@@ -10,7 +10,6 @@ members = [
     "examples/demo",
     "examples/controls-test",
     "examples/advanced-controls",
-    "examples/priority3-components",
     "examples/demo-window",
     "examples/docking-demo",
 ]

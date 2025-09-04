@@ -1673,19 +1673,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "priority3-components"
-version = "0.1.0"
-dependencies = [
- "dear-imgui",
- "dear-imgui-wgpu",
- "dear-imgui-winit",
- "env_logger",
- "pollster",
- "wgpu",
- "winit",
-]
-
-[[package]]
 name = "proc-macro-crate"
 version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

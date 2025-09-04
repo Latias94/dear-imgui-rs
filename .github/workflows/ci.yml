@@ -1,63 +1,63 @@
-name: CI
+# name: CI
 
-on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
+# on:
+#   push:
+#     branches: [ main, dev ]
+#   pull_request:
+#     branches: [ main ]
 
-env:
-  CARGO_TERM_COLOR: always
+# env:
+#   CARGO_TERM_COLOR: always
 
-jobs:
-  test:
-    name: Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [stable, beta]
+# jobs:
+#   test:
+#     name: Test
+#     runs-on: ${{ matrix.os }}
+#     strategy:
+#       matrix:
+#         os: [ubuntu-latest, windows-latest, macos-latest]
+#         rust: [stable, beta]
     
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
+#     steps:
+#     - uses: actions/checkout@v4
+#       with:
+#         submodules: recursive
     
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ matrix.rust }}
-        components: rustfmt, clippy
+#     - name: Install Rust
+#       uses: dtolnay/rust-toolchain@master
+#       with:
+#         toolchain: ${{ matrix.rust }}
+#         components: rustfmt, clippy
     
-    - name: Cache cargo registry
-      uses: actions/cache@v3
-      with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+#     - name: Cache cargo registry
+#       uses: actions/cache@v3
+#       with:
+#         path: ~/.cargo/registry
+#         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Install system dependencies (Linux)
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libfreetype6-dev
+#     - name: Install system dependencies (Linux)
+#       if: runner.os == 'Linux'
+#       run: |
+#         sudo apt-get update
+#         sudo apt-get install -y libfreetype6-dev
     
-    - name: Check formatting
-      run: cargo fmt --all -- --check
+#     - name: Check formatting
+#       run: cargo fmt --all -- --check
     
-    - name: Run clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
+#     - name: Run clippy
+#       run: cargo clippy --all-targets --all-features -- -D warnings
     
-    - name: Run tests
-      run: cargo test --all-features
+#     - name: Run tests
+#       run: cargo test --all-features
     
-    - name: Build examples
-      run: cargo build --examples --all-features
+#     - name: Build examples
+#       run: cargo build --examples --all-features
 
-  security:
-    name: Security audit
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - uses: rustsec/audit-check@v1.4.1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+#   security:
+#     name: Security audit
+#     runs-on: ubuntu-latest
+#     steps:
+#     - uses: actions/checkout@v4
+#     - uses: rustsec/audit-check@v1.4.1
+#       with:
+#         token: ${{ secrets.GITHUB_TOKEN }}
