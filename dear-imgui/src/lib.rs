@@ -38,6 +38,9 @@ pub mod draw_data;
 pub mod error;
 pub mod fonts;
 pub mod frame;
+pub mod io;
+pub mod navigation;
+pub mod style;
 pub mod types;
 pub mod ui;
 pub mod widget;
@@ -48,6 +51,8 @@ pub use context::Context;
 pub use draw_data::{DrawCmd, DrawData, DrawList};
 pub use error::{ImGuiError, Result};
 pub use frame::Frame;
+pub use io::{Io, ConfigFlags, BackendFlags, MouseCursor};
+pub use style::{Style, StyleColor, StyleVar, Direction};
 pub use types::*;
 pub use window::{Window, WindowFlags};
 

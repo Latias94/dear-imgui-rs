@@ -27,6 +27,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "advanced-features-demo"
+version = "0.1.0"
+dependencies = [
+ "dear-imgui",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -438,6 +445,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "complete-features-demo"
+version = "0.1.0"
+dependencies = [
+ "dear-imgui",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -637,7 +651,7 @@ dependencies = [
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "env_logger",
- "pollster",
+ "pollster 0.3.0",
  "wgpu",
  "winit",
 ]
@@ -650,7 +664,7 @@ dependencies = [
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "env_logger",
- "pollster",
+ "pollster 0.3.0",
  "wgpu",
  "winit",
 ]
@@ -678,7 +692,7 @@ dependencies = [
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "env_logger",
- "pollster",
+ "pollster 0.3.0",
  "wgpu",
  "winit",
 ]
@@ -947,6 +961,19 @@ checksum = "f2481980430f9f78649238835720ddccc57e52df14ffce1c6f37391d61b563e9"
 dependencies = [
  "equivalent",
  "hashbrown",
+]
+
+[[package]]
+name = "io-style-demo"
+version = "0.1.0"
+dependencies = [
+ "dear-imgui",
+ "dear-imgui-wgpu",
+ "dear-imgui-winit",
+ "env_logger",
+ "pollster 0.4.0",
+ "wgpu",
+ "winit",
 ]
 
 [[package]]
@@ -1640,6 +1667,12 @@ name = "pollster"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22686f4785f02a4fcc856d3b3bb19bf6c8160d103f7a99cc258bddd0251dc7f2"
+
+[[package]]
+name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "portable-atomic"

@@ -5,6 +5,8 @@ use std::sync::Mutex;
 use crate::error::{ImGuiError, Result};
 use crate::fonts::FontAtlas;
 use crate::frame::Frame;
+use crate::io::Io;
+use crate::style::Style;
 use dear_imgui_sys as sys;
 
 // Global context lock to ensure thread safety
@@ -102,6 +104,26 @@ impl Context {
             let io = sys::ImGui_GetIO();
             FontAtlas::from_raw((*io).Fonts)
         }
+    }
+
+    /// Get immutable access to the IO system
+    pub fn io(&self) -> Io {
+        unsafe { Io::from_raw(sys::ImGui_GetIO()) }
+    }
+
+    /// Get mutable access to the IO system
+    pub fn io_mut(&mut self) -> Io {
+        unsafe { Io::from_raw(sys::ImGui_GetIO()) }
+    }
+
+    /// Get immutable access to the style system
+    pub fn style(&self) -> Style {
+        unsafe { Style::from_raw(sys::ImGui_GetStyle()) }
+    }
+
+    /// Get mutable access to the style system
+    pub fn style_mut(&mut self) -> Style {
+        unsafe { Style::from_raw(sys::ImGui_GetStyle()) }
     }
 
     /// Get the raw ImGui context pointer

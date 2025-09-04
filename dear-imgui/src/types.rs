@@ -247,3 +247,83 @@ mod tests {
         assert_ne!(id1, indexed);
     }
 }
+
+/// Mouse button identifiers
+#[repr(i32)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub enum MouseButton {
+    Left = 0,
+    Right = 1,
+    Middle = 2,
+    X1 = 3,
+    X2 = 4,
+}
+
+/// Key identifiers for keyboard input
+#[repr(i32)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub enum Key {
+    None = 0,
+    Tab = 512,
+    LeftArrow = 513,
+    RightArrow = 514,
+    UpArrow = 515,
+    DownArrow = 516,
+    PageUp = 517,
+    PageDown = 518,
+    Home = 519,
+    End = 520,
+    Insert = 521,
+    Delete = 522,
+    Backspace = 523,
+    Space = 524,
+    Enter = 525,
+    Escape = 526,
+    LeftCtrl = 527,
+    LeftShift = 528,
+    LeftAlt = 529,
+    LeftSuper = 530,
+    RightCtrl = 531,
+    RightShift = 532,
+    RightAlt = 533,
+    RightSuper = 534,
+    Menu = 535,
+    A = 536,
+    B = 537,
+    C = 538,
+    D = 539,
+    E = 540,
+    F = 541,
+    G = 542,
+    H = 543,
+    I = 544,
+    J = 545,
+    K = 546,
+    L = 547,
+    M = 548,
+    N = 549,
+    O = 550,
+    P = 551,
+    Q = 552,
+    R = 553,
+    S = 554,
+    T = 555,
+    U = 556,
+    V = 557,
+    W = 558,
+    X = 559,
+    Y = 560,
+    Z = 561,
+    F1 = 562,
+    F2 = 563,
+    F3 = 564,
+    F4 = 565,
+    F5 = 566,
+    F6 = 567,
+    F7 = 568,
+    F8 = 569,
+    F9 = 570,
+    F10 = 571,
+    F11 = 572,
+    F12 = 573,
+}

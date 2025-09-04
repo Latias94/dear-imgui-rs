@@ -23,13 +23,42 @@ use std::time::Instant;
 
 use dear_imgui::{Context, ImGuiError, Result};
 use dear_imgui_sys as sys;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{
     DeviceEvent, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes};
+
+/// DPI factor handling mode.
+///
+/// Applications that use dear-imgui might want to customize the used DPI factor and not use
+/// directly the value coming from winit.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum HiDpiMode {
+    /// The DPI factor from winit is used directly without adjustment
+    Default,
+    /// The DPI factor from winit is rounded to an integer value.
+    ///
+    /// This prevents the user interface from becoming blurry with non-integer scaling.
+    Rounded,
+    /// The DPI factor from winit is ignored, and the included value is used instead.
+    ///
+    /// This is useful if you want to force some DPI factor (e.g. 1.0) and not care about the value
+    /// coming from winit.
+    Locked(f64),
+}
+
+impl HiDpiMode {
+    fn apply(&self, hidpi_factor: f64) -> f64 {
+        match *self {
+            HiDpiMode::Default => hidpi_factor,
+            HiDpiMode::Rounded => hidpi_factor.round(),
+            HiDpiMode::Locked(value) => value,
+        }
+    }
+}
 
 /// Winit platform backend for Dear ImGui
 ///
@@ -40,6 +69,8 @@ pub struct WinitPlatform {
     mouse_buttons: [bool; 5],
     mouse_pos: [f32; 2],
     key_map: HashMap<Key, sys::ImGuiKey>,
+    hidpi_mode: HiDpiMode,
+    hidpi_factor: f64,
 }
 
 impl WinitPlatform {
@@ -64,12 +95,70 @@ impl WinitPlatform {
             mouse_buttons: [false; 5],
             mouse_pos: [0.0, 0.0],
             key_map: HashMap::new(),
+            hidpi_mode: HiDpiMode::Default,
+            hidpi_factor: 1.0,
         };
 
         platform.setup_key_map();
         platform.configure_imgui(imgui_ctx);
 
         platform
+    }
+
+    /// Attach the platform to a window with specified DPI mode
+    ///
+    /// # Arguments
+    /// * `window` - The winit window to attach to
+    /// * `hidpi_mode` - The DPI handling mode to use
+    pub fn attach_window(&mut self, window: &Window, hidpi_mode: HiDpiMode) {
+        let scale_factor = window.scale_factor();
+        self.hidpi_factor = hidpi_mode.apply(scale_factor);
+        self.hidpi_mode = hidpi_mode;
+
+        // Update display size and framebuffer scale immediately
+        self.update_display_size(window);
+    }
+
+    /// Get the current DPI factor
+    pub fn hidpi_factor(&self) -> f64 {
+        self.hidpi_factor
+    }
+
+    /// Configure fonts for the current DPI factor
+    ///
+    /// This is a helper function to set up fonts with proper DPI scaling.
+    /// Call this after attaching the window and before using Dear ImGui.
+    ///
+    /// # Arguments
+    /// * `imgui_ctx` - The Dear ImGui context
+    /// * `base_font_size` - The base font size in logical pixels (default: 13.0)
+    pub fn configure_fonts(&self, _imgui_ctx: &mut Context, base_font_size: f32) -> f32 {
+        let font_size = base_font_size * self.hidpi_factor as f32;
+
+        unsafe {
+            let io = sys::ImGui_GetIO();
+            (*io).FontGlobalScale = (1.0 / self.hidpi_factor) as f32;
+        }
+
+        // Return the calculated font size for the user to use when loading fonts
+        font_size
+    }
+
+    /// Update display size based on current window and DPI settings
+    fn update_display_size(&self, window: &Window) {
+        unsafe {
+            let io = sys::ImGui_GetIO();
+
+            // Get physical size and convert to logical size using our DPI factor
+            let physical_size = window.inner_size();
+            let logical_width = physical_size.width as f64 / self.hidpi_factor;
+            let logical_height = physical_size.height as f64 / self.hidpi_factor;
+
+            (*io).DisplaySize.x = logical_width as f32;
+            (*io).DisplaySize.y = logical_height as f32;
+            (*io).DisplayFramebufferScale.x = self.hidpi_factor as f32;
+            (*io).DisplayFramebufferScale.y = self.hidpi_factor as f32;
+        }
     }
 
     /// Handle a winit event
@@ -108,26 +197,16 @@ impl WinitPlatform {
     ///
     /// * `window` - The window to prepare the frame for
     /// * `imgui_ctx` - The Dear ImGui context
-    pub fn prepare_frame(&mut self, window: &Window, imgui_ctx: &mut Context) {
+    pub fn prepare_frame(&mut self, window: &Window, _imgui_ctx: &mut Context) {
         let now = Instant::now();
         let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
         self.last_frame_time = now;
 
+        // Update display size in case window was resized or DPI changed
+        self.update_display_size(window);
+
         unsafe {
             let io = sys::ImGui_GetIO();
-
-            // Update display size and framebuffer scale
-            let size = window.inner_size();
-            let scale_factor = window.scale_factor() as f32;
-            (*io).DisplaySize.x = size.width as f32;
-            (*io).DisplaySize.y = size.height as f32;
-            (*io).DisplayFramebufferScale.x = scale_factor;
-            (*io).DisplayFramebufferScale.y = scale_factor;
-
-            // Update display framebuffer scale
-            let scale_factor = window.scale_factor() as f32;
-            (*io).DisplayFramebufferScale.x = scale_factor;
-            (*io).DisplayFramebufferScale.y = scale_factor;
 
             // Update delta time
             (*io).DeltaTime = delta_time.max(1.0 / 60.0); // Minimum 60 FPS
@@ -224,7 +303,29 @@ impl WinitPlatform {
     fn handle_window_event(&mut self, event: &WindowEvent, window: &Window) -> bool {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
-                self.mouse_pos = [position.x as f32, position.y as f32];
+                // Convert physical position to logical position using our DPI factor
+                let logical_pos = position.to_logical::<f64>(self.hidpi_factor);
+                self.mouse_pos = [logical_pos.x as f32, logical_pos.y as f32];
+                false
+            }
+            WindowEvent::Resized(_) => {
+                // Update display size when window is resized
+                self.update_display_size(window);
+                false
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                // Handle DPI changes
+                let new_hidpi_factor = self.hidpi_mode.apply(*scale_factor);
+
+                // Update mouse position to account for DPI change
+                if self.mouse_pos[0].is_finite() && self.mouse_pos[1].is_finite() {
+                    let scale_ratio = new_hidpi_factor / self.hidpi_factor;
+                    self.mouse_pos[0] = (self.mouse_pos[0] as f64 / scale_ratio) as f32;
+                    self.mouse_pos[1] = (self.mouse_pos[1] as f64 / scale_ratio) as f32;
+                }
+
+                self.hidpi_factor = new_hidpi_factor;
+                self.update_display_size(window);
                 false
             }
             WindowEvent::MouseInput { state, button, .. } => {

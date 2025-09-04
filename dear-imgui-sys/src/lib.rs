@@ -44,4 +44,20 @@ mod tests {
             assert!(version_string.contains('.'));
         }
     }
+
+    #[test]
+    fn test_context_creation() {
+        // Test that we can create and destroy contexts
+        unsafe {
+            let ctx = ImGui_CreateContext(std::ptr::null_mut());
+            assert!(!ctx.is_null());
+
+            // Test that we can set and get current context
+            ImGui_SetCurrentContext(ctx);
+            let current = ImGui_GetCurrentContext();
+            assert_eq!(ctx, current);
+
+            ImGui_DestroyContext(ctx);
+        }
+    }
 }

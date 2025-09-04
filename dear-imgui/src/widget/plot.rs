@@ -209,4 +209,37 @@ impl<'frame> Ui<'frame> {
             );
         }
     }
+
+
+
+    /// Display a loading indicator (spinner)
+    ///
+    /// # Arguments
+    ///
+    /// * `label` - Label for the spinner
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use dear_imgui::Context;
+    /// # let mut ctx = Context::new().unwrap();
+    /// # let mut frame = ctx.frame();
+    /// # frame.window("Loading Demo").show(|ui| {
+    /// ui.loading_indicator("Loading");
+    /// # });
+    /// ```
+    pub fn loading_indicator(&mut self, label: impl AsRef<str>) {
+        let label = label.as_ref();
+        let time = unsafe { sys::ImGui_GetTime() } as f32;
+
+        // Simple text-based loading indicator
+        let dots = match ((time * 4.0) as i32) % 4 {
+            0 => "",
+            1 => ".",
+            2 => "..",
+            _ => "...",
+        };
+
+        self.text(format!("{}{}", label, dots));
+    }
 }

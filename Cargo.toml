@@ -12,6 +12,9 @@ members = [
     "examples/advanced-controls",
     "examples/demo-window",
     "examples/docking-demo",
+    "examples/io-style-demo",
+    "examples/advanced-features-demo",
+    "examples/complete-features-demo",
 ]
 
 resolver = "2"

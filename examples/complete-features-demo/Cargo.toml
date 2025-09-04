@@ -1,0 +1,11 @@
+[package]
+name = "complete-features-demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui" }
+
+[[bin]]
+name = "complete-features-demo"
+path = "src/main.rs"
