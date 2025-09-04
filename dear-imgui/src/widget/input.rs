@@ -1,9 +1,9 @@
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Input widgets
 ///
 /// This module contains all input-related UI components like text inputs, sliders, checkboxes, etc.
-use std::ffi::CString;
 
 /// # Widgets: Input
 impl<'frame> Ui<'frame> {
@@ -25,9 +25,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn checkbox(&mut self, label: impl AsRef<str>, value: &mut bool) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        unsafe { sys::ImGui_Checkbox(c_label.as_ptr(), value as *mut bool) }
+        unsafe { sys::ImGui_Checkbox(self.scratch_txt(label), value as *mut bool) }
     }
 
     /// Display a float slider
@@ -54,11 +52,9 @@ impl<'frame> Ui<'frame> {
         min: f32,
         max: f32,
     ) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_SliderFloat(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 value as *mut f32,
                 min,
                 max,
@@ -93,16 +89,14 @@ impl<'frame> Ui<'frame> {
         max: f32,
         format: &str,
     ) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        let c_format = CString::new(format).unwrap_or_default();
+        let (label_ptr, format_ptr) = self.scratch_txt_two(label, format);
         unsafe {
             sys::ImGui_SliderFloat(
-                c_label.as_ptr(),
+                label_ptr,
                 value as *mut f32,
                 min,
                 max,
-                c_format.as_ptr(),
+                format_ptr,
                 0, // Default flags
             )
         }
@@ -132,11 +126,9 @@ impl<'frame> Ui<'frame> {
         min: i32,
         max: i32,
     ) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_SliderInt(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 value as *mut i32,
                 min,
                 max,
@@ -164,16 +156,13 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn input_text(&mut self, label: impl AsRef<str>, text: &mut String) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-
         // Create a buffer with extra space for editing
         let mut buffer = text.clone().into_bytes();
         buffer.resize(buffer.len() + 256, 0); // Add extra space
 
         let changed = unsafe {
             sys::ImGui_InputText(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 buffer.as_mut_ptr() as *mut i8,
                 buffer.len(),
                 0,                    // Default flags
@@ -213,11 +202,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn input_float(&mut self, label: impl AsRef<str>, value: &mut f32) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_InputFloat(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 value as *mut f32,
                 0.0,              // Default step
                 0.0,              // Default step_fast
@@ -245,11 +232,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn input_int(&mut self, label: impl AsRef<str>, value: &mut i32) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_InputInt(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 value as *mut i32,
                 1,   // Default step
                 100, // Default step_fast
@@ -282,21 +267,24 @@ impl<'frame> Ui<'frame> {
         current_item: &mut i32,
         items: &[&str],
     ) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
+        // Use a more efficient approach: allocate temporary buffer space for each string
+        // This is more efficient than creating CString for each item since we can pre-allocate
+        let total_len: usize = items.iter().map(|s| s.len() + 1).sum(); // +1 for null terminator
+        let mut buffer = Vec::with_capacity(total_len);
+        let mut ptrs = Vec::with_capacity(items.len());
 
-        // Convert items to C strings
-        let c_items: Vec<CString> = items
-            .iter()
-            .map(|&item| CString::new(item).unwrap_or_default())
-            .collect();
-        let c_item_ptrs: Vec<*const i8> = c_items.iter().map(|c_str| c_str.as_ptr()).collect();
+        for &item in items {
+            let start = buffer.len();
+            buffer.extend_from_slice(item.as_bytes());
+            buffer.push(0); // null terminator
+            ptrs.push(buffer.as_ptr().wrapping_add(start) as *const i8);
+        }
 
         unsafe {
             sys::ImGui_Combo(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 current_item as *mut i32,
-                c_item_ptrs.as_ptr(),
+                ptrs.as_ptr(),
                 items.len() as i32,
                 -1, // Default popup_max_height_in_items
             )
@@ -328,21 +316,23 @@ impl<'frame> Ui<'frame> {
         items: &[&str],
         height_in_items: i32,
     ) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
+        // Use a more efficient approach: allocate temporary buffer space for each string
+        let total_len: usize = items.iter().map(|s| s.len() + 1).sum(); // +1 for null terminator
+        let mut buffer = Vec::with_capacity(total_len);
+        let mut ptrs = Vec::with_capacity(items.len());
 
-        // Convert items to C strings
-        let c_items: Vec<CString> = items
-            .iter()
-            .map(|&item| CString::new(item).unwrap_or_default())
-            .collect();
-        let c_item_ptrs: Vec<*const i8> = c_items.iter().map(|c_str| c_str.as_ptr()).collect();
+        for &item in items {
+            let start = buffer.len();
+            buffer.extend_from_slice(item.as_bytes());
+            buffer.push(0); // null terminator
+            ptrs.push(buffer.as_ptr().wrapping_add(start) as *const i8);
+        }
 
         unsafe {
             sys::ImGui_ListBox(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 current_item as *mut i32,
-                c_item_ptrs.as_ptr(),
+                ptrs.as_ptr(),
                 items.len() as i32,
                 height_in_items,
             )
@@ -367,11 +357,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn selectable(&mut self, label: impl AsRef<str>, selected: &mut bool) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_Selectable1(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 selected as *mut bool,
                 0,                                           // Default flags
                 &sys::ImVec2 { x: 0.0, y: 0.0 } as *const _, // Default size
@@ -399,9 +387,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn radio_button_bool(&mut self, label: impl AsRef<str>, active: bool) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        unsafe { sys::ImGui_RadioButton(c_label.as_ptr(), active) }
+        unsafe { sys::ImGui_RadioButton(self.scratch_txt(label), active) }
     }
 
     /// Display a radio button for choosing between values
@@ -466,9 +452,6 @@ impl<'frame> Ui<'frame> {
         text: &mut String,
         size: crate::types::Vec2,
     ) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-
         // Create a buffer with extra space for editing
         let mut buffer = text.clone().into_bytes();
         buffer.resize(buffer.len() + 1024, 0); // Add extra space for multiline
@@ -480,7 +463,7 @@ impl<'frame> Ui<'frame> {
 
         let changed = unsafe {
             sys::ImGui_InputTextMultiline(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 buffer.as_mut_ptr() as *mut i8,
                 buffer.len(),
                 &size_vec as *const _,
@@ -528,11 +511,9 @@ impl<'frame> Ui<'frame> {
         min: f32,
         max: f32,
     ) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_DragFloat(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 value as *mut f32,
                 speed,
                 min,
@@ -568,11 +549,9 @@ impl<'frame> Ui<'frame> {
         min: i32,
         max: i32,
     ) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_DragInt(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 value as *mut i32,
                 speed,
                 min,

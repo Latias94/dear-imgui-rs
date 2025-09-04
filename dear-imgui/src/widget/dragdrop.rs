@@ -1,9 +1,9 @@
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Drag and drop widgets
 ///
 /// This module contains all drag and drop related UI components.
-use std::ffi::CString;
 
 /// # Widgets: Drag and Drop
 impl<'frame> Ui<'frame> {
@@ -75,11 +75,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn set_drag_drop_payload(&mut self, type_name: impl AsRef<str>, data: &[u8]) -> bool {
-        let type_name = type_name.as_ref();
-        let c_type_name = CString::new(type_name).unwrap_or_default();
         unsafe {
             sys::ImGui_SetDragDropPayload(
-                c_type_name.as_ptr(),
+                self.scratch_txt(type_name),
                 data.as_ptr() as *const std::ffi::c_void,
                 data.len(),
                 0, // Default condition (always set)
@@ -142,11 +140,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn accept_drag_drop_payload(&mut self, type_name: impl AsRef<str>) -> Option<&[u8]> {
-        let type_name = type_name.as_ref();
-        let c_type_name = CString::new(type_name).unwrap_or_default();
         unsafe {
             let payload_ptr = sys::ImGui_AcceptDragDropPayload(
-                c_type_name.as_ptr(),
+                self.scratch_txt(type_name),
                 0, // Default flags
             );
             if payload_ptr.is_null() {
@@ -191,10 +187,8 @@ impl<'frame> Ui<'frame> {
         type_name: impl AsRef<str>,
         flags: i32,
     ) -> Option<&[u8]> {
-        let type_name = type_name.as_ref();
-        let c_type_name = CString::new(type_name).unwrap_or_default();
         unsafe {
-            let payload_ptr = sys::ImGui_AcceptDragDropPayload(c_type_name.as_ptr(), flags);
+            let payload_ptr = sys::ImGui_AcceptDragDropPayload(self.scratch_txt(type_name), flags);
             if payload_ptr.is_null() {
                 None
             } else {

@@ -1,10 +1,10 @@
 use crate::types::Vec2;
+use crate::ui::Ui;
+
 /// Docking widgets
 ///
 /// This module contains all docking-related UI components for creating dockable layouts.
 /// Note: Docking requires the docking feature to be enabled in Dear ImGui.
-use crate::ui::Ui;
-use std::ffi::CString;
 
 /// # Widgets: Docking
 ///
@@ -27,15 +27,14 @@ impl<'frame> Ui<'frame> {
     /// ```
     #[cfg(feature = "docking")]
     pub fn dock_space(&mut self, id: impl AsRef<str>, size: Vec2) -> u32 {
-        let id_str = id.as_ref();
-        let c_id = CString::new(id_str).unwrap_or_default();
+
         let size_vec = dear_imgui_sys::ImVec2 {
             x: size.x,
             y: size.y,
         };
 
         unsafe {
-            let dock_id = dear_imgui_sys::ImGui_GetID(c_id.as_ptr());
+            let dock_id = dear_imgui_sys::ImGui_GetID(self.scratch_txt(id));
             dear_imgui_sys::ImGui_DockSpace(
                 dock_id,
                 &size_vec as *const _,
@@ -55,15 +54,14 @@ impl<'frame> Ui<'frame> {
     /// Create a dock space with flags
     #[cfg(feature = "docking")]
     pub fn dock_space_with_flags(&mut self, id: impl AsRef<str>, size: Vec2, flags: i32) -> u32 {
-        let id_str = id.as_ref();
-        let c_id = CString::new(id_str).unwrap_or_default();
+
         let size_vec = dear_imgui_sys::ImVec2 {
             x: size.x,
             y: size.y,
         };
 
         unsafe {
-            let dock_id = dear_imgui_sys::ImGui_GetID(c_id.as_ptr());
+            let dock_id = dear_imgui_sys::ImGui_GetID(self.scratch_txt(id));
             dear_imgui_sys::ImGui_DockSpace(
                 dock_id,
                 &size_vec as *const _,
@@ -83,11 +81,8 @@ impl<'frame> Ui<'frame> {
     /// Create a dock space over viewport
     #[cfg(feature = "docking")]
     pub fn dock_space_over_viewport(&mut self, id: impl AsRef<str>) -> u32 {
-        let id_str = id.as_ref();
-        let c_id = CString::new(id_str).unwrap_or_default();
-
         unsafe {
-            let dock_id = dear_imgui_sys::ImGui_GetID(c_id.as_ptr());
+            let dock_id = dear_imgui_sys::ImGui_GetID(self.scratch_txt(id));
             let viewport = dear_imgui_sys::ImGui_GetMainViewport();
             dear_imgui_sys::ImGui_DockSpaceOverViewport(
                 dock_id,
@@ -148,11 +143,8 @@ impl<'frame> Ui<'frame> {
     /// Dock a window to a specific dock node
     #[cfg(feature = "docking")]
     pub fn dock_builder_dock_window(&mut self, window_name: impl AsRef<str>, node_id: u32) {
-        let window_name_str = window_name.as_ref();
-        let c_window_name = CString::new(window_name_str).unwrap_or_default();
-
         unsafe {
-            dear_imgui_sys::ImGui_DockBuilderDockWindow(c_window_name.as_ptr(), node_id);
+            dear_imgui_sys::ImGui_DockBuilderDockWindow(self.scratch_txt(window_name), node_id);
         }
     }
 

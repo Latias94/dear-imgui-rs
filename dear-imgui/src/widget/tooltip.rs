@@ -1,9 +1,9 @@
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Tooltip widgets
 ///
 /// This module contains all tooltip-related UI components.
-use std::ffi::CString;
 
 /// # Widgets: Tooltip
 impl<'frame> Ui<'frame> {
@@ -21,10 +21,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn set_tooltip(&mut self, text: impl AsRef<str>) {
-        let text = text.as_ref();
-        let c_text = CString::new(text).unwrap_or_default();
         unsafe {
-            sys::ImGui_SetTooltip(c_text.as_ptr());
+            sys::ImGui_SetTooltip(self.scratch_txt(text));
         }
     }
 

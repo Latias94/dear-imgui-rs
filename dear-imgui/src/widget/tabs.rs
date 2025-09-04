@@ -1,9 +1,9 @@
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Tab widgets
 ///
 /// This module contains all tab-related UI components like tab bars and tab items.
-use std::ffi::CString;
 
 /// # Widgets: Tabs
 impl<'frame> Ui<'frame> {
@@ -33,10 +33,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_tab_bar(&mut self, str_id: impl AsRef<str>) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
         unsafe {
-            sys::ImGui_BeginTabBar(c_str_id.as_ptr(), 0) // Default flags
+            sys::ImGui_BeginTabBar(self.scratch_txt(str_id), 0) // Default flags
         }
     }
 
@@ -69,11 +67,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_tab_item(&mut self, label: impl AsRef<str>) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_BeginTabItem(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 std::ptr::null_mut(), // No open flag
                 0,                    // Default flags
             )
@@ -107,11 +103,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_tab_item_with_close(&mut self, label: impl AsRef<str>, open: &mut bool) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_BeginTabItem(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 open as *mut bool,
                 0, // Default flags
             )
@@ -145,10 +139,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn tab_item_button(&mut self, label: impl AsRef<str>) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
-            sys::ImGui_TabItemButton(c_label.as_ptr(), 0) // Default flags
+            sys::ImGui_TabItemButton(self.scratch_txt(label), 0) // Default flags
         }
     }
 
@@ -180,10 +172,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn set_tab_item_closed(&mut self, tab_or_docked_window_label: impl AsRef<str>) {
-        let label = tab_or_docked_window_label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
-            sys::ImGui_SetTabItemClosed(c_label.as_ptr());
+            sys::ImGui_SetTabItemClosed(self.scratch_txt(tab_or_docked_window_label));
         }
     }
 }

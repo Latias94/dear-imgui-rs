@@ -3,7 +3,6 @@
 //! List boxes provide a scrollable list of selectable items.
 
 use dear_imgui_sys as sys;
-use std::ffi::CString;
 use crate::ui::Ui;
 
 /// List box functionality for UI
@@ -54,25 +53,24 @@ impl<'frame> Ui<'frame> {
         current_item: &mut i32,
         height_in_items: i32
     ) -> bool {
-        let label_cstr = CString::new(label.as_ref()).unwrap_or_default();
+        // Use a more efficient approach: allocate temporary buffer space for each string
+        let total_len: usize = items.iter().map(|s| s.len() + 1).sum(); // +1 for null terminator
+        let mut buffer = Vec::with_capacity(total_len);
+        let mut ptrs = Vec::with_capacity(items.len());
 
-        // Convert items to C strings
-        let item_cstrs: Vec<CString> = items
-            .iter()
-            .map(|item| CString::new(*item).unwrap_or_default())
-            .collect();
-
-        let item_ptrs: Vec<*const i8> = item_cstrs
-            .iter()
-            .map(|cstr| cstr.as_ptr())
-            .collect();
+        for &item in items {
+            let start = buffer.len();
+            buffer.extend_from_slice(item.as_bytes());
+            buffer.push(0); // null terminator
+            ptrs.push(buffer.as_ptr().wrapping_add(start) as *const i8);
+        }
 
         unsafe {
             sys::ImGui_ListBox(
-                label_cstr.as_ptr(),
+                self.scratch_txt(label),
                 current_item,
-                item_ptrs.as_ptr(),
-                item_ptrs.len() as i32,
+                ptrs.as_ptr(),
+                ptrs.len() as i32,
                 height_in_items,
             )
         }
@@ -115,26 +113,24 @@ impl<'frame> Ui<'frame> {
     where
         F: FnMut(&mut Ui, usize),
     {
-        let label_cstr = CString::new(label.as_ref()).unwrap_or_default();
-        
         unsafe {
             let size = sys::ImVec2 {
                 x: 0.0,
                 y: height_in_items as f32 * sys::ImGui_GetTextLineHeightWithSpacing(),
             };
             let result = sys::ImGui_BeginListBox(
-                label_cstr.as_ptr(),
+                self.scratch_txt(label),
                 &size,
             );
 
             if result {
                 for i in 0..items_count {
                     let is_selected = *current_item == i as i32;
-                    let item_id = CString::new(format!("##item_{}", i)).unwrap_or_default();
+                    let item_id = format!("##item_{}", i);
                     let size = sys::ImVec2 { x: 0.0, y: 0.0 };
 
                     if sys::ImGui_Selectable(
-                        item_id.as_ptr(),
+                        self.scratch_txt(&item_id),
                         is_selected,
                         0, // flags
                         &size,

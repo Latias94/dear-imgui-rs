@@ -5,8 +5,11 @@
 /// are in the `widget` module.
 
 use crate::frame::Frame;
+use crate::string::UiBuffer;
 use crate::style::{push_style_var, StyleVar, StyleVarToken};
+use std::cell::UnsafeCell;
 use std::marker::PhantomData;
+use std::os::raw::c_char;
 
 /// UI builder for creating Dear ImGui widgets
 ///
@@ -29,6 +32,7 @@ use std::marker::PhantomData;
 /// ```
 pub struct Ui<'frame> {
     _frame: PhantomData<&'frame mut Frame<'frame>>,
+    buffer: UnsafeCell<UiBuffer>,
 }
 
 impl<'frame> Ui<'frame> {
@@ -36,6 +40,50 @@ impl<'frame> Ui<'frame> {
     pub(crate) fn new() -> Self {
         Self {
             _frame: PhantomData,
+            buffer: UnsafeCell::new(UiBuffer::new(1024)), // 1KB default buffer
+        }
+    }
+
+    /// Internal method to push a single text to our scratch buffer.
+    ///
+    /// This method follows the imgui-rs pattern for efficient string handling.
+    /// It pushes the string to a temporary buffer and returns a pointer to it.
+    pub(crate) fn scratch_txt(&self, txt: impl AsRef<str>) -> *const c_char {
+        unsafe {
+            let buffer = &mut *self.buffer.get();
+            buffer.scratch_txt(txt)
+        }
+    }
+
+    /// Internal method to push an optional text to our scratch buffer.
+    pub(crate) fn scratch_txt_opt(&self, txt: Option<impl AsRef<str>>) -> *const c_char {
+        unsafe {
+            let buffer = &mut *self.buffer.get();
+            buffer.scratch_txt_opt(txt)
+        }
+    }
+
+    /// Internal method to push two texts to our scratch buffer.
+    pub(crate) fn scratch_txt_two(
+        &self,
+        txt_0: impl AsRef<str>,
+        txt_1: impl AsRef<str>,
+    ) -> (*const c_char, *const c_char) {
+        unsafe {
+            let buffer = &mut *self.buffer.get();
+            buffer.scratch_txt_two(txt_0, txt_1)
+        }
+    }
+
+    /// Helper method, same as [`Self::scratch_txt_two`] but with one optional value
+    pub(crate) fn scratch_txt_with_opt(
+        &self,
+        txt_0: impl AsRef<str>,
+        txt_1: Option<impl AsRef<str>>,
+    ) -> (*const c_char, *const c_char) {
+        unsafe {
+            let buffer = &mut *self.buffer.get();
+            buffer.scratch_txt_with_opt(txt_0, txt_1)
         }
     }
 

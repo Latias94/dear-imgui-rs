@@ -34,14 +34,21 @@
 // Core modules
 pub mod clipboard;
 pub mod context;
+pub mod debug;
 pub mod demo;
 pub mod draw_data;
 pub mod error;
 pub mod fonts;
 pub mod frame;
+pub mod id;
+pub mod internal;
 pub mod io;
 pub mod navigation;
+pub mod stacks;
+pub mod string;
 pub mod style;
+pub mod text_filter;
+pub mod tokens;
 pub mod types;
 pub mod ui;
 pub mod utils;
@@ -50,11 +57,15 @@ pub mod window;
 
 // Re-exports for convenience
 pub use context::Context;
+pub use debug::Debug;
 pub use draw_data::{DrawCmd, DrawData, DrawList};
 pub use error::{ImGuiError, Result};
 pub use frame::Frame;
+pub use id::IdToken;
 pub use io::{Io, ConfigFlags, BackendFlags, MouseCursor};
+pub use string::{ImString, UiBuffer};
 pub use style::{Style, StyleColor, StyleVar, Direction};
+pub use text_filter::TextFilter;
 pub use types::*;
 pub use window::{Window, WindowFlags};
 

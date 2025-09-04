@@ -1,9 +1,9 @@
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Menu widgets
 ///
 /// This module contains all menu-related UI components like menu bars, menus, menu items, etc.
-use std::ffi::CString;
 
 /// # Widgets: Menu
 impl<'frame> Ui<'frame> {
@@ -95,9 +95,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_menu(&mut self, label: impl AsRef<str>) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        unsafe { sys::ImGui_BeginMenu(c_label.as_ptr(), true) }
+        unsafe { sys::ImGui_BeginMenu(self.scratch_txt(label), true) }
     }
 
     /// End menu (must be called after begin_menu returns true)
@@ -124,11 +122,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn menu_item(&mut self, label: impl AsRef<str>) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_MenuItem(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 std::ptr::null(), // No shortcut
                 false,            // Not selected
                 true,             // Enabled
@@ -154,11 +150,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn menu_item_bool(&mut self, label: impl AsRef<str>, selected: &mut bool) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_MenuItem1(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 std::ptr::null(), // No shortcut
                 selected as *mut bool,
                 true, // Enabled

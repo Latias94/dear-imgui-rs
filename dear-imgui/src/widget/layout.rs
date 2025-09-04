@@ -163,8 +163,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn progress_bar(&mut self, fraction: f32, overlay: Option<&str>) {
-        let c_overlay = overlay.map(|s| std::ffi::CString::new(s).unwrap_or_default());
-        let overlay_ptr = c_overlay.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        let overlay_ptr = self.scratch_txt_opt(overlay);
 
         unsafe {
             sys::ImGui_ProgressBar(
@@ -278,8 +277,6 @@ impl<'frame> Ui<'frame> {
         size: crate::types::Vec2,
         border: bool,
     ) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = std::ffi::CString::new(str_id).unwrap_or_default();
         let size_vec = sys::ImVec2 {
             x: size.x,
             y: size.y,
@@ -287,7 +284,7 @@ impl<'frame> Ui<'frame> {
         let child_flags = if border { 1 } else { 0 }; // ImGuiChildFlags_Border = 1
         unsafe {
             sys::ImGui_BeginChild(
-                c_str_id.as_ptr(),
+                self.scratch_txt(str_id),
                 &size_vec as *const _,
                 child_flags,
                 0, // Default window flags

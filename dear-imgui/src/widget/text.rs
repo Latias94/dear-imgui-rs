@@ -1,10 +1,19 @@
 use crate::types::Color;
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+use std::os::raw::c_char;
+
+/// Format string for text functions that need printf-style formatting
+static FMT: &[u8] = b"%s\0";
+
+#[inline]
+fn fmt_ptr() -> *const c_char {
+    FMT.as_ptr() as *const c_char
+}
+
 /// Text display widgets
 ///
 /// This module contains all text-related UI components.
-use std::ffi::CString;
 
 /// # Widgets: Text
 impl<'frame> Ui<'frame> {
@@ -22,10 +31,11 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn text(&mut self, text: impl AsRef<str>) {
-        let text = text.as_ref();
-        let c_text = CString::new(text).unwrap_or_default();
+        let s = text.as_ref();
         unsafe {
-            sys::ImGui_TextUnformatted(c_text.as_ptr(), std::ptr::null());
+            let start = s.as_ptr();
+            let end = start.add(s.len());
+            sys::ImGui_TextUnformatted(start as *const c_char, end as *const c_char);
         }
     }
 
@@ -43,8 +53,6 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn text_colored(&mut self, color: Color, text: impl AsRef<str>) {
-        let text = text.as_ref();
-        let c_text = CString::new(text).unwrap_or_default();
         let color_vec = sys::ImVec4 {
             x: color.r(),
             y: color.g(),
@@ -52,7 +60,7 @@ impl<'frame> Ui<'frame> {
             w: color.a(),
         };
         unsafe {
-            sys::ImGui_TextColored(&color_vec as *const _, c_text.as_ptr());
+            sys::ImGui_TextColored(&color_vec as *const _, self.scratch_txt(text));
         }
     }
 
@@ -69,10 +77,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn text_disabled(&mut self, text: impl AsRef<str>) {
-        let text = text.as_ref();
-        let c_text = CString::new(text).unwrap_or_default();
         unsafe {
-            sys::ImGui_TextDisabled(c_text.as_ptr());
+            sys::ImGui_TextDisabled(self.scratch_txt(text));
         }
     }
 
@@ -89,10 +95,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn text_wrapped(&mut self, text: impl AsRef<str>) {
-        let text = text.as_ref();
-        let c_text = CString::new(text).unwrap_or_default();
         unsafe {
-            sys::ImGui_TextWrapped(c_text.as_ptr());
+            sys::ImGui_TextWrapped(fmt_ptr(), self.scratch_txt(text));
         }
     }
 
@@ -110,10 +114,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn bullet_text(&mut self, text: impl AsRef<str>) {
-        let text = text.as_ref();
-        let c_text = CString::new(text).unwrap_or_default();
         unsafe {
-            sys::ImGui_BulletText(c_text.as_ptr());
+            sys::ImGui_BulletText(fmt_ptr(), self.scratch_txt(text));
         }
     }
 
@@ -131,13 +133,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn label_text(&mut self, label: impl AsRef<str>, text: impl AsRef<str>) {
-        let label = label.as_ref();
-        let text = text.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        let c_text = CString::new(text).unwrap_or_default();
-        let fmt = CString::new("%s").unwrap();
+        let (label_ptr, text_ptr) = self.scratch_txt_two(label, text);
         unsafe {
-            sys::ImGui_LabelText(c_label.as_ptr(), fmt.as_ptr(), c_text.as_ptr());
+            sys::ImGui_LabelText(label_ptr, fmt_ptr(), text_ptr);
         }
     }
 }

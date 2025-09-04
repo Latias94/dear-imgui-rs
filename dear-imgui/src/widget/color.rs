@@ -1,10 +1,10 @@
 use crate::types::Color;
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Color widgets
 ///
 /// This module contains all color-related UI components like color pickers, editors, etc.
-use std::ffi::CString;
 
 bitflags::bitflags! {
     /// Flags for color edit widgets
@@ -83,13 +83,12 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_edit(&mut self, label: impl AsRef<str>, color: &mut Color) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
+
         let mut color_array = [color.r(), color.g(), color.b(), color.a()];
 
         let changed = unsafe {
             sys::ImGui_ColorEdit4(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 color_array.as_mut_ptr(),
                 0, // Default flags
             )
@@ -125,13 +124,11 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_picker(&mut self, label: impl AsRef<str>, color: &mut Color) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         let mut color_array = [color.r(), color.g(), color.b(), color.a()];
 
         let changed = unsafe {
             sys::ImGui_ColorPicker4(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 color_array.as_mut_ptr(),
                 0,                // Default flags
                 std::ptr::null(), // No reference color
@@ -168,8 +165,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_button(&mut self, desc_id: impl AsRef<str>, color: Color) -> bool {
-        let desc_id = desc_id.as_ref();
-        let c_desc_id = CString::new(desc_id).unwrap_or_default();
+
         let color_vec = sys::ImVec4 {
             x: color.r(),
             y: color.g(),
@@ -179,7 +175,7 @@ impl<'frame> Ui<'frame> {
 
         unsafe {
             sys::ImGui_ColorButton(
-                c_desc_id.as_ptr(),
+                self.scratch_txt(desc_id),
                 &color_vec as *const _,
                 0,                                           // Default flags
                 &sys::ImVec2 { x: 0.0, y: 0.0 } as *const _, // Default size
@@ -206,13 +202,11 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_edit_with_flags(&mut self, label: impl AsRef<str>, color: &mut Color, flags: ColorEditFlags) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         let mut color_array = [color.r(), color.g(), color.b(), color.a()];
 
         let changed = unsafe {
             sys::ImGui_ColorEdit4(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 color_array.as_mut_ptr(),
                 flags.bits(),
             )
@@ -243,13 +237,11 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_edit3(&mut self, label: impl AsRef<str>, color: &mut Color) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         let mut color_array = [color.r(), color.g(), color.b()];
 
         let changed = unsafe {
             sys::ImGui_ColorEdit3(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 color_array.as_mut_ptr(),
                 0, // Default flags
             )
@@ -281,13 +273,11 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_edit3_with_flags(&mut self, label: impl AsRef<str>, color: &mut Color, flags: ColorEditFlags) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         let mut color_array = [color.r(), color.g(), color.b()];
 
         let changed = unsafe {
             sys::ImGui_ColorEdit3(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 color_array.as_mut_ptr(),
                 flags.bits(),
             )
@@ -319,13 +309,11 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_picker_with_flags(&mut self, label: impl AsRef<str>, color: &mut Color, flags: ColorEditFlags) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         let mut color_array = [color.r(), color.g(), color.b(), color.a()];
 
         let changed = unsafe {
             sys::ImGui_ColorPicker4(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 color_array.as_mut_ptr(),
                 flags.bits(),
                 std::ptr::null(), // No reference color
@@ -357,13 +345,11 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_picker3(&mut self, label: impl AsRef<str>, color: &mut Color) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         let mut color_array = [color.r(), color.g(), color.b()];
 
         let changed = unsafe {
             sys::ImGui_ColorPicker3(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 color_array.as_mut_ptr(),
                 0, // Default flags
             )
@@ -395,13 +381,11 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_picker3_with_flags(&mut self, label: impl AsRef<str>, color: &mut Color, flags: ColorEditFlags) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         let mut color_array = [color.r(), color.g(), color.b()];
 
         let changed = unsafe {
             sys::ImGui_ColorPicker3(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 color_array.as_mut_ptr(),
                 flags.bits(),
             )

@@ -1,10 +1,10 @@
 use crate::types::Vec2;
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Plot widgets
 ///
 /// This module contains all plotting-related UI components like line plots and histograms.
-use std::ffi::CString;
 
 /// # Widgets: Plots
 impl<'frame> Ui<'frame> {
@@ -24,8 +24,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn plot_lines(&mut self, label: impl AsRef<str>, values: &[f32], graph_size: Vec2) {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
+
         let size_vec = sys::ImVec2 {
             x: graph_size.x,
             y: graph_size.y,
@@ -33,7 +32,7 @@ impl<'frame> Ui<'frame> {
 
         unsafe {
             sys::ImGui_PlotLines(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 values.as_ptr(),
                 values.len() as i32,
                 0,                // values_offset
@@ -79,16 +78,7 @@ impl<'frame> Ui<'frame> {
         scale_max: f32,
         graph_size: Vec2,
     ) {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        let c_overlay = overlay_text
-            .map(|s| CString::new(s).unwrap_or_default())
-            .unwrap_or_default();
-        let overlay_ptr = if overlay_text.is_some() {
-            c_overlay.as_ptr()
-        } else {
-            std::ptr::null()
-        };
+        let overlay_ptr = self.scratch_txt_opt(overlay_text);
         let size_vec = sys::ImVec2 {
             x: graph_size.x,
             y: graph_size.y,
@@ -96,7 +86,7 @@ impl<'frame> Ui<'frame> {
 
         unsafe {
             sys::ImGui_PlotLines(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 values.as_ptr(),
                 values.len() as i32,
                 values_offset,
@@ -125,8 +115,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn plot_histogram(&mut self, label: impl AsRef<str>, values: &[f32], graph_size: Vec2) {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
+
         let size_vec = sys::ImVec2 {
             x: graph_size.x,
             y: graph_size.y,
@@ -134,7 +123,7 @@ impl<'frame> Ui<'frame> {
 
         unsafe {
             sys::ImGui_PlotHistogram(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 values.as_ptr(),
                 values.len() as i32,
                 0,                // values_offset
@@ -180,16 +169,7 @@ impl<'frame> Ui<'frame> {
         scale_max: f32,
         graph_size: Vec2,
     ) {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        let c_overlay = overlay_text
-            .map(|s| CString::new(s).unwrap_or_default())
-            .unwrap_or_default();
-        let overlay_ptr = if overlay_text.is_some() {
-            c_overlay.as_ptr()
-        } else {
-            std::ptr::null()
-        };
+        let overlay_ptr = self.scratch_txt_opt(overlay_text);
         let size_vec = sys::ImVec2 {
             x: graph_size.x,
             y: graph_size.y,
@@ -197,7 +177,7 @@ impl<'frame> Ui<'frame> {
 
         unsafe {
             sys::ImGui_PlotHistogram(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 values.as_ptr(),
                 values.len() as i32,
                 values_offset,

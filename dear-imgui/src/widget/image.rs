@@ -1,10 +1,10 @@
 use crate::types::Vec2;
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Image widgets
 ///
 /// This module contains all image-related UI components.
-use std::ffi::CString;
 
 /// # Widgets: Image
 impl<'frame> Ui<'frame> {
@@ -124,8 +124,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn image_button(&mut self, str_id: impl AsRef<str>, texture_id: u64, size: Vec2) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
+
         let size_vec = sys::ImVec2 {
             x: size.x,
             y: size.y,
@@ -150,7 +149,7 @@ impl<'frame> Ui<'frame> {
         };
         unsafe {
             sys::ImGui_ImageButton(
-                c_str_id.as_ptr(),
+                self.scratch_txt(str_id),
                 tex_ref,
                 &size_vec as *const _,
                 &uv0_vec as *const _,
@@ -196,8 +195,7 @@ impl<'frame> Ui<'frame> {
         bg_col: crate::types::Color,
         tint_col: crate::types::Color,
     ) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
+
         let size_vec = sys::ImVec2 {
             x: size.x,
             y: size.y,
@@ -222,7 +220,7 @@ impl<'frame> Ui<'frame> {
         };
         unsafe {
             sys::ImGui_ImageButton(
-                c_str_id.as_ptr(),
+                self.scratch_txt(str_id),
                 tex_ref,
                 &size_vec as *const _,
                 &uv0_vec as *const _,

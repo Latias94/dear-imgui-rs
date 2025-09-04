@@ -1,10 +1,10 @@
 use crate::types::Vec2;
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Button widgets
 ///
 /// This module contains all button-related UI components.
-use std::ffi::CString;
 
 /// # Widgets: Buttons
 impl<'frame> Ui<'frame> {
@@ -25,11 +25,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn button(&mut self, label: impl AsRef<str>) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_Button(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 &sys::ImVec2 { x: 0.0, y: 0.0 } as *const _,
             )
         }
@@ -52,13 +50,11 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn button_with_size(&mut self, label: impl AsRef<str>, size: Vec2) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         let size_vec = sys::ImVec2 {
             x: size.x,
             y: size.y,
         };
-        unsafe { sys::ImGui_Button(c_label.as_ptr(), &size_vec as *const _) }
+        unsafe { sys::ImGui_Button(self.scratch_txt(label), &size_vec as *const _) }
     }
 
     /// Display a small button (without padding)
@@ -78,9 +74,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn small_button(&mut self, label: impl AsRef<str>) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        unsafe { sys::ImGui_SmallButton(c_label.as_ptr()) }
+        unsafe { sys::ImGui_SmallButton(self.scratch_txt(label)) }
     }
 
     /// Display an invisible button (for custom drawing or hit testing)
@@ -100,15 +94,13 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn invisible_button(&mut self, str_id: impl AsRef<str>, size: Vec2) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
         let size_vec = sys::ImVec2 {
             x: size.x,
             y: size.y,
         };
         unsafe {
             sys::ImGui_InvisibleButton(
-                c_str_id.as_ptr(),
+                self.scratch_txt(str_id),
                 &size_vec as *const _,
                 0, // Default flags
             )
@@ -135,8 +127,6 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn arrow_button(&mut self, str_id: impl AsRef<str>, dir: i32) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
-        unsafe { sys::ImGui_ArrowButton(c_str_id.as_ptr(), dir) }
+        unsafe { sys::ImGui_ArrowButton(self.scratch_txt(str_id), dir) }
     }
 }

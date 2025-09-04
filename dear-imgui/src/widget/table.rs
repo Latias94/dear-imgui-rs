@@ -1,10 +1,10 @@
 use crate::ui::Ui;
 use crate::types::Vec2;
 use dear_imgui_sys as sys;
+
 /// Table widgets
 ///
 /// This module contains all table-related UI components.
-use std::ffi::CString;
 
 bitflags::bitflags! {
     /// Flags for table widgets
@@ -177,11 +177,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_table(&mut self, str_id: impl AsRef<str>, columns: i32) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
         unsafe {
             sys::ImGui_BeginTable(
-                c_str_id.as_ptr(),
+                self.scratch_txt(str_id),
                 columns,
                 0,                                           // Default flags
                 &sys::ImVec2 { x: 0.0, y: 0.0 } as *const _, // Default outer_size
@@ -215,11 +213,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn table_setup_column(&mut self, label: impl AsRef<str>) {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_TableSetupColumn(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 0,   // Default flags
                 0.0, // Default init_width_or_weight
                 0,   // Default user_id
@@ -352,11 +348,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_table_with_flags(&mut self, str_id: impl AsRef<str>, columns: i32, flags: TableFlags) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
         unsafe {
             sys::ImGui_BeginTable(
-                c_str_id.as_ptr(),
+                self.scratch_txt(str_id),
                 columns,
                 flags.bits(),
                 &sys::ImVec2 { x: 0.0, y: 0.0 } as *const _, // Default outer_size
@@ -403,15 +397,13 @@ impl<'frame> Ui<'frame> {
         outer_size: Vec2,
         inner_width: f32,
     ) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
         let outer_size_vec = sys::ImVec2 {
             x: outer_size.x,
             y: outer_size.y,
         };
         unsafe {
             sys::ImGui_BeginTable(
-                c_str_id.as_ptr(),
+                self.scratch_txt(str_id),
                 columns,
                 flags.bits(),
                 &outer_size_vec as *const _,
@@ -453,11 +445,9 @@ impl<'frame> Ui<'frame> {
         init_width_or_weight: f32,
         user_id: u32,
     ) {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
         unsafe {
             sys::ImGui_TableSetupColumn(
-                c_label.as_ptr(),
+                self.scratch_txt(label),
                 flags.bits(),
                 init_width_or_weight,
                 user_id,

@@ -1,9 +1,9 @@
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Tree widgets
 ///
 /// This module contains all tree-related UI components like tree nodes, collapsing headers, etc.
-use std::ffi::CString;
 
 /// # Widgets: Tree
 impl<'frame> Ui<'frame> {
@@ -30,9 +30,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn tree_node(&mut self, label: impl AsRef<str>) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        unsafe { sys::ImGui_TreeNode(c_label.as_ptr()) }
+        unsafe { sys::ImGui_TreeNode(self.scratch_txt(label)) }
     }
 
     /// Create a tree node with flags
@@ -54,9 +52,7 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn tree_node_ex(&mut self, label: impl AsRef<str>, flags: i32) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        unsafe { sys::ImGui_TreeNodeEx(c_label.as_ptr(), flags) }
+        unsafe { sys::ImGui_TreeNodeEx(self.scratch_txt(label), flags) }
     }
 
     /// Pop tree node (must be called after tree_node returns true)
@@ -98,8 +94,6 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn collapsing_header(&mut self, label: impl AsRef<str>) -> bool {
-        let label = label.as_ref();
-        let c_label = CString::new(label).unwrap_or_default();
-        unsafe { sys::ImGui_CollapsingHeader(c_label.as_ptr(), 0) }
+        unsafe { sys::ImGui_CollapsingHeader(self.scratch_txt(label), 0) }
     }
 }

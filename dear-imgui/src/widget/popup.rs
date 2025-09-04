@@ -1,9 +1,9 @@
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Popup widgets
 ///
 /// This module contains all popup-related UI components like popups and modals.
-use std::ffi::CString;
 
 /// # Widgets: Popup
 impl<'frame> Ui<'frame> {
@@ -34,10 +34,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_popup(&mut self, str_id: impl AsRef<str>) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
         unsafe {
-            sys::ImGui_BeginPopup(c_str_id.as_ptr(), 0) // Default flags
+            sys::ImGui_BeginPopup(self.scratch_txt(str_id), 0) // Default flags
         }
     }
 
@@ -74,11 +72,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_popup_modal(&mut self, name: impl AsRef<str>) -> bool {
-        let name = name.as_ref();
-        let c_name = CString::new(name).unwrap_or_default();
         unsafe {
             sys::ImGui_BeginPopupModal(
-                c_name.as_ptr(),
+                self.scratch_txt(name),
                 std::ptr::null_mut(), // No open flag
                 0,                    // Default flags
             )
@@ -110,11 +106,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_popup_modal_with_close(&mut self, name: impl AsRef<str>, open: &mut bool) -> bool {
-        let name = name.as_ref();
-        let c_name = CString::new(name).unwrap_or_default();
         unsafe {
             sys::ImGui_BeginPopupModal(
-                c_name.as_ptr(),
+                self.scratch_txt(name),
                 open as *mut bool,
                 0, // Default flags
             )
@@ -145,10 +139,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn open_popup(&mut self, str_id: impl AsRef<str>) {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
         unsafe {
-            sys::ImGui_OpenPopup(c_str_id.as_ptr(), 0); // Default flags
+            sys::ImGui_OpenPopup(self.scratch_txt(str_id), 0); // Default flags
         }
     }
 
@@ -230,11 +222,9 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn begin_popup_context_item_with_id(&mut self, str_id: impl AsRef<str>) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
         unsafe {
             sys::ImGui_BeginPopupContextItem(
-                c_str_id.as_ptr(),
+                self.scratch_txt(str_id),
                 1, // Right mouse button
             )
         }
@@ -287,10 +277,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn is_popup_open(&mut self, str_id: impl AsRef<str>) -> bool {
-        let str_id = str_id.as_ref();
-        let c_str_id = CString::new(str_id).unwrap_or_default();
         unsafe {
-            sys::ImGui_IsPopupOpen(c_str_id.as_ptr(), 0) // Default flags
+            sys::ImGui_IsPopupOpen(self.scratch_txt(str_id), 0) // Default flags
         }
     }
 }

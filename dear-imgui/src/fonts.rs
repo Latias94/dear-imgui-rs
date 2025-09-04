@@ -219,9 +219,15 @@ impl Font {
     }
 
     /// Get the raw pointer to the ImFont
-    pub fn raw(&self) -> *mut sys::ImFont {
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the pointer is used safely and doesn't outlive this Font
+    pub(crate) fn raw(&self) -> *mut sys::ImFont {
         self.raw
     }
+
+
 
     /// Calculate text size with this font
     ///
