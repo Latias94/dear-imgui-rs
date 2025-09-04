@@ -23,7 +23,11 @@ fn main() {
 
     {
         let io = context.io();
-        println!("• Display Size: {:.1} x {:.1}", io.display_size().x, io.display_size().y);
+        println!(
+            "• Display Size: {:.1} x {:.1}",
+            io.display_size().x,
+            io.display_size().y
+        );
         println!("• Delta Time: {:.3}ms", io.delta_time() * 1000.0);
         println!("• Framerate: {:.1} FPS", io.framerate());
         println!("• Want Capture Mouse: {}", io.want_capture_mouse());
@@ -36,7 +40,11 @@ fn main() {
         let mut io = context.io_mut();
         io.set_display_size(Vec2::new(1024.0, 768.0));
         io.set_delta_time(0.016); // 60 FPS
-        println!("• Updated display size to: {:.1} x {:.1}", io.display_size().x, io.display_size().y);
+        println!(
+            "• Updated display size to: {:.1} x {:.1}",
+            io.display_size().x,
+            io.display_size().y
+        );
         println!("• Updated delta time to: {:.3}ms", io.delta_time() * 1000.0);
     }
 
@@ -48,12 +56,21 @@ fn main() {
         let style = context.style();
         println!("• Current Alpha: {:.2}", style.alpha());
         println!("• Current Window Rounding: {:.1}", style.window_rounding());
-        println!("• Current Window Padding: {:.1}, {:.1}",
-            style.window_padding().x, style.window_padding().y);
-        println!("• Current Frame Padding: {:.1}, {:.1}",
-            style.frame_padding().x, style.frame_padding().y);
-        println!("• Current Item Spacing: {:.1}, {:.1}",
-            style.item_spacing().x, style.item_spacing().y);
+        println!(
+            "• Current Window Padding: {:.1}, {:.1}",
+            style.window_padding().x,
+            style.window_padding().y
+        );
+        println!(
+            "• Current Frame Padding: {:.1}, {:.1}",
+            style.frame_padding().x,
+            style.frame_padding().y
+        );
+        println!(
+            "• Current Item Spacing: {:.1}, {:.1}",
+            style.item_spacing().x,
+            style.item_spacing().y
+        );
     }
 
     // Test Style System - Mutable access
@@ -66,13 +83,25 @@ fn main() {
         style.set_item_spacing(Vec2::new(8.0, 6.0));
 
         println!("• Updated Alpha to: {:.2}", style.alpha());
-        println!("• Updated Window Rounding to: {:.1}", style.window_rounding());
-        println!("• Updated Window Padding to: {:.1}, {:.1}",
-            style.window_padding().x, style.window_padding().y);
-        println!("• Updated Frame Padding to: {:.1}, {:.1}",
-            style.frame_padding().x, style.frame_padding().y);
-        println!("• Updated Item Spacing to: {:.1}, {:.1}",
-            style.item_spacing().x, style.item_spacing().y);
+        println!(
+            "• Updated Window Rounding to: {:.1}",
+            style.window_rounding()
+        );
+        println!(
+            "• Updated Window Padding to: {:.1}, {:.1}",
+            style.window_padding().x,
+            style.window_padding().y
+        );
+        println!(
+            "• Updated Frame Padding to: {:.1}, {:.1}",
+            style.frame_padding().x,
+            style.frame_padding().y
+        );
+        println!(
+            "• Updated Item Spacing to: {:.1}, {:.1}",
+            style.item_spacing().x,
+            style.item_spacing().y
+        );
     }
 
     // Test Color Schemes

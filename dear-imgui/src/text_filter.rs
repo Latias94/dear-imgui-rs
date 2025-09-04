@@ -1,23 +1,23 @@
 //! Text filtering utilities for Dear ImGui
-//! 
+//!
 //! This module provides text filtering functionality that can be used to
 //! filter lists of items based on user input.
 
 use std::collections::HashSet;
 
 /// A text filter that can be used to filter lists of items
-/// 
+///
 /// The filter supports multiple search terms separated by commas,
 /// and can exclude items by prefixing terms with '-'.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```rust
 /// use dear_imgui::TextFilter;
-/// 
+///
 /// let mut filter = TextFilter::new();
 /// filter.set_filter("hello,world,-exclude");
-/// 
+///
 /// assert!(filter.pass_filter("hello there"));
 /// assert!(filter.pass_filter("world peace"));
 /// assert!(!filter.pass_filter("exclude this"));
@@ -43,12 +43,12 @@ impl Default for TextFilter {
 
 impl TextFilter {
     /// Create a new empty text filter
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let filter = TextFilter::new();
     /// assert!(filter.is_empty());
     /// ```
@@ -60,18 +60,18 @@ impl TextFilter {
             case_sensitive: false,
         }
     }
-    
+
     /// Create a new text filter with the given filter string
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `filter` - The initial filter string
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let filter = TextFilter::with_filter("hello,world");
     /// assert!(filter.pass_filter("hello there"));
     /// ```
@@ -80,21 +80,21 @@ impl TextFilter {
         text_filter.set_filter(filter);
         text_filter
     }
-    
+
     /// Set the filter string and parse it
-    /// 
+    ///
     /// The filter string can contain multiple terms separated by commas.
     /// Terms prefixed with '-' are treated as exclude terms.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `filter` - The filter string to parse
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let mut filter = TextFilter::new();
     /// filter.set_filter("include1,include2,-exclude1,-exclude2");
     /// ```
@@ -103,14 +103,14 @@ impl TextFilter {
         self.filter = filter.to_string();
         self.parse_filter();
     }
-    
+
     /// Get the current filter string
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let mut filter = TextFilter::new();
     /// filter.set_filter("hello,world");
     /// assert_eq!(filter.get_filter(), "hello,world");
@@ -118,39 +118,39 @@ impl TextFilter {
     pub fn get_filter(&self) -> &str {
         &self.filter
     }
-    
+
     /// Check if the filter is empty
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let filter = TextFilter::new();
     /// assert!(filter.is_empty());
-    /// 
+    ///
     /// let filter = TextFilter::with_filter("hello");
     /// assert!(!filter.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
         self.include_terms.is_empty() && self.exclude_terms.is_empty()
     }
-    
+
     /// Set whether the filter should be case sensitive
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `case_sensitive` - Whether to use case sensitive matching
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let mut filter = TextFilter::with_filter("Hello");
     /// filter.set_case_sensitive(true);
     /// assert!(!filter.pass_filter("hello")); // Case sensitive
-    /// 
+    ///
     /// filter.set_case_sensitive(false);
     /// assert!(filter.pass_filter("hello")); // Case insensitive
     /// ```
@@ -160,40 +160,40 @@ impl TextFilter {
             self.parse_filter(); // Re-parse with new case sensitivity
         }
     }
-    
+
     /// Check if the filter is case sensitive
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let filter = TextFilter::new();
     /// assert!(!filter.is_case_sensitive()); // Default is case insensitive
     /// ```
     pub fn is_case_sensitive(&self) -> bool {
         self.case_sensitive
     }
-    
+
     /// Test if the given text passes the filter
-    /// 
+    ///
     /// Returns `true` if the text should be included based on the current filter.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `text` - The text to test against the filter
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// `true` if the text passes the filter, `false` otherwise
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let filter = TextFilter::with_filter("hello,world,-exclude");
-    /// 
+    ///
     /// assert!(filter.pass_filter("hello there"));
     /// assert!(filter.pass_filter("world peace"));
     /// assert!(!filter.pass_filter("exclude this"));
@@ -201,50 +201,50 @@ impl TextFilter {
     /// ```
     pub fn pass_filter(&self, text: impl AsRef<str>) -> bool {
         let text = text.as_ref();
-        
+
         // If no filter is set, everything passes
         if self.is_empty() {
             return true;
         }
-        
+
         let text_to_check = if self.case_sensitive {
             text.to_string()
         } else {
             text.to_lowercase()
         };
-        
+
         // Check exclude terms first - if any match, reject
         for exclude_term in &self.exclude_terms {
             if text_to_check.contains(exclude_term) {
                 return false;
             }
         }
-        
+
         // If no include terms, and we passed exclude check, accept
         if self.include_terms.is_empty() {
             return true;
         }
-        
+
         // Check include terms - at least one must match
         for include_term in &self.include_terms {
             if text_to_check.contains(include_term) {
                 return true;
             }
         }
-        
+
         false
     }
-    
+
     /// Clear the filter
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let mut filter = TextFilter::with_filter("hello");
     /// assert!(!filter.is_empty());
-    /// 
+    ///
     /// filter.clear();
     /// assert!(filter.is_empty());
     /// ```
@@ -253,51 +253,51 @@ impl TextFilter {
         self.include_terms.clear();
         self.exclude_terms.clear();
     }
-    
+
     /// Get the number of include terms
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let filter = TextFilter::with_filter("hello,world,test");
     /// assert_eq!(filter.include_count(), 3);
     /// ```
     pub fn include_count(&self) -> usize {
         self.include_terms.len()
     }
-    
+
     /// Get the number of exclude terms
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::TextFilter;
-    /// 
+    ///
     /// let filter = TextFilter::with_filter("hello,-exclude1,-exclude2");
     /// assert_eq!(filter.exclude_count(), 2);
     /// ```
     pub fn exclude_count(&self) -> usize {
         self.exclude_terms.len()
     }
-    
+
     /// Parse the filter string into include and exclude terms
     fn parse_filter(&mut self) {
         self.include_terms.clear();
         self.exclude_terms.clear();
-        
+
         if self.filter.is_empty() {
             return;
         }
-        
+
         // Split by comma and process each term
         for term in self.filter.split(',') {
             let term = term.trim();
             if term.is_empty() {
                 continue;
             }
-            
+
             if let Some(exclude_term) = term.strip_prefix('-') {
                 // Exclude term
                 let exclude_term = exclude_term.trim();
@@ -319,25 +319,29 @@ impl TextFilter {
                 self.include_terms.push(processed_term);
             }
         }
-        
+
         // Remove duplicates while preserving order
-        self.include_terms = self.include_terms
+        self.include_terms = self
+            .include_terms
             .iter()
             .fold((Vec::new(), HashSet::new()), |(mut vec, mut set), item| {
                 if set.insert(item.clone()) {
                     vec.push(item.clone());
                 }
                 (vec, set)
-            }).0;
-            
-        self.exclude_terms = self.exclude_terms
+            })
+            .0;
+
+        self.exclude_terms = self
+            .exclude_terms
             .iter()
             .fold((Vec::new(), HashSet::new()), |(mut vec, mut set), item| {
                 if set.insert(item.clone()) {
                     vec.push(item.clone());
                 }
                 (vec, set)
-            }).0;
+            })
+            .0;
     }
 }
 
@@ -359,7 +363,7 @@ mod tests {
         assert!(!filter.is_empty());
         assert_eq!(filter.include_count(), 2);
         assert_eq!(filter.exclude_count(), 0);
-        
+
         assert!(filter.pass_filter("hello there"));
         assert!(filter.pass_filter("world peace"));
         assert!(filter.pass_filter("hello world"));
@@ -372,7 +376,7 @@ mod tests {
         assert!(!filter.is_empty());
         assert_eq!(filter.include_count(), 0);
         assert_eq!(filter.exclude_count(), 2);
-        
+
         assert!(filter.pass_filter("good text"));
         assert!(!filter.pass_filter("exclude this"));
         assert!(!filter.pass_filter("bad news"));
@@ -383,7 +387,7 @@ mod tests {
         let filter = TextFilter::with_filter("good,nice,-bad,-exclude");
         assert_eq!(filter.include_count(), 2);
         assert_eq!(filter.exclude_count(), 2);
-        
+
         assert!(filter.pass_filter("good news"));
         assert!(filter.pass_filter("nice day"));
         assert!(!filter.pass_filter("bad news"));
@@ -394,13 +398,13 @@ mod tests {
     #[test]
     fn test_case_sensitivity() {
         let mut filter = TextFilter::with_filter("Hello");
-        
+
         // Case insensitive (default)
         assert!(!filter.is_case_sensitive());
         assert!(filter.pass_filter("hello"));
         assert!(filter.pass_filter("HELLO"));
         assert!(filter.pass_filter("Hello"));
-        
+
         // Case sensitive
         filter.set_case_sensitive(true);
         assert!(filter.is_case_sensitive());
@@ -413,7 +417,7 @@ mod tests {
     fn test_clear() {
         let mut filter = TextFilter::with_filter("hello,world,-exclude");
         assert!(!filter.is_empty());
-        
+
         filter.clear();
         assert!(filter.is_empty());
         assert_eq!(filter.get_filter(), "");
@@ -426,7 +430,7 @@ mod tests {
         let filter = TextFilter::with_filter(" hello , world , -exclude ");
         assert_eq!(filter.include_count(), 2);
         assert_eq!(filter.exclude_count(), 1);
-        
+
         assert!(filter.pass_filter("hello there"));
         assert!(filter.pass_filter("world peace"));
         assert!(!filter.pass_filter("exclude this"));
@@ -437,7 +441,7 @@ mod tests {
         let filter = TextFilter::with_filter("hello,,,-,world");
         assert_eq!(filter.include_count(), 2);
         assert_eq!(filter.exclude_count(), 0);
-        
+
         assert!(filter.pass_filter("hello"));
         assert!(filter.pass_filter("world"));
     }

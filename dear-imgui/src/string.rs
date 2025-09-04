@@ -1,5 +1,5 @@
 //! String handling utilities for Dear ImGui
-//! 
+//!
 //! This module provides safe string handling for interfacing with Dear ImGui's
 //! C API, which expects null-terminated strings. It includes utilities for
 //! converting between Rust strings and C strings safely and efficiently.
@@ -11,7 +11,7 @@ use std::os::raw::c_char;
 use std::ptr;
 
 /// A string type that is compatible with Dear ImGui's C API
-/// 
+///
 /// This type provides a safe interface for strings that need to be passed
 /// to Dear ImGui functions. It automatically handles null termination and
 /// UTF-8 validation.
@@ -22,12 +22,12 @@ pub struct ImString {
 
 impl ImString {
     /// Create a new empty ImString
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let s = ImString::new();
     /// assert!(s.is_empty());
     /// ```
@@ -38,19 +38,19 @@ impl ImString {
     }
 
     /// Create an ImString with the specified capacity
-    /// 
+    ///
     /// This pre-allocates space for the string, which can be useful
     /// when you know the approximate size of the string you'll be building.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `capacity` - The initial capacity in bytes
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let s = ImString::with_capacity(100);
     /// assert!(s.capacity() >= 100);
     /// ```
@@ -63,20 +63,20 @@ impl ImString {
     }
 
     /// Create an ImString from a Rust string
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `s` - The string to convert
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// `Ok(ImString)` if the string is valid, `Err` if it contains null bytes
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let s = ImString::from_str("Hello, world!").unwrap();
     /// assert_eq!(s.to_str(), "Hello, world!");
     /// ```
@@ -140,12 +140,12 @@ impl ImString {
     }
 
     /// Get the string as a `&str`
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let s = ImString::from_str("Hello").unwrap();
     /// assert_eq!(s.to_str(), "Hello");
     /// ```
@@ -154,14 +154,14 @@ impl ImString {
     }
 
     /// Get the string as a `&CStr`
-    /// 
+    ///
     /// This is useful when interfacing with C APIs.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let s = ImString::from_str("Hello").unwrap();
     /// let c_str = s.as_c_str();
     /// ```
@@ -170,14 +170,14 @@ impl ImString {
     }
 
     /// Get a raw pointer to the null-terminated string
-    /// 
+    ///
     /// This is useful when calling C functions that expect a `*const c_char`.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let s = ImString::from_str("Hello").unwrap();
     /// let ptr = s.as_ptr();
     /// ```
@@ -186,15 +186,15 @@ impl ImString {
     }
 
     /// Check if the string is empty
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let s = ImString::new();
     /// assert!(s.is_empty());
-    /// 
+    ///
     /// let s = ImString::from_str("Hello").unwrap();
     /// assert!(!s.is_empty());
     /// ```
@@ -203,12 +203,12 @@ impl ImString {
     }
 
     /// Get the length of the string in bytes
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let s = ImString::from_str("Hello").unwrap();
     /// assert_eq!(s.len(), 5);
     /// ```
@@ -217,12 +217,12 @@ impl ImString {
     }
 
     /// Get the capacity of the string in bytes
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let s = ImString::with_capacity(100);
     /// assert!(s.capacity() >= 100);
     /// ```
@@ -232,12 +232,12 @@ impl ImString {
     }
 
     /// Clear the string, making it empty
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let mut s = ImString::from_str("Hello").unwrap();
     /// s.clear();
     /// assert!(s.is_empty());
@@ -247,20 +247,20 @@ impl ImString {
     }
 
     /// Push a string slice onto the end of this string
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `s` - The string slice to append
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// `Ok(())` if successful, `Err` if the string contains null bytes
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let mut s = ImString::from_str("Hello").unwrap();
     /// s.push_str(", world!").unwrap();
     /// assert_eq!(s.to_str(), "Hello, world!");
@@ -273,17 +273,17 @@ impl ImString {
     }
 
     /// Push a string slice onto the end of this string, replacing null bytes
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `s` - The string slice to append
     /// * `replacement` - The character to replace null bytes with
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::ImString;
-    /// 
+    ///
     /// let mut s = ImString::from_str("Hello").unwrap();
     /// s.push_str_safe(", wor\0ld!", '?');
     /// assert_eq!(s.to_str(), "Hello, wor?ld!");
@@ -345,7 +345,7 @@ impl AsRef<CStr> for ImString {
 }
 
 /// A mutable string buffer for use with Dear ImGui input widgets
-/// 
+///
 /// This type provides a mutable buffer that can be used with Dear ImGui's
 /// text input functions. It automatically manages the buffer size and
 /// null termination.
@@ -357,16 +357,16 @@ pub struct UiBuffer {
 
 impl UiBuffer {
     /// Create a new buffer with the specified capacity
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `capacity` - The maximum number of characters the buffer can hold
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::UiBuffer;
-    /// 
+    ///
     /// let buffer = UiBuffer::new(256);
     /// assert_eq!(buffer.capacity(), 256);
     /// ```
@@ -377,17 +377,17 @@ impl UiBuffer {
     }
 
     /// Create a buffer from an existing string
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `s` - The initial string content
     /// * `capacity` - The maximum capacity (must be >= string length)
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::UiBuffer;
-    /// 
+    ///
     /// let buffer = UiBuffer::from_str("Hello", 256);
     /// assert_eq!(buffer.to_str(), "Hello");
     /// assert_eq!(buffer.capacity(), 256);
@@ -404,32 +404,36 @@ impl UiBuffer {
     }
 
     /// Get the current string content
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::UiBuffer;
-    /// 
+    ///
     /// let buffer = UiBuffer::from_str("Hello", 256);
     /// assert_eq!(buffer.to_str(), "Hello");
     /// ```
     pub fn to_str(&self) -> &str {
         // Find the null terminator
-        let null_pos = self.buffer.iter().position(|&b| b == 0).unwrap_or(self.buffer.len());
+        let null_pos = self
+            .buffer
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.buffer.len());
         std::str::from_utf8(&self.buffer[..null_pos]).unwrap_or("")
     }
 
     /// Set the buffer content
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `s` - The new string content
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use dear_imgui::UiBuffer;
-    /// 
+    ///
     /// let mut buffer = UiBuffer::new(256);
     /// buffer.set_str("Hello, world!");
     /// assert_eq!(buffer.to_str(), "Hello, world!");
@@ -437,13 +441,13 @@ impl UiBuffer {
     pub fn set_str(&mut self, s: &str) {
         let bytes = s.as_bytes();
         let copy_len = bytes.len().min(self.capacity);
-        
+
         // Clear the buffer
         self.buffer.fill(0);
-        
+
         // Copy the string
         self.buffer[..copy_len].copy_from_slice(&bytes[..copy_len]);
-        
+
         // Ensure null termination
         if copy_len < self.buffer.len() {
             self.buffer[copy_len] = 0;
@@ -451,11 +455,11 @@ impl UiBuffer {
     }
 
     /// Get a mutable pointer to the buffer
-    /// 
+    ///
     /// This is used when calling Dear ImGui functions that modify the buffer.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// The caller must ensure that:
     /// - The buffer is not written beyond its capacity
     /// - The buffer remains null-terminated

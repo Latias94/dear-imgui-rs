@@ -24,7 +24,6 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn plot_lines(&mut self, label: impl AsRef<str>, values: &[f32], graph_size: Vec2) {
-
         let size_vec = sys::ImVec2 {
             x: graph_size.x,
             y: graph_size.y,
@@ -115,7 +114,6 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn plot_histogram(&mut self, label: impl AsRef<str>, values: &[f32], graph_size: Vec2) {
-
         let size_vec = sys::ImVec2 {
             x: graph_size.x,
             y: graph_size.y,
@@ -189,8 +187,6 @@ impl<'frame> Ui<'frame> {
             );
         }
     }
-
-
 
     /// Display a loading indicator (spinner)
     ///

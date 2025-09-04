@@ -198,7 +198,10 @@ impl Style {
     /// Set window padding
     pub fn set_window_padding(&mut self, padding: Vec2) {
         unsafe {
-            (*self.raw).WindowPadding = sys::ImVec2 { x: padding.x, y: padding.y };
+            (*self.raw).WindowPadding = sys::ImVec2 {
+                x: padding.x,
+                y: padding.y,
+            };
         }
     }
 
@@ -225,7 +228,10 @@ impl Style {
     /// Set frame padding
     pub fn set_frame_padding(&mut self, padding: Vec2) {
         unsafe {
-            (*self.raw).FramePadding = sys::ImVec2 { x: padding.x, y: padding.y };
+            (*self.raw).FramePadding = sys::ImVec2 {
+                x: padding.x,
+                y: padding.y,
+            };
         }
     }
 
@@ -240,7 +246,10 @@ impl Style {
     /// Set item spacing
     pub fn set_item_spacing(&mut self, spacing: Vec2) {
         unsafe {
-            (*self.raw).ItemSpacing = sys::ImVec2 { x: spacing.x, y: spacing.y };
+            (*self.raw).ItemSpacing = sys::ImVec2 {
+                x: spacing.x,
+                y: spacing.y,
+            };
         }
     }
 

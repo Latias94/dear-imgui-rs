@@ -16,13 +16,13 @@ use dear_imgui_sys as sys;
 /// # frame.window("Large List").show(|ui| {
 /// let mut clipper = ListClipper::new(items.len());
 /// clipper.begin(ui);
-/// 
+///
 /// while clipper.step() {
 ///     for i in clipper.display_start()..clipper.display_end() {
 ///         ui.text(&items[i]);
 ///     }
 /// }
-/// 
+///
 /// clipper.end();
 /// # });
 /// ```
@@ -195,8 +195,12 @@ impl<'frame> Ui<'frame> {
     /// });
     /// # });
     /// ```
-    pub fn list_clipper_with_height<F>(&mut self, items_count: usize, items_height: f32, mut render_fn: F)
-    where
+    pub fn list_clipper_with_height<F>(
+        &mut self,
+        items_count: usize,
+        items_height: f32,
+        mut render_fn: F,
+    ) where
         F: FnMut(&mut Ui, usize, usize),
     {
         let mut clipper = ListClipper::new_with_height(items_count, items_height);

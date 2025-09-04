@@ -3,7 +3,6 @@
 /// This module contains the main UI building interface that allows you to
 /// create Dear ImGui widgets and controls. The actual widget implementations
 /// are in the `widget` module.
-
 use crate::frame::Frame;
 use crate::string::UiBuffer;
 use crate::style::{push_style_var, StyleVar, StyleVarToken};

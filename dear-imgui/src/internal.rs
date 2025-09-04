@@ -1,5 +1,5 @@
 //! Internal utilities for Dear ImGui
-//! 
+//!
 //! This module provides low-level utilities and type conversions that are used
 //! internally by the Dear ImGui binding. These utilities provide safe abstractions
 //! over unsafe operations and ensure proper type safety.
@@ -11,7 +11,7 @@ use std::mem;
 use std::ptr::NonNull;
 
 /// Data type enumeration for Dear ImGui
-/// 
+///
 /// This enum represents the different data types that Dear ImGui can work with
 /// internally. It's used for type-safe operations and validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -52,7 +52,15 @@ impl DataType {
 
     /// Check if this data type is signed
     pub fn is_signed(self) -> bool {
-        matches!(self, DataType::S8 | DataType::S16 | DataType::S32 | DataType::S64 | DataType::Float | DataType::Double)
+        matches!(
+            self,
+            DataType::S8
+                | DataType::S16
+                | DataType::S32
+                | DataType::S64
+                | DataType::Float
+                | DataType::Double
+        )
     }
 
     /// Check if this data type is floating point
@@ -67,7 +75,7 @@ impl DataType {
 }
 
 /// Trait for types that can be converted to a Dear ImGui data type
-/// 
+///
 /// This trait provides a safe way to determine the Dear ImGui data type
 /// for Rust types, enabling type-safe operations.
 pub trait DataTypeKind {
@@ -116,13 +124,13 @@ impl DataTypeKind for f64 {
 }
 
 /// Trait for safe casting between types and raw pointers
-/// 
+///
 /// This trait provides a safe abstraction for converting between Rust types
 /// and the raw pointers expected by Dear ImGui's C API.
 pub trait RawCast<T> {
     /// Cast to a raw pointer
     fn raw(&self) -> *const T;
-    
+
     /// Cast to a mutable raw pointer
     fn raw_mut(&mut self) -> *mut T;
 }
@@ -168,9 +176,9 @@ pub struct ImVector<T> {
 
 impl<T> ImVector<T> {
     /// Create a new ImVector from a raw pointer
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// The caller must ensure that:
     /// - `ptr` is a valid pointer to an ImVector
     /// - The ImVector contains elements of type T
@@ -220,18 +228,18 @@ impl<T> ImVector<T> {
     }
 
     /// Get an element by index
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// The caller must ensure that `index` is within bounds.
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
         &*self.as_ptr().add(index)
     }
 
     /// Get a mutable element by index
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// The caller must ensure that `index` is within bounds.
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
         &mut *self.as_mut_ptr().add(index)
@@ -331,7 +339,7 @@ impl<'a, T> Iterator for ImVectorIterMut<'a, T> {
 impl<'a, T> ExactSizeIterator for ImVectorIterMut<'a, T> {}
 
 /// Utility function to check if two types have the same memory layout
-/// 
+///
 /// This is used to ensure that Rust types can be safely cast to/from
 /// their C counterparts.
 pub const fn assert_same_layout<T, U>() {
@@ -340,15 +348,15 @@ pub const fn assert_same_layout<T, U>() {
 }
 
 /// Utility function to safely transmute between types with the same layout
-/// 
+///
 /// # Safety
-/// 
+///
 /// The caller must ensure that T and U have the same memory layout and
 /// that the transmutation is semantically valid.
 pub unsafe fn transmute_same_layout<T, U>(value: T) -> U {
     debug_assert_eq!(mem::size_of::<T>(), mem::size_of::<U>());
     debug_assert_eq!(mem::align_of::<T>(), mem::align_of::<U>());
-    
+
     let result = mem::transmute_copy(&value);
     mem::forget(value);
     result
@@ -396,14 +404,14 @@ mod tests {
     #[test]
     fn test_raw_cast() {
         let mut value = 42i32;
-        
+
         let ptr = value.raw();
         assert_eq!(unsafe { *ptr }, 42);
-        
+
         let mut_ptr = value.raw_mut();
         unsafe { *mut_ptr = 84 };
         assert_eq!(value, 84);
-        
+
         let void_ptr = value.raw() as *const c_void;
         assert!(!void_ptr.is_null());
     }
@@ -413,7 +421,7 @@ mod tests {
         // These should compile without panicking
         assert_same_layout::<i32, i32>();
         assert_same_layout::<f32, u32>();
-        
+
         // Test that different sized types would fail
         // assert_same_layout::<i32, i64>(); // This would panic at compile time
     }
@@ -422,7 +430,7 @@ mod tests {
     fn test_transmute_same_layout() {
         let float_val = 3.14f32;
         let int_bits = unsafe { transmute_same_layout::<f32, u32>(float_val) };
-        
+
         // Convert back to verify
         let back_to_float = unsafe { transmute_same_layout::<u32, f32>(int_bits) };
         assert_eq!(back_to_float, 3.14f32);

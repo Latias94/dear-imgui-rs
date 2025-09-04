@@ -1,6 +1,6 @@
 use dear_imgui::{Context, Vec2};
 use dear_imgui_wgpu::WgpuRenderer;
-use dear_imgui_winit::{WinitPlatform, HiDpiMode};
+use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
@@ -74,7 +74,11 @@ impl DockingApp {
 
         // Configure fonts for DPI scaling
         let _font_size = platform.configure_fonts(&mut imgui_context, 13.0);
-        println!("DPI factor: {:.2}, Font size: {:.1}", platform.hidpi_factor(), _font_size);
+        println!(
+            "DPI factor: {:.2}, Font size: {:.1}",
+            platform.hidpi_factor(),
+            _font_size
+        );
 
         let renderer = WgpuRenderer::new(&device, &queue, surface_config.format);
 

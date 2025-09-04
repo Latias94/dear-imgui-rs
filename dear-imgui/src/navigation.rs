@@ -144,12 +144,6 @@ impl<'frame> Ui<'frame> {
         unsafe { sys::ImGui_IsItemDeactivatedAfterEdit() }
     }
 
-
-
-
-
-
-
     /// Enable or disable keyboard navigation for the current window
     ///
     /// # Arguments

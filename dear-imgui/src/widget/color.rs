@@ -83,7 +83,6 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_edit(&mut self, label: impl AsRef<str>, color: &mut Color) -> bool {
-
         let mut color_array = [color.r(), color.g(), color.b(), color.a()];
 
         let changed = unsafe {
@@ -165,7 +164,6 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn color_button(&mut self, desc_id: impl AsRef<str>, color: Color) -> bool {
-
         let color_vec = sys::ImVec4 {
             x: color.r(),
             y: color.g(),
@@ -201,7 +199,12 @@ impl<'frame> Ui<'frame> {
     /// }
     /// # });
     /// ```
-    pub fn color_edit_with_flags(&mut self, label: impl AsRef<str>, color: &mut Color, flags: ColorEditFlags) -> bool {
+    pub fn color_edit_with_flags(
+        &mut self,
+        label: impl AsRef<str>,
+        color: &mut Color,
+        flags: ColorEditFlags,
+    ) -> bool {
         let mut color_array = [color.r(), color.g(), color.b(), color.a()];
 
         let changed = unsafe {
@@ -213,7 +216,12 @@ impl<'frame> Ui<'frame> {
         };
 
         if changed {
-            *color = Color::rgba(color_array[0], color_array[1], color_array[2], color_array[3]);
+            *color = Color::rgba(
+                color_array[0],
+                color_array[1],
+                color_array[2],
+                color_array[3],
+            );
         }
 
         changed
@@ -272,7 +280,12 @@ impl<'frame> Ui<'frame> {
     /// }
     /// # });
     /// ```
-    pub fn color_edit3_with_flags(&mut self, label: impl AsRef<str>, color: &mut Color, flags: ColorEditFlags) -> bool {
+    pub fn color_edit3_with_flags(
+        &mut self,
+        label: impl AsRef<str>,
+        color: &mut Color,
+        flags: ColorEditFlags,
+    ) -> bool {
         let mut color_array = [color.r(), color.g(), color.b()];
 
         let changed = unsafe {
@@ -308,7 +321,12 @@ impl<'frame> Ui<'frame> {
     /// }
     /// # });
     /// ```
-    pub fn color_picker_with_flags(&mut self, label: impl AsRef<str>, color: &mut Color, flags: ColorEditFlags) -> bool {
+    pub fn color_picker_with_flags(
+        &mut self,
+        label: impl AsRef<str>,
+        color: &mut Color,
+        flags: ColorEditFlags,
+    ) -> bool {
         let mut color_array = [color.r(), color.g(), color.b(), color.a()];
 
         let changed = unsafe {
@@ -321,7 +339,12 @@ impl<'frame> Ui<'frame> {
         };
 
         if changed {
-            *color = Color::rgba(color_array[0], color_array[1], color_array[2], color_array[3]);
+            *color = Color::rgba(
+                color_array[0],
+                color_array[1],
+                color_array[2],
+                color_array[3],
+            );
         }
 
         changed
@@ -380,7 +403,12 @@ impl<'frame> Ui<'frame> {
     /// }
     /// # });
     /// ```
-    pub fn color_picker3_with_flags(&mut self, label: impl AsRef<str>, color: &mut Color, flags: ColorEditFlags) -> bool {
+    pub fn color_picker3_with_flags(
+        &mut self,
+        label: impl AsRef<str>,
+        color: &mut Color,
+        flags: ColorEditFlags,
+    ) -> bool {
         let mut color_array = [color.r(), color.g(), color.b()];
 
         let changed = unsafe {

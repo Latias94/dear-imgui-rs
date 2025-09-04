@@ -134,7 +134,10 @@ impl Io {
     /// Set display size in pixels
     pub fn set_display_size(&mut self, size: Vec2) {
         unsafe {
-            (*self.raw).DisplaySize = sys::ImVec2 { x: size.x, y: size.y };
+            (*self.raw).DisplaySize = sys::ImVec2 {
+                x: size.x,
+                y: size.y,
+            };
         }
     }
 

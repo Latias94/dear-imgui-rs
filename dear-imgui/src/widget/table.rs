@@ -1,5 +1,5 @@
-use crate::ui::Ui;
 use crate::types::Vec2;
+use crate::ui::Ui;
 use dear_imgui_sys as sys;
 
 /// Table widgets
@@ -347,7 +347,12 @@ impl<'frame> Ui<'frame> {
     /// }
     /// # });
     /// ```
-    pub fn begin_table_with_flags(&mut self, str_id: impl AsRef<str>, columns: i32, flags: TableFlags) -> bool {
+    pub fn begin_table_with_flags(
+        &mut self,
+        str_id: impl AsRef<str>,
+        columns: i32,
+        flags: TableFlags,
+    ) -> bool {
         unsafe {
             sys::ImGui_BeginTable(
                 self.scratch_txt(str_id),

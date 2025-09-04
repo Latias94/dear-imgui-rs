@@ -124,7 +124,6 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn image_button(&mut self, str_id: impl AsRef<str>, texture_id: u64, size: Vec2) -> bool {
-
         let size_vec = sys::ImVec2 {
             x: size.x,
             y: size.y,
@@ -195,7 +194,6 @@ impl<'frame> Ui<'frame> {
         bg_col: crate::types::Color,
         tint_col: crate::types::Color,
     ) -> bool {
-
         let size_vec = sys::ImVec2 {
             x: size.x,
             y: size.y,

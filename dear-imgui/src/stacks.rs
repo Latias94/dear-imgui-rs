@@ -4,10 +4,10 @@
 //! It uses the token system to ensure that stack operations are properly paired
 //! and automatically cleaned up.
 
-use dear_imgui_sys as sys;
-use crate::ui::Ui;
-use crate::style::StyleColor;
 use crate::fonts::Font;
+use crate::style::StyleColor;
+use crate::ui::Ui;
+use dear_imgui_sys as sys;
 
 // Create token types for different stack operations
 crate::create_token!(
@@ -134,20 +134,20 @@ impl<'frame> Ui<'frame> {
     }
 
     /// Push a style color onto the color stack
-    /// 
+    ///
     /// This temporarily changes a style color until the returned token is dropped.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `color_id` - The style color to modify
     /// * `color` - The new color value
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A token that automatically pops the color when dropped
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// # use dear_imgui::*;
     /// # let mut ctx = Context::new().unwrap();
@@ -158,7 +158,11 @@ impl<'frame> Ui<'frame> {
     /// // Color is automatically popped when _color_token is dropped
     /// # true });
     /// ```
-    pub fn push_style_color(&mut self, color_id: StyleColor, color: [f32; 4]) -> StyleColorStackToken<'_> {
+    pub fn push_style_color(
+        &mut self,
+        color_id: StyleColor,
+        color: [f32; 4],
+    ) -> StyleColorStackToken<'_> {
         unsafe {
             let vec4 = sys::ImVec4 {
                 x: color[0],
@@ -172,19 +176,19 @@ impl<'frame> Ui<'frame> {
     }
 
     /// Push multiple style colors onto the color stack
-    /// 
+    ///
     /// This is more efficient than calling `push_style_color` multiple times.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `colors` - Slice of (color_id, color) pairs
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A token that automatically pops all colors when dropped
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// # use dear_imgui::*;
     /// # let mut ctx = Context::new().unwrap();
@@ -200,7 +204,10 @@ impl<'frame> Ui<'frame> {
     /// // All colors are automatically popped when _color_token is dropped
     /// # true });
     /// ```
-    pub fn push_style_colors(&mut self, colors: &[(StyleColor, [f32; 4])]) -> StyleColorStackToken<'_> {
+    pub fn push_style_colors(
+        &mut self,
+        colors: &[(StyleColor, [f32; 4])],
+    ) -> StyleColorStackToken<'_> {
         for &(color_id, color) in colors {
             unsafe {
                 let vec4 = sys::ImVec4 {
@@ -282,19 +289,19 @@ impl<'frame> Ui<'frame> {
     }
 
     /// Push an item width onto the item width stack
-    /// 
+    ///
     /// This sets the width for the next item(s) until the token is dropped.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `width` - The item width (0.0 = default, >0.0 = fixed width, <0.0 = relative to right edge)
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A token that automatically pops the item width when dropped
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// # use dear_imgui::*;
     /// # let mut ctx = Context::new().unwrap();
@@ -313,19 +320,19 @@ impl<'frame> Ui<'frame> {
     }
 
     /// Push a text wrap position onto the text wrap stack
-    /// 
+    ///
     /// This sets the text wrap position for subsequent text until the token is dropped.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `wrap_pos_x` - The wrap position (0.0 = no wrap, >0.0 = wrap at position, <0.0 = wrap relative to right edge)
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A token that automatically pops the text wrap position when dropped
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// # use dear_imgui::*;
     /// # let mut ctx = Context::new().unwrap();
@@ -342,7 +349,6 @@ impl<'frame> Ui<'frame> {
         }
         TextWrapPosStackToken::new()
     }
-
 }
 
 #[cfg(test)]

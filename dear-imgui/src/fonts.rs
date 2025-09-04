@@ -227,8 +227,6 @@ impl Font {
         self.raw
     }
 
-
-
     /// Calculate text size with this font
     ///
     /// # Arguments

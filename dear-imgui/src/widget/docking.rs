@@ -27,7 +27,6 @@ impl<'frame> Ui<'frame> {
     /// ```
     #[cfg(feature = "docking")]
     pub fn dock_space(&mut self, id: impl AsRef<str>, size: Vec2) -> u32 {
-
         let size_vec = dear_imgui_sys::ImVec2 {
             x: size.x,
             y: size.y,
@@ -54,7 +53,6 @@ impl<'frame> Ui<'frame> {
     /// Create a dock space with flags
     #[cfg(feature = "docking")]
     pub fn dock_space_with_flags(&mut self, id: impl AsRef<str>, size: Vec2, flags: i32) -> u32 {
-
         let size_vec = dear_imgui_sys::ImVec2 {
             x: size.x,
             y: size.y,

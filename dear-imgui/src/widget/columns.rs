@@ -1,9 +1,9 @@
 use crate::ui::Ui;
 use dear_imgui_sys as sys;
+
 /// Column layout widgets
 ///
 /// This module contains all column-related UI components for creating multi-column layouts.
-use std::ffi::CString;
 
 /// # Widgets: Columns
 impl<'frame> Ui<'frame> {
@@ -33,10 +33,8 @@ impl<'frame> Ui<'frame> {
     /// # });
     /// ```
     pub fn columns(&mut self, count: i32, id: impl AsRef<str>, border: bool) {
-        let id = id.as_ref();
-        let c_id = CString::new(id).unwrap_or_default();
         unsafe {
-            sys::ImGui_Columns(count, c_id.as_ptr(), border);
+            sys::ImGui_Columns(count, self.scratch_txt(id), border);
         }
     }
 
