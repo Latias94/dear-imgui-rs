@@ -32,6 +32,7 @@
 //! ```
 
 // Core modules
+pub mod clipboard;
 pub mod context;
 pub mod demo;
 pub mod draw_data;
@@ -43,6 +44,7 @@ pub mod navigation;
 pub mod style;
 pub mod types;
 pub mod ui;
+pub mod utils;
 pub mod widget;
 pub mod window;
 

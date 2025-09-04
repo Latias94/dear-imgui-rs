@@ -7,6 +7,7 @@ pub mod image;
 pub mod input;
 pub mod layout;
 pub mod list_clipper;
+pub mod listbox;
 pub mod menu;
 pub mod misc;
 pub mod plot;
