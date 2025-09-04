@@ -1,0 +1,30 @@
+[package]
+name = "dear-imgui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
+description = "Safe, idiomatic Rust bindings for Dear ImGui"
+
+[features]
+default = ["tables"]
+docking = ["dear-imgui-sys/docking"]
+freetype = ["dear-imgui-sys/freetype"]
+tables = ["dear-imgui-sys/tables"]
+multi-viewport = ["dear-imgui-sys/multi-viewport"]
+serde = ["dep:serde"]
+
+[dependencies]
+dear-imgui-sys = { path = "../dear-imgui-sys" }
+bitflags.workspace = true
+thiserror.workspace = true
+mint.workspace = true
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion.workspace = true

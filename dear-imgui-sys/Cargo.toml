@@ -1,0 +1,28 @@
+[package]
+name = "dear-imgui-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
+description = "Raw FFI bindings for Dear ImGui"
+build = "build.rs"
+
+[features]
+default = ["tables"]
+docking = []
+freetype = []
+tables = []
+multi-viewport = []
+
+[build-dependencies]
+bindgen.workspace = true
+cc.workspace = true
+pkg-config = "0.3"
+
+[dependencies]
+# 无运行时依赖

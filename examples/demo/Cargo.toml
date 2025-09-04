@@ -1,0 +1,14 @@
+[package]
+name = "demo"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui" }
+dear-imgui-winit = { path = "../../backends/dear-imgui-winit" }
+dear-imgui-wgpu = { path = "../../backends/dear-imgui-wgpu" }
+winit = "0.30.12"
+wgpu = "26.0"
+env_logger = "0.11"
+pollster = "0.3"

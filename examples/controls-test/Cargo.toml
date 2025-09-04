@@ -1,0 +1,9 @@
+[package]
+name = "controls-test"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui" }
+env_logger = "0.11"

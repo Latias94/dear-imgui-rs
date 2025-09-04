@@ -1,0 +1,51 @@
+[workspace]
+members = [
+    "dear-imgui-sys",
+    "dear-imgui",
+    # "dear-imgui-derive",  # TODO: Create this crate later
+    "backends/dear-imgui-winit",
+    "backends/dear-imgui-wgpu",
+    # "backends/dear-imgui-opengl",  # TODO: Create OpenGL backend later
+    "examples/hello-world",
+    "examples/demo",
+    "examples/controls-test",
+    "examples/advanced-controls",
+    "examples/priority3-components",
+    "examples/demo-window",
+    "examples/docking-demo",
+]
+
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Latias94/dear-imgui-rs"
+homepage = "https://github.com/Latias94/dear-imgui-rs"
+documentation = "https://docs.rs/dear-imgui"
+authors = ["Mingzhen Zhuang <superfrankie621@gmail.com>"]
+categories = ["gui", "api-bindings", "graphics"]
+keywords = ["imgui", "gui", "graphics", "immediate-mode"]
+
+[workspace.dependencies]
+bitflags = "2.9"
+thiserror = "2.0"
+mint = "0.5"
+bytemuck = "1.0"
+
+serde = { version = "1.0", features = ["derive"] }
+glam = "0.30"
+cgmath = "0.18"
+nalgebra = "0.34"
+
+bindgen = "0.72"
+cc = "1.0"
+cmake = "0.1"
+
+winit = "0.30.12"
+wgpu = "26.0"
+raw-window-handle = "0.6"
+
+criterion = "0.7"
+env_logger = "0.11"

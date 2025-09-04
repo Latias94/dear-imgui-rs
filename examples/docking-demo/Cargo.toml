@@ -1,0 +1,17 @@
+[package]
+name = "docking-demo"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["docking"]
+docking = ["dear-imgui/docking"]
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui", features = ["docking"] }
+dear-imgui-wgpu = { path = "../../backends/dear-imgui-wgpu" }
+dear-imgui-winit = { path = "../../backends/dear-imgui-winit" }
+winit = "0.30"
+wgpu = "26"
+env_logger = "0.11"
+pollster = "0.3"

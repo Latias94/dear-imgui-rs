@@ -1,0 +1,22 @@
+[package]
+name = "dear-imgui-wgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
+description = "WGPU rendering backend for Dear ImGui Rust bindings"
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui" }
+dear-imgui-sys = { path = "../../dear-imgui-sys" }
+wgpu = "26.0"
+bytemuck = { version = "1.0", features = ["derive"] }
+smallvec = "1.0"
+
+[dev-dependencies]
+env_logger = "0.11"
