@@ -27,8 +27,8 @@
 //! }
 //! ```
 
-use std::{any, ffi};
 use crate::{sys, Condition, Ui};
+use std::{any, ffi};
 
 bitflags::bitflags! {
     /// Flags for drag and drop operations
@@ -37,7 +37,7 @@ bitflags::bitflags! {
     pub struct DragDropFlags: u32 {
         /// No flags
         const NONE = 0;
-        
+
         // Source flags
         /// Disable preview tooltip during drag
         const SOURCE_NO_PREVIEW_TOOLTIP = sys::ImGuiDragDropFlags_SourceNoPreviewTooltip as u32;
@@ -51,7 +51,7 @@ bitflags::bitflags! {
         const SOURCE_EXTERN = sys::ImGuiDragDropFlags_SourceExtern as u32;
         /// Automatically expire payload if source stops being submitted
         const PAYLOAD_AUTO_EXPIRE = sys::ImGuiDragDropFlags_PayloadAutoExpire as u32;
-        
+
         // Target flags
         /// Accept payload before mouse button is released
         const ACCEPT_BEFORE_DELIVERY = sys::ImGuiDragDropFlags_AcceptBeforeDelivery as u32;
@@ -330,11 +330,8 @@ impl<'ui> DragDropTarget<'ui> {
         name: impl AsRef<str>,
         flags: DragDropFlags,
     ) -> Option<DragDropPayload> {
-        let inner = sys::ImGui_AcceptDragDropPayload(
-            self.0.scratch_txt(name),
-            flags.bits() as i32,
-        );
-        
+        let inner = sys::ImGui_AcceptDragDropPayload(self.0.scratch_txt(name), flags.bits() as i32);
+
         if inner.is_null() {
             None
         } else {

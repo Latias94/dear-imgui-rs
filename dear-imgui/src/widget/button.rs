@@ -56,7 +56,12 @@ impl Ui {
     /// Returns true if this checkbox was clicked.
     pub fn checkbox_flags<T>(&self, label: impl AsRef<str>, flags: &mut T, mask: T) -> bool
     where
-        T: Copy + PartialEq + std::ops::BitOrAssign + std::ops::BitAndAssign + std::ops::BitAnd<Output = T> + std::ops::Not<Output = T>,
+        T: Copy
+            + PartialEq
+            + std::ops::BitOrAssign
+            + std::ops::BitAndAssign
+            + std::ops::BitAnd<Output = T>
+            + std::ops::Not<Output = T>,
     {
         let mut value = *flags & mask == mask;
         let pressed = self.checkbox(label, &mut value);

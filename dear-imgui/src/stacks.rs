@@ -66,7 +66,7 @@ impl Ui {
                     y: color_array[1],
                     z: color_array[2],
                     w: color_array[3],
-                }
+                },
             )
         };
         ColorStackToken::new(self)
@@ -152,7 +152,9 @@ unsafe fn push_style_var(style_var: StyleVar) {
         WindowRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_WindowRounding, v),
         WindowBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_WindowBorderSize, v),
         WindowMinSize(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowMinSize, &v.into()),
-        WindowTitleAlign(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowTitleAlign, &v.into()),
+        WindowTitleAlign(v) => {
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowTitleAlign, &v.into())
+        }
         ChildRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ChildRounding, v),
         ChildBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ChildBorderSize, v),
         PopupRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_PopupRounding, v),
@@ -161,7 +163,9 @@ unsafe fn push_style_var(style_var: StyleVar) {
         FrameRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_FrameRounding, v),
         FrameBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_FrameBorderSize, v),
         ItemSpacing(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ItemSpacing, &v.into()),
-        ItemInnerSpacing(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ItemInnerSpacing, &v.into()),
+        ItemInnerSpacing(v) => {
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ItemInnerSpacing, &v.into())
+        }
         IndentSpacing(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_IndentSpacing, v),
         CellPadding(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_CellPadding, &v.into()),
         ScrollbarSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ScrollbarSize, v),
@@ -169,8 +173,12 @@ unsafe fn push_style_var(style_var: StyleVar) {
         GrabMinSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_GrabMinSize, v),
         GrabRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_GrabRounding, v),
         TabRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_TabRounding, v),
-        ButtonTextAlign(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ButtonTextAlign, &v.into()),
-        SelectableTextAlign(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_SelectableTextAlign, &v.into()),
+        ButtonTextAlign(v) => {
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ButtonTextAlign, &v.into())
+        }
+        SelectableTextAlign(v) => {
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_SelectableTextAlign, &v.into())
+        }
     }
 }
 

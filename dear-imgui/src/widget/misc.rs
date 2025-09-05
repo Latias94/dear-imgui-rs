@@ -73,5 +73,3 @@ impl Ui {
         unsafe { sys::ImGui_ArrowButton(id_ptr, dir as i32) }
     }
 }
-
-

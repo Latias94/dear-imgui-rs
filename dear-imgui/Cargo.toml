@@ -37,9 +37,5 @@ approx = "0.5"
 pretty_assertions = "1.4"
 
 [[example]]
-name = "test_new_widgets"
-path = "../examples/test_new_widgets.rs"
-
-[[example]]
 name = "drag_drop_demo"
 path = "../examples/drag_drop_demo.rs"

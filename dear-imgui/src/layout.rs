@@ -161,7 +161,10 @@ impl Ui {
     #[doc(alias = "SetCursorPos")]
     pub fn set_cursor_pos(&self, pos: impl Into<[f32; 2]>) {
         let pos_array = pos.into();
-        let pos_vec = sys::ImVec2 { x: pos_array[0], y: pos_array[1] };
+        let pos_vec = sys::ImVec2 {
+            x: pos_array[0],
+            y: pos_array[1],
+        };
         unsafe { sys::ImGui_SetCursorPos(&pos_vec) };
     }
 
@@ -169,7 +172,10 @@ impl Ui {
     #[doc(alias = "SetCursorScreenPos")]
     pub fn set_cursor_screen_pos(&self, pos: impl Into<[f32; 2]>) {
         let pos_array = pos.into();
-        let pos_vec = sys::ImVec2 { x: pos_array[0], y: pos_array[1] };
+        let pos_vec = sys::ImVec2 {
+            x: pos_array[0],
+            y: pos_array[1],
+        };
         unsafe { sys::ImGui_SetCursorScreenPos(&pos_vec) };
     }
 
