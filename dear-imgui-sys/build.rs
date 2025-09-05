@@ -21,7 +21,7 @@ fn build_imgui() {
     // Configure C++ compilation
     build
         .cpp(true)
-        .include("imgui")
+        .include("third-party/imgui")
         .flag_if_supported("-std=c++17")
         .flag_if_supported("-fno-exceptions")
         .flag_if_supported("-fno-rtti")

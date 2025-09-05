@@ -16,10 +16,10 @@ extern thread_local ImGuiContext* MyImGuiTLS;
 #define GImGui MyImGuiTLS
 
 // Include Dear ImGui headers
-#include "imgui/imgui.h"
-#include "imgui/imgui_internal.h"
+#include "third-party/imgui/imgui.h"
+#include "third-party/imgui/imgui_internal.h"
 
 // Include freetype support if enabled
 #ifdef IMGUI_ENABLE_FREETYPE
-#include "imgui/misc/freetype/imgui_freetype.h"
+#include "third-party/imgui/misc/freetype/imgui_freetype.h"
 #endif

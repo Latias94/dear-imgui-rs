@@ -12,11 +12,11 @@ thread_local ImGuiContext* MyImGuiTLS;
 
 // Include all Dear ImGui source files
 // This approach compiles everything into a single translation unit
-#include "imgui/imgui.cpp"
-#include "imgui/imgui_widgets.cpp"
-#include "imgui/imgui_draw.cpp"
-#include "imgui/imgui_tables.cpp"
-#include "imgui/imgui_demo.cpp"
+#include "third-party/imgui/imgui.cpp"
+#include "third-party/imgui/imgui_widgets.cpp"
+#include "third-party/imgui/imgui_draw.cpp"
+#include "third-party/imgui/imgui_tables.cpp"
+#include "third-party/imgui/imgui_demo.cpp"
 
 // Include freetype support if enabled
 #ifdef IMGUI_ENABLE_FREETYPE

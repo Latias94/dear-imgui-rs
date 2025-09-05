@@ -5,17 +5,14 @@ members = [
     "dear-imgui",
     "backends/dear-imgui-winit",
     "backends/dear-imgui-wgpu",
-    "examples/hello-world",
-    "examples/widgets-demo",
-    "examples/color-image-plot-demo",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Latias94/dear-imgui-rs"
-homepage = "https://github.com/Latias94/dear-imgui-rs"
+repository = "https://github.com/Latias94/dear-imgui"
+homepage = "https://github.com/Latias94/dear-imgui"
 documentation = "https://docs.rs/dear-imgui"
 categories = ["gui", "api-bindings"]
 keywords = ["imgui", "ui", "graphics", "docking", "multiview"]
