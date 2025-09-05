@@ -2,3 +2,7 @@
 	path = dear-imgui-sys/imgui
 	url = https://github.com/ocornut/imgui.git
 	branch = docking
+[submodule "dear-imgui-sys/third-party/imgui"]
+	path = dear-imgui-sys/third-party/imgui
+	url = https://github.com/ocornut/imgui.git
+	branch = docking
