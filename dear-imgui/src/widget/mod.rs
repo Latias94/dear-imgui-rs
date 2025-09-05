@@ -25,33 +25,28 @@ pub use popup::PopupFlags;
 pub use table::TableColumnSetup;
 pub use tooltip::{HoveredFlags, MouseButton};
 
+// Widget implementations
 pub use self::button::*;
 pub use self::color::*;
+pub use self::combo::*;
 pub use self::drag::*;
 pub use self::image::*;
+pub use self::input::*;
 pub use self::list_box::*;
+pub use self::menu::*;
 pub use self::misc::*;
 pub use self::plot::*;
+pub use self::popup::*;
+pub use self::progress::*;
 pub use self::selectable::*;
 pub use self::slider::*;
 pub use self::tab::*;
+pub use self::table::*;
+pub use self::text::*;
+pub use self::tooltip::*;
+pub use self::tree::*;
 
-bitflags::bitflags! {
-    /// Flags for button widgets
-    #[repr(transparent)]
-    pub struct ButtonFlags: i32 {
-        /// No flags
-        const NONE = 0;
-        /// React on left mouse button (default)
-        const MOUSE_BUTTON_LEFT = sys::ImGuiButtonFlags_MouseButtonLeft;
-        /// React on right mouse button
-        const MOUSE_BUTTON_RIGHT = sys::ImGuiButtonFlags_MouseButtonRight;
-        /// React on center mouse button
-        const MOUSE_BUTTON_MIDDLE = sys::ImGuiButtonFlags_MouseButtonMiddle;
-        /// React on any mouse button
-        const MOUSE_BUTTON_MASK = sys::ImGuiButtonFlags_MouseButtonMask_;
-    }
-}
+// ButtonFlags is defined in misc.rs and re-exported
 
 bitflags::bitflags! {
     /// Flags for tree node widgets

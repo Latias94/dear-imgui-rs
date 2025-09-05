@@ -233,6 +233,13 @@ impl Context {
         }
     }
 
+    /// Returns a mutable reference to the font atlas (alias for font_atlas_mut)
+    ///
+    /// This provides compatibility with imgui-rs naming convention
+    pub fn fonts(&mut self) -> &mut FontAtlas {
+        self.font_atlas_mut()
+    }
+
     // TODO: Implement these methods once FFI is working
     // /// Sets the INI filename for settings persistence
     // pub fn set_ini_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) {

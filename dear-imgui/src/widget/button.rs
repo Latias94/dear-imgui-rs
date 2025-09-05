@@ -41,6 +41,34 @@ impl Ui {
         let label_ptr = self.scratch_txt(label);
         unsafe { sys::ImGui_RadioButton1(label_ptr, v, v_button) }
     }
+
+    /// Creates a radio button suitable for choosing an arbitrary value.
+    ///
+    /// Returns true if this radio button was clicked.
+    #[doc(alias = "RadioButtonBool")]
+    pub fn radio_button_bool(&self, label: impl AsRef<str>, active: bool) -> bool {
+        let label_ptr = self.scratch_txt(label);
+        unsafe { sys::ImGui_RadioButton(label_ptr, active) }
+    }
+
+    /// Renders a checkbox suitable for toggling bit flags using a mask.
+    ///
+    /// Returns true if this checkbox was clicked.
+    pub fn checkbox_flags<T>(&self, label: impl AsRef<str>, flags: &mut T, mask: T) -> bool
+    where
+        T: Copy + PartialEq + std::ops::BitOrAssign + std::ops::BitAndAssign + std::ops::BitAnd<Output = T> + std::ops::Not<Output = T>,
+    {
+        let mut value = *flags & mask == mask;
+        let pressed = self.checkbox(label, &mut value);
+        if pressed {
+            if value {
+                *flags |= mask;
+            } else {
+                *flags &= !mask;
+            }
+        }
+        pressed
+    }
 }
 
 /// Builder for button widget

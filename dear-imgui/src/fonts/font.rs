@@ -6,10 +6,21 @@
 use crate::sys;
 use std::marker::PhantomData;
 
+/// A font identifier
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct FontId(pub(crate) *const Font);
+
 /// A font instance with runtime data
 ///
 /// This represents a single font that can be used for text rendering.
 /// Fonts are managed by the FontAtlas and should not be created directly.
+///
+/// TODO: Currently using pointer wrapper approach for simplicity.
+/// Future improvement: Implement complete field mapping like imgui-rs for better type safety.
+///
+/// Note: Our dear-imgui-sys uses newer ImGui version with ImFontBaked architecture,
+/// while imgui-rs uses older version with direct field mapping. This difference
+/// requires careful consideration when implementing full mapping.
 #[derive(Debug)]
 pub struct Font {
     raw: *mut sys::ImFont,
@@ -23,6 +34,11 @@ impl Font {
     /// The caller must ensure that the pointer is valid and points to a valid ImFont
     pub unsafe fn from_raw(raw: *mut sys::ImFont) -> &'static Self {
         &*(raw as *const Self)
+    }
+
+    /// Returns the identifier of this font
+    pub fn id(&self) -> FontId {
+        FontId(self as *const _)
     }
 
     /// Returns the raw ImFont pointer

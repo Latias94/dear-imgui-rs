@@ -1,0 +1,84 @@
+use crate::sys;
+use crate::Ui;
+
+/// # Columns
+impl Ui {
+    /// Creates columns layout.
+    ///
+    /// # Arguments
+    /// * `count` - Number of columns (must be >= 1)
+    /// * `id` - Optional ID for the columns (can be empty string)
+    /// * `border` - Whether to draw borders between columns
+    #[doc(alias = "Columns")]
+    pub fn columns(&self, count: i32, id: impl AsRef<str>, border: bool) {
+        unsafe { sys::ImGui_Columns(count, self.scratch_txt(id), border) }
+    }
+
+    /// Switches to the next column.
+    ///
+    /// If the current row is finished, switches to first column of the next row
+    #[doc(alias = "NextColumn")]
+    pub fn next_column(&self) {
+        unsafe { sys::ImGui_NextColumn() }
+    }
+
+    /// Returns the index of the current column
+    #[doc(alias = "GetColumnIndex")]
+    pub fn current_column_index(&self) -> i32 {
+        unsafe { sys::ImGui_GetColumnIndex() }
+    }
+
+    /// Returns the width of the current column (in pixels)
+    #[doc(alias = "GetColumnWidth")]
+    pub fn current_column_width(&self) -> f32 {
+        unsafe { sys::ImGui_GetColumnWidth(-1) }
+    }
+
+    /// Returns the width of the given column (in pixels)
+    #[doc(alias = "GetColumnWidth")]
+    pub fn column_width(&self, column_index: i32) -> f32 {
+        unsafe { sys::ImGui_GetColumnWidth(column_index) }
+    }
+
+    /// Sets the width of the current column (in pixels)
+    #[doc(alias = "SetColumnWidth")]
+    pub fn set_current_column_width(&self, width: f32) {
+        unsafe { sys::ImGui_SetColumnWidth(-1, width) };
+    }
+
+    /// Sets the width of the given column (in pixels)
+    #[doc(alias = "SetColumnWidth")]
+    pub fn set_column_width(&self, column_index: i32, width: f32) {
+        unsafe { sys::ImGui_SetColumnWidth(column_index, width) };
+    }
+
+    /// Returns the offset of the current column (in pixels from the left side of the content region)
+    #[doc(alias = "GetColumnOffset")]
+    pub fn current_column_offset(&self) -> f32 {
+        unsafe { sys::ImGui_GetColumnOffset(-1) }
+    }
+
+    /// Returns the offset of the given column (in pixels from the left side of the content region)
+    #[doc(alias = "GetColumnOffset")]
+    pub fn column_offset(&self, column_index: i32) -> f32 {
+        unsafe { sys::ImGui_GetColumnOffset(column_index) }
+    }
+
+    /// Sets the offset of the current column (in pixels from the left side of the content region)
+    #[doc(alias = "SetColumnOffset")]
+    pub fn set_current_column_offset(&self, offset_x: f32) {
+        unsafe { sys::ImGui_SetColumnOffset(-1, offset_x) };
+    }
+
+    /// Sets the offset of the given column (in pixels from the left side of the content region)
+    #[doc(alias = "SetColumnOffset")]
+    pub fn set_column_offset(&self, column_index: i32, offset_x: f32) {
+        unsafe { sys::ImGui_SetColumnOffset(column_index, offset_x) };
+    }
+
+    /// Returns the current amount of columns
+    #[doc(alias = "GetColumnsCount")]
+    pub fn column_count(&self) -> i32 {
+        unsafe { sys::ImGui_GetColumnsCount() }
+    }
+}
