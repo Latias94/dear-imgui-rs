@@ -1,0 +1,41 @@
+[package]
+name = "dear-imgui"
+version.workspace = true
+edition.workspace = true
+description = "High-level Rust bindings to Dear ImGui with docking support"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dear-imgui"
+categories.workspace = true
+keywords.workspace = true
+readme = "../README.md"
+
+[package.metadata.docs.rs]
+features = ["freetype", "docking", "tables-api"]
+
+[dependencies]
+bitflags.workspace = true
+dear-imgui-sys = { path = "../dear-imgui-sys", version = "0.1" }
+mint.workspace = true
+parking_lot.workspace = true
+cfg-if.workspace = true
+
+[features]
+default = ["docking"]
+# Enable docking branch features (default)
+docking = ["dear-imgui-sys/docking"]
+# Enable freetype font rasterizer
+freetype = ["dear-imgui-sys/freetype"]
+# Enable for WASM targets
+wasm = ["dear-imgui-sys/wasm"]
+# Enable tables API (stable in upstream)
+tables-api = []
+
+[dev-dependencies]
+approx = "0.5"
+pretty_assertions = "1.4"
+
+[[example]]
+name = "test_new_widgets"
+path = "../examples/test_new_widgets.rs"

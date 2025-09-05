@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "dear-imgui-sys",
+    "dear-imgui",
+    "backends/dear-imgui-winit",
+    "backends/dear-imgui-wgpu",
+    "examples/hello-world",
+    "examples/widgets-demo",
+    "examples/color-image-plot-demo",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Latias94/dear-imgui-rs"
+homepage = "https://github.com/Latias94/dear-imgui-rs"
+documentation = "https://docs.rs/dear-imgui"
+categories = ["gui", "api-bindings"]
+keywords = ["imgui", "ui", "graphics", "docking", "multiview"]
+
+[workspace.dependencies]
+# Core dependencies
+bitflags = "2.9"
+parking_lot = "0.12"
+cfg-if = "1.0"
+
+# Graphics and windowing
+wgpu = "26.0"
+winit = "0.30.12"
+
+# Build dependencies
+bindgen = "0.72"
+cc = "1.0"
+pkg-config = "0.3"
+xshell = "0.2"
+
+# Utility
+mint = "0.5.6"
+env_logger = "0.11"
+pollster = "0.4"

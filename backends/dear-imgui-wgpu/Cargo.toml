@@ -1,0 +1,23 @@
+[package]
+name = "dear-imgui-wgpu"
+version.workspace = true
+edition.workspace = true
+description = "WGPU renderer for Dear ImGui"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dear-imgui-wgpu"
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui", version = "0.1" }
+dear-imgui-sys = { path = "../../dear-imgui-sys" }
+wgpu.workspace = true
+bytemuck = { version = "1.0", features = ["derive"] }
+smallvec = "1.0"
+
+[features]
+default = []
+# Enable docking features
+docking = ["dear-imgui/docking"]

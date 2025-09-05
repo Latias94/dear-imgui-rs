@@ -1,0 +1,23 @@
+[package]
+name = "dear-imgui-winit"
+version.workspace = true
+edition.workspace = true
+description = "Winit backend for Dear ImGui"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dear-imgui-winit"
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui", version = "0.1" }
+dear-imgui-sys = { path = "../../dear-imgui-sys" }
+winit.workspace = true
+raw-window-handle = "0.6"
+cfg-if.workspace = true
+
+[features]
+default = []
+# Enable docking features
+docking = ["dear-imgui/docking"]

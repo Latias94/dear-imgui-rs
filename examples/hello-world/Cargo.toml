@@ -1,0 +1,20 @@
+[package]
+name = "hello-world"
+version.workspace = true
+edition.workspace = true
+description = "Hello World example for Dear ImGui"
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "hello-world"
+path = "src/main.rs"
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui", version = "0.1" }
+dear-imgui-winit = { path = "../../backends/dear-imgui-winit", version = "0.1" }
+dear-imgui-wgpu = { path = "../../backends/dear-imgui-wgpu", version = "0.1" }
+winit.workspace = true
+wgpu.workspace = true
+pollster = "0.4"
+env_logger = "0.11"

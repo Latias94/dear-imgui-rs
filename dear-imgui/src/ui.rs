@@ -1,0 +1,162 @@
+use crate::draw::DrawListMut;
+use crate::string::UiBuffer;
+use std::cell::UnsafeCell;
+
+/// Represents the Dear ImGui user interface for one frame
+#[derive(Debug)]
+pub struct Ui {
+    /// Internal buffer for string operations
+    buffer: UnsafeCell<UiBuffer>,
+}
+
+impl Ui {
+    /// Creates a new Ui instance
+    ///
+    /// This should only be called by Context::create()
+    pub(crate) fn new() -> Self {
+        Ui {
+            buffer: UnsafeCell::new(UiBuffer::new(1024)),
+        }
+    }
+
+    /// Internal method to push a single text to our scratch buffer.
+    pub(crate) fn scratch_txt(&self, txt: impl AsRef<str>) -> *const std::os::raw::c_char {
+        unsafe {
+            let handle = &mut *self.buffer.get();
+            handle.scratch_txt(txt)
+        }
+    }
+
+    /// Internal method to push an option text to our scratch buffer.
+    pub(crate) fn scratch_txt_opt(
+        &self,
+        txt: Option<impl AsRef<str>>,
+    ) -> *const std::os::raw::c_char {
+        unsafe {
+            let handle = &mut *self.buffer.get();
+            handle.scratch_txt_opt(txt)
+        }
+    }
+
+    /// Helper method for two strings
+    pub(crate) fn scratch_txt_two(
+        &self,
+        txt_0: impl AsRef<str>,
+        txt_1: impl AsRef<str>,
+    ) -> (*const std::os::raw::c_char, *const std::os::raw::c_char) {
+        unsafe {
+            let handle = &mut *self.buffer.get();
+            handle.scratch_txt_two(txt_0, txt_1)
+        }
+    }
+
+    /// Helper method with one optional value
+    pub(crate) fn scratch_txt_with_opt(
+        &self,
+        txt_0: impl AsRef<str>,
+        txt_1: Option<impl AsRef<str>>,
+    ) -> (*const std::os::raw::c_char, *const std::os::raw::c_char) {
+        unsafe {
+            let handle = &mut *self.buffer.get();
+            handle.scratch_txt_with_opt(txt_0, txt_1)
+        }
+    }
+
+    /// Get access to the scratch buffer for complex string operations
+    pub(crate) fn scratch_buffer(&self) -> &UnsafeCell<UiBuffer> {
+        &self.buffer
+    }
+
+    /// Display text
+    #[doc(alias = "TextUnformatted")]
+    pub fn text<T: AsRef<str>>(&self, text: T) {
+        let s = text.as_ref();
+        unsafe {
+            let start = s.as_ptr();
+            let end = start.add(s.len());
+            crate::sys::ImGui_TextUnformatted(
+                start as *const std::os::raw::c_char,
+                end as *const std::os::raw::c_char,
+            );
+        }
+    }
+
+    /// Access to the current window's draw list
+    #[doc(alias = "GetWindowDrawList")]
+    pub fn get_window_draw_list(&self) -> DrawListMut<'_> {
+        DrawListMut::window(self)
+    }
+
+    /// Access to the background draw list
+    #[doc(alias = "GetBackgroundDrawList")]
+    pub fn get_background_draw_list(&self) -> DrawListMut<'_> {
+        DrawListMut::background(self)
+    }
+
+    /// Access to the foreground draw list
+    #[doc(alias = "GetForegroundDrawList")]
+    pub fn get_foreground_draw_list(&self) -> DrawListMut<'_> {
+        DrawListMut::foreground(self)
+    }
+
+    /// Creates a window builder
+    pub fn window(&self, name: impl Into<String>) -> crate::window::Window<'_> {
+        crate::window::Window::new(name)
+    }
+
+    // Drag widgets
+
+    /// Creates a drag float slider
+    #[doc(alias = "DragFloat")]
+    pub fn drag_float(&self, label: impl AsRef<str>, value: &mut f32) -> bool {
+        crate::widget::drag::Drag::new(label).build(self, value)
+    }
+
+    /// Creates a drag float slider with configuration
+    #[doc(alias = "DragFloat")]
+    pub fn drag_float_config<L: AsRef<str>>(&self, label: L) -> crate::widget::drag::Drag<f32, L> {
+        crate::widget::drag::Drag::new(label)
+    }
+
+    /// Creates a drag int slider
+    #[doc(alias = "DragInt")]
+    pub fn drag_int(&self, label: impl AsRef<str>, value: &mut i32) -> bool {
+        crate::widget::drag::Drag::new(label).build(self, value)
+    }
+
+    /// Creates a drag int slider with configuration
+    #[doc(alias = "DragInt")]
+    pub fn drag_int_config<L: AsRef<str>>(&self, label: L) -> crate::widget::drag::Drag<i32, L> {
+        crate::widget::drag::Drag::new(label)
+    }
+
+    /// Creates a drag float range slider
+    #[doc(alias = "DragFloatRange2")]
+    pub fn drag_float_range2(&self, label: impl AsRef<str>, min: &mut f32, max: &mut f32) -> bool {
+        crate::widget::drag::DragRange::<f32, _>::new(label).build(self, min, max)
+    }
+
+    /// Creates a drag float range slider with configuration
+    #[doc(alias = "DragFloatRange2")]
+    pub fn drag_float_range2_config<L: AsRef<str>>(
+        &self,
+        label: L,
+    ) -> crate::widget::drag::DragRange<f32, L> {
+        crate::widget::drag::DragRange::new(label)
+    }
+
+    /// Creates a drag int range slider
+    #[doc(alias = "DragIntRange2")]
+    pub fn drag_int_range2(&self, label: impl AsRef<str>, min: &mut i32, max: &mut i32) -> bool {
+        crate::widget::drag::DragRange::<i32, _>::new(label).build(self, min, max)
+    }
+
+    /// Creates a drag int range slider with configuration
+    #[doc(alias = "DragIntRange2")]
+    pub fn drag_int_range2_config<L: AsRef<str>>(
+        &self,
+        label: L,
+    ) -> crate::widget::drag::DragRange<i32, L> {
+        crate::widget::drag::DragRange::new(label)
+    }
+}
