@@ -1,0 +1,17 @@
+[package]
+name = "dear-imgui-examples"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "hello_world_wgpu"
+path = "hello_world_wgpu.rs"
+
+[dependencies]
+dear-imgui = { path = "../dear-imgui" }
+dear-imgui-winit = { path = "../backends/dear-imgui-winit" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu" }
+wgpu = "26.0"
+winit = "0.30.12"
+env_logger = "0.11"
+pollster = "0.4"

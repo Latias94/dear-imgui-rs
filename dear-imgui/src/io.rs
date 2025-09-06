@@ -200,4 +200,39 @@ impl Io {
     pub fn set_backend_flags(&mut self, flags: BackendFlags) {
         self.0.BackendFlags = flags.bits();
     }
+
+    /// Add a key event to the input queue
+    pub fn add_key_event(&mut self, key: crate::Key, down: bool) {
+        unsafe {
+            sys::ImGuiIO_AddKeyEvent(&mut self.0 as *mut _, key as i32, down);
+        }
+    }
+
+    /// Add a character input event to the input queue
+    pub fn add_input_character(&mut self, character: char) {
+        unsafe {
+            sys::ImGuiIO_AddInputCharacter(&mut self.0 as *mut _, character as u32);
+        }
+    }
+
+    /// Add a mouse position event to the input queue
+    pub fn add_mouse_pos_event(&mut self, pos: [f32; 2]) {
+        unsafe {
+            sys::ImGuiIO_AddMousePosEvent(&mut self.0 as *mut _, pos[0], pos[1]);
+        }
+    }
+
+    /// Add a mouse button event to the input queue
+    pub fn add_mouse_button_event(&mut self, button: crate::input::MouseButton, down: bool) {
+        unsafe {
+            sys::ImGuiIO_AddMouseButtonEvent(&mut self.0 as *mut _, button as i32, down);
+        }
+    }
+
+    /// Add a mouse wheel event to the input queue
+    pub fn add_mouse_wheel_event(&mut self, wheel: [f32; 2]) {
+        unsafe {
+            sys::ImGuiIO_AddMouseWheelEvent(&mut self.0 as *mut _, wheel[0], wheel[1]);
+        }
+    }
 }

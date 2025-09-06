@@ -5,6 +5,7 @@ members = [
     "dear-imgui",
     "backends/dear-imgui-winit",
     "backends/dear-imgui-wgpu",
+    "examples",
 ]
 
 [workspace.package]
