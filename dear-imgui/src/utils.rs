@@ -180,8 +180,17 @@ impl crate::ui::Ui {
     #[doc(alias = "GetContentRegionAvail")]
     pub fn get_content_region_avail(&self) -> [f32; 2] {
         unsafe {
-            let size = sys::ImGui_GetContentRegionAvail();
-            [size.x, size.y]
+            #[cfg(target_env = "msvc")]
+            {
+                let size_rr = sys::ImGui_GetContentRegionAvail();
+                let size: sys::ImVec2 = size_rr.into();
+                [size.x, size.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let size = sys::ImGui_GetContentRegionAvail();
+                [size.x, size.y]
+            }
         }
     }
 

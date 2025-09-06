@@ -7,8 +7,19 @@ impl Ui {
     /// This is the size of the window minus decorations (title bar, scrollbars, etc.)
     #[doc(alias = "GetContentRegionAvail")]
     pub fn content_region_avail(&self) -> [f32; 2] {
-        let size = unsafe { sys::ImGui_GetContentRegionAvail() };
-        [size.x, size.y]
+        unsafe {
+            #[cfg(target_env = "msvc")]
+            {
+                let size_rr = sys::ImGui_GetContentRegionAvail();
+                let size: sys::ImVec2 = size_rr.into();
+                [size.x, size.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let size = sys::ImGui_GetContentRegionAvail();
+                [size.x, size.y]
+            }
+        }
     }
 
     /// Returns the width of the content region available for widgets

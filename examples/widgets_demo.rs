@@ -215,10 +215,9 @@ impl AppWindow {
                 let cursor_pos = ui.get_cursor_screen_pos();
                 ui.text(&format!("Cursor Screen Pos: [{:.1}, {:.1}]", cursor_pos[0], cursor_pos[1]));
 
-                // 暂时注释掉有问题的函数
-                // let content_avail = ui.content_region_avail();
-                // ui.text(&format!("Content Region Avail: [{:.1}, {:.1}]", content_avail[0], content_avail[1]));
-                ui.text("Content Region Avail: [DISABLED - FFI issue]");
+                // 测试修复后的 content_region_avail 函数
+                let content_avail = ui.content_region_avail();
+                ui.text(&format!("Content Region Avail: [{:.1}, {:.1}]", content_avail[0], content_avail[1]));
             });
 
         // Style editor window

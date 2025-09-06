@@ -22,3 +22,8 @@ thread_local ImGuiContext* MyImGuiTLS;
 #ifdef IMGUI_ENABLE_FREETYPE
     #include "imgui/misc/freetype/imgui_freetype.cpp"
 #endif
+
+// Include MSVC ABI fix for Windows MSVC builds
+#ifdef _MSC_VER
+    #include "hack_msvc.cpp"
+#endif

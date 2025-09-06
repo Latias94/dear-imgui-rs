@@ -76,6 +76,7 @@ fn build_imgui() {
 
 fn generate_bindings() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap();
 
     // Configure bindgen with simpler settings
     let mut builder = bindgen::Builder::default()
@@ -97,6 +98,28 @@ fn generate_bindings() {
         .prepend_enum_name(false)
         // Generate layout tests
         .layout_tests(false); // Disable for now to avoid issues
+
+    // MSVC ABI fix: blocklist functions that return ImVec2
+    if target_env == "msvc" {
+        println!("cargo:rerun-if-changed=msvc_blocklist.txt");
+        println!("cargo:rerun-if-changed=hack_msvc.cpp");
+
+        // Read blocklist file if it exists
+        if let Ok(blocklist_content) = std::fs::read_to_string("msvc_blocklist.txt") {
+            for line in blocklist_content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                builder = builder.blocklist_function(line);
+            }
+        }
+
+        // Include MSVC hack header
+        builder = builder
+            .header("hack_msvc.cpp")
+            .allowlist_file("hack_msvc.cpp");
+    }
 
     // Add basic clang arguments for C++
     builder = builder

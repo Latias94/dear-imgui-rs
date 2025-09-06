@@ -1,0 +1,29 @@
+# MSVC ABI fix: Functions that return ImVec2 need special handling
+# These functions are blocked and replaced with wrapper functions in hack_msvc.cpp
+
+# Public API functions that return ImVec2
+ImGui::GetWindowPos
+ImGui::GetWindowSize
+ImGui::GetContentRegionAvail
+# ImGui::GetContentRegionMax
+# ImGui::GetWindowContentRegionMin
+# ImGui::GetWindowContentRegionMax
+ImGui::GetFontTexUvWhitePixel
+ImGui::GetCursorScreenPos
+ImGui::GetCursorPos
+ImGui::GetCursorStartPos
+ImGui::GetItemRectMin
+ImGui::GetItemRectMax
+ImGui::GetItemRectSize
+ImGui::CalcTextSize
+ImGui::GetMousePos
+ImGui::GetMousePosOnOpeningCurrentPopup
+ImGui::GetMouseDragDelta
+
+# Internal functions (if needed)
+ImBezierCubicCalc
+ImBezierCubicClosestPoint
+ImBezierCubicClosestPointCasteljau
+ImBezierQuadraticCalc
+ImLineClosestPoint
+ImTriangleClosestPoint

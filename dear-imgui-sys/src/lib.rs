@@ -112,8 +112,22 @@ impl<'a, T> IntoIterator for &'a mut ImVector<T> {
     }
 }
 
-// TODO: Add MSVC ABI compatibility if needed
-// For now, we'll use the simpler approach without MSVC hacks
+// MSVC ABI compatibility for ImVec2-returning functions
+#[cfg(target_env = "msvc")]
+impl From<ImVec2_rr> for ImVec2 {
+    #[inline]
+    fn from(rr: ImVec2_rr) -> ImVec2 {
+        ImVec2 { x: rr.x, y: rr.y }
+    }
+}
+
+#[cfg(target_env = "msvc")]
+impl From<ImVec2> for ImVec2_rr {
+    #[inline]
+    fn from(v: ImVec2) -> ImVec2_rr {
+        ImVec2_rr { x: v.x, y: v.y }
+    }
+}
 
 // Re-export commonly used types for convenience
 pub use ImColor as Color;
