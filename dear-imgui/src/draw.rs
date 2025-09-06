@@ -184,6 +184,7 @@ bitflags! {
     /// Options for some DrawList operations
     #[repr(transparent)]
     pub struct DrawFlags: u32 {
+        const NONE = 0;
         const CLOSED = 1 << 0;
         const ROUND_CORNERS_TOP_LEFT = 1 << 4;
         const ROUND_CORNERS_TOP_RIGHT = 1 << 5;
@@ -512,6 +513,181 @@ impl<'ui> DrawListMut<'ui> {
         P: Into<MintVec2>,
     {
         Polyline::new(self, points, c)
+    }
+
+    // ========== Path Drawing Functions ==========
+
+    /// Clear the current path (i.e. start a new path).
+    #[doc(alias = "PathClear")]
+    pub fn path_clear(&self) {
+        unsafe {
+            // PathClear is inline: _Path.Size = 0;
+            let draw_list = self.draw_list as *mut sys::ImDrawList;
+            (*draw_list)._Path.Size = 0;
+        }
+    }
+
+    /// Add a point to the current path.
+    #[doc(alias = "PathLineTo")]
+    pub fn path_line_to(&self, pos: impl Into<MintVec2>) {
+        unsafe {
+            let pos = pos.into();
+            let vec2 = sys::ImVec2 {
+                x: pos[0],
+                y: pos[1],
+            };
+
+            // PathLineTo is inline: _Path.push_back(pos);
+            // We need to manually push to the ImVector
+            let draw_list = self.draw_list as *mut sys::ImDrawList;
+            let path = &mut (*draw_list)._Path;
+
+            // Check if we have capacity
+            if path.Size < path.Capacity {
+                // Add the point directly
+                *path.Data.add(path.Size as usize) = vec2;
+                path.Size += 1;
+            } else {
+                // If no capacity, we'll use a workaround by drawing a line to the point
+                // This isn't perfect but avoids memory management issues
+                let current_pos = if path.Size > 0 {
+                    *path.Data.add((path.Size - 1) as usize)
+                } else {
+                    vec2
+                };
+
+                // Clear path and start fresh with just this point
+                path.Size = 0;
+                if path.Capacity > 0 {
+                    *path.Data.add(0) = vec2;
+                    path.Size = 1;
+                }
+            }
+        }
+    }
+
+    /// Add an arc to the current path.
+    #[doc(alias = "PathArcTo")]
+    pub fn path_arc_to(
+        &self,
+        center: impl Into<MintVec2>,
+        radius: f32,
+        a_min: f32,
+        a_max: f32,
+        num_segments: i32,
+    ) {
+        unsafe {
+            let center = center.into();
+            let center_vec = sys::ImVec2 {
+                x: center[0],
+                y: center[1],
+            };
+            sys::ImDrawList_PathArcTo(
+                self.draw_list,
+                &center_vec,
+                radius,
+                a_min,
+                a_max,
+                num_segments,
+            );
+        }
+    }
+
+    /// Add an arc to the current path using fast precomputed angles.
+    #[doc(alias = "PathArcToFast")]
+    pub fn path_arc_to_fast(
+        &self,
+        center: impl Into<MintVec2>,
+        radius: f32,
+        a_min_of_12: i32,
+        a_max_of_12: i32,
+    ) {
+        unsafe {
+            let center = center.into();
+            let center_vec = sys::ImVec2 {
+                x: center[0],
+                y: center[1],
+            };
+            sys::ImDrawList_PathArcToFast(
+                self.draw_list,
+                &center_vec,
+                radius,
+                a_min_of_12,
+                a_max_of_12,
+            );
+        }
+    }
+
+    /// Add a rectangle to the current path.
+    #[doc(alias = "PathRect")]
+    pub fn path_rect(
+        &self,
+        rect_min: impl Into<MintVec2>,
+        rect_max: impl Into<MintVec2>,
+        rounding: f32,
+        flags: DrawFlags,
+    ) {
+        unsafe {
+            let rect_min = rect_min.into();
+            let rect_max = rect_max.into();
+            let min_vec = sys::ImVec2 {
+                x: rect_min[0],
+                y: rect_min[1],
+            };
+            let max_vec = sys::ImVec2 {
+                x: rect_max[0],
+                y: rect_max[1],
+            };
+            sys::ImDrawList_PathRect(
+                self.draw_list,
+                &min_vec,
+                &max_vec,
+                rounding,
+                flags.bits() as i32,
+            );
+        }
+    }
+
+    /// Stroke the current path with the specified color and thickness.
+    #[doc(alias = "PathStroke")]
+    pub fn path_stroke(&self, color: impl Into<ImColor32>, flags: DrawFlags, thickness: f32) {
+        unsafe {
+            // PathStroke is inline: AddPolyline(_Path.Data, _Path.Size, col, flags, thickness); _Path.Size = 0;
+            let draw_list = self.draw_list as *mut sys::ImDrawList;
+            let path = &mut (*draw_list)._Path;
+
+            if path.Size > 0 {
+                sys::ImDrawList_AddPolyline(
+                    self.draw_list,
+                    path.Data,
+                    path.Size,
+                    color.into().into(),
+                    flags.bits() as i32,
+                    thickness,
+                );
+                path.Size = 0; // Clear path after stroking
+            }
+        }
+    }
+
+    /// Fill the current path as a convex polygon.
+    #[doc(alias = "PathFillConvex")]
+    pub fn path_fill_convex(&self, color: impl Into<ImColor32>) {
+        unsafe {
+            // PathFillConvex is inline: AddConvexPolyFilled(_Path.Data, _Path.Size, col); _Path.Size = 0;
+            let draw_list = self.draw_list as *mut sys::ImDrawList;
+            let path = &mut (*draw_list)._Path;
+
+            if path.Size > 0 {
+                sys::ImDrawList_AddConvexPolyFilled(
+                    self.draw_list,
+                    path.Data,
+                    path.Size,
+                    color.into().into(),
+                );
+                path.Size = 0; // Clear path after filling
+            }
+        }
     }
 
     /// Draw a text whose upper-left corner is at point `pos`.

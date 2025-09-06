@@ -97,6 +97,7 @@ bitflags! {
 
 /// Represents a window that can be built
 pub struct Window<'ui> {
+    ui: &'ui Ui,
     name: String,
     flags: WindowFlags,
     size: Option<[f32; 2]>,
@@ -109,13 +110,13 @@ pub struct Window<'ui> {
     collapsed_condition: Condition,
     focused: Option<bool>,
     bg_alpha: Option<f32>,
-    _phantom: std::marker::PhantomData<&'ui ()>,
 }
 
 impl<'ui> Window<'ui> {
     /// Creates a new window builder
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new(ui: &'ui Ui, name: impl Into<String>) -> Self {
         Self {
+            ui,
             name: name.into(),
             flags: WindowFlags::empty(),
             size: None,
@@ -128,7 +129,6 @@ impl<'ui> Window<'ui> {
             collapsed_condition: Condition::Always,
             focused: None,
             bg_alpha: None,
-            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -179,16 +179,16 @@ impl<'ui> Window<'ui> {
     }
 
     /// Builds the window and calls the provided closure
-    pub fn build<F, R>(self, ui: &'ui Ui, f: F) -> Option<R>
+    pub fn build<F, R>(self, f: F) -> Option<R>
     where
         F: FnOnce() -> R,
     {
-        let _token = self.begin(ui)?;
+        let _token = self.begin()?;
         Some(f())
     }
 
     /// Begins the window and returns a token
-    fn begin(self, _ui: &'ui Ui) -> Option<WindowToken<'ui>> {
+    fn begin(self) -> Option<WindowToken<'ui>> {
         use std::ffi::CString;
 
         let name_cstr = CString::new(self.name).ok()?;

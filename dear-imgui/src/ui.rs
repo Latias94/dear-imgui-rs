@@ -110,7 +110,7 @@ impl Ui {
 
     /// Creates a window builder
     pub fn window(&self, name: impl Into<String>) -> crate::window::Window<'_> {
-        crate::window::Window::new(name)
+        crate::window::Window::new(self, name)
     }
 
     /// Renders a demo window (previously called a test window), which demonstrates most

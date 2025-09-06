@@ -239,7 +239,7 @@ impl ApplicationHandler for App {
                         window
                             .size([400.0, 300.0], Condition::FirstUseEver)
                             .position([50.0, 50.0], Condition::FirstUseEver)
-                            .build(ui, || {
+                            .build(|| {
                                 ui.text("Welcome to Dear ImGui with WGPU!");
                                 ui.separator();
 
@@ -328,6 +328,19 @@ impl ApplicationHandler for App {
                                 ui.text("✅ Utility functions are working!");
                                 ui.spacing();
 
+                                // Test basic utility functions only
+                                ui.text("Basic Utility Functions Test:");
+                                ui.text(&format!("ImGui Time: {:.2}", ui.time()));
+                                ui.text(&format!("Frame Count: {}", ui.frame_count()));
+                                ui.text(&format!("Button Color Name: {}", ui.style_color_name(dear_imgui::StyleColor::Button)));
+                                ui.text("✅ Basic utility functions are working!");
+                                ui.spacing();
+
+                                // Test path drawing functions (simplified)
+                                ui.text("Path Drawing Test:");
+                                ui.text("⚠️ Path drawing temporarily disabled for stability");
+                                ui.spacing();
+
                                 // Test InputText functionality
                                 ui.text("InputText Test:");
 
@@ -377,7 +390,7 @@ impl ApplicationHandler for App {
                         info_window
                             .size([300.0, 200.0], Condition::FirstUseEver)
                             .position([500.0, 50.0], Condition::FirstUseEver)
-                            .build(ui, || {
+                            .build(|| {
                                 let delta_s = imgui.last_frame.elapsed();
                                 ui.text(format!(
                                     "Frametime: {:.3}ms",

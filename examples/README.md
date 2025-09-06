@@ -1,33 +1,47 @@
 # Dear ImGui Examples
 
-This directory contains examples demonstrating how to use the dear-imgui Rust bindings with various backends.
+This directory contains examples demonstrating how to use the Dear ImGui Rust bindings with various backends.
 
-## Hello World WGPU Example
+## Examples Overview
 
-The `hello_world_wgpu.rs` example demonstrates how to use dear-imgui with winit and wgpu for cross-platform GUI applications.
+### Basic Integration
+- **`hello_world.rs`** - Clean, minimal example showing Dear ImGui integration with WGPU and Winit
+- **`hello_world_wgpu.rs`** - Extended example with comprehensive feature testing
 
-### Features Demonstrated
+### Feature Demonstrations
+- **`draw_demo.rs`** - Showcase of drawing capabilities including:
+  - Basic shapes (lines, rectangles, circles)
+  - Bezier curves and polylines
+  - Path drawing functions
+  - Interactive drawing controls
 
-- **Window Management**: Creating and managing windows with winit
-- **WGPU Rendering**: Using WGPU as the graphics backend for Dear ImGui
-- **Basic Widgets**: Text, buttons, input fields, sliders, and checkboxes
-- **Event Handling**: Processing keyboard and mouse events through winit
-- **Frame Rate Display**: Showing frametime and FPS information
+- **`widgets_demo.rs`** - Comprehensive widget showcase including:
+  - Input widgets (text, sliders, checkboxes)
+  - Display widgets (buttons, radio buttons, combos)
+  - Color editors and style customization
+  - System information display
 
-### Running the Example
+### Advanced Features
+- **`drag_drop_demo.rs`** - Drag and drop functionality demonstration
 
-To run the hello world WGPU example:
+## Running Examples
+
+To run any example, use:
 
 ```bash
-# From the repository root
-cargo run -p dear-imgui-examples --bin hello_world_wgpu
+cargo run --bin <example_name>
 ```
 
-Or from the examples directory:
-
+For example:
 ```bash
-# From the examples directory
-cargo run --bin hello_world_wgpu
+cargo run --bin hello_world
+cargo run --bin draw_demo
+cargo run --bin widgets_demo
+```
+
+Or from the repository root:
+```bash
+cargo run -p dear-imgui-examples --bin hello_world
 ```
 
 ### Controls
