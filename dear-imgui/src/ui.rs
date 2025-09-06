@@ -1,6 +1,8 @@
 use crate::draw::DrawListMut;
+use crate::input::MouseCursor;
 use crate::internal::RawWrapper;
 use crate::string::UiBuffer;
+use crate::sys;
 use std::cell::UnsafeCell;
 
 /// Represents the Dear ImGui user interface for one frame
@@ -213,5 +215,40 @@ impl Ui {
         label: L,
     ) -> crate::widget::drag::DragRange<i32, L> {
         crate::widget::drag::DragRange::new(label)
+    }
+
+    /// Returns the currently desired mouse cursor type
+    ///
+    /// Returns `None` if no cursor should be displayed
+    #[doc(alias = "GetMouseCursor")]
+    pub fn mouse_cursor(&self) -> Option<MouseCursor> {
+        unsafe {
+            match sys::ImGui_GetMouseCursor() {
+                sys::ImGuiMouseCursor_Arrow => Some(MouseCursor::Arrow),
+                sys::ImGuiMouseCursor_TextInput => Some(MouseCursor::TextInput),
+                sys::ImGuiMouseCursor_ResizeAll => Some(MouseCursor::ResizeAll),
+                sys::ImGuiMouseCursor_ResizeNS => Some(MouseCursor::ResizeNS),
+                sys::ImGuiMouseCursor_ResizeEW => Some(MouseCursor::ResizeEW),
+                sys::ImGuiMouseCursor_ResizeNESW => Some(MouseCursor::ResizeNESW),
+                sys::ImGuiMouseCursor_ResizeNWSE => Some(MouseCursor::ResizeNWSE),
+                sys::ImGuiMouseCursor_Hand => Some(MouseCursor::Hand),
+                sys::ImGuiMouseCursor_NotAllowed => Some(MouseCursor::NotAllowed),
+                _ => None,
+            }
+        }
+    }
+
+    /// Sets the desired mouse cursor type
+    ///
+    /// Passing `None` hides the mouse cursor
+    #[doc(alias = "SetMouseCursor")]
+    pub fn set_mouse_cursor(&self, cursor_type: Option<MouseCursor>) {
+        unsafe {
+            sys::ImGui_SetMouseCursor(
+                cursor_type
+                    .map(|x| x as i32)
+                    .unwrap_or(sys::ImGuiMouseCursor_None),
+            );
+        }
     }
 }

@@ -60,6 +60,7 @@ pub use self::draw::*;
 pub use self::fonts::*;
 pub use self::input::*;
 pub use self::io::*;
+pub use self::platform_io::*;
 pub use self::string::*;
 pub use self::style::*;
 pub use self::ui::*;
@@ -88,12 +89,15 @@ pub use self::drag_drop::*;
 mod clipboard;
 mod color;
 mod context;
+mod dock_space;
 mod draw;
 mod fonts;
 mod input;
 pub mod internal;
 mod io;
 mod list_clipper;
+mod platform_io;
+pub mod render;
 mod string;
 mod style;
 mod ui;
@@ -116,6 +120,22 @@ mod drag_drop;
 
 // Column layout system
 mod columns;
+
+// Re-export public API
+pub use clipboard::*;
+pub use color::*;
+pub use context::*;
+pub use dock_space::*;
+pub use draw::*;
+pub use fonts::*;
+pub use input::*;
+pub use io::*;
+pub use list_clipper::*;
+pub use platform_io::*;
+pub use render::*;
+pub use string::*;
+pub use style::*;
+pub use ui::*;
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

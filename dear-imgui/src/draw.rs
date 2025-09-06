@@ -224,86 +224,9 @@ impl DrawVert {
 /// Draw index type
 pub type DrawIdx = u16;
 
-/// Draw data for rendering
-#[repr(C)]
-pub struct DrawData {
-    /// Only valid after render() is called and before the next new_frame() is called
-    pub valid: bool,
-    /// Number of ImDrawList* to render
-    pub cmd_lists_count: i32,
-    /// For convenience, sum of all ImDrawList's IdxBuffer.Size
-    pub total_idx_count: i32,
-    /// For convenience, sum of all ImDrawList's VtxBuffer.Size
-    pub total_vtx_count: i32,
-    /// Array of ImDrawList* to render
-    pub cmd_lists: *mut *mut sys::ImDrawList,
-    /// Upper-left position of the viewport to render
-    pub display_pos: Vec2,
-    /// Size of the viewport to render
-    pub display_size: Vec2,
-    /// Amount of pixels for each unit of DisplaySize
-    pub framebuffer_scale: Vec2,
-}
-
-impl DrawData {
-    /// Check if the draw data is valid
-    pub fn valid(&self) -> bool {
-        self.valid
-    }
-
-    /// Get display size as array
-    pub fn display_size(&self) -> [f32; 2] {
-        [self.display_size.x, self.display_size.y]
-    }
-
-    /// Get display position as array
-    pub fn display_pos(&self) -> [f32; 2] {
-        [self.display_pos.x, self.display_pos.y]
-    }
-
-    /// Get framebuffer scale as array
-    pub fn framebuffer_scale(&self) -> [f32; 2] {
-        [self.framebuffer_scale.x, self.framebuffer_scale.y]
-    }
-
-    /// Get iterator over draw lists
-    pub fn draw_lists(&self) -> DrawListIterator<'_> {
-        unsafe {
-            DrawListIterator {
-                iter: self.cmd_lists().iter(),
-            }
-        }
-    }
-
-    /// Returns the number of draw lists included in the draw data
-    pub fn draw_lists_count(&self) -> usize {
-        self.cmd_lists_count.max(0) as usize
-    }
-
-    /// Get command lists as slice
-    unsafe fn cmd_lists(&self) -> &[*const DrawList] {
-        if self.cmd_lists_count <= 0 || self.cmd_lists.is_null() {
-            return &[];
-        }
-        std::slice::from_raw_parts(
-            self.cmd_lists as *const *const DrawList,
-            self.cmd_lists_count as usize,
-        )
-    }
-}
-
-/// Iterator over draw lists
-pub struct DrawListIterator<'a> {
-    iter: std::slice::Iter<'a, *const DrawList>,
-}
-
-impl<'a> Iterator for DrawListIterator<'a> {
-    type Item = &'a DrawList;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|&ptr| unsafe { &*ptr })
-    }
-}
+// DrawData has been moved to crate::render::DrawData
+// Re-export for backward compatibility
+pub use crate::render::{DrawData, DrawListIterator};
 
 /// Draw list wrapper
 #[repr(transparent)]

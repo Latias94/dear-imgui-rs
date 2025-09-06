@@ -188,11 +188,35 @@ impl Context {
     }
 
     /// Renders the frame and returns a reference to the resulting draw data
-    pub fn render(&mut self) -> &crate::draw::DrawData {
+    ///
+    /// This finalizes the Dear ImGui frame and prepares all draw data for rendering.
+    /// The returned draw data contains all the information needed to render the frame.
+    pub fn render(&mut self) -> &crate::render::DrawData {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             sys::ImGui_Render();
-            &*(sys::ImGui_GetDrawData() as *const crate::draw::DrawData)
+            &*(sys::ImGui_GetDrawData() as *const crate::render::DrawData)
+        }
+    }
+
+    /// Gets the draw data for the current frame
+    ///
+    /// This returns the draw data without calling render. Only valid after
+    /// `render()` has been called and before the next `new_frame()`.
+    pub fn draw_data(&self) -> Option<&crate::render::DrawData> {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            let draw_data = sys::ImGui_GetDrawData();
+            if draw_data.is_null() {
+                None
+            } else {
+                let data = &*(draw_data as *const crate::render::DrawData);
+                if data.valid() {
+                    Some(data)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -349,6 +373,28 @@ impl Context {
         self.shared_font_atlas.clone()
     }
 
+    /// Loads settings from a string slice containing settings in .Ini file format
+    #[doc(alias = "LoadIniSettingsFromMemory")]
+    pub fn load_ini_settings(&mut self, data: &str) {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            sys::ImGui_LoadIniSettingsFromMemory(data.as_ptr() as *const _, data.len());
+        }
+    }
+
+    /// Saves settings to a mutable string buffer in .Ini file format
+    #[doc(alias = "SaveIniSettingsToMemory")]
+    pub fn save_ini_settings(&mut self, buf: &mut String) {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            let data_ptr = sys::ImGui_SaveIniSettingsToMemory(ptr::null_mut());
+            if !data_ptr.is_null() {
+                let data = std::ffi::CStr::from_ptr(data_ptr);
+                buf.push_str(&data.to_string_lossy());
+            }
+        }
+    }
+
     /// Sets the clipboard backend used for clipboard operations
     pub fn set_clipboard_backend<T: ClipboardBackend>(&mut self, backend: T) {
         let clipboard_ctx: Box<UnsafeCell<_>> =
@@ -364,25 +410,6 @@ impl Context {
 
         self.clipboard_ctx = clipboard_ctx;
     }
-
-    // TODO: Implement these methods once FFI is working
-    // /// Sets the INI filename for settings persistence
-    // pub fn set_ini_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
-    //     let _guard = CTX_MUTEX.lock();
-
-    //     self.ini_filename = filename.map(|f| {
-    //         CString::new(f.into().to_string_lossy().as_bytes())
-    //             .expect("Invalid filename")
-    //     });
-
-    //     unsafe {
-    //         let ptr = self.ini_filename
-    //             .as_ref()
-    //             .map(|s| s.as_ptr())
-    //             .unwrap_or(ptr::null());
-    //         (*sys::igGetIO()).IniFilename = ptr;
-    //     }
-    // }
 }
 
 impl Drop for Context {

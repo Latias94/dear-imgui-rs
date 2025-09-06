@@ -398,27 +398,5 @@ impl crate::Ui {
         unsafe { sys::ImGui_ResetMouseDragDelta(button as i32) }
     }
 
-    /// Get desired mouse cursor type
-    #[doc(alias = "GetMouseCursor")]
-    pub fn mouse_cursor(&self) -> Option<MouseCursor> {
-        match unsafe { sys::ImGui_GetMouseCursor() } {
-            sys::ImGuiMouseCursor_Arrow => Some(MouseCursor::Arrow),
-            sys::ImGuiMouseCursor_TextInput => Some(MouseCursor::TextInput),
-            sys::ImGuiMouseCursor_ResizeAll => Some(MouseCursor::ResizeAll),
-            sys::ImGuiMouseCursor_ResizeNS => Some(MouseCursor::ResizeNS),
-            sys::ImGuiMouseCursor_ResizeEW => Some(MouseCursor::ResizeEW),
-            sys::ImGuiMouseCursor_ResizeNESW => Some(MouseCursor::ResizeNESW),
-            sys::ImGuiMouseCursor_ResizeNWSE => Some(MouseCursor::ResizeNWSE),
-            sys::ImGuiMouseCursor_Hand => Some(MouseCursor::Hand),
-            sys::ImGuiMouseCursor_NotAllowed => Some(MouseCursor::NotAllowed),
-            _ => None,
-        }
-    }
 
-    /// Set mouse cursor type
-    #[doc(alias = "SetMouseCursor")]
-    pub fn set_mouse_cursor(&self, cursor: Option<MouseCursor>) {
-        let cursor_type = cursor.map_or(MouseCursor::None as i32, |c| c as i32);
-        unsafe { sys::ImGui_SetMouseCursor(cursor_type) }
-    }
 }
