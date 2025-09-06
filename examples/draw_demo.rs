@@ -37,13 +37,20 @@ impl ApplicationHandler for DrawDemoApp {
         // Window is already created in new()
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: winit::window::WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
         if let Some(imgui) = &mut self.imgui {
             let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
                 window_id: self.window.id(),
-                event: event.clone()
+                event: event.clone(),
             };
-            imgui.platform.handle_event(&full_event, &self.window, &mut imgui.context);
+            imgui
+                .platform
+                .handle_event(&full_event, &self.window, &mut imgui.context);
         }
 
         match event {
@@ -73,11 +80,13 @@ impl DrawDemoApp {
     fn new(event_loop: &EventLoop<()>) -> Self {
         let size = LogicalSize::new(1280.0, 720.0);
         let window = Arc::new(
-            event_loop.create_window(
-                winit::window::Window::default_attributes()
-                    .with_title("Dear ImGui Draw Demo")
-                    .with_inner_size(size)
-            ).unwrap(),
+            event_loop
+                .create_window(
+                    winit::window::Window::default_attributes()
+                        .with_title("Dear ImGui Draw Demo")
+                        .with_inner_size(size),
+                )
+                .unwrap(),
         );
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -94,7 +103,8 @@ impl DrawDemoApp {
         }))
         .unwrap();
 
-        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let (device, queue) =
+            block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
 
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
@@ -136,13 +146,13 @@ impl DrawDemoApp {
         context.set_ini_filename::<&str>(None);
 
         let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&self.window, dear_imgui_winit::HiDpiMode::Default, &mut context);
-
-        let mut renderer = WgpuRenderer::new(
-            &self.device,
-            &self.queue,
-            self.surface_desc.format,
+        platform.attach_window(
+            &self.window,
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
         );
+
+        let mut renderer = WgpuRenderer::new(&self.device, &self.queue, self.surface_desc.format);
 
         // Load font texture - this is crucial for text rendering!
         renderer.reload_font_texture(&mut context, &self.device, &self.queue);
@@ -168,7 +178,10 @@ impl DrawDemoApp {
         let imgui = self.imgui.as_mut().unwrap();
 
         let now = Instant::now();
-        imgui.context.io_mut().set_delta_time((now - imgui.last_frame).as_secs_f32());
+        imgui
+            .context
+            .io_mut()
+            .set_delta_time((now - imgui.last_frame).as_secs_f32());
         imgui.last_frame = now;
 
         let frame = match self.surface.get_current_texture() {
@@ -179,7 +192,9 @@ impl DrawDemoApp {
             }
         };
 
-        imgui.platform.prepare_frame(&self.window, &mut imgui.context);
+        imgui
+            .platform
+            .prepare_frame(&self.window, &mut imgui.context);
         let ui = imgui.context.frame();
 
         // Control panel
@@ -217,10 +232,14 @@ impl DrawDemoApp {
             });
 
         // Render
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -244,7 +263,12 @@ impl DrawDemoApp {
                 occlusion_query_set: None,
             });
 
-            let _ = imgui.renderer.render_with_renderpass(imgui.context.render(), &self.queue, &self.device, &mut rpass);
+            let _ = imgui.renderer.render_with_renderpass(
+                imgui.context.render(),
+                &self.queue,
+                &self.device,
+                &mut rpass,
+            );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

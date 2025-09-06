@@ -73,7 +73,7 @@ impl AppWindow {
         .expect("Failed to find an appropriate adapter");
 
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-        .expect("Failed to create device");
+            .expect("Failed to create device");
 
         let surface_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -104,7 +104,11 @@ impl AppWindow {
         context.set_ini_filename(None::<String>);
 
         let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&self.window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        platform.attach_window(
+            &self.window,
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        );
 
         let mut renderer = WgpuRenderer::new(&self.device, &self.queue, self.surface_desc.format);
 
@@ -133,7 +137,7 @@ impl AppWindow {
 
     fn render(&mut self) {
         let imgui = self.imgui.as_mut().unwrap();
-        
+
         let now = Instant::now();
         let delta_time = (now - imgui.last_frame).as_secs_f32();
         imgui.context.io_mut().set_delta_time(delta_time);
@@ -147,7 +151,9 @@ impl AppWindow {
             }
         };
 
-        imgui.platform.prepare_frame(&self.window, &mut imgui.context);
+        imgui
+            .platform
+            .prepare_frame(&self.window, &mut imgui.context);
         let ui = imgui.context.frame();
 
         // Main widgets demo window
@@ -193,7 +199,9 @@ impl AppWindow {
                 ui.slider("Slider", 0.0, 1.0, &mut imgui.slider_value);
 
                 let combo_items = ["Item 1", "Item 2", "Item 3", "Item 4"];
-                ui.combo("Combo", &mut imgui.combo_current, &combo_items, |item| (*item).into());
+                ui.combo("Combo", &mut imgui.combo_current, &combo_items, |item| {
+                    (*item).into()
+                });
 
                 ui.separator();
 
@@ -205,19 +213,28 @@ impl AppWindow {
 
                 // Information display
                 ui.text("System Information:");
-                ui.text(&format!("Application average {:.3} ms/frame ({:.1} FPS)",
-                    1000.0 / ui.io().framerate(), ui.io().framerate()));
+                ui.text(&format!(
+                    "Application average {:.3} ms/frame ({:.1} FPS)",
+                    1000.0 / ui.io().framerate(),
+                    ui.io().framerate()
+                ));
 
                 // 恢复系统信息显示功能
                 ui.text(&format!("ImGui Time: {:.2}", ui.time()));
                 ui.text(&format!("Frame Count: {}", ui.frame_count()));
 
                 let cursor_pos = ui.get_cursor_screen_pos();
-                ui.text(&format!("Cursor Screen Pos: [{:.1}, {:.1}]", cursor_pos[0], cursor_pos[1]));
+                ui.text(&format!(
+                    "Cursor Screen Pos: [{:.1}, {:.1}]",
+                    cursor_pos[0], cursor_pos[1]
+                ));
 
                 // 测试修复后的 content_region_avail 函数
                 let content_avail = ui.content_region_avail();
-                ui.text(&format!("Content Region Avail: [{:.1}, {:.1}]", content_avail[0], content_avail[1]));
+                ui.text(&format!(
+                    "Content Region Avail: [{:.1}, {:.1}]",
+                    content_avail[0], content_avail[1]
+                ));
             });
 
         // Style editor window
@@ -236,10 +253,14 @@ impl AppWindow {
                 ui.text("Successfully restored: time(), frame_count(), get_cursor_screen_pos()");
             });
 
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -259,7 +280,9 @@ impl AppWindow {
             });
 
             let draw_data = imgui.context.render();
-            imgui.renderer.render_with_renderpass(draw_data, &self.queue, &self.device, &mut rpass)
+            imgui
+                .renderer
+                .render_with_renderpass(draw_data, &self.queue, &self.device, &mut rpass)
                 .expect("Rendering failed");
         }
 
@@ -277,21 +300,30 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: winit::window::WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
         let window = self.window.as_mut().unwrap();
         let imgui = window.imgui.as_mut().unwrap();
 
         let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
             window_id: window.window.id(),
-            event: event.clone()
+            event: event.clone(),
         };
-        imgui.platform.handle_event(&full_event, &window.window, &mut imgui.context);
+        imgui
+            .platform
+            .handle_event(&full_event, &window.window, &mut imgui.context);
 
         match event {
             WindowEvent::Resized(physical_size) => {
                 window.surface_desc.width = physical_size.width;
                 window.surface_desc.height = physical_size.height;
-                window.surface.configure(&window.device, &window.surface_desc);
+                window
+                    .surface
+                    .configure(&window.device, &window.surface_desc);
             }
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::KeyboardInput { event, .. } => {
@@ -310,10 +342,10 @@ impl ApplicationHandler for App {
 
 fn main() {
     env_logger::init();
-    
+
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
-    
+
     let mut app = App::default();
     event_loop.run_app(&mut app).unwrap();
 }

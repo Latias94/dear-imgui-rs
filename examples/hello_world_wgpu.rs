@@ -332,7 +332,10 @@ impl ApplicationHandler for App {
                                 ui.text("Basic Utility Functions Test:");
                                 ui.text(&format!("ImGui Time: {:.2}", ui.time()));
                                 ui.text(&format!("Frame Count: {}", ui.frame_count()));
-                                ui.text(&format!("Button Color Name: {}", ui.style_color_name(dear_imgui::StyleColor::Button)));
+                                ui.text(&format!(
+                                    "Button Color Name: {}",
+                                    ui.style_color_name(dear_imgui::StyleColor::Button)
+                                ));
                                 ui.text("✅ Basic utility functions are working!");
                                 ui.spacing();
 
