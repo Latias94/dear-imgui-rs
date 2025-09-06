@@ -104,6 +104,60 @@ impl Ui {
         crate::window::Window::new(name)
     }
 
+    /// Renders a demo window (previously called a test window), which demonstrates most
+    /// Dear ImGui features.
+    #[doc(alias = "ShowDemoWindow")]
+    pub fn show_demo_window(&self, opened: &mut bool) {
+        unsafe {
+            crate::sys::ImGui_ShowDemoWindow(opened);
+        }
+    }
+
+    /// Renders an about window.
+    ///
+    /// Displays the Dear ImGui version/credits, and build/system information.
+    #[doc(alias = "ShowAboutWindow")]
+    pub fn show_about_window(&self, opened: &mut bool) {
+        unsafe {
+            crate::sys::ImGui_ShowAboutWindow(opened);
+        }
+    }
+
+    /// Renders a metrics/debug window.
+    ///
+    /// Displays Dear ImGui internals: draw commands (with individual draw calls and vertices),
+    /// window list, basic internal state, etc.
+    #[doc(alias = "ShowMetricsWindow")]
+    pub fn show_metrics_window(&self, opened: &mut bool) {
+        unsafe {
+            crate::sys::ImGui_ShowMetricsWindow(opened);
+        }
+    }
+
+    /// Renders a style editor block (not a window) for the given `Style` structure
+    #[doc(alias = "ShowStyleEditor")]
+    pub fn show_style_editor(&self, style: &mut crate::style::Style) {
+        unsafe {
+            crate::sys::ImGui_ShowStyleEditor(style.raw_mut());
+        }
+    }
+
+    /// Renders a style editor block (not a window) for the currently active style
+    #[doc(alias = "ShowStyleEditor")]
+    pub fn show_default_style_editor(&self) {
+        unsafe {
+            crate::sys::ImGui_ShowStyleEditor(std::ptr::null_mut());
+        }
+    }
+
+    /// Renders a basic help/info block (not a window)
+    #[doc(alias = "ShowUserGuide")]
+    pub fn show_user_guide(&self) {
+        unsafe {
+            crate::sys::ImGui_ShowUserGuide();
+        }
+    }
+
     // Drag widgets
 
     /// Creates a drag float slider

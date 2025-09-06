@@ -259,3 +259,166 @@ bitflags! {
 }
 
 // TODO: Add NavInput enum once we have proper constants in sys crate
+
+impl crate::Ui {
+    /// Check if a key is being held down
+    #[doc(alias = "IsKeyDown")]
+    pub fn is_key_down(&self, key: Key) -> bool {
+        unsafe { sys::ImGui_IsKeyDown(key as i32) }
+    }
+
+    /// Check if a key was pressed (went from !Down to Down)
+    #[doc(alias = "IsKeyPressed")]
+    pub fn is_key_pressed(&self, key: Key) -> bool {
+        unsafe { sys::ImGui_IsKeyPressed(key as i32, true) }
+    }
+
+    /// Check if a key was pressed (went from !Down to Down), with repeat
+    #[doc(alias = "IsKeyPressed")]
+    pub fn is_key_pressed_with_repeat(&self, key: Key, repeat: bool) -> bool {
+        unsafe { sys::ImGui_IsKeyPressed(key as i32, repeat) }
+    }
+
+    /// Check if a key was released (went from Down to !Down)
+    #[doc(alias = "IsKeyReleased")]
+    pub fn is_key_released(&self, key: Key) -> bool {
+        unsafe { sys::ImGui_IsKeyReleased(key as i32) }
+    }
+
+    /// Check if a mouse button is being held down
+    #[doc(alias = "IsMouseDown")]
+    pub fn is_mouse_down(&self, button: MouseButton) -> bool {
+        unsafe { sys::ImGui_IsMouseDown(button as i32) }
+    }
+
+    /// Check if a mouse button was clicked (went from !Down to Down)
+    #[doc(alias = "IsMouseClicked")]
+    pub fn is_mouse_clicked(&self, button: MouseButton) -> bool {
+        unsafe { sys::ImGui_IsMouseClicked(button as i32, false) }
+    }
+
+    /// Check if a mouse button was clicked, with repeat
+    #[doc(alias = "IsMouseClicked")]
+    pub fn is_mouse_clicked_with_repeat(&self, button: MouseButton, repeat: bool) -> bool {
+        unsafe { sys::ImGui_IsMouseClicked(button as i32, repeat) }
+    }
+
+    /// Check if a mouse button was released (went from Down to !Down)
+    #[doc(alias = "IsMouseReleased")]
+    pub fn is_mouse_released(&self, button: MouseButton) -> bool {
+        unsafe { sys::ImGui_IsMouseReleased(button as i32) }
+    }
+
+    /// Check if a mouse button was double-clicked
+    #[doc(alias = "IsMouseDoubleClicked")]
+    pub fn is_mouse_double_clicked(&self, button: MouseButton) -> bool {
+        unsafe { sys::ImGui_IsMouseDoubleClicked(button as i32) }
+    }
+
+    /// Get mouse position in screen coordinates
+    #[doc(alias = "GetMousePos")]
+    pub fn mouse_pos(&self) -> [f32; 2] {
+        let pos = unsafe { sys::ImGui_GetMousePos() };
+        [pos.x, pos.y]
+    }
+
+    /// Get mouse position when a specific button was clicked
+    #[doc(alias = "GetMousePosOnOpeningCurrentPopup")]
+    pub fn mouse_pos_on_opening_current_popup(&self) -> [f32; 2] {
+        let pos = unsafe { sys::ImGui_GetMousePosOnOpeningCurrentPopup() };
+        [pos.x, pos.y]
+    }
+
+    /// Check if mouse is hovering given rectangle
+    #[doc(alias = "IsMouseHoveringRect")]
+    pub fn is_mouse_hovering_rect(&self, r_min: [f32; 2], r_max: [f32; 2]) -> bool {
+        unsafe {
+            sys::ImGui_IsMouseHoveringRect(
+                &sys::ImVec2::new(r_min[0], r_min[1]),
+                &sys::ImVec2::new(r_max[0], r_max[1]),
+                true,
+            )
+        }
+    }
+
+    /// Check if mouse is hovering given rectangle (with clipping test)
+    #[doc(alias = "IsMouseHoveringRect")]
+    pub fn is_mouse_hovering_rect_with_clip(
+        &self,
+        r_min: [f32; 2],
+        r_max: [f32; 2],
+        clip: bool,
+    ) -> bool {
+        unsafe {
+            sys::ImGui_IsMouseHoveringRect(
+                &sys::ImVec2::new(r_min[0], r_min[1]),
+                &sys::ImVec2::new(r_max[0], r_max[1]),
+                clip,
+            )
+        }
+    }
+
+    /// Check if mouse is dragging
+    #[doc(alias = "IsMouseDragging")]
+    pub fn is_mouse_dragging(&self, button: MouseButton) -> bool {
+        unsafe { sys::ImGui_IsMouseDragging(button as i32, -1.0) }
+    }
+
+    /// Check if mouse is dragging with threshold
+    #[doc(alias = "IsMouseDragging")]
+    pub fn is_mouse_dragging_with_threshold(
+        &self,
+        button: MouseButton,
+        lock_threshold: f32,
+    ) -> bool {
+        unsafe { sys::ImGui_IsMouseDragging(button as i32, lock_threshold) }
+    }
+
+    /// Get mouse drag delta
+    #[doc(alias = "GetMouseDragDelta")]
+    pub fn mouse_drag_delta(&self, button: MouseButton) -> [f32; 2] {
+        let delta = unsafe { sys::ImGui_GetMouseDragDelta(button as i32, -1.0) };
+        [delta.x, delta.y]
+    }
+
+    /// Get mouse drag delta with threshold
+    #[doc(alias = "GetMouseDragDelta")]
+    pub fn mouse_drag_delta_with_threshold(
+        &self,
+        button: MouseButton,
+        lock_threshold: f32,
+    ) -> [f32; 2] {
+        let delta = unsafe { sys::ImGui_GetMouseDragDelta(button as i32, lock_threshold) };
+        [delta.x, delta.y]
+    }
+
+    /// Reset mouse drag delta for a specific button
+    #[doc(alias = "ResetMouseDragDelta")]
+    pub fn reset_mouse_drag_delta(&self, button: MouseButton) {
+        unsafe { sys::ImGui_ResetMouseDragDelta(button as i32) }
+    }
+
+    /// Get desired mouse cursor type
+    #[doc(alias = "GetMouseCursor")]
+    pub fn mouse_cursor(&self) -> Option<MouseCursor> {
+        match unsafe { sys::ImGui_GetMouseCursor() } {
+            sys::ImGuiMouseCursor_Arrow => Some(MouseCursor::Arrow),
+            sys::ImGuiMouseCursor_TextInput => Some(MouseCursor::TextInput),
+            sys::ImGuiMouseCursor_ResizeAll => Some(MouseCursor::ResizeAll),
+            sys::ImGuiMouseCursor_ResizeNS => Some(MouseCursor::ResizeNS),
+            sys::ImGuiMouseCursor_ResizeEW => Some(MouseCursor::ResizeEW),
+            sys::ImGuiMouseCursor_ResizeNESW => Some(MouseCursor::ResizeNESW),
+            sys::ImGuiMouseCursor_ResizeNWSE => Some(MouseCursor::ResizeNWSE),
+            sys::ImGuiMouseCursor_Hand => Some(MouseCursor::Hand),
+            sys::ImGuiMouseCursor_NotAllowed => Some(MouseCursor::NotAllowed),
+            _ => None,
+        }
+    }
+
+    /// Set mouse cursor type
+    #[doc(alias = "SetMouseCursor")]
+    pub fn set_mouse_cursor(&self, cursor: Option<MouseCursor>) {
+        let cursor_type = cursor.map_or(MouseCursor::None as i32, |c| c as i32);
+        unsafe { sys::ImGui_SetMouseCursor(cursor_type) }
+    }
+}

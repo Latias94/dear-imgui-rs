@@ -54,6 +54,7 @@ pub enum Condition {
 // use std::os::raw::c_char;
 
 // Core modules
+pub use self::clipboard::{ClipboardBackend, DummyClipboardBackend};
 pub use self::context::*;
 pub use self::draw::*;
 pub use self::fonts::*;
@@ -84,6 +85,7 @@ pub use self::drag_drop::*;
 // pub use self::columns::*;
 
 // Internal modules
+mod clipboard;
 mod color;
 mod context;
 mod draw;

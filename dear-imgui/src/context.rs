@@ -5,7 +5,8 @@ use std::ops::Drop;
 use std::path::PathBuf;
 use std::ptr;
 
-use crate::fonts::{Font, FontAtlas};
+use crate::clipboard::{ClipboardBackend, ClipboardContext};
+use crate::fonts::{Font, FontAtlas, SharedFontAtlas};
 use crate::io::Io;
 // use crate::style::Style;
 use crate::sys;
@@ -39,10 +40,16 @@ use crate::ui::Ui;
 #[derive(Debug)]
 pub struct Context {
     raw: *mut sys::ImGuiContext,
+    shared_font_atlas: Option<SharedFontAtlas>,
     ini_filename: Option<CString>,
     log_filename: Option<CString>,
     platform_name: Option<CString>,
     renderer_name: Option<CString>,
+    // We need to box this because we hand imgui a pointer to it,
+    // and we don't want to deal with finding `clipboard_ctx`.
+    // We also put it in an UnsafeCell since we're going to give
+    // imgui a mutable pointer to it.
+    clipboard_ctx: Box<UnsafeCell<ClipboardContext>>,
     ui: crate::Ui,
 }
 
@@ -51,17 +58,14 @@ pub struct Context {
 static CTX_MUTEX: ReentrantMutex<()> = parking_lot::const_reentrant_mutex(());
 
 fn clear_current_context() {
-    // TODO: Implement once FFI is working
-    // unsafe {
-    //     sys::igSetCurrentContext(ptr::null_mut());
-    // }
+    unsafe {
+        sys::ImGui_SetCurrentContext(ptr::null_mut());
+    }
 }
 
 fn no_current_context() -> bool {
-    // TODO: Implement once FFI is working
-    // let ctx = unsafe { sys::igGetCurrentContext() };
-    // ctx.is_null()
-    true // Placeholder
+    let ctx = unsafe { sys::ImGui_GetCurrentContext() };
+    ctx.is_null()
 }
 
 impl Context {
@@ -71,14 +75,32 @@ impl Context {
     ///
     /// Panics if an active context already exists
     pub fn create() -> Context {
+        Self::create_internal(None)
+    }
+
+    /// Creates a new active Dear ImGui context with a shared font atlas.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an active context already exists
+    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> Context {
+        Self::create_internal(Some(shared_font_atlas))
+    }
+
+    fn create_internal(mut shared_font_atlas: Option<SharedFontAtlas>) -> Context {
         let _guard = CTX_MUTEX.lock();
 
         if !no_current_context() {
             panic!("A Dear ImGui context is already active");
         }
 
+        let shared_font_atlas_ptr = match &mut shared_font_atlas {
+            Some(atlas) => atlas.as_ptr_mut(),
+            None => ptr::null_mut(),
+        };
+
         // Create the actual ImGui context
-        let raw = unsafe { sys::ImGui_CreateContext(ptr::null_mut()) };
+        let raw = unsafe { sys::ImGui_CreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
             panic!("Failed to create Dear ImGui context");
         }
@@ -90,10 +112,12 @@ impl Context {
 
         Context {
             raw,
+            shared_font_atlas,
             ini_filename: None,
             log_filename: None,
             platform_name: None,
             renderer_name: None,
+            clipboard_ctx: Box::new(ClipboardContext::dummy().into()),
             ui: crate::Ui::new(),
         }
     }
@@ -101,26 +125,11 @@ impl Context {
     /// Returns a mutable reference to the active context's IO object
     pub fn io_mut(&mut self) -> &mut Io {
         let _guard = CTX_MUTEX.lock();
-        Io::from_raw()
+        unsafe {
+            let io_ptr = sys::ImGui_GetIO();
+            &mut *(io_ptr as *mut Io)
+        }
     }
-
-    // /// Returns a reference to the active context's style
-    // pub fn style(&self) -> &Style {
-    //     let _guard = CTX_MUTEX.lock();
-    //     unsafe {
-    //         let style_ptr = sys::igGetStyle();
-    //         &*(style_ptr as *const Style)
-    //     }
-    // }
-
-    // /// Returns a mutable reference to the active context's style
-    // pub fn style_mut(&mut self) -> &mut Style {
-    //     let _guard = CTX_MUTEX.lock();
-    //     unsafe {
-    //         let style_ptr = sys::igGetStyle();
-    //         &mut *(style_ptr as *mut Style)
-    //     }
-    // }
 
     /// Get access to the IO structure
     pub fn io(&self) -> &crate::io::Io {
@@ -132,8 +141,21 @@ impl Context {
     }
 
     /// Get access to the Style structure
-    pub fn style(&self) -> crate::style::Style {
-        crate::style::Style::from_raw()
+    pub fn style(&self) -> &crate::style::Style {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            let style_ptr = sys::ImGui_GetStyle();
+            &*(style_ptr as *const crate::style::Style)
+        }
+    }
+
+    /// Get mutable access to the Style structure
+    pub fn style_mut(&mut self) -> &mut crate::style::Style {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            let style_ptr = sys::ImGui_GetStyle();
+            &mut *(style_ptr as *mut crate::style::Style)
+        }
     }
 
     /// Creates a new frame and returns a Ui object for building the interface
@@ -166,21 +188,108 @@ impl Context {
         f(ui)
     }
 
-    // TODO: Implement render once FFI is working
-    // /// Renders the frame and returns draw data
-    // pub fn render(&mut self) -> &sys::ImDrawData {
-    //     let _guard = CTX_MUTEX.lock();
-    //     unsafe {
-    //         sys::igRender();
-    //         &*sys::igGetDrawData()
-    //     }
-    // }
+    /// Renders the frame and returns a reference to the resulting draw data
+    pub fn render(&mut self) -> &crate::draw::DrawData {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            sys::ImGui_Render();
+            &*(sys::ImGui_GetDrawData() as *const crate::draw::DrawData)
+        }
+    }
+
+    /// Sets the INI filename for settings persistence  
+    pub fn set_ini_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
+        let _guard = CTX_MUTEX.lock();
+
+        self.ini_filename = filename.map(|f| {
+            CString::new(f.into().to_string_lossy().as_bytes())
+                .expect("Invalid filename")
+        });
+
+        unsafe {
+            let io = sys::ImGui_GetIO();
+            let ptr = self.ini_filename
+                .as_ref()
+                .map(|s| s.as_ptr())
+                .unwrap_or(ptr::null());
+            (*io).IniFilename = ptr;
+        }
+    }
+
+    /// Sets the log filename  
+    pub fn set_log_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
+        let _guard = CTX_MUTEX.lock();
+
+        self.log_filename = filename.map(|f| {
+            CString::new(f.into().to_string_lossy().as_bytes())
+                .expect("Invalid filename")
+        });
+
+        unsafe {
+            let io = sys::ImGui_GetIO();
+            let ptr = self.log_filename
+                .as_ref()
+                .map(|s| s.as_ptr())
+                .unwrap_or(ptr::null());
+            (*io).LogFilename = ptr;
+        }
+    }
+
+    /// Sets the platform name
+    pub fn set_platform_name<S: Into<String>>(&mut self, name: Option<S>) {
+        let _guard = CTX_MUTEX.lock();
+
+        self.platform_name = name.map(|n| {
+            CString::new(n.into())
+                .expect("Invalid platform name")
+        });
+
+        unsafe {
+            let io = sys::ImGui_GetIO();
+            let ptr = self.platform_name
+                .as_ref()
+                .map(|s| s.as_ptr())
+                .unwrap_or(ptr::null());
+            (*io).BackendPlatformName = ptr;
+        }
+    }
+
+    /// Sets the renderer name  
+    pub fn set_renderer_name<S: Into<String>>(&mut self, name: Option<S>) {
+        let _guard = CTX_MUTEX.lock();
+
+        self.renderer_name = name.map(|n| {
+            CString::new(n.into())
+                .expect("Invalid renderer name")
+        });
+
+        unsafe {
+            let io = sys::ImGui_GetIO();
+            let ptr = self.renderer_name
+                .as_ref()
+                .map(|s| s.as_ptr())
+                .unwrap_or(ptr::null());
+            (*io).BackendRendererName = ptr;
+        }
+    }
+
+    /// Suspends this context so another context can be the active context
+    pub fn suspend(self) -> SuspendedContext {
+        let _guard = CTX_MUTEX.lock();
+        assert!(
+            self.is_current_context(),
+            "context to be suspended is not the active context"
+        );
+        clear_current_context();
+        SuspendedContext(self)
+    }
+
+    fn is_current_context(&self) -> bool {
+        let ctx = unsafe { sys::ImGui_GetCurrentContext() };
+        self.raw == ctx
+    }
 
     /// Push a font onto the font stack
-    ///
-    /// This makes the given font the current font for subsequent text rendering.
-    /// Must be paired with a call to `pop_font()`.
-    #[doc(alias = "PushFont")]
     pub fn push_font(&mut self, font: &Font) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
@@ -240,6 +349,26 @@ impl Context {
         self.font_atlas_mut()
     }
 
+    /// Attempts to clone the interior shared font atlas **if it exists**.
+    pub fn clone_shared_font_atlas(&mut self) -> Option<SharedFontAtlas> {
+        self.shared_font_atlas.clone()
+    }
+
+    /// Sets the clipboard backend used for clipboard operations
+    pub fn set_clipboard_backend<T: ClipboardBackend>(&mut self, backend: T) {
+        let clipboard_ctx: Box<UnsafeCell<_>> = Box::new(ClipboardContext::new(backend).into());
+        
+        // Set the clipboard callbacks in the ImGui IO
+        unsafe {
+            let io = sys::ImGui_GetIO();
+            (*io).SetClipboardTextFn = Some(crate::clipboard::set_clipboard_text);
+            (*io).GetClipboardTextFn = Some(crate::clipboard::get_clipboard_text);
+            (*io).ClipboardUserData = clipboard_ctx.get() as *mut _;
+        }
+        
+        self.clipboard_ctx = clipboard_ctx;
+    }
+
     // TODO: Implement these methods once FFI is working
     // /// Sets the INI filename for settings persistence
     // pub fn set_ini_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
@@ -270,6 +399,86 @@ impl Drop for Context {
                 }
                 sys::ImGui_DestroyContext(self.raw);
             }
+        }
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            if !self.raw.is_null() {
+                if sys::ImGui_GetCurrentContext() == self.raw {
+                    clear_current_context();
+                }
+                sys::ImGui_DestroyContext(self.raw);
+            }
+        }
+    }
+}
+
+/// A suspended Dear ImGui context
+///
+/// A suspended context retains its state, but is not usable without activating it first.
+#[derive(Debug)]
+pub struct SuspendedContext(Context);
+
+impl SuspendedContext {
+    /// Creates a new suspended Dear ImGui context
+    pub fn create() -> Self {
+        Self::create_internal(None)
+    }
+
+    /// Creates a new suspended Dear ImGui context with a shared font atlas
+    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> Self {
+        Self::create_internal(Some(shared_font_atlas))
+    }
+
+    fn create_internal(mut shared_font_atlas: Option<SharedFontAtlas>) -> Self {
+        let _guard = CTX_MUTEX.lock();
+
+        let shared_font_atlas_ptr = match &mut shared_font_atlas {
+            Some(atlas) => atlas.as_ptr_mut(),
+            None => ptr::null_mut(),
+        };
+
+        let raw = unsafe { sys::ImGui_CreateContext(shared_font_atlas_ptr) };
+        if raw.is_null() {
+            panic!("Failed to create Dear ImGui context");
+        }
+
+        let ctx = Context {
+            raw,
+            shared_font_atlas,
+            ini_filename: None,
+            log_filename: None,
+            platform_name: None,
+            renderer_name: None,
+            clipboard_ctx: Box::new(ClipboardContext::dummy().into()),
+            ui: crate::Ui::new(),
+        };
+
+        // If the context was activated during creation, deactivate it
+        if ctx.is_current_context() {
+            clear_current_context();
+        }
+
+        SuspendedContext(ctx)
+    }
+
+    /// Attempts to activate this suspended context
+    /// 
+    /// If there is no active context, this suspended context is activated and `Ok` is returned.
+    /// If there is already an active context, nothing happens and `Err` is returned.
+    pub fn activate(self) -> Result<Context, SuspendedContext> {
+        let _guard = CTX_MUTEX.lock();
+        if no_current_context() {
+            unsafe {
+                sys::ImGui_SetCurrentContext(self.0.raw);
+            }
+            Ok(self.0)
+        } else {
+            Err(self)
         }
     }
 }

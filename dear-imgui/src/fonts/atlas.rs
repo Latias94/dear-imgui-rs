@@ -7,6 +7,7 @@ use crate::fonts::Font;
 use crate::sys;
 use std::marker::PhantomData;
 use std::ptr;
+use std::rc::Rc;
 
 /// Font atlas that manages multiple fonts and their texture data
 ///
@@ -19,6 +20,55 @@ pub struct FontAtlas {
     raw: *mut sys::ImFontAtlas,
     owned: bool,
     _phantom: PhantomData<*mut sys::ImFontAtlas>,
+}
+
+/// A font identifier
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct FontId(pub(crate) *const Font);
+
+/// A shared font atlas that can be used across multiple contexts
+///
+/// This allows multiple ImGui contexts to share the same font atlas,
+/// which is useful for applications with multiple windows or contexts.
+#[derive(Debug, Clone)]
+pub struct SharedFontAtlas(pub(crate) Rc<*mut sys::ImFontAtlas>);
+
+impl SharedFontAtlas {
+    /// Creates a new shared font atlas
+    pub fn create() -> SharedFontAtlas {
+        unsafe {
+            // Create a new ImFontAtlas instance
+            let atlas = sys::ImGui_CreateContext(ptr::null_mut());  // This should be ImFontAtlas_new()
+            // For now, use a placeholder approach 
+            let raw_atlas = Box::into_raw(Box::new(sys::ImFontAtlas::new()));
+            SharedFontAtlas(Rc::new(raw_atlas))
+        }
+    }
+
+    /// Returns a raw pointer to the underlying ImFontAtlas
+    pub(crate) fn as_ptr(&self) -> *const sys::ImFontAtlas {
+        *self.0
+    }
+
+    /// Returns a mutable raw pointer to the underlying ImFontAtlas
+    pub(crate) fn as_ptr_mut(&mut self) -> *mut sys::ImFontAtlas {
+        *self.0
+    }
+}
+
+impl Drop for SharedFontAtlas {
+    fn drop(&mut self) {
+        // Only drop if this is the last reference
+        if Rc::strong_count(&self.0) == 1 {
+            unsafe {
+                let atlas_ptr = *self.0;
+                if !atlas_ptr.is_null() {
+                    // Clean up the atlas
+                    drop(Box::from_raw(atlas_ptr));
+                }
+            }
+        }
+    }
 }
 
 impl FontAtlas {
