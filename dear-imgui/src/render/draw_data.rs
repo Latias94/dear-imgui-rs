@@ -8,36 +8,34 @@ use crate::render::renderer::TextureId;
 use crate::sys;
 use std::slice;
 
-/// All draw data to render a Dear ImGui frame
-///
-/// This structure contains all the draw lists and associated data needed
-/// to render a complete Dear ImGui frame. It's returned by `Context::render()`.
+/// All draw data to render a Dear ImGui frame.
 #[repr(C)]
 pub struct DrawData {
-    /// Only valid after render() is called and before the next new_frame() is called
+    /// Only valid after render() is called and before the next new frame() is called.
     valid: bool,
-    /// Number of DrawList to render
+    /// Number of DrawList to render.
     cmd_lists_count: i32,
-    /// For convenience, sum of all draw list index buffer sizes
+    /// For convenience, sum of all draw list index buffer sizes.
     pub total_idx_count: i32,
-    /// For convenience, sum of all draw list vertex buffer sizes
+    /// For convenience, sum of all draw list vertex buffer sizes.
     pub total_vtx_count: i32,
-    /// Array of DrawList pointers
-    cmd_lists: *mut *mut sys::ImDrawList,
-    /// Upper-left position of the viewport to render
+    // Array of DrawList.
+    cmd_lists: crate::internal::ImVector<DrawList>,
+    /// Upper-left position of the viewport to render.
     ///
     /// (= upper-left corner of the orthogonal projection matrix to use)
     pub display_pos: [f32; 2],
-    /// Size of the viewport to render
+    /// Size of the viewport to render.
     ///
     /// (= display_pos + display_size == lower-right corner of the orthogonal matrix to use)
     pub display_size: [f32; 2],
-    /// Amount of pixels for each unit of display_size
+    /// Amount of pixels for each unit of display_size.
     ///
     /// Based on io.display_frame_buffer_scale. Typically [1.0, 1.0] on normal displays, and
     /// [2.0, 2.0] on Retina displays, but fractional values are also possible.
     pub framebuffer_scale: [f32; 2],
-    /// Viewport carrying the DrawData instance, might be of use to the renderer (generally not)
+
+    /// Viewport carrying the DrawData instance, might be of use to the renderer (generally not).
     owner_viewport: *mut sys::ImGuiViewport,
 }
 
@@ -47,11 +45,11 @@ impl RawWrapper for DrawData {
     type Raw = sys::ImDrawData;
 
     unsafe fn raw(&self) -> &Self::Raw {
-        &*(self as *const _ as *const Self::Raw)
+        std::mem::transmute(self)
     }
 
     unsafe fn raw_mut(&mut self) -> &mut Self::Raw {
-        &mut *(self as *mut _ as *mut Self::Raw)
+        std::mem::transmute(self)
     }
 }
 
@@ -65,22 +63,20 @@ impl DrawData {
         self.valid
     }
 
-    /// Returns an iterator over the draw lists included in the draw data
+    /// Returns an iterator over the draw lists included in the draw data.
     #[inline]
     pub fn draw_lists(&self) -> DrawListIterator<'_> {
         unsafe {
             DrawListIterator {
-                iter: self.cmd_lists_slice().iter(),
+                iter: self.cmd_lists().iter(),
             }
         }
     }
-
-    /// Returns the number of draw lists included in the draw data
+    /// Returns the number of draw lists included in the draw data.
     #[inline]
     pub fn draw_lists_count(&self) -> usize {
-        self.cmd_lists_count.max(0) as usize
+        self.cmd_lists_count.try_into().unwrap()
     }
-
     /// Get the display position as an array
     #[inline]
     pub fn display_pos(&self) -> [f32; 2] {
@@ -99,17 +95,18 @@ impl DrawData {
         self.framebuffer_scale
     }
 
-    /// Get command lists as slice
     #[inline]
-    unsafe fn cmd_lists_slice(&self) -> &[*const DrawList] {
-        if self.cmd_lists_count <= 0 || self.cmd_lists.is_null() {
+    pub(crate) unsafe fn cmd_lists(&self) -> &[*const DrawList] {
+        if self.cmd_lists_count <= 0 || self.cmd_lists.data.is_null() {
             return &[];
         }
         slice::from_raw_parts(
-            self.cmd_lists as *const *const DrawList,
+            self.cmd_lists.data as *const *const DrawList,
             self.cmd_lists_count as usize,
         )
     }
+
+
 
     /// Converts all buffers from indexed to non-indexed, in case you cannot render indexed buffers
     ///
@@ -139,7 +136,7 @@ impl DrawData {
 
 /// Iterator over draw lists
 pub struct DrawListIterator<'a> {
-    iter: slice::Iter<'a, *const DrawList>,
+    iter: std::slice::Iter<'a, *const DrawList>,
 }
 
 impl<'a> Iterator for DrawListIterator<'a> {
@@ -156,36 +153,38 @@ impl<'a> ExactSizeIterator for DrawListIterator<'a> {
     }
 }
 
-/// A single draw list (generally one per window + extra overlay draw lists)
-///
-/// This contains the ImGui-generated geometry for a single draw list.
-/// All positions are in screen coordinates (0,0=top-left, 1 pixel per unit).
-/// Primitives are always added in 2D (we don't do 3D clipping).
+/// Draw command list
 #[repr(transparent)]
-pub struct DrawList(*const sys::ImDrawList);
+pub struct DrawList(sys::ImDrawList);
+
+impl RawWrapper for DrawList {
+    type Raw = sys::ImDrawList;
+    #[inline]
+    unsafe fn raw(&self) -> &sys::ImDrawList {
+        &self.0
+    }
+    #[inline]
+    unsafe fn raw_mut(&mut self) -> &mut sys::ImDrawList {
+        &mut self.0
+    }
+}
 
 impl DrawList {
-    /// Create DrawList from raw pointer
-    ///
-    /// # Safety
-    /// The pointer must be valid and point to a valid ImDrawList
-    #[inline]
-    pub unsafe fn from_raw(ptr: *const sys::ImDrawList) -> &'static Self {
-        &*(ptr as *const Self)
-    }
 
-    /// Get the raw pointer to the underlying ImDrawList
     #[inline]
-    pub fn as_raw(&self) -> *const sys::ImDrawList {
-        self.0
+    pub(crate) unsafe fn cmd_buffer(&self) -> &[sys::ImDrawCmd] {
+        let cmd_buffer = &self.0.CmdBuffer;
+        if cmd_buffer.Size <= 0 || cmd_buffer.Data.is_null() {
+            return &[];
+        }
+        slice::from_raw_parts(cmd_buffer.Data, cmd_buffer.Size as usize)
     }
 
     /// Returns an iterator over the draw commands in this draw list
     pub fn commands(&self) -> DrawCmdIterator<'_> {
         unsafe {
-            let cmd_buffer = &(*self.0).CmdBuffer;
             DrawCmdIterator {
-                iter: slice::from_raw_parts(cmd_buffer.Data, cmd_buffer.Size as usize).iter(),
+                iter: self.cmd_buffer().iter(),
             }
         }
     }
@@ -193,7 +192,7 @@ impl DrawList {
     /// Get vertex buffer as slice
     pub fn vtx_buffer(&self) -> &[DrawVert] {
         unsafe {
-            let vtx_buffer = &(*self.0).VtxBuffer;
+            let vtx_buffer = &self.0.VtxBuffer;
             slice::from_raw_parts(
                 vtx_buffer.Data as *const DrawVert,
                 vtx_buffer.Size as usize,
@@ -204,7 +203,7 @@ impl DrawList {
     /// Get index buffer as slice
     pub fn idx_buffer(&self) -> &[DrawIdx] {
         unsafe {
-            let idx_buffer = &(*self.0).IdxBuffer;
+            let idx_buffer = &self.0.IdxBuffer;
             slice::from_raw_parts(idx_buffer.Data, idx_buffer.Size as usize)
         }
     }
@@ -216,71 +215,69 @@ pub struct DrawCmdIterator<'a> {
 }
 
 impl<'a> Iterator for DrawCmdIterator<'a> {
-    type Item = DrawCmd<'a>;
+    type Item = DrawCmd;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(DrawCmd::from_raw)
+        self.iter.next().map(|cmd| {
+            let cmd_params = DrawCmdParams {
+                clip_rect: [cmd.ClipRect.x, cmd.ClipRect.y, cmd.ClipRect.z, cmd.ClipRect.w],
+                texture_id: TextureId::from(cmd.TexRef._TexID as usize),
+                vtx_offset: cmd.VtxOffset as usize,
+                idx_offset: cmd.IdxOffset as usize,
+            };
+
+            // Check for special callback values
+            match cmd.UserCallback {
+                Some(raw_callback) if raw_callback as usize == (-1isize) as usize => {
+                    DrawCmd::ResetRenderState
+                }
+                Some(raw_callback) => DrawCmd::RawCallback {
+                    callback: raw_callback,
+                    raw_cmd: cmd,
+                },
+                None => DrawCmd::Elements {
+                    count: cmd.ElemCount as usize,
+                    cmd_params,
+                },
+            }
+        })
     }
 }
 
-/// A single draw command within a draw list
-///
-/// Generally corresponds to 1 GPU draw call, unless it's a callback.
-pub struct DrawCmd<'a> {
-    raw: &'a sys::ImDrawCmd,
+/// Parameters for a draw command
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct DrawCmdParams {
+    /// Clipping rectangle [left, top, right, bottom]
+    pub clip_rect: [f32; 4],
+    /// Texture ID to use for rendering
+    pub texture_id: TextureId,
+    /// Vertex buffer offset
+    pub vtx_offset: usize,
+    /// Index buffer offset
+    pub idx_offset: usize,
 }
 
-impl<'a> DrawCmd<'a> {
-    #[inline]
-    fn from_raw(raw: &'a sys::ImDrawCmd) -> Self {
-        Self { raw }
-    }
-
-    /// Get the texture ID for this draw command
-    #[inline]
-    pub fn texture_id(&self) -> TextureId {
-        TextureId::from(self.raw.TexRef._TexID as usize)
-    }
-
-    /// Get the clipping rectangle (x1, y1, x2, y2)
-    #[inline]
-    pub fn clip_rect(&self) -> [f32; 4] {
-        [
-            self.raw.ClipRect.x,
-            self.raw.ClipRect.y,
-            self.raw.ClipRect.z,
-            self.raw.ClipRect.w,
-        ]
-    }
-
-    /// Get the number of indices for this draw command
-    #[inline]
-    pub fn elem_count(&self) -> u32 {
-        self.raw.ElemCount
-    }
-
-    /// Get the vertex offset for this draw command
-    #[inline]
-    pub fn vtx_offset(&self) -> u32 {
-        self.raw.VtxOffset
-    }
-
-    /// Get the index offset for this draw command
-    #[inline]
-    pub fn idx_offset(&self) -> u32 {
-        self.raw.IdxOffset
-    }
-
-    /// Check if this is a user callback command
-    #[inline]
-    pub fn is_user_callback(&self) -> bool {
-        self.raw.UserCallback.is_some()
-    }
+/// A draw command
+#[derive(Clone, Debug)]
+pub enum DrawCmd {
+    /// Elements to draw
+    Elements {
+        /// The number of indices used for this draw command
+        count: usize,
+        cmd_params: DrawCmdParams,
+    },
+    /// Reset render state
+    ResetRenderState,
+    /// Raw callback
+    RawCallback {
+        callback: unsafe extern "C" fn(*const sys::ImDrawList, cmd: *const sys::ImDrawCmd),
+        raw_cmd: *const sys::ImDrawCmd,
+    },
 }
 
 /// Vertex format used by Dear ImGui
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct DrawVert {
     /// Position (2D)
     pub pos: [f32; 2],
@@ -292,3 +289,5 @@ pub struct DrawVert {
 
 /// Index type used by Dear ImGui
 pub type DrawIdx = u16;
+
+

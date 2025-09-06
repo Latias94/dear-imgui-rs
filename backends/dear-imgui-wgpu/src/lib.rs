@@ -3,7 +3,7 @@
 //! This crate provides a WGPU-based renderer for Dear ImGui, allowing you to
 //! render Dear ImGui interfaces using the WGPU graphics API.
 
-use dear_imgui::{Context, DrawCmd, DrawData, DrawIdx, DrawList, DrawVert};
+use dear_imgui::{Context, render::{DrawCmd, DrawData, DrawIdx, DrawList, DrawVert}};
 use smallvec::SmallVec;
 use std::mem::size_of;
 use wgpu::util::{BufferInitDescriptor, DeviceExt, TextureDataOrder};
@@ -379,72 +379,84 @@ impl WgpuRenderer {
 
     /// Load font texture from Dear ImGui context
     pub fn reload_font_texture(&mut self, imgui_ctx: &mut Context, device: &Device, queue: &Queue) {
-        let fonts = imgui_ctx.font_atlas_mut();
+        let mut fonts = imgui_ctx.font_atlas_mut();
 
         // Build the font atlas if not already built
         if !fonts.is_built() {
             fonts.build();
         }
 
-        // Get texture data info
-        if let Some((width, height)) = fonts.get_tex_data_info() {
-            // For now, create a simple white texture as placeholder
-            // TODO: Implement proper texture data extraction from font atlas
-            let texture_data = vec![255u8; (width * height * 4) as usize]; // RGBA white
+        // Get actual texture data from the font atlas
+        unsafe {
+            if let Some((pixels_ptr, width, height)) = fonts.get_tex_data_ptr() {
+                // Our Dear ImGui version uses RGBA format
+                let bytes_per_pixel = 4;
+                let texture_size = (width * height * bytes_per_pixel) as usize;
 
-            // Create font texture
-            let font_texture = device.create_texture_with_data(
-                queue,
-                &TextureDescriptor {
-                    label: Some("imgui-wgpu font texture"),
-                    size: Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
+                // Copy texture data from Dear ImGui
+                let texture_data = std::slice::from_raw_parts(pixels_ptr, texture_size);
+
+                // Create font texture
+                let font_texture = device.create_texture_with_data(
+                    queue,
+                    &TextureDescriptor {
+                        label: Some("imgui-wgpu font texture"),
+                        size: Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: TextureDimension::D2,
+                        format: TextureFormat::Rgba8Unorm,
+                        usage: TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
                     },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: TextureDimension::D2,
-                    format: TextureFormat::Rgba8Unorm,
-                    usage: TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                },
-                TextureDataOrder::default(),
-                &texture_data,
-            );
+                    TextureDataOrder::default(),
+                    texture_data,
+                );
 
-            let font_texture_view = font_texture.create_view(&TextureViewDescriptor::default());
-            let font_sampler = device.create_sampler(&SamplerDescriptor {
-                label: Some("imgui-wgpu font sampler"),
-                address_mode_u: AddressMode::ClampToEdge,
-                address_mode_v: AddressMode::ClampToEdge,
-                address_mode_w: AddressMode::ClampToEdge,
-                mag_filter: FilterMode::Linear,
-                min_filter: FilterMode::Linear,
-                mipmap_filter: FilterMode::Linear,
-                ..Default::default()
-            });
+                let font_texture_view = font_texture.create_view(&TextureViewDescriptor::default());
+                let font_sampler = device.create_sampler(&SamplerDescriptor {
+                    label: Some("imgui-wgpu font sampler"),
+                    address_mode_u: AddressMode::ClampToEdge,
+                    address_mode_v: AddressMode::ClampToEdge,
+                    address_mode_w: AddressMode::ClampToEdge,
+                    mag_filter: FilterMode::Linear,
+                    min_filter: FilterMode::Linear,
+                    mipmap_filter: FilterMode::Linear,
+                    ..Default::default()
+                });
 
-            let font_texture_bind_group = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("imgui-wgpu font texture bind group"),
-                layout: &self.texture_layout,
-                entries: &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::TextureView(&font_texture_view),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::Sampler(&font_sampler),
-                    },
-                ],
-            });
+                let font_texture_bind_group = device.create_bind_group(&BindGroupDescriptor {
+                    label: Some("imgui-wgpu font texture bind group"),
+                    layout: &self.texture_layout,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: BindingResource::TextureView(&font_texture_view),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::Sampler(&font_sampler),
+                        },
+                    ],
+                });
 
-            self.font_texture_bind_group = Some(font_texture_bind_group);
+                self.font_texture_bind_group = Some(font_texture_bind_group);
 
-            // Set the texture reference in Dear ImGui
-            // TODO: Implement proper texture reference setting
-            // fonts.set_tex_ref(texture_ref);
+                // Set the texture reference in Dear ImGui
+                let tex_ref = dear_imgui_sys::ImTextureRef {
+                    _TexData: std::ptr::null_mut(), // We don't use TexData for GPU textures
+                    _TexID: 1, // Use texture ID 1 for font texture
+                };
+                fonts.set_tex_ref(tex_ref);
+
+                println!("Font texture loaded: {}x{} pixels", width, height);
+            } else {
+                println!("Failed to get font texture data");
+            }
         }
     }
 
@@ -582,7 +594,7 @@ impl WgpuRenderer {
                             rpass.set_scissor_rect(x, y, w, h);
 
                             // Choose the appropriate texture bind group based on texture ID
-                            let texture_bind_group = if cmd_params.texture_id as usize == 1 {
+                            let texture_bind_group = if cmd_params.texture_id.id() == 1 {
                                 // Font texture
                                 self.font_texture_bind_group
                                     .as_ref()

@@ -22,6 +22,12 @@ impl Ui {
         }
     }
 
+    /// Returns an immutable reference to the inputs/outputs object
+    #[doc(alias = "GetIO")]
+    pub fn io(&self) -> &crate::io::Io {
+        unsafe { &*(sys::ImGui_GetIO() as *const crate::io::Io) }
+    }
+
     /// Internal method to push a single text to our scratch buffer.
     pub(crate) fn scratch_txt(&self, txt: impl AsRef<str>) -> *const std::os::raw::c_char {
         unsafe {

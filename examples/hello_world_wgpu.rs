@@ -3,7 +3,7 @@
 //! This example demonstrates how to use dear-imgui with winit and wgpu.
 //! It creates a simple window with ImGui widgets rendered using WGPU.
 
-use dear_imgui::*;
+use dear_imgui::{FontSource, *};
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
@@ -112,22 +112,20 @@ impl AppWindow {
             &mut context,
         );
 
-        // Note: set_ini_filename is not implemented yet in dear-imgui
-        // context.set_ini_filename(None);
+        // Set INI filename to None to disable settings persistence
+        context.set_ini_filename(None::<&str>);
 
-        // Note: font_global_scale is not available in dear-imgui IO yet
-        // let font_size = (13.0 * self.hidpi_factor) as f32;
-        // context.io_mut().font_global_scale = (1.0 / self.hidpi_factor) as f32;
+        // Configure font scaling for HiDPI displays
+        let _font_size = (13.0 * self.hidpi_factor) as f32;
+        context.io_mut().set_font_global_scale((1.0 / self.hidpi_factor) as f32);
 
-        // Note: Font configuration is not implemented yet in dear-imgui
+        // Add default font with basic configuration
+        // Temporarily disabled due to FontAtlas implementation issues
         // context.fonts().add_font(&[FontSource::DefaultFontData {
-        //     config: Some(FontConfig {
-        //         oversample_h: 1,
-        //         pixel_snap_h: true,
-        //         size_pixels: font_size,
-        //         ..Default::default()
-        //     }),
+        //     config: Some(FontConfig::default()),
         // }]);
+
+        println!("Skipping font loading for now");
 
         //
         // Set up dear imgui wgpu renderer
@@ -139,7 +137,11 @@ impl AppWindow {
             a: 1.0,
         };
 
-        let renderer = WgpuRenderer::new(&self.device, &self.queue, self.surface_desc.format);
+        let mut renderer = WgpuRenderer::new(&self.device, &self.queue, self.surface_desc.format);
+
+        // Load font texture
+        renderer.reload_font_texture(&mut context, &self.device, &self.queue);
+
         let last_frame = Instant::now();
         let last_cursor = None;
         let demo_open = true;
@@ -167,7 +169,9 @@ impl AppWindow {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        println!("App resumed, creating window...");
         self.window = Some(AppWindow::new(event_loop));
+        println!("Window created successfully");
     }
 
     fn window_event(
@@ -223,102 +227,124 @@ impl ApplicationHandler for App {
                 imgui
                     .platform
                     .prepare_frame(&window.window, &mut imgui.context);
-                let ui = imgui.context.frame();
 
-                // Main Hello World window
-                {
-                    let window = ui.window("Hello World!");
-                    window
-                        .size([400.0, 300.0], Condition::FirstUseEver)
-                        .position([50.0, 50.0], Condition::FirstUseEver)
-                        .build(ui, || {
-                            ui.text("Welcome to Dear ImGui with WGPU!");
-                            ui.separator();
+                let mouse_cursor = {
+                    let ui = imgui.context.frame();
 
-                            ui.text("This is a simple hello world example.");
-                            ui.text("You can interact with the widgets below:");
+                    // Main Hello World window
+                    {
+                        let window = ui.window("Hello World!");
+                        window
+                            .size([400.0, 300.0], Condition::FirstUseEver)
+                            .position([50.0, 50.0], Condition::FirstUseEver)
+                            .build(ui, || {
+                                ui.text("Welcome to Dear ImGui with WGPU!");
+                                ui.separator();
 
-                            // ui.spacing(); // Not implemented yet
+                                ui.text("This is a simple hello world example.");
+                                ui.text("You can interact with the widgets below:");
 
-                            // Counter button
-                            if ui.button("Click me!") {
-                                imgui.counter += 1;
-                            }
-                            ui.same_line();
-                            ui.text(format!("Clicked {} times", imgui.counter));
+                                ui.spacing();
 
-                            // ui.spacing(); // Not implemented yet
+                                // Counter button
+                                if ui.button("Click me!") {
+                                    imgui.counter += 1;
+                                }
+                                ui.same_line();
+                                ui.text(format!("Clicked {} times", imgui.counter));
 
-                            // Text input
-                            ui.input_text("Text input", &mut imgui.text_input).build();
+                                ui.spacing();
 
-                            // Slider
-                            ui.slider("Slider", 0.0, 1.0, &mut imgui.slider_value);
+                                // Text input
+                                ui.input_text("Text input", &mut imgui.text_input).build();
 
-                            // ui.spacing(); // Not implemented yet
+                                // Slider
+                                ui.slider("Slider", 0.0, 1.0, &mut imgui.slider_value);
 
-                            // Color picker for background (not implemented yet)
-                            // let mut color = [
-                            //     imgui.clear_color.r as f32,
-                            //     imgui.clear_color.g as f32,
-                            //     imgui.clear_color.b as f32,
-                            // ];
-                            // if ui.color_edit3("Background Color", &mut color) {
-                            //     imgui.clear_color.r = color[0] as f64;
-                            //     imgui.clear_color.g = color[1] as f64;
-                            //     imgui.clear_color.b = color[2] as f64;
-                            // }
-                        });
+                                ui.spacing();
+
+                                // Color picker for background
+                                let mut color = [
+                                    imgui.clear_color.r as f32,
+                                    imgui.clear_color.g as f32,
+                                    imgui.clear_color.b as f32,
+                                ];
+                                if ui.color_edit3("Background Color", &mut color) {
+                                    imgui.clear_color.r = color[0] as f64;
+                                    imgui.clear_color.g = color[1] as f64;
+                                    imgui.clear_color.b = color[2] as f64;
+                                }
+                            });
+                    }
+
+                    // Info window
+                    {
+                        let info_window = ui.window("Information");
+                        info_window
+                            .size([300.0, 200.0], Condition::FirstUseEver)
+                            .position([500.0, 50.0], Condition::FirstUseEver)
+                            .build(ui, || {
+                                let delta_s = imgui.last_frame.elapsed();
+                                ui.text(format!(
+                                    "Frametime: {:.3}ms",
+                                    delta_s.as_secs_f32() * 1000.0
+                                ));
+                                ui.text(format!("FPS: {:.1}", 1.0 / delta_s.as_secs_f32()));
+
+                                ui.separator();
+
+                                // Mouse position
+                                let mouse_pos = ui.io().mouse_pos();
+                                ui.text(format!(
+                                    "Mouse Position: ({:.1}, {:.1})",
+                                    mouse_pos[0], mouse_pos[1]
+                                ));
+
+                                ui.text(format!(
+                                    "Window size: {}x{}",
+                                    window.surface_desc.width, window.surface_desc.height
+                                ));
+
+                                ui.separator();
+
+                                ui.checkbox("Show Demo Window", &mut imgui.demo_open);
+                            });
+                    }
+
+                    // Show demo window if enabled
+                    if imgui.demo_open {
+                        ui.show_demo_window(&mut imgui.demo_open);
+                    }
+
+                    // Get mouse cursor before ui goes out of scope
+                    ui.mouse_cursor()
+                };
+
+                // End the frame and get draw data
+                let draw_data = imgui.context.render();
+
+                // Debug: Check if we have draw data
+                println!("DrawData valid: {}, draw lists count: {}",
+                    draw_data.valid(),
+                    draw_data.draw_lists().count());
+
+                for (i, draw_list) in draw_data.draw_lists().enumerate() {
+                    println!("DrawList {}: vtx_buffer len: {}, idx_buffer len: {}, commands: {}",
+                        i,
+                        draw_list.vtx_buffer().len(),
+                        draw_list.idx_buffer().len(),
+                        draw_list.commands().count());
                 }
-
-                // Info window
-                {
-                    let info_window = ui.window("Information");
-                    info_window
-                        .size([300.0, 200.0], Condition::FirstUseEver)
-                        .position([500.0, 50.0], Condition::FirstUseEver)
-                        .build(ui, || {
-                            let delta_s = imgui.last_frame.elapsed();
-                            ui.text(format!(
-                                "Frametime: {:.3}ms",
-                                delta_s.as_secs_f32() * 1000.0
-                            ));
-                            ui.text(format!("FPS: {:.1}", 1.0 / delta_s.as_secs_f32()));
-
-                            ui.separator();
-
-                            // Mouse position not available in current dear-imgui IO
-                            // let mouse_pos = ui.io().mouse_pos;
-                            // ui.text(format!(
-                            //     "Mouse Position: ({:.1}, {:.1})",
-                            //     mouse_pos[0], mouse_pos[1]
-                            // ));
-
-                            ui.text(format!(
-                                "Window size: {}x{}",
-                                window.surface_desc.width, window.surface_desc.height
-                            ));
-
-                            ui.separator();
-
-                            ui.checkbox("Show Demo Window", &mut imgui.demo_open);
-                        });
-                }
-
-                // Show demo window if enabled (not implemented yet in dear-imgui)
-                // if imgui.demo_open {
-                //     ui.show_demo_window(&mut imgui.demo_open);
-                // }
 
                 let mut encoder: wgpu::CommandEncoder = window
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                // Mouse cursor handling not implemented yet
-                // if imgui.last_cursor != ui.mouse_cursor() {
-                //     imgui.last_cursor = ui.mouse_cursor();
-                //     imgui.platform.prepare_render(&ui, &window.window);
-                // }
+                // Mouse cursor handling
+                if imgui.last_cursor != mouse_cursor {
+                    imgui.last_cursor = mouse_cursor;
+                    // imgui.platform.prepare_render(&ui, &window.window);
+                }
 
                 let view = frame
                     .texture
@@ -339,16 +365,16 @@ impl ApplicationHandler for App {
                     occlusion_query_set: None,
                 });
 
-                // Render method not implemented yet in dear-imgui-wgpu
-                // imgui
-                //     .renderer
-                //     .render_with_renderpass(
-                //         &imgui.context.render(),
-                //         &window.queue,
-                //         &window.device,
-                //         &mut rpass,
-                //     )
-                //     .expect("Rendering failed");
+                // Render ImGui
+                imgui
+                    .renderer
+                    .render_with_renderpass(
+                        draw_data,
+                        &window.queue,
+                        &window.device,
+                        &mut rpass,
+                    )
+                    .expect("Rendering failed");
 
                 drop(rpass);
 
@@ -373,8 +399,13 @@ impl ApplicationHandler for App {
 
 fn main() {
     env_logger::init();
+    println!("Starting Dear ImGui WGPU Example...");
 
     let event_loop = EventLoop::new().unwrap();
+    println!("Created event loop");
+
     event_loop.set_control_flow(ControlFlow::Poll);
+    println!("Starting event loop...");
+
     event_loop.run_app(&mut App::default()).unwrap();
 }

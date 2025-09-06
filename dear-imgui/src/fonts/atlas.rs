@@ -37,9 +37,7 @@ impl SharedFontAtlas {
     /// Creates a new shared font atlas
     pub fn create() -> SharedFontAtlas {
         unsafe {
-            // Create a new ImFontAtlas instance
-            let atlas = sys::ImGui_CreateContext(ptr::null_mut()); // This should be ImFontAtlas_new()
-                                                                   // For now, use a placeholder approach
+            // Create a new ImFontAtlas instance using the proper constructor
             let raw_atlas = Box::into_raw(Box::new(sys::ImFontAtlas::new()));
             SharedFontAtlas(Rc::new(raw_atlas))
         }
@@ -101,9 +99,34 @@ impl FontAtlas {
         self.raw
     }
 
-    /// Add a font to the atlas
+    /// Add a font to the atlas using FontSource
     #[doc(alias = "AddFont")]
-    pub fn add_font(&mut self, font_cfg: &FontConfig) -> &mut Font {
+    pub fn add_font(&mut self, font_sources: &[FontSource<'_>]) -> crate::fonts::FontId {
+        let (head, tail) = font_sources.split_first().unwrap();
+        let font_id = self.add_font_internal(head, false);
+        for font in tail {
+            self.add_font_internal(font, true);
+        }
+        font_id
+    }
+
+    fn add_font_internal(&mut self, font_source: &FontSource<'_>, merge_mode: bool) -> crate::fonts::FontId {
+        match font_source {
+            FontSource::DefaultFontData { config } => {
+                let font = self.add_font_default(config.as_ref());
+                font.id()
+            }
+            FontSource::TtfData { data, size_pixels, config } => {
+                let font = self.add_font_from_memory_ttf(data, *size_pixels, config.as_ref(), None)
+                    .expect("Failed to add TTF font from memory");
+                font.id()
+            }
+        }
+    }
+
+    /// Add a font to the atlas using FontConfig
+    #[doc(alias = "AddFont")]
+    pub fn add_font_with_config(&mut self, font_cfg: &FontConfig) -> &mut Font {
         unsafe {
             let font_ptr = sys::ImFontAtlas_AddFont(self.raw, font_cfg.raw());
             &mut *(font_ptr as *mut Font)
@@ -263,16 +286,26 @@ impl FontAtlas {
         }
     }
 
-    /// Get raw texture data pointer
+    /// Get raw texture data pointer and dimensions
     ///
     /// # Safety
     /// The returned pointer is only valid while the FontAtlas exists and the texture is built.
     /// The caller must ensure proper lifetime management.
-    pub unsafe fn get_tex_data_ptr(&self) -> Option<*const u8> {
+    pub unsafe fn get_tex_data_ptr(&self) -> Option<(*const u8, u32, u32)> {
         if (*self.raw).TexIsBuilt {
-            // Note: Our Dear ImGui version might store texture data differently
-            // This is a placeholder implementation
-            Some(ptr::null())
+            let tex_data = (*self.raw).TexData;
+            if !tex_data.is_null() {
+                let width = (*tex_data).Width as u32;
+                let height = (*tex_data).Height as u32;
+                let pixels = (*tex_data).Pixels;
+                if !pixels.is_null() {
+                    Some((pixels, width, height))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -339,7 +372,7 @@ unsafe impl Send for FontAtlas {}
 unsafe impl Sync for FontAtlas {}
 
 /// Font configuration for loading fonts
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FontConfig {
     raw: sys::ImFontConfig,
 }
@@ -393,4 +426,17 @@ impl Default for FontConfig {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// A source for font data
+#[derive(Clone, Debug)]
+pub enum FontSource<'a> {
+    /// Default font included with the library (ProggyClean.ttf)
+    DefaultFontData { config: Option<FontConfig> },
+    /// Binary TTF/OTF font data
+    TtfData {
+        data: &'a [u8],
+        size_pixels: f32,
+        config: Option<FontConfig>,
+    },
 }

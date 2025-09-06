@@ -165,6 +165,13 @@ impl Context {
         unsafe {
             let io = sys::ImGui_GetIO();
             let fonts = (*io).Fonts;
+
+            // Check if we need to add default font and build atlas
+            if (*fonts).Fonts.Size == 0 {
+                // Add default font if no fonts are loaded
+                sys::ImFontAtlas_AddFontDefault(fonts, ptr::null());
+            }
+
             if !(*fonts).TexIsBuilt {
                 // Build the font atlas using the main build function
                 sys::ImFontAtlasBuildMain(fonts);
@@ -342,29 +349,29 @@ impl Context {
     }
 
     /// Get the font atlas from the IO structure
-    pub fn font_atlas(&self) -> &FontAtlas {
+    pub fn font_atlas(&self) -> FontAtlas {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             let io = sys::ImGui_GetIO();
             let atlas_ptr = (*io).Fonts;
-            &*(atlas_ptr as *const FontAtlas)
+            FontAtlas::from_raw(atlas_ptr)
         }
     }
 
     /// Get a mutable reference to the font atlas from the IO structure
-    pub fn font_atlas_mut(&mut self) -> &mut FontAtlas {
+    pub fn font_atlas_mut(&mut self) -> FontAtlas {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             let io = sys::ImGui_GetIO();
             let atlas_ptr = (*io).Fonts;
-            &mut *(atlas_ptr as *mut FontAtlas)
+            FontAtlas::from_raw(atlas_ptr)
         }
     }
 
-    /// Returns a mutable reference to the font atlas (alias for font_atlas_mut)
+    /// Returns the font atlas (alias for font_atlas_mut)
     ///
     /// This provides compatibility with imgui-rs naming convention
-    pub fn fonts(&mut self) -> &mut FontAtlas {
+    pub fn fonts(&mut self) -> FontAtlas {
         self.font_atlas_mut()
     }
 

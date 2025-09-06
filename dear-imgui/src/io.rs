@@ -235,4 +235,16 @@ impl Io {
             sys::ImGuiIO_AddMouseWheelEvent(&mut self.0 as *mut _, wheel[0], wheel[1]);
         }
     }
+
+    /// Get the global font scale (not available in current Dear ImGui version)
+    /// This is a placeholder for compatibility with imgui-rs
+    pub fn font_global_scale(&self) -> f32 {
+        1.0 // Default scale
+    }
+
+    /// Set the global font scale (not available in current Dear ImGui version)
+    /// This is a placeholder for compatibility with imgui-rs
+    pub fn set_font_global_scale(&mut self, _scale: f32) {
+        // No-op for now, as FontGlobalScale field is not available
+    }
 }
