@@ -37,6 +37,8 @@ pub struct DrawData {
 
     /// Viewport carrying the DrawData instance, might be of use to the renderer (generally not).
     owner_viewport: *mut sys::ImGuiViewport,
+    /// Texture data (internal use)
+    textures: *mut crate::internal::ImVector<*mut sys::ImTextureData>,
 }
 
 unsafe impl RawCast<sys::ImDrawData> for DrawData {}
@@ -106,8 +108,6 @@ impl DrawData {
         )
     }
 
-
-
     /// Converts all buffers from indexed to non-indexed, in case you cannot render indexed buffers
     ///
     /// **This is slow and most likely a waste of resources. Always prefer indexed rendering!**
@@ -170,7 +170,6 @@ impl RawWrapper for DrawList {
 }
 
 impl DrawList {
-
     #[inline]
     pub(crate) unsafe fn cmd_buffer(&self) -> &[sys::ImDrawCmd] {
         let cmd_buffer = &self.0.CmdBuffer;
@@ -193,10 +192,7 @@ impl DrawList {
     pub fn vtx_buffer(&self) -> &[DrawVert] {
         unsafe {
             let vtx_buffer = &self.0.VtxBuffer;
-            slice::from_raw_parts(
-                vtx_buffer.Data as *const DrawVert,
-                vtx_buffer.Size as usize,
-            )
+            slice::from_raw_parts(vtx_buffer.Data as *const DrawVert, vtx_buffer.Size as usize)
         }
     }
 
@@ -220,7 +216,12 @@ impl<'a> Iterator for DrawCmdIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|cmd| {
             let cmd_params = DrawCmdParams {
-                clip_rect: [cmd.ClipRect.x, cmd.ClipRect.y, cmd.ClipRect.z, cmd.ClipRect.w],
+                clip_rect: [
+                    cmd.ClipRect.x,
+                    cmd.ClipRect.y,
+                    cmd.ClipRect.z,
+                    cmd.ClipRect.w,
+                ],
                 texture_id: TextureId::from(cmd.TexRef._TexID as usize),
                 vtx_offset: cmd.VtxOffset as usize,
                 idx_offset: cmd.IdxOffset as usize,
@@ -289,5 +290,3 @@ pub struct DrawVert {
 
 /// Index type used by Dear ImGui
 pub type DrawIdx = u16;
-
-

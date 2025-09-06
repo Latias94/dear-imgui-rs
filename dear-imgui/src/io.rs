@@ -247,4 +247,21 @@ impl Io {
     pub fn set_font_global_scale(&mut self, _scale: f32) {
         // No-op for now, as FontGlobalScale field is not available
     }
+
+    /// Get the display framebuffer scale
+    pub fn display_framebuffer_scale(&self) -> [f32; 2] {
+        unsafe {
+            let scale = self.0.DisplayFramebufferScale;
+            [scale.x, scale.y]
+        }
+    }
+
+    /// Set the display framebuffer scale
+    /// This is important for HiDPI displays to ensure proper rendering
+    pub fn set_display_framebuffer_scale(&mut self, scale: [f32; 2]) {
+        unsafe {
+            self.0.DisplayFramebufferScale.x = scale[0];
+            self.0.DisplayFramebufferScale.y = scale[1];
+        }
+    }
 }

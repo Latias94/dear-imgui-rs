@@ -397,6 +397,4 @@ impl crate::Ui {
     pub fn reset_mouse_drag_delta(&self, button: MouseButton) {
         unsafe { sys::ImGui_ResetMouseDragDelta(button as i32) }
     }
-
-
 }

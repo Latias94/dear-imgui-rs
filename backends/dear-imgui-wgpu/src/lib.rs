@@ -3,7 +3,10 @@
 //! This crate provides a WGPU-based renderer for Dear ImGui, allowing you to
 //! render Dear ImGui interfaces using the WGPU graphics API.
 
-use dear_imgui::{Context, render::{DrawCmd, DrawData, DrawIdx, DrawList, DrawVert}};
+use dear_imgui::{
+    render::{DrawCmd, DrawData, DrawIdx, DrawList, DrawVert},
+    Context,
+};
 use smallvec::SmallVec;
 use std::mem::size_of;
 use wgpu::util::{BufferInitDescriptor, DeviceExt, TextureDataOrder};
@@ -293,18 +296,17 @@ impl WgpuRenderer {
             render_data.last_size = [display_width, display_height];
             render_data.last_pos = [display_pos_x, display_pos_y];
 
-            // Create orthographic projection matrix (following official implementation)
-            let l = display_pos_x;
-            let r = display_pos_x + display_width;
-            let t = display_pos_y;
-            let b = display_pos_y + display_height;
+            // Create orthographic projection matrix (matching imgui-wgpu-rs implementation)
+            let offset_x = display_pos_x / display_width;
+            let offset_y = display_pos_y / display_height;
 
             let matrix = [
-                [2.0 / (r - l), 0.0, 0.0, 0.0],
-                [0.0, 2.0 / (t - b), 0.0, 0.0],
-                [0.0, 0.0, 0.5, 0.0],
-                [(r + l) / (l - r), (t + b) / (b - t), 0.5, 1.0],
+                [2.0 / display_width, 0.0, 0.0, 0.0],
+                [0.0, 2.0 / -display_height, 0.0, 0.0], // Note: negative height for correct Y orientation
+                [0.0, 0.0, 1.0, 0.0],
+                [-1.0 - offset_x * 2.0, 1.0 + offset_y * 2.0, 0.0, 1.0],
             ];
+
             self.update_uniform_buffer(queue, &matrix);
         }
 
@@ -449,7 +451,7 @@ impl WgpuRenderer {
                 // Set the texture reference in Dear ImGui
                 let tex_ref = dear_imgui_sys::ImTextureRef {
                     _TexData: std::ptr::null_mut(), // We don't use TexData for GPU textures
-                    _TexID: 1, // Use texture ID 1 for font texture
+                    _TexID: 1,                      // Use texture ID 1 for font texture
                 };
                 fonts.set_tex_ref(tex_ref);
 
@@ -538,6 +540,7 @@ impl WgpuRenderer {
         rpass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint16);
 
         // Execute all the imgui render work
+        let fb_size = [viewport_width, viewport_height]; // Use actual framebuffer size for clipping
         for (draw_list, bases) in draw_data
             .draw_lists()
             .zip(render_data.draw_list_offsets.iter())
@@ -545,7 +548,7 @@ impl WgpuRenderer {
             self.render_draw_list(
                 rpass,
                 draw_list,
-                draw_data.display_size(), // 使用显示尺寸而不是帧缓冲尺寸
+                fb_size, // Use framebuffer size for proper clipping
                 draw_data.display_pos(),
                 draw_data.framebuffer_scale(),
                 *bases,

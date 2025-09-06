@@ -110,14 +110,23 @@ impl FontAtlas {
         font_id
     }
 
-    fn add_font_internal(&mut self, font_source: &FontSource<'_>, merge_mode: bool) -> crate::fonts::FontId {
+    fn add_font_internal(
+        &mut self,
+        font_source: &FontSource<'_>,
+        merge_mode: bool,
+    ) -> crate::fonts::FontId {
         match font_source {
             FontSource::DefaultFontData { config } => {
                 let font = self.add_font_default(config.as_ref());
                 font.id()
             }
-            FontSource::TtfData { data, size_pixels, config } => {
-                let font = self.add_font_from_memory_ttf(data, *size_pixels, config.as_ref(), None)
+            FontSource::TtfData {
+                data,
+                size_pixels,
+                config,
+            } => {
+                let font = self
+                    .add_font_from_memory_ttf(data, *size_pixels, config.as_ref(), None)
                     .expect("Failed to add TTF font from memory");
                 font.id()
             }

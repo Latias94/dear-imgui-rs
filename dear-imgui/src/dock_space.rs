@@ -15,7 +15,7 @@ impl Ui {
     /// It's equivalent to calling `dock_space` with the main viewport's ID and size.
     ///
     /// # Returns
-    /// 
+    ///
     /// The ID of the created dockspace
     ///
     /// # Example
@@ -60,7 +60,10 @@ impl Ui {
     #[doc(alias = "DockSpace")]
     pub fn dock_space(&self, id: sys::ImGuiID, size: [f32; 2]) -> sys::ImGuiID {
         unsafe {
-            let size_vec = sys::ImVec2 { x: size[0], y: size[1] };
+            let size_vec = sys::ImVec2 {
+                x: size[0],
+                y: size[1],
+            };
             sys::ImGui_DockSpace(
                 id,
                 &size_vec as *const _,

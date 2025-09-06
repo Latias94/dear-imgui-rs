@@ -154,10 +154,9 @@ impl WinitPlatform {
         let logical_height = physical_size.height as f64 / self.hidpi_factor;
 
         io.set_display_size([logical_width as f32, logical_height as f32]);
-        // Note: DisplayFramebufferScale is not directly exposed in our safe API
-        // This would need to be added to the Io implementation if needed
-        // (*io).DisplayFramebufferScale.x = self.hidpi_factor as f32;
-        // (*io).DisplayFramebufferScale.y = self.hidpi_factor as f32;
+
+        // Set the framebuffer scale for proper HiDPI rendering
+        io.set_display_framebuffer_scale([self.hidpi_factor as f32, self.hidpi_factor as f32]);
     }
 
     /// Handle a winit event

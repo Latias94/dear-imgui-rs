@@ -93,7 +93,10 @@ mod tests {
     fn test_texture_id_memory_layout() {
         // Ensure TextureId has the same size as a pointer
         assert_eq!(mem::size_of::<TextureId>(), mem::size_of::<*const c_void>());
-        assert_eq!(mem::align_of::<TextureId>(), mem::align_of::<*const c_void>());
+        assert_eq!(
+            mem::align_of::<TextureId>(),
+            mem::align_of::<*const c_void>()
+        );
     }
 
     #[test]

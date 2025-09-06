@@ -488,6 +488,32 @@ impl<'ui> DrawListMut<'ui> {
         Circle::new(self, center, radius, color)
     }
 
+    /// Returns a Bezier curve stretching from `pos0` to `pos1`, whose
+    /// curvature is defined by `cp0` and `cp1`.
+    #[doc(alias = "AddBezier", alias = "AddBezierCubic")]
+    pub fn add_bezier_curve(
+        &'ui self,
+        pos0: impl Into<MintVec2>,
+        cp0: impl Into<MintVec2>,
+        cp1: impl Into<MintVec2>,
+        pos1: impl Into<MintVec2>,
+        color: impl Into<ImColor32>,
+    ) -> BezierCurve<'ui> {
+        BezierCurve::new(self, pos0, cp0, cp1, pos1, color)
+    }
+
+    /// Returns a polygonal line. If filled is rendered as a convex
+    /// polygon, if not filled is drawn as a line specified by
+    /// [`Polyline::thickness`] (default 1.0)
+    #[doc(alias = "AddPolyline", alias = "AddConvexPolyFilled")]
+    pub fn add_polyline<C, P>(&'ui self, points: Vec<P>, c: C) -> Polyline<'ui>
+    where
+        C: Into<ImColor32>,
+        P: Into<MintVec2>,
+    {
+        Polyline::new(self, points, c)
+    }
+
     /// Draw a text whose upper-left corner is at point `pos`.
     pub fn add_text(
         &self,
@@ -743,6 +769,139 @@ impl<'ui> Circle<'ui> {
                     self.radius,
                     self.color.into(),
                     self.num_segments,
+                    self.thickness,
+                )
+            }
+        }
+    }
+}
+
+/// Represents a Bezier curve about to be drawn
+#[must_use = "should call .build() to draw the object"]
+pub struct BezierCurve<'ui> {
+    pos0: [f32; 2],
+    cp0: [f32; 2],
+    pos1: [f32; 2],
+    cp1: [f32; 2],
+    color: ImColor32,
+    thickness: f32,
+    /// If num_segments is not set, the bezier curve is auto-tessalated.
+    num_segments: Option<u32>,
+    draw_list: &'ui DrawListMut<'ui>,
+}
+
+impl<'ui> BezierCurve<'ui> {
+    /// Typically constructed by [`DrawListMut::add_bezier_curve`]
+    pub fn new<C>(
+        draw_list: &'ui DrawListMut<'_>,
+        pos0: impl Into<MintVec2>,
+        cp0: impl Into<MintVec2>,
+        cp1: impl Into<MintVec2>,
+        pos1: impl Into<MintVec2>,
+        c: C,
+    ) -> Self
+    where
+        C: Into<ImColor32>,
+    {
+        Self {
+            pos0: pos0.into().into(),
+            cp0: cp0.into().into(),
+            cp1: cp1.into().into(),
+            pos1: pos1.into().into(),
+            color: c.into(),
+            thickness: 1.0,
+            num_segments: None,
+            draw_list,
+        }
+    }
+
+    /// Set curve's thickness (default to 1.0 pixel)
+    pub fn thickness(mut self, thickness: f32) -> Self {
+        self.thickness = thickness;
+        self
+    }
+
+    /// Set number of segments used to draw the Bezier curve. If not set, the
+    /// bezier curve is auto-tessalated.
+    pub fn num_segments(mut self, num_segments: u32) -> Self {
+        self.num_segments = Some(num_segments);
+        self
+    }
+
+    /// Draw the curve on the window.
+    pub fn build(self) {
+        unsafe {
+            sys::ImDrawList_AddBezierCubic(
+                self.draw_list.draw_list,
+                &self.pos0.into(),
+                &self.cp0.into(),
+                &self.cp1.into(),
+                &self.pos1.into(),
+                self.color.into(),
+                self.thickness,
+                self.num_segments.unwrap_or(0) as i32,
+            )
+        }
+    }
+}
+
+/// Represents a poly line about to be drawn
+#[must_use = "should call .build() to draw the object"]
+pub struct Polyline<'ui> {
+    points: Vec<[f32; 2]>,
+    thickness: f32,
+    filled: bool,
+    color: ImColor32,
+    draw_list: &'ui DrawListMut<'ui>,
+}
+
+impl<'ui> Polyline<'ui> {
+    fn new<C, P>(draw_list: &'ui DrawListMut<'_>, points: Vec<P>, c: C) -> Self
+    where
+        C: Into<ImColor32>,
+        P: Into<MintVec2>,
+    {
+        Self {
+            points: points.into_iter().map(|p| p.into().into()).collect(),
+            color: c.into(),
+            thickness: 1.0,
+            filled: false,
+            draw_list,
+        }
+    }
+
+    /// Set line's thickness (default to 1.0 pixel). Has no effect if
+    /// shape is filled
+    pub fn thickness(mut self, thickness: f32) -> Self {
+        self.thickness = thickness;
+        self
+    }
+
+    /// Draw shape as filled convex polygon
+    pub fn filled(mut self, filled: bool) -> Self {
+        self.filled = filled;
+        self
+    }
+
+    /// Draw the line on the window
+    pub fn build(self) {
+        if self.filled {
+            unsafe {
+                sys::ImDrawList_AddConvexPolyFilled(
+                    self.draw_list.draw_list,
+                    self.points.as_ptr() as *const sys::ImVec2,
+                    self.points.len() as i32,
+                    self.color.into(),
+                )
+            }
+        } else {
+            unsafe {
+                sys::ImDrawList_AddPolyline(
+                    self.draw_list.draw_list,
+                    self.points.as_ptr() as *const sys::ImVec2,
+                    self.points.len() as i32,
+                    self.color.into(),
+                    sys::ImDrawFlags::default(),
                     self.thickness,
                 )
             }

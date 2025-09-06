@@ -117,7 +117,9 @@ impl AppWindow {
 
         // Configure font scaling for HiDPI displays
         let _font_size = (13.0 * self.hidpi_factor) as f32;
-        context.io_mut().set_font_global_scale((1.0 / self.hidpi_factor) as f32);
+        context
+            .io_mut()
+            .set_font_global_scale((1.0 / self.hidpi_factor) as f32);
 
         // Add default font with basic configuration
         // Temporarily disabled due to FontAtlas implementation issues
@@ -246,6 +248,98 @@ impl ApplicationHandler for App {
 
                                 ui.spacing();
 
+                                // Test DrawList functionality
+                                ui.text("DrawList Test:");
+
+                                // Get the window draw list
+                                let draw_list = ui.get_window_draw_list();
+
+                                // Draw a line
+                                draw_list
+                                    .add_line([50.0, 150.0], [150.0, 200.0], 0xFF_FF_FF_FF)
+                                    .build();
+
+                                // Draw a rectangle
+                                draw_list
+                                    .add_rect([200.0, 150.0], [300.0, 200.0], 0xFF_00_FF_00)
+                                    .build();
+
+                                // Draw a circle
+                                draw_list
+                                    .add_circle([100.0, 250.0], 20.0, 0xFF_FF_00_00)
+                                    .build();
+
+                                // Draw some text
+                                draw_list.add_text(
+                                    [50.0, 280.0],
+                                    0xFF_FF_FF_FF,
+                                    "Custom drawn text!",
+                                );
+
+                                ui.text("✅ DrawList functions are working!");
+                                ui.spacing();
+
+                                // Test new advanced DrawList functionality
+                                ui.text("Advanced DrawList Test:");
+
+                                // Test Bezier curve
+                                draw_list
+                                    .add_bezier_curve(
+                                        [50.0, 320.0],  // start point
+                                        [100.0, 300.0], // control point 1
+                                        [150.0, 340.0], // control point 2
+                                        [200.0, 320.0], // end point
+                                        0xFF_FF_00_FF,  // magenta color
+                                    )
+                                    .thickness(2.0)
+                                    .build();
+
+                                // Test polyline (unfilled)
+                                let triangle_points =
+                                    vec![[250.0, 320.0], [275.0, 300.0], [300.0, 320.0]];
+                                draw_list
+                                    .add_polyline(triangle_points, 0xFF_00_FF_FF)
+                                    .thickness(2.0)
+                                    .build();
+
+                                // Test filled polygon
+                                let square_points = vec![
+                                    [320.0, 300.0],
+                                    [350.0, 300.0],
+                                    [350.0, 330.0],
+                                    [320.0, 330.0],
+                                ];
+                                draw_list
+                                    .add_polyline(square_points, 0xFF_FF_FF_00)
+                                    .filled(true)
+                                    .build();
+
+                                ui.text("✅ Advanced DrawList functions are working!");
+                                ui.spacing();
+
+                                // Test utility functions
+                                ui.text("Utility Functions Test:");
+                                ui.text(&format!("ImGui Time: {:.2}", ui.time()));
+                                ui.text(&format!("Frame Count: {}", ui.frame_count()));
+                                ui.text(&format!(
+                                    "Button Color Name: {}",
+                                    ui.style_color_name(dear_imgui::StyleColor::Button)
+                                ));
+                                ui.text("✅ Utility functions are working!");
+                                ui.spacing();
+
+                                // Test InputText functionality
+                                ui.text("InputText Test:");
+
+                                // Create InputText widget using the UI method
+                                if ui.input_text("Text Input", &mut imgui.text_input).build() {
+                                    println!("InputText changed: {}", imgui.text_input);
+                                }
+
+                                ui.text(format!("Current text: {}", imgui.text_input));
+                                ui.text("✅ InputText functions are working!");
+                                ui.spacing();
+
                                 // Counter button
                                 if ui.button("Click me!") {
                                     imgui.counter += 1;
@@ -324,17 +418,17 @@ impl ApplicationHandler for App {
                 let draw_data = imgui.context.render();
 
                 // Debug: Check if we have draw data
-                println!("DrawData valid: {}, draw lists count: {}",
-                    draw_data.valid(),
-                    draw_data.draw_lists().count());
+                // println!("DrawData valid: {}, draw lists count: {}",
+                //     draw_data.valid(),
+                //     draw_data.draw_lists().count());
 
-                for (i, draw_list) in draw_data.draw_lists().enumerate() {
-                    println!("DrawList {}: vtx_buffer len: {}, idx_buffer len: {}, commands: {}",
-                        i,
-                        draw_list.vtx_buffer().len(),
-                        draw_list.idx_buffer().len(),
-                        draw_list.commands().count());
-                }
+                // for (i, draw_list) in draw_data.draw_lists().enumerate() {
+                //     println!("DrawList {}: vtx_buffer len: {}, idx_buffer len: {}, commands: {}",
+                //         i,
+                //         draw_list.vtx_buffer().len(),
+                //         draw_list.idx_buffer().len(),
+                //         draw_list.commands().count());
+                // }
 
                 let mut encoder: wgpu::CommandEncoder = window
                     .device
@@ -368,12 +462,7 @@ impl ApplicationHandler for App {
                 // Render ImGui
                 imgui
                     .renderer
-                    .render_with_renderpass(
-                        draw_data,
-                        &window.queue,
-                        &window.device,
-                        &mut rpass,
-                    )
+                    .render_with_renderpass(draw_data, &window.queue, &window.device, &mut rpass)
                     .expect("Rendering failed");
 
                 drop(rpass);

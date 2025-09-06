@@ -101,6 +101,7 @@ pub mod render;
 mod string;
 mod style;
 mod ui;
+mod utils;
 // mod math;
 mod widget;
 mod window;
@@ -136,6 +137,7 @@ pub use render::*;
 pub use string::*;
 pub use style::*;
 pub use ui::*;
+pub use utils::*;
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

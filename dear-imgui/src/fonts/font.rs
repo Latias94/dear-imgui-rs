@@ -3,8 +3,8 @@
 //! This module provides the Font type which represents a single font instance
 //! with its associated runtime data and rendering operations.
 
-use crate::sys;
 use super::FontId;
+use crate::sys;
 use std::marker::PhantomData;
 
 /// A font instance with runtime data
