@@ -38,8 +38,8 @@ impl SharedFontAtlas {
     pub fn create() -> SharedFontAtlas {
         unsafe {
             // Create a new ImFontAtlas instance
-            let atlas = sys::ImGui_CreateContext(ptr::null_mut());  // This should be ImFontAtlas_new()
-            // For now, use a placeholder approach 
+            let atlas = sys::ImGui_CreateContext(ptr::null_mut()); // This should be ImFontAtlas_new()
+                                                                   // For now, use a placeholder approach
             let raw_atlas = Box::into_raw(Box::new(sys::ImFontAtlas::new()));
             SharedFontAtlas(Rc::new(raw_atlas))
         }

@@ -106,7 +106,11 @@ impl AppWindow {
     fn setup_imgui(&mut self) {
         let mut context = Context::create();
         let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&self.window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        platform.attach_window(
+            &self.window,
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        );
 
         // Note: set_ini_filename is not implemented yet in dear-imgui
         // context.set_ini_filename(None);
@@ -215,7 +219,7 @@ impl ApplicationHandler for App {
                         return;
                     }
                 };
-                
+
                 imgui
                     .platform
                     .prepare_frame(&window.window, &mut imgui.context);
@@ -275,7 +279,10 @@ impl ApplicationHandler for App {
                         .position([500.0, 50.0], Condition::FirstUseEver)
                         .build(ui, || {
                             let delta_s = imgui.last_frame.elapsed();
-                            ui.text(format!("Frametime: {:.3}ms", delta_s.as_secs_f32() * 1000.0));
+                            ui.text(format!(
+                                "Frametime: {:.3}ms",
+                                delta_s.as_secs_f32() * 1000.0
+                            ));
                             ui.text(format!("FPS: {:.1}", 1.0 / delta_s.as_secs_f32()));
 
                             ui.separator();
@@ -287,9 +294,9 @@ impl ApplicationHandler for App {
                             //     mouse_pos[0], mouse_pos[1]
                             // ));
 
-                            ui.text(format!("Window size: {}x{}",
-                                window.surface_desc.width,
-                                window.surface_desc.height
+                            ui.text(format!(
+                                "Window size: {}x{}",
+                                window.surface_desc.width, window.surface_desc.height
                             ));
 
                             ui.separator();
@@ -353,7 +360,9 @@ impl ApplicationHandler for App {
         }
 
         let winit_event: Event<()> = Event::WindowEvent { window_id, event };
-        imgui.platform.handle_event(&winit_event, &window.window, &mut imgui.context);
+        imgui
+            .platform
+            .handle_event(&winit_event, &window.window, &mut imgui.context);
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {

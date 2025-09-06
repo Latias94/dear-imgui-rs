@@ -1,6 +1,6 @@
 use parking_lot::ReentrantMutex;
 use std::cell::UnsafeCell;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::ops::Drop;
 use std::path::PathBuf;
 use std::ptr;
@@ -8,9 +8,8 @@ use std::ptr;
 use crate::clipboard::{ClipboardBackend, ClipboardContext};
 use crate::fonts::{Font, FontAtlas, SharedFontAtlas};
 use crate::io::Io;
-// use crate::style::Style;
 use crate::sys;
-use crate::ui::Ui;
+use crate::ui;
 
 /// An imgui context.
 ///
@@ -50,7 +49,7 @@ pub struct Context {
     // We also put it in an UnsafeCell since we're going to give
     // imgui a mutable pointer to it.
     clipboard_ctx: Box<UnsafeCell<ClipboardContext>>,
-    ui: crate::Ui,
+    ui: crate::ui::Ui,
 }
 
 // This mutex needs to be used to guard all public functions that can affect the underlying
@@ -117,8 +116,8 @@ impl Context {
             log_filename: None,
             platform_name: None,
             renderer_name: None,
-            clipboard_ctx: Box::new(ClipboardContext::dummy().into()),
-            ui: crate::Ui::new(),
+            clipboard_ctx: Box::new(UnsafeCell::new(ClipboardContext::dummy())),
+            ui: crate::ui::Ui::new(),
         }
     }
 
@@ -159,7 +158,7 @@ impl Context {
     }
 
     /// Creates a new frame and returns a Ui object for building the interface
-    pub fn frame(&mut self) -> &mut crate::Ui {
+    pub fn frame(&mut self) -> &mut crate::ui::Ui {
         let _guard = CTX_MUTEX.lock();
 
         // Ensure font atlas is built before calling NewFrame
@@ -182,7 +181,7 @@ impl Context {
     /// Create a new frame with a callback
     pub fn frame_with<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&crate::Ui) -> R,
+        F: FnOnce(&crate::ui::Ui) -> R,
     {
         let ui = self.frame();
         f(ui)
@@ -202,13 +201,13 @@ impl Context {
         let _guard = CTX_MUTEX.lock();
 
         self.ini_filename = filename.map(|f| {
-            CString::new(f.into().to_string_lossy().as_bytes())
-                .expect("Invalid filename")
+            CString::new(f.into().to_string_lossy().as_bytes()).expect("Invalid filename")
         });
 
         unsafe {
             let io = sys::ImGui_GetIO();
-            let ptr = self.ini_filename
+            let ptr = self
+                .ini_filename
                 .as_ref()
                 .map(|s| s.as_ptr())
                 .unwrap_or(ptr::null());
@@ -221,13 +220,13 @@ impl Context {
         let _guard = CTX_MUTEX.lock();
 
         self.log_filename = filename.map(|f| {
-            CString::new(f.into().to_string_lossy().as_bytes())
-                .expect("Invalid filename")
+            CString::new(f.into().to_string_lossy().as_bytes()).expect("Invalid filename")
         });
 
         unsafe {
             let io = sys::ImGui_GetIO();
-            let ptr = self.log_filename
+            let ptr = self
+                .log_filename
                 .as_ref()
                 .map(|s| s.as_ptr())
                 .unwrap_or(ptr::null());
@@ -239,14 +238,12 @@ impl Context {
     pub fn set_platform_name<S: Into<String>>(&mut self, name: Option<S>) {
         let _guard = CTX_MUTEX.lock();
 
-        self.platform_name = name.map(|n| {
-            CString::new(n.into())
-                .expect("Invalid platform name")
-        });
+        self.platform_name = name.map(|n| CString::new(n.into()).expect("Invalid platform name"));
 
         unsafe {
             let io = sys::ImGui_GetIO();
-            let ptr = self.platform_name
+            let ptr = self
+                .platform_name
                 .as_ref()
                 .map(|s| s.as_ptr())
                 .unwrap_or(ptr::null());
@@ -258,14 +255,12 @@ impl Context {
     pub fn set_renderer_name<S: Into<String>>(&mut self, name: Option<S>) {
         let _guard = CTX_MUTEX.lock();
 
-        self.renderer_name = name.map(|n| {
-            CString::new(n.into())
-                .expect("Invalid renderer name")
-        });
+        self.renderer_name = name.map(|n| CString::new(n.into()).expect("Invalid renderer name"));
 
         unsafe {
             let io = sys::ImGui_GetIO();
-            let ptr = self.renderer_name
+            let ptr = self
+                .renderer_name
                 .as_ref()
                 .map(|s| s.as_ptr())
                 .unwrap_or(ptr::null());
@@ -356,16 +351,17 @@ impl Context {
 
     /// Sets the clipboard backend used for clipboard operations
     pub fn set_clipboard_backend<T: ClipboardBackend>(&mut self, backend: T) {
-        let clipboard_ctx: Box<UnsafeCell<_>> = Box::new(ClipboardContext::new(backend).into());
-        
-        // Set the clipboard callbacks in the ImGui IO
+        let clipboard_ctx: Box<UnsafeCell<_>> =
+            Box::new(UnsafeCell::new(ClipboardContext::new(backend)));
+
+        // Set the clipboard callbacks in the ImGui PlatformIO
         unsafe {
-            let io = sys::ImGui_GetIO();
-            (*io).SetClipboardTextFn = Some(crate::clipboard::set_clipboard_text);
-            (*io).GetClipboardTextFn = Some(crate::clipboard::get_clipboard_text);
-            (*io).ClipboardUserData = clipboard_ctx.get() as *mut _;
+            let platform_io = sys::ImGui_GetPlatformIO();
+            (*platform_io).Platform_SetClipboardTextFn = Some(crate::clipboard::set_clipboard_text);
+            (*platform_io).Platform_GetClipboardTextFn = Some(crate::clipboard::get_clipboard_text);
+            (*platform_io).Platform_ClipboardUserData = clipboard_ctx.get() as *mut _;
         }
-        
+
         self.clipboard_ctx = clipboard_ctx;
     }
 
@@ -387,20 +383,6 @@ impl Context {
     //         (*sys::igGetIO()).IniFilename = ptr;
     //     }
     // }
-}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        let _guard = CTX_MUTEX.lock();
-        unsafe {
-            if !self.raw.is_null() {
-                if sys::ImGui_GetCurrentContext() == self.raw {
-                    clear_current_context();
-                }
-                sys::ImGui_DestroyContext(self.raw);
-            }
-        }
-    }
 }
 
 impl Drop for Context {
@@ -454,8 +436,8 @@ impl SuspendedContext {
             log_filename: None,
             platform_name: None,
             renderer_name: None,
-            clipboard_ctx: Box::new(ClipboardContext::dummy().into()),
-            ui: crate::Ui::new(),
+            clipboard_ctx: Box::new(UnsafeCell::new(ClipboardContext::dummy())),
+            ui: crate::ui::Ui::new(),
         };
 
         // If the context was activated during creation, deactivate it
@@ -467,7 +449,7 @@ impl SuspendedContext {
     }
 
     /// Attempts to activate this suspended context
-    /// 
+    ///
     /// If there is no active context, this suspended context is activated and `Ok` is returned.
     /// If there is already an active context, nothing happens and `Err` is returned.
     pub fn activate(self) -> Result<Context, SuspendedContext> {

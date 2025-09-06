@@ -1,3 +1,4 @@
+use crate::internal::RawWrapper;
 use crate::sys;
 use bitflags::bitflags;
 
@@ -262,6 +263,18 @@ impl Style {
     /// Set a color by style color identifier
     pub fn set_color(&mut self, color: StyleColor, value: [f32; 4]) {
         self.colors[color as usize] = value;
+    }
+}
+
+impl RawWrapper for Style {
+    type Raw = sys::ImGuiStyle;
+
+    unsafe fn raw(&self) -> &Self::Raw {
+        &*(self as *const _ as *const Self::Raw)
+    }
+
+    unsafe fn raw_mut(&mut self) -> &mut Self::Raw {
+        &mut *(self as *mut _ as *mut Self::Raw)
     }
 }
 

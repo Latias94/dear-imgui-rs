@@ -1,7 +1,10 @@
-use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
-use std::ptr;
 use std::cell::UnsafeCell;
+use std::ffi::{CStr, CString};
+use std::fmt;
+use std::os::raw::c_char;
+use std::panic::catch_unwind;
+use std::process;
+use std::ptr;
 
 /// Trait for clipboard backends
 pub trait ClipboardBackend: 'static {
@@ -50,47 +53,49 @@ impl ClipboardBackend for DummyClipboardBackend {
 }
 
 /// C callback functions for Dear ImGui clipboard integration
-pub(crate) unsafe extern "C" fn get_clipboard_text(user_data: *mut std::os::raw::c_void) -> *const c_char {
-    let clipboard_ctx = &mut *(user_data as *mut ClipboardContext);
-    
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        clipboard_ctx.backend.get()
-    })) {
-        Ok(Some(value)) => {
-            // Convert to CString and store it
-            match CString::new(value) {
-                Ok(cstring) => {
-                    clipboard_ctx.last_value = cstring;
-                    clipboard_ctx.last_value.as_ptr()
-                }
-                Err(_) => ptr::null(),
+pub(crate) unsafe extern "C" fn get_clipboard_text(
+    _user_data: *mut crate::sys::ImGuiContext,
+) -> *const c_char {
+    let result = std::panic::catch_unwind(|| {
+        let user_data = unsafe { (*crate::sys::ImGui_GetPlatformIO()).Platform_ClipboardUserData };
+
+        let ctx = &mut *(user_data as *mut ClipboardContext);
+        match ctx.backend.get() {
+            Some(text) => {
+                ctx.last_value = CString::new(text).unwrap();
+                ctx.last_value.as_ptr()
             }
+            None => ptr::null(),
         }
-        Ok(None) => ptr::null(),
-        Err(_) => {
-            // Panic occurred, return null
-            ptr::null()
-        }
-    }
+    });
+    result.unwrap_or_else(|_| {
+        eprintln!("Clipboard getter panicked");
+        std::process::abort();
+    })
 }
 
-pub(crate) unsafe extern "C" fn set_clipboard_text(user_data: *mut std::os::raw::c_void, text: *const c_char) {
-    if text.is_null() {
-        return;
-    }
+pub(crate) unsafe extern "C" fn set_clipboard_text(
+    _user_data: *mut crate::sys::ImGuiContext,
+    text: *const c_char,
+) {
+    let result = std::panic::catch_unwind(|| {
+        let user_data = unsafe { (*crate::sys::ImGui_GetPlatformIO()).Platform_ClipboardUserData };
 
-    let clipboard_ctx = &mut *(user_data as *mut ClipboardContext);
-    
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let text_str = CStr::from_ptr(text);
-        if let Ok(text_str) = text_str.to_str() {
-            clipboard_ctx.backend.set(text_str);
-        }
-    }));
+        let ctx = &mut *(user_data as *mut ClipboardContext);
+        let text = CStr::from_ptr(text).to_owned();
+        ctx.backend.set(text.to_str().unwrap());
+    });
+    result.unwrap_or_else(|_| {
+        eprintln!("Clipboard setter panicked");
+        std::process::abort();
+    });
 }
 
-impl From<ClipboardContext> for UnsafeCell<ClipboardContext> {
-    fn from(ctx: ClipboardContext) -> Self {
-        UnsafeCell::new(ctx)
+impl fmt::Debug for ClipboardContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClipboardContext")
+            .field("backend", &(&(*self.backend) as *const _))
+            .field("last_value", &self.last_value)
+            .finish()
     }
 }

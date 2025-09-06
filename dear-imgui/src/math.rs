@@ -18,6 +18,15 @@ pub(crate) type MintVec3 = mint::Vector3<f32>;
 /// Mint-compatible 4D vector type
 pub(crate) type MintVec4 = mint::Vector4<f32>;
 
+/// Mint-compatible 2D integer vector type
+pub(crate) type MintIVec2 = mint::Vector2<i32>;
+
+/// Mint-compatible 3D integer vector type
+pub(crate) type MintIVec3 = mint::Vector3<i32>;
+
+/// Mint-compatible 4D integer vector type
+pub(crate) type MintIVec4 = mint::Vector4<i32>;
+
 /// RGBA color (4 floats, 0.0-1.0 range)
 pub type Color = [f32; 4];
 
@@ -39,123 +48,6 @@ pub enum Condition {
     FirstUseEver = sys::ImGuiCond_FirstUseEver,
     /// Set the variable if the object/window is appearing after being hidden/inactive (or the first time)
     Appearing = sys::ImGuiCond_Appearing,
-}
-
-/// Mouse cursor types
-#[repr(i32)]
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-pub enum MouseCursor {
-    None = sys::ImGuiMouseCursor_None,
-    Arrow = sys::ImGuiMouseCursor_Arrow,
-    TextInput = sys::ImGuiMouseCursor_TextInput,
-    ResizeAll = sys::ImGuiMouseCursor_ResizeAll,
-    ResizeNS = sys::ImGuiMouseCursor_ResizeNS,
-    ResizeEW = sys::ImGuiMouseCursor_ResizeEW,
-    ResizeNESW = sys::ImGuiMouseCursor_ResizeNESW,
-    ResizeNWSE = sys::ImGuiMouseCursor_ResizeNWSE,
-    Hand = sys::ImGuiMouseCursor_Hand,
-    NotAllowed = sys::ImGuiMouseCursor_NotAllowed,
-}
-
-/// Key indices for keyboard input
-#[repr(i32)]
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-pub enum Key {
-    Tab = sys::ImGuiKey_Tab,
-    LeftArrow = sys::ImGuiKey_LeftArrow,
-    RightArrow = sys::ImGuiKey_RightArrow,
-    UpArrow = sys::ImGuiKey_UpArrow,
-    DownArrow = sys::ImGuiKey_DownArrow,
-    PageUp = sys::ImGuiKey_PageUp,
-    PageDown = sys::ImGuiKey_PageDown,
-    Home = sys::ImGuiKey_Home,
-    End = sys::ImGuiKey_End,
-    Insert = sys::ImGuiKey_Insert,
-    Delete = sys::ImGuiKey_Delete,
-    Backspace = sys::ImGuiKey_Backspace,
-    Space = sys::ImGuiKey_Space,
-    Enter = sys::ImGuiKey_Enter,
-    Escape = sys::ImGuiKey_Escape,
-    LeftCtrl = sys::ImGuiKey_LeftCtrl,
-    LeftShift = sys::ImGuiKey_LeftShift,
-    LeftAlt = sys::ImGuiKey_LeftAlt,
-    LeftSuper = sys::ImGuiKey_LeftSuper,
-    RightCtrl = sys::ImGuiKey_RightCtrl,
-    RightShift = sys::ImGuiKey_RightShift,
-    RightAlt = sys::ImGuiKey_RightAlt,
-    RightSuper = sys::ImGuiKey_RightSuper,
-    Menu = sys::ImGuiKey_Menu,
-    A = sys::ImGuiKey_A,
-    B = sys::ImGuiKey_B,
-    C = sys::ImGuiKey_C,
-    D = sys::ImGuiKey_D,
-    E = sys::ImGuiKey_E,
-    F = sys::ImGuiKey_F,
-    G = sys::ImGuiKey_G,
-    H = sys::ImGuiKey_H,
-    I = sys::ImGuiKey_I,
-    J = sys::ImGuiKey_J,
-    K = sys::ImGuiKey_K,
-    L = sys::ImGuiKey_L,
-    M = sys::ImGuiKey_M,
-    N = sys::ImGuiKey_N,
-    O = sys::ImGuiKey_O,
-    P = sys::ImGuiKey_P,
-    Q = sys::ImGuiKey_Q,
-    R = sys::ImGuiKey_R,
-    S = sys::ImGuiKey_S,
-    T = sys::ImGuiKey_T,
-    U = sys::ImGuiKey_U,
-    V = sys::ImGuiKey_V,
-    W = sys::ImGuiKey_W,
-    X = sys::ImGuiKey_X,
-    Y = sys::ImGuiKey_Y,
-    Z = sys::ImGuiKey_Z,
-    F1 = sys::ImGuiKey_F1,
-    F2 = sys::ImGuiKey_F2,
-    F3 = sys::ImGuiKey_F3,
-    F4 = sys::ImGuiKey_F4,
-    F5 = sys::ImGuiKey_F5,
-    F6 = sys::ImGuiKey_F6,
-    F7 = sys::ImGuiKey_F7,
-    F8 = sys::ImGuiKey_F8,
-    F9 = sys::ImGuiKey_F9,
-    F10 = sys::ImGuiKey_F10,
-    F11 = sys::ImGuiKey_F11,
-    F12 = sys::ImGuiKey_F12,
-    Apostrophe = sys::ImGuiKey_Apostrophe,
-    Comma = sys::ImGuiKey_Comma,
-    Minus = sys::ImGuiKey_Minus,
-    Period = sys::ImGuiKey_Period,
-    Slash = sys::ImGuiKey_Slash,
-    Semicolon = sys::ImGuiKey_Semicolon,
-    Equal = sys::ImGuiKey_Equal,
-    LeftBracket = sys::ImGuiKey_LeftBracket,
-    Backslash = sys::ImGuiKey_Backslash,
-    RightBracket = sys::ImGuiKey_RightBracket,
-    GraveAccent = sys::ImGuiKey_GraveAccent,
-    CapsLock = sys::ImGuiKey_CapsLock,
-    ScrollLock = sys::ImGuiKey_ScrollLock,
-    NumLock = sys::ImGuiKey_NumLock,
-    PrintScreen = sys::ImGuiKey_PrintScreen,
-    Pause = sys::ImGuiKey_Pause,
-    Keypad0 = sys::ImGuiKey_Keypad0,
-    Keypad1 = sys::ImGuiKey_Keypad1,
-    Keypad2 = sys::ImGuiKey_Keypad2,
-    Keypad3 = sys::ImGuiKey_Keypad3,
-    Keypad4 = sys::ImGuiKey_Keypad4,
-    Keypad5 = sys::ImGuiKey_Keypad5,
-    Keypad6 = sys::ImGuiKey_Keypad6,
-    Keypad7 = sys::ImGuiKey_Keypad7,
-    Keypad8 = sys::ImGuiKey_Keypad8,
-    Keypad9 = sys::ImGuiKey_Keypad9,
-    KeypadDecimal = sys::ImGuiKey_KeypadDecimal,
-    KeypadDivide = sys::ImGuiKey_KeypadDivide,
-    KeypadMultiply = sys::ImGuiKey_KeypadMultiply,
-    KeypadSubtract = sys::ImGuiKey_KeypadSubtract,
-    KeypadAdd = sys::ImGuiKey_KeypadAdd,
-    KeypadEnter = sys::ImGuiKey_KeypadEnter,
-    KeypadEqual = sys::ImGuiKey_KeypadEqual,
 }
 
 /// Utility functions for color conversion

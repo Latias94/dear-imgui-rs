@@ -1,4 +1,5 @@
 use crate::draw::DrawListMut;
+use crate::internal::RawWrapper;
 use crate::string::UiBuffer;
 use std::cell::UnsafeCell;
 

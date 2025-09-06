@@ -4,11 +4,8 @@
 //! with its associated runtime data and rendering operations.
 
 use crate::sys;
+use super::FontId;
 use std::marker::PhantomData;
-
-/// A font identifier
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct FontId(pub(crate) *const Font);
 
 /// A font instance with runtime data
 ///

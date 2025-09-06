@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use dear_imgui::{Context, Key, ConfigFlags, BackendFlags};
+use dear_imgui::{BackendFlags, ConfigFlags, Context, Key};
 use dear_imgui_sys as sys;
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{
@@ -107,7 +107,12 @@ impl WinitPlatform {
     /// * `window` - The winit window to attach to
     /// * `hidpi_mode` - The DPI handling mode to use
     /// * `imgui_ctx` - The Dear ImGui context
-    pub fn attach_window(&mut self, window: &Window, hidpi_mode: HiDpiMode, imgui_ctx: &mut Context) {
+    pub fn attach_window(
+        &mut self,
+        window: &Window,
+        hidpi_mode: HiDpiMode,
+        imgui_ctx: &mut Context,
+    ) {
         let scale_factor = window.scale_factor();
         self.hidpi_factor = hidpi_mode.apply(scale_factor);
         self.hidpi_mode = hidpi_mode;
@@ -170,7 +175,12 @@ impl WinitPlatform {
     ///
     /// Returns `true` if Dear ImGui wants to capture this event (e.g., mouse is
     /// over a Dear ImGui window), `false` otherwise.
-    pub fn handle_event<T>(&mut self, event: &Event<T>, window: &Window, imgui_ctx: &mut Context) -> bool {
+    pub fn handle_event<T>(
+        &mut self,
+        event: &Event<T>,
+        window: &Window,
+        imgui_ctx: &mut Context,
+    ) -> bool {
         match event {
             Event::WindowEvent {
                 event, window_id, ..
@@ -236,7 +246,12 @@ impl WinitPlatform {
         // (*io).BackendPlatformName = backend_name.as_ptr();
     }
 
-    fn handle_window_event(&mut self, event: &WindowEvent, window: &Window, imgui_ctx: &mut Context) -> bool {
+    fn handle_window_event(
+        &mut self,
+        event: &WindowEvent,
+        window: &Window,
+        imgui_ctx: &mut Context,
+    ) -> bool {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
                 // Convert physical position to logical position using our DPI factor
@@ -296,7 +311,9 @@ impl WinitPlatform {
                     io.want_capture_mouse()
                 }
             }
-            WindowEvent::KeyboardInput { event, .. } => self.handle_keyboard_input(event, imgui_ctx),
+            WindowEvent::KeyboardInput { event, .. } => {
+                self.handle_keyboard_input(event, imgui_ctx)
+            }
             _ => false,
         }
     }
