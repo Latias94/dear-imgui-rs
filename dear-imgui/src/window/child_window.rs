@@ -80,13 +80,9 @@ impl<'ui> ChildWindow<'ui> {
         F: FnOnce() -> R,
     {
         let token = self.begin(ui)?;
-        let result = if token.should_render {
-            Some(f())
-        } else {
-            None
-        };
+        let result = f();
         drop(token); // Explicitly drop the token to call EndChild
-        result
+        Some(result)
     }
 
     /// Begins the child window and returns a token
@@ -108,18 +104,25 @@ impl<'ui> ChildWindow<'ui> {
 
         // IMPORTANT: According to ImGui documentation, BeginChild/EndChild are inconsistent
         // with other Begin/End functions. EndChild() must ALWAYS be called regardless of
-        // what BeginChild() returns. This is different from other ImGui functions.
-        Some(ChildWindowToken {
-            _phantom: std::marker::PhantomData,
-            should_render: result,
-        })
+        // what BeginChild() returns. However, if BeginChild returns false, EndChild must
+        // be called immediately and no content should be rendered.
+        if result {
+            Some(ChildWindowToken {
+                _phantom: std::marker::PhantomData,
+            })
+        } else {
+            // If BeginChild returns false, call EndChild immediately and return None
+            unsafe {
+                sys::ImGui_EndChild();
+            }
+            None
+        }
     }
 }
 
 /// Token representing an active child window
 pub struct ChildWindowToken<'ui> {
     _phantom: std::marker::PhantomData<&'ui ()>,
-    should_render: bool,
 }
 
 impl<'ui> Drop for ChildWindowToken<'ui> {
