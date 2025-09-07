@@ -117,7 +117,10 @@ fn generate_bindings() {
             }
 
             // Print diagnostic information
-            println!("cargo:warning=Applied MSVC ABI fixes for {} functions", blocked_functions.len());
+            println!(
+                "cargo:warning=Applied MSVC ABI fixes for {} functions",
+                blocked_functions.len()
+            );
             if std::env::var("DEAR_IMGUI_VERBOSE").is_ok() {
                 for func in &blocked_functions {
                     println!("cargo:warning=  - Blocked function: {}", func);

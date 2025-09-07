@@ -123,6 +123,20 @@ impl crate::ui::Ui {
         unsafe { sys::ImGui_GetFrameCount() }
     }
 
+    /// Returns a single style color from the user interface style.
+    ///
+    /// Use this function if you need to access the colors, but don't want to clone the entire
+    /// style object.
+    #[doc(alias = "GetStyle")]
+    pub fn style_color(&self, style_color: StyleColor) -> [f32; 4] {
+        unsafe {
+            let style_ptr = sys::ImGui_GetStyle();
+            let colors = (*style_ptr).Colors.as_ptr();
+            let color = *colors.add(style_color as usize);
+            [color.x, color.y, color.z, color.w]
+        }
+    }
+
     /// Returns the name of a style color.
     ///
     /// This is just a wrapper around calling [`name`] on [StyleColor].

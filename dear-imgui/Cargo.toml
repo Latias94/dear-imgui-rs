@@ -35,7 +35,3 @@ tables-api = []
 [dev-dependencies]
 approx = "0.5"
 pretty_assertions = "1.4"
-
-[[example]]
-name = "drag_drop_demo"
-path = "../examples/drag_drop_demo.rs"

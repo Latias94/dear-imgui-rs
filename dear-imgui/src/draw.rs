@@ -1007,12 +1007,17 @@ impl<'ui> BezierCurve<'ui> {
     /// Draw the curve on the window.
     pub fn build(self) {
         unsafe {
+            let pos0: sys::ImVec2 = self.pos0.into();
+            let cp0: sys::ImVec2 = self.cp0.into();
+            let cp1: sys::ImVec2 = self.cp1.into();
+            let pos1: sys::ImVec2 = self.pos1.into();
+
             sys::ImDrawList_AddBezierCubic(
                 self.draw_list.draw_list,
-                &self.pos0.into(),
-                &self.cp0.into(),
-                &self.cp1.into(),
-                &self.pos1.into(),
+                &pos0,
+                &cp0,
+                &cp1,
+                &pos1,
                 self.color.into(),
                 self.thickness,
                 self.num_segments.unwrap_or(0) as i32,
