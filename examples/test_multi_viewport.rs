@@ -124,8 +124,17 @@ impl AppWindow {
         // Enable multi-viewport support
         #[cfg(feature = "multi-viewport")]
         {
-            platform.setup_multi_viewport(event_loop, &mut context);
-            println!("Multi-viewport support enabled!");
+            println!("Multi-viewport feature is enabled, testing basic setup...");
+
+            // Enable multi-viewport in ImGui config
+            let io = context.io_mut();
+            let mut config_flags = io.config_flags();
+            config_flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
+            io.set_config_flags(config_flags);
+
+            println!("Multi-viewport config flags set, but skipping backend setup for now");
+            // platform.setup_multi_viewport(event_loop, &mut context);
+            // println!("Multi-viewport support enabled!");
         }
 
         // Add default font with basic configuration

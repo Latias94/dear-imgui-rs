@@ -14560,31 +14560,3 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn ImGui_ValidateABIFix() -> ImVec2_rr;
 }
-pub type PlatformGetWindowPosCallback =
-    ::std::option::Option<unsafe extern "C" fn(viewport: *mut ::std::os::raw::c_void) -> ImVec2_rr>;
-pub type PlatformGetWindowSizeCallback =
-    ::std::option::Option<unsafe extern "C" fn(viewport: *mut ::std::os::raw::c_void) -> ImVec2_rr>;
-unsafe extern "C" {
-    pub static mut g_platform_get_window_pos_callback: PlatformGetWindowPosCallback;
-}
-unsafe extern "C" {
-    pub static mut g_platform_get_window_size_callback: PlatformGetWindowSizeCallback;
-}
-unsafe extern "C" {
-    pub fn Platform_GetWindowPos_Wrapper(viewport: *mut ImGuiViewport) -> ImVec2;
-}
-unsafe extern "C" {
-    pub fn Platform_GetWindowSize_Wrapper(viewport: *mut ImGuiViewport) -> ImVec2;
-}
-unsafe extern "C" {
-    pub fn ImGui_SetPlatformGetWindowPosCallback(callback: PlatformGetWindowPosCallback);
-}
-unsafe extern "C" {
-    pub fn ImGui_SetPlatformGetWindowSizeCallback(callback: PlatformGetWindowSizeCallback);
-}
-unsafe extern "C" {
-    pub fn ImGui_GetPlatformGetWindowPosWrapper() -> *mut ::std::os::raw::c_void;
-}
-unsafe extern "C" {
-    pub fn ImGui_GetPlatformGetWindowSizeWrapper() -> *mut ::std::os::raw::c_void;
-}

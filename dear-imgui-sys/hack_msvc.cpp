@@ -89,51 +89,7 @@ ImVec2_rr ImGui_ValidateABIFix() {
     return ImVec2_rr { 42.0f, 24.0f };
 }
 
-// Multi-viewport callback function wrappers
-// These are needed because our callback functions return ImVec2, which has MSVC ABI issues
-
-// Function pointer types for the callbacks
-typedef ImVec2_rr (*PlatformGetWindowPosCallback)(void* viewport);
-typedef ImVec2_rr (*PlatformGetWindowSizeCallback)(void* viewport);
-
-// Global function pointers to store the Rust callbacks
-static PlatformGetWindowPosCallback g_platform_get_window_pos_callback = nullptr;
-static PlatformGetWindowSizeCallback g_platform_get_window_size_callback = nullptr;
-
-// C++ wrapper functions that call the Rust callbacks and convert the result
-// These use C++ linkage since they return ImVec2
-ImVec2 Platform_GetWindowPos_Wrapper(ImGuiViewport* viewport) {
-    if (g_platform_get_window_pos_callback) {
-        ImVec2_rr result = g_platform_get_window_pos_callback(viewport);
-        return ImVec2(result.x, result.y);
-    }
-    return ImVec2(0.0f, 0.0f);
-}
-
-ImVec2 Platform_GetWindowSize_Wrapper(ImGuiViewport* viewport) {
-    if (g_platform_get_window_size_callback) {
-        ImVec2_rr result = g_platform_get_window_size_callback(viewport);
-        return ImVec2(result.x, result.y);
-    }
-    return ImVec2(800.0f, 600.0f);
-}
-
-// Functions to set the callback pointers from Rust
-extern "C" void ImGui_SetPlatformGetWindowPosCallback(PlatformGetWindowPosCallback callback) {
-    g_platform_get_window_pos_callback = callback;
-}
-
-extern "C" void ImGui_SetPlatformGetWindowSizeCallback(PlatformGetWindowSizeCallback callback) {
-    g_platform_get_window_size_callback = callback;
-}
-
-// Functions to get the wrapper function pointers (to be used in PlatformIO)
-extern "C" void* ImGui_GetPlatformGetWindowPosWrapper() {
-    return (void*)Platform_GetWindowPos_Wrapper;
-}
-
-extern "C" void* ImGui_GetPlatformGetWindowSizeWrapper() {
-    return (void*)Platform_GetWindowSize_Wrapper;
-}
+// Note: Multi-viewport callback functions are complex to implement with MSVC ABI
+// For now, we'll use a simpler approach that doesn't require callback wrappers
 
 } // extern "C"
