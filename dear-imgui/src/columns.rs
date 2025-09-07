@@ -1,5 +1,32 @@
 use crate::sys;
 use crate::Ui;
+use bitflags::bitflags;
+
+bitflags! {
+    /// Flags for old columns system
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct OldColumnFlags: i32 {
+        /// No flags
+        const NONE = sys::ImGuiOldColumnFlags_None;
+        /// Disable column dividers
+        const NO_BORDER = sys::ImGuiOldColumnFlags_NoBorder;
+        /// Disable resizing columns by dragging dividers
+        const NO_RESIZE = sys::ImGuiOldColumnFlags_NoResize;
+        /// Disable column width preservation when the total width changes
+        const NO_PRESERVE_WIDTHS = sys::ImGuiOldColumnFlags_NoPreserveWidths;
+        /// Disable forcing columns to fit within window
+        const NO_FORCE_WITHIN_WINDOW = sys::ImGuiOldColumnFlags_NoForceWithinWindow;
+        /// Restore pre-1.51 behavior of extending the parent window contents size
+        const GROW_PARENT_CONTENTS_SIZE = sys::ImGuiOldColumnFlags_GrowParentContentsSize;
+    }
+}
+
+impl Default for OldColumnFlags {
+    fn default() -> Self {
+        OldColumnFlags::NONE
+    }
+}
 
 /// # Columns
 impl Ui {
@@ -12,6 +39,23 @@ impl Ui {
     #[doc(alias = "Columns")]
     pub fn columns(&self, count: i32, id: impl AsRef<str>, border: bool) {
         unsafe { sys::ImGui_Columns(count, self.scratch_txt(id), border) }
+    }
+
+    /// Begin columns layout with advanced flags.
+    ///
+    /// # Arguments
+    /// * `id` - ID for the columns
+    /// * `count` - Number of columns (must be >= 1)
+    /// * `flags` - Column flags
+    #[doc(alias = "BeginColumns")]
+    pub fn begin_columns(&self, id: impl AsRef<str>, count: i32, flags: OldColumnFlags) {
+        unsafe { sys::ImGui_BeginColumns(self.scratch_txt(id), count, flags.bits()) }
+    }
+
+    /// End columns layout.
+    #[doc(alias = "EndColumns")]
+    pub fn end_columns(&self) {
+        unsafe { sys::ImGui_EndColumns() }
     }
 
     /// Switches to the next column.
@@ -80,5 +124,97 @@ impl Ui {
     #[doc(alias = "GetColumnsCount")]
     pub fn column_count(&self) -> i32 {
         unsafe { sys::ImGui_GetColumnsCount() }
+    }
+
+    // ============================================================================
+    // Advanced column utilities
+    // ============================================================================
+
+    /// Push column clip rect for the given column index.
+    /// This is useful for custom drawing within columns.
+    #[doc(alias = "PushColumnClipRect")]
+    pub fn push_column_clip_rect(&self, column_index: i32) {
+        unsafe { sys::ImGui_PushColumnClipRect(column_index) }
+    }
+
+    /// Push columns background for drawing.
+    #[doc(alias = "PushColumnsBackground")]
+    pub fn push_columns_background(&self) {
+        unsafe { sys::ImGui_PushColumnsBackground() }
+    }
+
+    /// Pop columns background.
+    #[doc(alias = "PopColumnsBackground")]
+    pub fn pop_columns_background(&self) {
+        unsafe { sys::ImGui_PopColumnsBackground() }
+    }
+
+    /// Get columns ID for the given string ID and count.
+    #[doc(alias = "GetColumnsID")]
+    pub fn get_columns_id(&self, str_id: impl AsRef<str>, count: i32) -> u32 {
+        unsafe { sys::ImGui_GetColumnsID(self.scratch_txt(str_id), count) }
+    }
+
+    // ============================================================================
+    // Column state utilities
+    // ============================================================================
+
+    /// Check if any column is being resized.
+    /// Note: This is a placeholder implementation as the underlying C++ function is not available
+    pub fn is_any_column_resizing(&self) -> bool {
+        // TODO: Implement when the proper C++ binding is available
+        // The ImGui_GetCurrentWindow function is not available in our bindings
+        false
+    }
+
+    /// Get the total width of all columns.
+    pub fn get_columns_total_width(&self) -> f32 {
+        let count = self.column_count();
+        if count <= 0 {
+            return 0.0;
+        }
+
+        let mut total_width = 0.0;
+        for i in 0..count {
+            total_width += self.column_width(i);
+        }
+        total_width
+    }
+
+    /// Set all columns to equal width.
+    pub fn set_columns_equal_width(&self) {
+        let count = self.column_count();
+        if count <= 1 {
+            return;
+        }
+
+        let total_width = self.get_columns_total_width();
+        let equal_width = total_width / count as f32;
+
+        for i in 0..count {
+            self.set_column_width(i, equal_width);
+        }
+    }
+
+    /// Get column width as a percentage of total width.
+    pub fn get_column_width_percentage(&self, column_index: i32) -> f32 {
+        let total_width = self.get_columns_total_width();
+        if total_width <= 0.0 {
+            return 0.0;
+        }
+
+        let column_width = self.column_width(column_index);
+        (column_width / total_width) * 100.0
+    }
+
+    /// Set column width as a percentage of total width.
+    pub fn set_column_width_percentage(&self, column_index: i32, percentage: f32) {
+        let total_width = self.get_columns_total_width();
+        if total_width <= 0.0 {
+            return;
+        }
+
+        let new_width = (total_width * percentage) / 100.0;
+        self.set_column_width(column_index, new_width);
     }
 }

@@ -1,5 +1,6 @@
 use crate::sys;
 use crate::ui::Ui;
+use crate::input::MouseButton;
 
 /// # Tooltip Widgets
 impl Ui {
@@ -175,14 +176,7 @@ impl Ui {
     }
 }
 
-/// Mouse button enumeration
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(i32)]
-pub enum MouseButton {
-    Left = sys::ImGuiMouseButton_Left,
-    Right = sys::ImGuiMouseButton_Right,
-    Middle = sys::ImGuiMouseButton_Middle,
-}
+
 
 bitflags::bitflags! {
     /// Flags for IsItemHovered()

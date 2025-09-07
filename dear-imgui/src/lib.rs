@@ -83,7 +83,7 @@ pub use self::layout::*;
 pub use self::drag_drop::*;
 
 // Column layout system (included in layout module)
-// pub use self::columns::*;
+pub use self::columns::*;
 
 // Internal modules
 mod clipboard;
@@ -92,7 +92,7 @@ mod context;
 mod dock_space;
 mod draw;
 mod fonts;
-mod input;
+pub mod input;
 pub mod internal;
 mod io;
 mod list_clipper;

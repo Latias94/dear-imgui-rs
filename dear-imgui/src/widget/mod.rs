@@ -23,7 +23,7 @@ pub mod tree;
 // Re-export important types
 pub use popup::PopupFlags;
 pub use table::TableColumnSetup;
-pub use tooltip::{HoveredFlags, MouseButton};
+pub use tooltip::HoveredFlags;
 
 // Widget implementations
 pub use self::button::*;

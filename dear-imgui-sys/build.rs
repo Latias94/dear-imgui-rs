@@ -1,5 +1,5 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
     println!("cargo:rerun-if-changed=imgui");
@@ -160,4 +160,79 @@ fn generate_bindings() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
+
+    // Always copy bindings to src directory for reference
+    copy_bindings_for_reference(&bindings);
 }
+
+/// Copy generated bindings to src directory for easy reference
+fn copy_bindings_for_reference(bindings: &bindgen::Bindings) {
+    let reference_path = PathBuf::from("src/bindings_reference.rs");
+
+    // Write bindings to reference location
+    bindings
+        .write_to_file(&reference_path)
+        .expect("Couldn't write reference bindings!");
+
+    println!("cargo:warning=Copied bindings to src/bindings_reference.rs for reference");
+}
+
+// Unused function - keeping for potential future use
+#[allow(dead_code)]
+fn use_pregenerated_bindings(out_path: &Path, target_env: &str) {
+    let pregenerated_path = get_pregenerated_path(target_env);
+
+    if pregenerated_path.exists() {
+        std::fs::copy(&pregenerated_path, out_path.join("bindings.rs"))
+            .expect("Failed to copy pregenerated bindings");
+        println!("cargo:warning=Using pregenerated bindings from {}", pregenerated_path.display());
+    } else {
+        panic!(
+            "Pregenerated bindings not found at {}. Please run with bindgen or disable DEAR_IMGUI_USE_PREGENERATED.",
+            pregenerated_path.display()
+        );
+    }
+}
+
+#[allow(dead_code)]
+fn save_pregenerated_bindings(bindings: &bindgen::Bindings, target_env: &str) {
+    let pregenerated_path = get_pregenerated_path(target_env);
+
+    // Create directory if it doesn't exist
+    if let Some(parent) = pregenerated_path.parent() {
+        std::fs::create_dir_all(parent).expect("Failed to create pregenerated directory");
+    }
+
+    bindings
+        .write_to_file(&pregenerated_path)
+        .expect("Failed to save pregenerated bindings");
+
+    println!("cargo:warning=Saved pregenerated bindings to {}", pregenerated_path.display());
+}
+
+#[allow(dead_code)]
+fn get_pregenerated_path(target_env: &str) -> PathBuf {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+
+    // Create a unique filename based on target and features
+    let mut filename = format!("bindings_{}_{}", target_os, target_arch);
+
+    if target_env == "msvc" {
+        filename.push_str("_msvc");
+    }
+
+    if cfg!(feature = "docking") {
+        filename.push_str("_docking");
+    }
+
+    if cfg!(feature = "freetype") {
+        filename.push_str("_freetype");
+    }
+
+    filename.push_str(".rs");
+
+    PathBuf::from("src/pregenerated").join(filename)
+}
+
+
