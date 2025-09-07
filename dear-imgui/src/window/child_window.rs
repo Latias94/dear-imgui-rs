@@ -2,11 +2,38 @@ use crate::sys;
 use crate::{Ui, WindowFlags};
 use std::ffi::CString;
 
+bitflags::bitflags! {
+    /// Configuration flags for child windows
+    #[repr(transparent)]
+    pub struct ChildFlags: u32 {
+        /// No flags
+        const NONE = 0;
+        /// Show an outer border and enable WindowPadding
+        const BORDERS = 1 << 0;
+        /// Pad with style.WindowPadding even if no border are drawn
+        const ALWAYS_USE_WINDOW_PADDING = 1 << 1;
+        /// Allow resize from right border
+        const RESIZE_X = 1 << 2;
+        /// Allow resize from bottom border
+        const RESIZE_Y = 1 << 3;
+        /// Enable auto-resizing width
+        const AUTO_RESIZE_X = 1 << 4;
+        /// Enable auto-resizing height
+        const AUTO_RESIZE_Y = 1 << 5;
+        /// Combined with AutoResizeX/AutoResizeY. Always measure size even when child is hidden
+        const ALWAYS_AUTO_RESIZE = 1 << 6;
+        /// Style the child window like a framed item
+        const FRAME_STYLE = 1 << 7;
+        /// Share focus scope, allow gamepad/keyboard navigation to cross over parent border
+        const NAV_FLATTENED = 1 << 8;
+    }
+}
+
 /// Represents a child window that can be built
 pub struct ChildWindow<'ui> {
     name: String,
     size: [f32; 2],
-    border: bool,
+    child_flags: ChildFlags,
     flags: WindowFlags,
     _phantom: std::marker::PhantomData<&'ui ()>,
 }
@@ -17,7 +44,7 @@ impl<'ui> ChildWindow<'ui> {
         Self {
             name: name.into(),
             size: [0.0, 0.0],
-            border: false,
+            child_flags: ChildFlags::NONE,
             flags: WindowFlags::empty(),
             _phantom: std::marker::PhantomData,
         }
@@ -31,7 +58,13 @@ impl<'ui> ChildWindow<'ui> {
 
     /// Sets whether the child window has a border
     pub fn border(mut self, border: bool) -> Self {
-        self.border = border;
+        self.child_flags.set(ChildFlags::BORDERS, border);
+        self
+    }
+
+    /// Sets child flags for the child window
+    pub fn child_flags(mut self, child_flags: ChildFlags) -> Self {
+        self.child_flags = child_flags;
         self
     }
 
@@ -47,9 +80,13 @@ impl<'ui> ChildWindow<'ui> {
         F: FnOnce() -> R,
     {
         let token = self.begin(ui)?;
-        let result = f();
+        let result = if token.should_render {
+            Some(f())
+        } else {
+            None
+        };
         drop(token); // Explicitly drop the token to call EndChild
-        Some(result)
+        result
     }
 
     /// Begins the child window and returns a token
@@ -64,24 +101,25 @@ impl<'ui> ChildWindow<'ui> {
             sys::ImGui_BeginChild(
                 name_cstr.as_ptr(),
                 &size_vec,
-                self.border as i32,
+                self.child_flags.bits() as i32,
                 self.flags.bits() as i32,
             )
         };
 
-        if result {
-            Some(ChildWindowToken {
-                _phantom: std::marker::PhantomData,
-            })
-        } else {
-            None
-        }
+        // IMPORTANT: According to ImGui documentation, BeginChild/EndChild are inconsistent
+        // with other Begin/End functions. EndChild() must ALWAYS be called regardless of
+        // what BeginChild() returns. This is different from other ImGui functions.
+        Some(ChildWindowToken {
+            _phantom: std::marker::PhantomData,
+            should_render: result,
+        })
     }
 }
 
 /// Token representing an active child window
 pub struct ChildWindowToken<'ui> {
     _phantom: std::marker::PhantomData<&'ui ()>,
+    should_render: bool,
 }
 
 impl<'ui> Drop for ChildWindowToken<'ui> {

@@ -233,7 +233,7 @@ impl AppWindow {
         let imgui = self.imgui.as_mut().unwrap();
 
         let now = Instant::now();
-        let delta_time = now - imgui.last_frame;
+        let _delta_time = now - imgui.last_frame;
         imgui.last_frame = now;
 
         let frame = self.surface.get_current_texture()?;
@@ -245,21 +245,22 @@ impl AppWindow {
         
         // Create main dockspace
         imgui.dockspace_id = ui.dockspace_over_main_viewport();
-        
+
         // Setup initial layout on first frame
         if imgui.first_frame {
             setup_initial_docking_layout(imgui.dockspace_id);
             imgui.first_frame = false;
         }
 
-        // Render all panels
+        // Render all panels with Unity-style names - testing one by one
         render_main_menu_bar(&ui, &mut imgui.game_state);
-        render_scene_hierarchy(&ui, &mut imgui.game_state);
-        render_inspector(&ui, &mut imgui.game_state);
-        render_viewport(&ui, &mut imgui.game_state);
-        render_console(&ui, &mut imgui.game_state);
-        render_asset_browser(&ui, &mut imgui.game_state);
-        render_performance_stats(&ui, &mut imgui.game_state);
+        render_hierarchy(&ui, &mut imgui.game_state);
+        render_project(&ui, &mut imgui.game_state);
+        // render_scene_view(&ui, &mut imgui.game_state);
+        // render_game_view(&ui, &mut imgui.game_state);
+        // render_inspector(&ui, &mut imgui.game_state);
+        // render_console(&ui, &mut imgui.game_state);
+        // render_performance(&ui, &mut imgui.game_state);
 
         let draw_data = imgui.context.render();
 
@@ -294,10 +295,86 @@ impl AppWindow {
     }
 }
 
-/// Setup the initial docking layout
-fn setup_initial_docking_layout(_dockspace_id: u32) {
-    // Note: DockBuilder functionality would be used here when fully implemented
-    // For now, we'll let users manually arrange the docking layout
+/// Setup the initial docking layout - Professional Unity-style game engine layout
+fn setup_initial_docking_layout(dockspace_id: u32) {
+    use dear_imgui::{DockBuilder, SplitDirection};
+
+    // Clear any existing layout and create fresh dockspace
+    DockBuilder::remove_node(dockspace_id);
+    DockBuilder::add_node(dockspace_id, dear_imgui::DockNodeFlags::NONE);
+    DockBuilder::set_node_size(dockspace_id, [1920.0, 1080.0]);
+
+    // Unity-style Professional Layout:
+    // +-------------------+---------------------------+-------------------+
+    // |                   |        Scene View         |                   |
+    // |   Hierarchy       |---------------------------|    Inspector      |
+    // |                   |        Game View          |                   |
+    // +-------------------+---------------------------+-------------------+
+    // |      Project      |         Console           |   Performance     |
+    // +-------------------+---------------------------+-------------------+
+
+    // Step 1: Create main horizontal splits
+    // Left panel (Hierarchy + Project): 20%
+    // Center area (Scene/Game + Console): 60%
+    // Right panel (Inspector + Performance): 20%
+
+    let mut left_panel_id = 0u32;
+    let remaining_after_left = DockBuilder::split_node(
+        dockspace_id,
+        SplitDirection::Left,
+        0.2,
+        Some(&mut left_panel_id)
+    );
+
+    let mut right_panel_id = 0u32;
+    let center_area_id = DockBuilder::split_node(
+        remaining_after_left,
+        SplitDirection::Right,
+        0.25, // 20% of remaining 80% = 20% total
+        Some(&mut right_panel_id)
+    );
+
+    // Step 2: Split left panel vertically
+    // Hierarchy (top 70%) + Project (bottom 30%)
+    let mut project_id = 0u32;
+    let hierarchy_id = DockBuilder::split_node(
+        left_panel_id,
+        SplitDirection::Down,
+        0.3,
+        Some(&mut project_id)
+    );
+
+    // Step 3: Split center area vertically
+    // Scene/Game views (top 75%) + Console (bottom 25%)
+    let mut console_id = 0u32;
+    let viewport_area_id = DockBuilder::split_node(
+        center_area_id,
+        SplitDirection::Down,
+        0.25,
+        Some(&mut console_id)
+    );
+
+    // Step 4: Split right panel vertically
+    // Inspector (top 80%) + Performance (bottom 20%)
+    let mut performance_id = 0u32;
+    let inspector_id = DockBuilder::split_node(
+        right_panel_id,
+        SplitDirection::Down,
+        0.2,
+        Some(&mut performance_id)
+    );
+
+    // Step 5: Dock all windows to their designated areas
+    DockBuilder::dock_window("Hierarchy", hierarchy_id);
+    DockBuilder::dock_window("Project", project_id);
+    DockBuilder::dock_window("Scene View", viewport_area_id);
+    DockBuilder::dock_window("Game View", viewport_area_id); // Same area as Scene View (tabbed)
+    DockBuilder::dock_window("Console", console_id);
+    DockBuilder::dock_window("Inspector", inspector_id);
+    DockBuilder::dock_window("Performance", performance_id);
+
+    // Finalize the layout
+    DockBuilder::finish(dockspace_id);
 }
 
 /// Render the main menu bar
@@ -361,26 +438,36 @@ fn render_main_menu_bar(ui: &Ui, game_state: &mut GameEngineState) {
     }
 }
 
-/// Render the scene hierarchy panel
-fn render_scene_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
-    ui.window("Scene Hierarchy")
+/// Render the Hierarchy panel (Unity-style)
+fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
+    ui.window("Hierarchy")
         .size([300.0, 400.0], Condition::FirstUseEver)
         .build(|| {
-            ui.text(format!("Scene: {}", game_state.scene_name));
+            // Scene name header
+            ui.text_colored([0.8, 0.8, 0.8, 1.0], format!("Scene: {}", game_state.scene_name));
             ui.separator();
 
-            // Search filter
-            ui.input_text("Search", &mut String::new()).build();
+            // Search filter with icon
+            ui.text("🔍"); ui.same_line();
+            ui.input_text("##search", &mut String::new()).build();
 
             ui.separator();
 
-            // Entity list
+            // Entity list with hierarchy
             let mut selected_entity = None;
-            let mut entity_to_duplicate = None;
-            let mut entity_to_delete = None;
+            let mut entity_to_duplicate: Option<String> = None;
+            let mut entity_to_delete: Option<String> = None;
 
             for (_i, entity) in game_state.entities.iter().enumerate() {
                 let is_selected = game_state.selected_entity.as_ref() == Some(entity);
+
+                // Add hierarchy indentation and icons
+                let icon = if entity.contains("Camera") { "📷" }
+                          else if entity.contains("Light") { "💡" }
+                          else if entity.contains("Mesh") { "🔷" }
+                          else { "🎯" };
+
+                ui.text(icon); ui.same_line();
 
                 if ui.selectable_config(entity)
                     .selected(is_selected)
@@ -391,6 +478,10 @@ fn render_scene_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
 
                 // Right-click context menu
                 if let Some(_popup) = ui.begin_popup_context_item() {
+                    if ui.menu_item("Create Empty Child") {
+                        entity_to_duplicate = Some(format!("{} - Child", entity));
+                    }
+                    ui.separator();
                     if ui.menu_item("Duplicate") {
                         entity_to_duplicate = Some(entity.clone());
                     }
@@ -398,7 +489,10 @@ fn render_scene_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
                         entity_to_delete = Some(entity.clone());
                     }
                     ui.separator();
-                    ui.menu_item("Rename");
+                    if ui.menu_item("Rename") {
+                        // TODO: Implement rename functionality
+                    }
+                    // popup.end() is called automatically by Drop
                 }
             }
 
@@ -428,11 +522,83 @@ fn render_scene_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
 
             if let Some(entity) = entity_to_delete {
                 game_state.console_logs.push(format!("[INFO] {} deleted", entity));
+                game_state.entities.retain(|e| e != &entity);
+                if game_state.selected_entity.as_ref() == Some(&entity) {
+                    game_state.selected_entity = None;
+                }
             }
 
-            // Add new entity button
-            if ui.button("+ Add Entity") {
-                game_state.entities.push("New GameObject".to_string());
+            ui.separator();
+
+            // Create buttons
+            if ui.button("Create Empty") {
+                let new_entity = format!("GameObject ({})", game_state.entities.len() + 1);
+                game_state.entities.push(new_entity);
+            }
+            ui.same_line();
+            if ui.button("Create Cube") {
+                let new_entity = format!("Cube ({})", game_state.entities.len() + 1);
+                game_state.entities.push(new_entity);
+            }
+        });
+}
+
+/// Render the Project panel (Unity-style)
+fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
+    ui.window("Project")
+        .size([300.0, 200.0], Condition::FirstUseEver)
+        .build(|| {
+            // Project folder navigation
+            ui.text_colored([0.8, 0.8, 0.8, 1.0], format!("Project: {}", game_state.project_name));
+            ui.separator();
+
+            // Folder path
+            ui.text("📁"); ui.same_line();
+            ui.text(&game_state.current_folder);
+
+            ui.separator();
+
+            // Asset grid view
+            let mut columns = 4;
+            if ui.button("List View") { columns = 1; }
+            ui.same_line();
+            if ui.button("Grid View") { columns = 4; }
+
+            ui.separator();
+
+            // Assets display
+            for (i, asset) in game_state.assets.iter().enumerate() {
+                if i % columns != 0 { ui.same_line(); }
+
+                let icon = if asset.ends_with(".cs") { "📄" }
+                          else if asset.ends_with(".png") || asset.ends_with(".jpg") { "🖼️" }
+                          else if asset.ends_with(".fbx") || asset.ends_with(".obj") { "🎲" }
+                          else if asset.ends_with(".wav") || asset.ends_with(".mp3") { "🔊" }
+                          else { "📄" };
+
+                ui.button(format!("{}\n{}", icon, asset));
+
+                // Right-click context menu - temporarily disabled for testing
+                // if let Some(popup) = ui.begin_popup_context_item() {
+                //     if ui.menu_item("Import") {
+                //         game_state.console_logs.push(format!("[INFO] Importing {}", asset));
+                //     }
+                //     if ui.menu_item("Delete") {
+                //         game_state.console_logs.push(format!("[INFO] Deleted {}", asset));
+                //     }
+                //     ui.separator();
+                //     if ui.menu_item("Show in Explorer") {
+                //         game_state.console_logs.push(format!("[INFO] Opening {}", asset));
+                //     }
+                //     popup.end();
+                // }
+            }
+
+            ui.separator();
+
+            // Import button
+            if ui.button("Import New Asset") {
+                game_state.assets.push(format!("NewAsset_{}.png", game_state.assets.len()));
             }
         });
 }
@@ -520,22 +686,23 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
         });
 }
 
-/// Render the main viewport
-fn render_viewport(ui: &Ui, game_state: &mut GameEngineState) {
-    ui.window("Viewport")
+/// Render the Scene View (Unity-style editor view)
+fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
+    ui.window("Scene View")
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
-            // Viewport toolbar
-            if ui.button("🎮 Play") {
-                game_state.console_logs.push("[INFO] Play mode started".to_string());
+            // Scene view toolbar
+            ui.text("🔧"); ui.same_line();
+            if ui.button("Move") {
+                game_state.console_logs.push("[INFO] Move tool selected".to_string());
             }
             ui.same_line();
-            if ui.button("⏸ Pause") {
-                game_state.console_logs.push("[INFO] Play mode paused".to_string());
+            if ui.button("Rotate") {
+                game_state.console_logs.push("[INFO] Rotate tool selected".to_string());
             }
             ui.same_line();
-            if ui.button("⏹ Stop") {
-                game_state.console_logs.push("[INFO] Play mode stopped".to_string());
+            if ui.button("Scale") {
+                game_state.console_logs.push("[INFO] Scale tool selected".to_string());
             }
 
             ui.same_line();
@@ -548,23 +715,22 @@ fn render_viewport(ui: &Ui, game_state: &mut GameEngineState) {
 
             ui.separator();
 
-            // Main viewport area
+            // Scene view area
             let content_region = ui.content_region_avail();
             game_state.viewport_size = [content_region[0], content_region[1]];
 
             // Only draw if we have a valid canvas size
             if content_region[0] > 0.0 && content_region[1] > 0.0 {
-                // Placeholder for actual 3D rendering
                 let draw_list = ui.get_window_draw_list();
                 let canvas_pos = ui.cursor_screen_pos();
                 let canvas_size = content_region;
 
-                // Draw a simple "3D scene" placeholder
+                // Draw scene background
                 draw_list
                     .add_rect(
                         canvas_pos,
                         [canvas_pos[0] + canvas_size[0], canvas_pos[1] + canvas_size[1]],
-                        [0.2, 0.3, 0.4, 1.0],
+                        [0.15, 0.15, 0.15, 1.0],
                     )
                     .filled(true)
                     .build();
@@ -572,7 +738,7 @@ fn render_viewport(ui: &Ui, game_state: &mut GameEngineState) {
                 // Draw grid if enabled
                 if game_state.show_grid {
                     let grid_step = 50.0;
-                    let grid_color = [0.4, 0.4, 0.4, 0.5];
+                    let grid_color = [0.3, 0.3, 0.3, 0.8];
 
                     // Vertical lines
                     let mut x = canvas_pos[0];
@@ -603,7 +769,7 @@ fn render_viewport(ui: &Ui, game_state: &mut GameEngineState) {
                     }
                 }
 
-                // Draw some placeholder objects
+                // Draw scene objects
                 draw_list
                     .add_rect(
                         [canvas_pos[0] + 100.0, canvas_pos[1] + 100.0],
@@ -623,9 +789,80 @@ fn render_viewport(ui: &Ui, game_state: &mut GameEngineState) {
                     .num_segments(32)
                     .build();
 
-                ui.text(format!("Viewport Size: {:.0}x{:.0}", canvas_size[0], canvas_size[1]));
+                // Scene info
+                ui.text(format!("Scene Size: {:.0}x{:.0}", canvas_size[0], canvas_size[1]));
             } else {
-                ui.text("Viewport too small to render");
+                ui.text("Scene view too small to render");
+            }
+        });
+}
+
+/// Render the Game View (Unity-style play view)
+fn render_game_view(ui: &Ui, game_state: &mut GameEngineState) {
+    ui.window("Game View")
+        .size([800.0, 600.0], Condition::FirstUseEver)
+        .build(|| {
+            // Game view toolbar
+            if ui.button("🎮 Play") {
+                game_state.console_logs.push("[INFO] Play mode started".to_string());
+            }
+            ui.same_line();
+            if ui.button("⏸ Pause") {
+                game_state.console_logs.push("[INFO] Play mode paused".to_string());
+            }
+            ui.same_line();
+            if ui.button("⏹ Stop") {
+                game_state.console_logs.push("[INFO] Play mode stopped".to_string());
+            }
+
+            ui.same_line();
+            ui.separator_vertical();
+            ui.same_line();
+
+            ui.text("Aspect:"); ui.same_line();
+            if ui.button("16:9") {
+                game_state.console_logs.push("[INFO] Aspect ratio set to 16:9".to_string());
+            }
+            ui.same_line();
+            if ui.button("4:3") {
+                game_state.console_logs.push("[INFO] Aspect ratio set to 4:3".to_string());
+            }
+
+            ui.separator();
+
+            // Game view area
+            let content_region = ui.content_region_avail();
+
+            if content_region[0] > 0.0 && content_region[1] > 0.0 {
+                let draw_list = ui.get_window_draw_list();
+                let canvas_pos = ui.cursor_screen_pos();
+                let canvas_size = content_region;
+
+                // Draw game background
+                draw_list
+                    .add_rect(
+                        canvas_pos,
+                        [canvas_pos[0] + canvas_size[0], canvas_pos[1] + canvas_size[1]],
+                        [0.1, 0.2, 0.4, 1.0],
+                    )
+                    .filled(true)
+                    .build();
+
+                // Draw game objects (different from scene view)
+                draw_list
+                    .add_rect(
+                        [canvas_pos[0] + 120.0, canvas_pos[1] + 120.0],
+                        [canvas_pos[0] + 170.0, canvas_pos[1] + 170.0],
+                        [0.8, 0.2, 0.8, 1.0],
+                    )
+                    .filled(true)
+                    .build();
+
+                // Game info
+                ui.text(format!("Game Size: {:.0}x{:.0}", canvas_size[0], canvas_size[1]));
+                ui.text("FPS: 60 | Frame: 1234");
+            } else {
+                ui.text("Game view too small to render");
             }
         });
 }
@@ -635,83 +872,12 @@ fn render_console(ui: &Ui, game_state: &mut GameEngineState) {
     ui.window("Console")
         .size([800.0, 200.0], Condition::FirstUseEver)
         .build(|| {
-            // Console toolbar
-            if ui.button("Clear") {
-                game_state.console_logs.clear();
-            }
-            ui.same_line();
-
-            let mut show_info = true;
-            let mut show_warnings = true;
-            let mut show_errors = true;
-
-            ui.checkbox("Info", &mut show_info);
-            ui.same_line();
-            ui.checkbox("Warnings", &mut show_warnings);
-            ui.same_line();
-            ui.checkbox("Errors", &mut show_errors);
-
-            ui.separator();
-
-            // Console output
-            ui.child_window("console_output")
-                .size([0.0, -25.0])
-                .build(&ui, || {
-                    for log in &game_state.console_logs {
-                        let color = if log.contains("[ERROR]") {
-                            [1.0, 0.4, 0.4, 1.0] // Red
-                        } else if log.contains("[WARNING]") {
-                            [1.0, 1.0, 0.4, 1.0] // Yellow
-                        } else {
-                            [1.0, 1.0, 1.0, 1.0] // White
-                        };
-
-                        ui.text_colored(color, log);
-                    }
-
-                    // Auto-scroll to bottom
-                    if ui.scroll_y() >= ui.scroll_max_y() {
-                        ui.set_scroll_here_y(1.0);
-                    }
-                });
-
-            // Console input
-            ui.separator();
-            let mut enter_pressed = false;
-            ui.input_text("##console_input", &mut game_state.console_input).build();
-            if ui.is_item_focused() && ui.is_key_pressed(dear_imgui::Key::Enter) {
-                enter_pressed = true;
-            }
-            if enter_pressed {
-                if !game_state.console_input.is_empty() {
-                    game_state.console_logs.push(format!("> {}", game_state.console_input));
-
-                    // Simple command processing
-                    match game_state.console_input.as_str() {
-                        "help" => {
-                            game_state.console_logs.push("[INFO] Available commands: help, clear, fps, version".to_string());
-                        }
-                        "clear" => {
-                            game_state.console_logs.clear();
-                        }
-                        "fps" => {
-                            game_state.console_logs.push(format!("[INFO] Current FPS: {:.1}", game_state.fps));
-                        }
-                        "version" => {
-                            game_state.console_logs.push("[INFO] Game Engine v1.0.0".to_string());
-                        }
-                        _ => {
-                            game_state.console_logs.push(format!("[ERROR] Unknown command: {}", game_state.console_input));
-                        }
-                    }
-
-                    game_state.console_input.clear();
-                }
-            }
+            ui.text("Console - Simplified Version");
+            ui.text("This is a test to isolate the EndChild error");
         });
 }
 
-/// Render the asset browser panel
+/// Render the asset browser panel (already handled by Project panel)
 fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
     ui.window("Asset Browser")
         .size([300.0, 300.0], Condition::FirstUseEver)
@@ -758,23 +924,23 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
                     }
                 }
 
-                // Right-click context menu
-                if let Some(_popup) = ui.begin_popup_context_item() {
-                    if ui.menu_item("Import") {
-                        game_state.console_logs.push(format!("[INFO] Importing {}", asset));
-                    }
-                    if ui.menu_item("Delete") {
-                        game_state.console_logs.push(format!("[WARNING] Deleted {}", asset));
-                    }
-                    ui.separator();
-                    ui.menu_item("Properties");
-                }
+                // Right-click context menu - temporarily disabled for testing
+                // if let Some(_popup) = ui.begin_popup_context_item() {
+                //     if ui.menu_item("Import") {
+                //         game_state.console_logs.push(format!("[INFO] Importing {}", asset));
+                //     }
+                //     if ui.menu_item("Delete") {
+                //         game_state.console_logs.push(format!("[WARNING] Deleted {}", asset));
+                //     }
+                //     ui.separator();
+                //     ui.menu_item("Properties");
+                // }
             }
         });
 }
 
 /// Render the performance stats panel
-fn render_performance_stats(ui: &Ui, game_state: &mut GameEngineState) {
+fn render_performance(ui: &Ui, game_state: &mut GameEngineState) {
     ui.window("Performance")
         .size([250.0, 200.0], Condition::FirstUseEver)
         .build(|| {
@@ -800,9 +966,10 @@ fn render_performance_stats(ui: &Ui, game_state: &mut GameEngineState) {
 
             // Simple performance graph
             ui.text("FPS Graph:");
-            let fps_history: Vec<f32> = (0..60).map(|i| {
+            let _fps_history: Vec<f32> = (0..60).map(|i| {
                 60.0 + ((ui.time() - i as f64 * 0.1) * 2.0).sin() as f32 * 5.0
             }).collect();
+            // TODO: Implement actual graph rendering with plot_lines when available
 
             // Note: plot_lines might not be available in current API
             ui.text("(Graph visualization would go here)");
