@@ -20,7 +20,10 @@ fn test_docking_basic_functions() {
     let window_class = WindowClass::new(1)
         .docking_always_tab_bar(true)
         .docking_allow_unclassed(false);
-    println!("Created window class with class_id: {}", window_class.class_id);
+    println!(
+        "Created window class with class_id: {}",
+        window_class.class_id
+    );
 
     println!("✅ Basic docking functions test passed");
 }
@@ -28,7 +31,7 @@ fn test_docking_basic_functions() {
 #[test]
 fn test_dock_node_flags() {
     let _guard = TEST_MUTEX.lock().unwrap();
-    
+
     // Test DockNodeFlags bitflags
     let flags = DockNodeFlags::NO_RESIZE | DockNodeFlags::AUTO_HIDE_TAB_BAR;
     assert!(flags.contains(DockNodeFlags::NO_RESIZE));
@@ -40,14 +43,14 @@ fn test_dock_node_flags() {
     assert_eq!(DockNodeFlags::NONE.bits(), 0);
     assert_ne!(DockNodeFlags::KEEP_ALIVE_ONLY.bits(), 0);
     assert_ne!(DockNodeFlags::PASSTHRU_CENTRAL_NODE.bits(), 0);
-    
+
     println!("✅ Dock node flags test passed");
 }
 
 #[test]
 fn test_window_class() {
     let _guard = TEST_MUTEX.lock().unwrap();
-    
+
     // Test default window class
     let default_class = WindowClass::default();
     assert_eq!(default_class.class_id, 0);
@@ -63,7 +66,7 @@ fn test_window_class() {
         .focus_route_parent_window_id(200)
         .docking_always_tab_bar(true)
         .docking_allow_unclassed(false);
-    
+
     assert_eq!(custom_class.class_id, 42);
     assert_eq!(custom_class.parent_viewport_id, 100);
     assert_eq!(custom_class.focus_route_parent_window_id, 200);

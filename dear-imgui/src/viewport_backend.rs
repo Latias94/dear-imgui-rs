@@ -322,17 +322,13 @@ pub fn clear_renderer_viewport_context() {
 /// Check if a platform viewport context is available
 #[cfg(feature = "multi-viewport")]
 pub fn has_platform_viewport_context() -> bool {
-    PLATFORM_VIEWPORT_CONTEXT.with(|ctx| {
-        ctx.borrow().is_some()
-    })
+    PLATFORM_VIEWPORT_CONTEXT.with(|ctx| ctx.borrow().is_some())
 }
 
 /// Check if a renderer viewport context is available
 #[cfg(feature = "multi-viewport")]
 pub fn has_renderer_viewport_context() -> bool {
-    RENDERER_VIEWPORT_CONTEXT.with(|ctx| {
-        ctx.borrow().is_some()
-    })
+    RENDERER_VIEWPORT_CONTEXT.with(|ctx| ctx.borrow().is_some())
 }
 
 /// Execute a closure with access to the platform viewport context, with error handling

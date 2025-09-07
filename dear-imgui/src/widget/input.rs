@@ -20,7 +20,11 @@ impl Ui {
     /// }
     /// ```
     #[doc(alias = "InputText", alias = "InputTextWithHint")]
-    pub fn input_text<'p>(&self, label: impl AsRef<str>, buf: &'p mut String) -> InputText<'_, 'p, String, String, PassthroughCallback> {
+    pub fn input_text<'p>(
+        &self,
+        label: impl AsRef<str>,
+        buf: &'p mut String,
+    ) -> InputText<'_, 'p, String, String, PassthroughCallback> {
         InputText::new(self, label, buf)
     }
 
@@ -176,7 +180,8 @@ impl<'ui, 'p, L, H, T> InputText<'ui, 'p, L, H, T> {
 
     /// Makes Enter key return true instead of adding new line
     pub fn enter_returns_true(mut self, enter_returns: bool) -> Self {
-        self.flags.set(InputTextFlags::ENTER_RETURNS_TRUE, enter_returns);
+        self.flags
+            .set(InputTextFlags::ENTER_RETURNS_TRUE, enter_returns);
         self
     }
 
@@ -261,8 +266,6 @@ where
         result
     }
 }
-
-
 
 /// Builder for multiline text input widget
 #[derive(Debug)]

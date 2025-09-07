@@ -108,7 +108,7 @@ fn generate_bindings() {
     // MSVC ABI fix: blocklist functions that return ImVec2
     if target_env == "msvc" {
         println!("cargo:rerun-if-changed=msvc_blocklist.txt");
-        println!("cargo:rerun-if-changed=hack_msvc.cpp");
+        println!("cargo:rerun-if-changed=imgui_msvc_wrapper.cpp");
 
         // Read blocklist file if it exists
         if let Ok(blocklist_content) = std::fs::read_to_string("msvc_blocklist.txt") {
@@ -134,11 +134,16 @@ fn generate_bindings() {
             }
         }
 
-        // Include MSVC hack header
+        // Include MSVC wrapper for bindgen to see the fixed functions
         builder = builder
-            .header("hack_msvc.cpp")
-            .allowlist_file("hack_msvc.cpp");
+            .header("imgui_msvc_wrapper.cpp")
+            .allowlist_file("imgui_msvc_wrapper.cpp");
     }
+
+    // Add viewport callback wrappers (for all platforms, not just MSVC)
+    builder = builder
+        .allowlist_function("ImGui_Platform_SetGetWindowPosCallback")
+        .allowlist_function("ImGui_Platform_SetGetWindowSizeCallback");
 
     // Add basic clang arguments for C++
     builder = builder
@@ -196,7 +201,10 @@ fn use_pregenerated_bindings(out_path: &Path, target_env: &str) {
     if pregenerated_path.exists() {
         std::fs::copy(&pregenerated_path, out_path.join("bindings.rs"))
             .expect("Failed to copy pregenerated bindings");
-        println!("cargo:warning=Using pregenerated bindings from {}", pregenerated_path.display());
+        println!(
+            "cargo:warning=Using pregenerated bindings from {}",
+            pregenerated_path.display()
+        );
     } else {
         panic!(
             "Pregenerated bindings not found at {}. Please run with bindgen or disable DEAR_IMGUI_USE_PREGENERATED.",
@@ -218,7 +226,10 @@ fn save_pregenerated_bindings(bindings: &bindgen::Bindings, target_env: &str) {
         .write_to_file(&pregenerated_path)
         .expect("Failed to save pregenerated bindings");
 
-    println!("cargo:warning=Saved pregenerated bindings to {}", pregenerated_path.display());
+    println!(
+        "cargo:warning=Saved pregenerated bindings to {}",
+        pregenerated_path.display()
+    );
 }
 
 #[allow(dead_code)]
@@ -245,5 +256,3 @@ fn get_pregenerated_path(target_env: &str) -> PathBuf {
 
     PathBuf::from("src/pregenerated").join(filename)
 }
-
-

@@ -152,30 +152,30 @@ mod tests {
     fn test_platform_viewport_context() {
         // Clear any existing context
         clear_platform_viewport_context();
-        
+
         // Initially no context should be available
         assert!(!has_platform_viewport_context());
-        
+
         // Create and set a test backend
         let backend = TestPlatformBackend::new();
         let calls_ref = backend.calls.clone();
         let context = PlatformViewportContext::new(backend);
-        
+
         set_platform_viewport_context(context);
-        
+
         // Now context should be available
         assert!(has_platform_viewport_context());
-        
+
         // Test calling methods through the context
         let mut dummy_viewport = Viewport::dummy();
-        
+
         with_platform_viewport_context(|backend| {
             backend.create_window(&mut dummy_viewport);
             backend.show_window(&mut dummy_viewport);
             backend.set_window_pos(&mut dummy_viewport, [10.0, 20.0]);
             let _pos = backend.get_window_pos(&mut dummy_viewport);
         });
-        
+
         // Verify the calls were recorded
         let calls = calls_ref.lock().unwrap();
         assert_eq!(calls.len(), 4);
@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(calls[1], "show_window");
         assert_eq!(calls[2], "set_window_pos(10, 20)");
         assert_eq!(calls[3], "get_window_pos");
-        
+
         // Clear context
         clear_platform_viewport_context();
         assert!(!has_platform_viewport_context());
@@ -193,36 +193,36 @@ mod tests {
     fn test_renderer_viewport_context() {
         // Clear any existing context
         clear_renderer_viewport_context();
-        
+
         // Initially no context should be available
         assert!(!has_renderer_viewport_context());
-        
+
         // Create and set a test backend
         let backend = TestRendererBackend::new();
         let calls_ref = backend.calls.clone();
         let context = RendererViewportContext::new(backend);
-        
+
         set_renderer_viewport_context(context);
-        
+
         // Now context should be available
         assert!(has_renderer_viewport_context());
-        
+
         // Test calling methods through the context
         let mut dummy_viewport = Viewport::dummy();
-        
+
         with_renderer_viewport_context(|backend| {
             backend.create_window(&mut dummy_viewport);
             backend.set_window_size(&mut dummy_viewport, [1024.0, 768.0]);
             backend.render_window(&mut dummy_viewport);
         });
-        
+
         // Verify the calls were recorded
         let calls = calls_ref.lock().unwrap();
         assert_eq!(calls.len(), 3);
         assert_eq!(calls[0], "create_window");
         assert_eq!(calls[1], "set_window_size(1024, 768)");
         assert_eq!(calls[2], "render_window");
-        
+
         // Clear context
         clear_renderer_viewport_context();
         assert!(!has_renderer_viewport_context());
@@ -233,19 +233,15 @@ mod tests {
         // Clear contexts
         clear_platform_viewport_context();
         clear_renderer_viewport_context();
-        
+
         // Test error handling when no context is available
-        let result = try_with_platform_viewport_context::<_, (), ViewportError>(|_backend| {
-            Ok(())
-        });
-        
+        let result = try_with_platform_viewport_context::<_, (), ViewportError>(|_backend| Ok(()));
+
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), ViewportError::NoContext);
-        
-        let result = try_with_renderer_viewport_context::<_, (), ViewportError>(|_backend| {
-            Ok(())
-        });
-        
+
+        let result = try_with_renderer_viewport_context::<_, (), ViewportError>(|_backend| Ok(()));
+
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), ViewportError::NoContext);
     }
@@ -254,13 +250,13 @@ mod tests {
     fn test_viewport_error_display() {
         let error = ViewportError::NoContext;
         assert_eq!(error.to_string(), "No viewport context available");
-        
+
         let error = ViewportError::InvalidViewport;
         assert_eq!(error.to_string(), "Invalid viewport handle");
-        
+
         let error = ViewportError::PlatformError("test error".to_string());
         assert_eq!(error.to_string(), "Platform error: test error");
-        
+
         let error = ViewportError::RendererError("render failed".to_string());
         assert_eq!(error.to_string(), "Renderer error: render failed");
     }

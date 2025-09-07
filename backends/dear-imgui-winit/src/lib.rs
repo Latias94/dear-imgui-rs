@@ -603,7 +603,8 @@ impl PlatformViewportBackend for WinitViewportBackend {
                 let logical_pos = LogicalPosition::new(pos[0] as f64, pos[1] as f64);
                 // Note: winit doesn't provide a direct way to set window position
                 // This is a limitation of the current winit API
-                let _ = window.set_outer_position(logical_pos.to_physical::<f64>(window.scale_factor()));
+                let _ = window
+                    .set_outer_position(logical_pos.to_physical::<f64>(window.scale_factor()));
             }
         }
     }

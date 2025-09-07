@@ -165,13 +165,25 @@ impl ApplicationHandler for MultiViewportApp {
         self.renderer = Some(renderer);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
-        if let (Some(window), Some(platform), Some(imgui_ctx)) = 
-            (&self.window, &mut self.platform, &mut self.imgui_ctx) 
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        if let (Some(window), Some(platform), Some(imgui_ctx)) =
+            (&self.window, &mut self.platform, &mut self.imgui_ctx)
         {
             if window.id() == window_id {
-                let response = platform.handle_event(&Event::WindowEvent { window_id, event: event.clone() }, window, imgui_ctx);
-                
+                let response = platform.handle_event(
+                    &Event::WindowEvent {
+                        window_id,
+                        event: event.clone(),
+                    },
+                    window,
+                    imgui_ctx,
+                );
+
                 match event {
                     WindowEvent::CloseRequested => {
                         event_loop.exit();
@@ -239,10 +251,13 @@ impl MultiViewportApp {
                     ui.text("Hello from Dear ImGui!");
                     ui.text("This window can be dragged outside the main viewport.");
                     ui.separator();
-                    
-                    ui.text(format!("Frame time: {:.3} ms", delta_time.as_secs_f32() * 1000.0));
+
+                    ui.text(format!(
+                        "Frame time: {:.3} ms",
+                        delta_time.as_secs_f32() * 1000.0
+                    ));
                     ui.text(format!("FPS: {:.1}", 1.0 / delta_time.as_secs_f32()));
-                    
+
                     if ui.button("Close") {
                         self.demo_open = false;
                     }
@@ -256,7 +271,7 @@ impl MultiViewportApp {
                 .build(|| {
                     ui.text("This is another window that supports multi-viewport!");
                     ui.text("Try dragging it outside the main window.");
-                    
+
                     if ui.button("Close") {
                         self.another_window_open = false;
                     }
@@ -265,11 +280,16 @@ impl MultiViewportApp {
 
         // Render
         let output = wgpu_state.surface.get_current_texture().unwrap();
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = wgpu_state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+        let mut encoder =
+            wgpu_state
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Encoder"),
+                });
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -292,7 +312,13 @@ impl MultiViewportApp {
                 timestamp_writes: None,
             });
 
-            renderer.render(imgui_ctx.render(), &wgpu_state.queue, &wgpu_state.device, &mut render_pass)
+            renderer
+                .render(
+                    imgui_ctx.render(),
+                    &wgpu_state.queue,
+                    &wgpu_state.device,
+                    &mut render_pass,
+                )
                 .expect("Rendering failed");
         }
 
@@ -304,7 +330,10 @@ impl MultiViewportApp {
         {
             unsafe {
                 dear_imgui_sys::ImGui_UpdatePlatformWindows();
-                dear_imgui_sys::ImGui_RenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
+                dear_imgui_sys::ImGui_RenderPlatformWindowsDefault(
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                );
             }
         }
     }

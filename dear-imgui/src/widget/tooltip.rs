@@ -1,6 +1,6 @@
+use crate::input::MouseButton;
 use crate::sys;
 use crate::ui::Ui;
-use crate::input::MouseButton;
 
 /// # Tooltip Widgets
 impl Ui {
@@ -175,8 +175,6 @@ impl Ui {
         }
     }
 }
-
-
 
 bitflags::bitflags! {
     /// Flags for IsItemHovered()

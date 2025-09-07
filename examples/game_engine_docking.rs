@@ -17,29 +17,29 @@ struct GameEngineState {
     // Scene hierarchy
     selected_entity: Option<String>,
     entities: Vec<String>,
-    
+
     // Inspector properties
     transform_position: [f32; 3],
     transform_rotation: [f32; 3],
     transform_scale: [f32; 3],
-    
+
     // Console logs
     console_logs: Vec<String>,
     console_input: String,
-    
+
     // Asset browser
     current_folder: String,
     assets: Vec<String>,
-    
+
     // Viewport settings
     viewport_size: [f32; 2],
     show_wireframe: bool,
     show_grid: bool,
-    
+
     // Project settings
     project_name: String,
     scene_name: String,
-    
+
     // Performance stats
     fps: f32,
     frame_time: f32,
@@ -154,15 +154,13 @@ impl AppWindow {
         }))
         .expect("Failed to find an appropriate adapter");
 
-        let (device, queue) = block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::default(),
-                trace: wgpu::Trace::default(),
-            },
-        ))
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: None,
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::default(),
+        }))
         .expect("Failed to create device");
 
         let size = LogicalSize::new(1600.0, 900.0); // Larger window for game engine UI
@@ -237,12 +235,16 @@ impl AppWindow {
         imgui.last_frame = now;
 
         let frame = self.surface.get_current_texture()?;
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
-        imgui.platform.prepare_frame(&self.window, &mut imgui.context);
+        imgui
+            .platform
+            .prepare_frame(&self.window, &mut imgui.context);
 
         let ui = imgui.context.frame();
-        
+
         // Full docking demo - now that we've fixed the EndChild issue
         imgui.dockspace_id = ui.dockspace_over_main_viewport();
 
@@ -263,9 +265,11 @@ impl AppWindow {
 
         let draw_data = imgui.context.render();
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -284,7 +288,10 @@ impl AppWindow {
                 occlusion_query_set: None,
             });
 
-            imgui.renderer.render_with_renderpass(draw_data, &self.queue, &self.device, &mut render_pass).expect("Rendering failed");
+            imgui
+                .renderer
+                .render_with_renderpass(draw_data, &self.queue, &self.device, &mut render_pass)
+                .expect("Rendering failed");
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -322,7 +329,7 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
         dockspace_id,
         SplitDirection::Left,
         0.2,
-        Some(&mut left_panel_id)
+        Some(&mut left_panel_id),
     );
 
     let mut right_panel_id = 0u32;
@@ -330,7 +337,7 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
         remaining_after_left,
         SplitDirection::Right,
         0.25, // 20% of remaining 80% = 20% total
-        Some(&mut right_panel_id)
+        Some(&mut right_panel_id),
     );
 
     // Step 2: Split left panel vertically
@@ -340,7 +347,7 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
         left_panel_id,
         SplitDirection::Down,
         0.3,
-        Some(&mut project_id)
+        Some(&mut project_id),
     );
 
     // Step 3: Split center area vertically
@@ -350,7 +357,7 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
         center_area_id,
         SplitDirection::Down,
         0.25,
-        Some(&mut console_id)
+        Some(&mut console_id),
     );
 
     // Step 4: Split right panel vertically
@@ -360,7 +367,7 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
         right_panel_id,
         SplitDirection::Down,
         0.2,
-        Some(&mut performance_id)
+        Some(&mut performance_id),
     );
 
     // Step 5: Dock all windows to their designated areas
@@ -381,13 +388,19 @@ fn render_main_menu_bar(ui: &Ui, game_state: &mut GameEngineState) {
     if let Some(_main_menu_bar) = ui.begin_main_menu_bar() {
         ui.menu("File", || {
             if ui.menu_item("New Scene") {
-                game_state.console_logs.push("[INFO] New scene created".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] New scene created".to_string());
             }
             if ui.menu_item("Open Scene") {
-                game_state.console_logs.push("[INFO] Scene opened".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Scene opened".to_string());
             }
             if ui.menu_item("Save Scene") {
-                game_state.console_logs.push("[INFO] Scene saved".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Scene saved".to_string());
             }
             ui.separator();
             if ui.menu_item("Exit") {
@@ -407,7 +420,9 @@ fn render_main_menu_bar(ui: &Ui, game_state: &mut GameEngineState) {
         ui.menu("GameObject", || {
             if ui.menu_item("Create Empty") {
                 game_state.entities.push("GameObject".to_string());
-                game_state.console_logs.push("[INFO] Empty GameObject created".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Empty GameObject created".to_string());
             }
             ui.menu("3D Object", || {
                 if ui.menu_item("Cube") {
@@ -443,11 +458,15 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
         .size([300.0, 400.0], Condition::FirstUseEver)
         .build(|| {
             // Scene name header
-            ui.text_colored([0.8, 0.8, 0.8, 1.0], format!("Scene: {}", game_state.scene_name));
+            ui.text_colored(
+                [0.8, 0.8, 0.8, 1.0],
+                format!("Scene: {}", game_state.scene_name),
+            );
             ui.separator();
 
             // Search filter with icon
-            ui.text("🔍"); ui.same_line();
+            ui.text("🔍");
+            ui.same_line();
             ui.input_text("##search", &mut String::new()).build();
 
             ui.separator();
@@ -461,17 +480,20 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
                 let is_selected = game_state.selected_entity.as_ref() == Some(entity);
 
                 // Add hierarchy indentation and icons
-                let icon = if entity.contains("Camera") { "📷" }
-                          else if entity.contains("Light") { "💡" }
-                          else if entity.contains("Mesh") { "🔷" }
-                          else { "🎯" };
+                let icon = if entity.contains("Camera") {
+                    "📷"
+                } else if entity.contains("Light") {
+                    "💡"
+                } else if entity.contains("Mesh") {
+                    "🔷"
+                } else {
+                    "🎯"
+                };
 
-                ui.text(icon); ui.same_line();
+                ui.text(icon);
+                ui.same_line();
 
-                if ui.selectable_config(entity)
-                    .selected(is_selected)
-                    .build()
-                {
+                if ui.selectable_config(entity).selected(is_selected).build() {
                     selected_entity = Some(entity.clone());
                 }
 
@@ -520,7 +542,9 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
             }
 
             if let Some(entity) = entity_to_delete {
-                game_state.console_logs.push(format!("[INFO] {} deleted", entity));
+                game_state
+                    .console_logs
+                    .push(format!("[INFO] {} deleted", entity));
                 game_state.entities.retain(|e| e != &entity);
                 if game_state.selected_entity.as_ref() == Some(&entity) {
                     game_state.selected_entity = None;
@@ -548,32 +572,48 @@ fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
         .size([300.0, 200.0], Condition::FirstUseEver)
         .build(|| {
             // Project folder navigation
-            ui.text_colored([0.8, 0.8, 0.8, 1.0], format!("Project: {}", game_state.project_name));
+            ui.text_colored(
+                [0.8, 0.8, 0.8, 1.0],
+                format!("Project: {}", game_state.project_name),
+            );
             ui.separator();
 
             // Folder path
-            ui.text("📁"); ui.same_line();
+            ui.text("📁");
+            ui.same_line();
             ui.text(&game_state.current_folder);
 
             ui.separator();
 
             // Asset grid view
             let mut columns = 4;
-            if ui.button("List View") { columns = 1; }
+            if ui.button("List View") {
+                columns = 1;
+            }
             ui.same_line();
-            if ui.button("Grid View") { columns = 4; }
+            if ui.button("Grid View") {
+                columns = 4;
+            }
 
             ui.separator();
 
             // Assets display
             for (i, asset) in game_state.assets.iter().enumerate() {
-                if i % columns != 0 { ui.same_line(); }
+                if i % columns != 0 {
+                    ui.same_line();
+                }
 
-                let icon = if asset.ends_with(".cs") { "📄" }
-                          else if asset.ends_with(".png") || asset.ends_with(".jpg") { "🖼️" }
-                          else if asset.ends_with(".fbx") || asset.ends_with(".obj") { "🎲" }
-                          else if asset.ends_with(".wav") || asset.ends_with(".mp3") { "🔊" }
-                          else { "📄" };
+                let icon = if asset.ends_with(".cs") {
+                    "📄"
+                } else if asset.ends_with(".png") || asset.ends_with(".jpg") {
+                    "🖼️"
+                } else if asset.ends_with(".fbx") || asset.ends_with(".obj") {
+                    "🎲"
+                } else if asset.ends_with(".wav") || asset.ends_with(".mp3") {
+                    "🔊"
+                } else {
+                    "📄"
+                };
 
                 ui.button(format!("{}\n{}", icon, asset));
 
@@ -597,7 +637,9 @@ fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
 
             // Import button
             if ui.button("Import New Asset") {
-                game_state.assets.push(format!("NewAsset_{}.png", game_state.assets.len()));
+                game_state
+                    .assets
+                    .push(format!("NewAsset_{}.png", game_state.assets.len()));
             }
         });
 }
@@ -639,7 +681,9 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
                 if ui.collapsing_header("Mesh Renderer", TreeNodeFlags::empty()) {
                     ui.text("Material: Default");
                     if ui.button("Select Material") {
-                        game_state.console_logs.push("[INFO] Material selector opened".to_string());
+                        game_state
+                            .console_logs
+                            .push("[INFO] Material selector opened".to_string());
                     }
 
                     ui.checkbox("Cast Shadows", &mut true);
@@ -678,10 +722,12 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
                 //         game_state.console_logs.push("[INFO] Script component added".to_string());
                 //     }
                 // });
-
             } else {
                 ui.text("No object selected");
-                ui.text_colored([0.7, 0.7, 0.7, 1.0], "Select an object in the Scene Hierarchy to view its properties");
+                ui.text_colored(
+                    [0.7, 0.7, 0.7, 1.0],
+                    "Select an object in the Scene Hierarchy to view its properties",
+                );
             }
         });
 }
@@ -692,17 +738,24 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
             // Scene view toolbar
-            ui.text("🔧"); ui.same_line();
+            ui.text("🔧");
+            ui.same_line();
             if ui.button("Move") {
-                game_state.console_logs.push("[INFO] Move tool selected".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Move tool selected".to_string());
             }
             ui.same_line();
             if ui.button("Rotate") {
-                game_state.console_logs.push("[INFO] Rotate tool selected".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Rotate tool selected".to_string());
             }
             ui.same_line();
             if ui.button("Scale") {
-                game_state.console_logs.push("[INFO] Scale tool selected".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Scale tool selected".to_string());
             }
 
             ui.same_line();
@@ -729,7 +782,10 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
                 draw_list
                     .add_rect(
                         canvas_pos,
-                        [canvas_pos[0] + canvas_size[0], canvas_pos[1] + canvas_size[1]],
+                        [
+                            canvas_pos[0] + canvas_size[0],
+                            canvas_pos[1] + canvas_size[1],
+                        ],
                         [0.15, 0.15, 0.15, 1.0],
                     )
                     .filled(true)
@@ -790,7 +846,10 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
                     .build();
 
                 // Scene info
-                ui.text(format!("Scene Size: {:.0}x{:.0}", canvas_size[0], canvas_size[1]));
+                ui.text(format!(
+                    "Scene Size: {:.0}x{:.0}",
+                    canvas_size[0], canvas_size[1]
+                ));
             } else {
                 ui.text("Scene view too small to render");
             }
@@ -804,28 +863,39 @@ fn render_game_view(ui: &Ui, game_state: &mut GameEngineState) {
         .build(|| {
             // Game view toolbar
             if ui.button("🎮 Play") {
-                game_state.console_logs.push("[INFO] Play mode started".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Play mode started".to_string());
             }
             ui.same_line();
             if ui.button("⏸ Pause") {
-                game_state.console_logs.push("[INFO] Play mode paused".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Play mode paused".to_string());
             }
             ui.same_line();
             if ui.button("⏹ Stop") {
-                game_state.console_logs.push("[INFO] Play mode stopped".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Play mode stopped".to_string());
             }
 
             ui.same_line();
             ui.separator_vertical();
             ui.same_line();
 
-            ui.text("Aspect:"); ui.same_line();
+            ui.text("Aspect:");
+            ui.same_line();
             if ui.button("16:9") {
-                game_state.console_logs.push("[INFO] Aspect ratio set to 16:9".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Aspect ratio set to 16:9".to_string());
             }
             ui.same_line();
             if ui.button("4:3") {
-                game_state.console_logs.push("[INFO] Aspect ratio set to 4:3".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Aspect ratio set to 4:3".to_string());
             }
 
             ui.separator();
@@ -842,7 +912,10 @@ fn render_game_view(ui: &Ui, game_state: &mut GameEngineState) {
                 draw_list
                     .add_rect(
                         canvas_pos,
-                        [canvas_pos[0] + canvas_size[0], canvas_pos[1] + canvas_size[1]],
+                        [
+                            canvas_pos[0] + canvas_size[0],
+                            canvas_pos[1] + canvas_size[1],
+                        ],
                         [0.1, 0.2, 0.4, 1.0],
                     )
                     .filled(true)
@@ -859,7 +932,10 @@ fn render_game_view(ui: &Ui, game_state: &mut GameEngineState) {
                     .build();
 
                 // Game info
-                ui.text(format!("Game Size: {:.0}x{:.0}", canvas_size[0], canvas_size[1]));
+                ui.text(format!(
+                    "Game Size: {:.0}x{:.0}",
+                    canvas_size[0], canvas_size[1]
+                ));
                 ui.text("FPS: 60 | Frame: 1234");
             } else {
                 ui.text("Game view too small to render");
@@ -893,7 +969,9 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
             }
             ui.same_line();
             if ui.button("🔄 Refresh") {
-                game_state.console_logs.push("[INFO] Asset browser refreshed".to_string());
+                game_state
+                    .console_logs
+                    .push("[INFO] Asset browser refreshed".to_string());
             }
 
             ui.separator();
@@ -901,7 +979,9 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
             // Asset grid
             let button_size = [80.0, 80.0];
             let mut items_per_row = (ui.content_region_avail()[0] / (button_size[0] + 8.0)) as i32;
-            if items_per_row < 1 { items_per_row = 1; }
+            if items_per_row < 1 {
+                items_per_row = 1;
+            }
 
             for (i, asset) in game_state.assets.iter().enumerate() {
                 if i > 0 && (i as i32) % items_per_row != 0 {
@@ -919,9 +999,13 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
                 if ui.button_with_size(format!("{}\n{}", icon, display_name), button_size) {
                     if is_folder {
                         game_state.current_folder = format!("Assets/{}", asset);
-                        game_state.console_logs.push(format!("[INFO] Opened folder: {}", asset));
+                        game_state
+                            .console_logs
+                            .push(format!("[INFO] Opened folder: {}", asset));
                     } else {
-                        game_state.console_logs.push(format!("[INFO] Selected asset: {}", asset));
+                        game_state
+                            .console_logs
+                            .push(format!("[INFO] Selected asset: {}", asset));
                     }
                 }
 
@@ -967,9 +1051,9 @@ fn render_performance(ui: &Ui, game_state: &mut GameEngineState) {
 
             // Simple performance graph
             ui.text("FPS Graph:");
-            let _fps_history: Vec<f32> = (0..60).map(|i| {
-                60.0 + ((ui.time() - i as f64 * 0.1) * 2.0).sin() as f32 * 5.0
-            }).collect();
+            let _fps_history: Vec<f32> = (0..60)
+                .map(|i| 60.0 + ((ui.time() - i as f64 * 0.1) * 2.0).sin() as f32 * 5.0)
+                .collect();
             // TODO: Implement actual graph rendering with plot_lines when available
 
             // Note: plot_lines might not be available in current API
@@ -986,7 +1070,12 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: winit::window::WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
         let window = self.window.as_mut().unwrap();
 
         // Handle platform events first
@@ -997,14 +1086,18 @@ impl ApplicationHandler for App {
                 window_id: _window_id,
                 event: event.clone(),
             };
-            imgui.platform.handle_event(&fake_event, &window.window, &mut imgui.context);
+            imgui
+                .platform
+                .handle_event(&fake_event, &window.window, &mut imgui.context);
         }
 
         match event {
             WindowEvent::Resized(physical_size) => {
                 window.surface_desc.width = physical_size.width;
                 window.surface_desc.height = physical_size.height;
-                window.surface.configure(&window.device, &window.surface_desc);
+                window
+                    .surface
+                    .configure(&window.device, &window.surface_desc);
             }
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -1019,7 +1112,9 @@ impl ApplicationHandler for App {
                 match render_result {
                     Ok(_) => {}
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        window.surface.configure(&window.device, &window.surface_desc);
+                        window
+                            .surface
+                            .configure(&window.device, &window.surface_desc);
                     }
                     Err(wgpu::SurfaceError::OutOfMemory) => {
                         eprintln!("OutOfMemory");
@@ -1039,7 +1134,9 @@ impl ApplicationHandler for App {
         // Check input capture after handling events
         {
             let imgui = window.imgui.as_mut().unwrap();
-            if !imgui.context.io().want_capture_mouse() && !imgui.context.io().want_capture_keyboard() {
+            if !imgui.context.io().want_capture_mouse()
+                && !imgui.context.io().want_capture_keyboard()
+            {
                 // Handle game input here when not captured by ImGui
             }
         }

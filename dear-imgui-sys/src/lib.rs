@@ -114,18 +114,18 @@ impl<'a, T> IntoIterator for &'a mut ImVector<T> {
 
 // MSVC ABI compatibility for ImVec2-returning functions
 #[cfg(target_env = "msvc")]
-impl From<ImVec2_rr> for ImVec2 {
+impl From<ImVec2_Pod> for ImVec2 {
     #[inline]
-    fn from(rr: ImVec2_rr) -> ImVec2 {
-        ImVec2 { x: rr.x, y: rr.y }
+    fn from(pod: ImVec2_Pod) -> ImVec2 {
+        ImVec2 { x: pod.x, y: pod.y }
     }
 }
 
 #[cfg(target_env = "msvc")]
-impl From<ImVec2> for ImVec2_rr {
+impl From<ImVec2> for ImVec2_Pod {
     #[inline]
-    fn from(v: ImVec2) -> ImVec2_rr {
-        ImVec2_rr { x: v.x, y: v.y }
+    fn from(v: ImVec2) -> ImVec2_Pod {
+        ImVec2_Pod { x: v.x, y: v.y }
     }
 }
 

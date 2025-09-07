@@ -8,12 +8,15 @@ use std::ptr;
 use crate::clipboard::{ClipboardBackend, ClipboardContext};
 use crate::fonts::{Font, FontAtlas, SharedFontAtlas};
 use crate::io::Io;
+#[cfg(feature = "multi-viewport")]
+use crate::platform_io::PlatformIo;
 use crate::sys;
 use crate::ui;
 #[cfg(feature = "multi-viewport")]
-use crate::viewport_backend::{PlatformViewportBackend, RendererViewportBackend, PlatformViewportContext, RendererViewportContext};
-#[cfg(feature = "multi-viewport")]
-use crate::platform_io::PlatformIo;
+use crate::viewport_backend::{
+    PlatformViewportBackend, PlatformViewportContext, RendererViewportBackend,
+    RendererViewportContext,
+};
 
 /// An imgui context.
 ///
@@ -332,7 +335,7 @@ impl Context {
         let context = PlatformViewportContext::new(backend);
         crate::viewport_backend::set_platform_viewport_context(context);
 
-        // Set up the platform IO callbacks (simplified to avoid MSVC ABI issues)
+        // Set up the platform IO callbacks
         let platform_io = self.platform_io_mut();
         platform_io.set_platform_create_window(Some(platform_create_window));
         platform_io.set_platform_destroy_window(Some(platform_destroy_window));
@@ -340,20 +343,34 @@ impl Context {
         platform_io.set_platform_set_window_pos(Some(platform_set_window_pos));
         platform_io.set_platform_set_window_size(Some(platform_set_window_size));
 
-        // Skip the problematic callbacks that return ImVec2 to avoid MSVC ABI issues
-        // These would be: platform_get_window_pos, platform_get_window_size
-        platform_io.set_platform_get_window_pos(None);
-        platform_io.set_platform_get_window_size(None);
+        // Use our safe callback wrappers for functions that return ImVec2
+        // These use out-parameter style to avoid MSVC ABI issues
+        unsafe {
+            extern "C" {
+                fn ImGui_Platform_SetGetWindowPosCallback(
+                    callback: Option<
+                        unsafe extern "C" fn(*mut crate::platform_io::Viewport, *mut sys::ImVec2),
+                    >,
+                );
+                fn ImGui_Platform_SetGetWindowSizeCallback(
+                    callback: Option<
+                        unsafe extern "C" fn(*mut crate::platform_io::Viewport, *mut sys::ImVec2),
+                    >,
+                );
+            }
+            ImGui_Platform_SetGetWindowPosCallback(Some(platform_get_window_pos));
+            ImGui_Platform_SetGetWindowSizeCallback(Some(platform_get_window_size));
+        }
 
-        // Also skip other optional callbacks for simplicity
-        platform_io.set_platform_set_window_focus(None);
-        platform_io.set_platform_get_window_focus(None);
-        platform_io.set_platform_get_window_minimized(None);
-        platform_io.set_platform_set_window_title(None);
-        platform_io.set_platform_set_window_alpha(None);
-        platform_io.set_platform_update_window(None);
-        platform_io.set_platform_render_window(None);
-        platform_io.set_platform_swap_buffers(None);
+        // Set other platform callbacks
+        platform_io.set_platform_set_window_focus(Some(platform_set_window_focus));
+        platform_io.set_platform_get_window_focus(Some(platform_get_window_focus));
+        platform_io.set_platform_get_window_minimized(Some(platform_get_window_minimized));
+        platform_io.set_platform_set_window_title(Some(platform_set_window_title));
+        platform_io.set_platform_set_window_alpha(Some(platform_set_window_alpha));
+        platform_io.set_platform_update_window(Some(platform_update_window));
+        platform_io.set_platform_render_window(Some(platform_render_window));
+        platform_io.set_platform_swap_buffers(Some(platform_swap_buffers));
     }
 
     /// Set the renderer viewport backend
@@ -579,7 +596,7 @@ unsafe impl Sync for Context {}
 
 // Multi-viewport callback functions
 #[cfg(feature = "multi-viewport")]
-use std::ffi::c_char;
+use std::ffi::{c_char, c_void};
 
 #[cfg(feature = "multi-viewport")]
 extern "C" fn platform_create_window(viewport: *mut crate::platform_io::Viewport) {
@@ -609,7 +626,10 @@ extern "C" fn platform_show_window(viewport: *mut crate::platform_io::Viewport) 
 }
 
 #[cfg(feature = "multi-viewport")]
-extern "C" fn platform_set_window_pos(viewport: *mut crate::platform_io::Viewport, pos: sys::ImVec2) {
+extern "C" fn platform_set_window_pos(
+    viewport: *mut crate::platform_io::Viewport,
+    pos: sys::ImVec2,
+) {
     if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
         crate::viewport_backend::with_platform_viewport_context(|backend| {
             backend.set_window_pos(viewport_ref, [pos.x, pos.y]);
@@ -617,10 +637,11 @@ extern "C" fn platform_set_window_pos(viewport: *mut crate::platform_io::Viewpor
     }
 }
 
-// Note: platform_get_window_pos callback removed to avoid MSVC ABI issues
-
 #[cfg(feature = "multi-viewport")]
-extern "C" fn platform_set_window_size(viewport: *mut crate::platform_io::Viewport, size: sys::ImVec2) {
+extern "C" fn platform_set_window_size(
+    viewport: *mut crate::platform_io::Viewport,
+    size: sys::ImVec2,
+) {
     if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
         crate::viewport_backend::with_platform_viewport_context(|backend| {
             backend.set_window_size(viewport_ref, [size.x, size.y]);
@@ -628,9 +649,148 @@ extern "C" fn platform_set_window_size(viewport: *mut crate::platform_io::Viewpo
     }
 }
 
-// Note: platform_get_window_size callback removed to avoid MSVC ABI issues
+// Note: platform_get_window_pos and platform_get_window_size callbacks use out-parameter style
+// to avoid MSVC ABI issues with returning ImVec2 by value
 
-// Note: Optional platform callbacks removed for simplicity to avoid MSVC ABI issues
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_get_window_pos(
+    viewport: *mut crate::platform_io::Viewport,
+    out_pos: *mut sys::ImVec2,
+) {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        if let Some(pos) = crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.get_window_pos(viewport_ref)
+        }) {
+            unsafe {
+                (*out_pos).x = pos[0];
+                (*out_pos).y = pos[1];
+            }
+            return;
+        }
+    }
+    unsafe {
+        (*out_pos).x = 0.0;
+        (*out_pos).y = 0.0;
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_get_window_size(
+    viewport: *mut crate::platform_io::Viewport,
+    out_size: *mut sys::ImVec2,
+) {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        if let Some(size) = crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.get_window_size(viewport_ref)
+        }) {
+            unsafe {
+                (*out_size).x = size[0];
+                (*out_size).y = size[1];
+            }
+            return;
+        }
+    }
+    unsafe {
+        (*out_size).x = 800.0;
+        (*out_size).y = 600.0;
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_set_window_focus(viewport: *mut crate::platform_io::Viewport) {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.set_window_focus(viewport_ref);
+        });
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_get_window_focus(viewport: *mut crate::platform_io::Viewport) -> bool {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        if let Some(focus) = crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.get_window_focus(viewport_ref)
+        }) {
+            return focus;
+        }
+    }
+    false
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_get_window_minimized(viewport: *mut crate::platform_io::Viewport) -> bool {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        if let Some(minimized) =
+            crate::viewport_backend::with_platform_viewport_context(|backend| {
+                backend.get_window_minimized(viewport_ref)
+            })
+        {
+            return minimized;
+        }
+    }
+    false
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_set_window_title(
+    viewport: *mut crate::platform_io::Viewport,
+    title: *const c_char,
+) {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        let title_str = unsafe {
+            if title.is_null() {
+                ""
+            } else {
+                std::ffi::CStr::from_ptr(title).to_str().unwrap_or("")
+            }
+        };
+        crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.set_window_title(viewport_ref, title_str);
+        });
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_set_window_alpha(viewport: *mut crate::platform_io::Viewport, alpha: f32) {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.set_window_alpha(viewport_ref, alpha);
+        });
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_update_window(viewport: *mut crate::platform_io::Viewport) {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.update_window(viewport_ref);
+        });
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_render_window(
+    viewport: *mut crate::platform_io::Viewport,
+    _render_arg: *mut c_void,
+) {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.render_window(viewport_ref);
+        });
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_swap_buffers(
+    viewport: *mut crate::platform_io::Viewport,
+    _render_arg: *mut c_void,
+) {
+    if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
+        crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.swap_buffers(viewport_ref);
+        });
+    }
+}
 
 #[cfg(feature = "multi-viewport")]
 extern "C" fn renderer_create_window(viewport: *mut crate::platform_io::Viewport) {
@@ -651,7 +811,10 @@ extern "C" fn renderer_destroy_window(viewport: *mut crate::platform_io::Viewpor
 }
 
 #[cfg(feature = "multi-viewport")]
-extern "C" fn renderer_set_window_size(viewport: *mut crate::platform_io::Viewport, size: sys::ImVec2) {
+extern "C" fn renderer_set_window_size(
+    viewport: *mut crate::platform_io::Viewport,
+    size: sys::ImVec2,
+) {
     if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
         crate::viewport_backend::with_renderer_viewport_context(|backend| {
             backend.set_window_size(viewport_ref, [size.x, size.y]);
@@ -660,7 +823,10 @@ extern "C" fn renderer_set_window_size(viewport: *mut crate::platform_io::Viewpo
 }
 
 #[cfg(feature = "multi-viewport")]
-extern "C" fn renderer_render_window(viewport: *mut crate::platform_io::Viewport, _render_arg: *mut std::ffi::c_void) {
+extern "C" fn renderer_render_window(
+    viewport: *mut crate::platform_io::Viewport,
+    _render_arg: *mut std::ffi::c_void,
+) {
     if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
         crate::viewport_backend::with_renderer_viewport_context(|backend| {
             backend.render_window(viewport_ref);
@@ -669,7 +835,10 @@ extern "C" fn renderer_render_window(viewport: *mut crate::platform_io::Viewport
 }
 
 #[cfg(feature = "multi-viewport")]
-extern "C" fn renderer_swap_buffers(viewport: *mut crate::platform_io::Viewport, _render_arg: *mut std::ffi::c_void) {
+extern "C" fn renderer_swap_buffers(
+    viewport: *mut crate::platform_io::Viewport,
+    _render_arg: *mut std::ffi::c_void,
+) {
     if let Some(viewport_ref) = unsafe { viewport.as_mut() } {
         crate::viewport_backend::with_renderer_viewport_context(|backend| {
             backend.swap_buffers(viewport_ref);

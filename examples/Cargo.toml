@@ -42,6 +42,10 @@ path = "multi_viewport_demo.rs"
 name = "test_multi_viewport"
 path = "test_multi_viewport.rs"
 
+[[bin]]
+name = "test_viewport_callbacks"
+path = "test_viewport_callbacks.rs"
+
 
 
 [dependencies]

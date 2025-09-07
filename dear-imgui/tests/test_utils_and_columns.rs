@@ -158,7 +158,11 @@ fn test_columns_advanced_functions() {
     // Test advanced columns with flags
     use dear_imgui::OldColumnFlags;
 
-    ui.begin_columns("advanced_columns", 4, OldColumnFlags::NO_BORDER | OldColumnFlags::NO_RESIZE);
+    ui.begin_columns(
+        "advanced_columns",
+        4,
+        OldColumnFlags::NO_BORDER | OldColumnFlags::NO_RESIZE,
+    );
 
     let column_count = ui.column_count();
     let columns_id = ui.get_columns_id("advanced_columns", 4);

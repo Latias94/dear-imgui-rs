@@ -92,9 +92,9 @@ pub use self::columns::*;
 mod clipboard;
 mod color;
 mod context;
-mod dock_space;
 #[cfg(feature = "docking")]
 mod dock_builder;
+mod dock_space;
 mod draw;
 mod fonts;
 pub mod input;
@@ -103,12 +103,12 @@ mod io;
 mod list_clipper;
 mod platform_io;
 pub mod render;
-#[cfg(feature = "multi-viewport")]
-mod viewport_backend;
 mod string;
 mod style;
 mod ui;
 mod utils;
+#[cfg(feature = "multi-viewport")]
+mod viewport_backend;
 // mod math;
 mod widget;
 mod window;
@@ -136,9 +136,9 @@ mod columns;
 pub use clipboard::*;
 pub use color::*;
 pub use context::*;
-pub use dock_space::*;
 #[cfg(feature = "docking")]
 pub use dock_builder::*;
+pub use dock_space::*;
 pub use draw::*;
 pub use fonts::*;
 pub use input::*;

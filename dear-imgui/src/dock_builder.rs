@@ -16,15 +16,15 @@
 //! # let ui = ctx.frame();
 //! // Create a dockspace
 //! let dockspace_id = ui.dockspace_over_main_viewport();
-//! 
+//!
 //! // Use DockBuilder to create a layout
 //! let left_id = DockBuilder::split_node(dockspace_id, SplitDirection::Left, 0.3, None);
 //! let right_id = DockBuilder::split_node(dockspace_id, SplitDirection::Right, 0.7, None);
-//! 
+//!
 //! // Dock windows to specific nodes
 //! DockBuilder::dock_window("Tool Panel", left_id);
 //! DockBuilder::dock_window("Main View", right_id);
-//! 
+//!
 //! // Finish the layout
 //! DockBuilder::finish(dockspace_id);
 //! ```
@@ -170,7 +170,10 @@ impl DockBuilder {
     #[doc(alias = "DockBuilderSetNodePos")]
     pub fn set_node_pos(node_id: sys::ImGuiID, pos: [f32; 2]) {
         unsafe {
-            let pos_vec = sys::ImVec2 { x: pos[0], y: pos[1] };
+            let pos_vec = sys::ImVec2 {
+                x: pos[0],
+                y: pos[1],
+            };
             sys::ImGui_DockBuilderSetNodePos(node_id, pos_vec)
         }
     }
@@ -191,7 +194,10 @@ impl DockBuilder {
     #[doc(alias = "DockBuilderSetNodeSize")]
     pub fn set_node_size(node_id: sys::ImGuiID, size: [f32; 2]) {
         unsafe {
-            let size_vec = sys::ImVec2 { x: size[0], y: size[1] };
+            let size_vec = sys::ImVec2 {
+                x: size[0],
+                y: size[1],
+            };
             sys::ImGui_DockBuilderSetNodeSize(node_id, size_vec)
         }
     }

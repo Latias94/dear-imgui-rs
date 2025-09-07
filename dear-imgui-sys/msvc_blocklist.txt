@@ -20,6 +20,12 @@ ImGui::GetMousePos
 ImGui::GetMousePosOnOpeningCurrentPopup
 ImGui::GetMouseDragDelta
 
+# Viewport platform callbacks that return ImVec2
+# These are not direct ImGui functions but callback signatures we need to handle
+# Platform_GetWindowPos
+# Platform_GetWindowSize
+# Platform_GetWindowFramebufferScale
+
 # Internal functions (if needed)
 ImBezierCubicCalc
 ImBezierCubicClosestPoint

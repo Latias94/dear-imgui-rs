@@ -14506,39 +14506,47 @@ unsafe extern "C" {
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct ImVec2_rr {
+pub struct ImVec2_Pod {
     pub x: f32,
     pub y: f32,
 }
-unsafe extern "C" {
-    pub fn ImGui_GetWindowPos() -> ImVec2_rr;
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct ImVec4_Pod {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
 }
 unsafe extern "C" {
-    pub fn ImGui_GetWindowSize() -> ImVec2_rr;
+    pub fn ImGui_GetWindowPos() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetContentRegionAvail() -> ImVec2_rr;
+    pub fn ImGui_GetWindowSize() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetFontTexUvWhitePixel() -> ImVec2_rr;
+    pub fn ImGui_GetContentRegionAvail() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetCursorScreenPos() -> ImVec2_rr;
+    pub fn ImGui_GetFontTexUvWhitePixel() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetCursorPos() -> ImVec2_rr;
+    pub fn ImGui_GetCursorScreenPos() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetCursorStartPos() -> ImVec2_rr;
+    pub fn ImGui_GetCursorPos() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetItemRectMin() -> ImVec2_rr;
+    pub fn ImGui_GetCursorStartPos() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetItemRectMax() -> ImVec2_rr;
+    pub fn ImGui_GetItemRectMin() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetItemRectSize() -> ImVec2_rr;
+    pub fn ImGui_GetItemRectMax() -> ImVec2_Pod;
+}
+unsafe extern "C" {
+    pub fn ImGui_GetItemRectSize() -> ImVec2_Pod;
 }
 unsafe extern "C" {
     pub fn ImGui_CalcTextSize(
@@ -14546,17 +14554,36 @@ unsafe extern "C" {
         text_end: *const ::std::os::raw::c_char,
         hide_text_after_double_hash: bool,
         wrap_width: f32,
-    ) -> ImVec2_rr;
+    ) -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetMousePos() -> ImVec2_rr;
+    pub fn ImGui_GetMousePos() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetMousePosOnOpeningCurrentPopup() -> ImVec2_rr;
+    pub fn ImGui_GetMousePosOnOpeningCurrentPopup() -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_GetMouseDragDelta(button: ImGuiMouseButton, lock_threshold: f32) -> ImVec2_rr;
+    pub fn ImGui_GetMouseDragDelta(button: ImGuiMouseButton, lock_threshold: f32) -> ImVec2_Pod;
 }
 unsafe extern "C" {
-    pub fn ImGui_ValidateABIFix() -> ImVec2_rr;
+    pub static mut g_Platform_GetWindowPos_OutParam:
+        ::std::option::Option<unsafe extern "C" fn(arg1: *mut ImGuiViewport, arg2: *mut ImVec2)>;
+}
+unsafe extern "C" {
+    pub static mut g_Platform_GetWindowSize_OutParam:
+        ::std::option::Option<unsafe extern "C" fn(arg1: *mut ImGuiViewport, arg2: *mut ImVec2)>;
+}
+unsafe extern "C" {
+    pub fn ImGui_Platform_SetGetWindowPosCallback(
+        callback: ::std::option::Option<
+            unsafe extern "C" fn(arg1: *mut ImGuiViewport, arg2: *mut ImVec2),
+        >,
+    );
+}
+unsafe extern "C" {
+    pub fn ImGui_Platform_SetGetWindowSizeCallback(
+        callback: ::std::option::Option<
+            unsafe extern "C" fn(arg1: *mut ImGuiViewport, arg2: *mut ImVec2),
+        >,
+    );
 }

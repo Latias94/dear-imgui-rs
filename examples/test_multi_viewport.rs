@@ -461,7 +461,10 @@ impl ApplicationHandler for App {
                 {
                     unsafe {
                         dear_imgui::sys::ImGui_UpdatePlatformWindows();
-                        dear_imgui::sys::ImGui_RenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
+                        dear_imgui::sys::ImGui_RenderPlatformWindowsDefault(
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                        );
                     }
                 }
 

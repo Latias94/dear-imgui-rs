@@ -1,0 +1,151 @@
+// imgui_msvc_wrapper.cpp
+// Unified MSVC ABI fixes and wrappers for Dear ImGui Rust bindings
+// This file contains all workarounds for MSVC ABI compatibility issues
+
+#include "third-party/imgui/imgui.h"
+
+// ============================================================================
+// FFI-Safe POD Types
+// ============================================================================
+
+// FFI-safe POD type equivalent to ImVec2
+// Used to avoid MSVC ABI issues with returning small C++ classes by value
+struct ImVec2_Pod {
+    float x, y;
+    
+    ImVec2_Pod() : x(0), y(0) {}
+    ImVec2_Pod(float x_, float y_) : x(x_), y(y_) {}
+    ImVec2_Pod(const ImVec2& v) : x(v.x), y(v.y) {}
+    operator ImVec2() const { return ImVec2(x, y); }
+};
+
+// FFI-safe POD type equivalent to ImVec4  
+struct ImVec4_Pod {
+    float x, y, z, w;
+    
+    ImVec4_Pod() : x(0), y(0), z(0), w(0) {}
+    ImVec4_Pod(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
+    ImVec4_Pod(const ImVec4& v) : x(v.x), y(v.y), z(v.z), w(v.w) {}
+    operator ImVec4() const { return ImVec4(x, y, z, w); }
+};
+
+// Helper function for conversion
+static inline ImVec2_Pod to_pod(const ImVec2& v) { return ImVec2_Pod(v); }
+
+// ============================================================================
+// MSVC ABI Fix: Regular ImGui Functions  
+// ============================================================================
+// These functions return ImVec2/ImVec4 by value, which has ABI issues on MSVC
+// We provide wrapper functions that return FFI-safe POD types
+
+extern "C" {
+
+#ifdef _MSC_VER
+// Only needed for MSVC - these wrappers return POD types instead of ImVec2
+ImVec2_Pod ImGui_GetWindowPos() { 
+    return to_pod(ImGui::GetWindowPos()); 
+}
+
+ImVec2_Pod ImGui_GetWindowSize() { 
+    return to_pod(ImGui::GetWindowSize()); 
+}
+
+ImVec2_Pod ImGui_GetContentRegionAvail() { 
+    return to_pod(ImGui::GetContentRegionAvail()); 
+}
+
+ImVec2_Pod ImGui_GetFontTexUvWhitePixel() { 
+    return to_pod(ImGui::GetFontTexUvWhitePixel()); 
+}
+
+ImVec2_Pod ImGui_GetCursorScreenPos() { 
+    return to_pod(ImGui::GetCursorScreenPos()); 
+}
+
+ImVec2_Pod ImGui_GetCursorPos() { 
+    return to_pod(ImGui::GetCursorPos()); 
+}
+
+ImVec2_Pod ImGui_GetCursorStartPos() { 
+    return to_pod(ImGui::GetCursorStartPos()); 
+}
+
+ImVec2_Pod ImGui_GetItemRectMin() { 
+    return to_pod(ImGui::GetItemRectMin()); 
+}
+
+ImVec2_Pod ImGui_GetItemRectMax() { 
+    return to_pod(ImGui::GetItemRectMax()); 
+}
+
+ImVec2_Pod ImGui_GetItemRectSize() { 
+    return to_pod(ImGui::GetItemRectSize()); 
+}
+
+ImVec2_Pod ImGui_CalcTextSize(const char* text, const char* text_end, bool hide_text_after_double_hash, float wrap_width) { 
+    return to_pod(ImGui::CalcTextSize(text, text_end, hide_text_after_double_hash, wrap_width)); 
+}
+
+ImVec2_Pod ImGui_GetMousePos() { 
+    return to_pod(ImGui::GetMousePos()); 
+}
+
+ImVec2_Pod ImGui_GetMousePosOnOpeningCurrentPopup() { 
+    return to_pod(ImGui::GetMousePosOnOpeningCurrentPopup()); 
+}
+
+ImVec2_Pod ImGui_GetMouseDragDelta(ImGuiMouseButton button, float lock_threshold) { 
+    return to_pod(ImGui::GetMouseDragDelta(button, lock_threshold)); 
+}
+#endif // _MSC_VER
+
+// ============================================================================
+// Multi-Viewport Callback Support
+// ============================================================================
+// Platform callbacks that return ImVec2 also have ABI issues
+// We use a different approach: callbacks use out-parameters instead of return values
+
+// Storage for our safe callbacks that use out parameters
+static void (*g_Platform_GetWindowPos_OutParam)(ImGuiViewport*, ImVec2*) = nullptr;
+static void (*g_Platform_GetWindowSize_OutParam)(ImGuiViewport*, ImVec2*) = nullptr;
+
+// Thunk functions that convert from out-parameter style to return-by-value style
+static ImVec2 Platform_GetWindowPos_Thunk(ImGuiViewport* viewport) {
+    ImVec2 result = ImVec2(0, 0);
+    if (g_Platform_GetWindowPos_OutParam) {
+        g_Platform_GetWindowPos_OutParam(viewport, &result);
+    }
+    return result;
+}
+
+static ImVec2 Platform_GetWindowSize_Thunk(ImGuiViewport* viewport) {
+    ImVec2 result = ImVec2(800, 600);
+    if (g_Platform_GetWindowSize_OutParam) {
+        g_Platform_GetWindowSize_OutParam(viewport, &result);
+    }
+    return result;
+}
+
+// Set the Platform_GetWindowPos callback using an out-parameter style
+// This avoids ABI issues with returning ImVec2 by value
+void ImGui_Platform_SetGetWindowPosCallback(void (*callback)(ImGuiViewport*, ImVec2*)) {
+    g_Platform_GetWindowPos_OutParam = callback;
+    if (callback) {
+        ImGui::GetPlatformIO().Platform_GetWindowPos = Platform_GetWindowPos_Thunk;
+    } else {
+        ImGui::GetPlatformIO().Platform_GetWindowPos = nullptr;
+    }
+}
+
+// Set the Platform_GetWindowSize callback using an out-parameter style
+// This avoids ABI issues with returning ImVec2 by value
+void ImGui_Platform_SetGetWindowSizeCallback(void (*callback)(ImGuiViewport*, ImVec2*)) {
+    g_Platform_GetWindowSize_OutParam = callback;
+    if (callback) {
+        ImGui::GetPlatformIO().Platform_GetWindowSize = Platform_GetWindowSize_Thunk;
+    } else {
+        ImGui::GetPlatformIO().Platform_GetWindowSize = nullptr;
+    }
+}
+
+} // extern "C"

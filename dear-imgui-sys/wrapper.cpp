@@ -23,9 +23,5 @@ thread_local ImGuiContext* MyImGuiTLS;
     #include "imgui/misc/freetype/imgui_freetype.cpp"
 #endif
 
-// Include MSVC ABI fix for Windows MSVC builds
-#ifdef _MSC_VER
-    #include "hack_msvc.cpp"
-#endif
-
-// All wrapper functions removed - using direct C++ bindings via bindgen
+// Include unified MSVC ABI fixes and multi-viewport wrappers
+#include "imgui_msvc_wrapper.cpp"
