@@ -103,6 +103,8 @@ mod io;
 mod list_clipper;
 mod platform_io;
 pub mod render;
+#[cfg(feature = "multi-viewport")]
+mod viewport_backend;
 mod string;
 mod style;
 mod ui;
@@ -149,6 +151,8 @@ pub use style::*;
 pub use text_filter::*;
 pub use ui::*;
 pub use utils::*;
+#[cfg(feature = "multi-viewport")]
+pub use viewport_backend::*;
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

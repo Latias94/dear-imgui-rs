@@ -37,6 +37,8 @@ xshell = "0.2"
 default = ["docking"]
 # Enable docking branch features (default)
 docking = []
+# Enable multi-viewport support (requires docking)
+multi-viewport = ["docking"]
 # Enable freetype font rasterizer
 freetype = ["pkg-config"]
 # Enable for WASM targets

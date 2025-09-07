@@ -40,10 +40,10 @@ bitflags! {
         /// Backend renderer supports DrawCmd::vtx_offset.
         const RENDERER_HAS_VTX_OFFSET = sys::ImGuiBackendFlags_RendererHasVtxOffset;
 
-        #[cfg(feature = "docking")]
+        #[cfg(feature = "multi-viewport")]
         /// Set if the platform backend supports viewports.
         const PLATFORM_HAS_VIEWPORTS = sys::ImGuiBackendFlags_PlatformHasViewports;
-        #[cfg(feature = "docking")]
+        #[cfg(feature = "multi-viewport")]
         /// Set if the renderer backend supports viewports.
         const RENDERER_HAS_VIEWPORTS = sys::ImGuiBackendFlags_RendererHasViewports;
     }

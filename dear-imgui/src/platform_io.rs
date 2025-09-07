@@ -4,6 +4,7 @@
 //! multi-viewport and platform-specific functionality.
 
 use crate::sys;
+use std::ffi::{c_char, c_void};
 use std::ptr;
 
 /// Platform IO structure for multi-viewport support
@@ -44,6 +45,126 @@ impl PlatformIo {
     /// Get the raw mutable pointer to the underlying `ImGuiPlatformIO`
     pub fn as_raw_mut(&mut self) -> *mut sys::ImGuiPlatformIO {
         &mut self.raw as *mut _
+    }
+
+    /// Set platform create window callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_create_window(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport)>) {
+        self.raw.Platform_CreateWindow = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform destroy window callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_destroy_window(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport)>) {
+        self.raw.Platform_DestroyWindow = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform show window callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_show_window(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport)>) {
+        self.raw.Platform_ShowWindow = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform set window position callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_set_window_pos(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>) {
+        self.raw.Platform_SetWindowPos = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform get window position callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_get_window_pos(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>) {
+        self.raw.Platform_GetWindowPos = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform set window size callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_set_window_size(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>) {
+        self.raw.Platform_SetWindowSize = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform get window size callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_get_window_size(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>) {
+        self.raw.Platform_GetWindowSize = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform set window focus callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_set_window_focus(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport)>) {
+        self.raw.Platform_SetWindowFocus = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform get window focus callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_get_window_focus(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport) -> bool>) {
+        self.raw.Platform_GetWindowFocus = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform get window minimized callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_get_window_minimized(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport) -> bool>) {
+        self.raw.Platform_GetWindowMinimized = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform set window title callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_set_window_title(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport, *const c_char)>) {
+        self.raw.Platform_SetWindowTitle = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform set window alpha callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_set_window_alpha(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport, f32)>) {
+        self.raw.Platform_SetWindowAlpha = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform update window callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_update_window(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport)>) {
+        self.raw.Platform_UpdateWindow = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform render window callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_render_window(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>) {
+        self.raw.Platform_RenderWindow = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set platform swap buffers callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_swap_buffers(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>) {
+        self.raw.Platform_SwapBuffers = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set renderer create window callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_renderer_create_window(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport)>) {
+        self.raw.Renderer_CreateWindow = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set renderer destroy window callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_renderer_destroy_window(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport)>) {
+        self.raw.Renderer_DestroyWindow = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set renderer set window size callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_renderer_set_window_size(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>) {
+        self.raw.Renderer_SetWindowSize = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set renderer render window callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_renderer_render_window(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>) {
+        self.raw.Renderer_RenderWindow = callback.map(|f| unsafe { std::mem::transmute(f) });
+    }
+
+    /// Set renderer swap buffers callback
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_renderer_swap_buffers(&mut self, callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>) {
+        self.raw.Renderer_SwapBuffers = callback.map(|f| unsafe { std::mem::transmute(f) });
     }
 }
 

@@ -3,6 +3,9 @@ name = "dear-imgui-examples"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+multi-viewport = ["dear-imgui/multi-viewport", "dear-imgui-winit/multi-viewport"]
+
 [[bin]]
 name = "hello_world"
 path = "hello_world.rs"
@@ -30,6 +33,14 @@ path = "text_filter_demo.rs"
 [[bin]]
 name = "input_text_callback_demo"
 path = "input_text_callback_demo.rs"
+
+[[bin]]
+name = "multi_viewport_demo"
+path = "multi_viewport_demo.rs"
+
+[[bin]]
+name = "test_multi_viewport"
+path = "test_multi_viewport.rs"
 
 
 

@@ -50,6 +50,12 @@ fn build_imgui() {
         println!("cargo:warning=Using Dear ImGui docking branch with full docking support.");
     }
 
+    if cfg!(feature = "multi-viewport") {
+        // Multi-viewport requires docking branch
+        println!("cargo:warning=Enabling Dear ImGui multi-viewport support.");
+        build.define("IMGUI_HAS_VIEWPORT", None);
+    }
+
     if cfg!(feature = "freetype") {
         build.define("IMGUI_ENABLE_FREETYPE", None);
 
@@ -147,6 +153,11 @@ fn generate_bindings() {
     if cfg!(feature = "docking") {
         // Docking branch is used by default
         builder = builder.clang_arg("-DIMGUI_HAS_DOCK");
+    }
+
+    if cfg!(feature = "multi-viewport") {
+        // Multi-viewport support
+        builder = builder.clang_arg("-DIMGUI_HAS_VIEWPORT");
     }
 
     if cfg!(feature = "freetype") {

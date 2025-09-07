@@ -21,3 +21,5 @@ cfg-if.workspace = true
 default = []
 # Enable docking features
 docking = ["dear-imgui/docking"]
+# Enable multi-viewport support
+multi-viewport = ["dear-imgui/multi-viewport"]

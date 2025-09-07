@@ -30,6 +30,11 @@ use winit::event::{
 use winit::keyboard::{Key as WinitKey, KeyLocation, NamedKey};
 use winit::window::{CursorIcon as WinitCursor, Window, WindowAttributes};
 
+#[cfg(feature = "multi-viewport")]
+use dear_imgui::{PlatformViewportBackend, Viewport};
+#[cfg(feature = "multi-viewport")]
+use winit::event_loop::ActiveEventLoop;
+
 /// DPI factor handling mode.
 ///
 /// Applications that use dear-imgui might want to customize the used DPI factor and not use
@@ -69,6 +74,8 @@ pub struct WinitPlatform {
     mouse_pos: [f32; 2],
     hidpi_mode: HiDpiMode,
     hidpi_factor: f64,
+    #[cfg(feature = "multi-viewport")]
+    viewports: HashMap<sys::ImGuiID, Window>,
 }
 
 impl WinitPlatform {
@@ -94,6 +101,8 @@ impl WinitPlatform {
             mouse_pos: [0.0, 0.0],
             hidpi_mode: HiDpiMode::Default,
             hidpi_factor: 1.0,
+            #[cfg(feature = "multi-viewport")]
+            viewports: HashMap::new(),
         };
 
         platform.configure_imgui(imgui_ctx);
@@ -119,11 +128,49 @@ impl WinitPlatform {
 
         // Update display size and framebuffer scale immediately
         self.update_display_size(window, imgui_ctx);
+
+        // Set main viewport platform handle for multi-viewport support
+        #[cfg(feature = "multi-viewport")]
+        {
+            self.set_main_viewport_platform_handle(window, imgui_ctx);
+        }
     }
 
     /// Get the current DPI factor
     pub fn hidpi_factor(&self) -> f64 {
         self.hidpi_factor
+    }
+
+    /// Set up multi-viewport support with winit backend
+    #[cfg(feature = "multi-viewport")]
+    pub fn setup_multi_viewport(&mut self, event_loop: &ActiveEventLoop, imgui_ctx: &mut Context) {
+        // Enable multi-viewport in ImGui
+        let io = imgui_ctx.io_mut();
+        let mut config_flags = io.config_flags();
+        config_flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
+        io.set_config_flags(config_flags);
+
+        // Set up the platform backend
+        let viewport_backend = unsafe { WinitViewportBackend::new(event_loop) };
+        imgui_ctx.set_platform_backend(viewport_backend);
+    }
+
+    /// Set the main viewport platform handle
+    #[cfg(feature = "multi-viewport")]
+    fn set_main_viewport_platform_handle(&self, window: &Window, imgui_ctx: &mut Context) {
+        use raw_window_handle::HasWindowHandle;
+
+        // Get the main viewport
+        unsafe {
+            let main_viewport = dear_imgui_sys::ImGui_GetMainViewport();
+            if !main_viewport.is_null() {
+                // Set the platform handle to the winit window
+                // We store the window pointer as the platform handle
+                let window_ptr = window as *const Window as *mut std::ffi::c_void;
+                (*main_viewport).PlatformHandle = window_ptr;
+                (*main_viewport).PlatformHandleRaw = window_ptr;
+            }
+        }
     }
 
     /// Configure fonts for the current DPI factor
@@ -236,6 +283,12 @@ impl WinitPlatform {
         let mut backend_flags = io.backend_flags();
         backend_flags.insert(BackendFlags::HAS_MOUSE_CURSORS);
         backend_flags.insert(BackendFlags::HAS_SET_MOUSE_POS);
+
+        #[cfg(feature = "multi-viewport")]
+        {
+            backend_flags.insert(BackendFlags::PLATFORM_HAS_VIEWPORTS);
+        }
+
         io.set_backend_flags(backend_flags);
 
         // Note: Backend name setting is not exposed in our safe API
@@ -462,6 +515,204 @@ fn winit_key_to_imgui_key(key: &WinitKey) -> Option<Key> {
             }
         }
         _ => None,
+    }
+}
+
+/// Multi-viewport backend implementation for winit
+#[cfg(feature = "multi-viewport")]
+pub struct WinitViewportBackend {
+    event_loop: *const ActiveEventLoop,
+}
+
+#[cfg(feature = "multi-viewport")]
+impl WinitViewportBackend {
+    /// Create a new winit viewport backend
+    ///
+    /// # Safety
+    ///
+    /// The event_loop pointer must remain valid for the lifetime of this backend
+    pub unsafe fn new(event_loop: &ActiveEventLoop) -> Self {
+        Self {
+            event_loop: event_loop as *const _,
+        }
+    }
+
+    fn event_loop(&self) -> &ActiveEventLoop {
+        unsafe { &*self.event_loop }
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+impl PlatformViewportBackend for WinitViewportBackend {
+    fn create_window(&mut self, viewport: &mut Viewport) {
+        let size = viewport.size();
+        let pos = viewport.pos();
+
+        let window_attributes = WindowAttributes::default()
+            .with_title("ImGui Viewport")
+            .with_inner_size(LogicalSize::new(size[0] as f64, size[1] as f64))
+            .with_position(LogicalPosition::new(pos[0] as f64, pos[1] as f64))
+            .with_visible(false); // Start invisible, will be shown later
+
+        match self.event_loop().create_window(window_attributes) {
+            Ok(window) => {
+                // Store the window handle in the viewport's platform user data
+                let window_ptr = Box::into_raw(Box::new(window));
+                unsafe {
+                    let raw_viewport = viewport.as_raw_mut();
+                    (*raw_viewport).PlatformHandle = window_ptr as *mut std::ffi::c_void;
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to create viewport window: {}", e);
+                // Set platform handle to null to indicate failure
+                unsafe {
+                    let raw_viewport = viewport.as_raw_mut();
+                    (*raw_viewport).PlatformHandle = std::ptr::null_mut();
+                }
+            }
+        }
+    }
+
+    fn destroy_window(&mut self, viewport: &mut Viewport) {
+        unsafe {
+            let raw_viewport = viewport.as_raw_mut();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window_ptr = (*raw_viewport).PlatformHandle as *mut Window;
+                let _window = Box::from_raw(window_ptr);
+                (*raw_viewport).PlatformHandle = std::ptr::null_mut();
+            }
+        }
+    }
+
+    fn show_window(&mut self, viewport: &mut Viewport) {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                window.set_visible(true);
+            }
+        }
+    }
+
+    fn set_window_pos(&mut self, viewport: &mut Viewport, pos: [f32; 2]) {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                let logical_pos = LogicalPosition::new(pos[0] as f64, pos[1] as f64);
+                // Note: winit doesn't provide a direct way to set window position
+                // This is a limitation of the current winit API
+                let _ = window.set_outer_position(logical_pos.to_physical::<f64>(window.scale_factor()));
+            }
+        }
+    }
+
+    fn get_window_pos(&mut self, viewport: &mut Viewport) -> [f32; 2] {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                if let Ok(pos) = window.outer_position() {
+                    let logical_pos: LogicalPosition<f64> = pos.to_logical(window.scale_factor());
+                    return [logical_pos.x as f32, logical_pos.y as f32];
+                }
+            }
+        }
+        [0.0, 0.0]
+    }
+
+    fn set_window_size(&mut self, viewport: &mut Viewport, size: [f32; 2]) {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                let logical_size = LogicalSize::new(size[0] as f64, size[1] as f64);
+                let _ = window.request_inner_size(logical_size);
+            }
+        }
+    }
+
+    fn get_window_size(&mut self, viewport: &mut Viewport) -> [f32; 2] {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                let size = window.inner_size();
+                let logical_size: LogicalSize<f64> = size.to_logical(window.scale_factor());
+                return [logical_size.width as f32, logical_size.height as f32];
+            }
+        }
+        [800.0, 600.0]
+    }
+
+    fn set_window_focus(&mut self, viewport: &mut Viewport) {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                window.focus_window();
+            }
+        }
+    }
+
+    fn get_window_focus(&mut self, viewport: &mut Viewport) -> bool {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                return window.has_focus();
+            }
+        }
+        false
+    }
+
+    fn get_window_minimized(&mut self, viewport: &mut Viewport) -> bool {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                return window.is_minimized().unwrap_or(false);
+            }
+        }
+        false
+    }
+
+    fn set_window_title(&mut self, viewport: &mut Viewport, title: &str) {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                window.set_title(title);
+            }
+        }
+    }
+
+    fn set_window_alpha(&mut self, _viewport: &mut Viewport, _alpha: f32) {
+        // Winit doesn't support window transparency in a cross-platform way
+        // This would need platform-specific implementations
+    }
+
+    fn update_window(&mut self, _viewport: &mut Viewport) {
+        // Nothing to do for winit
+    }
+
+    fn render_window(&mut self, _viewport: &mut Viewport) {
+        // This is handled by the renderer backend
+    }
+
+    fn swap_buffers(&mut self, _viewport: &mut Viewport) {
+        // This is handled by the renderer backend
+    }
+
+    fn create_vk_surface(
+        &mut self,
+        _viewport: &mut Viewport,
+        _instance: u64,
+        _out_surface: &mut u64,
+    ) -> i32 {
+        // Vulkan surface creation would need platform-specific implementation
+        -1
     }
 }
 
