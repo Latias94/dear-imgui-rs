@@ -1,7 +1,7 @@
 [package]
 name = "dear-imgui-examples"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 
 [features]
 multi-viewport = ["dear-imgui/multi-viewport", "dear-imgui-winit/multi-viewport"]
@@ -9,10 +9,6 @@ multi-viewport = ["dear-imgui/multi-viewport", "dear-imgui-winit/multi-viewport"
 [[bin]]
 name = "hello_world"
 path = "hello_world.rs"
-
-[[bin]]
-name = "hello_world_wgpu"
-path = "hello_world_wgpu.rs"
 
 [[bin]]
 name = "draw_demo"
@@ -27,26 +23,8 @@ name = "game_engine_docking"
 path = "game_engine_docking.rs"
 
 [[bin]]
-name = "text_filter_demo"
-path = "text_filter_demo.rs"
-
-[[bin]]
-name = "input_text_callback_demo"
-path = "input_text_callback_demo.rs"
-
-[[bin]]
 name = "multi_viewport_demo"
 path = "multi_viewport_demo.rs"
-
-[[bin]]
-name = "test_multi_viewport"
-path = "test_multi_viewport.rs"
-
-[[bin]]
-name = "test_viewport_callbacks"
-path = "test_viewport_callbacks.rs"
-
-
 
 [dependencies]
 dear-imgui = { path = "../dear-imgui" }
