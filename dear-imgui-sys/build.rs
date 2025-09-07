@@ -106,12 +106,22 @@ fn generate_bindings() {
 
         // Read blocklist file if it exists
         if let Ok(blocklist_content) = std::fs::read_to_string("msvc_blocklist.txt") {
+            let mut blocked_functions = Vec::new();
             for line in blocklist_content.lines() {
                 let line = line.trim();
                 if line.is_empty() || line.starts_with('#') {
                     continue;
                 }
+                blocked_functions.push(line);
                 builder = builder.blocklist_function(line);
+            }
+
+            // Print diagnostic information
+            println!("cargo:warning=Applied MSVC ABI fixes for {} functions", blocked_functions.len());
+            if std::env::var("DEAR_IMGUI_VERBOSE").is_ok() {
+                for func in &blocked_functions {
+                    println!("cargo:warning=  - Blocked function: {}", func);
+                }
             }
         }
 

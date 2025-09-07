@@ -82,4 +82,11 @@ ImVec2_rr ImGui_GetMouseDragDelta(ImGuiMouseButton button, float lock_threshold)
     return _rr(ImGui::GetMouseDragDelta(button, lock_threshold)); 
 }
 
+// Validation function to ensure our ABI fixes work correctly
+// This can be called from Rust tests to verify the wrapper functions
+ImVec2_rr ImGui_ValidateABIFix() {
+    // Return a known value that can be verified from Rust
+    return ImVec2_rr { 42.0f, 24.0f };
+}
+
 } // extern "C"
