@@ -14504,6 +14504,175 @@ unsafe extern "C" {
         out_uv_fill: *mut ImVec2,
     ) -> bool;
 }
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_DockSpace"]
+    pub fn ImGui_DockSpace1(
+        dockspace_id: ImGuiID,
+        size: *const ImVec2,
+        flags: ImGuiDockNodeFlags,
+        window_class: *const ImGuiWindowClass,
+    ) -> ImGuiID;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_DockSpaceOverViewport"]
+    pub fn ImGui_DockSpaceOverViewport1(
+        dockspace_id: ImGuiID,
+        viewport: *const ImGuiViewport,
+        flags: ImGuiDockNodeFlags,
+        window_class: *const ImGuiWindowClass,
+    ) -> ImGuiID;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_SetNextWindowDockID"]
+    pub fn ImGui_SetNextWindowDockID1(dock_id: ImGuiID, cond: ImGuiCond);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_GetWindowDockID"]
+    pub fn ImGui_GetWindowDockID1() -> ImGuiID;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_IsWindowDocked"]
+    pub fn ImGui_IsWindowDocked1() -> bool;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_GetMainViewport"]
+    pub fn ImGui_GetMainViewport1() -> *const ImGuiViewport;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_GetWindowViewport"]
+    pub fn ImGui_GetWindowViewport1() -> *const ImGuiViewport;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_DockBuilderRemoveNode"]
+    pub fn ImGui_DockBuilderRemoveNode1(node_id: ImGuiID);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_DockBuilderAddNode"]
+    pub fn ImGui_DockBuilderAddNode1(node_id: ImGuiID, flags: ImGuiDockNodeFlags) -> ImGuiID;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_DockBuilderSetNodePos"]
+    pub fn ImGui_DockBuilderSetNodePos1(node_id: ImGuiID, pos: *const ImVec2);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_DockBuilderSetNodeSize"]
+    pub fn ImGui_DockBuilderSetNodeSize1(node_id: ImGuiID, size: *const ImVec2);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_DockBuilderSplitNode"]
+    pub fn ImGui_DockBuilderSplitNode1(
+        node_id: ImGuiID,
+        split_dir: ImGuiDir,
+        size_ratio_for_node_at_dir: f32,
+        out_id_at_dir: *mut ImGuiID,
+        out_id_at_opposite_dir: *mut ImGuiID,
+    ) -> ImGuiID;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_DockBuilderDockWindow"]
+    pub fn ImGui_DockBuilderDockWindow1(
+        window_name: *const ::std::os::raw::c_char,
+        node_id: ImGuiID,
+    );
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_DockBuilderFinish"]
+    pub fn ImGui_DockBuilderFinish1(node_id: ImGuiID);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_Begin"]
+    pub fn ImGui_Begin1(
+        name: *const ::std::os::raw::c_char,
+        p_open: *mut bool,
+        flags: ImGuiWindowFlags,
+    ) -> bool;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_End"]
+    pub fn ImGui_End1();
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_SetNextWindowSize"]
+    pub fn ImGui_SetNextWindowSize1(size: *const ImVec2, cond: ImGuiCond);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_SetNextWindowPos"]
+    pub fn ImGui_SetNextWindowPos1(pos: *const ImVec2, cond: ImGuiCond, pivot: *const ImVec2);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_SetNextWindowContentSize"]
+    pub fn ImGui_SetNextWindowContentSize1(size: *const ImVec2);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_SetNextWindowCollapsed"]
+    pub fn ImGui_SetNextWindowCollapsed1(collapsed: bool, cond: ImGuiCond);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_SetNextWindowFocus"]
+    pub fn ImGui_SetNextWindowFocus1();
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_SetNextWindowBgAlpha"]
+    pub fn ImGui_SetNextWindowBgAlpha1(alpha: f32);
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_BeginPopup"]
+    pub fn ImGui_BeginPopup1(
+        str_id: *const ::std::os::raw::c_char,
+        flags: ImGuiWindowFlags,
+    ) -> bool;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_EndPopup"]
+    pub fn ImGui_EndPopup1();
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_BeginPopupModal"]
+    pub fn ImGui_BeginPopupModal1(
+        name: *const ::std::os::raw::c_char,
+        p_open: *mut bool,
+        flags: ImGuiWindowFlags,
+    ) -> bool;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_BeginPopupContextItem"]
+    pub fn ImGui_BeginPopupContextItem1(
+        str_id: *const ::std::os::raw::c_char,
+        popup_flags: ImGuiPopupFlags,
+    ) -> bool;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_BeginChild"]
+    pub fn ImGui_BeginChild2(
+        str_id: *const ::std::os::raw::c_char,
+        size: *const ImVec2,
+        child_flags: ImGuiChildFlags,
+        window_flags: ImGuiWindowFlags,
+    ) -> bool;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_EndChild"]
+    pub fn ImGui_EndChild1();
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_CollapsingHeader"]
+    pub fn ImGui_CollapsingHeader2(
+        label: *const ::std::os::raw::c_char,
+        flags: ImGuiTreeNodeFlags,
+    ) -> bool;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_GetWindowDrawList"]
+    pub fn ImGui_GetWindowDrawList1() -> *mut ImDrawList;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_GetBackgroundDrawList"]
+    pub fn ImGui_GetBackgroundDrawList1() -> *mut ImDrawList;
+}
+unsafe extern "C" {
+    #[link_name = "\u{1}ImGui_GetForegroundDrawList"]
+    pub fn ImGui_GetForegroundDrawList1() -> *mut ImDrawList;
+}
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImVec2_rr {

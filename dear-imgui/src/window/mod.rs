@@ -254,11 +254,17 @@ impl<'ui> Window<'ui> {
             crate::sys::ImGui_Begin(name_cstr.as_ptr(), &mut open, self.flags.bits() as i32)
         };
 
+        // IMPORTANT: According to ImGui documentation, Begin/End calls must be balanced.
+        // If Begin returns false, we need to call End immediately and return None.
         if result && open {
             Some(WindowToken {
                 _phantom: std::marker::PhantomData,
             })
         } else {
+            // If Begin returns false, call End immediately and return None
+            unsafe {
+                crate::sys::ImGui_End();
+            }
             None
         }
     }

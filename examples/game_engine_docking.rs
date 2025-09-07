@@ -243,24 +243,23 @@ impl AppWindow {
 
         let ui = imgui.context.frame();
         
-        // Create main dockspace
+        // Full docking demo - now that we've fixed the EndChild issue
         imgui.dockspace_id = ui.dockspace_over_main_viewport();
 
-        // Setup initial layout on first frame
         if imgui.first_frame {
             setup_initial_docking_layout(imgui.dockspace_id);
             imgui.first_frame = false;
         }
 
-        // Render all panels with Unity-style names - testing one by one
         render_main_menu_bar(&ui, &mut imgui.game_state);
         render_hierarchy(&ui, &mut imgui.game_state);
         render_project(&ui, &mut imgui.game_state);
-        // render_scene_view(&ui, &mut imgui.game_state);
-        // render_game_view(&ui, &mut imgui.game_state);
-        // render_inspector(&ui, &mut imgui.game_state);
-        // render_console(&ui, &mut imgui.game_state);
-        // render_performance(&ui, &mut imgui.game_state);
+        render_inspector(&ui, &mut imgui.game_state);
+        render_scene_view(&ui, &mut imgui.game_state);
+        render_game_view(&ui, &mut imgui.game_state);
+        render_console(&ui, &mut imgui.game_state);
+        render_asset_browser(&ui, &mut imgui.game_state);
+        render_performance(&ui, &mut imgui.game_state);
 
         let draw_data = imgui.context.render();
 
@@ -476,24 +475,24 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
                     selected_entity = Some(entity.clone());
                 }
 
-                // Right-click context menu
-                if let Some(_popup) = ui.begin_popup_context_item() {
-                    if ui.menu_item("Create Empty Child") {
-                        entity_to_duplicate = Some(format!("{} - Child", entity));
-                    }
-                    ui.separator();
-                    if ui.menu_item("Duplicate") {
-                        entity_to_duplicate = Some(entity.clone());
-                    }
-                    if ui.menu_item("Delete") {
-                        entity_to_delete = Some(entity.clone());
-                    }
-                    ui.separator();
-                    if ui.menu_item("Rename") {
-                        // TODO: Implement rename functionality
-                    }
-                    // popup.end() is called automatically by Drop
-                }
+                // Right-click context menu - temporarily disabled for debugging
+                // if let Some(_popup) = ui.begin_popup_context_item() {
+                //     if ui.menu_item("Create Empty Child") {
+                //         entity_to_duplicate = Some(format!("{} - Child", entity));
+                //     }
+                //     ui.separator();
+                //     if ui.menu_item("Duplicate") {
+                //         entity_to_duplicate = Some(entity.clone());
+                //     }
+                //     if ui.menu_item("Delete") {
+                //         entity_to_delete = Some(entity.clone());
+                //     }
+                //     ui.separator();
+                //     if ui.menu_item("Rename") {
+                //         // TODO: Implement rename functionality
+                //     }
+                //     // popup.end() is called automatically by Drop
+                // }
             }
 
             // Handle actions outside the loop
@@ -663,21 +662,22 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
                 }
 
                 ui.separator();
-                if ui.button("Add Component") {
-                    ui.open_popup("add_component");
-                }
+                // Temporarily disabled popup to test
+                // if ui.button("Add Component") {
+                //     ui.open_popup("add_component");
+                // }
 
-                ui.popup("add_component", || {
-                    if ui.menu_item("Rigidbody") {
-                        game_state.console_logs.push("[INFO] Rigidbody component added".to_string());
-                    }
-                    if ui.menu_item("Audio Source") {
-                        game_state.console_logs.push("[INFO] Audio Source component added".to_string());
-                    }
-                    if ui.menu_item("Script") {
-                        game_state.console_logs.push("[INFO] Script component added".to_string());
-                    }
-                });
+                // ui.popup("add_component", || {
+                //     if ui.menu_item("Rigidbody") {
+                //         game_state.console_logs.push("[INFO] Rigidbody component added".to_string());
+                //     }
+                //     if ui.menu_item("Audio Source") {
+                //         game_state.console_logs.push("[INFO] Audio Source component added".to_string());
+                //     }
+                //     if ui.menu_item("Script") {
+                //         game_state.console_logs.push("[INFO] Script component added".to_string());
+                //     }
+                // });
 
             } else {
                 ui.text("No object selected");
@@ -868,12 +868,13 @@ fn render_game_view(ui: &Ui, game_state: &mut GameEngineState) {
 }
 
 /// Render the console panel
-fn render_console(ui: &Ui, game_state: &mut GameEngineState) {
+fn render_console(ui: &Ui, _game_state: &mut GameEngineState) {
     ui.window("Console")
         .size([800.0, 200.0], Condition::FirstUseEver)
         .build(|| {
             ui.text("Console - Simplified Version");
             ui.text("This is a test to isolate the EndChild error");
+            ui.text("No collapsing header here");
         });
 }
 
