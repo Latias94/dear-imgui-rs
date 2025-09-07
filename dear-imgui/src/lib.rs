@@ -90,6 +90,8 @@ mod clipboard;
 mod color;
 mod context;
 mod dock_space;
+#[cfg(feature = "docking")]
+mod dock_builder;
 mod draw;
 mod fonts;
 pub mod input;
@@ -127,6 +129,8 @@ pub use clipboard::*;
 pub use color::*;
 pub use context::*;
 pub use dock_space::*;
+#[cfg(feature = "docking")]
+pub use dock_builder::*;
 pub use draw::*;
 pub use fonts::*;
 pub use input::*;

@@ -30,7 +30,7 @@ impl Ui {
     #[doc(alias = "SeparatorEx")]
     pub fn separator_vertical(&self) {
         unsafe {
-            sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Vertical, 0.0);
+            sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Vertical, 1.0);
         }
     }
 
@@ -38,7 +38,7 @@ impl Ui {
     #[doc(alias = "SeparatorEx")]
     pub fn separator_horizontal(&self) {
         unsafe {
-            sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Horizontal, 0.0);
+            sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Horizontal, 1.0);
         }
     }
 

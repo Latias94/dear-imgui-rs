@@ -46,8 +46,10 @@ impl<'ui> ChildWindow<'ui> {
     where
         F: FnOnce() -> R,
     {
-        let _token = self.begin(ui)?;
-        Some(f())
+        let token = self.begin(ui)?;
+        let result = f();
+        drop(token); // Explicitly drop the token to call EndChild
+        Some(result)
     }
 
     /// Begins the child window and returns a token
