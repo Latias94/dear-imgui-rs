@@ -82,6 +82,9 @@ pub use self::layout::*;
 // Drag and drop system
 pub use self::drag_drop::*;
 
+// Text filtering system
+pub use self::text_filter::*;
+
 // Column layout system (included in layout module)
 pub use self::columns::*;
 
@@ -121,6 +124,9 @@ mod layout;
 // Drag and drop system
 mod drag_drop;
 
+// Text filtering system
+mod text_filter;
+
 // Column layout system
 mod columns;
 
@@ -140,6 +146,7 @@ pub use platform_io::*;
 pub use render::*;
 pub use string::*;
 pub use style::*;
+pub use text_filter::*;
 pub use ui::*;
 pub use utils::*;
 

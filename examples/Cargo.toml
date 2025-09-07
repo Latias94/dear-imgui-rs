@@ -23,6 +23,14 @@ path = "widgets_demo.rs"
 name = "game_engine_docking"
 path = "game_engine_docking.rs"
 
+[[bin]]
+name = "text_filter_demo"
+path = "text_filter_demo.rs"
+
+[[bin]]
+name = "input_text_callback_demo"
+path = "input_text_callback_demo.rs"
+
 
 
 [dependencies]
