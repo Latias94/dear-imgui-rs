@@ -715,6 +715,36 @@ impl PlatformViewportBackend for WinitViewportBackend {
         // Vulkan surface creation would need platform-specific implementation
         -1
     }
+
+    fn get_window_dpi_scale(&mut self, viewport: &mut Viewport) -> f32 {
+        unsafe {
+            let raw_viewport = viewport.as_raw();
+            if !(*raw_viewport).PlatformHandle.is_null() {
+                let window = &*((*raw_viewport).PlatformHandle as *const Window);
+                let scale = window.scale_factor() as f32;
+                // Ensure the scale factor is within valid range (0.0, 99.0)
+                if scale > 0.0 && scale < 99.0 {
+                    return scale;
+                }
+            }
+        }
+        1.0
+    }
+
+    fn get_window_framebuffer_scale(&mut self, viewport: &mut Viewport) -> [f32; 2] {
+        let scale = self.get_window_dpi_scale(viewport);
+        [scale, scale]
+    }
+
+    fn on_changed_viewport(&mut self, _viewport: &mut Viewport) {
+        // Nothing to do for winit
+    }
+
+    fn get_window_work_area_insets(&mut self, _viewport: &mut Viewport) -> [f32; 4] {
+        // Winit doesn't provide direct access to work area insets
+        // This would need platform-specific implementation
+        [0.0, 0.0, 0.0, 0.0]
+    }
 }
 
 #[cfg(test)]

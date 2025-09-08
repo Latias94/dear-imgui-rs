@@ -22,6 +22,18 @@ path = "widgets_demo.rs"
 name = "game_engine_docking"
 path = "game_engine_docking.rs"
 
+[[bin]]
+name = "multi_viewport_demo"
+path = "multi_viewport_demo.rs"
+
+[[bin]]
+name = "simple_test"
+path = "simple_test.rs"
+
+[[bin]]
+name = "basic_test"
+path = "basic_test.rs"
+
 
 
 [dependencies]

@@ -93,6 +93,37 @@ pub trait PlatformViewportBackend: 'static {
         instance: u64,
         out_surface: &mut u64,
     ) -> i32;
+
+    /// Called by imgui to get the DPI scale of a [`Viewport`].
+    ///
+    /// This is used for proper scaling of UI elements on high-DPI displays.
+    /// Return 1.0 if DPI scaling is not supported.
+    fn get_window_dpi_scale(&mut self, viewport: &mut Viewport) -> f32 {
+        1.0
+    }
+
+    /// Called by imgui to get the framebuffer scale of a [`Viewport`].
+    ///
+    /// This is used for proper scaling of rendering on high-DPI displays.
+    /// Return [1.0, 1.0] if framebuffer scaling is not supported.
+    fn get_window_framebuffer_scale(&mut self, viewport: &mut Viewport) -> [f32; 2] {
+        [1.0, 1.0]
+    }
+
+    /// Called by imgui when a viewport has changed.
+    ///
+    /// This can be used to update platform-specific state when viewport properties change.
+    fn on_changed_viewport(&mut self, _viewport: &mut Viewport) {
+        // Default implementation does nothing
+    }
+
+    /// Called by imgui to get work area insets for a [`Viewport`].
+    ///
+    /// Work area insets define the space taken up by OS elements like taskbars.
+    /// Return [0.0, 0.0, 0.0, 0.0] if work area insets are not supported.
+    fn get_window_work_area_insets(&mut self, _viewport: &mut Viewport) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
 }
 
 /// Trait that holds optional functions for a rendering backend to support multiple viewports.
@@ -189,6 +220,22 @@ impl PlatformViewportBackend for DummyPlatformViewportBackend {
         _out_surface: &mut u64,
     ) -> i32 {
         -1 // Not supported
+    }
+
+    fn get_window_dpi_scale(&mut self, _viewport: &mut Viewport) -> f32 {
+        1.0
+    }
+
+    fn get_window_framebuffer_scale(&mut self, _viewport: &mut Viewport) -> [f32; 2] {
+        [1.0, 1.0]
+    }
+
+    fn on_changed_viewport(&mut self, _viewport: &mut Viewport) {
+        // Do nothing
+    }
+
+    fn get_window_work_area_insets(&mut self, _viewport: &mut Viewport) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
     }
 }
 

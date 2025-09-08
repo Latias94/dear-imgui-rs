@@ -108,6 +108,8 @@ ImVec2_Pod ImGui_GetMouseDragDelta(ImGuiMouseButton button, float lock_threshold
 // Storage for our safe callbacks that use out parameters
 static void (*g_Platform_GetWindowPos_OutParam)(ImGuiViewport*, ImVec2*) = nullptr;
 static void (*g_Platform_GetWindowSize_OutParam)(ImGuiViewport*, ImVec2*) = nullptr;
+static void (*g_Platform_GetWindowFramebufferScale_OutParam)(ImGuiViewport*, ImVec2*) = nullptr;
+static void (*g_Platform_GetWindowWorkAreaInsets_OutParam)(ImGuiViewport*, ImVec4*) = nullptr;
 
 // Thunk functions that convert from out-parameter style to return-by-value style
 static ImVec2 Platform_GetWindowPos_Thunk(ImGuiViewport* viewport) {
@@ -122,6 +124,22 @@ static ImVec2 Platform_GetWindowSize_Thunk(ImGuiViewport* viewport) {
     ImVec2 result = ImVec2(800, 600);
     if (g_Platform_GetWindowSize_OutParam) {
         g_Platform_GetWindowSize_OutParam(viewport, &result);
+    }
+    return result;
+}
+
+static ImVec2 Platform_GetWindowFramebufferScale_Thunk(ImGuiViewport* viewport) {
+    ImVec2 result = ImVec2(1.0f, 1.0f);
+    if (g_Platform_GetWindowFramebufferScale_OutParam) {
+        g_Platform_GetWindowFramebufferScale_OutParam(viewport, &result);
+    }
+    return result;
+}
+
+static ImVec4 Platform_GetWindowWorkAreaInsets_Thunk(ImGuiViewport* viewport) {
+    ImVec4 result = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+    if (g_Platform_GetWindowWorkAreaInsets_OutParam) {
+        g_Platform_GetWindowWorkAreaInsets_OutParam(viewport, &result);
     }
     return result;
 }
@@ -145,6 +163,28 @@ void ImGui_Platform_SetGetWindowSizeCallback(void (*callback)(ImGuiViewport*, Im
         ImGui::GetPlatformIO().Platform_GetWindowSize = Platform_GetWindowSize_Thunk;
     } else {
         ImGui::GetPlatformIO().Platform_GetWindowSize = nullptr;
+    }
+}
+
+// Set the Platform_GetWindowFramebufferScale callback using an out-parameter style
+// This avoids ABI issues with returning ImVec2 by value
+void ImGui_Platform_SetGetWindowFramebufferScaleCallback(void (*callback)(ImGuiViewport*, ImVec2*)) {
+    g_Platform_GetWindowFramebufferScale_OutParam = callback;
+    if (callback) {
+        ImGui::GetPlatformIO().Platform_GetWindowFramebufferScale = Platform_GetWindowFramebufferScale_Thunk;
+    } else {
+        ImGui::GetPlatformIO().Platform_GetWindowFramebufferScale = nullptr;
+    }
+}
+
+// Set the Platform_GetWindowWorkAreaInsets callback using an out-parameter style
+// This avoids ABI issues with returning ImVec4 by value
+void ImGui_Platform_SetGetWindowWorkAreaInsetsCallback(void (*callback)(ImGuiViewport*, ImVec4*)) {
+    g_Platform_GetWindowWorkAreaInsets_OutParam = callback;
+    if (callback) {
+        ImGui::GetPlatformIO().Platform_GetWindowWorkAreaInsets = Platform_GetWindowWorkAreaInsets_Thunk;
+    } else {
+        ImGui::GetPlatformIO().Platform_GetWindowWorkAreaInsets = nullptr;
     }
 }
 

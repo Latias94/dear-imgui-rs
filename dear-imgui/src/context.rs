@@ -371,6 +371,30 @@ impl Context {
         platform_io.set_platform_update_window(Some(platform_update_window));
         platform_io.set_platform_render_window(Some(platform_render_window));
         platform_io.set_platform_swap_buffers(Some(platform_swap_buffers));
+
+        // Set additional platform callbacks
+        unsafe {
+            let raw_platform_io = platform_io.as_raw_mut();
+            (*raw_platform_io).Platform_GetWindowDpiScale = Some(platform_get_window_dpi_scale);
+            (*raw_platform_io).Platform_OnChangedViewport = Some(platform_on_changed_viewport);
+
+            // Use external C wrapper functions for callbacks that return ImVec2/ImVec4
+            // to avoid MSVC ABI issues
+            extern "C" {
+                fn ImGui_Platform_SetGetWindowFramebufferScaleCallback(
+                    callback: Option<
+                        unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+                    >,
+                );
+                fn ImGui_Platform_SetGetWindowWorkAreaInsetsCallback(
+                    callback: Option<
+                        unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4),
+                    >,
+                );
+            }
+            ImGui_Platform_SetGetWindowFramebufferScaleCallback(Some(platform_get_window_framebuffer_scale));
+            ImGui_Platform_SetGetWindowWorkAreaInsetsCallback(Some(platform_get_window_work_area_insets));
+        }
     }
 
     /// Set the renderer viewport backend
@@ -389,6 +413,65 @@ impl Context {
         platform_io.set_renderer_set_window_size(Some(renderer_set_window_size));
         platform_io.set_renderer_render_window(Some(renderer_render_window));
         platform_io.set_renderer_swap_buffers(Some(renderer_swap_buffers));
+    }
+
+    /// Get the main viewport
+    #[cfg(feature = "multi-viewport")]
+    pub fn main_viewport(&self) -> &crate::platform_io::Viewport {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            let main_viewport = sys::ImGui_GetMainViewport();
+            crate::platform_io::Viewport::from_raw(main_viewport)
+        }
+    }
+
+    /// Get the main viewport (mutable)
+    #[cfg(feature = "multi-viewport")]
+    pub fn main_viewport_mut(&mut self) -> &mut crate::platform_io::Viewport {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            let main_viewport = sys::ImGui_GetMainViewport();
+            crate::platform_io::Viewport::from_raw_mut(main_viewport)
+        }
+    }
+
+    /// Update platform windows
+    ///
+    /// This function should be called every frame when multi-viewport is enabled.
+    /// It updates all platform windows and handles viewport management.
+    #[cfg(feature = "multi-viewport")]
+    pub fn update_platform_windows(&mut self) {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            sys::ImGui_UpdatePlatformWindows();
+        }
+    }
+
+    /// Render platform windows with default implementation
+    ///
+    /// This function renders all platform windows using the default implementation.
+    /// It calls the platform and renderer backends to render each viewport.
+    #[cfg(feature = "multi-viewport")]
+    pub fn render_platform_windows_default(&mut self) {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            sys::ImGui_RenderPlatformWindowsDefault(
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+        }
+    }
+
+    /// Destroy all platform windows
+    ///
+    /// This function should be called during shutdown to properly clean up
+    /// all platform windows and their associated resources.
+    #[cfg(feature = "multi-viewport")]
+    pub fn destroy_platform_windows(&mut self) {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            sys::ImGui_DestroyPlatformWindows();
+        }
     }
 
     /// Suspends this context so another context can be the active context
@@ -843,5 +926,85 @@ extern "C" fn renderer_swap_buffers(
         crate::viewport_backend::with_renderer_viewport_context(|backend| {
             backend.swap_buffers(viewport_ref);
         });
+    }
+}
+
+// Additional platform callback functions
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_get_window_dpi_scale(viewport: *mut sys::ImGuiViewport) -> f32 {
+    if !viewport.is_null() {
+        let viewport_ref = unsafe { crate::platform_io::Viewport::from_raw_mut(viewport) };
+        if let Some(result) = crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.get_window_dpi_scale(viewport_ref)
+        }) {
+            return result;
+        }
+    }
+    1.0
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_get_window_framebuffer_scale(
+    viewport: *mut sys::ImGuiViewport,
+    out_scale: *mut sys::ImVec2,
+) {
+    if !viewport.is_null() && !out_scale.is_null() {
+        let viewport_ref = unsafe { crate::platform_io::Viewport::from_raw_mut(viewport) };
+        if let Some(result) = crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.get_window_framebuffer_scale(viewport_ref)
+        }) {
+            unsafe {
+                (*out_scale).x = result[0];
+                (*out_scale).y = result[1];
+            }
+            return;
+        }
+    }
+    // Default fallback
+    if !out_scale.is_null() {
+        unsafe {
+            (*out_scale).x = 1.0;
+            (*out_scale).y = 1.0;
+        }
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_on_changed_viewport(viewport: *mut sys::ImGuiViewport) {
+    if !viewport.is_null() {
+        let viewport_ref = unsafe { crate::platform_io::Viewport::from_raw_mut(viewport) };
+        crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.on_changed_viewport(viewport_ref);
+        });
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+extern "C" fn platform_get_window_work_area_insets(
+    viewport: *mut sys::ImGuiViewport,
+    out_insets: *mut sys::ImVec4,
+) {
+    if !viewport.is_null() && !out_insets.is_null() {
+        let viewport_ref = unsafe { crate::platform_io::Viewport::from_raw_mut(viewport) };
+        if let Some(result) = crate::viewport_backend::with_platform_viewport_context(|backend| {
+            backend.get_window_work_area_insets(viewport_ref)
+        }) {
+            unsafe {
+                (*out_insets).x = result[0];
+                (*out_insets).y = result[1];
+                (*out_insets).z = result[2];
+                (*out_insets).w = result[3];
+            }
+            return;
+        }
+    }
+    // Default fallback
+    if !out_insets.is_null() {
+        unsafe {
+            (*out_insets).x = 0.0;
+            (*out_insets).y = 0.0;
+            (*out_insets).z = 0.0;
+            (*out_insets).w = 0.0;
+        }
     }
 }

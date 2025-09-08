@@ -226,6 +226,46 @@ impl PlatformIo {
     ) {
         self.raw.Renderer_SwapBuffers = callback.map(|f| unsafe { std::mem::transmute(f) });
     }
+
+    /// Get access to the monitors vector
+    #[cfg(feature = "multi-viewport")]
+    pub fn monitors(&self) -> &sys::ImVector<sys::ImGuiPlatformMonitor> {
+        &self.raw.Monitors
+    }
+
+    /// Get mutable access to the monitors vector
+    #[cfg(feature = "multi-viewport")]
+    pub fn monitors_mut(&mut self) -> &mut sys::ImVector<sys::ImGuiPlatformMonitor> {
+        &mut self.raw.Monitors
+    }
+
+    /// Get access to the viewports vector
+    #[cfg(feature = "multi-viewport")]
+    pub fn viewports(&self) -> &sys::ImVector<*mut sys::ImGuiViewport> {
+        &self.raw.Viewports
+    }
+
+    /// Get mutable access to the viewports vector
+    #[cfg(feature = "multi-viewport")]
+    pub fn viewports_mut(&mut self) -> &mut sys::ImVector<*mut sys::ImGuiViewport> {
+        &mut self.raw.Viewports
+    }
+
+    /// Get an iterator over all viewports
+    #[cfg(feature = "multi-viewport")]
+    pub fn viewports_iter(&self) -> impl Iterator<Item = &Viewport> {
+        self.viewports().iter().map(|&ptr| unsafe {
+            Viewport::from_raw(ptr)
+        })
+    }
+
+    /// Get a mutable iterator over all viewports
+    #[cfg(feature = "multi-viewport")]
+    pub fn viewports_iter_mut(&mut self) -> impl Iterator<Item = &mut Viewport> {
+        self.viewports_mut().iter_mut().map(|&mut ptr| unsafe {
+            Viewport::from_raw_mut(ptr)
+        })
+    }
 }
 
 // TODO: Add safe wrappers for platform IO functionality:
@@ -316,17 +356,22 @@ impl Viewport {
     ///
     /// Note: Main viewport is typically identified by ID == 0 or by checking if it's not a platform window
     pub fn is_main(&self) -> bool {
-        self.raw.ID == 0 || (self.raw.Flags & sys::ImGuiViewportFlags_IsPlatformWindow as i32) == 0
+        self.raw.ID == 0 || (self.raw.Flags & sys::ImGuiViewportFlags_IsPlatformWindow) == 0
     }
 
-    /// Check if the viewport is minimized
-    pub fn is_minimized(&self) -> bool {
-        (self.raw.Flags & sys::ImGuiViewportFlags_IsMinimized as i32) != 0
+    /// Check if this is a platform window (not the main viewport)
+    pub fn is_platform_window(&self) -> bool {
+        (self.raw.Flags & sys::ImGuiViewportFlags_IsPlatformWindow) != 0
     }
 
-    /// Check if the viewport has focus
-    pub fn is_focused(&self) -> bool {
-        (self.raw.Flags & sys::ImGuiViewportFlags_IsFocused as i32) != 0
+    /// Check if this is a platform monitor
+    pub fn is_platform_monitor(&self) -> bool {
+        (self.raw.Flags & sys::ImGuiViewportFlags_IsPlatformMonitor) != 0
+    }
+
+    /// Check if this viewport is owned by the application
+    pub fn is_owned_by_app(&self) -> bool {
+        (self.raw.Flags & sys::ImGuiViewportFlags_OwnedByApp) != 0
     }
 
     /// Get the platform user data
@@ -407,6 +452,59 @@ impl Viewport {
     /// Set the viewport flags
     pub fn set_flags(&mut self, flags: sys::ImGuiViewportFlags) {
         self.raw.Flags = flags;
+    }
+
+    /// Get the DPI scale factor
+    #[cfg(feature = "multi-viewport")]
+    pub fn dpi_scale(&self) -> f32 {
+        self.raw.DpiScale
+    }
+
+    /// Set the DPI scale factor
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_dpi_scale(&mut self, scale: f32) {
+        self.raw.DpiScale = scale;
+    }
+
+    /// Get the parent viewport ID
+    #[cfg(feature = "multi-viewport")]
+    pub fn parent_viewport_id(&self) -> sys::ImGuiID {
+        self.raw.ParentViewportId
+    }
+
+    /// Set the parent viewport ID
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_parent_viewport_id(&mut self, id: sys::ImGuiID) {
+        self.raw.ParentViewportId = id;
+    }
+
+    /// Get the draw data pointer
+    #[cfg(feature = "multi-viewport")]
+    pub fn draw_data(&self) -> *mut sys::ImDrawData {
+        self.raw.DrawData
+    }
+
+    /// Get the draw data as a reference (if available)
+    #[cfg(feature = "multi-viewport")]
+    pub fn draw_data_ref(&self) -> Option<&sys::ImDrawData> {
+        if self.raw.DrawData.is_null() {
+            None
+        } else {
+            Some(unsafe { &*self.raw.DrawData })
+        }
+    }
+
+    /// Get the framebuffer scale
+    #[cfg(feature = "multi-viewport")]
+    pub fn framebuffer_scale(&self) -> [f32; 2] {
+        [self.raw.FramebufferScale.x, self.raw.FramebufferScale.y]
+    }
+
+    /// Set the framebuffer scale
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_framebuffer_scale(&mut self, scale: [f32; 2]) {
+        self.raw.FramebufferScale.x = scale[0];
+        self.raw.FramebufferScale.y = scale[1];
     }
 }
 

@@ -19,10 +19,10 @@ bitflags! {
         /// Application is using a touch screen instead of a mouse.
         const IS_TOUCH_SCREEN = sys::ImGuiConfigFlags_IsTouchScreen;
 
-        #[cfg(feature = "docking")]
+        #[cfg(any(feature = "docking", feature = "multi-viewport"))]
         const DOCKING_ENABLE = sys::ImGuiConfigFlags_DockingEnable;
 
-        #[cfg(feature = "docking")]
+        #[cfg(any(feature = "docking", feature = "multi-viewport"))]
         const VIEWPORTS_ENABLE = sys::ImGuiConfigFlags_ViewportsEnable;
     }
 }
