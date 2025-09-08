@@ -1,258 +1,331 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-fn main() {
-    println!("cargo:rerun-if-changed=imgui");
-    println!("cargo:rerun-if-changed=wrapper.h");
-    println!("cargo:rerun-if-changed=wrapper.cpp");
-
-    // Build Dear ImGui C++ library
-    build_imgui();
-
-    // Generate Rust bindings
-    generate_bindings();
-}
-
-fn build_imgui() {
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-
-    let mut build = cc::Build::new();
-
-    // Configure C++ compilation
-    build
-        .cpp(true)
-        .include("third-party/imgui")
-        .flag_if_supported("-std=c++17")
-        .flag_if_supported("-fno-exceptions")
-        .flag_if_supported("-fno-rtti")
-        .warnings(false) // Suppress warnings from Dear ImGui
-        .define("IMGUI_DEFINE_MATH_OPERATORS", None)
-        .define("IMGUI_USE_WCHAR32", None) // Use 32-bit characters for Rust compatibility
-        .define("IMGUI_DISABLE_OBSOLETE_FUNCTIONS", None)
-        .define("IMGUI_DISABLE_OBSOLETE_KEYIO", None);
-
-    // Platform-specific configuration
-    match target_os.as_str() {
-        "windows" => {
-            build.define("WIN32_LEAN_AND_MEAN", None);
-            build.define("NOMINMAX", None);
-            build.define("IMGUI_DISABLE_WIN32_DEFAULT_CLIPBOARD_FUNCTIONS", None);
-        }
-        "macos" => {
-            build.define("IMGUI_DISABLE_OSX_FUNCTIONS", None);
-        }
-        _ => {}
+/// Check if we need to copy files based on modification times
+fn should_copy_files(imgui_ori: &Path, imgui_src_files: &[&str], copy_marker: &Path) -> bool {
+    // If marker doesn't exist, we need to copy
+    if !copy_marker.exists() {
+        return true;
     }
 
-    // Feature-specific configuration
-    if cfg!(feature = "docking") {
-        // Docking is enabled by default since we're using the docking branch
-        println!("cargo:warning=Using Dear ImGui docking branch with full docking support.");
-    }
+    // Get marker modification time
+    let marker_time = match std::fs::metadata(copy_marker).and_then(|m| m.modified()) {
+        Ok(time) => time,
+        Err(_) => return true, // If we can't read marker, copy
+    };
 
-    if cfg!(feature = "multi-viewport") {
-        // Multi-viewport requires docking branch
-        println!("cargo:warning=Enabling Dear ImGui multi-viewport support.");
-        build.define("IMGUI_HAS_VIEWPORT", None);
-    }
-
-    if cfg!(feature = "freetype") {
-        build.define("IMGUI_ENABLE_FREETYPE", None);
-
-        // Try to find FreeType library
-        #[cfg(feature = "freetype")]
-        match pkg_config::probe_library("freetype2") {
-            Ok(freetype) => {
-                for include_path in freetype.include_paths {
-                    build.include(include_path);
+    // Check if any source file is newer than the marker
+    for ori in imgui_src_files {
+        let src = imgui_ori.join(ori);
+        if src.exists() {
+            if let Ok(metadata) = std::fs::metadata(&src) {
+                if let Ok(src_time) = metadata.modified() {
+                    if src_time > marker_time {
+                        return true; // Source file is newer, need to copy
+                    }
                 }
             }
-            Err(_) => {
-                println!("cargo:warning=FreeType not found via pkg-config. Please ensure FreeType is installed.");
+        }
+    }
+
+    // Check freetype files
+    for ori in ["imgui_freetype.cpp", "imgui_freetype.h"] {
+        let src = imgui_ori.join("misc/freetype").join(ori);
+        if src.exists() {
+            if let Ok(metadata) = std::fs::metadata(&src) {
+                if let Ok(src_time) = metadata.modified() {
+                    if src_time > marker_time {
+                        return true; // Source file is newer, need to copy
+                    }
+                }
             }
         }
     }
 
-    // Use the wrapper.cpp file to compile everything together
-    build.file("wrapper.cpp");
-
-    // Compile the library
-    build.compile("dear_imgui");
+    false // All files are up to date
 }
 
-fn generate_bindings() {
+/// Check if we need to regenerate bindings
+fn should_regenerate_bindings(
+    imgui_src: &Path,
+    bindings_marker: &Path,
+    target_env: &str,
+    manifest_dir: &Path,
+) -> bool {
+    // If marker doesn't exist, we need to regenerate
+    if !bindings_marker.exists() {
+        return true;
+    }
+
+    // Get marker modification time
+    let marker_time = match std::fs::metadata(bindings_marker).and_then(|m| m.modified()) {
+        Ok(time) => time,
+        Err(_) => return true, // If we can't read marker, regenerate
+    };
+
+    // Check if any header file is newer than the marker
+    for header in ["imgui.h", "imgui_internal.h", "imconfig.h"] {
+        let header_path = imgui_src.join(header);
+        if header_path.exists() {
+            if let Ok(metadata) = std::fs::metadata(&header_path) {
+                if let Ok(header_time) = metadata.modified() {
+                    if header_time > marker_time {
+                        return true; // Header file is newer, need to regenerate
+                    }
+                }
+            }
+        }
+    }
+
+    // Check MSVC-specific files
+    if target_env == "msvc" {
+        for file in ["msvc_blocklist.txt", "imgui_msvc_wrapper.cpp"] {
+            let file_path = manifest_dir.join(file);
+            if file_path.exists() {
+                if let Ok(metadata) = std::fs::metadata(&file_path) {
+                    if let Ok(file_time) = metadata.modified() {
+                        if file_time > marker_time {
+                            return true; // MSVC file is newer, need to regenerate
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    false // All files are up to date
+}
+
+fn main() {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap();
 
-    // Configure bindgen with simpler settings
-    let mut builder = bindgen::Builder::default()
-        .header("wrapper.h")
+    // ImGui source files to copy and track
+    let imgui_src_files = [
+        "imgui.h",
+        "imgui_internal.h",
+        "imstb_textedit.h",
+        "imstb_rectpack.h",
+        "imstb_truetype.h",
+        "imgui.cpp",
+        "imgui_widgets.cpp",
+        "imgui_draw.cpp",
+        "imgui_tables.cpp",
+        "imgui_demo.cpp",
+    ];
+
+    let imgui_ori = manifest_dir.join("imgui");
+    let imgui_src = out_path.join("imgui_src");
+    let imgui_misc_ft = imgui_src.join("misc/freetype");
+
+    // Create output directories if they don't exist
+    std::fs::create_dir_all(&imgui_src).unwrap();
+    std::fs::create_dir_all(&imgui_misc_ft).unwrap();
+
+    // Check if we need to copy files (smart caching)
+    let copy_marker = imgui_src.join(".copy_complete");
+    let need_copy = should_copy_files(&imgui_ori, &imgui_src_files, &copy_marker);
+
+    if need_copy {
+        // Copy ImGui source files
+        for ori in imgui_src_files {
+            let src = imgui_ori.join(ori);
+            let dst = imgui_src.join(ori);
+            if src.exists() {
+                std::fs::copy(&src, &dst).unwrap();
+            }
+        }
+
+        // Copy freetype files
+        for ori in ["imgui_freetype.cpp", "imgui_freetype.h"] {
+            let src = imgui_ori.join("misc/freetype").join(ori);
+            let dst = imgui_misc_ft.join(ori);
+            if src.exists() {
+                std::fs::copy(&src, &dst).unwrap();
+            }
+        }
+
+        // Mark copy as complete
+        std::fs::write(&copy_marker, "complete").unwrap();
+    }
+
+    // Always register rerun triggers
+    for ori in imgui_src_files {
+        let src = imgui_ori.join(ori);
+        if src.exists() {
+            println!("cargo:rerun-if-changed={}", src.display());
+        }
+    }
+    for ori in ["imgui_freetype.cpp", "imgui_freetype.h"] {
+        let src = imgui_ori.join("misc/freetype").join(ori);
+        if src.exists() {
+            println!("cargo:rerun-if-changed={}", src.display());
+        }
+    }
+
+    // Register wrapper files for rerun detection
+    println!("cargo:rerun-if-changed={}", manifest_dir.join("wrapper.cpp").display());
+    println!("cargo:rerun-if-changed={}", manifest_dir.join("imgui_msvc_wrapper.cpp").display());
+    println!("cargo:rerun-if-changed=build.rs");
+
+    // Write custom imconfig.h only if it doesn't exist or content differs
+    let imconfig_path = imgui_src.join("imconfig.h");
+    let imconfig_content = r#"
+// This only works on windows, the arboard crate has better cross-support
+#define IMGUI_DISABLE_WIN32_DEFAULT_CLIPBOARD_FUNCTIONS
+
+// Only use the latest non-obsolete functions
+#define IMGUI_DISABLE_OBSOLETE_FUNCTIONS
+#define IMGUI_DISABLE_OBSOLETE_KEYIO
+// A Rust char is 32-bits, just do that
+#define IMGUI_USE_WCHAR32
+
+// Try to play thread-safe-ish. The variable definition is in wrapper.cpp
+struct ImGuiContext;
+extern thread_local ImGuiContext* MyImGuiTLS;
+#define GImGui MyImGuiTLS
+"#;
+
+    let should_write_imconfig = if imconfig_path.exists() {
+        match std::fs::read_to_string(&imconfig_path) {
+            Ok(existing_content) => existing_content != imconfig_content,
+            Err(_) => true,
+        }
+    } else {
+        true
+    };
+
+    if should_write_imconfig {
+        std::fs::write(&imconfig_path, imconfig_content).unwrap();
+    }
+
+    println!("cargo:THIRD_PARTY={}", imgui_src.display());
+    println!("cargo:rerun-if-changed=wrapper.cpp");
+
+    // Track MSVC files
+    if target_env == "msvc" {
+        println!("cargo:rerun-if-changed=msvc_blocklist.txt");
+        println!("cargo:rerun-if-changed=imgui_msvc_wrapper.cpp");
+    }
+
+    // Generate bindings
+    generate_bindings(&manifest_dir, &out_path, &imgui_src, &target_env);
+
+    // Build ImGui
+    build_imgui(&manifest_dir, &imgui_src, &target_arch, &target_env);
+}
+
+fn generate_bindings(
+    manifest_dir: &PathBuf,
+    out_path: &PathBuf,
+    imgui_src: &PathBuf,
+    target_env: &str,
+) {
+    let bindings_path = out_path.join("bindings.rs");
+    let bindings_marker = out_path.join(".bindings_complete");
+
+    // Check if we need to regenerate bindings
+    if should_regenerate_bindings(&imgui_src, &bindings_marker, target_env, manifest_dir) {
+        println!("cargo:warning=Regenerating bindings...");
+
+        let mut bindings = bindgen::Builder::default()
+        .header(imgui_src.join("imgui.h").to_string_lossy())
+        .header(imgui_src.join("imgui_internal.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        // Generate bindings for ImGui functions and types
         .allowlist_function("ig.*")
         .allowlist_function("Im.*")
         .allowlist_type("Im.*")
         .allowlist_var("Im.*")
-        // Derive common traits
         .derive_default(true)
         .derive_debug(true)
         .derive_copy(true)
         .derive_eq(true)
         .derive_partialeq(true)
         .derive_hash(true)
-        // Prepend enum names to avoid conflicts
         .prepend_enum_name(false)
-        // Generate layout tests
-        .layout_tests(false); // Disable for now to avoid issues
+        .layout_tests(false)
+        .clang_arg(format!("-I{}", imgui_src.display()))
+        .clang_arg("-x")
+        .clang_arg("c++")
+        .clang_arg("-std=c++17");
 
-    // MSVC ABI fix: blocklist functions that return ImVec2
     if target_env == "msvc" {
-        println!("cargo:rerun-if-changed=msvc_blocklist.txt");
-        println!("cargo:rerun-if-changed=imgui_msvc_wrapper.cpp");
-
-        // Read blocklist file if it exists
-        if let Ok(blocklist_content) = std::fs::read_to_string("msvc_blocklist.txt") {
-            let mut blocked_functions = Vec::new();
-            for line in blocklist_content.lines() {
+        let blocklist_file = manifest_dir.join("msvc_blocklist.txt");
+        if let Ok(content) = std::fs::read_to_string(&blocklist_file) {
+            for line in content.lines() {
                 let line = line.trim();
                 if line.is_empty() || line.starts_with('#') {
                     continue;
                 }
-                blocked_functions.push(line);
-                builder = builder.blocklist_function(line);
-            }
-
-            // Print diagnostic information
-            println!(
-                "cargo:warning=Applied MSVC ABI fixes for {} functions",
-                blocked_functions.len()
-            );
-            if std::env::var("DEAR_IMGUI_VERBOSE").is_ok() {
-                for func in &blocked_functions {
-                    println!("cargo:warning=  - Blocked function: {}", func);
-                }
+                bindings = bindings.blocklist_function(line);
             }
         }
 
-        // Include MSVC wrapper for bindgen to see the fixed functions
-        builder = builder
-            .header("imgui_msvc_wrapper.cpp")
-            .allowlist_file("imgui_msvc_wrapper.cpp");
+        let msvc_wrapper_src = manifest_dir.join("imgui_msvc_wrapper.cpp");
+        if msvc_wrapper_src.exists() {
+            bindings = bindings
+                .header(msvc_wrapper_src.to_string_lossy())
+                .allowlist_file(msvc_wrapper_src.to_string_lossy());
+        }
     }
 
-    // Add viewport callback wrappers (for all platforms, not just MSVC)
-    builder = builder
-        .allowlist_function("ImGui_Platform_SetGetWindowPosCallback")
-        .allowlist_function("ImGui_Platform_SetGetWindowSizeCallback");
-
-    // Add basic clang arguments for C++
-    builder = builder
-        .clang_arg("-x")
-        .clang_arg("c++")
-        .clang_arg("-std=c++17")
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_OBSOLETE_KEYIO");
-
-    // Add feature-specific defines
-    if cfg!(feature = "docking") {
-        // Docking branch is used by default
-        builder = builder.clang_arg("-DIMGUI_HAS_DOCK");
+    #[cfg(feature = "freetype")]
+    if let Ok(freetype) = pkg_config::probe_library("freetype2") {
+        bindings = bindings.clang_arg("-DIMGUI_ENABLE_FREETYPE=1");
+        for include in &freetype.include_paths {
+            bindings = bindings.clang_args(["-I", &include.display().to_string()]);
+        }
     }
 
-    if cfg!(feature = "multi-viewport") {
-        // Multi-viewport support
-        builder = builder.clang_arg("-DIMGUI_HAS_VIEWPORT");
-    }
+        let bindings = bindings.generate().expect("Unable to generate bindings");
 
-    if cfg!(feature = "freetype") {
-        builder = builder.clang_arg("-DIMGUI_ENABLE_FREETYPE");
-    }
+        bindings
+            .write_to_file(&bindings_path)
+            .expect("Couldn't write bindings!");
 
-    // Generate the bindings
-    let bindings = builder.generate().expect("Unable to generate bindings");
-
-    // Write the bindings to the output file
-    bindings
-        .write_to_file(out_path.join("bindings.rs"))
-        .expect("Couldn't write bindings!");
-
-    // Always copy bindings to src directory for reference
-    copy_bindings_for_reference(&bindings);
-}
-
-/// Copy generated bindings to src directory for easy reference
-fn copy_bindings_for_reference(bindings: &bindgen::Bindings) {
-    let reference_path = PathBuf::from("src/bindings_reference.rs");
-
-    // Write bindings to reference location
-    bindings
-        .write_to_file(&reference_path)
-        .expect("Couldn't write reference bindings!");
-
-    println!("cargo:warning=Copied bindings to src/bindings_reference.rs for reference");
-}
-
-// Unused function - keeping for potential future use
-#[allow(dead_code)]
-fn use_pregenerated_bindings(out_path: &Path, target_env: &str) {
-    let pregenerated_path = get_pregenerated_path(target_env);
-
-    if pregenerated_path.exists() {
-        std::fs::copy(&pregenerated_path, out_path.join("bindings.rs"))
-            .expect("Failed to copy pregenerated bindings");
-        println!(
-            "cargo:warning=Using pregenerated bindings from {}",
-            pregenerated_path.display()
-        );
+        // Mark bindings as complete
+        std::fs::write(&bindings_marker, "complete").unwrap();
     } else {
-        panic!(
-            "Pregenerated bindings not found at {}. Please run with bindgen or disable DEAR_IMGUI_USE_PREGENERATED.",
-            pregenerated_path.display()
-        );
+        println!("cargo:warning=Using cached bindings...");
     }
 }
 
-#[allow(dead_code)]
-fn save_pregenerated_bindings(bindings: &bindgen::Bindings, target_env: &str) {
-    let pregenerated_path = get_pregenerated_path(target_env);
+fn build_imgui(
+    manifest_dir: &PathBuf,
+    imgui_src: &PathBuf,
+    target_arch: &str,
+    target_env: &str,
+) {
 
-    // Create directory if it doesn't exist
-    if let Some(parent) = pregenerated_path.parent() {
-        std::fs::create_dir_all(parent).expect("Failed to create pregenerated directory");
+    let mut build = cc::Build::new();
+
+    if target_arch == "wasm32" {
+        build.define("IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS", "1");
+    } else {
+        build.cpp(true).std("c++20");
     }
 
-    bindings
-        .write_to_file(&pregenerated_path)
-        .expect("Failed to save pregenerated bindings");
+    build.include(imgui_src);
+    build.file(manifest_dir.join("wrapper.cpp"));
 
-    println!(
-        "cargo:warning=Saved pregenerated bindings to {}",
-        pregenerated_path.display()
-    );
-}
-
-#[allow(dead_code)]
-fn get_pregenerated_path(target_env: &str) -> PathBuf {
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-
-    // Create a unique filename based on target and features
-    let mut filename = format!("bindings_{}_{}", target_os, target_arch);
+    #[cfg(feature = "freetype")]
+    if let Ok(freetype) = pkg_config::probe_library("freetype2") {
+        build.define("IMGUI_ENABLE_FREETYPE", "1");
+        for include in &freetype.include_paths {
+            build.include(include);
+        }
+    }
 
     if target_env == "msvc" {
-        filename.push_str("_msvc");
+        let msvc_wrapper_src = manifest_dir.join("imgui_msvc_wrapper.cpp");
+        if msvc_wrapper_src.exists() {
+            build.file(msvc_wrapper_src);
+        }
     }
 
-    if cfg!(feature = "docking") {
-        filename.push_str("_docking");
-    }
-
-    if cfg!(feature = "freetype") {
-        filename.push_str("_freetype");
-    }
-
-    filename.push_str(".rs");
-
-    PathBuf::from("src/pregenerated").join(filename)
+    build.compile("dear_imgui");
 }
+
+

@@ -2,7 +2,7 @@
 // Unified MSVC ABI fixes and wrappers for Dear ImGui Rust bindings
 // This file contains all workarounds for MSVC ABI compatibility issues
 
-#include "third-party/imgui/imgui.h"
+#include "imgui.h"
 
 // ============================================================================
 // FFI-Safe POD Types

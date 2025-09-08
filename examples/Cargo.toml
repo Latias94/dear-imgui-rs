@@ -22,9 +22,7 @@ path = "widgets_demo.rs"
 name = "game_engine_docking"
 path = "game_engine_docking.rs"
 
-[[bin]]
-name = "multi_viewport_demo"
-path = "multi_viewport_demo.rs"
+
 
 [dependencies]
 dear-imgui = { path = "../dear-imgui" }
