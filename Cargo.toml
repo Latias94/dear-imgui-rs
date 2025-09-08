@@ -5,6 +5,7 @@ members = [
     "dear-imgui",
     "backends/dear-imgui-winit",
     "backends/dear-imgui-wgpu",
+    "backends/dear-imgui-bevy",
     "examples",
 ]
 
@@ -30,7 +31,7 @@ winit = "0.30.12"
 
 # Build dependencies
 bindgen = "0.72"
-cc = "1.0"
+cc = "1.2"
 pkg-config = "0.3"
 xshell = "0.2"
 

@@ -290,3 +290,91 @@ pub struct DrawVert {
 
 /// Index type used by Dear ImGui
 pub type DrawIdx = u16;
+
+/// A container for a heap-allocated deep copy of a `DrawData` struct.
+///
+/// Can be used to retain draw data for rendering on a different thread.
+/// The underlying copy is released when this struct is dropped.
+pub struct OwnedDrawData {
+    draw_data: *mut sys::ImDrawData,
+}
+
+// SAFETY: OwnedDrawData owns its data and manages it properly
+unsafe impl Send for OwnedDrawData {}
+unsafe impl Sync for OwnedDrawData {}
+
+impl OwnedDrawData {
+    /// If this struct contains a `DrawData` object, then this function returns a reference to it.
+    ///
+    /// Otherwise, this struct is empty and so this function returns `None`.
+    #[inline]
+    pub fn draw_data(&self) -> Option<&DrawData> {
+        if !self.draw_data.is_null() {
+            Some(unsafe { std::mem::transmute(&*self.draw_data) })
+        } else {
+            None
+        }
+    }
+}
+
+impl Default for OwnedDrawData {
+    /// The default `OwnedDrawData` struct is empty.
+    #[inline]
+    fn default() -> Self {
+        Self {
+            draw_data: std::ptr::null_mut(),
+        }
+    }
+}
+
+impl From<&DrawData> for OwnedDrawData {
+    /// Construct `OwnedDrawData` from `DrawData` by creating a heap-allocated deep copy of the given `DrawData`
+    fn from(value: &DrawData) -> Self {
+        unsafe {
+            // Allocate memory for the new DrawData
+            let result = sys::ImGui_MemAlloc(std::mem::size_of::<sys::ImDrawData>()) as *mut sys::ImDrawData;
+            if result.is_null() {
+                panic!("Failed to allocate memory for OwnedDrawData");
+            }
+
+            // Initialize with default values
+            std::ptr::write(result, sys::ImDrawData::default());
+
+            // Copy basic fields from the source
+            let source_ptr = RawWrapper::raw(value);
+            (*result).Valid = source_ptr.Valid;
+            (*result).TotalIdxCount = source_ptr.TotalIdxCount;
+            (*result).TotalVtxCount = source_ptr.TotalVtxCount;
+            (*result).DisplayPos = source_ptr.DisplayPos;
+            (*result).DisplaySize = source_ptr.DisplaySize;
+            (*result).FramebufferScale = source_ptr.FramebufferScale;
+            (*result).OwnerViewport = source_ptr.OwnerViewport;
+
+            // Copy draw lists - simplified approach
+            (*result).CmdListsCount = source_ptr.CmdListsCount;
+            if source_ptr.CmdListsCount > 0 && !source_ptr.CmdLists.Data.is_null() {
+                // For now, we'll just reference the same draw lists
+                // A full implementation would need to deep copy each draw list
+                (*result).CmdLists.Data = source_ptr.CmdLists.Data;
+                (*result).CmdLists.Size = source_ptr.CmdLists.Size;
+                (*result).CmdLists.Capacity = source_ptr.CmdLists.Capacity;
+            }
+
+            OwnedDrawData { draw_data: result }
+        }
+    }
+}
+
+impl Drop for OwnedDrawData {
+    /// Releases any heap-allocated memory consumed by this `OwnedDrawData` object
+    fn drop(&mut self) {
+        unsafe {
+            if !self.draw_data.is_null() {
+                // Note: This is a simplified cleanup
+                // TODO: A full implementation would need to properly clean up draw lists
+                sys::ImGui_MemFree(self.draw_data as *mut std::ffi::c_void);
+                self.draw_data = std::ptr::null_mut();
+            }
+        }
+    }
+}

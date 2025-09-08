@@ -1,0 +1,45 @@
+[package]
+name = "dear-imgui-bevy"
+version.workspace = true
+edition.workspace = true
+description = "Bevy integration for Dear ImGui"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dear-imgui-bevy"
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui", version = "0.1" }
+dear-imgui-wgpu = { path = "../dear-imgui-wgpu", version = "0.1" }
+dear-imgui-sys = { path = "../../dear-imgui-sys" }
+
+# Bevy dependencies - using git for latest wgpu 26 support
+bevy = { git = "https://github.com/bevyengine/bevy", default-features = true, features = [
+    "zstd_rust"
+] }
+
+# Graphics and utility
+wgpu.workspace = true
+bytemuck = { version = "1.0", features = ["derive"] }
+smallvec = "1.0"
+log = "0.4"
+
+[dev-dependencies]
+bevy = { git = "https://github.com/bevyengine/bevy", default-features = false, features = [
+    "bevy_asset",
+    "bevy_core_pipeline", 
+    "bevy_pbr", 
+    "bevy_render", 
+    "bevy_window", 
+    "bevy_winit", 
+    "png", 
+    "multi_threaded", 
+    "tonemapping_luts"
+] }
+
+[features]
+default = []
+# Enable docking features
+docking = ["dear-imgui/docking"]
