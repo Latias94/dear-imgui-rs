@@ -7,6 +7,7 @@ use dear_imgui::{
     render::{DrawCmd, DrawData, DrawIdx, DrawList, DrawVert},
     Context,
 };
+
 use smallvec::SmallVec;
 use std::mem::size_of;
 use wgpu::util::{BufferInitDescriptor, DeviceExt, TextureDataOrder};
@@ -244,6 +245,17 @@ impl WgpuRenderer {
             render_data: None,
             texture_format,
         }
+    }
+
+    /// Enable multi-viewport support for WGPU renderer
+    ///
+    /// **Note**: Multi-viewport support for WGPU is currently disabled while we focus on
+    /// improving the platform layer (Winit) implementation. This will be re-enabled in a future version.
+    #[cfg(feature = "multi-viewport")]
+    pub fn enable_multi_viewport(&self, _context: &mut dear_imgui::Context) {
+        // TODO: Implement WGPU multi-viewport support
+        // For now, we focus on the platform layer (Winit) implementation
+        eprintln!("Warning: WGPU multi-viewport support is temporarily disabled. Use a simpler renderer like OpenGL for multi-viewport features.");
     }
 
     /// Prepare buffers for the current imgui frame
@@ -628,3 +640,5 @@ impl WgpuRenderer {
         Ok(())
     }
 }
+
+// Multi-viewport support will be added in a future version

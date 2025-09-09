@@ -101,14 +101,14 @@ pub mod input;
 pub mod internal;
 mod io;
 mod list_clipper;
-mod platform_io;
+pub mod platform_io;
 pub mod render;
 mod string;
 mod style;
 mod ui;
 mod utils;
 #[cfg(feature = "multi-viewport")]
-mod viewport_backend;
+pub mod viewport_backend;
 // mod math;
 mod widget;
 mod window;

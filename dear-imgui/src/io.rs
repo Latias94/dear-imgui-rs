@@ -49,6 +49,44 @@ bitflags! {
     }
 }
 
+#[cfg(feature = "multi-viewport")]
+bitflags! {
+    /// Viewport flags for multi-viewport support
+    #[repr(transparent)]
+    pub struct ViewportFlags: i32 {
+        /// No flags
+        const NONE = 0;
+        /// Represent a Platform Window
+        const IS_PLATFORM_WINDOW = sys::ImGuiViewportFlags_IsPlatformWindow;
+        /// Represent a Platform Monitor (unused in our implementation)
+        const IS_PLATFORM_MONITOR = sys::ImGuiViewportFlags_IsPlatformMonitor;
+        /// Platform Window: is created/managed by the application (rather than a dear imgui backend)
+        const OWNED_BY_APP = sys::ImGuiViewportFlags_OwnedByApp;
+        /// Platform Window: Disable platform decorations: title bar, borders, etc.
+        const NO_DECORATION = sys::ImGuiViewportFlags_NoDecoration;
+        /// Platform Window: Disable platform task bar icon (generally set on popups/tooltips, or all windows if ImGuiConfigFlags_ViewportsNoTaskBarIcon is set)
+        const NO_TASK_BAR_ICON = sys::ImGuiViewportFlags_NoTaskBarIcon;
+        /// Platform Window: Don't take focus when created.
+        const NO_FOCUS_ON_APPEARING = sys::ImGuiViewportFlags_NoFocusOnAppearing;
+        /// Platform Window: Don't take focus when clicked on.
+        const NO_FOCUS_ON_CLICK = sys::ImGuiViewportFlags_NoFocusOnClick;
+        /// Platform Window: Make mouse pass through so we can drag this window while peaking behind it.
+        const NO_INPUTS = sys::ImGuiViewportFlags_NoInputs;
+        /// Platform Window: Renderer doesn't need to clear the framebuffer ahead (because we will fill it entirely).
+        const NO_RENDERER_CLEAR = sys::ImGuiViewportFlags_NoRendererClear;
+        /// Platform Window: Avoid merging this window into another host window. This can only be set via ImGuiWindowClass viewport flags override (because we need to now ahead if we are going to create a viewport in the first place!).
+        const NO_AUTO_MERGE = sys::ImGuiViewportFlags_NoAutoMerge;
+        /// Platform Window: Display on top (for tooltips only).
+        const TOP_MOST = sys::ImGuiViewportFlags_TopMost;
+        /// Viewport can host multiple imgui windows (secondary viewports are associated to a single window).
+        const CAN_HOST_OTHER_WINDOWS = sys::ImGuiViewportFlags_CanHostOtherWindows;
+        /// Platform Window: Window is minimized, can skip render. When minimized we tend to avoid using the viewport pos/size for clipping rectangle computation.
+        const IS_MINIMIZED = sys::ImGuiViewportFlags_IsMinimized;
+        /// Platform Window: Window is focused (last call to Platform_GetWindowFocus() returned true)
+        const IS_FOCUSED = sys::ImGuiViewportFlags_IsFocused;
+    }
+}
+
 /// Settings and inputs/outputs for imgui-rs
 /// This is a transparent wrapper around ImGuiIO
 #[repr(transparent)]

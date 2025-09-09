@@ -28,8 +28,20 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     return VertexOutput(vec4<f32>(position, 0.0, 1.0), in.color, in.uv);
 }
 
+// sRGB to linear conversion function
+fn srgb_to_linear(srgb: vec4<f32>) -> vec4<f32> {
+    let color_srgb = srgb.rgb;
+    let selector = ceil(color_srgb - 0.04045); // 0 if under value, 1 if over
+    let under = color_srgb / 12.92;
+    let over = pow((color_srgb + 0.055) / 1.055, vec3<f32>(2.4));
+    let result = mix(under, over, selector);
+    return vec4<f32>(result, srgb.a);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let texture_color = textureSample(image_texture, image_sampler, in.uv);
-    return texture_color * in.color;
+    // Convert vertex color from sRGB to linear space for proper blending
+    let linear_color = srgb_to_linear(in.color);
+    return texture_color * linear_color;
 }
