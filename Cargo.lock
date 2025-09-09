@@ -2034,12 +2034,14 @@ name = "dear-imgui-bevy"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_mesh",
  "bytemuck",
  "dear-imgui",
  "dear-imgui-sys",
- "dear-imgui-wgpu",
+ "encase",
  "log",
  "smallvec",
+ "uuid",
  "wgpu",
 ]
 

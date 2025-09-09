@@ -392,8 +392,12 @@ impl Context {
                     >,
                 );
             }
-            ImGui_Platform_SetGetWindowFramebufferScaleCallback(Some(platform_get_window_framebuffer_scale));
-            ImGui_Platform_SetGetWindowWorkAreaInsetsCallback(Some(platform_get_window_work_area_insets));
+            ImGui_Platform_SetGetWindowFramebufferScaleCallback(Some(
+                platform_get_window_framebuffer_scale,
+            ));
+            ImGui_Platform_SetGetWindowWorkAreaInsetsCallback(Some(
+                platform_get_window_work_area_insets,
+            ));
         }
     }
 
@@ -455,10 +459,7 @@ impl Context {
     pub fn render_platform_windows_default(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::ImGui_RenderPlatformWindowsDefault(
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            );
+            sys::ImGui_RenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
         }
     }
 

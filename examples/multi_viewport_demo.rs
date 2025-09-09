@@ -203,7 +203,10 @@ impl AppWindow {
                 ui.text("Window Controls:");
                 ui.checkbox("Show Demo Window", &mut imgui.show_demo_window);
                 ui.checkbox("Show Another Window", &mut imgui.show_another_window);
-                ui.checkbox("Show Multi-Viewport Info", &mut imgui.show_multi_viewport_info);
+                ui.checkbox(
+                    "Show Multi-Viewport Info",
+                    &mut imgui.show_multi_viewport_info,
+                );
 
                 ui.separator();
                 ui.text("Multi-Viewport Instructions:");
@@ -308,10 +311,6 @@ impl AppWindow {
         }
     }
 }
-
-
-
-
 
 impl ApplicationHandler for MultiViewportApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {

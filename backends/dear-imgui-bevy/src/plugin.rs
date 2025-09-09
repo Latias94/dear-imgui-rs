@@ -2,8 +2,20 @@
 
 use crate::{
     context::ImguiContext,
-    render::{ImguiRenderContext, ImguiRenderNode, ImguiRenderNodeLabel},
-    systems::{imgui_end_frame_system, imgui_extract_frame_system, imgui_new_frame_system, imgui_update_textures_system},
+    render_impl::{
+        systems::{
+            prepare_imgui_render_data_system, prepare_imgui_transforms_system,
+            queue_imgui_bind_groups_system,
+        },
+        ImguiPipeline, ImguiPipelines, ImguiRenderContext, ImguiRenderData, ImguiRenderNode,
+        ImguiRenderNodeLabel, ImguiTextureBindGroups, ImguiTransforms,
+    },
+    shaders::ImguiShaderPlugin,
+    systems::{
+        imgui_end_frame_system, imgui_extract_frame_system, imgui_new_frame_system,
+        imgui_update_render_context_system, imgui_update_textures_system,
+        setup_imgui_render_output_system,
+    },
 };
 use bevy::{
     app::{App, Plugin},
@@ -15,13 +27,13 @@ use bevy::{
     prelude::*,
     render::{
         render_graph::RenderGraphExt,
+        render_resource::SpecializedRenderPipelines,
         renderer::{RenderDevice, RenderQueue},
-        Render, RenderApp, RenderSet,
+        Render, RenderApp, RenderSystems,
     },
     window::PrimaryWindow,
 };
-use dear_imgui::{Context, FontSource};
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui::Context;
 use std::path::PathBuf;
 
 /// Configuration settings for the ImGui plugin
@@ -61,8 +73,9 @@ impl Default for ImguiPlugin {
 }
 
 impl Plugin for ImguiPlugin {
-    fn build(&self, _app: &mut App) {
-        // Plugin configuration is handled in finish()
+    fn build(&self, app: &mut App) {
+        // Add shader plugin
+        app.add_plugins(ImguiShaderPlugin);
     }
 
     fn finish(&self, app: &mut App) {
@@ -87,23 +100,8 @@ impl Plugin for ImguiPlugin {
                 SystemState::new(render_app.world_mut());
             let (device, queue) = system_state.get_mut(render_app.world_mut());
 
-            // Create WGPU renderer with default format
-            // The format will be updated during extraction if needed
+            // Set up texture format
             let texture_format = wgpu::TextureFormat::Bgra8UnormSrgb; // Default format
-            let mut renderer = WgpuRenderer::new(device.wgpu_device(), &queue, texture_format);
-
-            // Initialize font texture
-            {
-                let mut ctx_guard = context.context().write().unwrap();
-                self.update_display_scale(
-                    1.0,
-                    display_scale,
-                    &mut ctx_guard,
-                    &mut renderer,
-                    device.wgpu_device(),
-                    &queue,
-                );
-            }
 
             // Add render graph nodes
             render_app
@@ -112,68 +110,43 @@ impl Plugin for ImguiPlugin {
                 .add_render_graph_node::<ImguiRenderNode>(Core3d, ImguiRenderNodeLabel)
                 .add_render_graph_edges(Core3d, (Node3d::EndMainPass, ImguiRenderNodeLabel));
 
-            // Insert render context resource
-            render_app.insert_resource(ImguiRenderContext::new(
-                renderer,
-                texture_format,
-                self.clone(),
-                display_scale,
-            ));
+            // Insert render context resources
+            render_app.insert_resource(ImguiRenderContext::new(texture_format, display_scale));
+
+            // Initialize render resources
+            render_app.init_resource::<ImguiTransforms>();
+            render_app.init_resource::<ImguiTextureBindGroups>();
+            render_app.init_resource::<ImguiRenderData>();
+            render_app.init_resource::<ImguiPipelines>();
+            render_app.init_resource::<ImguiPipeline>();
+            render_app.init_resource::<SpecializedRenderPipelines<ImguiPipeline>>();
 
             // Add render systems
             render_app.add_systems(ExtractSchedule, imgui_extract_frame_system);
             render_app.add_systems(
                 Render,
-                imgui_update_textures_system.in_set(RenderSet::Prepare),
+                (
+                    imgui_update_render_context_system,
+                    imgui_update_textures_system,
+                    prepare_imgui_transforms_system,
+                    prepare_imgui_render_data_system,
+                )
+                    .in_set(RenderSystems::Prepare),
+            );
+            render_app.add_systems(
+                Render,
+                queue_imgui_bind_groups_system.in_set(RenderSystems::Queue),
             );
         }
 
         // Insert main app context and systems
         app.insert_non_send_resource(context)
             .add_systems(PreUpdate, imgui_new_frame_system)
-            .add_systems(Last, imgui_end_frame_system);
+            .add_systems(Last, imgui_end_frame_system)
+            .add_systems(PostUpdate, setup_imgui_render_output_system);
     }
 }
 
 impl ImguiPlugin {
-    /// Update display scale and reload font accordingly
-    pub(crate) fn update_display_scale(
-        &self,
-        previous_display_scale: f32,
-        display_scale: f32,
-        ctx: &mut Context,
-        renderer: &mut WgpuRenderer,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) {
-        let font_scale = if self.apply_display_scale_to_font_size {
-            display_scale
-        } else {
-            1.0
-        };
-
-        let font_oversample_scale = if self.apply_display_scale_to_font_oversample {
-            display_scale.ceil() as i32
-        } else {
-            1
-        };
-
-        let io = ctx.io_mut();
-        io.set_display_framebuffer_scale([display_scale, display_scale]);
-        io.set_font_global_scale(1.0 / font_scale);
-
-        // Reload font
-        ctx.font_atlas_mut().clear();
-        let font_config = dear_imgui::FontConfig::new()
-            .size_pixels(f32::floor(self.font_size * font_scale));
-        ctx.font_atlas_mut().add_font(&[FontSource::DefaultFontData {
-            config: Some(font_config),
-        }]);
-
-        // Reload font texture
-        renderer.reload_font_texture(ctx, device, queue);
-
-        // Update style for DPI change - simplified for now
-        // TODO: Implement style scaling when API is available
-    }
+    // TODO: Implement font loading and display scale handling for our custom renderer
 }

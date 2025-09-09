@@ -116,7 +116,7 @@ fn main() {
         "imgui_demo.cpp",
     ];
 
-    let imgui_ori = manifest_dir.join("third-party/imgui");
+    let imgui_ori = manifest_dir.join("imgui");
     let imgui_src = out_path.join("imgui_src");
     let imgui_misc_ft = imgui_src.join("misc/freetype");
 
@@ -166,8 +166,14 @@ fn main() {
     }
 
     // Register wrapper files for rerun detection
-    println!("cargo:rerun-if-changed={}", manifest_dir.join("wrapper.cpp").display());
-    println!("cargo:rerun-if-changed={}", manifest_dir.join("imgui_msvc_wrapper.cpp").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("wrapper.cpp").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("imgui_msvc_wrapper.cpp").display()
+    );
     println!("cargo:rerun-if-changed=build.rs");
 
     // Write custom imconfig.h only if it doesn't exist or content differs
@@ -231,53 +237,53 @@ fn generate_bindings(
         println!("cargo:warning=Regenerating bindings...");
 
         let mut bindings = bindgen::Builder::default()
-        .header(imgui_src.join("imgui.h").to_string_lossy())
-        .header(imgui_src.join("imgui_internal.h").to_string_lossy())
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .allowlist_function("ig.*")
-        .allowlist_function("Im.*")
-        .allowlist_type("Im.*")
-        .allowlist_var("Im.*")
-        .derive_default(true)
-        .derive_debug(true)
-        .derive_copy(true)
-        .derive_eq(true)
-        .derive_partialeq(true)
-        .derive_hash(true)
-        .prepend_enum_name(false)
-        .layout_tests(false)
-        .clang_arg(format!("-I{}", imgui_src.display()))
-        .clang_arg("-x")
-        .clang_arg("c++")
-        .clang_arg("-std=c++17");
+            .header(imgui_src.join("imgui.h").to_string_lossy())
+            .header(imgui_src.join("imgui_internal.h").to_string_lossy())
+            .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+            .allowlist_function("ig.*")
+            .allowlist_function("Im.*")
+            .allowlist_type("Im.*")
+            .allowlist_var("Im.*")
+            .derive_default(true)
+            .derive_debug(true)
+            .derive_copy(true)
+            .derive_eq(true)
+            .derive_partialeq(true)
+            .derive_hash(true)
+            .prepend_enum_name(false)
+            .layout_tests(false)
+            .clang_arg(format!("-I{}", imgui_src.display()))
+            .clang_arg("-x")
+            .clang_arg("c++")
+            .clang_arg("-std=c++17");
 
-    if target_env == "msvc" {
-        let blocklist_file = manifest_dir.join("msvc_blocklist.txt");
-        if let Ok(content) = std::fs::read_to_string(&blocklist_file) {
-            for line in content.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
+        if target_env == "msvc" {
+            let blocklist_file = manifest_dir.join("msvc_blocklist.txt");
+            if let Ok(content) = std::fs::read_to_string(&blocklist_file) {
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    bindings = bindings.blocklist_function(line);
                 }
-                bindings = bindings.blocklist_function(line);
+            }
+
+            let msvc_wrapper_src = manifest_dir.join("imgui_msvc_wrapper.cpp");
+            if msvc_wrapper_src.exists() {
+                bindings = bindings
+                    .header(msvc_wrapper_src.to_string_lossy())
+                    .allowlist_file(msvc_wrapper_src.to_string_lossy());
             }
         }
 
-        let msvc_wrapper_src = manifest_dir.join("imgui_msvc_wrapper.cpp");
-        if msvc_wrapper_src.exists() {
-            bindings = bindings
-                .header(msvc_wrapper_src.to_string_lossy())
-                .allowlist_file(msvc_wrapper_src.to_string_lossy());
+        #[cfg(feature = "freetype")]
+        if let Ok(freetype) = pkg_config::probe_library("freetype2") {
+            bindings = bindings.clang_arg("-DIMGUI_ENABLE_FREETYPE=1");
+            for include in &freetype.include_paths {
+                bindings = bindings.clang_args(["-I", &include.display().to_string()]);
+            }
         }
-    }
-
-    #[cfg(feature = "freetype")]
-    if let Ok(freetype) = pkg_config::probe_library("freetype2") {
-        bindings = bindings.clang_arg("-DIMGUI_ENABLE_FREETYPE=1");
-        for include in &freetype.include_paths {
-            bindings = bindings.clang_args(["-I", &include.display().to_string()]);
-        }
-    }
 
         let bindings = bindings.generate().expect("Unable to generate bindings");
 
@@ -292,13 +298,7 @@ fn generate_bindings(
     }
 }
 
-fn build_imgui(
-    manifest_dir: &PathBuf,
-    imgui_src: &PathBuf,
-    target_arch: &str,
-    target_env: &str,
-) {
-
+fn build_imgui(manifest_dir: &PathBuf, imgui_src: &PathBuf, target_arch: &str, target_env: &str) {
     let mut build = cc::Build::new();
 
     if target_arch == "wasm32" {
@@ -327,5 +327,3 @@ fn build_imgui(
 
     build.compile("dear_imgui");
 }
-
-

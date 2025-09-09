@@ -17,6 +17,7 @@ use std::{
 /// This resource manages the Dear ImGui context and provides thread-safe access
 /// to the UI building functionality. It should be accessed as a `NonSendMut` resource
 /// in Bevy systems.
+#[derive(Resource)]
 pub struct ImguiContext {
     /// The underlying Dear ImGui context
     ctx: RwLock<Context>,

@@ -38,7 +38,8 @@
 
 mod context;
 mod plugin;
-mod render;
+mod render_impl;
+mod shaders;
 mod systems;
 mod texture;
 

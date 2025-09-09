@@ -254,17 +254,17 @@ impl PlatformIo {
     /// Get an iterator over all viewports
     #[cfg(feature = "multi-viewport")]
     pub fn viewports_iter(&self) -> impl Iterator<Item = &Viewport> {
-        self.viewports().iter().map(|&ptr| unsafe {
-            Viewport::from_raw(ptr)
-        })
+        self.viewports()
+            .iter()
+            .map(|&ptr| unsafe { Viewport::from_raw(ptr) })
     }
 
     /// Get a mutable iterator over all viewports
     #[cfg(feature = "multi-viewport")]
     pub fn viewports_iter_mut(&mut self) -> impl Iterator<Item = &mut Viewport> {
-        self.viewports_mut().iter_mut().map(|&mut ptr| unsafe {
-            Viewport::from_raw_mut(ptr)
-        })
+        self.viewports_mut()
+            .iter_mut()
+            .map(|&mut ptr| unsafe { Viewport::from_raw_mut(ptr) })
     }
 }
 

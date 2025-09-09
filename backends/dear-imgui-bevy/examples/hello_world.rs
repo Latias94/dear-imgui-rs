@@ -102,11 +102,11 @@ fn ui_system(mut context: NonSendMut<ImguiContext>, mut state: ResMut<UiState>) 
             ui.slider("Rotation Speed", 0.0, 5.0, &mut state.cube_rotation_speed);
 
             ui.separator();
-            
+
             let io = ui.io();
             ui.text(format!("FPS: {:.1}", io.framerate));
             ui.text(format!("Frame Time: {:.3}ms", 1000.0 / io.framerate));
-            
+
             let mouse_pos = io.mouse_pos;
             ui.text(format!("Mouse: ({:.1}, {:.1})", mouse_pos[0], mouse_pos[1]));
         });

@@ -332,7 +332,8 @@ impl From<&DrawData> for OwnedDrawData {
     fn from(value: &DrawData) -> Self {
         unsafe {
             // Allocate memory for the new DrawData
-            let result = sys::ImGui_MemAlloc(std::mem::size_of::<sys::ImDrawData>()) as *mut sys::ImDrawData;
+            let result =
+                sys::ImGui_MemAlloc(std::mem::size_of::<sys::ImDrawData>()) as *mut sys::ImDrawData;
             if result.is_null() {
                 panic!("Failed to allocate memory for OwnedDrawData");
             }

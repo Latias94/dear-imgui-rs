@@ -6,7 +6,6 @@ use bevy::{
     render::{render_asset::RenderAssets, renderer::RenderDevice, texture::GpuImage},
 };
 // TextureId is just u32 in our implementation
-use dear_imgui_wgpu::WgpuRenderer;
 use log::info;
 use std::sync::Arc;
 
@@ -15,16 +14,15 @@ pub fn add_image_to_renderer(
     texture_id: u32,
     strong: &Arc<StrongHandle>,
     gpu_images: &RenderAssets<GpuImage>,
-    renderer: &mut WgpuRenderer,
     device: &RenderDevice,
 ) -> Result<(), String> {
     let handle = Handle::<Image>::Strong(strong.clone());
-    
+
     if let Some(gpu_image) = gpu_images.get(&handle) {
         // Note: This functionality would need to be implemented in dear-imgui-wgpu
         // The current WgpuRenderer doesn't expose methods to add custom textures
         // This is a design limitation that would need to be addressed
-        
+
         // For now, we'll just log that we would add the texture
         info!(
             "Would add texture {:?} with size {}x{} to ImGui renderer",
@@ -32,13 +30,13 @@ pub fn add_image_to_renderer(
             gpu_image.texture.width(),
             gpu_image.texture.height()
         );
-        
+
         // TODO: Implement texture addition in dear-imgui-wgpu
         // This would involve:
         // 1. Creating a bind group from the GPU texture
         // 2. Storing it in the renderer with the given texture ID
         // 3. Making it available for ImGui draw calls
-        
+
         Ok(())
     } else {
         Err(format!(
@@ -49,20 +47,17 @@ pub fn add_image_to_renderer(
 }
 
 /// Remove a texture from the ImGui renderer
-pub fn remove_texture_from_renderer(
-    texture_id: u32,
-    renderer: &mut WgpuRenderer,
-) -> Result<(), String> {
+pub fn remove_texture_from_renderer(texture_id: u32) -> Result<(), String> {
     // Note: This functionality would need to be implemented in dear-imgui-wgpu
     // The current WgpuRenderer doesn't expose methods to remove textures
 
     info!("Would remove texture {:?} from ImGui renderer", texture_id);
-    
+
     // TODO: Implement texture removal in dear-imgui-wgpu
     // This would involve:
     // 1. Removing the bind group from the renderer's texture storage
     // 2. Cleaning up any associated resources
-    
+
     Ok(())
 }
 
