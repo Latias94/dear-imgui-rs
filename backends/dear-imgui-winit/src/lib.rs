@@ -45,14 +45,12 @@
 //! # }
 //! ```
 
-use std::collections::HashMap;
 use std::time::Instant;
 
-use dear_imgui::{BackendFlags, ConfigFlags, Context, Key};
-use dear_imgui_sys as sys;
-use winit::dpi::{LogicalPosition, LogicalSize};
+use dear_imgui::{BackendFlags, ConfigFlags, Context, Key, MouseCursor};
+use winit::dpi::LogicalSize;
 use winit::event::{
-    DeviceEvent, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
+    DeviceEvent, ElementState, Event, Ime, KeyEvent, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
 };
 use winit::keyboard::{Key as WinitKey, KeyLocation, NamedKey};
 use winit::window::{CursorIcon as WinitCursor, Window, WindowAttributes};
@@ -88,6 +86,25 @@ impl HiDpiMode {
     }
 }
 
+/// Cursor settings cache to avoid unnecessary cursor changes
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct CursorSettings {
+    cursor: Option<MouseCursor>,
+    draw_cursor: bool,
+}
+
+impl CursorSettings {
+    fn apply(&self, window: &Window) {
+        match self.cursor {
+            Some(mouse_cursor) if !self.draw_cursor => {
+                window.set_cursor_visible(true);
+                window.set_cursor(to_winit_cursor(mouse_cursor));
+            }
+            _ => window.set_cursor_visible(false),
+        }
+    }
+}
+
 /// Winit platform backend for Dear ImGui
 ///
 /// This struct manages the integration between Dear ImGui and winit,
@@ -98,6 +115,8 @@ pub struct WinitPlatform {
     mouse_pos: [f32; 2],
     hidpi_mode: HiDpiMode,
     hidpi_factor: f64,
+    cursor_cache: Option<CursorSettings>,
+    ime_enabled: bool,
     #[cfg(feature = "multi-viewport")]
     multi_viewport_initialized: bool,
 }
@@ -115,7 +134,7 @@ impl WinitPlatform {
     /// use dear_imgui::Context;
     /// use dear_imgui_winit::WinitPlatform;
     ///
-    /// let mut imgui_ctx = Context::new().unwrap();
+    /// let mut imgui_ctx = Context::create();
     /// let platform = WinitPlatform::new(&mut imgui_ctx);
     /// ```
     pub fn new(imgui_ctx: &mut Context) -> Self {
@@ -125,6 +144,8 @@ impl WinitPlatform {
             mouse_pos: [0.0, 0.0],
             hidpi_mode: HiDpiMode::Default,
             hidpi_factor: 1.0,
+            cursor_cache: None,
+            ime_enabled: false,
             #[cfg(feature = "multi-viewport")]
             multi_viewport_initialized: false,
         };
@@ -260,6 +281,32 @@ impl WinitPlatform {
         }
     }
 
+    /// Prepare for rendering
+    ///
+    /// This method should be called before rendering to update cursor and other
+    /// platform-specific rendering preparations.
+    ///
+    /// # Arguments
+    ///
+    /// * `window` - The window to prepare rendering for
+    /// * `imgui_ctx` - The Dear ImGui context
+    pub fn prepare_render(&mut self, window: &Window, imgui_ctx: &Context) {
+        // Update cursor if needed
+        let io = imgui_ctx.io();
+        if !io.config_flags().contains(ConfigFlags::NO_MOUSE_CURSOR_CHANGE) {
+            // Note: Our dear-imgui doesn't have mouse_cursor() and mouse_draw_cursor() methods on Io
+            // We'll need to get this information from the UI context instead
+            let cursor = CursorSettings {
+                cursor: None, // TODO: Get current cursor from UI context
+                draw_cursor: false, // TODO: Get draw cursor setting
+            };
+            if self.cursor_cache != Some(cursor) {
+                cursor.apply(window);
+                self.cursor_cache = Some(cursor);
+            }
+        }
+    }
+
     /// Initialize multi-viewport support if not already done
     ///
     /// This method should be called from within the event loop when ActiveEventLoop is available.
@@ -374,6 +421,24 @@ impl WinitPlatform {
             WindowEvent::KeyboardInput { event, .. } => {
                 self.handle_keyboard_input(event, imgui_ctx)
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.handle_modifiers_changed(modifiers, imgui_ctx);
+                false
+            }
+            WindowEvent::Ime(ime) => {
+                self.handle_ime_event(ime, imgui_ctx);
+                imgui_ctx.io().want_capture_keyboard()
+            }
+            WindowEvent::Focused(focused) => {
+                // Note: Our dear-imgui doesn't have set_app_focus_lost method
+                // We'll handle focus events differently or skip for now
+                // TODO: Add focus event handling if needed
+                false
+            }
+            WindowEvent::Touch(touch) => {
+                self.handle_touch_event(touch, window, imgui_ctx);
+                imgui_ctx.io().want_capture_mouse()
+            }
             _ => false,
         }
     }
@@ -388,16 +453,16 @@ impl WinitPlatform {
     fn handle_keyboard_input(&mut self, event: &KeyEvent, imgui_ctx: &mut Context) -> bool {
         let io = imgui_ctx.io_mut();
 
-        // Handle key press/release
-        if let Some(imgui_key) = winit_key_to_imgui_key(&event.logical_key) {
+        // Handle key press/release with location awareness
+        if let Some(imgui_key) = winit_key_to_imgui_key(&event.logical_key, event.location) {
             io.add_key_event(imgui_key, event.state == ElementState::Pressed);
         }
 
         // Handle text input
         if event.state == ElementState::Pressed {
-            if let WinitKey::Character(ref text) = event.logical_key {
+            if let Some(text) = event.text.as_ref() {
                 for ch in text.chars() {
-                    if ch.is_ascii() && !ch.is_control() {
+                    if ch != '\u{7f}' && !ch.is_control() {
                         io.add_input_character(ch);
                     }
                 }
@@ -405,6 +470,75 @@ impl WinitPlatform {
         }
 
         io.want_capture_keyboard()
+    }
+
+    fn handle_modifiers_changed(&mut self, modifiers: &winit::event::Modifiers, imgui_ctx: &mut Context) {
+        let io = imgui_ctx.io_mut();
+        let state = modifiers.state();
+
+        // Update modifier key states - our Key enum has Left/Right variants instead of Mod variants
+        // We'll update both left and right keys to the same state since winit doesn't distinguish
+        io.add_key_event(Key::LeftShift, state.shift_key());
+        io.add_key_event(Key::RightShift, state.shift_key());
+        io.add_key_event(Key::LeftCtrl, state.control_key());
+        io.add_key_event(Key::RightCtrl, state.control_key());
+        io.add_key_event(Key::LeftAlt, state.alt_key());
+        io.add_key_event(Key::RightAlt, state.alt_key());
+        io.add_key_event(Key::LeftSuper, state.super_key());
+        io.add_key_event(Key::RightSuper, state.super_key());
+    }
+
+    fn handle_ime_event(&mut self, ime: &Ime, imgui_ctx: &mut Context) {
+        let io = imgui_ctx.io_mut();
+
+        match ime {
+            Ime::Enabled => {
+                if !self.ime_enabled {
+                    self.ime_enabled = true;
+                    // IME enabled - could add specific handling here
+                }
+            }
+            Ime::Preedit(text, _cursor) => {
+                // Handle IME preedit text
+                // For now, we'll treat it as regular text input
+                if !text.is_empty() {
+                    for ch in text.chars() {
+                        if !ch.is_control() {
+                            io.add_input_character(ch);
+                        }
+                    }
+                }
+            }
+            Ime::Commit(text) => {
+                // Handle IME commit text
+                for ch in text.chars() {
+                    if !ch.is_control() {
+                        io.add_input_character(ch);
+                    }
+                }
+            }
+            Ime::Disabled => {
+                self.ime_enabled = false;
+            }
+        }
+    }
+
+    fn handle_touch_event(&mut self, touch: &winit::event::Touch, window: &Window, imgui_ctx: &mut Context) {
+        // Convert touch to mouse events for basic touch support
+        let logical_pos = touch.location.to_logical::<f64>(self.hidpi_factor);
+
+        match touch.phase {
+            TouchPhase::Started => {
+                self.mouse_pos = [logical_pos.x as f32, logical_pos.y as f32];
+                self.mouse_buttons[0] = true; // Treat as left mouse button
+            }
+            TouchPhase::Moved => {
+                self.mouse_pos = [logical_pos.x as f32, logical_pos.y as f32];
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                self.mouse_buttons[0] = false;
+            }
+        }
     }
 }
 
@@ -425,8 +559,8 @@ pub fn create_window_attributes(title: &str, size: LogicalSize<f32>) -> WindowAt
         .with_visible(true)
 }
 
-/// Convert winit key to Dear ImGui key
-fn winit_key_to_imgui_key(key: &WinitKey) -> Option<Key> {
+/// Convert winit key to Dear ImGui key with location awareness
+fn winit_key_to_imgui_key(key: &WinitKey, location: KeyLocation) -> Option<Key> {
     match key {
         WinitKey::Named(named_key) => match named_key {
             NamedKey::Tab => Some(Key::Tab),
@@ -442,80 +576,116 @@ fn winit_key_to_imgui_key(key: &WinitKey) -> Option<Key> {
             NamedKey::Delete => Some(Key::Delete),
             NamedKey::Backspace => Some(Key::Backspace),
             NamedKey::Space => Some(Key::Space),
-            NamedKey::Enter => Some(Key::Enter),
+            NamedKey::Enter => Some(Key::Enter), // No separate keypad enter in our enum
             NamedKey::Escape => Some(Key::Escape),
-            NamedKey::Control => Some(Key::LeftCtrl),
-            NamedKey::Shift => Some(Key::LeftShift),
-            NamedKey::Alt => Some(Key::LeftAlt),
-            NamedKey::Super => Some(Key::LeftSuper),
+
+            // Modifier keys with location awareness
+            NamedKey::Control => match location {
+                KeyLocation::Left => Some(Key::LeftCtrl),
+                KeyLocation::Right => Some(Key::RightCtrl),
+                _ => Some(Key::LeftCtrl),
+            },
+            NamedKey::Shift => match location {
+                KeyLocation::Left => Some(Key::LeftShift),
+                KeyLocation::Right => Some(Key::RightShift),
+                _ => Some(Key::LeftShift),
+            },
+            NamedKey::Alt => match location {
+                KeyLocation::Left => Some(Key::LeftAlt),
+                KeyLocation::Right => Some(Key::RightAlt),
+                _ => Some(Key::LeftAlt),
+            },
+            NamedKey::Super => match location {
+                KeyLocation::Left => Some(Key::LeftSuper),
+                KeyLocation::Right => Some(Key::RightSuper),
+                _ => Some(Key::LeftSuper),
+            },
+
+            // Function keys
+            NamedKey::F1 => Some(Key::F1),
+            NamedKey::F2 => Some(Key::F2),
+            NamedKey::F3 => Some(Key::F3),
+            NamedKey::F4 => Some(Key::F4),
+            NamedKey::F5 => Some(Key::F5),
+            NamedKey::F6 => Some(Key::F6),
+            NamedKey::F7 => Some(Key::F7),
+            NamedKey::F8 => Some(Key::F8),
+            NamedKey::F9 => Some(Key::F9),
+            NamedKey::F10 => Some(Key::F10),
+            NamedKey::F11 => Some(Key::F11),
+            NamedKey::F12 => Some(Key::F12),
+
+            // Lock keys - not available in our Key enum
+            // NamedKey::CapsLock => Some(Key::CapsLock),
+            // NamedKey::ScrollLock => Some(Key::ScrollLock),
+            // NamedKey::NumLock => Some(Key::NumLock),
+
+            // Special keys - only Menu is available
+            // NamedKey::PrintScreen => Some(Key::PrintScreen),
+            // NamedKey::Pause => Some(Key::Pause),
+            NamedKey::ContextMenu => Some(Key::Menu),
+
             _ => None,
         },
         WinitKey::Character(text) => {
             if text.len() == 1 {
                 let ch = text.chars().next().unwrap();
-                match ch {
-                    'a' => Some(Key::A),
-                    'b' => Some(Key::B),
-                    'c' => Some(Key::C),
-                    'd' => Some(Key::D),
-                    'e' => Some(Key::E),
-                    'f' => Some(Key::F),
-                    'g' => Some(Key::G),
-                    'h' => Some(Key::H),
-                    'i' => Some(Key::I),
-                    'j' => Some(Key::J),
-                    'k' => Some(Key::K),
-                    'l' => Some(Key::L),
-                    'm' => Some(Key::M),
-                    'n' => Some(Key::N),
-                    'o' => Some(Key::O),
-                    'p' => Some(Key::P),
-                    'q' => Some(Key::Q),
-                    'r' => Some(Key::R),
-                    's' => Some(Key::S),
-                    't' => Some(Key::T),
-                    'u' => Some(Key::U),
-                    'v' => Some(Key::V),
-                    'w' => Some(Key::W),
-                    'x' => Some(Key::X),
-                    'y' => Some(Key::Y),
-                    'z' => Some(Key::Z),
-                    'A' => Some(Key::A),
-                    'B' => Some(Key::B),
-                    'C' => Some(Key::C),
-                    'D' => Some(Key::D),
-                    'E' => Some(Key::E),
-                    'F' => Some(Key::F),
-                    'G' => Some(Key::G),
-                    'H' => Some(Key::H),
-                    'I' => Some(Key::I),
-                    'J' => Some(Key::J),
-                    'K' => Some(Key::K),
-                    'L' => Some(Key::L),
-                    'M' => Some(Key::M),
-                    'N' => Some(Key::N),
-                    'O' => Some(Key::O),
-                    'P' => Some(Key::P),
-                    'Q' => Some(Key::Q),
-                    'R' => Some(Key::R),
-                    'S' => Some(Key::S),
-                    'T' => Some(Key::T),
-                    'U' => Some(Key::U),
-                    'V' => Some(Key::V),
-                    'W' => Some(Key::W),
-                    'X' => Some(Key::X),
-                    'Y' => Some(Key::Y),
-                    'Z' => Some(Key::Z),
-                    '0' => Some(Key::Key0),
-                    '1' => Some(Key::Key1),
-                    '2' => Some(Key::Key2),
-                    '3' => Some(Key::Key3),
-                    '4' => Some(Key::Key4),
-                    '5' => Some(Key::Key5),
-                    '6' => Some(Key::Key6),
-                    '7' => Some(Key::Key7),
-                    '8' => Some(Key::Key8),
-                    '9' => Some(Key::Key9),
+                match (ch, location) {
+                    // Letters (case insensitive)
+                    ('a' | 'A', _) => Some(Key::A),
+                    ('b' | 'B', _) => Some(Key::B),
+                    ('c' | 'C', _) => Some(Key::C),
+                    ('d' | 'D', _) => Some(Key::D),
+                    ('e' | 'E', _) => Some(Key::E),
+                    ('f' | 'F', _) => Some(Key::F),
+                    ('g' | 'G', _) => Some(Key::G),
+                    ('h' | 'H', _) => Some(Key::H),
+                    ('i' | 'I', _) => Some(Key::I),
+                    ('j' | 'J', _) => Some(Key::J),
+                    ('k' | 'K', _) => Some(Key::K),
+                    ('l' | 'L', _) => Some(Key::L),
+                    ('m' | 'M', _) => Some(Key::M),
+                    ('n' | 'N', _) => Some(Key::N),
+                    ('o' | 'O', _) => Some(Key::O),
+                    ('p' | 'P', _) => Some(Key::P),
+                    ('q' | 'Q', _) => Some(Key::Q),
+                    ('r' | 'R', _) => Some(Key::R),
+                    ('s' | 'S', _) => Some(Key::S),
+                    ('t' | 'T', _) => Some(Key::T),
+                    ('u' | 'U', _) => Some(Key::U),
+                    ('v' | 'V', _) => Some(Key::V),
+                    ('w' | 'W', _) => Some(Key::W),
+                    ('x' | 'X', _) => Some(Key::X),
+                    ('y' | 'Y', _) => Some(Key::Y),
+                    ('z' | 'Z', _) => Some(Key::Z),
+
+                    // Numbers with location awareness
+                    ('0', KeyLocation::Standard) => Some(Key::Key0),
+                    ('1', KeyLocation::Standard) => Some(Key::Key1),
+                    ('2', KeyLocation::Standard) => Some(Key::Key2),
+                    ('3', KeyLocation::Standard) => Some(Key::Key3),
+                    ('4', KeyLocation::Standard) => Some(Key::Key4),
+                    ('5', KeyLocation::Standard) => Some(Key::Key5),
+                    ('6', KeyLocation::Standard) => Some(Key::Key6),
+                    ('7', KeyLocation::Standard) => Some(Key::Key7),
+                    ('8', KeyLocation::Standard) => Some(Key::Key8),
+                    ('9', KeyLocation::Standard) => Some(Key::Key9),
+
+                    // Numpad numbers - fallback to regular numbers since our Key enum doesn't have keypad variants
+                    ('0', KeyLocation::Numpad) => Some(Key::Key0),
+                    ('1', KeyLocation::Numpad) => Some(Key::Key1),
+                    ('2', KeyLocation::Numpad) => Some(Key::Key2),
+                    ('3', KeyLocation::Numpad) => Some(Key::Key3),
+                    ('4', KeyLocation::Numpad) => Some(Key::Key4),
+                    ('5', KeyLocation::Numpad) => Some(Key::Key5),
+                    ('6', KeyLocation::Numpad) => Some(Key::Key6),
+                    ('7', KeyLocation::Numpad) => Some(Key::Key7),
+                    ('8', KeyLocation::Numpad) => Some(Key::Key8),
+                    ('9', KeyLocation::Numpad) => Some(Key::Key9),
+
+                    // For now, we only support the keys that are defined in our Key enum
+                    // Most punctuation keys are not defined, so we'll skip them
+
                     _ => None,
                 }
             } else {
@@ -523,6 +693,22 @@ fn winit_key_to_imgui_key(key: &WinitKey) -> Option<Key> {
             }
         }
         _ => None,
+    }
+}
+
+/// Convert Dear ImGui mouse cursor to winit cursor
+fn to_winit_cursor(cursor: MouseCursor) -> WinitCursor {
+    match cursor {
+        MouseCursor::None => WinitCursor::Default, // Default cursor when none specified
+        MouseCursor::Arrow => WinitCursor::Default,
+        MouseCursor::TextInput => WinitCursor::Text,
+        MouseCursor::ResizeAll => WinitCursor::Move,
+        MouseCursor::ResizeNS => WinitCursor::NsResize,
+        MouseCursor::ResizeEW => WinitCursor::EwResize,
+        MouseCursor::ResizeNESW => WinitCursor::NeswResize,
+        MouseCursor::ResizeNWSE => WinitCursor::NwseResize,
+        MouseCursor::Hand => WinitCursor::Pointer,
+        MouseCursor::NotAllowed => WinitCursor::NotAllowed,
     }
 }
 
@@ -895,10 +1081,55 @@ pub mod multi_viewport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use winit::keyboard::{KeyLocation, NamedKey};
 
     #[test]
     fn test_platform_creation() {
         let mut ctx = Context::create();
         let _platform = WinitPlatform::new(&mut ctx);
+    }
+
+    #[test]
+    fn test_key_mapping() {
+        // Test basic keys
+        assert_eq!(
+            winit_key_to_imgui_key(&WinitKey::Named(NamedKey::Tab), KeyLocation::Standard),
+            Some(Key::Tab)
+        );
+
+        // Test modifier keys with location
+        assert_eq!(
+            winit_key_to_imgui_key(&WinitKey::Named(NamedKey::Control), KeyLocation::Left),
+            Some(Key::LeftCtrl)
+        );
+        assert_eq!(
+            winit_key_to_imgui_key(&WinitKey::Named(NamedKey::Control), KeyLocation::Right),
+            Some(Key::RightCtrl)
+        );
+
+        // Test character keys
+        assert_eq!(
+            winit_key_to_imgui_key(&WinitKey::Character("a".into()), KeyLocation::Standard),
+            Some(Key::A)
+        );
+
+        // Test standard numbers
+        assert_eq!(
+            winit_key_to_imgui_key(&WinitKey::Character("1".into()), KeyLocation::Standard),
+            Some(Key::Key1)
+        );
+
+        // Test function keys
+        assert_eq!(
+            winit_key_to_imgui_key(&WinitKey::Named(NamedKey::F1), KeyLocation::Standard),
+            Some(Key::F1)
+        );
+    }
+
+    #[test]
+    fn test_cursor_mapping() {
+        assert_eq!(to_winit_cursor(MouseCursor::Arrow), WinitCursor::Default);
+        assert_eq!(to_winit_cursor(MouseCursor::Hand), WinitCursor::Pointer);
+        assert_eq!(to_winit_cursor(MouseCursor::TextInput), WinitCursor::Text);
     }
 }
