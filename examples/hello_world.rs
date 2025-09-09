@@ -6,10 +6,10 @@ use std::{sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{Event, WindowEvent},
+    event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, NamedKey},
-    window::Window,
+    window::{Window, WindowId},
 };
 
 struct ImguiState {
@@ -27,8 +27,7 @@ struct AppWindow {
     window: Arc<Window>,
     surface_desc: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
-    hidpi_factor: f64,
-    imgui: Option<ImguiState>,
+    imgui: ImguiState,
 }
 
 #[derive(Default)]
@@ -37,7 +36,7 @@ struct App {
 }
 
 impl AppWindow {
-    fn setup_gpu(event_loop: &ActiveEventLoop) -> Self {
+    fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
@@ -53,13 +52,11 @@ impl AppWindow {
                         Window::default_attributes()
                             .with_title(&format!("Dear ImGui Hello World - {version}"))
                             .with_inner_size(size),
-                    )
-                    .expect("Failed to create window"),
+                    )?,
             )
         };
 
-        let hidpi_factor = window.scale_factor();
-        let surface = instance.create_surface(window.clone()).unwrap();
+        let surface = instance.create_surface(window.clone())?;
 
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -68,8 +65,7 @@ impl AppWindow {
         }))
         .expect("Failed to find an appropriate adapter");
 
-        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-            .expect("Failed to create device");
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
 
         let size = LogicalSize::new(1280.0, 720.0);
         let surface_desc = wgpu::SurfaceConfiguration {
@@ -85,34 +81,21 @@ impl AppWindow {
 
         surface.configure(&device, &surface_desc);
 
-        Self {
-            device,
-            queue,
-            window,
-            surface_desc,
-            surface,
-            hidpi_factor,
-            imgui: None,
-        }
-    }
-
-    fn setup_imgui(&mut self) {
+        // Setup ImGui immediately
         let mut context = Context::create();
         context.set_ini_filename(None::<String>);
 
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(
-            &self.window,
+            &window,
             dear_imgui_winit::HiDpiMode::Default,
             &mut context,
         );
 
-        let mut renderer = WgpuRenderer::new(&self.device, &self.queue, self.surface_desc.format);
+        let mut renderer = WgpuRenderer::new(&device, &queue, surface_desc.format);
+        renderer.reload_font_texture(&mut context, &device, &queue);
 
-        // Load font texture - this is crucial for text rendering!
-        renderer.reload_font_texture(&mut context, &self.device, &self.queue);
-
-        self.imgui = Some(ImguiState {
+        let imgui = ImguiState {
             context,
             platform,
             renderer,
@@ -124,32 +107,41 @@ impl AppWindow {
             },
             demo_open: true,
             last_frame: Instant::now(),
-        });
+        };
+
+        Ok(Self {
+            device,
+            queue,
+            window,
+            surface_desc,
+            surface,
+            imgui,
+        })
     }
 
-    fn render(&mut self) {
-        let imgui = self.imgui.as_mut().unwrap();
+    fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.surface_desc.width = new_size.width;
+            self.surface_desc.height = new_size.height;
+            self.surface.configure(&self.device, &self.surface_desc);
+        }
+    }
 
+    fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
-        let delta_time = now - imgui.last_frame;
-        imgui
+        let delta_time = now - self.imgui.last_frame;
+        self.imgui
             .context
             .io_mut()
             .set_delta_time(delta_time.as_secs_f32());
-        imgui.last_frame = now;
+        self.imgui.last_frame = now;
 
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(e) => {
-                eprintln!("dropped frame: {e:?}");
-                return;
-            }
-        };
+        let frame = self.surface.get_current_texture()?;
 
-        imgui
+        self.imgui
             .platform
-            .prepare_frame(&self.window, &mut imgui.context);
-        let ui = imgui.context.frame();
+            .prepare_frame(&self.window, &mut self.imgui.context);
+        let ui = self.imgui.context.frame();
 
         // Main window content
         ui.window("Hello, Dear ImGui!")
@@ -164,24 +156,28 @@ impl AppWindow {
                     ui.io().framerate()
                 ));
 
-                ui.color_edit4(
-                    "Clear color",
-                    &mut [
-                        imgui.clear_color.r as f32,
-                        imgui.clear_color.g as f32,
-                        imgui.clear_color.b as f32,
-                        imgui.clear_color.a as f32,
-                    ],
-                );
+                let mut color = [
+                    self.imgui.clear_color.r as f32,
+                    self.imgui.clear_color.g as f32,
+                    self.imgui.clear_color.b as f32,
+                    self.imgui.clear_color.a as f32,
+                ];
+
+                if ui.color_edit4("Clear color", &mut color) {
+                    self.imgui.clear_color.r = color[0] as f64;
+                    self.imgui.clear_color.g = color[1] as f64;
+                    self.imgui.clear_color.b = color[2] as f64;
+                    self.imgui.clear_color.a = color[3] as f64;
+                }
 
                 if ui.button("Show Demo Window") {
-                    imgui.demo_open = true;
+                    self.imgui.demo_open = true;
                 }
             });
 
         // Show demo window if requested
-        if imgui.demo_open {
-            ui.show_demo_window(&mut imgui.demo_open);
+        if self.imgui.demo_open {
+            ui.show_demo_window(&mut self.imgui.demo_open);
         }
 
         let view = frame
@@ -193,7 +189,7 @@ impl AppWindow {
                 label: Some("Render Encoder"),
             });
 
-        let draw_data = imgui.context.render();
+        let draw_data = self.imgui.context.render();
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -202,7 +198,7 @@ impl AppWindow {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(imgui.clear_color),
+                        load: wgpu::LoadOp::Clear(self.imgui.clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -212,63 +208,85 @@ impl AppWindow {
                 occlusion_query_set: None,
             });
 
-            imgui
+            self.imgui
                 .renderer
-                .render_with_renderpass(&draw_data, &self.queue, &self.device, &mut rpass)
-                .expect("Rendering failed");
+                .render_with_renderpass(&draw_data, &self.queue, &self.device, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        Ok(())
     }
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        // For compatibility with older winit versions and mobile platforms
         if self.window.is_none() {
-            let mut window = AppWindow::setup_gpu(event_loop);
-            window.setup_imgui();
-            self.window = Some(window);
+            match AppWindow::new(event_loop) {
+                Ok(window) => {
+                    self.window = Some(window);
+                    println!("Window created successfully in resumed");
+                }
+                Err(e) => {
+                    eprintln!("Failed to create window in resumed: {e}");
+                    event_loop.exit();
+                }
+            }
         }
     }
+
+
 
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
-        let window = self.window.as_mut().unwrap();
-        let imgui = window.imgui.as_mut().unwrap();
+        let window = match self.window.as_mut() {
+            Some(window) => window,
+            None => return,
+        };
 
-        // Handle the event first before matching on it
+        // Handle the event with ImGui first
         let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-            window_id: window.window.id(),
+            window_id,
             event: event.clone(),
         };
-        imgui
+        window
+            .imgui
             .platform
-            .handle_event(&full_event, &window.window, &mut imgui.context);
+            .handle_event(&mut window.imgui.context, &window.window, &full_event);
 
         match event {
             WindowEvent::Resized(physical_size) => {
-                window.surface_desc.width = physical_size.width;
-                window.surface_desc.height = physical_size.height;
-                window
-                    .surface
-                    .configure(&window.device, &window.surface_desc);
+                window.resize(physical_size);
+                window.window.request_redraw();
             }
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                println!("Close requested");
+                event_loop.exit();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.logical_key == Key::Named(NamedKey::Escape) {
                     event_loop.exit();
                 }
             }
             WindowEvent::RedrawRequested => {
-                window.render();
+                if let Err(e) = window.render() {
+                    eprintln!("Render error: {e}");
+                }
                 window.window.request_redraw();
             }
             _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        // Request redraw if we have a window
+        if let Some(window) = &self.window {
+            window.window.request_redraw();
         }
     }
 }

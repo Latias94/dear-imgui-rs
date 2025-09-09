@@ -116,7 +116,7 @@ fn main() {
         "imgui_demo.cpp",
     ];
 
-    let imgui_ori = manifest_dir.join("imgui");
+    let imgui_ori = manifest_dir.join("third-party").join("imgui");
     let imgui_src = out_path.join("imgui_src");
     let imgui_misc_ft = imgui_src.join("misc/freetype");
 

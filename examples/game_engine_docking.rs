@@ -1088,7 +1088,7 @@ impl ApplicationHandler for App {
             };
             imgui
                 .platform
-                .handle_event(&fake_event, &window.window, &mut imgui.context);
+                .handle_event(&mut imgui.context, &window.window, &fake_event);
         }
 
         match event {

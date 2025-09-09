@@ -315,7 +315,7 @@ impl ApplicationHandler for App {
         };
         imgui
             .platform
-            .handle_event(&full_event, &window.window, &mut imgui.context);
+            .handle_event(&mut imgui.context, &window.window, &full_event);
 
         match event {
             WindowEvent::Resized(physical_size) => {

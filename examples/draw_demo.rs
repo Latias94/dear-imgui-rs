@@ -50,7 +50,7 @@ impl ApplicationHandler for DrawDemoApp {
             };
             imgui
                 .platform
-                .handle_event(&full_event, &self.window, &mut imgui.context);
+                .handle_event(&mut imgui.context, &self.window, &full_event);
         }
 
         match event {
