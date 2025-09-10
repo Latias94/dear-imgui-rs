@@ -66,14 +66,12 @@ impl AppWindow {
             ContextAttributesBuilder::new().build(Some(window.window_handle()?.as_raw()));
         let context = unsafe { cfg.display().create_context(&cfg, &context_attribs)? };
 
-        // Create surface
-        let surface_attribs = SurfaceAttributesBuilder::<WindowSurface>::new()
-            .with_srgb(Some(true))
-            .build(
-                window.window_handle()?.as_raw(),
-                NonZeroU32::new(1280).unwrap(),
-                NonZeroU32::new(720).unwrap(),
-            );
+        // Create surface (using linear framebuffer like the reference implementation)
+        let surface_attribs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
+            window.window_handle()?.as_raw(),
+            NonZeroU32::new(1280).unwrap(),
+            NonZeroU32::new(720).unwrap(),
+        );
         let surface = unsafe {
             cfg.display()
                 .create_window_surface(&cfg, &surface_attribs)?

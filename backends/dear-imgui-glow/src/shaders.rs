@@ -15,11 +15,14 @@ pub struct Shaders {
 
 impl Shaders {
     /// Create and compile shaders
-    pub fn new(gl: &Context, gl_version: GlVersion, output_srgb: bool) -> InitResult<Self> {
+    ///
+    /// Following the official OpenGL3 backend approach: uses simple shaders that rely on
+    /// OpenGL's GL_FRAMEBUFFER_SRGB for automatic sRGB conversion.
+    pub fn new(gl: &Context, gl_version: GlVersion) -> InitResult<Self> {
         let glsl_version = GlslVersion::for_gl_version(gl_version);
 
         let vertex_shader_source = Self::vertex_shader_source(&glsl_version);
-        let fragment_shader_source = Self::fragment_shader_source(&glsl_version, output_srgb);
+        let fragment_shader_source = Self::fragment_shader_source(&glsl_version);
 
         unsafe {
             // Create vertex shader
@@ -108,8 +111,40 @@ impl Shaders {
 
     /// Generate vertex shader source
     fn vertex_shader_source(glsl_version: &GlslVersion) -> String {
-        format!(
-            r#"{version}
+        let version_str = glsl_version.as_str();
+        let is_legacy =
+            version_str.contains("#version 120") || version_str.contains("#version 100");
+
+        if is_legacy {
+            // GLSL 120 and ES 100 use attribute/varying
+            format!(
+                r#"{version}
+{precision}
+uniform mat4 ProjMtx;
+attribute vec2 Position;
+attribute vec2 UV;
+attribute vec4 Color;
+varying vec2 Frag_UV;
+varying vec4 Frag_Color;
+
+void main()
+{{
+    Frag_UV = UV;
+    Frag_Color = Color;
+    gl_Position = ProjMtx * vec4(Position.xy, 0, 1);
+}}
+"#,
+                version = version_str,
+                precision = if version_str.contains("es") {
+                    "precision mediump float;"
+                } else {
+                    ""
+                }
+            )
+        } else {
+            // GLSL 130+ use in/out
+            format!(
+                r#"{version}
 {precision}
 uniform mat4 ProjMtx;
 in vec2 Position;
@@ -125,39 +160,51 @@ void main()
     gl_Position = ProjMtx * vec4(Position.xy, 0, 1);
 }}
 "#,
-            version = glsl_version.as_str(),
-            precision = if glsl_version.as_str().contains("es") {
-                "precision mediump float;"
-            } else {
-                ""
-            }
-        )
+                version = version_str,
+                precision = if version_str.contains("es") {
+                    "precision mediump float;"
+                } else {
+                    ""
+                }
+            )
+        }
     }
 
     /// Generate fragment shader source
-    fn fragment_shader_source(glsl_version: &GlslVersion, output_srgb: bool) -> String {
-        // Dear ImGui colors are typically in sRGB space, so we need to convert them to linear
-        // for proper blending, then let the framebuffer handle the final sRGB conversion
-        let color_processing = if output_srgb {
-            r#"
-    // Convert sRGB vertex color to linear space for proper blending
-    // Following the same approach as Dear ImGui WGPU backend
-    vec3 srgb_color = Frag_Color.rgb;
-    vec3 selector = step(0.04045, srgb_color);
-    vec3 under = srgb_color / 12.92;
-    vec3 over = pow((srgb_color + 0.055) / 1.055, vec3(2.4));
-    vec3 linear_color = mix(under, over, selector);
-    vec4 vertex_color = vec4(linear_color, Frag_Color.a);
+    ///
+    /// Following the official OpenGL3 backend approach: simple shader that relies on
+    /// OpenGL's GL_FRAMEBUFFER_SRGB for automatic sRGB conversion, rather than
+    /// manual shader-based conversion like the WGPU backend.
+    fn fragment_shader_source(glsl_version: &GlslVersion) -> String {
+        let version_str = glsl_version.as_str();
+        let is_legacy =
+            version_str.contains("#version 120") || version_str.contains("#version 100");
 
-    vec4 color = vertex_color * texture(Texture, Frag_UV.st);"#
+        if is_legacy {
+            // GLSL 120 and ES 100 use gl_FragColor and texture2D
+            format!(
+                r#"{version}
+{precision}
+uniform sampler2D Texture;
+varying vec2 Frag_UV;
+varying vec4 Frag_Color;
+
+void main()
+{{
+    gl_FragColor = Frag_Color * texture2D(Texture, Frag_UV.st);
+}}
+"#,
+                version = version_str,
+                precision = if version_str.contains("es") || version_str.contains("#version 120") {
+                    "#ifdef GL_ES\n    precision mediump float;\n#endif"
+                } else {
+                    ""
+                }
+            )
         } else {
-            r#"
-    // No color space conversion needed for non-sRGB output
-    vec4 color = Frag_Color * texture(Texture, Frag_UV.st);"#
-        };
-
-        format!(
-            r#"{version}
+            // GLSL 130+ use out variables and texture()
+            format!(
+                r#"{version}
 {precision}
 uniform sampler2D Texture;
 in vec2 Frag_UV;
@@ -165,17 +212,17 @@ in vec4 Frag_Color;
 out vec4 Out_Color;
 
 void main()
-{{{color_processing}
-    Out_Color = color;
+{{
+    Out_Color = Frag_Color * texture(Texture, Frag_UV.st);
 }}
 "#,
-            version = glsl_version.as_str(),
-            precision = if glsl_version.as_str().contains("es") {
-                "precision mediump float;"
-            } else {
-                ""
-            },
-            color_processing = color_processing
-        )
+                version = version_str,
+                precision = if version_str.contains("es") {
+                    "precision mediump float;"
+                } else {
+                    ""
+                }
+            )
+        }
     }
 }

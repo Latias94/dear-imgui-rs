@@ -15,7 +15,7 @@ use crate::{
     state::GlStateBackup,
     texture::{SimpleTextureMap, TextureMap},
     to_byte_slice,
-    versions::GlVersion,
+    versions::{GlVersion, GlslVersion},
     GlBuffer, GlTexture, GlVertexArray,
 };
 
@@ -36,13 +36,12 @@ pub struct Renderer {
 impl Renderer {
     /// Create a new renderer
     ///
-    /// `output_srgb` controls whether the shader outputs sRGB colors, or linear
-    /// RGB colors. See the documentation for details on when to use each.
+    /// Following the official OpenGL3 backend approach: relies on OpenGL's GL_FRAMEBUFFER_SRGB
+    /// for automatic sRGB conversion rather than manual shader-based conversion.
     pub fn new<T: TextureMap>(
         gl: &Context,
         imgui_context: &mut ImGuiContext,
         texture_map: &mut T,
-        output_srgb: bool,
     ) -> InitResult<Self> {
         let gl_version = GlVersion::read(gl);
 
@@ -76,7 +75,7 @@ impl Renderer {
 
         let font_atlas_texture = Self::prepare_font_atlas(gl, imgui_context, texture_map)?;
 
-        let shaders = Shaders::new(gl, gl_version, output_srgb)?;
+        let shaders = Shaders::new(gl, gl_version)?;
         let vbo_handle = unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?;
         let ebo_handle = unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?;
 
@@ -312,6 +311,12 @@ impl Renderer {
             gl.disable(glow::STENCIL_TEST);
             gl.enable(glow::SCISSOR_TEST);
 
+            // Note: We don't enable GL_FRAMEBUFFER_SRGB here because:
+            // 1. Modern applications typically create sRGB surfaces directly (e.g., glutin's .with_srgb(true))
+            // 2. The official OpenGL3 backend also doesn't explicitly enable GL_FRAMEBUFFER_SRGB
+            // 3. Enabling it when the surface is already sRGB would cause incorrect double conversion
+            // The sRGB conversion is handled by the surface/framebuffer configuration
+
             #[cfg(feature = "polygon_mode_support")]
             if self.gl_version.polygon_mode_support() {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
@@ -420,7 +425,7 @@ impl Renderer {
     /// Create OpenGL device objects (buffers, shaders, etc.)
     pub fn create_device_objects(&mut self, gl: &Context) -> RenderResult<()> {
         if self.shaders.program.is_none() {
-            self.shaders = Shaders::new(gl, self.gl_version, false)
+            self.shaders = Shaders::new(gl, self.gl_version)
                 .map_err(|e| RenderError::Generic(format!("Failed to create shaders: {:?}", e)))?;
         }
 
@@ -689,11 +694,11 @@ pub struct AutoRenderer {
 impl AutoRenderer {
     /// Create a new AutoRenderer for simple rendering
     ///
-    /// Uses `output_srgb: false` by default, assuming modern applications use sRGB framebuffers.
-    /// If you need sRGB output conversion, use `Renderer::new` directly with `output_srgb: true`.
+    /// Following the official OpenGL3 backend approach: relies on OpenGL's GL_FRAMEBUFFER_SRGB
+    /// for automatic sRGB conversion rather than manual shader-based conversion.
     pub fn new(gl: glow::Context, imgui_context: &mut ImGuiContext) -> InitResult<Self> {
         let mut texture_map = SimpleTextureMap::default();
-        let renderer = Renderer::new(&gl, imgui_context, &mut texture_map, false)?;
+        let renderer = Renderer::new(&gl, imgui_context, &mut texture_map)?;
         Ok(Self {
             gl: std::rc::Rc::new(gl),
             texture_map,

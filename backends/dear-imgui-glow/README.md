@@ -53,7 +53,7 @@ For more control, you can use the `Renderer` directly:
 use dear_imgui_glow::{Renderer, SimpleTextureMap};
 
 let mut texture_map = SimpleTextureMap::new();
-let mut renderer = Renderer::new(&gl, &mut imgui, &mut texture_map, true)?;
+let mut renderer = Renderer::new(&gl, &mut imgui, &mut texture_map)?;
 
 // In your render loop:
 renderer.render(&gl, &texture_map, draw_data)?;
