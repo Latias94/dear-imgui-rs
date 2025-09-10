@@ -318,6 +318,36 @@ impl PlatformIo {
             Some(crate::texture::TextureData::from_raw(texture_ptr))
         }
     }
+
+    /// Set the renderer render state
+    ///
+    /// This is used by renderer backends to expose their current render state
+    /// to draw callbacks during rendering. The pointer should remain valid
+    /// during the entire render_draw_data() call.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that:
+    /// - The pointer is valid for the duration of the render call
+    /// - The pointed-to data matches the expected render state structure for the backend
+    /// - The pointer is set to null after rendering is complete
+    pub unsafe fn set_renderer_render_state(&mut self, render_state: *mut std::ffi::c_void) {
+        self.raw.Renderer_RenderState = render_state;
+    }
+
+    /// Get the current renderer render state
+    ///
+    /// Returns the render state pointer that was set by the renderer backend.
+    /// This is typically used by draw callbacks to access the current render state.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that:
+    /// - The returned pointer is cast to the correct render state type for the backend
+    /// - The pointer is only used during the render_draw_data() call
+    pub unsafe fn renderer_render_state(&self) -> *mut std::ffi::c_void {
+        self.raw.Renderer_RenderState
+    }
 }
 
 // TODO: Add safe wrappers for platform IO functionality:

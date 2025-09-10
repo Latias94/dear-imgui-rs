@@ -290,6 +290,38 @@ impl WgpuRenderer {
         self.backend_data.is_some()
     }
 
+    /// Update a single texture manually
+    ///
+    /// This corresponds to ImGui_ImplWGPU_UpdateTexture in the C++ implementation.
+    /// Use this when you need precise control over texture update timing.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `TextureUpdateResult` that contains any status/ID updates that need
+    /// to be applied to the texture data. This follows Rust's principle of explicit
+    /// state management.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use dear_imgui_wgpu::*;
+    /// # let mut renderer = WgpuRenderer::new();
+    /// # let mut texture_data = dear_imgui::TextureData::new();
+    /// let result = renderer.update_texture(&texture_data)?;
+    /// result.apply_to(&mut texture_data);
+    /// ```
+    pub fn update_texture(&mut self, texture_data: &dear_imgui::TextureData) -> RendererResult<crate::TextureUpdateResult> {
+        if let Some(backend_data) = &self.backend_data {
+            self.texture_manager.update_single_texture(
+                texture_data,
+                &backend_data.device,
+                &backend_data.queue,
+            ).map_err(RendererError::TextureCreationFailed)
+        } else {
+            Err(RendererError::InvalidRenderState("Renderer not initialized".to_string()))
+        }
+    }
+
     /// Called every frame to prepare for rendering
     ///
     /// This corresponds to ImGui_ImplWGPU_NewFrame in the C++ implementation
@@ -344,14 +376,32 @@ impl WgpuRenderer {
         // Setup render state
         Self::setup_render_state_static(draw_data, render_pass, backend_data)?;
 
-        // Render draw lists
-        Self::render_draw_lists_static(
-            &mut self.texture_manager,
-            &self.default_texture,
-            draw_data,
-            render_pass,
-            backend_data,
-        )?;
+        // Setup render state structure (for callbacks and custom texture bindings)
+        // Note: We need to be careful with lifetimes here, so we'll set it just before rendering
+        // and clear it immediately after
+        unsafe {
+            let platform_io = dear_imgui::sys::ImGui_GetPlatformIO();
+
+            // Create a temporary render state structure
+            let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
+
+            // Set the render state pointer
+            (*platform_io).Renderer_RenderState = &mut render_state as *mut _ as *mut std::ffi::c_void;
+
+            // Render draw lists with the render state exposed
+            let result = Self::render_draw_lists_static(
+                &mut self.texture_manager,
+                &self.default_texture,
+                draw_data,
+                render_pass,
+                backend_data,
+            );
+
+            // Clear the render state pointer
+            (*platform_io).Renderer_RenderState = std::ptr::null_mut();
+
+            result?;
+        }
 
         Ok(())
     }

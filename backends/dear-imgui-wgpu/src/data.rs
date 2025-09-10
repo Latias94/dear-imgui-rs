@@ -6,6 +6,65 @@
 use crate::{FrameResources, RenderResources};
 use wgpu::*;
 
+/// Selected render state data shared with callbacks
+///
+/// This corresponds to ImGui_ImplWGPU_RenderState in the C++ implementation.
+/// This is temporarily stored during the render_draw_data() call to allow
+/// draw callbacks to access the current render state.
+#[derive(Debug)]
+pub struct WgpuRenderState {
+    /// WGPU device for creating resources (raw pointer for lifetime flexibility)
+    pub device: *const Device,
+    /// Current render pass encoder for drawing (raw pointer for lifetime flexibility)
+    pub render_pass_encoder: *mut std::ffi::c_void,
+}
+
+impl WgpuRenderState {
+    /// Create a new render state from references
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the device and render pass remain valid
+    /// for the lifetime of this render state.
+    pub unsafe fn new(device: &Device, render_pass: &mut RenderPass) -> Self {
+        Self {
+            device: device as *const Device,
+            render_pass_encoder: render_pass as *mut _ as *mut std::ffi::c_void,
+        }
+    }
+
+    /// Get the device reference
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the device pointer is still valid.
+    pub unsafe fn device(&self) -> &Device {
+        &*self.device
+    }
+
+    /// Get the render pass encoder reference
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that:
+    /// 1. The render pass pointer is still valid
+    /// 2. No other mutable references to the render pass exist
+    /// 3. The lifetime is appropriate
+    ///
+    /// This method is designed for use in C++ callbacks where we need to provide
+    /// mutable access to the render pass from an immutable context.
+    ///
+    /// # Clippy Allow
+    ///
+    /// We allow `clippy::mut_from_ref` here because this is a legitimate use case
+    /// for FFI interop where we need to provide mutable access through an immutable
+    /// interface to match C++ callback expectations.
+    #[allow(clippy::mut_from_ref)]
+    pub unsafe fn render_pass_encoder(&self) -> &mut RenderPass<'_> {
+        &mut *(self.render_pass_encoder as *mut RenderPass)
+    }
+}
+
 /// Initialization data for ImGui WGPU renderer
 ///
 /// This corresponds to ImGui_ImplWGPU_InitInfo in the C++ implementation

@@ -8,6 +8,52 @@ use dear_imgui::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, Te
 use std::collections::HashMap;
 use wgpu::*;
 
+/// Result of a texture update operation
+///
+/// This enum represents the outcome of a texture update operation and
+/// contains any state changes that need to be applied to the texture data.
+/// This follows Rust's principle of explicit state management.
+#[derive(Debug, Clone)]
+pub enum TextureUpdateResult {
+    /// Texture was successfully created
+    Created { texture_id: TextureId },
+    /// Texture was successfully updated
+    Updated,
+    /// Texture was destroyed
+    Destroyed,
+    /// Texture update failed
+    Failed,
+    /// No action was needed
+    NoAction,
+}
+
+impl TextureUpdateResult {
+    /// Apply the result to a texture data object
+    ///
+    /// This method updates the texture data's status and ID based on the operation result.
+    /// This is the Rust-idiomatic way to handle state updates.
+    pub fn apply_to(self, texture_data: &mut TextureData) {
+        match self {
+            TextureUpdateResult::Created { texture_id } => {
+                texture_data.set_tex_id(texture_id);
+                texture_data.set_status(TextureStatus::OK);
+            }
+            TextureUpdateResult::Updated => {
+                texture_data.set_status(TextureStatus::OK);
+            }
+            TextureUpdateResult::Destroyed => {
+                texture_data.set_status(TextureStatus::Destroyed);
+            }
+            TextureUpdateResult::Failed => {
+                texture_data.set_status(TextureStatus::Destroyed);
+            }
+            TextureUpdateResult::NoAction => {
+                // No changes needed
+            }
+        }
+    }
+}
+
 /// WGPU texture resource
 ///
 /// This corresponds to ImGui_ImplWGPU_Texture in the C++ implementation
@@ -262,6 +308,58 @@ impl WgpuTextureManager {
                 TextureStatus::OK | TextureStatus::Destroyed => {
                     // No action needed
                 }
+            }
+        }
+    }
+
+    /// Update a single texture based on its status
+    ///
+    /// This corresponds to ImGui_ImplWGPU_UpdateTexture in the C++ implementation.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `TextureUpdateResult` that contains the operation result and
+    /// any status/ID updates that need to be applied to the texture data.
+    /// This follows Rust's principle of explicit state management.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use dear_imgui_wgpu::*;
+    /// # let mut texture_manager = WgpuTextureManager::new();
+    /// # let device = todo!();
+    /// # let queue = todo!();
+    /// # let mut texture_data = dear_imgui::TextureData::new();
+    /// let result = texture_manager.update_single_texture(&texture_data, &device, &queue)?;
+    /// result.apply_to(&mut texture_data);
+    /// ```
+    pub fn update_single_texture(
+        &mut self,
+        texture_data: &dear_imgui::TextureData,
+        device: &Device,
+        queue: &Queue,
+    ) -> Result<TextureUpdateResult, String> {
+        match texture_data.status() {
+            TextureStatus::WantCreate => {
+                match self.create_texture_from_data(device, queue, texture_data) {
+                    Ok(texture_id) => Ok(TextureUpdateResult::Created {
+                        texture_id: TextureId::from(texture_id as usize),
+                    }),
+                    Err(e) => Err(format!("Failed to create texture: {}", e)),
+                }
+            }
+            TextureStatus::WantUpdates => {
+                match self.update_texture_from_data(device, queue, texture_data) {
+                    Ok(_) => Ok(TextureUpdateResult::Updated),
+                    Err(e) => Ok(TextureUpdateResult::Failed),
+                }
+            }
+            TextureStatus::WantDestroy => {
+                self.destroy_texture(texture_data.tex_id());
+                Ok(TextureUpdateResult::Destroyed)
+            }
+            TextureStatus::OK | TextureStatus::Destroyed => {
+                Ok(TextureUpdateResult::NoAction)
             }
         }
     }
