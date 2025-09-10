@@ -44,7 +44,7 @@ struct TextureModifyState {
 
 impl ImguiContext {
     /// Create a new ImGui context
-    pub(crate) fn new(mut ctx: Context) -> Self {
+    pub(crate) fn new(ctx: Context) -> Self {
         // Key mappings will be handled in the input system
 
         Self {

@@ -1,3 +1,4 @@
+use crate::texture::TextureId;
 use bitflags::bitflags;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
@@ -24,7 +25,7 @@ impl ImColor32 {
     /// Construct a color from 4 single-byte `u8` channel values
     #[inline]
     pub const fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
-        Self(((a as u32) << 24) | ((r as u32) << 0) | ((g as u32) << 8) | ((b as u32) << 16))
+        Self(((a as u32) << 24) | (r as u32) | ((g as u32) << 8) | ((b as u32) << 16))
     }
 
     /// Construct a fully opaque color from 3 single-byte `u8` channel values
@@ -199,35 +200,8 @@ bitflags! {
     }
 }
 
-/// Draw vertex
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct DrawVert {
-    /// Position
-    pub pos: [f32; 2],
-    /// UV coordinates
-    pub uv: [f32; 2],
-    /// Color (packed RGBA)
-    pub col: [u8; 4],
-}
-
-impl DrawVert {
-    /// Creates a new draw vertex
-    pub fn new(pos: [f32; 2], uv: [f32; 2], color: [u8; 4]) -> Self {
-        Self {
-            pos,
-            uv,
-            col: color,
-        }
-    }
-}
-
-/// Draw index type
-pub type DrawIdx = u16;
-
-// DrawData has been moved to crate::render::DrawData
-// Re-export for backward compatibility
-pub use crate::render::{DrawData, DrawListIterator};
+// All draw types have been moved to crate::render module
+// Use crate::render::{DrawVert, DrawIdx, DrawData, DrawListIterator} instead
 
 /// Draw list wrapper
 #[repr(transparent)]
@@ -254,20 +228,20 @@ impl DrawList {
     }
 
     /// Get vertex buffer
-    pub fn vtx_buffer(&self) -> &[DrawVert] {
+    pub fn vtx_buffer(&self) -> &[crate::render::DrawVert] {
         unsafe {
             if (*self.0).VtxBuffer.Size <= 0 || (*self.0).VtxBuffer.Data.is_null() {
                 return &[];
             }
             std::slice::from_raw_parts(
-                (*self.0).VtxBuffer.Data as *const DrawVert,
+                (*self.0).VtxBuffer.Data as *const crate::render::DrawVert,
                 (*self.0).VtxBuffer.Size as usize,
             )
         }
     }
 
     /// Get index buffer
-    pub fn idx_buffer(&self) -> &[DrawIdx] {
+    pub fn idx_buffer(&self) -> &[crate::render::DrawIdx] {
         unsafe {
             if (*self.0).IdxBuffer.Size <= 0 || (*self.0).IdxBuffer.Data.is_null() {
                 return &[];
@@ -303,7 +277,7 @@ impl Iterator for DrawCmdIterator<'_> {
                     cmd.ClipRect.z,
                     cmd.ClipRect.w,
                 ],
-                texture_id: cmd.TexRef._TexID as TextureId,
+                texture_id: TextureId::from(cmd.TexRef._TexID as usize),
                 vtx_offset: cmd.VtxOffset as usize,
                 idx_offset: cmd.IdxOffset as usize,
             };
@@ -358,9 +332,6 @@ pub enum DrawCmd {
         raw_cmd: *const sys::ImDrawCmd,
     },
 }
-
-/// Texture identifier
-pub type TextureId = *const c_void;
 
 enum DrawListType {
     Window,
@@ -522,7 +493,7 @@ impl<'ui> DrawListMut<'ui> {
     pub fn path_clear(&self) {
         unsafe {
             // PathClear is inline: _Path.Size = 0;
-            let draw_list = self.draw_list as *mut sys::ImDrawList;
+            let draw_list = self.draw_list;
             (*draw_list)._Path.Size = 0;
         }
     }
@@ -539,7 +510,7 @@ impl<'ui> DrawListMut<'ui> {
 
             // PathLineTo is inline: _Path.push_back(pos);
             // We need to manually push to the ImVector
-            let draw_list = self.draw_list as *mut sys::ImDrawList;
+            let draw_list = self.draw_list;
             let path = &mut (*draw_list)._Path;
 
             // Check if we have capacity
@@ -550,7 +521,7 @@ impl<'ui> DrawListMut<'ui> {
             } else {
                 // If no capacity, we'll use a workaround by drawing a line to the point
                 // This isn't perfect but avoids memory management issues
-                let current_pos = if path.Size > 0 {
+                let _current_pos = if path.Size > 0 {
                     *path.Data.add((path.Size - 1) as usize)
                 } else {
                     vec2
@@ -653,7 +624,7 @@ impl<'ui> DrawListMut<'ui> {
     pub fn path_stroke(&self, color: impl Into<ImColor32>, flags: DrawFlags, thickness: f32) {
         unsafe {
             // PathStroke is inline: AddPolyline(_Path.Data, _Path.Size, col, flags, thickness); _Path.Size = 0;
-            let draw_list = self.draw_list as *mut sys::ImDrawList;
+            let draw_list = self.draw_list;
             let path = &mut (*draw_list)._Path;
 
             if path.Size > 0 {
@@ -675,7 +646,7 @@ impl<'ui> DrawListMut<'ui> {
     pub fn path_fill_convex(&self, color: impl Into<ImColor32>) {
         unsafe {
             // PathFillConvex is inline: AddConvexPolyFilled(_Path.Data, _Path.Size, col); _Path.Size = 0;
-            let draw_list = self.draw_list as *mut sys::ImDrawList;
+            let draw_list = self.draw_list;
             let path = &mut (*draw_list)._Path;
 
             if path.Size > 0 {
@@ -980,10 +951,10 @@ impl<'ui> BezierCurve<'ui> {
         C: Into<ImColor32>,
     {
         Self {
-            pos0: pos0.into().into(),
-            cp0: cp0.into().into(),
-            cp1: cp1.into().into(),
-            pos1: pos1.into().into(),
+            pos0: pos0.into(),
+            cp0: cp0.into(),
+            cp1: cp1.into(),
+            pos1: pos1.into(),
             color: c.into(),
             thickness: 1.0,
             num_segments: None,
@@ -1043,7 +1014,7 @@ impl<'ui> Polyline<'ui> {
         P: Into<MintVec2>,
     {
         Self {
-            points: points.into_iter().map(|p| p.into().into()).collect(),
+            points: points.into_iter().map(|p| p.into()).collect(),
             color: c.into(),
             thickness: 1.0,
             filled: false,

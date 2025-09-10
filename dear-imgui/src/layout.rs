@@ -146,15 +146,37 @@ impl Ui {
     /// Returns the cursor position (in window coordinates)
     #[doc(alias = "GetCursorPos")]
     pub fn cursor_pos(&self) -> [f32; 2] {
-        let out = unsafe { sys::ImGui_GetCursorPos() };
-        [out.x, out.y]
+        unsafe {
+            #[cfg(target_env = "msvc")]
+            {
+                let pos_rr = sys::ImGui_GetCursorPos();
+                let pos: sys::ImVec2 = pos_rr.into();
+                [pos.x, pos.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let pos = sys::ImGui_GetCursorPos();
+                [pos.x, pos.y]
+            }
+        }
     }
 
     /// Returns the cursor position (in absolute screen coordinates)
     #[doc(alias = "GetCursorScreenPos")]
     pub fn cursor_screen_pos(&self) -> [f32; 2] {
-        let out = unsafe { sys::ImGui_GetCursorScreenPos() };
-        [out.x, out.y]
+        unsafe {
+            #[cfg(target_env = "msvc")]
+            {
+                let pos_rr = sys::ImGui_GetCursorScreenPos();
+                let pos: sys::ImVec2 = pos_rr.into();
+                [pos.x, pos.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let pos = sys::ImGui_GetCursorScreenPos();
+                [pos.x, pos.y]
+            }
+        }
     }
 
     /// Sets the cursor position (in window coordinates)
@@ -206,7 +228,18 @@ impl Ui {
     /// Returns the initial cursor position (in window coordinates)
     #[doc(alias = "GetCursorStartPos")]
     pub fn cursor_start_pos(&self) -> [f32; 2] {
-        let out = unsafe { sys::ImGui_GetCursorStartPos() };
-        [out.x, out.y]
+        unsafe {
+            #[cfg(target_env = "msvc")]
+            {
+                let pos_rr = sys::ImGui_GetCursorStartPos();
+                let pos: sys::ImVec2 = pos_rr.into();
+                [pos.x, pos.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let pos = sys::ImGui_GetCursorStartPos();
+                [pos.x, pos.y]
+            }
+        }
     }
 }

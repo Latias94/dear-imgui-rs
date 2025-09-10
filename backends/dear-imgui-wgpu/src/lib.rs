@@ -5,10 +5,12 @@
 
 use dear_imgui::{
     render::{DrawCmd, DrawData, DrawIdx, DrawList, DrawVert},
-    Context,
+    BackendFlags, Context, TextureData, TextureFormat as ImGuiTextureFormat, TextureId,
+    TextureStatus,
 };
 
 use smallvec::SmallVec;
+use std::collections::HashMap;
 use std::mem::size_of;
 use wgpu::util::{BufferInitDescriptor, DeviceExt, TextureDataOrder};
 use wgpu::*;
@@ -20,12 +22,15 @@ static FS_ENTRY_POINT_LINEAR: &str = "fs_main_linear";
 pub enum RendererError {
     /// Generic error
     Generic(String),
+    /// Bad texture error
+    BadTexture(String),
 }
 
 impl std::fmt::Display for RendererError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RendererError::Generic(msg) => write!(f, "Renderer error: {}", msg),
+            RendererError::BadTexture(msg) => write!(f, "Bad texture error: {}", msg),
         }
     }
 }
@@ -40,6 +45,59 @@ struct DrawVertPod(DrawVert);
 
 unsafe impl bytemuck::Zeroable for DrawVertPod {}
 unsafe impl bytemuck::Pod for DrawVertPod {}
+
+/// WGPU texture resource
+#[derive(Debug)]
+pub struct WgpuTexture {
+    pub texture: Texture,
+    pub view: TextureView,
+    pub bind_group: BindGroup,
+}
+
+/// Texture management for WGPU renderer
+#[derive(Debug, Default)]
+pub struct WgpuTextureMap {
+    textures: HashMap<u64, WgpuTexture>,
+    next_id: u64,
+}
+
+impl WgpuTextureMap {
+    /// Create a new texture map
+    pub fn new() -> Self {
+        Self {
+            textures: HashMap::new(),
+            next_id: 1, // Start from 1, 0 is reserved for null texture
+        }
+    }
+
+    /// Insert a new texture and return its ID
+    pub fn insert(&mut self, texture: WgpuTexture) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.textures.insert(id, texture);
+        id
+    }
+
+    /// Get a texture by ID
+    pub fn get(&self, id: u64) -> Option<&WgpuTexture> {
+        self.textures.get(&id)
+    }
+
+    /// Remove a texture by ID
+    pub fn remove(&mut self, id: u64) -> Option<WgpuTexture> {
+        self.textures.remove(&id)
+    }
+
+    /// Check if a texture exists
+    pub fn contains(&self, id: u64) -> bool {
+        self.textures.contains_key(&id)
+    }
+
+    /// Insert a texture with a specific ID
+    pub fn insert_with_id(&mut self, id: u64, texture: WgpuTexture) {
+        self.textures.insert(id, texture);
+    }
+}
 
 pub struct RenderData {
     fb_size: [f32; 2],
@@ -62,6 +120,7 @@ pub struct WgpuRenderer {
     font_texture_bind_group: Option<BindGroup>,
     render_data: Option<RenderData>,
     texture_format: TextureFormat,
+    texture_map: WgpuTextureMap,
 }
 
 impl WgpuRenderer {
@@ -244,6 +303,268 @@ impl WgpuRenderer {
             font_texture_bind_group: None,
             render_data: None,
             texture_format,
+            texture_map: WgpuTextureMap::new(),
+        }
+    }
+
+    /// Configure Dear ImGui context with WGPU backend capabilities
+    pub fn configure_imgui_context(&self, imgui_context: &mut Context) {
+        let io = imgui_context.io_mut();
+        let mut flags = io.backend_flags();
+
+        // Set WGPU renderer capabilities
+        flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
+        flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
+
+        io.set_backend_flags(flags);
+    }
+
+    /// Prepare font atlas for rendering (should be called after configuring context)
+    pub fn prepare_font_atlas(&mut self, imgui_ctx: &mut Context, device: &Device, queue: &Queue) {
+        // This method ensures the font atlas is ready for the new texture management system
+        self.reload_font_texture(imgui_ctx, device, queue);
+    }
+
+    /// Create a texture from texture data
+    fn create_texture_from_data(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        texture_data: &TextureData,
+    ) -> Result<u64, RendererError> {
+        let width = texture_data.width();
+        let height = texture_data.height();
+        let format = texture_data.format();
+        let data = texture_data.pixels().ok_or(RendererError::BadTexture(
+            "No pixel data available".to_string(),
+        ))?;
+
+        // Convert ImGui texture format to WGPU format
+        let (wgpu_format, _bytes_per_pixel) = match format {
+            ImGuiTextureFormat::RGBA32 => (TextureFormat::Rgba8Unorm, 4),
+            ImGuiTextureFormat::Alpha8 => {
+                // Convert Alpha8 to RGBA32 for WGPU
+                let mut rgba_data = Vec::with_capacity(data.len() * 4);
+                for &alpha in data {
+                    rgba_data.extend_from_slice(&[255, 255, 255, alpha]); // White + alpha
+                }
+
+                let texture = device.create_texture_with_data(
+                    queue,
+                    &TextureDescriptor {
+                        label: Some("imgui-wgpu texture"),
+                        size: Extent3d {
+                            width: width.try_into().unwrap(),
+                            height: height.try_into().unwrap(),
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: TextureDimension::D2,
+                        format: TextureFormat::Rgba8Unorm,
+                        usage: TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    },
+                    TextureDataOrder::default(),
+                    &rgba_data,
+                );
+
+                return self.create_texture_bind_group(texture, device);
+            }
+        };
+
+        // Create RGBA32 texture directly
+        let texture = device.create_texture_with_data(
+            queue,
+            &TextureDescriptor {
+                label: Some("imgui-wgpu texture"),
+                size: Extent3d {
+                    width: width.try_into().unwrap(),
+                    height: height.try_into().unwrap(),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: wgpu_format,
+                usage: TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            TextureDataOrder::default(),
+            data,
+        );
+
+        self.create_texture_bind_group(texture, device)
+    }
+
+    /// Create a bind group for a texture and add it to the texture map
+    fn create_texture_bind_group(
+        &mut self,
+        texture: Texture,
+        device: &Device,
+    ) -> Result<u64, RendererError> {
+        let texture_view = texture.create_view(&TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("imgui-wgpu texture sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("imgui-wgpu texture bind group"),
+            layout: &self.texture_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&texture_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        let wgpu_texture = WgpuTexture {
+            texture,
+            view: texture_view,
+            bind_group,
+        };
+
+        let texture_id = self.texture_map.insert(wgpu_texture);
+        Ok(texture_id)
+    }
+
+    /// Update an existing texture from texture data
+    fn update_texture_from_data(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        texture_data: &TextureData,
+    ) -> Result<(), RendererError> {
+        let texture_id = texture_data.tex_id();
+
+        // For WGPU, we recreate the texture instead of updating in place
+        // This is simpler and more reliable than trying to update existing textures
+        let texture_id_u64 = texture_id.id() as u64;
+        if self.texture_map.contains(texture_id_u64) {
+            // Remove old texture
+            self.texture_map.remove(texture_id_u64);
+
+            // Create new texture with same ID
+            let new_texture_id = self.create_texture_from_data(device, queue, texture_data)?;
+
+            // Move the texture to the correct ID slot
+            if let Some(texture) = self.texture_map.remove(new_texture_id) {
+                self.texture_map.insert_with_id(texture_id_u64, texture);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Destroy a texture
+    fn destroy_texture(&mut self, texture_id: TextureId) {
+        let texture_id_u64 = texture_id.id() as u64;
+        self.texture_map.remove(texture_id_u64);
+        // WGPU textures are automatically cleaned up when dropped
+    }
+
+    /// Register a new texture with the renderer
+    pub fn register_texture(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        width: u32,
+        height: u32,
+        format: ImGuiTextureFormat,
+        data: &[u8],
+    ) -> Result<TextureId, RendererError> {
+        // Create texture data using the proper constructor
+        let mut texture_data = TextureData::new();
+
+        // Create the texture with the specified format and dimensions
+        texture_data.create(format, width as i32, height as i32);
+
+        // Set the pixel data
+        texture_data.set_data(data);
+
+        // Create the texture
+        let texture_id = self.create_texture_from_data(device, queue, &texture_data)?;
+
+        // Set the texture ID and mark as OK
+        texture_data.set_tex_id(TextureId::from(texture_id as usize));
+        texture_data.set_status(TextureStatus::OK);
+
+        Ok(TextureId::from(texture_id as usize))
+    }
+
+    /// Update an existing texture
+    pub fn update_texture(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        texture_id: TextureId,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> Result<(), RendererError> {
+        // Create temporary texture data for update
+        let mut texture_data = TextureData::new();
+        texture_data.set_tex_id(texture_id);
+        texture_data.set_width(width);
+        texture_data.set_height(height);
+        texture_data.set_format(ImGuiTextureFormat::RGBA32); // Assume RGBA32 for updates
+        texture_data.set_data(data);
+        texture_data.set_status(TextureStatus::WantUpdates);
+
+        self.update_texture_from_data(device, queue, &texture_data)
+    }
+
+    /// Get texture data for inspection
+    pub fn get_texture_data(&self, _texture_id: TextureId) -> Option<&TextureData> {
+        // This is a simplified implementation - in a real scenario,
+        // you might want to store texture metadata separately
+        None // For now, return None as we don't store the original TextureData
+    }
+
+    /// Handle texture updates from Dear ImGui
+    fn handle_texture_updates(&mut self, draw_data: &DrawData, device: &Device, queue: &Queue) {
+        for texture_data in draw_data.textures() {
+            match texture_data.status() {
+                TextureStatus::WantCreate => {
+                    if let Ok(texture_id) =
+                        self.create_texture_from_data(device, queue, texture_data)
+                    {
+                        // Update the texture data with the new ID
+                        texture_data.set_tex_id(TextureId::from(texture_id as usize));
+                        texture_data.set_status(TextureStatus::OK);
+                    }
+                }
+                TextureStatus::WantUpdates => {
+                    if self
+                        .update_texture_from_data(device, queue, texture_data)
+                        .is_err()
+                    {
+                        // If update fails, mark as destroyed
+                        texture_data.set_status(TextureStatus::Destroyed);
+                    } else {
+                        texture_data.set_status(TextureStatus::OK);
+                    }
+                }
+                TextureStatus::WantDestroy => {
+                    self.destroy_texture(texture_data.tex_id());
+                    texture_data.set_status(TextureStatus::Destroyed);
+                }
+                TextureStatus::OK | TextureStatus::Destroyed => {
+                    // No action needed
+                }
+            }
         }
     }
 
@@ -260,12 +581,16 @@ impl WgpuRenderer {
 
     /// Prepare buffers for the current imgui frame
     pub fn prepare(
-        &self,
+        &mut self,
         draw_data: &DrawData,
         render_data: Option<RenderData>,
         queue: &Queue,
         device: &Device,
     ) -> RenderData {
+        // Handle texture management
+        self.handle_texture_updates(draw_data, device, queue);
+
+        // Continue with existing buffer preparation logic
         let [display_width, display_height] = draw_data.display_size();
         let [scale_x, scale_y] = draw_data.framebuffer_scale();
         let fb_width = display_width * scale_x;
@@ -458,13 +783,21 @@ impl WgpuRenderer {
                     ],
                 });
 
-                self.font_texture_bind_group = Some(font_texture_bind_group);
+                // Keep the old bind group for backward compatibility
+                self.font_texture_bind_group = Some(font_texture_bind_group.clone());
 
-                // Set the texture reference in Dear ImGui
-                let tex_ref = dear_imgui_sys::ImTextureRef {
-                    _TexData: std::ptr::null_mut(), // We don't use TexData for GPU textures
-                    _TexID: 1,                      // Use texture ID 1 for font texture
+                // Create WGPU texture and add to texture map
+                let wgpu_texture = WgpuTexture {
+                    texture: font_texture,
+                    view: font_texture_view,
+                    bind_group: font_texture_bind_group,
                 };
+
+                // Insert into texture map and get ID
+                let font_texture_id = self.texture_map.insert(wgpu_texture);
+
+                // Set the texture reference in Dear ImGui using the new texture management system
+                let tex_ref = dear_imgui::create_texture_ref(font_texture_id);
                 fonts.set_tex_ref(tex_ref);
 
                 println!("Font texture loaded: {}x{} pixels", width, height);
@@ -609,14 +942,23 @@ impl WgpuRenderer {
                             rpass.set_scissor_rect(x, y, w, h);
 
                             // Choose the appropriate texture bind group based on texture ID
-                            let texture_bind_group = if cmd_params.texture_id.id() == 1 {
-                                // Font texture
-                                self.font_texture_bind_group
-                                    .as_ref()
-                                    .unwrap_or(&self.default_texture_bind_group)
-                            } else {
-                                // Default texture for other cases
-                                &self.default_texture_bind_group
+                            let texture_bind_group = {
+                                let tex_id = cmd_params.texture_id.id();
+                                if tex_id == 0 {
+                                    // Default texture for null/invalid texture ID
+                                    &self.default_texture_bind_group
+                                } else if tex_id == 1 && self.font_texture_bind_group.is_some() {
+                                    // Legacy font texture (for backward compatibility)
+                                    self.font_texture_bind_group.as_ref().unwrap()
+                                } else if let Some(wgpu_texture) =
+                                    self.texture_map.get(tex_id as u64)
+                                {
+                                    // Modern texture management
+                                    &wgpu_texture.bind_group
+                                } else {
+                                    // Fallback to default texture if texture not found
+                                    &self.default_texture_bind_group
+                                }
                             };
 
                             rpass.set_bind_group(1, texture_bind_group, &[]);

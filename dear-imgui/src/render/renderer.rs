@@ -1,92 +1,16 @@
 //! Renderer abstractions and texture management
 //!
-//! This module provides texture ID management and renderer trait definitions
-//! for integrating with various graphics APIs.
+//! This module provides renderer trait definitions for integrating with various graphics APIs.
+//! For texture management, use the types from the `texture` module.
 
-use std::os::raw::c_void;
-
-/// An opaque texture identifier
-///
-/// This is compatible with Dear ImGui's ImTextureID and can be used
-/// to reference textures in draw commands.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-#[repr(transparent)]
-pub struct TextureId(usize);
-
-impl TextureId {
-    /// Creates a new texture id with the given identifier
-    #[inline]
-    pub const fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    /// Returns the id of the TextureId
-    #[inline]
-    pub const fn id(self) -> usize {
-        self.0
-    }
-
-    /// Creates a null texture ID
-    #[inline]
-    pub const fn null() -> Self {
-        Self(0)
-    }
-
-    /// Checks if this texture ID is null
-    #[inline]
-    pub const fn is_null(self) -> bool {
-        self.0 == 0
-    }
-}
-
-impl From<usize> for TextureId {
-    #[inline]
-    fn from(id: usize) -> Self {
-        TextureId(id)
-    }
-}
-
-impl<T> From<*const T> for TextureId {
-    #[inline]
-    fn from(ptr: *const T) -> Self {
-        TextureId(ptr as usize)
-    }
-}
-
-impl<T> From<*mut T> for TextureId {
-    #[inline]
-    fn from(ptr: *mut T) -> Self {
-        TextureId(ptr as usize)
-    }
-}
-
-impl From<TextureId> for *const c_void {
-    #[inline]
-    fn from(id: TextureId) -> Self {
-        id.0 as *const c_void
-    }
-}
-
-impl From<TextureId> for *mut c_void {
-    #[inline]
-    fn from(id: TextureId) -> Self {
-        id.0 as *mut c_void
-    }
-}
-
-impl Default for TextureId {
-    #[inline]
-    fn default() -> Self {
-        Self::null()
-    }
-}
-
-/// Raw texture ID type for compatibility with Dear ImGui
-pub type RawTextureId = *const c_void;
+// Re-export texture types for backward compatibility
+pub use crate::texture::{RawTextureId, TextureData, TextureFormat, TextureRect, TextureStatus};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::texture::TextureId;
+    use std::ffi::c_void;
     use std::mem;
 
     #[test]

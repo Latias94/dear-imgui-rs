@@ -56,7 +56,7 @@ pub enum Condition {
 // Core modules
 pub use self::clipboard::{ClipboardBackend, DummyClipboardBackend};
 pub use self::context::*;
-pub use self::draw::*;
+// Note: draw types are now in render module
 pub use self::fonts::*;
 pub use self::input::*;
 pub use self::io::*;
@@ -105,6 +105,7 @@ pub mod platform_io;
 pub mod render;
 mod string;
 mod style;
+pub mod texture;
 mod ui;
 mod utils;
 #[cfg(feature = "multi-viewport")]
@@ -139,7 +140,7 @@ pub use context::*;
 #[cfg(feature = "docking")]
 pub use dock_builder::*;
 pub use dock_space::*;
-pub use draw::*;
+// Note: draw types are now in render module, no need to export draw::*
 pub use fonts::*;
 pub use input::*;
 pub use io::*;
@@ -149,6 +150,7 @@ pub use render::*;
 pub use string::*;
 pub use style::*;
 pub use text_filter::*;
+pub use texture::*;
 pub use ui::*;
 pub use utils::*;
 #[cfg(feature = "multi-viewport")]

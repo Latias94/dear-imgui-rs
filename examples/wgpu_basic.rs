@@ -47,12 +47,11 @@ impl AppWindow {
             let size = LogicalSize::new(1280.0, 720.0);
 
             Arc::new(
-                event_loop
-                    .create_window(
-                        Window::default_attributes()
-                            .with_title(&format!("Dear ImGui Hello World - {version}"))
-                            .with_inner_size(size),
-                    )?,
+                event_loop.create_window(
+                    Window::default_attributes()
+                        .with_title(&format!("Dear ImGui Hello World - {version}"))
+                        .with_inner_size(size),
+                )?,
             )
         };
 
@@ -86,11 +85,7 @@ impl AppWindow {
         context.set_ini_filename(None::<String>);
 
         let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(
-            &window,
-            dear_imgui_winit::HiDpiMode::Default,
-            &mut context,
-        );
+        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
 
         let mut renderer = WgpuRenderer::new(&device, &queue, surface_desc.format);
         renderer.reload_font_texture(&mut context, &device, &queue);
@@ -208,9 +203,12 @@ impl AppWindow {
                 occlusion_query_set: None,
             });
 
-            self.imgui
-                .renderer
-                .render_with_renderpass(&draw_data, &self.queue, &self.device, &mut rpass)?;
+            self.imgui.renderer.render_with_renderpass(
+                &draw_data,
+                &self.queue,
+                &self.device,
+                &mut rpass,
+            )?;
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -235,8 +233,6 @@ impl ApplicationHandler for App {
             }
         }
     }
-
-
 
     fn window_event(
         &mut self,

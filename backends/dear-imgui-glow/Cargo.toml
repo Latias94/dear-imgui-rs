@@ -1,0 +1,55 @@
+[package]
+name = "dear-imgui-glow"
+version.workspace = true
+edition.workspace = true
+description = "Glow (OpenGL) renderer for Dear ImGui"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dear-imgui-glow"
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+dear-imgui = { path = "../../dear-imgui" }
+dear-imgui-sys = { path = "../../dear-imgui-sys" }
+glow = "0.16"
+memoffset = "0.9"
+smallvec = "1.0"
+
+[features]
+default = [
+    "gl_extensions_support",
+    "debug_message_insert_support", 
+    "bind_vertex_array_support",
+    "vertex_offset_support",
+    "clip_origin_support",
+    "bind_sampler_support",
+    "polygon_mode_support",
+    "primitive_restart_support",
+]
+# Enable docking features
+docking = ["dear-imgui/docking"]
+# Enable multi-viewport support
+multi-viewport = ["dear-imgui/multi-viewport"]
+# Enable checking for OpenGL extensions
+gl_extensions_support = []
+# Support for `gl.debug_message_insert`
+debug_message_insert_support = []
+# Support for `glBindVertexArray`
+bind_vertex_array_support = []
+# Support for `glDrawElementsBaseVertex`
+vertex_offset_support = []
+# Support for `GL_CLIP_ORIGIN`
+clip_origin_support = []
+# Support for `glBindSampler`
+bind_sampler_support = []
+# Support for `glPolygonMode`
+polygon_mode_support = []
+# Support for `GL_PRIMITIVE_RESTART`
+primitive_restart_support = []
+
+[dev-dependencies]
+env_logger.workspace = true
+pollster.workspace = true
+winit.workspace = true

@@ -228,49 +228,183 @@ impl AppWindow {
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        println!("Starting render...");
         let imgui = self.imgui.as_mut().unwrap();
 
         let now = Instant::now();
         let delta_time = now - imgui.last_frame;
+        println!("Setting delta time: {:.6}", delta_time.as_secs_f32());
         imgui
             .context
             .io_mut()
             .set_delta_time(delta_time.as_secs_f32());
         imgui.last_frame = now;
 
+        println!("Getting surface texture...");
         let frame = self.surface.get_current_texture()?;
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        println!("Preparing frame...");
         imgui
             .platform
             .prepare_frame(&self.window, &mut imgui.context);
 
+        println!("Creating UI frame...");
         let ui = imgui.context.frame();
 
-        // Create dockspace over main viewport
-        imgui.dockspace_id = ui.dockspace_over_main_viewport();
-
-        // Only setup initial layout on first frame to avoid conflicts with saved layout
-        if imgui.first_frame {
-            // Check if we have a saved layout, if not, setup default
-            if !std::path::Path::new("game_engine_docking.ini").exists() {
-                setup_initial_docking_layout(imgui.dockspace_id);
+        // Test 0: Check ImGui context validity
+        unsafe {
+            let ctx = dear_imgui::sys::ImGui_GetCurrentContext();
+            if ctx.is_null() {
+                println!("❌ ERROR: ImGui context is NULL!");
+                return Ok(());
+            } else {
+                println!("✓ ImGui context is valid: {:p}", ctx);
             }
-            imgui.first_frame = false;
+
+            // Test a simple function that returns a scalar
+            let time = dear_imgui::sys::ImGui_GetTime();
+            println!("✓ ImGui time: {} (should be > 0)", time);
+            if time <= 0.0 {
+                println!("❌ ERROR: ImGui_GetTime returned invalid value!");
+            }
         }
 
-        render_main_menu_bar(&ui, &mut imgui.game_state);
-        render_hierarchy(&ui, &mut imgui.game_state);
-        render_project(&ui, &mut imgui.game_state);
-        render_inspector(&ui, &mut imgui.game_state);
-        render_scene_view(&ui, &mut imgui.game_state);
-        render_game_view(&ui, &mut imgui.game_state);
-        render_console(&ui, &mut imgui.game_state);
-        render_asset_browser(&ui, &mut imgui.game_state);
-        render_performance(&ui, &mut imgui.game_state);
+        // Test 1: Simple window without docking
+        println!("Creating simple test window...");
+        ui.window("Test Window")
+            .size([300.0, 200.0], Condition::FirstUseEver)
+            .build(|| {
+                ui.text("Hello, World!");
+                ui.text("This is a test window");
+                if ui.button("Test Button") {
+                    println!("Button clicked!");
+                }
 
+                // Test inside the window context where ImGui state should be valid
+                println!("Testing inside window context...");
+
+                // Test window size (should work)
+                unsafe {
+                    #[cfg(target_env = "msvc")]
+                    {
+                        let win_size = dear_imgui::sys::ImGui_GetWindowSize();
+                        println!(
+                            "Window size inside context (MSVC): x={}, y={}",
+                            win_size.x, win_size.y
+                        );
+                    }
+                    #[cfg(not(target_env = "msvc"))]
+                    {
+                        let win_size = dear_imgui::sys::ImGui_GetWindowSize();
+                        println!(
+                            "Window size inside context (non-MSVC): x={}, y={}",
+                            win_size.x, win_size.y
+                        );
+                    }
+                }
+
+                // Test content region (problematic function)
+                let content = ui.content_region_avail();
+                println!("Content region inside context: {:?}", content);
+
+                // Test if we're inside a window
+                unsafe {
+                    let in_window = dear_imgui::sys::ImGui_IsWindowAppearing();
+                    println!("Is window appearing: {}", in_window);
+
+                    // Test window position (another ImVec2 function)
+                    #[cfg(target_env = "msvc")]
+                    {
+                        let win_pos = dear_imgui::sys::ImGui_GetWindowPos();
+                        println!("Window pos (MSVC): x={}, y={}", win_pos.x, win_pos.y);
+                    }
+                }
+            });
+
+        // Test 2: Test a simple function first that doesn't return ImVec2
+        let window_width = unsafe { dear_imgui::sys::ImGui_GetWindowWidth() };
+        println!("Window width: {}", window_width);
+
+        // Test 3: Try content_region_avail with detailed debugging
+        println!("Testing content_region_avail...");
+
+        // First test the raw POD function
+        unsafe {
+            #[cfg(target_env = "msvc")]
+            {
+                let raw_pod = dear_imgui::sys::ImGui_GetContentRegionAvail();
+                println!("Raw POD result: x={}, y={}", raw_pod.x, raw_pod.y);
+
+                // Test conversion
+                let converted: dear_imgui::sys::ImVec2 = raw_pod.into();
+                println!("After conversion: x={}, y={}", converted.x, converted.y);
+            }
+        }
+
+        // Now test the high-level API
+        let content_region = ui.content_region_avail();
+        println!("High-level API result: {:?}", content_region);
+
+        // Test if values are reasonable (should be positive and within window bounds)
+        if content_region[0] < 0.0
+            || content_region[1] < 0.0
+            || content_region[0] > 10000.0
+            || content_region[1] > 10000.0
+        {
+            println!("⚠️  WARNING: content_region_avail returned suspicious values!");
+        }
+
+        // Test 3: Try cursor_screen_pos (another potentially problematic call)
+        println!("Testing cursor_screen_pos...");
+        let cursor_pos = ui.cursor_screen_pos();
+        println!("✓ cursor_screen_pos succeeded: {:?}", cursor_pos);
+
+        // Test if values are reasonable
+        if cursor_pos[0] < -1000.0
+            || cursor_pos[1] < -1000.0
+            || cursor_pos[0] > 10000.0
+            || cursor_pos[1] > 10000.0
+        {
+            println!("⚠️  WARNING: cursor_screen_pos returned suspicious values!");
+        }
+
+        // Test 4: Try direct sys calls to compare
+        println!("Testing direct sys calls...");
+        unsafe {
+            #[cfg(target_env = "msvc")]
+            {
+                let direct_content = dear_imgui::sys::ImGui_GetContentRegionAvail();
+                println!(
+                    "Direct MSVC content_region_avail: x={}, y={}",
+                    direct_content.x, direct_content.y
+                );
+
+                let direct_cursor = dear_imgui::sys::ImGui_GetCursorScreenPos();
+                println!(
+                    "Direct MSVC cursor_screen_pos: x={}, y={}",
+                    direct_cursor.x, direct_cursor.y
+                );
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let direct_content = dear_imgui::sys::ImGui_GetContentRegionAvail();
+                println!(
+                    "Direct non-MSVC content_region_avail: x={}, y={}",
+                    direct_content.x, direct_content.y
+                );
+
+                let direct_cursor = dear_imgui::sys::ImGui_GetCursorScreenPos();
+                println!(
+                    "Direct non-MSVC cursor_screen_pos: x={}, y={}",
+                    direct_cursor.x, direct_cursor.y
+                );
+            }
+        }
+
+        println!("Rendering draw data...");
         let draw_data = imgui.context.render();
 
         let mut encoder = self
@@ -305,6 +439,7 @@ impl AppWindow {
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
 
+        println!("Render completed successfully");
         Ok(())
     }
 }
@@ -1286,25 +1421,22 @@ impl ApplicationHandler for App {
 fn main() {
     env_logger::init();
 
+    println!("🎮 Game Engine Docking Demo - MSVC ABI Debug Version");
+    println!("Testing MSVC ABI compatibility issues...");
+    println!();
+
+    // Test 1: Basic event loop creation
+    println!("Test 1: Creating event loop...");
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
+    println!("✓ Event loop created successfully");
 
     let mut app = App::default();
+    println!("✓ App created successfully");
 
-    println!("🎮 Game Engine Docking Demo");
-    println!("Features:");
-    println!("  • Scene Hierarchy - Manage game objects");
-    println!("  • Inspector - Edit object properties");
-    println!("  • Viewport - 3D scene view with controls");
-    println!("  • Console - Command input and logging");
-    println!("  • Asset Browser - File management");
-    println!("  • Performance Stats - Real-time metrics");
     println!();
-    println!("Controls:");
-    println!("  • Drag panel tabs to rearrange layout");
-    println!("  • Right-click on objects for context menus");
-    println!("  • Use console commands: help, clear, fps, version");
-    println!("  • Press ESC to exit");
+    println!("Starting event loop...");
+    println!("Press ESC to exit");
     println!();
 
     event_loop.run_app(&mut app).unwrap();

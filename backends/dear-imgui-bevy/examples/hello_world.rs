@@ -41,13 +41,13 @@ fn setup_scene(
     // Plane
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        MeshMaterial3d(materials.add(bevy::color::Color::srgb(0.3, 0.5, 0.3))),
     ));
 
     // Rotating cube
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::default().mesh())),
-        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        MeshMaterial3d(materials.add(bevy::color::Color::srgb(0.8, 0.7, 0.6))),
         Transform::from_xyz(0.0, 0.5, 0.0),
         RotatingCube,
     ));
@@ -73,12 +73,12 @@ fn ui_system(mut context: NonSendMut<ImguiContext>, mut state: ResMut<UiState>) 
     let ui = context.ui();
 
     // Main menu bar
-    ui.main_menu_bar(|| {
+    if let Some(_token) = ui.begin_main_menu_bar() {
         ui.menu("Windows", || {
             ui.checkbox("Demo Window", &mut state.demo_window_open);
             ui.checkbox("Metrics", &mut state.show_metrics);
         });
-    });
+    }
 
     // Demo window
     if state.demo_window_open {
@@ -104,10 +104,10 @@ fn ui_system(mut context: NonSendMut<ImguiContext>, mut state: ResMut<UiState>) 
             ui.separator();
 
             let io = ui.io();
-            ui.text(format!("FPS: {:.1}", io.framerate));
-            ui.text(format!("Frame Time: {:.3}ms", 1000.0 / io.framerate));
+            ui.text(format!("FPS: {:.1}", io.framerate()));
+            ui.text(format!("Frame Time: {:.3}ms", 1000.0 / io.framerate()));
 
-            let mouse_pos = io.mouse_pos;
+            let mouse_pos = io.mouse_pos();
             ui.text(format!("Mouse: ({:.1}, {:.1})", mouse_pos[0], mouse_pos[1]));
         });
 }

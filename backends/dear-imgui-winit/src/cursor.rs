@@ -54,13 +54,28 @@ mod tests {
         assert_eq!(to_winit_cursor(MouseCursor::Arrow), WinitCursor::Default);
         assert_eq!(to_winit_cursor(MouseCursor::TextInput), WinitCursor::Text);
         assert_eq!(to_winit_cursor(MouseCursor::Hand), WinitCursor::Pointer);
-        assert_eq!(to_winit_cursor(MouseCursor::NotAllowed), WinitCursor::NotAllowed);
-        
+        assert_eq!(
+            to_winit_cursor(MouseCursor::NotAllowed),
+            WinitCursor::NotAllowed
+        );
+
         // Test resize cursors
-        assert_eq!(to_winit_cursor(MouseCursor::ResizeNS), WinitCursor::NsResize);
-        assert_eq!(to_winit_cursor(MouseCursor::ResizeEW), WinitCursor::EwResize);
-        assert_eq!(to_winit_cursor(MouseCursor::ResizeNESW), WinitCursor::NeswResize);
-        assert_eq!(to_winit_cursor(MouseCursor::ResizeNWSE), WinitCursor::NwseResize);
+        assert_eq!(
+            to_winit_cursor(MouseCursor::ResizeNS),
+            WinitCursor::NsResize
+        );
+        assert_eq!(
+            to_winit_cursor(MouseCursor::ResizeEW),
+            WinitCursor::EwResize
+        );
+        assert_eq!(
+            to_winit_cursor(MouseCursor::ResizeNESW),
+            WinitCursor::NeswResize
+        );
+        assert_eq!(
+            to_winit_cursor(MouseCursor::ResizeNWSE),
+            WinitCursor::NwseResize
+        );
     }
 
     #[test]
@@ -69,17 +84,17 @@ mod tests {
             cursor: Some(MouseCursor::Arrow),
             draw_cursor: false,
         };
-        
+
         let settings2 = CursorSettings {
             cursor: Some(MouseCursor::Arrow),
             draw_cursor: false,
         };
-        
+
         let settings3 = CursorSettings {
             cursor: Some(MouseCursor::Hand),
             draw_cursor: false,
         };
-        
+
         assert_eq!(settings1, settings2);
         assert_ne!(settings1, settings3);
     }

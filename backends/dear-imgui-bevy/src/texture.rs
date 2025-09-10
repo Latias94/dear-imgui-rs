@@ -14,7 +14,7 @@ pub fn add_image_to_renderer(
     texture_id: u32,
     strong: &Arc<StrongHandle>,
     gpu_images: &RenderAssets<GpuImage>,
-    device: &RenderDevice,
+    _device: &RenderDevice,
 ) -> Result<(), String> {
     let handle = Handle::<Image>::Strong(strong.clone());
 

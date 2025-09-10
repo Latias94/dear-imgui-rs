@@ -72,8 +72,17 @@ impl crate::ui::Ui {
     #[doc(alias = "GetItemRectMin")]
     pub fn item_rect_min(&self) -> [f32; 2] {
         unsafe {
-            let rect = sys::ImGui_GetItemRectMin();
-            [rect.x, rect.y]
+            #[cfg(target_env = "msvc")]
+            {
+                let rect_rr = sys::ImGui_GetItemRectMin();
+                let rect: sys::ImVec2 = rect_rr.into();
+                [rect.x, rect.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let rect = sys::ImGui_GetItemRectMin();
+                [rect.x, rect.y]
+            }
         }
     }
 
@@ -81,8 +90,17 @@ impl crate::ui::Ui {
     #[doc(alias = "GetItemRectMax")]
     pub fn item_rect_max(&self) -> [f32; 2] {
         unsafe {
-            let rect = sys::ImGui_GetItemRectMax();
-            [rect.x, rect.y]
+            #[cfg(target_env = "msvc")]
+            {
+                let rect_rr = sys::ImGui_GetItemRectMax();
+                let rect: sys::ImVec2 = rect_rr.into();
+                [rect.x, rect.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let rect = sys::ImGui_GetItemRectMax();
+                [rect.x, rect.y]
+            }
         }
     }
 
@@ -138,8 +156,17 @@ impl crate::ui::Ui {
     #[doc(alias = "GetMousePos")]
     pub fn get_mouse_pos(&self) -> [f32; 2] {
         unsafe {
-            let pos = sys::ImGui_GetMousePos();
-            [pos.x, pos.y]
+            #[cfg(target_env = "msvc")]
+            {
+                let pos_rr = sys::ImGui_GetMousePos();
+                let pos: sys::ImVec2 = pos_rr.into();
+                [pos.x, pos.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let pos = sys::ImGui_GetMousePos();
+                [pos.x, pos.y]
+            }
         }
     }
 
@@ -147,8 +174,17 @@ impl crate::ui::Ui {
     #[doc(alias = "GetMousePosOnOpeningCurrentPopup")]
     pub fn get_mouse_pos_on_opening_current_popup(&self) -> [f32; 2] {
         unsafe {
-            let pos = sys::ImGui_GetMousePosOnOpeningCurrentPopup();
-            [pos.x, pos.y]
+            #[cfg(target_env = "msvc")]
+            {
+                let pos_rr = sys::ImGui_GetMousePosOnOpeningCurrentPopup();
+                let pos: sys::ImVec2 = pos_rr.into();
+                [pos.x, pos.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let pos = sys::ImGui_GetMousePosOnOpeningCurrentPopup();
+                [pos.x, pos.y]
+            }
         }
     }
 
@@ -156,8 +192,17 @@ impl crate::ui::Ui {
     #[doc(alias = "GetMouseDragDelta")]
     pub fn get_mouse_drag_delta(&self, button: MouseButton, lock_threshold: f32) -> [f32; 2] {
         unsafe {
-            let delta = sys::ImGui_GetMouseDragDelta(button as i32, lock_threshold);
-            [delta.x, delta.y]
+            #[cfg(target_env = "msvc")]
+            {
+                let delta_rr = sys::ImGui_GetMouseDragDelta(button as i32, lock_threshold);
+                let delta: sys::ImVec2 = delta_rr.into();
+                [delta.x, delta.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let delta = sys::ImGui_GetMouseDragDelta(button as i32, lock_threshold);
+                [delta.x, delta.y]
+            }
         }
     }
 
@@ -257,8 +302,17 @@ impl crate::ui::Ui {
     #[doc(alias = "GetCursorScreenPos")]
     pub fn get_cursor_screen_pos(&self) -> [f32; 2] {
         unsafe {
-            let pos = sys::ImGui_GetCursorScreenPos();
-            [pos.x, pos.y]
+            #[cfg(target_env = "msvc")]
+            {
+                let pos_rr = sys::ImGui_GetCursorScreenPos();
+                let pos: sys::ImVec2 = pos_rr.into();
+                [pos.x, pos.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let pos = sys::ImGui_GetCursorScreenPos();
+                [pos.x, pos.y]
+            }
         }
     }
 

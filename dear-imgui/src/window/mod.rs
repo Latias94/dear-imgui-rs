@@ -250,9 +250,8 @@ impl<'ui> Window<'ui> {
 
         // Begin the window
         let mut open = true;
-        let result = unsafe {
-            crate::sys::ImGui_Begin(name_cstr.as_ptr(), &mut open, self.flags.bits() as i32)
-        };
+        let result =
+            unsafe { crate::sys::ImGui_Begin(name_cstr.as_ptr(), &mut open, self.flags.bits()) };
 
         // IMPORTANT: According to ImGui documentation, Begin/End calls must be balanced.
         // If Begin returns false, we need to call End immediately and return None.

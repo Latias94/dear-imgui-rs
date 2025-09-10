@@ -1,9 +1,6 @@
 //! Shader loading for Dear ImGui
 
-use bevy::{
-    asset::{embedded_asset, AssetApp},
-    prelude::*,
-};
+use bevy::{asset::embedded_asset, prelude::*};
 
 use crate::render_impl::IMGUI_SHADER_HANDLE;
 
@@ -16,7 +13,7 @@ impl Plugin for ImguiShaderPlugin {
         embedded_asset!(app, "render_impl/imgui.wgsl");
 
         // Register the shader handle
-        app.world_mut().resource_mut::<Assets<Shader>>().insert(
+        let _ = app.world_mut().resource_mut::<Assets<Shader>>().insert(
             &IMGUI_SHADER_HANDLE,
             Shader::from_wgsl(
                 include_str!("render_impl/imgui.wgsl"),

@@ -8,7 +8,7 @@ use bevy::{
             BindGroupLayout, BindGroupLayoutEntries, BlendState, ColorTargetState, ColorWrites,
             FragmentState, MultisampleState, PrimitiveState, RenderPipelineDescriptor,
             SamplerBindingType, ShaderStages, SpecializedRenderPipeline, TextureFormat,
-            TextureSampleType, VertexAttribute, VertexFormat, VertexState, VertexStepMode,
+            TextureSampleType, VertexFormat, VertexState, VertexStepMode,
         },
         renderer::RenderDevice,
         view::ViewTarget,

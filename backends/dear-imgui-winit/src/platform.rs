@@ -14,9 +14,10 @@ use crate::cursor::CursorSettings;
 use crate::events;
 
 /// DPI scaling mode for the platform
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Default)]
 pub enum HiDpiMode {
     /// Use the default DPI scaling
+    #[default]
     Default,
     /// Use a custom scale factor
     Locked(f64),
@@ -24,17 +25,12 @@ pub enum HiDpiMode {
     Rounded,
 }
 
-impl Default for HiDpiMode {
-    fn default() -> Self {
-        HiDpiMode::Default
-    }
-}
-
 /// Main platform backend for Dear ImGui with winit integration
 pub struct WinitPlatform {
     hidpi_mode: HiDpiMode,
     hidpi_factor: f64,
     cursor_cache: Option<CursorSettings>,
+    #[allow(dead_code)]
     ime_enabled: bool,
     last_frame: Instant,
 }
@@ -47,7 +43,7 @@ impl WinitPlatform {
     /// ```
     /// use dear_imgui::Context;
     /// use dear_imgui_winit::WinitPlatform;
-    /// 
+    ///
     /// let mut imgui_ctx = Context::create();
     /// let mut platform = WinitPlatform::new(&mut imgui_ctx);
     /// ```
@@ -88,7 +84,12 @@ impl WinitPlatform {
     }
 
     /// Attach the platform to a window
-    pub fn attach_window(&mut self, window: &Window, hidpi_mode: HiDpiMode, imgui_ctx: &mut Context) {
+    pub fn attach_window(
+        &mut self,
+        window: &Window,
+        hidpi_mode: HiDpiMode,
+        imgui_ctx: &mut Context,
+    ) {
         self.hidpi_mode = hidpi_mode;
         self.hidpi_factor = match hidpi_mode {
             HiDpiMode::Default => window.scale_factor(),
@@ -104,7 +105,12 @@ impl WinitPlatform {
     }
 
     /// Handle a winit event
-    pub fn handle_event<T>(&mut self, imgui_ctx: &mut Context, window: &Window, event: &Event<T>) -> bool {
+    pub fn handle_event<T>(
+        &mut self,
+        imgui_ctx: &mut Context,
+        window: &Window,
+        event: &Event<T>,
+    ) -> bool {
         match event {
             Event::WindowEvent { event, .. } => self.handle_window_event(imgui_ctx, window, event),
             Event::DeviceEvent { event, .. } => {
@@ -116,11 +122,18 @@ impl WinitPlatform {
     }
 
     /// Handle a window event
-    fn handle_window_event(&mut self, imgui_ctx: &mut Context, window: &Window, event: &WindowEvent) -> bool {
+    fn handle_window_event(
+        &mut self,
+        imgui_ctx: &mut Context,
+        window: &Window,
+        event: &WindowEvent,
+    ) -> bool {
         match event {
             WindowEvent::Resized(physical_size) => {
                 let logical_size = physical_size.to_logical(self.hidpi_factor);
-                imgui_ctx.io_mut().set_display_size([logical_size.width, logical_size.height]);
+                imgui_ctx
+                    .io_mut()
+                    .set_display_size([logical_size.width, logical_size.height]);
                 false
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -133,7 +146,10 @@ impl WinitPlatform {
                 let logical_size = window.inner_size().to_logical(self.hidpi_factor);
                 let io = imgui_ctx.io_mut();
                 io.set_display_size([logical_size.width, logical_size.height]);
-                io.set_display_framebuffer_scale([self.hidpi_factor as f32, self.hidpi_factor as f32]);
+                io.set_display_framebuffer_scale([
+                    self.hidpi_factor as f32,
+                    self.hidpi_factor as f32,
+                ]);
                 false
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -146,9 +162,7 @@ impl WinitPlatform {
             WindowEvent::MouseInput { button, state, .. } => {
                 events::handle_mouse_button(*button, *state, imgui_ctx)
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                events::handle_mouse_wheel(*delta, imgui_ctx)
-            }
+            WindowEvent::MouseWheel { delta, .. } => events::handle_mouse_wheel(*delta, imgui_ctx),
             WindowEvent::ModifiersChanged(modifiers) => {
                 events::handle_modifiers_changed(modifiers, imgui_ctx);
                 false
@@ -161,9 +175,7 @@ impl WinitPlatform {
                 events::handle_touch_event(touch, window, imgui_ctx);
                 imgui_ctx.io().want_capture_mouse()
             }
-            WindowEvent::Focused(focused) => {
-                events::handle_focused(*focused, imgui_ctx)
-            }
+            WindowEvent::Focused(focused) => events::handle_focused(*focused, imgui_ctx),
             _ => false,
         }
     }
@@ -191,7 +203,7 @@ impl WinitPlatform {
         // Note: Our dear-imgui doesn't have mouse_cursor() and mouse_draw_cursor() methods on Io
         // We'll need to get this information from the UI context instead
         let cursor = CursorSettings {
-            cursor: None, // TODO: Get current cursor from UI context
+            cursor: None,       // TODO: Get current cursor from UI context
             draw_cursor: false, // TODO: Get draw cursor setting
         };
 
@@ -222,21 +234,21 @@ mod tests {
     fn test_platform_creation() {
         let mut ctx = Context::create();
         let platform = WinitPlatform::new(&mut ctx);
-        
+
         assert_eq!(platform.hidpi_mode, HiDpiMode::Default);
         assert_eq!(platform.hidpi_factor, 1.0);
         assert_eq!(platform.cursor_cache, None);
-        assert_eq!(platform.ime_enabled, false);
+        assert!(!platform.ime_enabled);
     }
 
     #[test]
     fn test_hidpi_mode_setting() {
         let mut ctx = Context::create();
         let mut platform = WinitPlatform::new(&mut ctx);
-        
+
         platform.set_hidpi_mode(HiDpiMode::Locked(2.0));
         assert_eq!(platform.hidpi_mode, HiDpiMode::Locked(2.0));
-        
+
         platform.set_hidpi_mode(HiDpiMode::Rounded);
         assert_eq!(platform.hidpi_mode, HiDpiMode::Rounded);
     }

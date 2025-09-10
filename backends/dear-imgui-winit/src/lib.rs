@@ -54,7 +54,3 @@ mod platform;
 
 // Re-export main types
 pub use platform::{HiDpiMode, WinitPlatform};
-
-
-
-

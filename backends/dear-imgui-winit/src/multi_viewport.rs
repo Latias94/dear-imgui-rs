@@ -14,17 +14,23 @@ use winit::window::{Window, WindowAttributes, WindowLevel};
 
 // Thread-local storage for winit multi-viewport support
 thread_local! {
-    static EVENT_LOOP: RefCell<Option<*const ActiveEventLoop>> = RefCell::new(None);
+    static EVENT_LOOP: RefCell<Option<*const ActiveEventLoop>> = const { RefCell::new(None) };
 }
 
 /// Helper structure stored in the void* PlatformUserData field of each ImGuiViewport
 /// to easily retrieve our backend data. Following official ImGui backend pattern.
 #[repr(C)]
 pub struct ViewportData {
-    pub window: *mut Window,        // Stored in ImGuiViewport::PlatformHandle
-    pub window_owned: bool,         // Set to false for main window
+    pub window: *mut Window, // Stored in ImGuiViewport::PlatformHandle
+    pub window_owned: bool,  // Set to false for main window
     pub ignore_window_pos_event_frame: i32,
     pub ignore_window_size_event_frame: i32,
+}
+
+impl Default for ViewportData {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ViewportData {
@@ -70,7 +76,7 @@ pub fn init_multi_viewport_support(_ctx: &mut Context, main_window: &Window) {
 unsafe fn setup_monitors() {
     // For now, let's skip the monitor setup and see if ImGui can work without it
     // The assertion suggests ImGui expects monitors to be set up, but let's try a simpler approach
-    
+
     // We'll let ImGui handle monitor detection internally
     // This is a temporary workaround to get basic multi-viewport working
 }
@@ -114,9 +120,7 @@ unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui::sys::ImGuiViewport
     }
 
     // Get event loop reference
-    let event_loop = EVENT_LOOP.with(|el| {
-        el.borrow().map(|ptr| &*ptr)
-    });
+    let event_loop = EVENT_LOOP.with(|el| el.borrow().map(|ptr| &*ptr));
 
     let event_loop = match event_loop {
         Some(el) => el,
@@ -132,7 +136,10 @@ unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui::sys::ImGuiViewport
     let mut window_attrs = WindowAttributes::default()
         .with_title("ImGui Viewport")
         .with_inner_size(LogicalSize::new((*vp).Size.x as f64, (*vp).Size.y as f64))
-        .with_position(winit::dpi::Position::Logical(LogicalPosition::new((*vp).Pos.x as f64, (*vp).Pos.y as f64)))
+        .with_position(winit::dpi::Position::Logical(LogicalPosition::new(
+            (*vp).Pos.x as f64,
+            (*vp).Pos.y as f64,
+        )))
         .with_visible(false); // Start hidden, will be shown by show_window callback
 
     // Handle decorations
@@ -201,7 +208,9 @@ unsafe extern "C" fn winit_show_window(vp: *mut dear_imgui::sys::ImGuiViewport) 
 }
 
 /// Get window position
-unsafe extern "C" fn winit_get_window_pos(vp: *mut dear_imgui::sys::ImGuiViewport) -> dear_imgui::sys::ImVec2 {
+unsafe extern "C" fn winit_get_window_pos(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+) -> dear_imgui::sys::ImVec2 {
     if vp.is_null() {
         return dear_imgui::sys::ImVec2 { x: 0.0, y: 0.0 };
     }
@@ -218,7 +227,7 @@ unsafe extern "C" fn winit_get_window_pos(vp: *mut dear_imgui::sys::ImGuiViewpor
             if let Ok(pos) = (*vd.window).outer_position() {
                 return dear_imgui::sys::ImVec2 {
                     x: pos.x as f32,
-                    y: pos.y as f32
+                    y: pos.y as f32,
                 };
             }
         }
@@ -228,7 +237,10 @@ unsafe extern "C" fn winit_get_window_pos(vp: *mut dear_imgui::sys::ImGuiViewpor
 }
 
 /// Set window position
-unsafe extern "C" fn winit_set_window_pos(vp: *mut dear_imgui::sys::ImGuiViewport, pos: dear_imgui::sys::ImVec2) {
+unsafe extern "C" fn winit_set_window_pos(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+    pos: dear_imgui::sys::ImVec2,
+) {
     if vp.is_null() {
         return;
     }
@@ -236,14 +248,16 @@ unsafe extern "C" fn winit_set_window_pos(vp: *mut dear_imgui::sys::ImGuiViewpor
     if let Some(vd) = ((*vp).PlatformUserData as *mut ViewportData).as_mut() {
         if !vd.window.is_null() {
             let position = LogicalPosition::new(pos.x as f64, pos.y as f64);
-            let _ = (*vd.window).set_outer_position(position);
+            (*vd.window).set_outer_position(position);
             vd.ignore_window_pos_event_frame = dear_imgui::sys::ImGui_GetFrameCount();
         }
     }
 }
 
 /// Get window size
-unsafe extern "C" fn winit_get_window_size(vp: *mut dear_imgui::sys::ImGuiViewport) -> dear_imgui::sys::ImVec2 {
+unsafe extern "C" fn winit_get_window_size(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+) -> dear_imgui::sys::ImVec2 {
     if vp.is_null() {
         return dear_imgui::sys::ImVec2 { x: 0.0, y: 0.0 };
     }
@@ -253,7 +267,7 @@ unsafe extern "C" fn winit_get_window_size(vp: *mut dear_imgui::sys::ImGuiViewpo
             let size = (*vd.window).inner_size();
             return dear_imgui::sys::ImVec2 {
                 x: size.width as f32,
-                y: size.height as f32
+                y: size.height as f32,
             };
         }
     }
@@ -262,7 +276,10 @@ unsafe extern "C" fn winit_get_window_size(vp: *mut dear_imgui::sys::ImGuiViewpo
 }
 
 /// Set window size
-unsafe extern "C" fn winit_set_window_size(vp: *mut dear_imgui::sys::ImGuiViewport, size: dear_imgui::sys::ImVec2) {
+unsafe extern "C" fn winit_set_window_size(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+    size: dear_imgui::sys::ImVec2,
+) {
     if vp.is_null() {
         return;
     }
@@ -320,7 +337,10 @@ unsafe extern "C" fn winit_get_window_minimized(vp: *mut dear_imgui::sys::ImGuiV
 }
 
 /// Set window title
-unsafe extern "C" fn winit_set_window_title(vp: *mut dear_imgui::sys::ImGuiViewport, title: *const c_char) {
+unsafe extern "C" fn winit_set_window_title(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+    title: *const c_char,
+) {
     if vp.is_null() || title.is_null() {
         return;
     }
@@ -335,7 +355,9 @@ unsafe extern "C" fn winit_set_window_title(vp: *mut dear_imgui::sys::ImGuiViewp
 }
 
 /// Get window framebuffer scale
-unsafe extern "C" fn winit_get_window_framebuffer_scale(vp: *mut dear_imgui::sys::ImGuiViewport) -> dear_imgui::sys::ImVec2 {
+unsafe extern "C" fn winit_get_window_framebuffer_scale(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+) -> dear_imgui::sys::ImVec2 {
     if vp.is_null() {
         return dear_imgui::sys::ImVec2 { x: 1.0, y: 1.0 };
     }

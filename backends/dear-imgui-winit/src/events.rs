@@ -23,14 +23,6 @@ pub fn handle_keyboard_input(event: &KeyEvent, imgui_ctx: &mut Context) -> bool 
     false
 }
 
-/// Handle character input for text editing
-pub fn handle_character_input(character: char, imgui_ctx: &mut Context) {
-    // Filter out control characters but allow normal text input
-    if !character.is_control() || character == '\t' || character == '\n' || character == '\r' {
-        imgui_ctx.io_mut().add_input_character(character);
-    }
-}
-
 /// Handle mouse wheel scrolling
 pub fn handle_mouse_wheel(delta: MouseScrollDelta, imgui_ctx: &mut Context) -> bool {
     let io = imgui_ctx.io_mut();
@@ -57,7 +49,9 @@ pub fn handle_mouse_button(
 ) -> bool {
     if let Some(imgui_button) = to_imgui_mouse_button(button) {
         let pressed = state == ElementState::Pressed;
-        imgui_ctx.io_mut().add_mouse_button_event(imgui_button, pressed);
+        imgui_ctx
+            .io_mut()
+            .add_mouse_button_event(imgui_button, pressed);
         return imgui_ctx.io().want_capture_mouse();
     }
     false
@@ -118,11 +112,7 @@ pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) {
 }
 
 /// Handle touch events by converting them to mouse events
-pub fn handle_touch_event(
-    touch: &winit::event::Touch,
-    _window: &Window,
-    _imgui_ctx: &mut Context,
-) {
+pub fn handle_touch_event(touch: &winit::event::Touch, _window: &Window, _imgui_ctx: &mut Context) {
     // Convert touch events to mouse events for basic touch support
     match touch.phase {
         TouchPhase::Started => {
@@ -168,42 +158,28 @@ mod tests {
 
         // Test that the function exists and can be called
         // We'll use a dummy test that doesn't require constructing KeyEvent
-        assert!(true); // Placeholder test
+        // This is a placeholder test - in a real implementation we would test actual key handling
     }
 
     #[test]
     fn test_mouse_button_handling() {
         let mut ctx = Context::create();
-        
+
         let handled = handle_mouse_button(MouseButton::Left, ElementState::Pressed, &mut ctx);
         // The result depends on whether imgui wants to capture mouse
         // We just test that it doesn't panic
-        assert!(handled == true || handled == false);
-    }
-
-    #[test]
-    fn test_character_input() {
-        let mut ctx = Context::create();
-        
-        // Should handle normal characters
-        handle_character_input('a', &mut ctx);
-        handle_character_input('1', &mut ctx);
-        handle_character_input('!', &mut ctx);
-        
-        // Should handle special characters
-        handle_character_input('\t', &mut ctx);
-        handle_character_input('\n', &mut ctx);
-        
-        // Test doesn't panic - actual behavior depends on imgui internals
+        // Test that the function returns a boolean value (always true)
+        let _ = handled; // Just verify it's a boolean
     }
 
     #[test]
     fn test_cursor_moved() {
         let mut ctx = Context::create();
-        
+
         let handled = handle_cursor_moved([100.0, 200.0], &mut ctx);
         // The result depends on whether imgui wants to capture mouse
         // We just test that it doesn't panic
-        assert!(handled == true || handled == false);
+        // Test that the function returns a boolean value (always true)
+        let _ = handled; // Just verify it's a boolean
     }
 }

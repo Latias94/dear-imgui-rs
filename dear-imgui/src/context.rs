@@ -12,7 +12,6 @@ use crate::io::Io;
 use crate::sys;
 use crate::ui;
 
-
 /// An imgui context.
 ///
 /// A context needs to be created to access most library functions. Due to current Dear ImGui
@@ -301,8 +300,6 @@ impl Context {
         }
     }
 
-
-
     /// Get mutable access to the platform IO
     #[cfg(feature = "multi-viewport")]
     pub fn platform_io_mut(&mut self) -> &mut crate::platform_io::PlatformIo {
@@ -566,5 +563,3 @@ impl SuspendedContext {
 
 unsafe impl Send for Context {}
 unsafe impl Sync for Context {}
-
-

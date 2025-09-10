@@ -39,6 +39,8 @@ bitflags! {
         const HAS_SET_MOUSE_POS = sys::ImGuiBackendFlags_HasSetMousePos;
         /// Backend renderer supports DrawCmd::vtx_offset.
         const RENDERER_HAS_VTX_OFFSET = sys::ImGuiBackendFlags_RendererHasVtxOffset;
+        /// Backend renderer supports ImTextureData requests to create/update/destroy textures.
+        const RENDERER_HAS_TEXTURES = sys::ImGuiBackendFlags_RendererHasTextures;
 
         #[cfg(feature = "multi-viewport")]
         /// Set if the platform backend supports viewports.

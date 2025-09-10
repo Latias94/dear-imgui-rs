@@ -4,8 +4,8 @@
 //! which contain all the information needed to render a frame.
 
 use crate::internal::{RawCast, RawWrapper};
-use crate::render::renderer::TextureId;
 use crate::sys;
+use crate::texture::TextureId;
 use std::slice;
 
 /// All draw data to render a Dear ImGui frame.
@@ -78,6 +78,72 @@ impl DrawData {
     #[inline]
     pub fn draw_lists_count(&self) -> usize {
         self.cmd_lists_count.try_into().unwrap()
+    }
+
+    /// Returns an iterator over the textures that need to be updated
+    ///
+    /// This is used by renderer backends to process texture creation, updates, and destruction.
+    /// Most of the time this list has only 1 texture and it doesn't need any update.
+    pub fn textures(&self) -> TextureIterator<'_> {
+        unsafe {
+            if self.textures.is_null() {
+                TextureIterator::new(std::ptr::null(), std::ptr::null())
+            } else {
+                let vector = &*self.textures;
+                TextureIterator::new(vector.data, vector.data.add(vector.size as usize))
+            }
+        }
+    }
+
+    /// Returns the number of textures in the texture list
+    pub fn textures_count(&self) -> usize {
+        unsafe {
+            if self.textures.is_null() {
+                0
+            } else {
+                (*self.textures).size as usize
+            }
+        }
+    }
+
+    /// Get a specific texture by index
+    ///
+    /// Returns None if the index is out of bounds or no textures are available.
+    pub fn texture(&self, index: usize) -> Option<&crate::texture::TextureData> {
+        unsafe {
+            if self.textures.is_null() {
+                return None;
+            }
+            let vector = &*self.textures;
+            if index >= vector.size as usize {
+                return None;
+            }
+            let texture_ptr = *vector.data.add(index);
+            if texture_ptr.is_null() {
+                return None;
+            }
+            Some(crate::texture::TextureData::from_raw(texture_ptr))
+        }
+    }
+
+    /// Get a mutable reference to a specific texture by index
+    ///
+    /// Returns None if the index is out of bounds or no textures are available.
+    pub fn texture_mut(&mut self, index: usize) -> Option<&mut crate::texture::TextureData> {
+        unsafe {
+            if self.textures.is_null() {
+                return None;
+            }
+            let vector = &*self.textures;
+            if index >= vector.size as usize {
+                return None;
+            }
+            let texture_ptr = *vector.data.add(index);
+            if texture_ptr.is_null() {
+                return None;
+            }
+            Some(crate::texture::TextureData::from_raw(texture_ptr))
+        }
     }
     /// Get the display position as an array
     #[inline]
@@ -288,6 +354,32 @@ pub struct DrawVert {
     pub col: u32,
 }
 
+impl DrawVert {
+    /// Creates a new draw vertex with u32 color
+    pub fn new(pos: [f32; 2], uv: [f32; 2], col: u32) -> Self {
+        Self { pos, uv, col }
+    }
+
+    /// Creates a new draw vertex from RGBA bytes
+    pub fn from_rgba(pos: [f32; 2], uv: [f32; 2], rgba: [u8; 4]) -> Self {
+        let col = ((rgba[3] as u32) << 24)
+            | ((rgba[2] as u32) << 16)
+            | ((rgba[1] as u32) << 8)
+            | (rgba[0] as u32);
+        Self { pos, uv, col }
+    }
+
+    /// Extracts RGBA bytes from the packed color
+    pub fn rgba(&self) -> [u8; 4] {
+        [
+            (self.col & 0xFF) as u8,
+            ((self.col >> 8) & 0xFF) as u8,
+            ((self.col >> 16) & 0xFF) as u8,
+            ((self.col >> 24) & 0xFF) as u8,
+        ]
+    }
+}
+
 /// Index type used by Dear ImGui
 pub type DrawIdx = u16;
 
@@ -310,7 +402,7 @@ impl OwnedDrawData {
     #[inline]
     pub fn draw_data(&self) -> Option<&DrawData> {
         if !self.draw_data.is_null() {
-            Some(unsafe { std::mem::transmute(&*self.draw_data) })
+            Some(unsafe { std::mem::transmute::<&sys::ImDrawData, &DrawData>(&*self.draw_data) })
         } else {
             None
         }
@@ -371,11 +463,64 @@ impl Drop for OwnedDrawData {
     fn drop(&mut self) {
         unsafe {
             if !self.draw_data.is_null() {
-                // Note: This is a simplified cleanup
-                // TODO: A full implementation would need to properly clean up draw lists
+                // Clear the draw data first to release any internal resources
+                sys::ImDrawData_Clear(self.draw_data);
+
+                // Free the draw data structure itself
+                // Note: Since we don't have ImDrawData_destroy in our bindings,
+                // we use MemFree directly. This is safe because ImDrawData
+                // doesn't have complex destructors in the C++ side.
                 sys::ImGui_MemFree(self.draw_data as *mut std::ffi::c_void);
                 self.draw_data = std::ptr::null_mut();
             }
         }
     }
 }
+
+/// Iterator over textures in draw data
+pub struct TextureIterator<'a> {
+    ptr: *const *mut sys::ImTextureData,
+    end: *const *mut sys::ImTextureData,
+    _phantom: std::marker::PhantomData<&'a crate::texture::TextureData>,
+}
+
+impl<'a> TextureIterator<'a> {
+    /// Create a new texture iterator from raw pointers
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the pointers are valid and that the range
+    /// [ptr, end) contains valid texture data pointers.
+    pub(crate) unsafe fn new(
+        ptr: *const *mut sys::ImTextureData,
+        end: *const *mut sys::ImTextureData,
+    ) -> Self {
+        Self {
+            ptr,
+            end,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a> Iterator for TextureIterator<'a> {
+    type Item = &'a mut crate::texture::TextureData;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ptr >= self.end {
+            None
+        } else {
+            unsafe {
+                let texture_ptr = *self.ptr;
+                self.ptr = self.ptr.add(1);
+                if texture_ptr.is_null() {
+                    self.next() // Skip null pointers
+                } else {
+                    Some(crate::texture::TextureData::from_raw(texture_ptr))
+                }
+            }
+        }
+    }
+}
+
+impl<'a> std::iter::FusedIterator for TextureIterator<'a> {}

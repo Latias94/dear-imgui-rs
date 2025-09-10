@@ -10,27 +10,23 @@
 
 // FFI-safe POD type equivalent to ImVec2
 // Used to avoid MSVC ABI issues with returning small C++ classes by value
+// This MUST be a simple C-style struct with no constructors or operators
 struct ImVec2_Pod {
     float x, y;
-    
-    ImVec2_Pod() : x(0), y(0) {}
-    ImVec2_Pod(float x_, float y_) : x(x_), y(y_) {}
-    ImVec2_Pod(const ImVec2& v) : x(v.x), y(v.y) {}
-    operator ImVec2() const { return ImVec2(x, y); }
 };
 
-// FFI-safe POD type equivalent to ImVec4  
+// FFI-safe POD type equivalent to ImVec4
 struct ImVec4_Pod {
     float x, y, z, w;
-    
-    ImVec4_Pod() : x(0), y(0), z(0), w(0) {}
-    ImVec4_Pod(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
-    ImVec4_Pod(const ImVec4& v) : x(v.x), y(v.y), z(v.z), w(v.w) {}
-    operator ImVec4() const { return ImVec4(x, y, z, w); }
 };
 
 // Helper function for conversion
-static inline ImVec2_Pod to_pod(const ImVec2& v) { return ImVec2_Pod(v); }
+static inline ImVec2_Pod to_pod(const ImVec2& v) {
+    ImVec2_Pod result;
+    result.x = v.x;
+    result.y = v.y;
+    return result;
+}
 
 // ============================================================================
 // MSVC ABI Fix: Regular ImGui Functions  
@@ -50,8 +46,8 @@ ImVec2_Pod ImGui_GetWindowSize() {
     return to_pod(ImGui::GetWindowSize()); 
 }
 
-ImVec2_Pod ImGui_GetContentRegionAvail() { 
-    return to_pod(ImGui::GetContentRegionAvail()); 
+ImVec2_Pod ImGui_GetContentRegionAvail() {
+    return to_pod(ImGui::GetContentRegionAvail());
 }
 
 ImVec2_Pod ImGui_GetFontTexUvWhitePixel() { 

@@ -98,7 +98,7 @@ impl<'ui> ChildWindow<'ui> {
                 name_cstr.as_ptr(),
                 &size_vec,
                 self.child_flags.bits() as i32,
-                self.flags.bits() as i32,
+                self.flags.bits(),
             )
         };
 
@@ -133,7 +133,7 @@ impl<'ui> Drop for ChildWindowToken<'ui> {
     }
 }
 
-impl<'ui> Ui {
+impl Ui {
     /// Creates a child window builder
     pub fn child_window(&self, name: impl Into<String>) -> ChildWindow<'_> {
         ChildWindow::new(name)

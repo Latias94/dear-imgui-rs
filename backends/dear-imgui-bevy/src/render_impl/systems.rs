@@ -6,9 +6,8 @@ use bevy::{
     render::{
         render_asset::RenderAssets,
         render_resource::{
-            BindGroup, BindGroupEntry, BindingResource, Buffer, BufferDescriptor, BufferId,
-            BufferUsages, CachedRenderPipelineId, DynamicUniformBuffer, PipelineCache,
-            SpecializedRenderPipelines, TexelCopyBufferLayout,
+            BindGroup, BindGroupEntry, BindingResource, Buffer, BufferId, CachedRenderPipelineId,
+            DynamicUniformBuffer, PipelineCache, SpecializedRenderPipelines, TexelCopyBufferLayout,
         },
         renderer::{RenderDevice, RenderQueue},
         sync_world::MainEntity,
@@ -188,7 +187,7 @@ pub fn prepare_imgui_render_data_system(
 
             // Update view data
             view_data.pixels_per_point = 1.0; // TODO: Get from actual display scale
-            view_data.target_size = UVec2::new(view.viewport.z as u32, view.viewport.w as u32);
+            view_data.target_size = UVec2::new(view.viewport.z, view.viewport.w);
 
             // Create or update pipeline
             let pipeline_key = ImguiPipelineKey {
@@ -241,7 +240,7 @@ fn convert_draw_data_to_buffers(
     view_data.draw_commands.clear();
 
     let mut vertex_offset = 0u32;
-    let mut index_offset = 0u32;
+    let mut _index_offset = 0u32;
 
     // Process each draw list
     let draw_data_ref = draw_data.draw_data().unwrap();
@@ -294,7 +293,7 @@ fn convert_draw_data_to_buffers(
                         texture_id,
                     });
 
-                    index_offset += count as u32;
+                    _index_offset += count as u32;
                 }
                 _ => {
                     // Handle other command types if needed
@@ -350,11 +349,11 @@ fn convert_draw_data_to_buffers(
 
 /// System to create texture bind groups for Dear ImGui textures
 pub fn queue_imgui_bind_groups_system(
-    mut commands: Commands,
+    _commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     imgui_pipeline: Res<ImguiPipeline>,
-    gpu_images: Res<RenderAssets<GpuImage>>,
+    _gpu_images: Res<RenderAssets<GpuImage>>,
     imgui_render_data: Res<ImguiRenderData>,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
 ) {
@@ -362,7 +361,7 @@ pub fn queue_imgui_bind_groups_system(
     texture_bind_groups.clear();
 
     // Create bind groups for all textures used in the current frame
-    for (entity, render_data) in imgui_render_data.0.iter() {
+    for (_entity, render_data) in imgui_render_data.0.iter() {
         for draw_command in &render_data.draw_commands {
             let texture_id = draw_command.texture_id;
 
@@ -372,7 +371,7 @@ pub fn queue_imgui_bind_groups_system(
             }
 
             match texture_id {
-                ImguiTextureId::Managed(main_entity, tex_id) => {
+                ImguiTextureId::Managed(_main_entity, tex_id) => {
                     // For the font texture (tex_id == 0), create a basic white texture
                     // TODO: In the future, we should extract the actual font texture from ImGui
                     if tex_id == 0 {

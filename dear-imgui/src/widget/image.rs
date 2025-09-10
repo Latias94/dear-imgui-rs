@@ -1,39 +1,12 @@
 use crate::sys;
+use crate::texture::TextureId;
 use crate::ui::Ui;
-
-/// Texture ID for images
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-pub struct ImageTextureId(pub usize);
-
-impl ImageTextureId {
-    /// Creates a new texture ID
-    pub fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    /// Returns the raw ID
-    pub fn id(self) -> usize {
-        self.0
-    }
-}
-
-impl From<usize> for ImageTextureId {
-    fn from(id: usize) -> Self {
-        Self(id)
-    }
-}
-
-impl From<*mut std::os::raw::c_void> for ImageTextureId {
-    fn from(ptr: *mut std::os::raw::c_void) -> Self {
-        Self(ptr as usize)
-    }
-}
 
 /// # Image Widgets
 impl Ui {
     /// Creates an image widget
     #[doc(alias = "Image")]
-    pub fn image(&self, texture_id: ImageTextureId, size: [f32; 2]) {
+    pub fn image(&self, texture_id: TextureId, size: [f32; 2]) {
         self.image_config(texture_id, size).build()
     }
 
@@ -42,14 +15,14 @@ impl Ui {
     pub fn image_button(
         &self,
         str_id: impl AsRef<str>,
-        texture_id: ImageTextureId,
+        texture_id: TextureId,
         size: [f32; 2],
     ) -> bool {
         self.image_button_config(str_id, texture_id, size).build()
     }
 
     /// Creates an image builder
-    pub fn image_config(&self, texture_id: ImageTextureId, size: [f32; 2]) -> Image<'_> {
+    pub fn image_config(&self, texture_id: TextureId, size: [f32; 2]) -> Image<'_> {
         Image::new(self, texture_id, size)
     }
 
@@ -57,7 +30,7 @@ impl Ui {
     pub fn image_button_config(
         &self,
         str_id: impl AsRef<str>,
-        texture_id: ImageTextureId,
+        texture_id: TextureId,
         size: [f32; 2],
     ) -> ImageButton<'_> {
         ImageButton::new(self, str_id, texture_id, size)
@@ -69,7 +42,7 @@ impl Ui {
 #[must_use]
 pub struct Image<'ui> {
     ui: &'ui Ui,
-    texture_id: ImageTextureId,
+    texture_id: TextureId,
     size: [f32; 2],
     uv0: [f32; 2],
     uv1: [f32; 2],
@@ -79,7 +52,7 @@ pub struct Image<'ui> {
 
 impl<'ui> Image<'ui> {
     /// Creates a new image builder
-    pub fn new(ui: &'ui Ui, texture_id: ImageTextureId, size: [f32; 2]) -> Self {
+    pub fn new(ui: &'ui Ui, texture_id: TextureId, size: [f32; 2]) -> Self {
         Self {
             ui,
             texture_id,
@@ -120,13 +93,13 @@ impl<'ui> Image<'ui> {
         let size_vec: sys::ImVec2 = self.size.into();
         let uv0_vec: sys::ImVec2 = self.uv0.into();
         let uv1_vec: sys::ImVec2 = self.uv1.into();
-        let tint_vec: sys::ImVec4 = sys::ImVec4 {
+        let _tint_vec: sys::ImVec4 = sys::ImVec4 {
             x: self.tint_color[0],
             y: self.tint_color[1],
             z: self.tint_color[2],
             w: self.tint_color[3],
         };
-        let border_vec: sys::ImVec4 = sys::ImVec4 {
+        let _border_vec: sys::ImVec4 = sys::ImVec4 {
             x: self.border_color[0],
             y: self.border_color[1],
             z: self.border_color[2],
@@ -153,7 +126,7 @@ impl<'ui> Image<'ui> {
 pub struct ImageButton<'ui> {
     ui: &'ui Ui,
     str_id: String,
-    texture_id: ImageTextureId,
+    texture_id: TextureId,
     size: [f32; 2],
     uv0: [f32; 2],
     uv1: [f32; 2],
@@ -166,7 +139,7 @@ impl<'ui> ImageButton<'ui> {
     pub fn new(
         ui: &'ui Ui,
         str_id: impl AsRef<str>,
-        texture_id: ImageTextureId,
+        texture_id: TextureId,
         size: [f32; 2],
     ) -> Self {
         Self {

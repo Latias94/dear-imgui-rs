@@ -218,7 +218,7 @@ where
     T: InputTextCallbackHandler,
 {
     /// Builds the text input widget
-    pub fn build(mut self) -> bool {
+    pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let hint_ptr = if let Some(ref hint) = self.hint {
             self.ui.scratch_txt(hint.as_ref())
@@ -237,7 +237,7 @@ where
                     buffer.as_mut_ptr() as *mut std::os::raw::c_char,
                     buffer.len(),
                     self.flags.bits(),
-                    Some(callback::<T>),
+                    Some(callback),
                     self.buf as *mut String as *mut std::ffi::c_void,
                 )
             } else {
@@ -247,7 +247,7 @@ where
                     buffer.as_mut_ptr() as *mut std::os::raw::c_char,
                     buffer.len(),
                     self.flags.bits(),
-                    Some(callback::<T>),
+                    Some(callback),
                     self.buf as *mut String as *mut std::ffi::c_void,
                 )
             }
@@ -715,9 +715,7 @@ pub struct PassthroughCallback;
 impl InputTextCallbackHandler for PassthroughCallback {}
 
 /// This is our default callback function that routes ImGui callbacks to our trait methods.
-extern "C" fn callback<T: InputTextCallbackHandler>(
-    data: *mut sys::ImGuiInputTextCallbackData,
-) -> c_int {
+extern "C" fn callback(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
     let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
     let buffer_ptr = unsafe { (*data).UserData as *mut String };
 

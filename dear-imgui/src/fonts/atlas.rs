@@ -113,7 +113,7 @@ impl FontAtlas {
     fn add_font_internal(
         &mut self,
         font_source: &FontSource<'_>,
-        merge_mode: bool,
+        _merge_mode: bool,
     ) -> crate::fonts::FontId {
         match font_source {
             FontSource::DefaultFontData { config } => {
@@ -400,7 +400,7 @@ impl FontConfig {
     }
 
     /// Set the font size in pixels
-    pub fn size_pixels(mut self, size: f32) -> Self {
+    pub fn size_pixels(self, _size: f32) -> Self {
         // Note: ImFontConfig doesn't have a direct size field in our bindings
         // The size is typically passed to the AddFont functions
         self
@@ -448,4 +448,19 @@ pub enum FontSource<'a> {
         size_pixels: f32,
         config: Option<FontConfig>,
     },
+}
+
+/// Handle to a font atlas texture
+#[derive(Clone, Debug)]
+pub struct FontAtlasTexture<'a> {
+    /// Texture width (in pixels)
+    pub width: u32,
+    /// Texture height (in pixels)
+    pub height: u32,
+    /// Raw texture data (in bytes).
+    ///
+    /// The format depends on which function was called to obtain this data:
+    /// - For RGBA32: 4 bytes per pixel (R, G, B, A)
+    /// - For Alpha8: 1 byte per pixel (Alpha only)
+    pub data: &'a [u8],
 }

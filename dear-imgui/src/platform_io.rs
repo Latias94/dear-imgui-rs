@@ -266,6 +266,58 @@ impl PlatformIo {
             .iter_mut()
             .map(|&mut ptr| unsafe { Viewport::from_raw_mut(ptr) })
     }
+
+    /// Get an iterator over all textures managed by the platform
+    ///
+    /// This is used by renderer backends during shutdown to destroy all textures.
+    pub fn textures(&self) -> crate::render::draw_data::TextureIterator<'_> {
+        unsafe {
+            let vector = &self.raw.Textures;
+            crate::render::draw_data::TextureIterator::new(
+                vector.Data,
+                vector.Data.add(vector.Size as usize),
+            )
+        }
+    }
+
+    /// Get the number of textures managed by the platform
+    pub fn textures_count(&self) -> usize {
+        self.raw.Textures.Size as usize
+    }
+
+    /// Get a specific texture by index
+    ///
+    /// Returns None if the index is out of bounds.
+    pub fn texture(&self, index: usize) -> Option<&crate::texture::TextureData> {
+        unsafe {
+            let vector = &self.raw.Textures;
+            if index >= vector.Size as usize {
+                return None;
+            }
+            let texture_ptr = *vector.Data.add(index);
+            if texture_ptr.is_null() {
+                return None;
+            }
+            Some(crate::texture::TextureData::from_raw(texture_ptr))
+        }
+    }
+
+    /// Get a mutable reference to a specific texture by index
+    ///
+    /// Returns None if the index is out of bounds.
+    pub fn texture_mut(&mut self, index: usize) -> Option<&mut crate::texture::TextureData> {
+        unsafe {
+            let vector = &self.raw.Textures;
+            if index >= vector.Size as usize {
+                return None;
+            }
+            let texture_ptr = *vector.Data.add(index);
+            if texture_ptr.is_null() {
+                return None;
+            }
+            Some(crate::texture::TextureData::from_raw(texture_ptr))
+        }
+    }
 }
 
 // TODO: Add safe wrappers for platform IO functionality:

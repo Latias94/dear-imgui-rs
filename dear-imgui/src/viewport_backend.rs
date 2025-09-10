@@ -9,7 +9,7 @@ use crate::sys;
 #[cfg(feature = "multi-viewport")]
 pub mod utils {
     use super::*;
-    
+
     /// Enable multi-viewport flags in ImGui context
     pub fn enable_viewport_flags(io: &mut crate::Io) {
         let mut flags = io.config_flags();

@@ -128,7 +128,7 @@ impl Ui {
             for column in &column_data {
                 self.table_setup_column(
                     &column.name,
-                    column.flags.clone(),
+                    column.flags,
                     column.init_width_or_weight,
                     column.user_id,
                 );

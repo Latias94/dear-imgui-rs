@@ -113,7 +113,7 @@ pub fn imgui_extract_frame_system(mut commands: Commands, mut main_world: ResMut
     // Query cameras with ImguiRenderOutput in the main world
     let mut query = main_world.query::<(Entity, &mut ImguiRenderOutput, &Camera)>();
 
-    for (entity, mut render_output, camera) in query.iter_mut(&mut main_world) {
+    for (_entity, mut render_output, camera) in query.iter_mut(&mut main_world) {
         // Only process active cameras
         if !camera.is_active {
             continue;
@@ -145,7 +145,7 @@ pub fn imgui_update_render_context_system(extracted_data: Option<Res<ExtractedIm
 
 /// System to update textures in the render world
 pub fn imgui_update_textures_system(
-    mut context: ResMut<ImguiRenderContext>,
+    _context: ResMut<ImguiRenderContext>,
     _device: Res<RenderDevice>,
     _gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
 ) {

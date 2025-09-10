@@ -98,7 +98,7 @@ impl Plugin for ImguiPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             let mut system_state: SystemState<(Res<RenderDevice>, Res<RenderQueue>)> =
                 SystemState::new(render_app.world_mut());
-            let (device, queue) = system_state.get_mut(render_app.world_mut());
+            let (_device, _queue) = system_state.get_mut(render_app.world_mut());
 
             // Set up texture format
             let texture_format = wgpu::TextureFormat::Bgra8UnormSrgb; // Default format

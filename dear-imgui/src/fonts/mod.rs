@@ -35,8 +35,17 @@ impl Ui {
     #[doc(alias = "GetFontTexUvWhitePixel")]
     pub fn font_tex_uv_white_pixel(&self) -> [f32; 2] {
         unsafe {
-            let uv = crate::sys::ImGui_GetFontTexUvWhitePixel();
-            [uv.x, uv.y]
+            #[cfg(target_env = "msvc")]
+            {
+                let uv_rr = crate::sys::ImGui_GetFontTexUvWhitePixel();
+                let uv: crate::sys::ImVec2 = uv_rr.into();
+                [uv.x, uv.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let uv = crate::sys::ImGui_GetFontTexUvWhitePixel();
+                [uv.x, uv.y]
+            }
         }
     }
 

@@ -105,11 +105,7 @@ impl Ui {
     where
         F: FnOnce() -> R,
     {
-        if let Some(_token) = self.begin_modal_popup(name) {
-            Some(f())
-        } else {
-            None
-        }
+        self.begin_modal_popup(name).map(|_token| f())
     }
 
     /// Closes the current popup.
