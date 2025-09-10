@@ -6,6 +6,12 @@
 use dear_imgui::render::{DrawIdx, DrawVert};
 use wgpu::*;
 
+/// Memory alignment function (equivalent to MEMALIGN macro in C++)
+/// Aligns size to the specified alignment boundary
+fn align_size(size: usize, alignment: usize) -> usize {
+    (size + alignment - 1) & !(alignment - 1)
+}
+
 /// Per-frame resources
 ///
 /// This corresponds to the FrameResources struct in the C++ implementation.
@@ -48,10 +54,11 @@ impl FrameResources {
             // Add some extra capacity to avoid frequent reallocations
             let new_size = (required_vertices + 5000).max(self.vertex_buffer_size * 2);
 
-            // Create new GPU buffer
+            // Create new GPU buffer with proper alignment
+            let buffer_size = align_size(new_size * std::mem::size_of::<DrawVert>(), 4);
             let buffer = device.create_buffer(&BufferDescriptor {
                 label: Some("Dear ImGui Vertex Buffer"),
-                size: (new_size * std::mem::size_of::<DrawVert>()) as u64,
+                size: buffer_size as u64,
                 usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
@@ -77,10 +84,11 @@ impl FrameResources {
             // Add some extra capacity to avoid frequent reallocations
             let new_size = (required_indices + 10000).max(self.index_buffer_size * 2);
 
-            // Create new GPU buffer
+            // Create new GPU buffer with proper alignment
+            let buffer_size = align_size(new_size * std::mem::size_of::<DrawIdx>(), 4);
             let buffer = device.create_buffer(&BufferDescriptor {
                 label: Some("Dear ImGui Index Buffer"),
-                size: (new_size * std::mem::size_of::<DrawIdx>()) as u64,
+                size: buffer_size as u64,
                 usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
@@ -122,8 +130,16 @@ impl FrameResources {
             }
         }
 
-        // Upload to GPU
-        queue.write_buffer(vertex_buffer, 0, vertex_bytes);
+        // Upload to GPU with proper alignment
+        let aligned_size = align_size(vertex_bytes.len(), 4);
+        if aligned_size > vertex_bytes.len() {
+            // Need to pad the data to meet alignment requirements
+            let mut aligned_data = vertex_bytes.to_vec();
+            aligned_data.resize(aligned_size, 0);
+            queue.write_buffer(vertex_buffer, 0, &aligned_data);
+        } else {
+            queue.write_buffer(vertex_buffer, 0, vertex_bytes);
+        }
         Ok(())
     }
 
@@ -149,8 +165,16 @@ impl FrameResources {
             }
         }
 
-        // Upload to GPU
-        queue.write_buffer(index_buffer, 0, index_bytes);
+        // Upload to GPU with proper alignment
+        let aligned_size = align_size(index_bytes.len(), 4);
+        if aligned_size > index_bytes.len() {
+            // Need to pad the data to meet alignment requirements
+            let mut aligned_data = index_bytes.to_vec();
+            aligned_data.resize(aligned_size, 0);
+            queue.write_buffer(index_buffer, 0, &aligned_data);
+        } else {
+            queue.write_buffer(index_buffer, 0, index_bytes);
+        }
         Ok(())
     }
 

@@ -6,6 +6,12 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu::*;
 
+/// Memory alignment function (equivalent to MEMALIGN macro in C++)
+/// Aligns size to the specified alignment boundary
+fn align_size(size: usize, alignment: usize) -> usize {
+    (size + alignment - 1) & !(alignment - 1)
+}
+
 /// Uniform data structure
 ///
 /// This corresponds to the Uniforms struct in the C++ implementation.
@@ -113,10 +119,11 @@ pub struct UniformBuffer {
 impl UniformBuffer {
     /// Create a new uniform buffer
     pub fn new(device: &Device, sampler: &Sampler) -> Self {
-        // Create the uniform buffer
+        // Create the uniform buffer with proper alignment (16 bytes for uniforms)
+        let buffer_size = align_size(std::mem::size_of::<Uniforms>(), 16);
         let buffer = device.create_buffer(&BufferDescriptor {
             label: Some("Dear ImGui Uniform Buffer"),
-            size: std::mem::size_of::<Uniforms>() as u64,
+            size: buffer_size as u64,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });

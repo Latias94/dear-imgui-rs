@@ -3,6 +3,7 @@ use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
 use std::{sync::Arc, time::Instant};
+use tracing::{info, error, warn, debug, trace};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -19,6 +20,10 @@ struct ImguiState {
     clear_color: wgpu::Color,
     demo_open: bool,
     last_frame: Instant,
+    // Logging demo state
+    log_counter: i32,
+    frame_count: u64,
+    total_frame_time: f32,
 }
 
 struct AppWindow {
@@ -101,6 +106,11 @@ impl AppWindow {
             .prepare_font_atlas(&mut context)
             .expect("Failed to prepare font atlas");
 
+        // Log successful initialization
+        dear_imgui::logging::log_context_created();
+        dear_imgui::logging::log_platform_init("Winit");
+        dear_imgui::logging::log_renderer_init("WGPU");
+
         let imgui = ImguiState {
             context,
             platform,
@@ -113,6 +123,9 @@ impl AppWindow {
             },
             demo_open: true,
             last_frame: Instant::now(),
+            log_counter: 0,
+            frame_count: 0,
+            total_frame_time: 0.0,
         };
 
         Ok(Self {
@@ -136,10 +149,23 @@ impl AppWindow {
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
         let delta_time = now - self.imgui.last_frame;
+        let delta_secs = delta_time.as_secs_f32();
+
+        // Update frame statistics
+        self.imgui.frame_count += 1;
+        self.imgui.total_frame_time += delta_secs;
+
+        // Log frame statistics every 60 frames
+        if self.imgui.frame_count % 60 == 0 {
+            let avg_frame_time = self.imgui.total_frame_time / 60.0;
+            dear_imgui::logging::log_frame_stats(avg_frame_time, 1.0 / avg_frame_time);
+            self.imgui.total_frame_time = 0.0;
+        }
+
         self.imgui
             .context
             .io_mut()
-            .set_delta_time(delta_time.as_secs_f32());
+            .set_delta_time(delta_secs);
         self.imgui.last_frame = now;
 
         let frame = self.surface.get_current_texture()?;
@@ -179,6 +205,62 @@ impl AppWindow {
                 if ui.button("Show Demo Window") {
                     self.imgui.demo_open = true;
                 }
+            });
+
+        // Logging Demo Window
+        ui.window("Logging Demo")
+            .size([350.0, 250.0], Condition::FirstUseEver)
+            .build(|| {
+                ui.text("Dear ImGui Logging Features");
+                ui.separator();
+
+                // Counter with logging
+                if ui.button("Increment Counter") {
+                    self.imgui.log_counter += 1;
+                    info!("Counter incremented to: {}", self.imgui.log_counter);
+                }
+                ui.same_line();
+                ui.text(format!("Count: {}", self.imgui.log_counter));
+
+                ui.separator();
+
+                // Log level buttons
+                ui.text("Generate log messages:");
+
+                if ui.button("Trace") {
+                    trace!("This is a trace message - very detailed debugging info");
+                }
+                ui.same_line();
+                if ui.button("Debug") {
+                    debug!("This is a debug message - general debugging info");
+                }
+                ui.same_line();
+                if ui.button("Info") {
+                    info!("This is an info message - general information");
+                }
+
+                if ui.button("Warn") {
+                    warn!("This is a warning message - something might be wrong");
+                }
+                ui.same_line();
+                if ui.button("Error") {
+                    error!("This is an error message - something went wrong!");
+                }
+
+                ui.separator();
+
+                // Error handling demo
+                if ui.button("Test Error Handling") {
+                    let result: Result<(), ImGuiError> = Err(ImGuiError::resource_allocation("Demo texture"));
+                    if let Err(e) = result {
+                        error!("Simulated error: {}", e);
+                    }
+                }
+
+                ui.separator();
+                ui.text_wrapped("Check your console/terminal for log output!");
+                ui.text_wrapped("Set RUST_LOG environment variable to control verbosity:");
+                ui.text("  RUST_LOG=debug cargo run --example wgpu_basic");
             });
 
         // Show demo window if requested
@@ -238,10 +320,10 @@ impl ApplicationHandler for App {
             match AppWindow::new(event_loop) {
                 Ok(window) => {
                     self.window = Some(window);
-                    println!("Window created successfully in resumed");
+                    info!("Window created successfully in resumed");
                 }
                 Err(e) => {
-                    eprintln!("Failed to create window in resumed: {e}");
+                    error!("Failed to create window in resumed: {e}");
                     event_loop.exit();
                 }
             }
@@ -275,7 +357,7 @@ impl ApplicationHandler for App {
                 window.window.request_redraw();
             }
             WindowEvent::CloseRequested => {
-                println!("Close requested");
+                info!("Close requested");
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -285,7 +367,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 if let Err(e) = window.render() {
-                    eprintln!("Render error: {e}");
+                    error!("Render error: {e}");
                 }
                 window.window.request_redraw();
             }
@@ -302,11 +384,25 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
-    env_logger::init();
+    // Initialize tracing with custom filter for demo
+    dear_imgui::logging::init_tracing_with_filter(
+        "dear_imgui=debug,wgpu_basic=info,wgpu=warn"
+    );
+
+    info!("Starting Dear ImGui WGPU Basic Example with Logging Demo");
+    info!("This example demonstrates:");
+    info!("  - Basic Dear ImGui usage with WGPU backend");
+    info!("  - Integrated tracing/logging support");
+    info!("  - Error handling with thiserror");
+    info!("  - Frame statistics logging");
 
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::default();
+
+    info!("Starting event loop...");
     event_loop.run_app(&mut app).unwrap();
+
+    info!("Dear ImGui WGPU Basic Example finished");
 }

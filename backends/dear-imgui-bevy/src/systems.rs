@@ -7,7 +7,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 use dear_imgui::OwnedDrawData;
-use log::info;
+use tracing::info;
 use std::ptr::NonNull;
 
 /// Component to hold ImGui render output data that can be extracted to render world

@@ -134,6 +134,9 @@ mod text_filter;
 // Column layout system
 mod columns;
 
+// Logging utilities
+pub mod logging;
+
 // Re-export public API
 pub use clipboard::*;
 pub use color::*;

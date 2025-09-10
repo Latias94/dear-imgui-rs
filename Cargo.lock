@@ -2146,6 +2146,7 @@ dependencies = [
  "pretty_assertions",
  "thiserror 2.0.16",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2158,8 +2159,8 @@ dependencies = [
  "dear-imgui",
  "dear-imgui-sys",
  "encase",
- "log",
  "smallvec",
+ "tracing",
  "uuid",
  "wgpu",
 ]
@@ -2179,6 +2180,8 @@ dependencies = [
  "image",
  "pollster",
  "raw-window-handle",
+ "tracing",
+ "tracing-subscriber",
  "wgpu",
  "winit",
 ]
