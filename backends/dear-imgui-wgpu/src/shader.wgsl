@@ -15,16 +15,17 @@ struct VertexOutput {
 
 struct Uniforms {
     u_Matrix: mat4x4<f32>,
+    u_Gamma: f32,
 }
 
 @group(0) @binding(0)
 var<uniform> uniforms: Uniforms;
 
+@group(0) @binding(1)
+var u_Sampler: sampler;
+
 @group(1) @binding(0)
 var u_Texture: texture_2d<f32>;
-
-@group(1) @binding(1)
-var u_Sampler: sampler;
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
@@ -49,13 +50,8 @@ fn srgb_to_linear(srgb: vec4<f32>) -> vec4<f32> {
 }
 
 @fragment
-fn fs_main_linear(in: VertexOutput) -> FragmentOutput {
-    let color = srgb_to_linear(in.v_Color);
-    return FragmentOutput(color * textureSample(u_Texture, u_Sampler, in.v_UV));
-}
-
-@fragment
-fn fs_main_srgb(in: VertexOutput) -> FragmentOutput {
-    let color = in.v_Color;
-    return FragmentOutput(color * textureSample(u_Texture, u_Sampler, in.v_UV));
+fn fs_main(in: VertexOutput) -> FragmentOutput {
+    let color = in.v_Color * textureSample(u_Texture, u_Sampler, in.v_UV);
+    let corrected_color = pow(color.rgb, vec3<f32>(uniforms.u_Gamma));
+    return FragmentOutput(vec4<f32>(corrected_color, color.a));
 }

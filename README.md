@@ -162,6 +162,7 @@ This project is licensed under MIT OR Apache-2.0.
 ```bash
 git clone https://github.com/Latias94/dear-imgui
 cd dear-imgui
+git submodule update --init --recursive
 cargo build
 cargo test
 cargo run --example wgpu_basic

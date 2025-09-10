@@ -87,8 +87,19 @@ impl AppWindow {
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
 
-        let mut renderer = WgpuRenderer::new(&device, &queue, surface_desc.format);
-        renderer.reload_font_texture(&mut context, &device, &queue);
+        let mut renderer = WgpuRenderer::new();
+
+        // Initialize the renderer with the new API
+        let init_info =
+            dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
+        renderer
+            .init(init_info)
+            .expect("Failed to initialize WGPU renderer");
+
+        // Prepare font atlas
+        renderer
+            .prepare_font_atlas(&mut context)
+            .expect("Failed to prepare font atlas");
 
         let imgui = ImguiState {
             context,
@@ -203,12 +214,15 @@ impl AppWindow {
                 occlusion_query_set: None,
             });
 
-            self.imgui.renderer.render_with_renderpass(
-                &draw_data,
-                &self.queue,
-                &self.device,
-                &mut rpass,
-            )?;
+            // Call new_frame before rendering
+            self.imgui
+                .renderer
+                .new_frame()
+                .expect("Failed to prepare new frame");
+
+            self.imgui
+                .renderer
+                .render_draw_data(&draw_data, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));
