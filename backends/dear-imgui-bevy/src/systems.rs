@@ -7,8 +7,8 @@ use bevy::{
     window::PrimaryWindow,
 };
 use dear_imgui::OwnedDrawData;
-use tracing::info;
 use std::ptr::NonNull;
+use tracing::info;
 
 /// Component to hold ImGui render output data that can be extracted to render world
 #[derive(Component, Default)]

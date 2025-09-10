@@ -6,8 +6,8 @@ use bevy::{
     render::{render_asset::RenderAssets, renderer::RenderDevice, texture::GpuImage},
 };
 // TextureId is just u32 in our implementation
-use tracing::info;
 use std::sync::Arc;
+use tracing::info;
 
 /// Add a Bevy image to the ImGui renderer
 pub fn add_image_to_renderer(

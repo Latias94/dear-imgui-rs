@@ -87,7 +87,9 @@ impl Context {
     /// Returns an error if:
     /// - Another context is already active
     /// - Failed to create the underlying ImGui context
-    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> crate::error::ImGuiResult<Context> {
+    pub fn create_with_shared_font_atlas(
+        shared_font_atlas: SharedFontAtlas,
+    ) -> crate::error::ImGuiResult<Context> {
         Self::create_internal(Some(shared_font_atlas))
     }
 
@@ -112,10 +114,13 @@ impl Context {
     ///
     /// Panics if another context is already active or context creation fails.
     pub fn create_with_shared_font_atlas_or_panic(shared_font_atlas: SharedFontAtlas) -> Context {
-        Self::create_with_shared_font_atlas(shared_font_atlas).expect("Failed to create Dear ImGui context")
+        Self::create_with_shared_font_atlas(shared_font_atlas)
+            .expect("Failed to create Dear ImGui context")
     }
 
-    fn create_internal(mut shared_font_atlas: Option<SharedFontAtlas>) -> crate::error::ImGuiResult<Context> {
+    fn create_internal(
+        mut shared_font_atlas: Option<SharedFontAtlas>,
+    ) -> crate::error::ImGuiResult<Context> {
         let _guard = CTX_MUTEX.lock();
 
         if !no_current_context() {
@@ -131,7 +136,7 @@ impl Context {
         let raw = unsafe { sys::ImGui_CreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
             return Err(crate::error::ImGuiError::ContextCreation {
-                reason: "ImGui_CreateContext returned null".to_string()
+                reason: "ImGui_CreateContext returned null".to_string(),
             });
         }
 
@@ -263,7 +268,10 @@ impl Context {
     /// # Errors
     ///
     /// Returns an error if the filename contains null bytes
-    pub fn set_ini_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) -> crate::error::ImGuiResult<()> {
+    pub fn set_ini_filename<P: Into<PathBuf>>(
+        &mut self,
+        filename: Option<P>,
+    ) -> crate::error::ImGuiResult<()> {
         use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
 
@@ -301,7 +309,10 @@ impl Context {
     /// # Errors
     ///
     /// Returns an error if the filename contains null bytes
-    pub fn set_log_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) -> crate::error::ImGuiResult<()> {
+    pub fn set_log_filename<P: Into<PathBuf>>(
+        &mut self,
+        filename: Option<P>,
+    ) -> crate::error::ImGuiResult<()> {
         use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
 
@@ -339,7 +350,10 @@ impl Context {
     /// # Errors
     ///
     /// Returns an error if the name contains null bytes
-    pub fn set_platform_name<S: Into<String>>(&mut self, name: Option<S>) -> crate::error::ImGuiResult<()> {
+    pub fn set_platform_name<S: Into<String>>(
+        &mut self,
+        name: Option<S>,
+    ) -> crate::error::ImGuiResult<()> {
         use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
 
@@ -377,7 +391,10 @@ impl Context {
     /// # Errors
     ///
     /// Returns an error if the name contains null bytes
-    pub fn set_renderer_name<S: Into<String>>(&mut self, name: Option<S>) -> crate::error::ImGuiResult<()> {
+    pub fn set_renderer_name<S: Into<String>>(
+        &mut self,
+        name: Option<S>,
+    ) -> crate::error::ImGuiResult<()> {
         use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
 
@@ -626,7 +643,9 @@ impl SuspendedContext {
     /// # Errors
     ///
     /// Returns an error if failed to create the underlying ImGui context
-    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> crate::error::ImGuiResult<Self> {
+    pub fn create_with_shared_font_atlas(
+        shared_font_atlas: SharedFontAtlas,
+    ) -> crate::error::ImGuiResult<Self> {
         Self::create_internal(Some(shared_font_atlas))
     }
 
@@ -651,10 +670,13 @@ impl SuspendedContext {
     ///
     /// Panics if context creation fails.
     pub fn create_with_shared_font_atlas_or_panic(shared_font_atlas: SharedFontAtlas) -> Self {
-        Self::create_with_shared_font_atlas(shared_font_atlas).expect("Failed to create Dear ImGui context")
+        Self::create_with_shared_font_atlas(shared_font_atlas)
+            .expect("Failed to create Dear ImGui context")
     }
 
-    fn create_internal(mut shared_font_atlas: Option<SharedFontAtlas>) -> crate::error::ImGuiResult<Self> {
+    fn create_internal(
+        mut shared_font_atlas: Option<SharedFontAtlas>,
+    ) -> crate::error::ImGuiResult<Self> {
         let _guard = CTX_MUTEX.lock();
 
         let shared_font_atlas_ptr = match &mut shared_font_atlas {
@@ -665,7 +687,7 @@ impl SuspendedContext {
         let raw = unsafe { sys::ImGui_CreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
             return Err(crate::error::ImGuiError::ContextCreation {
-                reason: "ImGui_CreateContext returned null".to_string()
+                reason: "ImGui_CreateContext returned null".to_string(),
             });
         }
 

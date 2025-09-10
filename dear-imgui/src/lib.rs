@@ -92,11 +92,11 @@ pub use self::columns::*;
 mod clipboard;
 mod color;
 mod context;
-mod error;
 #[cfg(feature = "docking")]
 mod dock_builder;
 mod dock_space;
 mod draw;
+mod error;
 mod fonts;
 pub mod input;
 pub mod internal;
@@ -141,10 +141,10 @@ pub mod logging;
 pub use clipboard::*;
 pub use color::*;
 pub use context::*;
-pub use error::*;
 #[cfg(feature = "docking")]
 pub use dock_builder::*;
 pub use dock_space::*;
+pub use error::*;
 // Note: draw types are now in render module, no need to export draw::*
 pub use fonts::*;
 pub use input::*;

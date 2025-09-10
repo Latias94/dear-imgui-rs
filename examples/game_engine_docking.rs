@@ -211,10 +211,14 @@ impl AppWindow {
             self.queue.clone(),
             self.surface_desc.format,
         );
-        renderer.init(init_info).expect("Failed to initialize WGPU renderer");
+        renderer
+            .init(init_info)
+            .expect("Failed to initialize WGPU renderer");
 
         // Load font texture - this is crucial for text rendering!
-        renderer.prepare_font_atlas(&mut context).expect("Failed to prepare font atlas");
+        renderer
+            .prepare_font_atlas(&mut context)
+            .expect("Failed to prepare font atlas");
 
         let clear_color = wgpu::Color {
             r: 0.1,

@@ -358,9 +358,7 @@ impl WgpuTextureManager {
                 self.destroy_texture(texture_data.tex_id());
                 Ok(TextureUpdateResult::Destroyed)
             }
-            TextureStatus::OK | TextureStatus::Destroyed => {
-                Ok(TextureUpdateResult::NoAction)
-            }
+            TextureStatus::OK | TextureStatus::Destroyed => Ok(TextureUpdateResult::NoAction),
         }
     }
 }

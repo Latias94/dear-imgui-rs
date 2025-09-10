@@ -310,15 +310,18 @@ impl WgpuRenderer {
     /// let result = renderer.update_texture(&texture_data)?;
     /// result.apply_to(&mut texture_data);
     /// ```
-    pub fn update_texture(&mut self, texture_data: &dear_imgui::TextureData) -> RendererResult<crate::TextureUpdateResult> {
+    pub fn update_texture(
+        &mut self,
+        texture_data: &dear_imgui::TextureData,
+    ) -> RendererResult<crate::TextureUpdateResult> {
         if let Some(backend_data) = &self.backend_data {
-            self.texture_manager.update_single_texture(
-                texture_data,
-                &backend_data.device,
-                &backend_data.queue,
-            ).map_err(RendererError::TextureCreationFailed)
+            self.texture_manager
+                .update_single_texture(texture_data, &backend_data.device, &backend_data.queue)
+                .map_err(RendererError::TextureCreationFailed)
         } else {
-            Err(RendererError::InvalidRenderState("Renderer not initialized".to_string()))
+            Err(RendererError::InvalidRenderState(
+                "Renderer not initialized".to_string(),
+            ))
         }
     }
 
@@ -386,7 +389,8 @@ impl WgpuRenderer {
             let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
 
             // Set the render state pointer
-            (*platform_io).Renderer_RenderState = &mut render_state as *mut _ as *mut std::ffi::c_void;
+            (*platform_io).Renderer_RenderState =
+                &mut render_state as *mut _ as *mut std::ffi::c_void;
 
             // Render draw lists with the render state exposed
             let result = Self::render_draw_lists_static(

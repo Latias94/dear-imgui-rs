@@ -3,7 +3,7 @@ use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
 use std::{sync::Arc, time::Instant};
-use tracing::{info, error, warn, debug, trace};
+use tracing::{debug, error, info, trace, warn};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -162,10 +162,7 @@ impl AppWindow {
             self.imgui.total_frame_time = 0.0;
         }
 
-        self.imgui
-            .context
-            .io_mut()
-            .set_delta_time(delta_secs);
+        self.imgui.context.io_mut().set_delta_time(delta_secs);
         self.imgui.last_frame = now;
 
         let frame = self.surface.get_current_texture()?;
@@ -251,7 +248,8 @@ impl AppWindow {
 
                 // Error handling demo
                 if ui.button("Test Error Handling") {
-                    let result: Result<(), ImGuiError> = Err(ImGuiError::resource_allocation("Demo texture"));
+                    let result: Result<(), ImGuiError> =
+                        Err(ImGuiError::resource_allocation("Demo texture"));
                     if let Err(e) = result {
                         error!("Simulated error: {}", e);
                     }
@@ -385,9 +383,7 @@ impl ApplicationHandler for App {
 
 fn main() {
     // Initialize tracing with custom filter for demo
-    dear_imgui::logging::init_tracing_with_filter(
-        "dear_imgui=debug,wgpu_basic=info,wgpu=warn"
-    );
+    dear_imgui::logging::init_tracing_with_filter("dear_imgui=debug,wgpu_basic=info,wgpu=warn");
 
     info!("Starting Dear ImGui WGPU Basic Example with Logging Demo");
     info!("This example demonstrates:");

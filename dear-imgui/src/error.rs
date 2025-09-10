@@ -6,7 +6,7 @@
 use thiserror::Error;
 
 #[cfg(feature = "tracing")]
-use tracing::{error, warn, debug, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 /// Result type for Dear ImGui operations
 pub type ImGuiResult<T> = Result<T, ImGuiError>;
@@ -189,7 +189,7 @@ pub trait SafeStringConversion {
 impl SafeStringConversion for str {
     fn to_cstring_safe(&self) -> Result<std::ffi::CString, ImGuiError> {
         std::ffi::CString::new(self).map_err(|_| ImGuiError::InvalidOperation {
-            operation: format!("String contains null byte: {}", self)
+            operation: format!("String contains null byte: {}", self),
         })
     }
 }

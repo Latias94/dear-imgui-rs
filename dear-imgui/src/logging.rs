@@ -4,13 +4,13 @@
 //! It supports both `tracing` (recommended) and `log` crate backends.
 
 #[cfg(feature = "tracing")]
-use tracing::{info, warn, error, debug, trace};
+use tracing::{debug, error, info, trace, warn};
 
 /// Initialize tracing subscriber with sensible defaults for Dear ImGui applications
 #[cfg(feature = "tracing")]
 pub fn init_tracing() {
     use tracing_subscriber::{fmt, EnvFilter};
-    
+
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
             // Default filter: show info+ for dear_imgui, warn+ for everything else
@@ -30,9 +30,9 @@ pub fn init_tracing() {
 #[cfg(feature = "tracing")]
 pub fn init_tracing_with_filter(filter: &str) {
     use tracing_subscriber::{fmt, EnvFilter};
-    
+
     let filter = EnvFilter::new(filter);
-    
+
     fmt()
         .with_env_filter(filter)
         .with_target(true)
@@ -46,7 +46,7 @@ pub fn init_tracing_with_filter(filter: &str) {
 #[cfg(feature = "tracing")]
 pub fn init_tracing_dev() {
     use tracing_subscriber::{fmt, EnvFilter};
-    
+
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
             // Development filter: show debug+ for dear_imgui, info+ for everything else
@@ -95,7 +95,10 @@ pub fn log_frame_stats(frame_time: f32, fps: f32) {
 /// Log memory usage
 #[cfg(feature = "tracing")]
 pub fn log_memory_usage(vertices: usize, indices: usize, draw_calls: usize) {
-    debug!("Render stats - Vertices: {}, Indices: {}, Draw calls: {}", vertices, indices, draw_calls);
+    debug!(
+        "Render stats - Vertices: {}, Indices: {}, Draw calls: {}",
+        vertices, indices, draw_calls
+    );
 }
 
 // Fallback implementations when tracing is not available
