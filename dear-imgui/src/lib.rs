@@ -17,7 +17,7 @@
 //! ```no_run
 //! use dear_imgui::*;
 //!
-//! let mut ctx = Context::create();
+//! let mut ctx = Context::create_or_panic();
 //! let ui = ctx.frame();
 //!
 //! ui.window("Hello World")
@@ -92,6 +92,7 @@ pub use self::columns::*;
 mod clipboard;
 mod color;
 mod context;
+mod error;
 #[cfg(feature = "docking")]
 mod dock_builder;
 mod dock_space;
@@ -137,6 +138,7 @@ mod columns;
 pub use clipboard::*;
 pub use color::*;
 pub use context::*;
+pub use error::*;
 #[cfg(feature = "docking")]
 pub use dock_builder::*;
 pub use dock_space::*;

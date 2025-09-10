@@ -44,7 +44,7 @@ impl WinitPlatform {
     /// use dear_imgui::Context;
     /// use dear_imgui_winit::WinitPlatform;
     ///
-    /// let mut imgui_ctx = Context::create();
+    /// let mut imgui_ctx = Context::create_or_panic();
     /// let mut platform = WinitPlatform::new(&mut imgui_ctx);
     /// ```
     pub fn new(imgui_ctx: &mut Context) -> Self {
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn test_platform_creation() {
-        let mut ctx = Context::create();
+        let mut ctx = Context::create_or_panic();
         let platform = WinitPlatform::new(&mut ctx);
 
         assert_eq!(platform.hidpi_mode, HiDpiMode::Default);
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_hidpi_mode_setting() {
-        let mut ctx = Context::create();
+        let mut ctx = Context::create_or_panic();
         let mut platform = WinitPlatform::new(&mut ctx);
 
         platform.set_hidpi_mode(HiDpiMode::Locked(2.0));

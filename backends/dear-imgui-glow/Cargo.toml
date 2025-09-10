@@ -16,6 +16,7 @@ dear-imgui-sys = { path = "../../dear-imgui-sys" }
 glow = "0.16"
 memoffset = "0.9"
 smallvec = "1.0"
+thiserror.workspace = true
 
 [features]
 default = [

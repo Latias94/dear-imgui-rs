@@ -1,74 +1,66 @@
 //! Error types for the Dear ImGui Glow renderer
 
-use std::{error::Error, fmt::Display};
+use thiserror::Error;
 
 /// Errors that can occur during renderer initialization
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum InitError {
     /// Failed to create OpenGL buffer object
+    #[error("Failed to create buffer object: {0}")]
     CreateBufferObject(String),
+
     /// Failed to create OpenGL texture
+    #[error("Failed to create texture: {0}")]
     CreateTexture(String),
+
     /// Failed to create OpenGL shader
+    #[error("Failed to create shader: {0}")]
     CreateShader(String),
+
     /// Failed to compile shader
+    #[error("Failed to compile shader: {0}")]
     CompileShader(String),
+
     /// Failed to link shader program
+    #[error("Failed to link program: {0}")]
     LinkProgram(String),
+
     /// Failed to create vertex array object
+    #[error("Failed to create vertex array: {0}")]
     CreateVertexArray(String),
+
     /// OpenGL version not supported
+    #[error("Unsupported OpenGL version: {0}")]
     UnsupportedVersion(String),
+
     /// Generic initialization error
+    #[error("Initialization error: {0}")]
     Generic(String),
 }
 
-impl Display for InitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            InitError::CreateBufferObject(msg) => {
-                write!(f, "Failed to create buffer object: {}", msg)
-            }
-            InitError::CreateTexture(msg) => write!(f, "Failed to create texture: {}", msg),
-            InitError::CreateShader(msg) => write!(f, "Failed to create shader: {}", msg),
-            InitError::CompileShader(msg) => write!(f, "Failed to compile shader: {}", msg),
-            InitError::LinkProgram(msg) => write!(f, "Failed to link program: {}", msg),
-            InitError::CreateVertexArray(msg) => {
-                write!(f, "Failed to create vertex array: {}", msg)
-            }
-            InitError::UnsupportedVersion(msg) => write!(f, "Unsupported OpenGL version: {}", msg),
-            InitError::Generic(msg) => write!(f, "Initialization error: {}", msg),
-        }
-    }
-}
-
-impl Error for InitError {}
+// Display and Error traits are automatically implemented by thiserror
 
 /// Errors that can occur during rendering
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum RenderError {
     /// OpenGL error
+    #[error("OpenGL error: {0}")]
     OpenGLError(String),
+
     /// Invalid texture ID
+    #[error("Invalid texture: {0}")]
     InvalidTexture(String),
+
     /// Renderer was destroyed
+    #[error("Renderer was destroyed")]
     RendererDestroyed,
+
     /// Generic rendering error
+    #[error("Rendering error: {0}")]
     Generic(String),
 }
 
-impl Display for RenderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RenderError::OpenGLError(msg) => write!(f, "OpenGL error: {}", msg),
-            RenderError::InvalidTexture(msg) => write!(f, "Invalid texture: {}", msg),
-            RenderError::RendererDestroyed => write!(f, "Renderer was destroyed"),
-            RenderError::Generic(msg) => write!(f, "Rendering error: {}", msg),
-        }
-    }
-}
-
-impl Error for RenderError {}
+// Display and Error traits are automatically implemented by thiserror
 
 /// Result type for initialization operations
 pub type InitResult<T> = Result<T, InitError>;

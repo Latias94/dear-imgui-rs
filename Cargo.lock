@@ -2144,6 +2144,8 @@ dependencies = [
  "mint",
  "parking_lot",
  "pretty_assertions",
+ "thiserror 2.0.16",
+ "tracing",
 ]
 
 [[package]]
@@ -2192,6 +2194,7 @@ dependencies = [
  "memoffset",
  "pollster",
  "smallvec",
+ "thiserror 2.0.16",
  "winit",
 ]
 
@@ -2215,6 +2218,7 @@ dependencies = [
  "dear-imgui",
  "dear-imgui-sys",
  "smallvec",
+ "thiserror 2.0.16",
  "wgpu",
 ]
 

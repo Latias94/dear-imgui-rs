@@ -82,8 +82,8 @@ impl AppWindow {
         let context = context.make_current(&surface)?;
 
         // Setup Dear ImGui
-        let mut imgui_context = Context::create();
-        imgui_context.set_ini_filename(None::<String>);
+        let mut imgui_context = Context::create_or_panic();
+        imgui_context.set_ini_filename_or_panic(None::<String>);
 
         let mut platform = WinitPlatform::new(&mut imgui_context);
         platform.attach_window(

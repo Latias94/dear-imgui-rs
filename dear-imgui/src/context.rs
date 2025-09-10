@@ -25,7 +25,7 @@ use crate::ui;
 ///
 /// Creating a new active context:
 /// ```
-/// let ctx = dear_imgui::Context::create();
+/// let ctx = dear_imgui::Context::create_or_panic();
 /// // ctx is dropped naturally when it goes out of scope, which deactivates and destroys the
 /// // context
 /// ```
@@ -33,9 +33,9 @@ use crate::ui;
 /// Never try to create an active context when another one is active:
 ///
 /// ```should_panic
-/// let ctx1 = dear_imgui::Context::create();
+/// let ctx1 = dear_imgui::Context::create_or_panic();
 ///
-/// let ctx2 = dear_imgui::Context::create(); // PANIC
+/// let ctx2 = dear_imgui::Context::create_or_panic(); // PANIC
 /// ```
 #[derive(Debug)]
 pub struct Context {
@@ -71,27 +71,55 @@ fn no_current_context() -> bool {
 impl Context {
     /// Creates a new active Dear ImGui context.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if an active context already exists
-    pub fn create() -> Context {
+    /// Returns an error if:
+    /// - Another context is already active
+    /// - Failed to create the underlying ImGui context
+    pub fn create() -> crate::error::ImGuiResult<Context> {
         Self::create_internal(None)
     }
 
     /// Creates a new active Dear ImGui context with a shared font atlas.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if an active context already exists
-    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> Context {
+    /// Returns an error if:
+    /// - Another context is already active
+    /// - Failed to create the underlying ImGui context
+    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> crate::error::ImGuiResult<Context> {
         Self::create_internal(Some(shared_font_atlas))
     }
 
-    fn create_internal(mut shared_font_atlas: Option<SharedFontAtlas>) -> Context {
+    /// Creates a new active Dear ImGui context (panics on error).
+    ///
+    /// This is a convenience method that panics if context creation fails.
+    /// Use `create()` for proper error handling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another context is already active or context creation fails.
+    pub fn create_or_panic() -> Context {
+        Self::create().expect("Failed to create Dear ImGui context")
+    }
+
+    /// Creates a new active Dear ImGui context with a shared font atlas (panics on error).
+    ///
+    /// This is a convenience method that panics if context creation fails.
+    /// Use `create_with_shared_font_atlas()` for proper error handling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another context is already active or context creation fails.
+    pub fn create_with_shared_font_atlas_or_panic(shared_font_atlas: SharedFontAtlas) -> Context {
+        Self::create_with_shared_font_atlas(shared_font_atlas).expect("Failed to create Dear ImGui context")
+    }
+
+    fn create_internal(mut shared_font_atlas: Option<SharedFontAtlas>) -> crate::error::ImGuiResult<Context> {
         let _guard = CTX_MUTEX.lock();
 
         if !no_current_context() {
-            panic!("A Dear ImGui context is already active");
+            return Err(crate::error::ImGuiError::ContextAlreadyActive);
         }
 
         let shared_font_atlas_ptr = match &mut shared_font_atlas {
@@ -102,7 +130,9 @@ impl Context {
         // Create the actual ImGui context
         let raw = unsafe { sys::ImGui_CreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
-            panic!("Failed to create Dear ImGui context");
+            return Err(crate::error::ImGuiError::ContextCreation {
+                reason: "ImGui_CreateContext returned null".to_string()
+            });
         }
 
         // Set it as the current context
@@ -110,7 +140,7 @@ impl Context {
             sys::ImGui_SetCurrentContext(raw);
         }
 
-        Context {
+        Ok(Context {
             raw,
             shared_font_atlas,
             ini_filename: None,
@@ -119,7 +149,7 @@ impl Context {
             renderer_name: None,
             clipboard_ctx: Box::new(UnsafeCell::new(ClipboardContext::dummy())),
             ui: crate::ui::Ui::new(),
-        }
+        })
     }
 
     /// Returns a mutable reference to the active context's IO object
@@ -228,13 +258,19 @@ impl Context {
         }
     }
 
-    /// Sets the INI filename for settings persistence  
-    pub fn set_ini_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
+    /// Sets the INI filename for settings persistence
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the filename contains null bytes
+    pub fn set_ini_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) -> crate::error::ImGuiResult<()> {
+        use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
 
-        self.ini_filename = filename.map(|f| {
-            CString::new(f.into().to_string_lossy().as_bytes()).expect("Invalid filename")
-        });
+        self.ini_filename = match filename {
+            Some(f) => Some(f.into().to_string_lossy().to_cstring_safe()?),
+            None => None,
+        };
 
         unsafe {
             let io = sys::ImGui_GetIO();
@@ -245,15 +281,34 @@ impl Context {
                 .unwrap_or(ptr::null());
             (*io).IniFilename = ptr;
         }
+        Ok(())
     }
 
-    /// Sets the log filename  
-    pub fn set_log_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
+    /// Sets the INI filename for settings persistence (panics on error)
+    ///
+    /// This is a convenience method that panics if the filename contains null bytes.
+    /// Use `set_ini_filename()` for proper error handling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the filename contains null bytes.
+    pub fn set_ini_filename_or_panic<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
+        self.set_ini_filename(filename).expect("Invalid filename")
+    }
+
+    /// Sets the log filename
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the filename contains null bytes
+    pub fn set_log_filename<P: Into<PathBuf>>(&mut self, filename: Option<P>) -> crate::error::ImGuiResult<()> {
+        use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
 
-        self.log_filename = filename.map(|f| {
-            CString::new(f.into().to_string_lossy().as_bytes()).expect("Invalid filename")
-        });
+        self.log_filename = match filename {
+            Some(f) => Some(f.into().to_string_lossy().to_cstring_safe()?),
+            None => None,
+        };
 
         unsafe {
             let io = sys::ImGui_GetIO();
@@ -264,13 +319,34 @@ impl Context {
                 .unwrap_or(ptr::null());
             (*io).LogFilename = ptr;
         }
+        Ok(())
+    }
+
+    /// Sets the log filename (panics on error)
+    ///
+    /// This is a convenience method that panics if the filename contains null bytes.
+    /// Use `set_log_filename()` for proper error handling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the filename contains null bytes.
+    pub fn set_log_filename_or_panic<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
+        self.set_log_filename(filename).expect("Invalid filename")
     }
 
     /// Sets the platform name
-    pub fn set_platform_name<S: Into<String>>(&mut self, name: Option<S>) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the name contains null bytes
+    pub fn set_platform_name<S: Into<String>>(&mut self, name: Option<S>) -> crate::error::ImGuiResult<()> {
+        use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
 
-        self.platform_name = name.map(|n| CString::new(n.into()).expect("Invalid platform name"));
+        self.platform_name = match name {
+            Some(n) => Some(n.into().to_cstring_safe()?),
+            None => None,
+        };
 
         unsafe {
             let io = sys::ImGui_GetIO();
@@ -281,13 +357,34 @@ impl Context {
                 .unwrap_or(ptr::null());
             (*io).BackendPlatformName = ptr;
         }
+        Ok(())
+    }
+
+    /// Sets the platform name (panics on error)
+    ///
+    /// This is a convenience method that panics if the name contains null bytes.
+    /// Use `set_platform_name()` for proper error handling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the name contains null bytes.
+    pub fn set_platform_name_or_panic<S: Into<String>>(&mut self, name: Option<S>) {
+        self.set_platform_name(name).expect("Invalid platform name")
     }
 
     /// Sets the renderer name
-    pub fn set_renderer_name<S: Into<String>>(&mut self, name: Option<S>) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the name contains null bytes
+    pub fn set_renderer_name<S: Into<String>>(&mut self, name: Option<S>) -> crate::error::ImGuiResult<()> {
+        use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
 
-        self.renderer_name = name.map(|n| CString::new(n.into()).expect("Invalid renderer name"));
+        self.renderer_name = match name {
+            Some(n) => Some(n.into().to_cstring_safe()?),
+            None => None,
+        };
 
         unsafe {
             let io = sys::ImGui_GetIO();
@@ -298,6 +395,19 @@ impl Context {
                 .unwrap_or(ptr::null());
             (*io).BackendRendererName = ptr;
         }
+        Ok(())
+    }
+
+    /// Sets the renderer name (panics on error)
+    ///
+    /// This is a convenience method that panics if the name contains null bytes.
+    /// Use `set_renderer_name()` for proper error handling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the name contains null bytes.
+    pub fn set_renderer_name_or_panic<S: Into<String>>(&mut self, name: Option<S>) {
+        self.set_renderer_name(name).expect("Invalid renderer name")
     }
 
     /// Get mutable access to the platform IO
@@ -503,16 +613,48 @@ pub struct SuspendedContext(Context);
 
 impl SuspendedContext {
     /// Creates a new suspended Dear ImGui context
-    pub fn create() -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if failed to create the underlying ImGui context
+    pub fn create() -> crate::error::ImGuiResult<Self> {
         Self::create_internal(None)
     }
 
     /// Creates a new suspended Dear ImGui context with a shared font atlas
-    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if failed to create the underlying ImGui context
+    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> crate::error::ImGuiResult<Self> {
         Self::create_internal(Some(shared_font_atlas))
     }
 
-    fn create_internal(mut shared_font_atlas: Option<SharedFontAtlas>) -> Self {
+    /// Creates a new suspended Dear ImGui context (panics on error)
+    ///
+    /// This is a convenience method that panics if context creation fails.
+    /// Use `create()` for proper error handling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if context creation fails.
+    pub fn create_or_panic() -> Self {
+        Self::create().expect("Failed to create Dear ImGui context")
+    }
+
+    /// Creates a new suspended Dear ImGui context with a shared font atlas (panics on error)
+    ///
+    /// This is a convenience method that panics if context creation fails.
+    /// Use `create_with_shared_font_atlas()` for proper error handling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if context creation fails.
+    pub fn create_with_shared_font_atlas_or_panic(shared_font_atlas: SharedFontAtlas) -> Self {
+        Self::create_with_shared_font_atlas(shared_font_atlas).expect("Failed to create Dear ImGui context")
+    }
+
+    fn create_internal(mut shared_font_atlas: Option<SharedFontAtlas>) -> crate::error::ImGuiResult<Self> {
         let _guard = CTX_MUTEX.lock();
 
         let shared_font_atlas_ptr = match &mut shared_font_atlas {
@@ -522,7 +664,9 @@ impl SuspendedContext {
 
         let raw = unsafe { sys::ImGui_CreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
-            panic!("Failed to create Dear ImGui context");
+            return Err(crate::error::ImGuiError::ContextCreation {
+                reason: "ImGui_CreateContext returned null".to_string()
+            });
         }
 
         let ctx = Context {
@@ -541,7 +685,7 @@ impl SuspendedContext {
             clear_current_context();
         }
 
-        SuspendedContext(ctx)
+        Ok(SuspendedContext(ctx))
     }
 
     /// Attempts to activate this suspended context

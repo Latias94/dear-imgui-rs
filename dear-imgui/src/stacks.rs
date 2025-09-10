@@ -17,7 +17,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let font_data_sources = [];
     /// // At initialization time
     /// let my_custom_font = ctx.fonts().add_font(&font_data_sources);
@@ -44,7 +44,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
     /// let color = ui.push_style_color(StyleColor::Text, RED);
@@ -81,7 +81,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// let style = ui.push_style_var(StyleVar::Alpha(0.2));
     /// ui.text("I'm transparent!");
@@ -263,7 +263,7 @@ impl Ui {
     /// In `dear-imgui` the same applies, we can manually specify labels with the `##` syntax:
     ///
     /// ```no_run
-    /// # let mut imgui = dear_imgui::Context::create();
+    /// # let mut imgui = dear_imgui::Context::create_or_panic();
     /// # let ui = imgui.frame();
     ///
     /// ui.button("Click##button1");
@@ -275,7 +275,7 @@ impl Ui {
     /// push an ID to the ID stack:
     ///
     /// ```no_run
-    /// # let mut imgui = dear_imgui::Context::create();
+    /// # let mut imgui = dear_imgui::Context::create_or_panic();
     /// # let ui = imgui.frame();
     ///
     /// for i in 0..10 {

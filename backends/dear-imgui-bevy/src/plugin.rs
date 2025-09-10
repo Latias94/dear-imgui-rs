@@ -80,8 +80,8 @@ impl Plugin for ImguiPlugin {
 
     fn finish(&self, app: &mut App) {
         // Create Dear ImGui context
-        let mut ctx = Context::create();
-        ctx.set_ini_filename(self.ini_filename.clone());
+        let mut ctx = Context::create_or_panic();
+        ctx.set_ini_filename_or_panic(self.ini_filename.clone());
 
         // Get display scale from primary window
         let display_scale = {

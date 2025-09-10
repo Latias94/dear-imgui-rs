@@ -189,8 +189,8 @@ impl AppWindow {
     }
 
     fn setup_imgui(&mut self) {
-        let mut context = Context::create();
-        context.set_ini_filename(Some("game_engine_docking.ini"));
+        let mut context = Context::create_or_panic();
+        context.set_ini_filename_or_panic(Some("game_engine_docking.ini"));
 
         // Enable docking
         let io = context.io_mut();
@@ -203,10 +203,18 @@ impl AppWindow {
             &mut context,
         );
 
-        let mut renderer = WgpuRenderer::new(&self.device, &self.queue, self.surface_desc.format);
+        let mut renderer = WgpuRenderer::new();
+
+        // Initialize renderer with device and queue
+        let init_info = dear_imgui_wgpu::WgpuInitInfo::new(
+            self.device.clone(),
+            self.queue.clone(),
+            self.surface_desc.format,
+        );
+        renderer.init(init_info).expect("Failed to initialize WGPU renderer");
 
         // Load font texture - this is crucial for text rendering!
-        renderer.reload_font_texture(&mut context, &self.device, &self.queue);
+        renderer.prepare_font_atlas(&mut context).expect("Failed to prepare font atlas");
 
         let clear_color = wgpu::Color {
             r: 0.1,
@@ -432,7 +440,7 @@ impl AppWindow {
 
             imgui
                 .renderer
-                .render_with_renderpass(draw_data, &self.queue, &self.device, &mut render_pass)
+                .render_draw_data(&draw_data, &mut render_pass)
                 .expect("Rendering failed");
         }
 

@@ -16,6 +16,7 @@ dear-imgui-sys = { path = "../../dear-imgui-sys" }
 wgpu.workspace = true
 bytemuck = { version = "1.0", features = ["derive"] }
 smallvec = "1.0"
+thiserror.workspace = true
 
 [features]
 default = []

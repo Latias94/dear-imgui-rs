@@ -12,7 +12,7 @@
 //!
 //! ```no_run
 //! # use dear_imgui::*;
-//! # let mut ctx = Context::create();
+//! # let mut ctx = Context::create_or_panic();
 //! # let ui = ctx.frame();
 //! // Create a dockspace
 //! let dockspace_id = ui.dockspace_over_main_viewport();

@@ -22,7 +22,7 @@
 //!     // Your OpenGL loader function
 //!     std::ptr::null()
 //! });
-//! let mut imgui = Context::create();
+//! let mut imgui = Context::create_or_panic();
 //!
 //! // Create the renderer
 //! let mut renderer = Renderer::new(&gl, &mut imgui).unwrap();

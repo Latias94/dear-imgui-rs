@@ -46,7 +46,7 @@ where
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// ui.slider_config("Example", i8::MIN, i8::MAX)
     ///     .range(4, 8)
@@ -156,7 +156,7 @@ where
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// VerticalSlider::new("Example", [20.0, 20.0], i8::MIN, i8::MAX)
     ///     .range(4, 8)
@@ -189,7 +189,7 @@ where
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// VerticalSlider::new("Example", [20.0, 20.0], i8::MIN, i8::MAX)
     ///     .range(4, 8)
@@ -288,7 +288,7 @@ where
     /// Sets the range in degrees (inclusive)
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// AngleSlider::new("Example")
     ///     .range_degrees(-20.0, 20.0)

@@ -8,7 +8,7 @@
 //!
 //! ```no_run
 //! # use dear_imgui::*;
-//! # let mut ctx = Context::create();
+//! # let mut ctx = Context::create_or_panic();
 //! # let ui = ctx.frame();
 //! // Create a drag source
 //! ui.button("Drag me!");
@@ -73,7 +73,7 @@ impl Ui {
     /// # Example
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// ui.button("Drag me!");
     /// if let Some(source) = ui.drag_drop_source_config("MY_DATA")
@@ -100,7 +100,7 @@ impl Ui {
     /// # Example
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// ui.button("Drop target");
     /// if let Some(target) = ui.drag_drop_target() {

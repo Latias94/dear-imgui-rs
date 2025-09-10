@@ -36,6 +36,9 @@ cc = "1.2"
 pkg-config = "0.3"
 xshell = "0.2"
 
+# Error handling
+thiserror = "2.0"
+
 # Utility
 mint = "0.5.6"
 env_logger = "0.11"

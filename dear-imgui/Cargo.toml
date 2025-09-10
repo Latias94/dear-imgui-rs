@@ -20,6 +20,8 @@ dear-imgui-sys = { path = "../dear-imgui-sys", version = "0.1" }
 mint.workspace = true
 parking_lot.workspace = true
 cfg-if.workspace = true
+thiserror.workspace = true
+tracing = { version = "0.1", optional = true }
 
 [features]
 default = ["docking"]
@@ -27,6 +29,8 @@ default = ["docking"]
 docking = ["dear-imgui-sys/docking"]
 # Enable multi-viewport support (requires docking)
 multi-viewport = ["docking", "dear-imgui-sys/multi-viewport"]
+# Enable tracing support for better debugging
+tracing = ["dep:tracing"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
 # Enable for WASM targets

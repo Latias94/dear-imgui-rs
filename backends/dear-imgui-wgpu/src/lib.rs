@@ -25,7 +25,7 @@
 //! let (device, queue) = adapter.request_device(&DeviceDescriptor::default(), None).await?;
 //!
 //! // Create Dear ImGui context
-//! let mut imgui = Context::create();
+//! let mut imgui = Context::create_or_panic();
 //!
 //! // Create renderer
 //! let init_info = WgpuInitInfo::new(device, TextureFormat::Bgra8UnormSrgb);

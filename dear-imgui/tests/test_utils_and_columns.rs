@@ -7,7 +7,7 @@ static TEST_MUTEX: Mutex<()> = Mutex::new(());
 #[test]
 fn test_utils_keyboard_functions() {
     let _guard = TEST_MUTEX.lock().unwrap();
-    let mut ctx = Context::create();
+    let mut ctx = Context::create_or_panic();
     ctx.io_mut().set_display_size([800.0, 600.0]);
 
     let ui = ctx.frame();
@@ -26,7 +26,7 @@ fn test_utils_keyboard_functions() {
 #[test]
 fn test_utils_mouse_functions() {
     let _guard = TEST_MUTEX.lock().unwrap();
-    let mut ctx = Context::create();
+    let mut ctx = Context::create_or_panic();
     ctx.io_mut().set_display_size([800.0, 600.0]);
 
     let ui = ctx.frame();
@@ -53,7 +53,7 @@ fn test_utils_mouse_functions() {
 #[test]
 fn test_utils_general_functions() {
     let _guard = TEST_MUTEX.lock().unwrap();
-    let mut ctx = Context::create();
+    let mut ctx = Context::create_or_panic();
     ctx.io_mut().set_display_size([800.0, 600.0]);
 
     let ui = ctx.frame();
@@ -106,7 +106,7 @@ fn test_utils_general_functions() {
 #[test]
 fn test_columns_basic_functions() {
     let _guard = TEST_MUTEX.lock().unwrap();
-    let mut ctx = Context::create();
+    let mut ctx = Context::create_or_panic();
     ctx.io_mut().set_display_size([800.0, 600.0]);
 
     let ui = ctx.frame();
@@ -150,7 +150,7 @@ fn test_columns_basic_functions() {
 #[test]
 fn test_columns_advanced_functions() {
     let _guard = TEST_MUTEX.lock().unwrap();
-    let mut ctx = Context::create();
+    let mut ctx = Context::create_or_panic();
     ctx.io_mut().set_display_size([800.0, 600.0]);
 
     let ui = ctx.frame();
@@ -195,7 +195,7 @@ fn test_columns_advanced_functions() {
 #[test]
 fn test_item_utilities() {
     let _guard = TEST_MUTEX.lock().unwrap();
-    let mut ctx = Context::create();
+    let mut ctx = Context::create_or_panic();
     ctx.io_mut().set_display_size([800.0, 600.0]);
 
     let ui = ctx.frame();

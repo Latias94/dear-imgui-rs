@@ -11,7 +11,7 @@
 //!
 //! ```no_run
 //! # use dear_imgui::*;
-//! # let mut ctx = Context::create();
+//! # let mut ctx = Context::create_or_panic();
 //! # let ui = ctx.frame();
 //! // Create a dockspace over the main viewport
 //! let dockspace_id = ui.dockspace_over_main_viewport();
@@ -147,7 +147,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dockspace_over_main_viewport_with_flags(
     ///     0,
@@ -183,7 +183,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dockspace_over_main_viewport();
     /// ```
@@ -209,7 +209,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dock_space_with_class(
     ///     0,
@@ -256,7 +256,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dock_space(0, [800.0, 600.0]);
     /// ```
@@ -278,7 +278,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dockspace_over_main_viewport();
     /// ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
@@ -306,7 +306,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dockspace_over_main_viewport();
     /// ui.set_next_window_dock_id(dockspace_id);
@@ -331,7 +331,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// let window_class = WindowClass::new(1).docking_always_tab_bar(true);
     /// ui.set_next_window_class(&window_class);
@@ -357,7 +357,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// ui.window("My Window").build(|| {
     ///     let dock_id = ui.get_window_dock_id();
@@ -383,7 +383,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create();
+    /// # let mut ctx = Context::create_or_panic();
     /// # let ui = ctx.frame();
     /// ui.window("My Window").build(|| {
     ///     if ui.is_window_docked() {
