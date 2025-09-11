@@ -1,0 +1,16 @@
+# Build artifacts
+/target/
+Cargo.lock
+
+# Generated bindings
+src/bindings.rs
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -7,6 +7,10 @@ members = [
     "backends/dear-imgui-wgpu",
     "backends/dear-imgui-glow",
     "backends/dear-imgui-bevy",
+    "extensions/dear-implot-sys",
+    "extensions/dear-implot",
+    "extensions/dear-imguizmo-sys",
+    "extensions/dear-imguizmo",
     "examples",
 ]
 

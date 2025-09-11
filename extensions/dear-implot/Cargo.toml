@@ -1,0 +1,39 @@
+[package]
+name = "dear-implot"
+version.workspace = true
+edition.workspace = true
+description = "High-level Rust bindings to ImPlot with Dear ImGui compatibility"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dear-implot"
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[package.metadata.docs.rs]
+features = ["freetype", "docking"]
+
+[dependencies]
+bitflags.workspace = true
+dear-imgui = { path = "../../dear-imgui", version = "0.1" }
+dear-implot-sys = { path = "../dear-implot-sys", version = "0.1" }
+mint.workspace = true
+parking_lot.workspace = true
+cfg-if.workspace = true
+thiserror.workspace = true
+
+[features]
+default = ["docking"]
+# Enable docking branch features (default)
+docking = ["dear-imgui/docking", "dear-implot-sys/docking"]
+# Enable multi-viewport support (requires docking)
+multi-viewport = ["docking", "dear-imgui/multi-viewport", "dear-implot-sys/multi-viewport"]
+# Enable freetype font rasterizer
+freetype = ["dear-imgui/freetype", "dear-implot-sys/freetype"]
+# Enable for WASM targets
+wasm = ["dear-imgui/wasm", "dear-implot-sys/wasm"]
+
+[dev-dependencies]
+approx = "0.5"
+pretty_assertions = "1.4"

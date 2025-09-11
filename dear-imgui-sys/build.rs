@@ -175,4 +175,14 @@ extern thread_local ImGuiContext* MyImGuiTLS;
     }
 
     build.compile("dear_imgui");
+
+    // Export paths and defines for extension crates (similar to imgui-sys)
+    println!("cargo:THIRD_PARTY={}", imgui_src.display());
+    println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
+
+    // Export common defines that extensions might need
+    println!("cargo:DEFINE_IMGUI_DEFINE_MATH_OPERATORS=");
+    if target_env == "msvc" {
+        println!("cargo:DEFINE_IMGUI_API=__declspec(dllexport)");
+    }
 }

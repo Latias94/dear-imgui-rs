@@ -1,45 +1,33 @@
 [package]
-name = "dear-imgui-sys"
+name = "dear-implot-sys"
 version.workspace = true
 edition.workspace = true
-description = "Low level FFI bindings for Dear ImGui with docking support"
+description = "Low-level FFI bindings for ImPlot using C++ bindgen"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation = "https://docs.rs/dear-imgui-sys"
 categories.workspace = true
 keywords.workspace = true
 build = "build.rs"
-links = "dear-imgui"
-
-# Exclude unnecessary files to reduce package size
-exclude = [
-    "imgui/backends/",
-    "imgui/docs/", 
-    "imgui/examples/",
-    "imgui/misc/cpp/",
-    "imgui/misc/debuggers/",
-    "imgui/misc/fonts/",
-    "imgui/misc/single_file/",
-]
+links = "dear_implot"
 
 [dependencies]
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.1" }
 mint.workspace = true
 cfg-if.workspace = true
 
 [build-dependencies]
 bindgen.workspace = true
 cc.workspace = true
-pkg-config = { workspace = true, optional = true }
 xshell = "0.2"
 
 [features]
 default = ["docking"]
 # Enable docking branch features (default)
-docking = []
+docking = ["dear-imgui-sys/docking"]
 # Enable multi-viewport support (requires docking)
-multi-viewport = ["docking"]
+multi-viewport = ["docking", "dear-imgui-sys/multi-viewport"]
 # Enable freetype font rasterizer
-freetype = ["pkg-config"]
+freetype = ["dear-imgui-sys/freetype"]
 # Enable for WASM targets
-wasm = []
+wasm = ["dear-imgui-sys/wasm"]

@@ -21,6 +21,84 @@ impl Ui {
     pub fn drag_config<T: AsRef<str>, K: DataTypeKind>(&self, label: T) -> Drag<K, T> {
         Drag::new(label)
     }
+
+    /// Creates a drag float2 slider (2 floats)
+    #[doc(alias = "DragFloat2")]
+    pub fn drag_float2(&self, label: impl AsRef<str>, values: &mut [f32; 2]) -> bool {
+        unsafe {
+            let label_cstr = self.scratch_txt(label);
+            sys::ImGui_DragFloat2(
+                label_cstr,
+                values.as_mut_ptr(),
+                1.0,
+                0.0,
+                0.0,
+                ptr::null(),
+                0,
+            )
+        }
+    }
+
+    /// Creates a drag float3 slider (3 floats)
+    #[doc(alias = "DragFloat3")]
+    pub fn drag_float3(&self, label: impl AsRef<str>, values: &mut [f32; 3]) -> bool {
+        unsafe {
+            let label_cstr = self.scratch_txt(label);
+            sys::ImGui_DragFloat3(
+                label_cstr,
+                values.as_mut_ptr(),
+                1.0,
+                0.0,
+                0.0,
+                ptr::null(),
+                0,
+            )
+        }
+    }
+
+    /// Creates a drag float4 slider (4 floats)
+    #[doc(alias = "DragFloat4")]
+    pub fn drag_float4(&self, label: impl AsRef<str>, values: &mut [f32; 4]) -> bool {
+        unsafe {
+            let label_cstr = self.scratch_txt(label);
+            sys::ImGui_DragFloat4(
+                label_cstr,
+                values.as_mut_ptr(),
+                1.0,
+                0.0,
+                0.0,
+                ptr::null(),
+                0,
+            )
+        }
+    }
+
+    /// Creates a drag int2 slider (2 ints)
+    #[doc(alias = "DragInt2")]
+    pub fn drag_int2(&self, label: impl AsRef<str>, values: &mut [i32; 2]) -> bool {
+        unsafe {
+            let label_cstr = self.scratch_txt(label);
+            sys::ImGui_DragInt2(label_cstr, values.as_mut_ptr(), 1.0, 0, 0, ptr::null(), 0)
+        }
+    }
+
+    /// Creates a drag int3 slider (3 ints)
+    #[doc(alias = "DragInt3")]
+    pub fn drag_int3(&self, label: impl AsRef<str>, values: &mut [i32; 3]) -> bool {
+        unsafe {
+            let label_cstr = self.scratch_txt(label);
+            sys::ImGui_DragInt3(label_cstr, values.as_mut_ptr(), 1.0, 0, 0, ptr::null(), 0)
+        }
+    }
+
+    /// Creates a drag int4 slider (4 ints)
+    #[doc(alias = "DragInt4")]
+    pub fn drag_int4(&self, label: impl AsRef<str>, values: &mut [i32; 4]) -> bool {
+        unsafe {
+            let label_cstr = self.scratch_txt(label);
+            sys::ImGui_DragInt4(label_cstr, values.as_mut_ptr(), 1.0, 0, 0, ptr::null(), 0)
+        }
+    }
 }
 
 /// Builder for a drag slider widget
