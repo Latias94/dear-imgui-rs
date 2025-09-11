@@ -168,19 +168,38 @@ impl WgpuTextureManager {
             .ok_or_else(|| RendererError::BadTexture("No pixel data available".to_string()))?;
 
         // Convert ImGui texture format to WGPU format and handle data conversion
-        let (wgpu_format, converted_data) = match format {
-            ImGuiTextureFormat::RGBA32 => (TextureFormat::Rgba8Unorm, pixels.to_vec()),
+        // This matches the texture format handling in imgui_impl_wgpu.cpp
+        let (wgpu_format, converted_data, _bytes_per_pixel) = match format {
+            ImGuiTextureFormat::RGBA32 => {
+                // RGBA32 maps directly to RGBA8Unorm (matches C++ implementation)
+                if pixels.len() != (width * height * 4) as usize {
+                    return Err(RendererError::BadTexture(format!(
+                        "RGBA32 texture data size mismatch: expected {} bytes, got {}",
+                        width * height * 4,
+                        pixels.len()
+                    )));
+                }
+                (TextureFormat::Rgba8Unorm, pixels.to_vec(), 4u32)
+            }
             ImGuiTextureFormat::Alpha8 => {
-                // Convert Alpha8 to RGBA32 for WGPU
+                // Convert Alpha8 to RGBA32 for WGPU (white RGB + original alpha)
+                // This ensures compatibility with the standard RGBA8Unorm format
+                if pixels.len() != (width * height) as usize {
+                    return Err(RendererError::BadTexture(format!(
+                        "Alpha8 texture data size mismatch: expected {} bytes, got {}",
+                        width * height,
+                        pixels.len()
+                    )));
+                }
                 let mut rgba_data = Vec::with_capacity(pixels.len() * 4);
                 for &alpha in pixels {
-                    rgba_data.extend_from_slice(&[255, 255, 255, alpha]); // White + alpha
+                    rgba_data.extend_from_slice(&[255, 255, 255, alpha]); // White RGB + alpha
                 }
-                (TextureFormat::Rgba8Unorm, rgba_data)
+                (TextureFormat::Rgba8Unorm, rgba_data, 4u32)
             }
         };
 
-        // Create WGPU texture
+        // Create WGPU texture (matches the descriptor setup in imgui_impl_wgpu.cpp)
         let texture = device.create_texture(&TextureDescriptor {
             label: Some("Dear ImGui Texture"),
             size: Extent3d {
@@ -196,7 +215,17 @@ impl WgpuTextureManager {
             view_formats: &[],
         });
 
-        // Upload texture data
+        // Validate texture data size before upload
+        let expected_size = (width * height * 4) as usize; // Always RGBA after conversion
+        if converted_data.len() != expected_size {
+            return Err(RendererError::BadTexture(format!(
+                "Converted texture data size mismatch: expected {} bytes, got {}",
+                expected_size,
+                converted_data.len()
+            )));
+        }
+
+        // Upload texture data (matches the upload logic in imgui_impl_wgpu.cpp)
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -207,7 +236,7 @@ impl WgpuTextureManager {
             &converted_data,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(width * 4), // RGBA = 4 bytes per pixel
+                bytes_per_row: Some(width * 4), // Always 4 bytes per pixel (RGBA)
                 rows_per_image: Some(height),
             },
             Extent3d {
@@ -326,12 +355,15 @@ impl WgpuTextureManager {
     ///
     /// ```rust,no_run
     /// # use dear_imgui_wgpu::*;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut texture_manager = WgpuTextureManager::new();
     /// # let device = todo!();
     /// # let queue = todo!();
     /// # let mut texture_data = dear_imgui::TextureData::new();
     /// let result = texture_manager.update_single_texture(&texture_data, &device, &queue)?;
     /// result.apply_to(&mut texture_data);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn update_single_texture(
         &mut self,
@@ -351,7 +383,7 @@ impl WgpuTextureManager {
             TextureStatus::WantUpdates => {
                 match self.update_texture_from_data(device, queue, texture_data) {
                     Ok(_) => Ok(TextureUpdateResult::Updated),
-                    Err(e) => Ok(TextureUpdateResult::Failed),
+                    Err(_e) => Ok(TextureUpdateResult::Failed),
                 }
             }
             TextureStatus::WantDestroy => {

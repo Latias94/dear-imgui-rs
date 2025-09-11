@@ -65,23 +65,82 @@ impl Uniforms {
     /// Determine gamma value based on texture format
     ///
     /// This matches the gamma detection logic in ImGui_ImplWGPU_SetupRenderState
+    /// from the official C++ implementation, supporting all sRGB texture formats.
     pub fn gamma_for_format(format: TextureFormat) -> f32 {
         match format {
-            // sRGB formats need gamma correction
-            TextureFormat::Rgba8UnormSrgb
-            | TextureFormat::Bgra8UnormSrgb
+            // sRGB formats need gamma correction (gamma = 2.2)
+            // This matches the complete list from imgui_impl_wgpu.cpp
+
+            // ASTC sRGB formats
+            TextureFormat::Astc {
+                block: AstcBlock::B4x4,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B5x4,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B5x5,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B6x5,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B6x6,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B8x5,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B8x6,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B8x8,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B10x5,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B10x6,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B10x8,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B10x10,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B12x10,
+                channel: AstcChannel::UnormSrgb,
+            }
+            | TextureFormat::Astc {
+                block: AstcBlock::B12x12,
+                channel: AstcChannel::UnormSrgb,
+            }
+            // BC (Block Compression) sRGB formats
             | TextureFormat::Bc1RgbaUnormSrgb
             | TextureFormat::Bc2RgbaUnormSrgb
             | TextureFormat::Bc3RgbaUnormSrgb
             | TextureFormat::Bc7RgbaUnormSrgb
+            // Standard sRGB formats
+            | TextureFormat::Rgba8UnormSrgb
+            | TextureFormat::Bgra8UnormSrgb
+            // ETC2 sRGB formats
             | TextureFormat::Etc2Rgb8UnormSrgb
             | TextureFormat::Etc2Rgb8A1UnormSrgb
-            | TextureFormat::Etc2Rgba8UnormSrgb
-            | TextureFormat::Astc {
-                block: _,
-                channel: AstcChannel::UnormSrgb,
-            } => 2.2,
-            // Linear formats don't need gamma correction
+            | TextureFormat::Etc2Rgba8UnormSrgb => 2.2,
+            // Linear formats don't need gamma correction (gamma = 1.0)
             _ => 1.0,
         }
     }

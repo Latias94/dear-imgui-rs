@@ -20,15 +20,15 @@
 //!
 //! // Initialize WGPU device and queue
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let instance = Instance::new(InstanceDescriptor::default());
+//! let instance = Instance::new(&InstanceDescriptor::default());
 //! let adapter = instance.request_adapter(&RequestAdapterOptions::default()).await.unwrap();
-//! let (device, queue) = adapter.request_device(&DeviceDescriptor::default(), None).await?;
+//! let (device, queue) = adapter.request_device(&DeviceDescriptor::default()).await?;
 //!
 //! // Create Dear ImGui context
 //! let mut imgui = Context::create_or_panic();
 //!
 //! // Create renderer
-//! let init_info = WgpuInitInfo::new(device, TextureFormat::Bgra8UnormSrgb);
+//! let init_info = WgpuInitInfo::new(device, queue, TextureFormat::Bgra8UnormSrgb);
 //! let mut renderer = WgpuRenderer::new();
 //! renderer.init(init_info)?;
 //! renderer.configure_imgui_context(&mut imgui);

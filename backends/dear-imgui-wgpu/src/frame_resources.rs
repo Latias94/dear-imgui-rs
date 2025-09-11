@@ -119,7 +119,7 @@ impl FrameResources {
         let vertex_bytes = unsafe {
             std::slice::from_raw_parts(
                 vertices.as_ptr() as *const u8,
-                vertices.len() * std::mem::size_of::<DrawVert>(),
+                std::mem::size_of_val(vertices),
             )
         };
 
@@ -154,7 +154,7 @@ impl FrameResources {
         let index_bytes = unsafe {
             std::slice::from_raw_parts(
                 indices.as_ptr() as *const u8,
-                indices.len() * std::mem::size_of::<DrawIdx>(),
+                std::mem::size_of_val(indices),
             )
         };
 

@@ -151,14 +151,29 @@ impl WgpuRenderer {
             use_gamma_correction,
         );
 
-        // Create depth stencil state if needed
+        // Create depth stencil state if needed (matches imgui_impl_wgpu.cpp depth-stencil setup)
         let depth_stencil = backend_data
             .depth_stencil_format
             .map(|format| DepthStencilState {
                 format,
-                depth_write_enabled: false,
-                depth_compare: CompareFunction::Always,
-                stencil: StencilState::default(),
+                depth_write_enabled: false, // matches WGPUOptionalBool_False in C++
+                depth_compare: CompareFunction::Always, // matches WGPUCompareFunction_Always
+                stencil: StencilState {
+                    front: StencilFaceState {
+                        compare: CompareFunction::Always, // matches WGPUCompareFunction_Always
+                        fail_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
+                        depth_fail_op: StencilOperation::Keep, // matches WGPUStencilOperation_Keep
+                        pass_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
+                    },
+                    back: StencilFaceState {
+                        compare: CompareFunction::Always, // matches WGPUCompareFunction_Always
+                        fail_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
+                        depth_fail_op: StencilOperation::Keep, // matches WGPUStencilOperation_Keep
+                        pass_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
+                    },
+                    read_mask: 0xff,  // default value
+                    write_mask: 0xff, // default value
+                },
                 bias: DepthBiasState::default(),
             });
 
@@ -307,10 +322,13 @@ impl WgpuRenderer {
     ///
     /// ```rust,no_run
     /// # use dear_imgui_wgpu::*;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut renderer = WgpuRenderer::new();
     /// # let mut texture_data = dear_imgui::TextureData::new();
     /// let result = renderer.update_texture(&texture_data)?;
     /// result.apply_to(&mut texture_data);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn update_texture(
         &mut self,
@@ -445,17 +463,17 @@ impl WgpuRenderer {
         // Ensure buffer capacity and upload data
         frame_resources
             .ensure_vertex_buffer_capacity(&backend_data.device, total_vtx_count)
-            .map_err(|e| RendererError::BufferCreationFailed(e))?;
+            .map_err(RendererError::BufferCreationFailed)?;
         frame_resources
             .ensure_index_buffer_capacity(&backend_data.device, total_idx_count)
-            .map_err(|e| RendererError::BufferCreationFailed(e))?;
+            .map_err(RendererError::BufferCreationFailed)?;
 
         frame_resources
             .upload_vertex_data(&backend_data.queue, &vertices)
-            .map_err(|e| RendererError::BufferCreationFailed(e))?;
+            .map_err(RendererError::BufferCreationFailed)?;
         frame_resources
             .upload_index_data(&backend_data.queue, &indices)
-            .map_err(|e| RendererError::BufferCreationFailed(e))?;
+            .map_err(RendererError::BufferCreationFailed)?;
 
         Ok(())
     }
@@ -640,5 +658,11 @@ impl WgpuRenderer {
     pub fn shutdown(&mut self) {
         self.invalidate_device_objects().ok();
         self.backend_data = None;
+    }
+}
+
+impl Default for WgpuRenderer {
+    fn default() -> Self {
+        Self::new()
     }
 }
