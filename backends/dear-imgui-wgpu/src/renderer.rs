@@ -68,7 +68,9 @@ impl WgpuRenderer {
         let mut flags = io.backend_flags();
 
         // Set WGPU renderer capabilities
+        // We can honor the ImDrawCmd::VtxOffset field, allowing for large meshes.
         flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
+        // We can honor ImGuiPlatformIO::Textures[] requests during render.
         flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
 
         io.set_backend_flags(flags);

@@ -1,0 +1,40 @@
+[package]
+name = "dear-imnodeflow"
+version.workspace = true
+edition.workspace = true
+description = "High-level Rust bindings to ImNodeFlow with Dear ImGui compatibility"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dear-imnodeflow"
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[package.metadata.docs.rs]
+features = ["freetype", "docking"]
+
+[dependencies]
+bitflags.workspace = true
+dear-imgui = { path = "../../dear-imgui", version = "0.1" }
+dear-imnodeflow-sys = { path = "../dear-imnodeflow-sys", version = "0.1" }
+mint.workspace = true
+parking_lot.workspace = true
+cfg-if.workspace = true
+thiserror.workspace = true
+log.workspace = true
+
+[features]
+default = ["docking"]
+# Enable docking branch features (default)
+docking = ["dear-imgui/docking", "dear-imnodeflow-sys/docking"]
+# Enable multi-viewport support (requires docking)
+multi-viewport = ["docking", "dear-imgui/multi-viewport", "dear-imnodeflow-sys/multi-viewport"]
+# Enable freetype font rasterizer
+freetype = ["dear-imgui/freetype", "dear-imnodeflow-sys/freetype"]
+# Enable for WASM targets
+wasm = ["dear-imgui/wasm", "dear-imnodeflow-sys/wasm"]
+
+[dev-dependencies]
+approx = "0.5"
+pretty_assertions = "1.4"

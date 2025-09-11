@@ -10,6 +10,8 @@ members = [
     "extensions/dear-implot-sys",
     "extensions/dear-implot",
     "extensions/dear-imguizmo",
+    "extensions/dear-imnodeflow-sys",
+    "extensions/dear-imnodeflow",
     "examples",
 ]
 
@@ -43,6 +45,7 @@ xshell = "0.2"
 thiserror = "2.0"
 
 # Logging
+log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 

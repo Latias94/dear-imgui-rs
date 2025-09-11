@@ -37,6 +37,10 @@ path = "implot_basic.rs"
 name = "imguizmo_basic"
 path = "imguizmo_basic.rs"
 
+[[bin]]
+name = "imnodeflow_basic"
+path = "imnodeflow_basic.rs"
+
 [dependencies]
 dear-imgui = { path = "../dear-imgui" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit" }

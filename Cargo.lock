@@ -2254,6 +2254,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "dear-imnodeflow"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "bitflags 2.9.4",
+ "cfg-if",
+ "dear-imgui",
+ "dear-imnodeflow-sys",
+ "log",
+ "mint",
+ "parking_lot",
+ "pretty_assertions",
+ "thiserror 2.0.16",
+]
+
+[[package]]
+name = "dear-imnodeflow-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cfg-if",
+ "dear-imgui-sys",
+ "mint",
+ "xshell",
+]
+
+[[package]]
 name = "dear-implot"
 version = "0.1.0"
 dependencies = [

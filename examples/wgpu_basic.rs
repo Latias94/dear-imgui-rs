@@ -101,6 +101,9 @@ impl AppWindow {
             .init(init_info)
             .expect("Failed to initialize WGPU renderer");
 
+        // Configure ImGui context with WGPU backend capabilities
+        renderer.configure_imgui_context(&mut context);
+
         // Prepare font atlas
         renderer
             .prepare_font_atlas(&mut context)
