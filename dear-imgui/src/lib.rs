@@ -144,6 +144,8 @@ pub use context::*;
 #[cfg(feature = "docking")]
 pub use dock_builder::*;
 pub use dock_space::*;
+// Export DrawListMut for extensions
+pub use draw::DrawListMut;
 pub use error::*;
 // Note: draw types are now in render module, no need to export draw::*
 pub use fonts::*;

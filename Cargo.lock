@@ -2244,25 +2244,13 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "bitflags 2.9.4",
- "cfg-if",
  "dear-imgui",
- "dear-imguizmo-sys",
+ "glam",
  "mint",
- "parking_lot",
  "pretty_assertions",
  "thiserror 2.0.16",
-]
-
-[[package]]
-name = "dear-imguizmo-sys"
-version = "0.1.0"
-dependencies = [
- "bindgen",
- "cc",
- "cfg-if",
- "dear-imgui-sys",
- "mint",
- "xshell",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2815,6 +2803,7 @@ checksum = "f2d1aab06663bdce00d6ca5e5ed586ec8d18033a771906c993a1e3755b368d85"
 dependencies = [
  "bytemuck",
  "libm",
+ "mint",
  "rand 0.9.2",
  "serde",
 ]

@@ -4,7 +4,7 @@ use dear_imgui_winit::WinitPlatform;
 use dear_imguizmo::*;
 use pollster::block_on;
 use std::{sync::Arc, time::Instant};
-use tracing::{debug, error, info, trace};
+use tracing::{error, info};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -23,9 +23,9 @@ struct ImguiState {
     last_frame: Instant,
     // ImGuizmo state
     gizmo_context: GuizmoContext,
-    object_matrix: Matrix4,
-    view_matrix: Matrix4,
-    projection_matrix: Matrix4,
+    object_matrix: glam::Mat4,
+    view_matrix: glam::Mat4,
+    projection_matrix: glam::Mat4,
     current_operation: Operation,
     current_mode: Mode,
     use_snap: bool,
@@ -123,12 +123,10 @@ impl AppWindow {
         dear_imgui::logging::log_renderer_init("WGPU");
 
         // Initialize ImGuizmo
-        let gizmo_context = GuizmoContext::create(&context);
+        let gizmo_context = GuizmoContext::new();
 
         // Initialize matrices
-        let object_matrix = [
-            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-        ];
+        let object_matrix = glam::Mat4::IDENTITY;
 
         let imgui = ImguiState {
             context,
@@ -181,40 +179,21 @@ impl AppWindow {
 }
 
 // Helper functions for matrix creation
-fn create_view_matrix(distance: f32, angle_x: f32, angle_y: f32) -> Matrix4 {
+fn create_view_matrix(distance: f32, angle_x: f32, angle_y: f32) -> glam::Mat4 {
     // Simple look-at matrix pointing towards origin
     let eye_x = distance * angle_y.cos() * angle_x.cos();
     let eye_y = distance * angle_x.sin();
     let eye_z = distance * angle_y.sin() * angle_x.cos();
 
-    // Simplified view matrix (looking at origin)
-    [
-        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -eye_x, -eye_y, -eye_z, 1.0,
-    ]
+    // Use glam's look_at_rh function
+    let eye = glam::Vec3::new(eye_x, eye_y, eye_z);
+    let center = glam::Vec3::ZERO;
+    let up = glam::Vec3::Y;
+    glam::Mat4::look_at_rh(eye, center, up)
 }
 
-fn create_projection_matrix(fov_degrees: f32, aspect: f32, near: f32, far: f32) -> Matrix4 {
-    let fov_rad = fov_degrees.to_radians();
-    let f = 1.0 / (fov_rad / 2.0).tan();
-
-    [
-        f / aspect,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        f,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        (far + near) / (near - far),
-        -1.0,
-        0.0,
-        0.0,
-        (2.0 * far * near) / (near - far),
-        0.0,
-    ]
+fn create_projection_matrix(fov_degrees: f32, aspect: f32, near: f32, far: f32) -> glam::Mat4 {
+    glam::Mat4::perspective_rh(fov_degrees.to_radians(), aspect, near, far)
 }
 
 impl AppWindow {
@@ -254,6 +233,31 @@ impl AppWindow {
             .build(|| {
                 ui.text("3D Gizmo Manipulation Demo");
                 ui.separator();
+
+                // Test drawing in ImGui window
+                let draw_list = ui.get_window_draw_list();
+                let cursor_pos = ui.cursor_screen_pos();
+
+                // Draw test lines in the window
+                draw_list
+                    .add_line(
+                        [cursor_pos[0], cursor_pos[1]],
+                        [cursor_pos[0] + 100.0, cursor_pos[1] + 50.0],
+                        0xFF00FF00, // Green
+                    )
+                    .thickness(3.0)
+                    .build();
+
+                draw_list
+                    .add_line(
+                        [cursor_pos[0], cursor_pos[1]],
+                        [cursor_pos[0] + 50.0, cursor_pos[1] + 100.0],
+                        0xFF0000FF, // Red
+                    )
+                    .thickness(3.0)
+                    .build();
+
+                ui.dummy([120.0, 120.0]); // Make space for the lines
 
                 // Operation selection
                 ui.text("Operation:");
@@ -329,10 +333,7 @@ impl AppWindow {
                 }
 
                 if ui.button("Reset Object") {
-                    self.imgui.object_matrix = [
-                        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
-                        1.0,
-                    ];
+                    self.imgui.object_matrix = glam::Mat4::IDENTITY;
                 }
 
                 ui.separator();
@@ -350,31 +351,72 @@ impl AppWindow {
                 ));
             });
 
-        // Main 3D manipulation
-        let mut manipulation_builder = gizmo_ui
-            .manipulate(&self.imgui.view_matrix, &self.imgui.projection_matrix)
-            .operation(self.imgui.current_operation)
-            .mode(self.imgui.current_mode)
-            .matrix(&mut self.imgui.object_matrix);
+        // Main 3D manipulation in a dedicated window
+        let manipulation_result = ui
+            .window("3D Gizmo Viewport")
+            .size([800.0, 600.0], Condition::FirstUseEver)
+            .position([320.0, 10.0], Condition::FirstUseEver)
+            .build(|| {
+                // Set the gizmo viewport to this window's content area
+                let content_region = ui.content_region_avail();
+                let cursor_pos = ui.cursor_screen_pos();
 
-        // Add snap if enabled
-        if self.imgui.use_snap {
-            manipulation_builder = manipulation_builder.snap(&self.imgui.snap_values);
-        }
-
-        // Execute manipulation
-        if let Some(result) = manipulation_builder.build() {
-            if result.used {
-                info!(
-                    "Object manipulated with operation: {:?}",
-                    self.imgui.current_operation
+                // Update gizmo viewport to match this window
+                let _ = gizmo_ui.set_rect(
+                    cursor_pos[0],
+                    cursor_pos[1],
+                    content_region[0],
+                    content_region[1],
                 );
-                if let Some(delta) = result.delta_matrix {
-                    debug!("Delta matrix: {:?}", delta);
+
+                ui.text("3D Gizmo should appear here");
+                ui.text(format!(
+                    "Viewport: [{:.0}, {:.0}] size: [{:.0}, {:.0}]",
+                    cursor_pos[0], cursor_pos[1], content_region[0], content_region[1]
+                ));
+
+                // Reserve space for the gizmo
+                ui.dummy(content_region);
+
+                // Get the window draw list for gizmo rendering
+                let draw_list = ui.get_window_draw_list();
+
+                // Now perform the gizmo manipulation
+                if self.imgui.use_snap {
+                    gizmo_ui.manipulate_with_snap(
+                        &draw_list,
+                        &self.imgui.view_matrix,
+                        &self.imgui.projection_matrix,
+                        self.imgui.current_operation,
+                        self.imgui.current_mode,
+                        &mut self.imgui.object_matrix,
+                        Some(&self.imgui.snap_values),
+                    )
+                } else {
+                    gizmo_ui.manipulate(
+                        &draw_list,
+                        &self.imgui.view_matrix,
+                        &self.imgui.projection_matrix,
+                        self.imgui.current_operation,
+                        self.imgui.current_mode,
+                        &mut self.imgui.object_matrix,
+                    )
+                }
+            })
+            .unwrap_or(Ok(false));
+
+        // Handle manipulation result
+        match manipulation_result {
+            Ok(modified) => {
+                if modified {
+                    info!(
+                        "Object manipulated with operation: {:?}",
+                        self.imgui.current_operation
+                    );
                 }
             }
-            if result.hovered {
-                trace!("Gizmo is hovered");
+            Err(e) => {
+                error!("Manipulation error: {:?}", e);
             }
         }
 
@@ -390,13 +432,17 @@ impl AppWindow {
                 self.imgui.view_manipulate_size,
             ];
 
-            gizmo_ui
-                .view_manipulate(&mut self.imgui.view_matrix)
-                .length(8.0)
-                .position(view_pos[0], view_pos[1])
-                .size(view_size[0], view_size[1])
-                .background_color(0x10101050)
-                .build();
+            let view_modified = gizmo_ui.view_manipulate(
+                &mut self.imgui.view_matrix,
+                8.0,
+                view_pos,
+                view_size,
+                0x10101050,
+            );
+
+            if view_modified {
+                info!("View manipulated");
+            }
         }
 
         // Matrix information window
@@ -411,14 +457,15 @@ impl AppWindow {
                 ui.separator();
 
                 // Display matrix in a readable format
+                let matrix_array = self.imgui.object_matrix.to_cols_array();
                 for row in 0..4 {
                     let start_idx = row * 4;
                     ui.text(&format!(
                         "[{:6.2}, {:6.2}, {:6.2}, {:6.2}]",
-                        self.imgui.object_matrix[start_idx],
-                        self.imgui.object_matrix[start_idx + 1],
-                        self.imgui.object_matrix[start_idx + 2],
-                        self.imgui.object_matrix[start_idx + 3]
+                        matrix_array[start_idx],
+                        matrix_array[start_idx + 1],
+                        matrix_array[start_idx + 2],
+                        matrix_array[start_idx + 3]
                     ));
                 }
 

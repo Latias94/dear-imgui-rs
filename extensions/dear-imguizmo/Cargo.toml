@@ -2,7 +2,7 @@
 name = "dear-imguizmo"
 version.workspace = true
 edition.workspace = true
-description = "High-level Rust bindings to ImGuizmo with Dear ImGui compatibility"
+description = "Pure Rust implementation of ImGuizmo - 3D gizmo manipulation library for Dear ImGui"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -17,23 +17,25 @@ features = ["freetype", "docking"]
 [dependencies]
 bitflags.workspace = true
 dear-imgui = { path = "../../dear-imgui", version = "0.1" }
-dear-imguizmo-sys = { path = "../dear-imguizmo-sys", version = "0.1" }
+glam = { version = "0.30", features = ["mint"] }
 mint.workspace = true
-parking_lot.workspace = true
-cfg-if.workspace = true
 thiserror.workspace = true
+tracing = { version = "0.1", optional = true }
 
 [features]
 default = ["docking"]
 # Enable docking branch features (default)
-docking = ["dear-imgui/docking", "dear-imguizmo-sys/docking"]
+docking = ["dear-imgui/docking"]
 # Enable multi-viewport support (requires docking)
-multi-viewport = ["docking", "dear-imgui/multi-viewport", "dear-imguizmo-sys/multi-viewport"]
+multi-viewport = ["docking", "dear-imgui/multi-viewport"]
 # Enable freetype font rasterizer
-freetype = ["dear-imgui/freetype", "dear-imguizmo-sys/freetype"]
+freetype = ["dear-imgui/freetype"]
 # Enable for WASM targets
-wasm = ["dear-imgui/wasm", "dear-imguizmo-sys/wasm"]
+wasm = ["dear-imgui/wasm"]
+# Enable tracing support for logging
+tracing = ["dep:tracing"]
 
 [dev-dependencies]
 approx = "0.5"
 pretty_assertions = "1.4"
+tracing-subscriber = "0.3"

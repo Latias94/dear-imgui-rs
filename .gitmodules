@@ -5,6 +5,3 @@
 [submodule "extensions/dear-implot-sys/third-party/implot"]
 	path = extensions/dear-implot-sys/third-party/implot
 	url = https://github.com/epezent/implot.git
-[submodule "extensions/dear-imguizmo-sys/third-party/ImGuizmo"]
-	path = extensions/dear-imguizmo-sys/third-party/ImGuizmo
-	url = https://github.com/CedricGuillemet/ImGuizmo.git

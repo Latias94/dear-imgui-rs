@@ -1,130 +1,171 @@
-//! # Dear ImGuizmo
+//! # Dear ImGuizmo - Pure Rust Implementation
 //!
-//! High-level Rust bindings for ImGuizmo, a 3D gizmo library for Dear ImGui.
-//!
-//! ImGuizmo provides interactive 3D manipulation widgets (gizmos) for translation,
-//! rotation, and scaling operations in 3D space.
+//! A pure Rust implementation of ImGuizmo, a 3D gizmo manipulation library for Dear ImGui.
+//! This crate provides comprehensive 3D transformation tools without requiring C++ FFI bindings.
 //!
 //! ## Features
 //!
-//! - **Translation gizmos**: Move objects in 3D space
-//! - **Rotation gizmos**: Rotate objects around axes
+//! - **Pure Rust**: No C++ dependencies or FFI bindings
+//! - **Translation gizmos**: Move objects in 3D space with visual feedback
+//! - **Rotation gizmos**: Rotate objects around axes with arc visualization
 //! - **Scale gizmos**: Scale objects uniformly or per-axis
-//! - **View manipulation**: Interactive camera controls
-//! - **Grid rendering**: Draw reference grids
-//! - **Matrix utilities**: Decompose and recompose transformation matrices
+//! - **View manipulation**: Interactive camera controls with cube view
+//! - **Grid rendering**: Draw reference grids for spatial orientation
+//! - **Matrix utilities**: Powered by glam for efficient math operations
 //! - **Customizable styling**: Configure colors, sizes, and appearance
+//! - **Extensions**: ImSequencer, ImCurveEdit, and GraphEditor modules
+//! - **Error handling**: Comprehensive error handling with thiserror
+//! - **Logging**: Integrated tracing support for debugging
 //!
 //! ## Quick Start
 //!
 //! ```rust,no_run
 //! use dear_imgui::*;
 //! use dear_imguizmo::*;
+//! use glam::Mat4;
 //!
-//! fn main() {
-//!     let mut imgui_ctx = Context::create_or_panic();
-//!     let mut gizmo_ctx = GuizmoContext::create(&imgui_ctx);
+//! fn main() -> Result<()> {
+//!     let mut imgui_ctx = Context::create();
+//!     let mut gizmo_ctx = GuizmoContext::new();
 //!
 //!     // In your render loop
 //!     let ui = imgui_ctx.frame();
 //!     let gizmo_ui = gizmo_ctx.get_ui(&ui);
 //!
-//!     // Set up the viewport
-//!     gizmo_ui.set_rect(0.0, 0.0, 800.0, 600.0);
-//!
 //!     // Your transformation matrix
-//!     let mut matrix = [1.0, 0.0, 0.0, 0.0,
-//!                       0.0, 1.0, 0.0, 0.0,
-//!                       0.0, 0.0, 1.0, 0.0,
-//!                       0.0, 0.0, 0.0, 1.0];
+//!     let mut transform = Mat4::IDENTITY;
 //!
 //!     // Camera matrices
-//!     let view = get_view_matrix();
-//!     let projection = get_projection_matrix();
+//!     let view = Mat4::look_at_rh(
+//!         glam::Vec3::new(0.0, 0.0, 5.0),
+//!         glam::Vec3::ZERO,
+//!         glam::Vec3::Y,
+//!     );
+//!     let projection = Mat4::perspective_rh(
+//!         45.0_f32.to_radians(),
+//!         16.0 / 9.0,
+//!         0.1,
+//!         100.0,
+//!     );
+//!
+//!     // Set the viewport
+//!     gizmo_ui.set_rect(0.0, 0.0, 800.0, 600.0);
 //!
 //!     // Manipulate the object
-//!     if let Some(result) = gizmo_ui.manipulate(&view, &projection)
-//!         .operation(Operation::TRANSLATE)
-//!         .mode(Mode::WORLD)
-//!         .matrix(&mut matrix)
-//!         .build() {
+//!     if gizmo_ui.manipulate(
+//!         &view,
+//!         &projection,
+//!         Operation::TRANSLATE,
+//!         Mode::WORLD,
+//!         &mut transform,
+//!     )? {
 //!         // Object was manipulated
 //!         println!("Object moved!");
 //!     }
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Advanced Usage
+//!
+//! ```rust,no_run
+//! use dear_imgui::*;
+//! use dear_imguizmo::*;
+//! use glam::{Mat4, Vec3};
+//!
+//! fn advanced_example() -> Result<()> {
+//!     let mut imgui_ctx = Context::create();
+//!     let mut gizmo_ctx = GuizmoContext::new();
+//!
+//!     let ui = imgui_ctx.frame();
+//!     let gizmo_ui = gizmo_ctx.get_ui(&ui);
+//!
+//!     // Configure style
+//!     let mut style = gizmo_ui.get_style();
+//!     style.translation_line_thickness = 4.0;
+//!     style.colors[ColorElement::DirectionX as usize] = [1.0, 0.0, 0.0, 1.0];
+//!     gizmo_ui.set_style(&style);
+//!
+//!     // Enable snapping
+//!     let snap = [1.0, 1.0, 1.0]; // 1 unit snap
+//!
+//!     let mut transform = Mat4::IDENTITY;
+//!     let view = Mat4::look_at_rh(Vec3::new(5.0, 5.0, 5.0), Vec3::ZERO, Vec3::Y);
+//!     let projection = Mat4::perspective_rh(45.0_f32.to_radians(), 16.0/9.0, 0.1, 100.0);
+//!
+//!     // Multi-operation gizmo
+//!     let operation = Operation::TRANSLATE | Operation::ROTATE | Operation::SCALE_UNIFORM;
+//!
+//!     if gizmo_ui.manipulate_with_snap(
+//!         &view,
+//!         &projection,
+//!         operation,
+//!         Mode::LOCAL,
+//!         &mut transform,
+//!         Some(&snap),
+//!     )? {
+//!         println!("Transform changed with snapping!");
+//!     }
+//!
+//!     // Draw helper grid
+//!     gizmo_ui.draw_grid(&view, &projection, &Mat4::IDENTITY, 10.0);
+//!
+//!     // View manipulation cube
+//!     let mut view_matrix = view;
+//!     gizmo_ui.view_manipulate(
+//!         &mut view_matrix,
+//!         8.0, // distance
+//!         [650.0, 50.0], // position
+//!         [128.0, 128.0], // size
+//!         0x10101010, // background color
+//!     );
+//!
+//!     Ok(())
 //! }
 //! ```
 
 #![deny(missing_docs)]
+#![warn(clippy::all)]
+#![allow(clippy::too_many_arguments)] // ImGuizmo naturally has many parameters
 
-use std::ffi::CString;
-use std::ptr;
-
+// Re-export essential dependencies
 pub use dear_imgui as imgui;
-pub use dear_imguizmo_sys as sys;
+pub use glam;
 
+// Core modules
 mod context;
-mod gizmo;
+mod error;
+mod math;
 mod style;
 mod types;
+mod utils;
 
+// Feature modules
+mod draw;
+mod gizmo;
+mod interaction;
+mod view;
+
+// Extension modules
+pub mod extensions;
+
+// Re-export public API
 pub use context::*;
-pub use gizmo::*;
+pub use error::*;
+pub use math::*;
 pub use style::*;
 pub use types::*;
+pub use utils::*;
 
-/// Re-export commonly used types from dear-imgui
+// Re-export commonly used types from dear-imgui
 pub use dear_imgui::{Context as ImGuiContext, Ui};
 
 /// Result type for ImGuizmo operations
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, GuizmoError>;
 
-/// Error types for ImGuizmo operations
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    /// Invalid matrix data
-    #[error("Invalid matrix data: {0}")]
-    InvalidMatrix(String),
+/// Version information
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-    /// Invalid operation
-    #[error("Invalid operation: {0}")]
-    InvalidOperation(String),
-
-    /// Context not initialized
-    #[error("GuizmoContext not properly initialized")]
-    ContextNotInitialized,
-}
-
-/// Convert a Rust string to a C string safely
-pub(crate) fn to_cstring(s: &str) -> CString {
-    CString::new(s).unwrap_or_else(|_| CString::new("").unwrap())
-}
-
-/// Convert an optional Rust string to a C string pointer
-pub(crate) fn to_cstring_ptr(s: Option<&str>) -> *const i8 {
-    match s {
-        Some(s) => to_cstring(s).as_ptr(),
-        None => ptr::null(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cstring_conversion() {
-        let s = "test";
-        let c_str = to_cstring(s);
-        assert_eq!(c_str.to_str().unwrap(), s);
-    }
-
-    #[test]
-    fn test_cstring_ptr_conversion() {
-        let s = Some("test");
-        let ptr = to_cstring_ptr(s);
-        assert!(!ptr.is_null());
-
-        let none_ptr = to_cstring_ptr(None);
-        assert!(none_ptr.is_null());
-    }
-}
+/// Check if the library was compiled with tracing support
+pub const HAS_TRACING: bool = cfg!(feature = "tracing");

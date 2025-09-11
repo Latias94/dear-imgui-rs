@@ -9,7 +9,6 @@ members = [
     "backends/dear-imgui-bevy",
     "extensions/dear-implot-sys",
     "extensions/dear-implot",
-    "extensions/dear-imguizmo-sys",
     "extensions/dear-imguizmo",
     "examples",
 ]

@@ -474,6 +474,21 @@ impl<'ui> DrawListMut<'ui> {
         BezierCurve::new(self, pos0, cp0, cp1, pos1, color)
     }
 
+    /// Returns a triangle with the given 3 vertices `p1`, `p2` and `p3` and color `c`.
+    #[doc(alias = "AddTriangleFilled", alias = "AddTriangle")]
+    pub fn add_triangle<C>(
+        &'ui self,
+        p1: impl Into<MintVec2>,
+        p2: impl Into<MintVec2>,
+        p3: impl Into<MintVec2>,
+        c: C,
+    ) -> Triangle<'ui>
+    where
+        C: Into<ImColor32>,
+    {
+        Triangle::new(self, p1, p2, p3, c)
+    }
+
     /// Returns a polygonal line. If filled is rendered as a convex
     /// polygon, if not filled is drawn as a line specified by
     /// [`Polyline::thickness`] (default 1.0)
@@ -1054,6 +1069,92 @@ impl<'ui> Polyline<'ui> {
                     self.points.len() as i32,
                     self.color.into(),
                     sys::ImDrawFlags::default(),
+                    self.thickness,
+                )
+            }
+        }
+    }
+}
+
+/// Represents a triangle about to be drawn on the window
+#[must_use = "should call .build() to draw the object"]
+pub struct Triangle<'ui> {
+    p1: [f32; 2],
+    p2: [f32; 2],
+    p3: [f32; 2],
+    color: ImColor32,
+    thickness: f32,
+    filled: bool,
+    draw_list: &'ui DrawListMut<'ui>,
+}
+
+impl<'ui> Triangle<'ui> {
+    fn new<C>(
+        draw_list: &'ui DrawListMut<'_>,
+        p1: impl Into<MintVec2>,
+        p2: impl Into<MintVec2>,
+        p3: impl Into<MintVec2>,
+        c: C,
+    ) -> Self
+    where
+        C: Into<ImColor32>,
+    {
+        Self {
+            p1: p1.into(),
+            p2: p2.into(),
+            p3: p3.into(),
+            color: c.into(),
+            thickness: 1.0,
+            filled: false,
+            draw_list,
+        }
+    }
+
+    /// Set triangle's thickness (default to 1.0 pixel)
+    pub fn thickness(mut self, thickness: f32) -> Self {
+        self.thickness = thickness;
+        self
+    }
+
+    /// Set to `true` to make a filled triangle (default to `false`).
+    pub fn filled(mut self, filled: bool) -> Self {
+        self.filled = filled;
+        self
+    }
+
+    /// Draw the triangle on the window.
+    pub fn build(self) {
+        let p1 = sys::ImVec2 {
+            x: self.p1[0],
+            y: self.p1[1],
+        };
+        let p2 = sys::ImVec2 {
+            x: self.p2[0],
+            y: self.p2[1],
+        };
+        let p3 = sys::ImVec2 {
+            x: self.p3[0],
+            y: self.p3[1],
+        };
+
+        if self.filled {
+            unsafe {
+                sys::ImDrawList_AddTriangleFilled(
+                    self.draw_list.draw_list,
+                    &p1,
+                    &p2,
+                    &p3,
+                    self.color.into(),
+                )
+            }
+        } else {
+            unsafe {
+                sys::ImDrawList_AddTriangle(
+                    self.draw_list.draw_list,
+                    &p1,
+                    &p2,
+                    &p3,
+                    self.color.into(),
                     self.thickness,
                 )
             }

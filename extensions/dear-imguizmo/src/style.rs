@@ -1,8 +1,15 @@
-//! ImGuizmo styling and appearance configuration
+//! Style configuration for ImGuizmo
+//!
+//! This module provides comprehensive styling options for customizing the appearance
+//! of gizmo elements, including colors, line thickness, and sizes.
 
-use crate::{sys, Color, ColorType, GuizmoUi};
+use crate::types::colors;
+use crate::types::{Color, ColorElement};
 
-/// ImGuizmo style configuration
+/// Style configuration for ImGuizmo
+///
+/// This structure contains all the visual customization options for gizmo rendering.
+/// It follows the same pattern as the original ImGuizmo C++ library.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Style {
     /// Thickness of lines for translation gizmo
@@ -22,11 +29,37 @@ pub struct Style {
     /// Size of circle at the center of the translate/scale gizmo
     pub center_circle_size: f32,
     /// Colors for different gizmo elements
-    pub colors: [Color; 15], // COLOR::COUNT
+    pub colors: [Color; ColorElement::COUNT],
 }
 
 impl Default for Style {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Style {
+    /// Create a new style with default values
+    pub fn new() -> Self {
+        let mut colors = [colors::WHITE; ColorElement::COUNT];
+
+        // Set default colors for each element
+        colors[ColorElement::DirectionX as usize] = colors::RED;
+        colors[ColorElement::DirectionY as usize] = colors::GREEN;
+        colors[ColorElement::DirectionZ as usize] = colors::BLUE;
+        colors[ColorElement::PlaneX as usize] = [1.0, 0.0, 0.0, 0.5]; // Semi-transparent red
+        colors[ColorElement::PlaneY as usize] = [0.0, 1.0, 0.0, 0.5]; // Semi-transparent green
+        colors[ColorElement::PlaneZ as usize] = [0.0, 0.0, 1.0, 0.5]; // Semi-transparent blue
+        colors[ColorElement::Selection as usize] = colors::YELLOW;
+        colors[ColorElement::Inactive as usize] = colors::GRAY;
+        colors[ColorElement::TranslationLine as usize] = [0.666, 0.666, 0.666, 0.666];
+        colors[ColorElement::ScaleLine as usize] = [0.250, 0.250, 0.250, 1.0];
+        colors[ColorElement::RotationUsingBorder as usize] = [1.0, 0.5, 0.0, 1.0]; // Orange
+        colors[ColorElement::RotationUsingFill as usize] = [1.0, 0.5, 0.0, 0.5]; // Semi-transparent orange
+        colors[ColorElement::HatchedAxisLines as usize] = [0.0, 0.0, 0.0, 0.5]; // Semi-transparent black
+        colors[ColorElement::Text as usize] = colors::WHITE;
+        colors[ColorElement::TextShadow as usize] = [0.0, 0.0, 0.0, 1.0]; // Black
+
         Self {
             translation_line_thickness: 3.0,
             translation_line_arrow_size: 6.0,
@@ -36,146 +69,136 @@ impl Default for Style {
             scale_line_circle_size: 6.0,
             hatched_axis_line_thickness: 6.0,
             center_circle_size: 6.0,
-            colors: [
-                [0.666, 0.000, 0.000, 1.000], // DIRECTION_X
-                [0.000, 0.666, 0.000, 1.000], // DIRECTION_Y
-                [0.000, 0.000, 0.666, 1.000], // DIRECTION_Z
-                [0.666, 0.000, 0.000, 0.380], // PLANE_X
-                [0.000, 0.666, 0.000, 0.380], // PLANE_Y
-                [0.000, 0.000, 0.666, 0.380], // PLANE_Z
-                [1.000, 0.500, 0.062, 0.541], // SELECTION
-                [0.600, 0.600, 0.600, 0.600], // INACTIVE
-                [0.666, 0.000, 0.000, 0.666], // TRANSLATION_LINE
-                [0.666, 0.000, 0.000, 0.666], // SCALE_LINE
-                [1.000, 1.000, 1.000, 1.000], // ROTATION_USING_BORDER
-                [1.000, 1.000, 1.000, 0.500], // ROTATION_USING_FILL
-                [0.000, 0.000, 0.000, 0.500], // HATCHED_AXIS_LINES
-                [1.000, 1.000, 1.000, 1.000], // TEXT
-                [0.000, 0.000, 0.000, 1.000], // TEXT_SHADOW
-            ],
+            colors,
         }
     }
-}
 
-impl<'ui> GuizmoUi<'ui> {
-    /// Get the current ImGuizmo style
-    pub fn get_style(&self) -> Style {
-        let mut style = Style::default();
+    /// Create a dark theme style
+    pub fn dark() -> Self {
+        let mut style = Self::new();
 
-        unsafe {
-            let imgui_style = sys::ImGuizmo_GetStyle();
-            style.translation_line_thickness = (*imgui_style).TranslationLineThickness;
-            style.translation_line_arrow_size = (*imgui_style).TranslationLineArrowSize;
-            style.rotation_line_thickness = (*imgui_style).RotationLineThickness;
-            style.rotation_outer_line_thickness = (*imgui_style).RotationOuterLineThickness;
-            style.scale_line_thickness = (*imgui_style).ScaleLineThickness;
-            style.scale_line_circle_size = (*imgui_style).ScaleLineCircleSize;
-            style.hatched_axis_line_thickness = (*imgui_style).HatchedAxisLineThickness;
-            style.center_circle_size = (*imgui_style).CenterCircleSize;
-
-            // Copy colors
-            for i in 0..style.colors.len().min(15) {
-                // COLOR::COUNT is 15
-                style.colors[i] = [
-                    (*imgui_style).Colors[i].x,
-                    (*imgui_style).Colors[i].y,
-                    (*imgui_style).Colors[i].z,
-                    (*imgui_style).Colors[i].w,
-                ];
-            }
-        }
+        // Adjust colors for dark theme
+        style.colors[ColorElement::DirectionX as usize] = [0.8, 0.2, 0.2, 1.0]; // Darker red
+        style.colors[ColorElement::DirectionY as usize] = [0.2, 0.8, 0.2, 1.0]; // Darker green
+        style.colors[ColorElement::DirectionZ as usize] = [0.2, 0.2, 0.8, 1.0]; // Darker blue
+        style.colors[ColorElement::Selection as usize] = [1.0, 0.8, 0.0, 1.0]; // Darker yellow
+        style.colors[ColorElement::Inactive as usize] = [0.3, 0.3, 0.3, 1.0]; // Darker gray
+        style.colors[ColorElement::Text as usize] = [0.9, 0.9, 0.9, 1.0]; // Light gray text
 
         style
     }
 
-    /// Set the ImGuizmo style
-    pub fn set_style(&self, style: &Style) {
-        unsafe {
-            let imgui_style = sys::ImGuizmo_GetStyle();
-            (*imgui_style).TranslationLineThickness = style.translation_line_thickness;
-            (*imgui_style).TranslationLineArrowSize = style.translation_line_arrow_size;
-            (*imgui_style).RotationLineThickness = style.rotation_line_thickness;
-            (*imgui_style).RotationOuterLineThickness = style.rotation_outer_line_thickness;
-            (*imgui_style).ScaleLineThickness = style.scale_line_thickness;
-            (*imgui_style).ScaleLineCircleSize = style.scale_line_circle_size;
-            (*imgui_style).HatchedAxisLineThickness = style.hatched_axis_line_thickness;
-            (*imgui_style).CenterCircleSize = style.center_circle_size;
+    /// Create a light theme style
+    pub fn light() -> Self {
+        let mut style = Self::new();
 
-            // Copy colors
-            for i in 0..style.colors.len().min(15) {
-                // COLOR::COUNT is 15
-                (*imgui_style).Colors[i].x = style.colors[i][0];
-                (*imgui_style).Colors[i].y = style.colors[i][1];
-                (*imgui_style).Colors[i].z = style.colors[i][2];
-                (*imgui_style).Colors[i].w = style.colors[i][3];
+        // Adjust colors for light theme
+        style.colors[ColorElement::Text as usize] = [0.1, 0.1, 0.1, 1.0]; // Dark text
+        style.colors[ColorElement::TextShadow as usize] = [1.0, 1.0, 1.0, 0.8]; // Light shadow
+        style.colors[ColorElement::Inactive as usize] = [0.7, 0.7, 0.7, 1.0]; // Lighter gray
+
+        style
+    }
+
+    /// Get the color for a specific element
+    pub fn get_color(&self, element: ColorElement) -> Color {
+        self.colors[element as usize]
+    }
+
+    /// Set the color for a specific element
+    pub fn set_color(&mut self, element: ColorElement, color: Color) {
+        self.colors[element as usize] = color;
+    }
+
+    /// Set all axis colors at once
+    pub fn set_axis_colors(&mut self, x: Color, y: Color, z: Color) {
+        self.colors[ColorElement::DirectionX as usize] = x;
+        self.colors[ColorElement::DirectionY as usize] = y;
+        self.colors[ColorElement::DirectionZ as usize] = z;
+    }
+
+    /// Set all plane colors at once
+    pub fn set_plane_colors(&mut self, x: Color, y: Color, z: Color) {
+        self.colors[ColorElement::PlaneX as usize] = x;
+        self.colors[ColorElement::PlaneY as usize] = y;
+        self.colors[ColorElement::PlaneZ as usize] = z;
+    }
+
+    /// Scale all line thicknesses by a factor
+    pub fn scale_line_thickness(&mut self, factor: f32) {
+        self.translation_line_thickness *= factor;
+        self.rotation_line_thickness *= factor;
+        self.rotation_outer_line_thickness *= factor;
+        self.scale_line_thickness *= factor;
+        self.hatched_axis_line_thickness *= factor;
+    }
+
+    /// Scale all sizes by a factor
+    pub fn scale_sizes(&mut self, factor: f32) {
+        self.translation_line_arrow_size *= factor;
+        self.scale_line_circle_size *= factor;
+        self.center_circle_size *= factor;
+    }
+
+    /// Validate the style configuration
+    pub fn validate(&self) -> Result<(), crate::GuizmoError> {
+        // Check for negative values
+        if self.translation_line_thickness < 0.0 {
+            return Err(crate::GuizmoError::style_configuration(
+                "translation_line_thickness cannot be negative",
+            ));
+        }
+        if self.translation_line_arrow_size < 0.0 {
+            return Err(crate::GuizmoError::style_configuration(
+                "translation_line_arrow_size cannot be negative",
+            ));
+        }
+        if self.rotation_line_thickness < 0.0 {
+            return Err(crate::GuizmoError::style_configuration(
+                "rotation_line_thickness cannot be negative",
+            ));
+        }
+        if self.rotation_outer_line_thickness < 0.0 {
+            return Err(crate::GuizmoError::style_configuration(
+                "rotation_outer_line_thickness cannot be negative",
+            ));
+        }
+        if self.scale_line_thickness < 0.0 {
+            return Err(crate::GuizmoError::style_configuration(
+                "scale_line_thickness cannot be negative",
+            ));
+        }
+        if self.scale_line_circle_size < 0.0 {
+            return Err(crate::GuizmoError::style_configuration(
+                "scale_line_circle_size cannot be negative",
+            ));
+        }
+        if self.hatched_axis_line_thickness < 0.0 {
+            return Err(crate::GuizmoError::style_configuration(
+                "hatched_axis_line_thickness cannot be negative",
+            ));
+        }
+        if self.center_circle_size < 0.0 {
+            return Err(crate::GuizmoError::style_configuration(
+                "center_circle_size cannot be negative",
+            ));
+        }
+
+        // Validate colors (check for valid alpha values)
+        for (i, color) in self.colors.iter().enumerate() {
+            if color[3] < 0.0 || color[3] > 1.0 {
+                return Err(crate::GuizmoError::style_configuration(format!(
+                    "Invalid alpha value for color element {}: {}",
+                    i, color[3]
+                )));
             }
         }
-    }
 
-    /// Set a specific color in the style
-    pub fn set_color(&self, color_type: ColorType, color: Color) {
-        let mut style = self.get_style();
-        style.colors[color_type as usize] = color;
-        self.set_style(&style);
-    }
-
-    /// Get a specific color from the style
-    pub fn get_color(&self, color_type: ColorType) -> Color {
-        let style = self.get_style();
-        style.colors[color_type as usize]
-    }
-
-    /// Set the gizmo size in clip space
-    ///
-    /// Controls the overall size of the gizmo. Default is typically around 0.1.
-    pub fn set_gizmo_size_clip_space(&self, value: f32) {
-        unsafe {
-            sys::ImGuizmo_SetGizmoSizeClipSpace(value);
-        }
-    }
-
-    /// Allow or disallow axis flipping
-    ///
-    /// When true (default), gizmo axes flip for better visibility.
-    /// When false, they always stay along the positive world/local axis.
-    pub fn allow_axis_flip(&self, value: bool) {
-        unsafe {
-            sys::ImGuizmo_AllowAxisFlip(value);
-        }
-    }
-
-    /// Set the limit where axes are hidden
-    ///
-    /// Controls at what angle axes become hidden for better visibility.
-    pub fn set_axis_limit(&self, value: f32) {
-        unsafe {
-            sys::ImGuizmo_SetAxisLimit(value);
-        }
-    }
-
-    /// Set an axis mask to permanently hide given axes
-    ///
-    /// # Arguments
-    /// * `x` - true to hide X axis, false to show
-    /// * `y` - true to hide Y axis, false to show  
-    /// * `z` - true to hide Z axis, false to show
-    pub fn set_axis_mask(&self, x: bool, y: bool, z: bool) {
-        unsafe {
-            sys::ImGuizmo_SetAxisMask(x, y, z);
-        }
-    }
-
-    /// Set the limit where planes are hidden
-    ///
-    /// Controls at what angle manipulation planes become hidden.
-    pub fn set_plane_limit(&self, value: f32) {
-        unsafe {
-            sys::ImGuizmo_SetPlaneLimit(value);
-        }
+        Ok(())
     }
 }
 
-/// Style builder for fluent configuration
+/// Builder pattern for creating custom styles
 pub struct StyleBuilder {
     style: Style,
 }
@@ -184,7 +207,21 @@ impl StyleBuilder {
     /// Create a new style builder with default values
     pub fn new() -> Self {
         Self {
-            style: Style::default(),
+            style: Style::new(),
+        }
+    }
+
+    /// Start with a dark theme
+    pub fn dark() -> Self {
+        Self {
+            style: Style::dark(),
+        }
+    }
+
+    /// Start with a light theme
+    pub fn light() -> Self {
+        Self {
+            style: Style::light(),
         }
     }
 
@@ -194,21 +231,9 @@ impl StyleBuilder {
         self
     }
 
-    /// Set translation line arrow size
-    pub fn translation_line_arrow_size(mut self, size: f32) -> Self {
-        self.style.translation_line_arrow_size = size;
-        self
-    }
-
     /// Set rotation line thickness
     pub fn rotation_line_thickness(mut self, thickness: f32) -> Self {
         self.style.rotation_line_thickness = thickness;
-        self
-    }
-
-    /// Set rotation outer line thickness
-    pub fn rotation_outer_line_thickness(mut self, thickness: f32) -> Self {
-        self.style.rotation_outer_line_thickness = thickness;
         self
     }
 
@@ -218,38 +243,69 @@ impl StyleBuilder {
         self
     }
 
-    /// Set scale line circle size
-    pub fn scale_line_circle_size(mut self, size: f32) -> Self {
-        self.style.scale_line_circle_size = size;
-        self
-    }
-
-    /// Set hatched axis line thickness
-    pub fn hatched_axis_line_thickness(mut self, thickness: f32) -> Self {
-        self.style.hatched_axis_line_thickness = thickness;
-        self
-    }
-
-    /// Set center circle size
-    pub fn center_circle_size(mut self, size: f32) -> Self {
-        self.style.center_circle_size = size;
+    /// Set axis colors
+    pub fn axis_colors(mut self, x: Color, y: Color, z: Color) -> Self {
+        self.style.set_axis_colors(x, y, z);
         self
     }
 
     /// Set a specific color
-    pub fn color(mut self, color_type: ColorType, color: Color) -> Self {
-        self.style.colors[color_type as usize] = color;
+    pub fn color(mut self, element: ColorElement, color: Color) -> Self {
+        self.style.set_color(element, color);
         self
     }
 
-    /// Build the style
-    pub fn build(self) -> Style {
-        self.style
+    /// Build the final style
+    pub fn build(self) -> Result<Style, crate::GuizmoError> {
+        self.style.validate()?;
+        Ok(self.style)
     }
 }
 
 impl Default for StyleBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_style() {
+        let style = Style::new();
+        assert_eq!(style.translation_line_thickness, 3.0);
+        assert_eq!(style.get_color(ColorElement::DirectionX), colors::RED);
+        assert_eq!(style.get_color(ColorElement::DirectionY), colors::GREEN);
+        assert_eq!(style.get_color(ColorElement::DirectionZ), colors::BLUE);
+    }
+
+    #[test]
+    fn test_style_builder() {
+        let style = StyleBuilder::new()
+            .translation_line_thickness(5.0)
+            .axis_colors(colors::WHITE, colors::WHITE, colors::WHITE)
+            .build()
+            .unwrap();
+
+        assert_eq!(style.translation_line_thickness, 5.0);
+        assert_eq!(style.get_color(ColorElement::DirectionX), colors::WHITE);
+    }
+
+    #[test]
+    fn test_style_validation() {
+        let mut style = Style::new();
+        style.translation_line_thickness = -1.0;
+        assert!(style.validate().is_err());
+    }
+
+    #[test]
+    fn test_color_operations() {
+        let mut style = Style::new();
+        let custom_color = [0.5, 0.5, 0.5, 1.0];
+
+        style.set_color(ColorElement::Selection, custom_color);
+        assert_eq!(style.get_color(ColorElement::Selection), custom_color);
     }
 }
