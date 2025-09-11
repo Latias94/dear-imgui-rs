@@ -43,6 +43,10 @@ pub enum RendererError {
     /// WGPU error
     #[error("WGPU error")]
     Wgpu(#[from] wgpu::Error),
+
+    /// Invalid texture ID
+    #[error("Invalid texture ID: {0}")]
+    InvalidTextureId(u64),
 }
 
 // Display and Error traits are automatically implemented by thiserror

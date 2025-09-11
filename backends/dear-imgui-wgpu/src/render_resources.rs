@@ -44,13 +44,13 @@ impl RenderResources {
         // or 'style.AntiAliasedLinesUseTex = false' to allow point/nearest sampling
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("Dear ImGui Texture Sampler"),
-            address_mode_u: AddressMode::ClampToEdge,  // matches WGPUAddressMode_ClampToEdge
-            address_mode_v: AddressMode::ClampToEdge,  // matches WGPUAddressMode_ClampToEdge
-            address_mode_w: AddressMode::ClampToEdge,  // matches WGPUAddressMode_ClampToEdge
-            mag_filter: FilterMode::Linear,            // matches WGPUFilterMode_Linear
-            min_filter: FilterMode::Linear,            // matches WGPUFilterMode_Linear
-            mipmap_filter: FilterMode::Linear,         // matches WGPUMipmapFilterMode_Linear
-            anisotropy_clamp: 1,                       // matches maxAnisotropy = 1
+            address_mode_u: AddressMode::ClampToEdge, // matches WGPUAddressMode_ClampToEdge
+            address_mode_v: AddressMode::ClampToEdge, // matches WGPUAddressMode_ClampToEdge
+            address_mode_w: AddressMode::ClampToEdge, // matches WGPUAddressMode_ClampToEdge
+            mag_filter: FilterMode::Linear,           // matches WGPUFilterMode_Linear
+            min_filter: FilterMode::Linear,           // matches WGPUFilterMode_Linear
+            mipmap_filter: FilterMode::Linear,        // matches WGPUMipmapFilterMode_Linear
+            anisotropy_clamp: 1,                      // matches maxAnisotropy = 1
             ..Default::default()
         });
 

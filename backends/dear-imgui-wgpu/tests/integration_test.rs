@@ -2,7 +2,7 @@
 //!
 //! This test verifies that our improvements maintain compatibility with the C++ implementation
 
-use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, Uniforms};
+use dear_imgui_wgpu::{Uniforms, WgpuInitInfo, WgpuRenderer};
 use wgpu::*;
 
 /// Test that gamma correction values match the C++ implementation
@@ -88,7 +88,11 @@ fn test_gamma_correction_formats() {
 
     for format in astc_srgb_formats {
         let gamma = Uniforms::gamma_for_format(format);
-        assert_eq!(gamma, 2.2, "ASTC sRGB format {:?} should have gamma 2.2", format);
+        assert_eq!(
+            gamma, 2.2,
+            "ASTC sRGB format {:?} should have gamma 2.2",
+            format
+        );
     }
 
     // Test linear formats that should have gamma = 1.0
@@ -101,7 +105,11 @@ fn test_gamma_correction_formats() {
 
     for format in linear_formats {
         let gamma = Uniforms::gamma_for_format(format);
-        assert_eq!(gamma, 1.0, "Linear format {:?} should have gamma 1.0", format);
+        assert_eq!(
+            gamma, 1.0,
+            "Linear format {:?} should have gamma 1.0",
+            format
+        );
     }
 }
 
@@ -110,16 +118,16 @@ fn test_gamma_correction_formats() {
 fn test_orthographic_matrix() {
     let display_pos = [10.0, 20.0];
     let display_size = [800.0, 600.0];
-    
+
     let matrix = Uniforms::create_orthographic_matrix(display_pos, display_size);
-    
+
     // Expected values based on C++ implementation:
     // L = 10.0, R = 810.0, T = 20.0, B = 620.0
     let l = display_pos[0];
     let r = display_pos[0] + display_size[0];
     let t = display_pos[1];
     let b = display_pos[1] + display_size[1];
-    
+
     // Check matrix values match C++ calculation
     assert_eq!(matrix[0][0], 2.0 / (r - l));
     assert_eq!(matrix[1][1], 2.0 / (t - b));
@@ -135,7 +143,7 @@ fn test_orthographic_matrix() {
 fn test_renderer_creation() {
     let renderer = WgpuRenderer::new();
     assert!(!renderer.is_initialized());
-    
+
     // Test default creation
     let default_renderer = WgpuRenderer::default();
     assert!(!default_renderer.is_initialized());
@@ -144,14 +152,14 @@ fn test_renderer_creation() {
 /// Test uniforms structure size and alignment
 #[test]
 fn test_uniforms_layout() {
-    use std::mem::{size_of, align_of};
-    
+    use std::mem::{align_of, size_of};
+
     // Ensure uniforms structure has proper size and alignment for GPU usage
     assert_eq!(size_of::<Uniforms>(), 80); // 4x4 f32 matrix (64 bytes) + f32 gamma (4 bytes) + padding (12 bytes)
-    assert_eq!(align_of::<Uniforms>(), 4);  // f32 alignment
-    
+    assert_eq!(align_of::<Uniforms>(), 4); // f32 alignment
+
     let uniforms = Uniforms::new();
-    
+
     // Test default values
     assert_eq!(uniforms.gamma, 1.0);
     assert_eq!(uniforms.mvp[0][0], 1.0); // Identity matrix

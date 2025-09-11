@@ -138,6 +138,41 @@ impl WgpuTextureManager {
         }
     }
 
+    /// Destroy a texture by ID
+    pub fn destroy_texture_by_id(&mut self, id: u64) {
+        self.remove_texture(id);
+    }
+
+    /// Update an existing texture from Dear ImGui texture data with specific ID
+    pub fn update_texture_from_data_with_id(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        texture_data: &TextureData,
+        texture_id: u64,
+    ) -> RendererResult<()> {
+        // For WGPU, we recreate the texture instead of updating in place
+        // This is simpler and more reliable than trying to update existing textures
+        if self.contains_texture(texture_id) {
+            // Remove old texture
+            self.remove_texture(texture_id);
+
+            // Create new texture
+            let new_texture_id = self.create_texture_from_data(device, queue, texture_data)?;
+
+            // Move the texture to the correct ID slot if needed
+            if new_texture_id != texture_id {
+                if let Some(texture) = self.remove_texture(new_texture_id) {
+                    self.insert_texture_with_id(texture_id, texture);
+                }
+            }
+
+            Ok(())
+        } else {
+            Err(RendererError::InvalidTextureId(texture_id))
+        }
+    }
+
     /// Get the number of registered textures
     pub fn texture_count(&self) -> usize {
         self.textures.len()
@@ -311,17 +346,31 @@ impl WgpuTextureManager {
         for texture_data in draw_data.textures() {
             match texture_data.status() {
                 TextureStatus::WantCreate => {
-                    if let Ok(texture_id) =
+                    // Get the texture ID that Dear ImGui wants to use
+                    let imgui_tex_id = texture_data.tex_id();
+                    let internal_id = imgui_tex_id.id() as u64;
+
+                    if let Ok(wgpu_texture_id) =
                         self.create_texture_from_data(device, queue, texture_data)
                     {
-                        // Update the texture data with the new ID
-                        texture_data.set_tex_id(TextureId::from(texture_id as usize));
+                        // Map the Dear ImGui texture ID to our internal WGPU texture
+                        if wgpu_texture_id != internal_id {
+                            // Move the texture to the correct ID slot
+                            if let Some(texture) = self.remove_texture(wgpu_texture_id) {
+                                self.insert_texture_with_id(internal_id, texture);
+                            }
+                        }
+
+                        // Mark texture as ready
                         texture_data.set_status(TextureStatus::OK);
                     }
                 }
                 TextureStatus::WantUpdates => {
+                    let imgui_tex_id = texture_data.tex_id();
+                    let internal_id = imgui_tex_id.id() as u64;
+
                     if self
-                        .update_texture_from_data(device, queue, texture_data)
+                        .update_texture_from_data_with_id(device, queue, texture_data, internal_id)
                         .is_err()
                     {
                         // If update fails, mark as destroyed
@@ -331,7 +380,9 @@ impl WgpuTextureManager {
                     }
                 }
                 TextureStatus::WantDestroy => {
-                    self.destroy_texture(texture_data.tex_id());
+                    let imgui_tex_id = texture_data.tex_id();
+                    let internal_id = imgui_tex_id.id() as u64;
+                    self.destroy_texture_by_id(internal_id);
                     texture_data.set_status(TextureStatus::Destroyed);
                 }
                 TextureStatus::OK | TextureStatus::Destroyed => {

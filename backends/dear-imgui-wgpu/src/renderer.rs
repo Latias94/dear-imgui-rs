@@ -248,46 +248,29 @@ impl WgpuRenderer {
     }
 
     /// Load font texture from Dear ImGui context
+    ///
+    /// With the new texture management system in Dear ImGui 1.92+, font textures are
+    /// automatically managed through ImDrawData->Textures[] during rendering.
+    /// We only need to build the font atlas here; texture creation happens automatically.
     fn reload_font_texture(
         &mut self,
         imgui_ctx: &mut Context,
-        device: &Device,
-        queue: &Queue,
+        _device: &Device,
+        _queue: &Queue,
     ) -> RendererResult<()> {
         let mut fonts = imgui_ctx.font_atlas_mut();
 
         // Build the font atlas if not already built
+        // With RENDERER_HAS_TEXTURES, Dear ImGui will automatically create the texture
+        // through the new texture management system during the first render call
         if !fonts.is_built() {
             fonts.build();
         }
 
-        // Get texture data from the font atlas
-        unsafe {
-            if let Some((pixels_ptr, width, height)) = fonts.get_tex_data_ptr() {
-                let bytes_per_pixel = 4; // RGBA format
-                let texture_size = (width * height * bytes_per_pixel) as usize;
-                let texture_data = std::slice::from_raw_parts(pixels_ptr, texture_size);
-
-                // Create font texture using texture manager
-                let mut temp_texture_data = dear_imgui::TextureData::new();
-                temp_texture_data.create(
-                    dear_imgui::TextureFormat::RGBA32,
-                    width as i32,
-                    height as i32,
-                );
-                temp_texture_data.set_data(texture_data);
-
-                let font_texture_id = self.texture_manager.create_texture_from_data(
-                    device,
-                    queue,
-                    &temp_texture_data,
-                )?;
-
-                // Set the texture reference in Dear ImGui
-                let tex_ref = dear_imgui::create_texture_ref(font_texture_id);
-                fonts.set_tex_ref(tex_ref);
-            }
-        }
+        // Note: With the new texture management system (RENDERER_HAS_TEXTURES),
+        // we don't manually create font textures here. Instead, Dear ImGui will
+        // automatically create and manage font textures through ImDrawData->Textures[]
+        // during the render process.
 
         Ok(())
     }
