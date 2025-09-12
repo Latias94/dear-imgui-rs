@@ -359,7 +359,7 @@ impl WgpuTextureManager {
                             // In Rust, we can't get the raw pointer, so we use our internal texture ID.
                             // This works because our renderer will map the texture ID to the WGPU texture.
                             let new_texture_id =
-                                dear_imgui::TextureId::from(wgpu_texture_id as usize);
+                                dear_imgui::TextureId::from(wgpu_texture_id);
 
                             texture_data.set_tex_id(new_texture_id);
 
@@ -435,7 +435,7 @@ impl WgpuTextureManager {
             TextureStatus::WantCreate => {
                 match self.create_texture_from_data(device, queue, texture_data) {
                     Ok(texture_id) => Ok(TextureUpdateResult::Created {
-                        texture_id: TextureId::from(texture_id as usize),
+                        texture_id: TextureId::from(texture_id),
                     }),
                     Err(e) => Err(format!("Failed to create texture: {}", e)),
                 }

@@ -80,15 +80,12 @@ impl TextureMap for SimpleTextureMap {
         format: TextureFormat,
     ) -> TextureId {
         self.next_id += 1;
-        let texture_id = TextureId::new(self.next_id);
+        let texture_id = TextureId::new(self.next_id as u64);
 
-        // ✅ 正确：使用 Dear ImGui 提供的安全接口
         let mut texture_data = TextureData::new();
 
-        // ✅ 正确：使用 Dear ImGui 的创建方法
         texture_data.create(format, width, height);
 
-        // ✅ 正确：设置纹理 ID 和状态
         texture_data.set_tex_id(texture_id);
         texture_data.set_status(TextureStatus::OK);
 

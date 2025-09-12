@@ -9,22 +9,25 @@ use std::ffi::c_void;
 
 /// Simple texture ID for backward compatibility
 ///
-/// This is a simple wrapper around usize that can be used to identify textures.
+/// This is a simple wrapper around u64 that can be used to identify textures.
 /// For modern texture management, use TextureData instead.
+///
+/// Note: Changed from usize to u64 in Dear ImGui 1.91.4+ to support 64-bit handles
+/// like Vulkan and DX12 on 32-bit targets.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(transparent)]
-pub struct TextureId(usize);
+pub struct TextureId(u64);
 
 impl TextureId {
     /// Creates a new texture id with the given identifier
     #[inline]
-    pub const fn new(id: usize) -> Self {
+    pub const fn new(id: u64) -> Self {
         Self(id)
     }
 
     /// Returns the id of the TextureId
     #[inline]
-    pub const fn id(self) -> usize {
+    pub const fn id(self) -> u64 {
         self.0
     }
 
@@ -41,9 +44,9 @@ impl TextureId {
     }
 }
 
-impl From<usize> for TextureId {
+impl From<u64> for TextureId {
     #[inline]
-    fn from(id: usize) -> Self {
+    fn from(id: u64) -> Self {
         TextureId(id)
     }
 }
@@ -51,28 +54,44 @@ impl From<usize> for TextureId {
 impl<T> From<*const T> for TextureId {
     #[inline]
     fn from(ptr: *const T) -> Self {
-        TextureId(ptr as usize)
+        TextureId(ptr as usize as u64)
     }
 }
 
 impl<T> From<*mut T> for TextureId {
     #[inline]
     fn from(ptr: *mut T) -> Self {
-        TextureId(ptr as usize)
+        TextureId(ptr as usize as u64)
     }
 }
 
 impl From<TextureId> for *const c_void {
     #[inline]
     fn from(id: TextureId) -> Self {
-        id.0 as *const c_void
+        id.0 as usize as *const c_void
     }
 }
 
 impl From<TextureId> for *mut c_void {
     #[inline]
     fn from(id: TextureId) -> Self {
-        id.0 as *mut c_void
+        id.0 as usize as *mut c_void
+    }
+}
+
+// Backward compatibility: allow conversion from usize for legacy code
+impl From<usize> for TextureId {
+    #[inline]
+    fn from(id: usize) -> Self {
+        TextureId(id as u64)
+    }
+}
+
+// Allow conversion to usize for legacy code
+impl From<TextureId> for usize {
+    #[inline]
+    fn from(id: TextureId) -> Self {
+        id.0 as usize
     }
 }
 
@@ -258,7 +277,7 @@ impl TextureData {
 
     /// Get the texture ID
     pub fn tex_id(&self) -> TextureId {
-        TextureId::from(self.raw.TexID as usize)
+        TextureId::from(self.raw.TexID)
     }
 
     /// Set the texture ID

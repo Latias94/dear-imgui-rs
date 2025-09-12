@@ -276,7 +276,7 @@ impl Iterator for DrawCmdIterator<'_> {
                     cmd.ClipRect.z,
                     cmd.ClipRect.w,
                 ],
-                texture_id: TextureId::from(cmd.TexRef._TexID as usize),
+                texture_id: TextureId::from(cmd.TexRef._TexID),
                 vtx_offset: cmd.VtxOffset as usize,
                 idx_offset: cmd.IdxOffset as usize,
             };

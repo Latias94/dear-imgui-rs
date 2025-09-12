@@ -420,7 +420,7 @@ impl BevyImguiTextureManager {
                     texture_data,
                 ) {
                     Ok(texture_id) => Ok(TextureUpdateResult::Created {
-                        texture_id: TextureId::from(texture_id as usize),
+                        texture_id: TextureId::from(texture_id),
                     }),
                     Err(e) => Err(format!("Failed to create texture: {}", e)),
                 }
