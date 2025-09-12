@@ -69,47 +69,47 @@ fn setup_scene(
     ));
 }
 
-fn ui_system(mut context: NonSendMut<ImguiContext>, mut state: ResMut<UiState>) {
-    let ui = context.ui();
+fn ui_system(context: NonSendMut<ImguiContext>, mut state: ResMut<UiState>) {
+    context.with_ui(|ui| {
+        // Main menu bar
+        if let Some(_token) = ui.begin_main_menu_bar() {
+            ui.menu("Windows", || {
+                ui.checkbox("Demo Window", &mut state.demo_window_open);
+                ui.checkbox("Metrics", &mut state.show_metrics);
+            });
+        }
 
-    // Main menu bar
-    if let Some(_token) = ui.begin_main_menu_bar() {
-        ui.menu("Windows", || {
-            ui.checkbox("Demo Window", &mut state.demo_window_open);
-            ui.checkbox("Metrics", &mut state.show_metrics);
-        });
-    }
+        // Demo window
+        if state.demo_window_open {
+            ui.show_demo_window(&mut state.demo_window_open);
+        }
 
-    // Demo window
-    if state.demo_window_open {
-        ui.show_demo_window(&mut state.demo_window_open);
-    }
+        // Metrics window
+        if state.show_metrics {
+            ui.show_metrics_window(&mut state.show_metrics);
+        }
 
-    // Metrics window
-    if state.show_metrics {
-        ui.show_metrics_window(&mut state.show_metrics);
-    }
+        // Control panel
+        ui.window("Control Panel")
+            .size([300.0, 200.0], Condition::FirstUseEver)
+            .position([10.0, 50.0], Condition::FirstUseEver)
+            .build(|| {
+                ui.text("Dear ImGui + Bevy Integration");
+                ui.separator();
 
-    // Control panel
-    ui.window("Control Panel")
-        .size([300.0, 200.0], Condition::FirstUseEver)
-        .position([10.0, 50.0], Condition::FirstUseEver)
-        .build(|| {
-            ui.text("Dear ImGui + Bevy Integration");
-            ui.separator();
+                ui.text("Cube Controls:");
+                ui.slider("Rotation Speed", 0.0, 5.0, &mut state.cube_rotation_speed);
 
-            ui.text("Cube Controls:");
-            ui.slider("Rotation Speed", 0.0, 5.0, &mut state.cube_rotation_speed);
+                ui.separator();
 
-            ui.separator();
+                let io = ui.io();
+                ui.text(format!("FPS: {:.1}", io.framerate()));
+                ui.text(format!("Frame Time: {:.3}ms", 1000.0 / io.framerate()));
 
-            let io = ui.io();
-            ui.text(format!("FPS: {:.1}", io.framerate()));
-            ui.text(format!("Frame Time: {:.3}ms", 1000.0 / io.framerate()));
-
-            let mouse_pos = io.mouse_pos();
-            ui.text(format!("Mouse: ({:.1}, {:.1})", mouse_pos[0], mouse_pos[1]));
-        });
+                let mouse_pos = io.mouse_pos();
+                ui.text(format!("Mouse: ({:.1}, {:.1})", mouse_pos[0], mouse_pos[1]));
+            });
+    });
 }
 
 fn rotate_cube_system(

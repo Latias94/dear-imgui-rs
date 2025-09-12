@@ -203,22 +203,14 @@ impl AppWindow {
             &mut context,
         );
 
-        let mut renderer = WgpuRenderer::new();
-
-        // Initialize renderer with device and queue
+        // Initialize renderer with device and queue using one-step initialization
         let init_info = dear_imgui_wgpu::WgpuInitInfo::new(
             self.device.clone(),
             self.queue.clone(),
             self.surface_desc.format,
         );
-        renderer
-            .init(init_info)
-            .expect("Failed to initialize WGPU renderer");
-
-        // Load font texture - this is crucial for text rendering!
-        renderer
-            .prepare_font_atlas(&mut context)
-            .expect("Failed to prepare font atlas");
+        let mut renderer =
+            WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
 
         let clear_color = wgpu::Color {
             r: 0.1,

@@ -9,7 +9,7 @@ struct Transform {
 struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) uv: vec2<f32>,
-    @location(2) color: vec4<f32>,
+    @location(2) color: u32,  // Dear ImGui uses packed RGBA u32 color
 }
 
 struct VertexOutput {
@@ -25,7 +25,16 @@ struct VertexOutput {
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     let position = in.position * transform.scale + transform.translation;
-    return VertexOutput(vec4<f32>(position, 0.0, 1.0), in.color, in.uv);
+
+    // Unpack u32 color to vec4<f32> (RGBA)
+    let color = vec4<f32>(
+        f32((in.color >> 0u) & 0xFFu) / 255.0,   // Red
+        f32((in.color >> 8u) & 0xFFu) / 255.0,   // Green
+        f32((in.color >> 16u) & 0xFFu) / 255.0,  // Blue
+        f32((in.color >> 24u) & 0xFFu) / 255.0,  // Alpha
+    );
+
+    return VertexOutput(vec4<f32>(position, 0.0, 1.0), color, in.uv);
 }
 
 // sRGB to linear conversion function

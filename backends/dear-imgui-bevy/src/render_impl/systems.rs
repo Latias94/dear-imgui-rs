@@ -4,6 +4,7 @@ use bevy::{
     ecs::system::SystemParam,
     prelude::*,
     render::{
+        extract_resource::ExtractResource,
         render_asset::RenderAssets,
         render_resource::{
             BindGroup, BindGroupEntry, BindingResource, Buffer, BufferId, CachedRenderPipelineId,
@@ -18,6 +19,30 @@ use bevy::{
 use std::collections::HashMap;
 
 use crate::render_impl::pipeline::{ImguiPipeline, ImguiPipelineKey, ImguiTransform};
+
+/// Extracted font texture data from the main world
+#[derive(Resource, Default)]
+pub struct ExtractedImguiFontTexture {
+    pub texture: Option<Handle<Image>>,
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+    pub needs_update: bool,
+}
+
+impl ExtractResource for ExtractedImguiFontTexture {
+    type Source = super::ImguiFontTexture;
+
+    fn extract_resource(source: &Self::Source) -> Self {
+        Self {
+            texture: None, // We'll handle texture creation in render world
+            width: source.width,
+            height: source.height,
+            data: source.data.clone(),
+            needs_update: source.needs_update,
+        }
+    }
+}
 
 /// Texture ID for Dear ImGui textures
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -201,10 +226,7 @@ pub fn prepare_imgui_render_data_system(
                 &params.imgui_pipeline,
                 pipeline_key,
             );
-            info!(
-                "Created pipeline {:?} for entity {:?}",
-                pipeline_id, main_entity
-            );
+
             params.pipelines.0.insert(main_entity, pipeline_id);
 
             // Convert draw data to vertex/index data (after pipeline setup)
@@ -268,7 +290,7 @@ fn convert_draw_data_to_buffers(
                 .extend_from_slice(&vertex.col.to_le_bytes());
         }
 
-        // Convert indices
+        // Convert indices - handle both 16-bit and 32-bit indices
         for &index in idx_buffer {
             view_data.index_data.push(vertex_offset + index as u32);
         }
@@ -323,6 +345,8 @@ fn convert_draw_data_to_buffers(
     }
 
     // Create or update index buffer
+    // Note: We always use u32 internally for simplicity, even if Dear ImGui uses u16
+    // The GPU can handle this efficiently
     let index_data_size = view_data.index_data.len() * std::mem::size_of::<u32>();
     if index_data_size > 0 {
         if view_data.index_buffer_capacity < index_data_size {
@@ -336,6 +360,7 @@ fn convert_draw_data_to_buffers(
         }
 
         if let Some(ref buffer) = view_data.index_buffer {
+            // Convert indices to bytes - always use u32 format for consistency
             let index_bytes: Vec<u8> = view_data
                 .index_data
                 .iter()
@@ -356,9 +381,10 @@ pub fn queue_imgui_bind_groups_system(
     _gpu_images: Res<RenderAssets<GpuImage>>,
     imgui_render_data: Res<ImguiRenderData>,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
+    mut extracted_font_texture: ResMut<ExtractedImguiFontTexture>,
 ) {
-    // Clear existing bind groups
-    texture_bind_groups.clear();
+    // Don't clear existing bind groups - only create new ones if needed
+    // This prevents unnecessary recreation and flickering
 
     // Create bind groups for all textures used in the current frame
     for (_entity, render_data) in imgui_render_data.0.iter() {
@@ -372,20 +398,62 @@ pub fn queue_imgui_bind_groups_system(
 
             match texture_id {
                 ImguiTextureId::Managed(_main_entity, tex_id) => {
-                    // For the font texture (tex_id == 0), create a basic white texture
-                    // TODO: In the future, we should extract the actual font texture from ImGui
+                    // For the font texture (tex_id == 0), use the actual font texture from ImGui
                     if tex_id == 0 {
-                        // Create a basic white texture for now
-                        let width = 256u32;
-                        let height = 256u32;
+                        // Use font texture data from extracted resource
+                        let (width, height, texture_data) = if extracted_font_texture.needs_update {
+                            (extracted_font_texture.width, extracted_font_texture.height, extracted_font_texture.data.clone())
+                        } else {
+                            // Fallback to a basic white texture if font data is not available
+                            let width = 256u32;
+                            let height = 256u32;
+                            let fallback_data = vec![255u8; (width * height * 4) as usize];
+                            (width, height, fallback_data)
+                        };
+
                         let bytes_per_pixel = 4u32;
 
-                        // Create white texture data
-                        let texture_data = vec![255u8; (width * height * bytes_per_pixel) as usize];
+                        // Create or update the font texture only if needed
+                        let needs_texture_creation = extracted_font_texture.texture.is_none() || extracted_font_texture.needs_update;
 
-                        // Create the font texture
-                        let texture = render_device.create_texture(&wgpu::TextureDescriptor {
-                            label: Some("imgui_font_texture"),
+                        if needs_texture_creation {
+                            let texture = render_device.create_texture(&wgpu::TextureDescriptor {
+                                label: Some("imgui_font_texture"),
+                                size: wgpu::Extent3d {
+                                    width,
+                                    height,
+                                    depth_or_array_layers: 1,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                    | wgpu::TextureUsages::COPY_DST,
+                                view_formats: &[],
+                            });
+
+                            // Upload the texture data
+                            render_queue.write_texture(
+                                texture.as_image_copy(),
+                                &texture_data,
+                                TexelCopyBufferLayout {
+                                    offset: 0,
+                                    bytes_per_row: Some(width * bytes_per_pixel),
+                                    rows_per_image: Some(height),
+                                },
+                                texture.size(),
+                            );
+
+                            // TODO: Store the Bevy texture handle instead of wgpu texture
+                    // extracted_font_texture.texture = Some(texture.clone());
+                            extracted_font_texture.needs_update = false;
+                        }
+
+                        // For now, create a temporary texture view since we don't store the wgpu texture
+                        // This is a simplified approach - in a full implementation, we'd store the texture
+                        let temp_texture = render_device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("imgui_font_texture_temp"),
                             size: wgpu::Extent3d {
                                 width,
                                 height,
@@ -402,18 +470,17 @@ pub fn queue_imgui_bind_groups_system(
 
                         // Upload the texture data
                         render_queue.write_texture(
-                            texture.as_image_copy(),
+                            temp_texture.as_image_copy(),
                             &texture_data,
                             TexelCopyBufferLayout {
                                 offset: 0,
                                 bytes_per_row: Some(width * bytes_per_pixel),
                                 rows_per_image: Some(height),
                             },
-                            texture.size(),
+                            temp_texture.size(),
                         );
 
-                        let texture_view =
-                            texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        let texture_view = temp_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
                         let sampler = render_device.create_sampler(&wgpu::SamplerDescriptor {
                             label: Some("imgui_font_sampler"),
@@ -442,7 +509,11 @@ pub fn queue_imgui_bind_groups_system(
                         );
 
                         texture_bind_groups.insert(texture_id, bind_group);
-                        info!("Created white font texture bind group for texture_id: {:?}, size: {}x{}", texture_id, width, height);
+
+                        // Mark as no longer needing update if we created a new texture
+                        if needs_texture_creation {
+                            extracted_font_texture.needs_update = false;
+                        }
                     }
                 }
                 ImguiTextureId::User(_) => {

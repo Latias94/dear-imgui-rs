@@ -39,20 +39,56 @@ winit = "0.30.12"
 pollster = "0.4"
 ```
 
-Basic usage:
+Basic usage with WGPU:
 
 ```rust
 use dear_imgui::*;
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
 use dear_imgui_winit::WinitPlatform;
 
 // Create ImGui context
 let mut imgui = Context::create();
 imgui.set_ini_filename(Some("imgui.ini"));
 
-// Create platform and renderer
+// Create platform and renderer (one-step initialization)
 let mut platform = WinitPlatform::init(&mut imgui);
-let mut renderer = WgpuRenderer::new(/* ... */);
+let init_info = WgpuInitInfo::new(device, queue, surface_format);
+let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
+
+// Alternative: Two-step initialization for advanced usage
+// let mut renderer = WgpuRenderer::empty();
+// renderer.init_with_context(init_info, &mut imgui)?;
+
+// In your main loop
+let ui = imgui.frame();
+ui.window("Hello World")
+    .size([300.0, 100.0], Condition::FirstUseEver)
+    .build(|| {
+        ui.text("Hello, world!");
+        if ui.button("Click me") {
+            println!("Button clicked!");
+        }
+    });
+
+// Render
+let draw_data = imgui.render();
+renderer.render(&draw_data, /* ... */);
+```
+
+Basic usage with OpenGL:
+
+```rust
+use dear_imgui::*;
+use dear_imgui_glow::GlowRenderer;
+use dear_imgui_winit::WinitPlatform;
+
+// Create ImGui context
+let mut imgui = Context::create();
+imgui.set_ini_filename(Some("imgui.ini"));
+
+// Create platform and renderer (handles initialization automatically)
+let mut platform = WinitPlatform::init(&mut imgui);
+let mut renderer = GlowRenderer::new(gl_context, &mut imgui)?;
 
 // In your main loop
 let ui = imgui.frame();

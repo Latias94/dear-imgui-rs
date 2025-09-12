@@ -92,7 +92,7 @@ impl SpecializedRenderPipeline for ImguiPipeline {
                     [
                         VertexFormat::Float32x2, // position
                         VertexFormat::Float32x2, // UV
-                        VertexFormat::Unorm8x4,  // color (sRGB)
+                        VertexFormat::Uint32,    // color (packed RGBA)
                     ],
                 )],
             },

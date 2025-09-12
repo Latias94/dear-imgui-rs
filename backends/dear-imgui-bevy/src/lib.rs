@@ -28,11 +28,13 @@
 //!     commands.spawn(Camera3d::default());
 //! }
 //!
-//! fn ui_system(mut context: NonSendMut<ImguiContext>, mut state: ResMut<UiState>) {
-//!     let ui = context.ui();
-//!     if state.demo_window_open {
-//!         ui.show_demo_window(&mut state.demo_window_open);
-//!     }
+//! fn ui_system(context: NonSendMut<ImguiContext>, mut state: ResMut<UiState>) {
+//!     context.with_context(|ctx| {
+//!         let ui = ctx.frame();
+//!         if state.demo_window_open {
+//!             ui.show_demo_window(&mut state.demo_window_open);
+//!         }
+//!     });
 //! }
 //! ```
 

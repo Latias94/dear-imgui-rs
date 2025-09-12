@@ -6,7 +6,7 @@
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
 use dear_imgui::*;
-use dear_imgui_glow::AutoRenderer;
+use dear_imgui_glow::GlowRenderer;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
@@ -28,7 +28,7 @@ use winit::{
 struct ImguiState {
     context: Context,
     platform: WinitPlatform,
-    renderer: AutoRenderer,
+    renderer: GlowRenderer,
     clear_color: [f32; 4],
     demo_open: bool,
     last_frame: Instant,
@@ -97,7 +97,7 @@ impl AppWindow {
             })
         };
 
-        let mut renderer = AutoRenderer::new(gl, &mut imgui_context)?;
+        let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
         renderer.new_frame()?;
 
         let imgui = ImguiState {
@@ -174,7 +174,7 @@ impl AppWindow {
         }
 
         // Render
-        let gl = self.imgui.renderer.gl_context();
+        let gl = self.imgui.renderer.gl_context().unwrap();
         unsafe {
             gl.clear_color(
                 self.imgui.clear_color[0],

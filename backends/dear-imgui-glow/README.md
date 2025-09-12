@@ -25,7 +25,7 @@ dear-imgui-glow = "0.1"
 
 ```rust
 use dear_imgui::Context;
-use dear_imgui_glow::AutoRenderer;
+use dear_imgui_glow::GlowRenderer;
 use glow::HasContext;
 
 // Initialize your OpenGL context and Dear ImGui context
@@ -36,7 +36,7 @@ let gl = glow::Context::from_loader_function(|s| {
 let mut imgui = Context::create();
 
 // Create the renderer
-let mut renderer = AutoRenderer::new(gl, &mut imgui)?;
+let mut renderer = GlowRenderer::new(gl, &mut imgui)?;
 
 // In your render loop:
 imgui.new_frame();
@@ -109,7 +109,7 @@ Multi-viewport support allows Dear ImGui to create additional windows outside th
 - **Version Support**: OpenGL 2.1+, ES 2.0+, ES 3.0+ compatibility
 - **Feature Detection**: Runtime OpenGL capability detection
 - **Projection Matrix**: Proper orthographic projection with clip origin support
-- **AutoRenderer**: Simplified high-level renderer interface
+- **GlowRenderer**: Simplified high-level renderer interface
 
 🚧 **In Progress:**
 - Complete multi-viewport implementation with context management
@@ -127,7 +127,7 @@ Multi-viewport support allows Dear ImGui to create additional windows outside th
 
 The crate is structured as follows:
 
-- `renderer.rs` - Main renderer implementation (`Renderer` and `AutoRenderer`)
+- `renderer.rs` - Main renderer implementation (`Renderer` and `GlowRenderer`)
 - `shaders.rs` - Shader compilation and management
 - `state.rs` - OpenGL state backup/restoration
 - `texture.rs` - Texture management and mapping

@@ -7,13 +7,13 @@ use crate::{
             prepare_imgui_render_data_system, prepare_imgui_transforms_system,
             queue_imgui_bind_groups_system,
         },
-        ImguiPipeline, ImguiPipelines, ImguiRenderContext, ImguiRenderData, ImguiRenderNode,
-        ImguiRenderNodeLabel, ImguiTextureBindGroups, ImguiTransforms,
+        ImguiFontTexture, ImguiPipeline, ImguiPipelines, ImguiRenderContext, ImguiRenderData,
+        ImguiRenderNode, ImguiRenderNodeLabel, ImguiTextureBindGroups, ImguiTransforms,
     },
     shaders::ImguiShaderPlugin,
     systems::{
-        imgui_end_frame_system, imgui_extract_frame_system, imgui_new_frame_system,
-        imgui_update_render_context_system, imgui_update_textures_system,
+        imgui_end_frame_system, imgui_extract_frame_system,
+        imgui_new_frame_system, imgui_prepare_font_texture_system, imgui_update_render_context_system, imgui_update_textures_system,
         setup_imgui_render_output_system,
     },
 };
@@ -26,6 +26,7 @@ use bevy::{
     ecs::system::SystemState,
     prelude::*,
     render::{
+        extract_resource::ExtractResourcePlugin,
         render_graph::RenderGraphExt,
         render_resource::SpecializedRenderPipelines,
         renderer::{RenderDevice, RenderQueue},
@@ -76,12 +77,36 @@ impl Plugin for ImguiPlugin {
     fn build(&self, app: &mut App) {
         // Add shader plugin
         app.add_plugins(ImguiShaderPlugin);
+
+        // Add extract resource plugin for font texture
+        app.add_plugins(ExtractResourcePlugin::<crate::render_impl::systems::ExtractedImguiFontTexture>::default());
+
+        // Initialize texture manager resource
+        app.insert_resource(crate::texture::BevyImguiTextureManager::new());
+
+        // Initialize font texture resource
+        app.insert_resource(crate::render_impl::ImguiFontTexture::default());
     }
 
     fn finish(&self, app: &mut App) {
         // Create Dear ImGui context
         let mut ctx = Context::create_or_panic();
         ctx.set_ini_filename_or_panic(self.ini_filename.clone());
+
+        // Set backend information and flags
+        let io = ctx.io_mut();
+        let mut flags = io.backend_flags();
+
+        // Set renderer capabilities
+        flags.insert(dear_imgui::BackendFlags::RENDERER_HAS_VTX_OFFSET);
+        flags.insert(dear_imgui::BackendFlags::RENDERER_HAS_TEXTURES);
+        flags.insert(dear_imgui::BackendFlags::HAS_MOUSE_CURSORS);
+        flags.insert(dear_imgui::BackendFlags::HAS_SET_MOUSE_POS);
+
+        // TODO: Add when we implement gamepad support
+        // flags.insert(dear_imgui::BackendFlags::HAS_GAMEPAD);
+
+        io.set_backend_flags(flags);
 
         // Get display scale from primary window
         let display_scale = {
@@ -103,6 +128,9 @@ impl Plugin for ImguiPlugin {
             // Set up texture format
             let texture_format = wgpu::TextureFormat::Bgra8UnormSrgb; // Default format
 
+            // Initialize texture manager in render world
+            render_app.insert_resource(crate::texture::BevyImguiTextureManager::new());
+
             // Add render graph nodes
             render_app
                 .add_render_graph_node::<ImguiRenderNode>(Core2d, ImguiRenderNodeLabel)
@@ -119,10 +147,15 @@ impl Plugin for ImguiPlugin {
             render_app.init_resource::<ImguiRenderData>();
             render_app.init_resource::<ImguiPipelines>();
             render_app.init_resource::<ImguiPipeline>();
+            render_app.init_resource::<ImguiFontTexture>();
+            render_app.init_resource::<crate::render_impl::systems::ExtractedImguiFontTexture>();
             render_app.init_resource::<SpecializedRenderPipelines<ImguiPipeline>>();
 
             // Add render systems
-            render_app.add_systems(ExtractSchedule, imgui_extract_frame_system);
+            render_app.add_systems(
+                ExtractSchedule,
+                imgui_extract_frame_system,
+            );
             render_app.add_systems(
                 Render,
                 (
@@ -142,6 +175,7 @@ impl Plugin for ImguiPlugin {
         // Insert main app context and systems
         app.insert_non_send_resource(context)
             .add_systems(PreUpdate, imgui_new_frame_system)
+            .add_systems(Update, imgui_prepare_font_texture_system)
             .add_systems(Last, imgui_end_frame_system)
             .add_systems(PostUpdate, setup_imgui_render_output_system);
     }
@@ -149,4 +183,10 @@ impl Plugin for ImguiPlugin {
 
 impl ImguiPlugin {
     // TODO: Implement font loading and display scale handling for our custom renderer
+    // TODO: Implement Dear ImGui 1.92+ modern texture API:
+    //       - Support for ImGuiBackendFlags_RendererHasTextures
+    //       - Use ImFontAtlas::Textures[] array instead of GetTexDataAsRGBA32()
+    //       - Implement proper texture lifecycle management
+    // TODO: Add gamepad support with ImGuiBackendFlags_HasGamepad
+    // TODO: Add viewport support for multi-window applications
 }

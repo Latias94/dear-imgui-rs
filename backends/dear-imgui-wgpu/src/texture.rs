@@ -344,25 +344,34 @@ impl WgpuTextureManager {
         queue: &Queue,
     ) {
         for texture_data in draw_data.textures() {
-            match texture_data.status() {
+            let status = texture_data.status();
+            let current_tex_id = texture_data.tex_id().id();
+
+            match status {
                 TextureStatus::WantCreate => {
-                    // Get the texture ID that Dear ImGui wants to use
-                    let imgui_tex_id = texture_data.tex_id();
-                    let internal_id = imgui_tex_id.id() as u64;
+                    // Create and upload new texture to graphics system
+                    // Following the official imgui_impl_wgpu.cpp implementation
 
-                    if let Ok(wgpu_texture_id) =
-                        self.create_texture_from_data(device, queue, texture_data)
-                    {
-                        // Map the Dear ImGui texture ID to our internal WGPU texture
-                        if wgpu_texture_id != internal_id {
-                            // Move the texture to the correct ID slot
-                            if let Some(texture) = self.remove_texture(wgpu_texture_id) {
-                                self.insert_texture_with_id(internal_id, texture);
-                            }
+                    match self.create_texture_from_data(device, queue, texture_data) {
+                        Ok(wgpu_texture_id) => {
+                            // CRITICAL: Set the texture ID back to Dear ImGui
+                            // In the C++ implementation, they use the TextureView pointer as ImTextureID.
+                            // In Rust, we can't get the raw pointer, so we use our internal texture ID.
+                            // This works because our renderer will map the texture ID to the WGPU texture.
+                            let new_texture_id =
+                                dear_imgui::TextureId::from(wgpu_texture_id as usize);
+
+                            texture_data.set_tex_id(new_texture_id);
+
+                            // Mark texture as ready
+                            texture_data.set_status(TextureStatus::OK);
                         }
-
-                        // Mark texture as ready
-                        texture_data.set_status(TextureStatus::OK);
+                        Err(e) => {
+                            println!(
+                                "Failed to create texture for ID: {}, error: {}",
+                                current_tex_id, e
+                            );
+                        }
                     }
                 }
                 TextureStatus::WantUpdates => {

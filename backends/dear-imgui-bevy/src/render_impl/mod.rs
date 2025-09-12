@@ -41,6 +41,28 @@ impl ImguiRenderContext {
     }
 }
 
+/// Resource to hold font texture information
+#[derive(Resource)]
+pub struct ImguiFontTexture {
+    pub texture: Option<wgpu::Texture>,
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+    pub needs_update: bool,
+}
+
+impl Default for ImguiFontTexture {
+    fn default() -> Self {
+        Self {
+            texture: None,
+            width: 0,
+            height: 0,
+            data: Vec::new(),
+            needs_update: true,
+        }
+    }
+}
+
 /// The label used by the render node responsible for rendering ImGui
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
 pub struct ImguiRenderNodeLabel;

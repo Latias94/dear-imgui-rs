@@ -14,7 +14,7 @@
 //!
 //! ```rust,no_run
 //! use dear_imgui::Context;
-//! use dear_imgui_glow::Renderer;
+//! use dear_imgui_glow::GlowRenderer;
 //! use glow::HasContext;
 //!
 //! // Initialize your OpenGL context and Dear ImGui context
@@ -24,14 +24,14 @@
 //! });
 //! let mut imgui = Context::create_or_panic();
 //!
-//! // Create the renderer
-//! let mut renderer = Renderer::new(&gl, &mut imgui).unwrap();
+//! // Create the renderer (simple usage)
+//! let mut renderer = GlowRenderer::new(gl, &mut imgui).unwrap();
 //!
 //! // In your render loop:
 //! // imgui.new_frame();
 //! // ... build your UI ...
 //! // let draw_data = imgui.render();
-//! // renderer.render(&gl, draw_data).unwrap();
+//! // renderer.render(draw_data).unwrap();
 //! ```
 
 use std::mem::size_of;

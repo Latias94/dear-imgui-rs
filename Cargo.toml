@@ -10,8 +10,6 @@ members = [
     "extensions/dear-implot-sys",
     "extensions/dear-implot",
     "extensions/dear-imguizmo",
-    "extensions/dear-imnodeflow-sys",
-    "extensions/dear-imnodeflow",
     "examples",
 ]
 

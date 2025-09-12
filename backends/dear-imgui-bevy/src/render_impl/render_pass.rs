@@ -48,25 +48,16 @@ impl Node for ImguiPassNode {
         };
 
         let main_entity = view.retained_view_entity.main_entity;
-        info!("Looking for render data for entity: {:?}", main_entity);
 
         let Some(data) = render_data.0.get(&main_entity) else {
-            info!("No render data found for Dear ImGui view");
             return Ok(());
         };
 
-        info!("Looking for pipeline for entity: {:?}", main_entity);
         let Some(pipeline_id) = imgui_pipelines.get(&main_entity) else {
-            info!("No pipeline found for Dear ImGui view");
-            info!(
-                "Available pipelines: {:?}",
-                imgui_pipelines.keys().collect::<Vec<_>>()
-            );
             return Ok(());
         };
 
         let Some(pipeline) = pipeline_cache.get_render_pipeline(*pipeline_id) else {
-            info!("Pipeline not ready for Dear ImGui view");
             return Ok(());
         };
 
@@ -104,36 +95,22 @@ impl Node for ImguiPassNode {
         let (vertex_buffer, index_buffer) = match (&data.vertex_buffer, &data.index_buffer) {
             (Some(vertex), Some(index)) => (vertex, index),
             _ => {
-                info!("No vertex/index buffers for Dear ImGui view");
                 return Ok(());
             }
         };
 
         // Set vertex and index buffers
         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+
+        // We always use Uint32 for indices internally for simplicity and safety
+        // This handles both 16-bit and 32-bit Dear ImGui configurations
         render_pass.set_index_buffer(index_buffer.slice(..), 0, IndexFormat::Uint32);
 
         // Render draw commands
         let mut index_offset = 0u32;
-        info!("Processing {} draw commands", data.draw_commands.len());
-        for (cmd_idx, draw_command) in data.draw_commands.iter().enumerate() {
-            info!(
-                "Draw command {}: indices_count={}, texture_id={:?}, clip_rect={:?}",
-                cmd_idx,
-                draw_command.indices_count,
-                draw_command.texture_id,
-                draw_command.clip_rect
-            );
+        for draw_command in data.draw_commands.iter() {
             // Set texture bind group
-            info!(
-                "Looking for texture bind group for texture_id: {:?}",
-                draw_command.texture_id
-            );
             if let Some(texture_bind_group) = bind_groups.get(&draw_command.texture_id) {
-                info!(
-                    "Found texture bind group for texture_id: {:?}",
-                    draw_command.texture_id
-                );
                 render_pass.set_bind_group(1, texture_bind_group, &[]);
 
                 // Set scissor rect (simplified for now)
@@ -145,40 +122,20 @@ impl Node for ImguiPassNode {
                 let max_y =
                     (clip_rect[3] * data.pixels_per_point).min(data.target_size.y as f32) as u32;
 
-                info!("Scissor rect: min=({}, {}), max=({}, {}), pixels_per_point={}, target_size={:?}",
-                      min_x, min_y, max_x, max_y, data.pixels_per_point, data.target_size);
-
                 if max_x > min_x && max_y > min_y {
                     render_pass.set_scissor_rect(min_x, min_y, max_x - min_x, max_y - min_y);
 
                     // Draw indexed
-                    info!(
-                        "Drawing indices {}..{}",
-                        index_offset,
-                        index_offset + draw_command.indices_count as u32
-                    );
                     render_pass.draw_indexed(
                         index_offset..(index_offset + draw_command.indices_count as u32),
                         0,
                         0..1,
                     );
-                } else {
-                    info!("Skipping draw command due to invalid scissor rect");
                 }
-            } else {
-                info!(
-                    "No texture bind group found for texture_id: {:?}",
-                    draw_command.texture_id
-                );
             }
 
             index_offset += draw_command.indices_count as u32;
         }
-
-        info!(
-            "Dear ImGui rendered successfully with {} draw commands",
-            data.draw_commands.len()
-        );
 
         Ok(())
     }

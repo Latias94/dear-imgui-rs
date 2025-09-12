@@ -25,8 +25,42 @@ pub struct WgpuRenderer {
 }
 
 impl WgpuRenderer {
-    /// Create a new WGPU renderer
-    pub fn new() -> Self {
+    /// Create a new WGPU renderer with full initialization (recommended)
+    ///
+    /// This is the preferred way to create a WGPU renderer as it ensures proper
+    /// initialization order and is consistent with other backends.
+    ///
+    /// # Arguments
+    /// * `init_info` - WGPU initialization information (device, queue, format)
+    /// * `imgui_ctx` - Dear ImGui context to configure
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
+    ///
+    /// let init_info = WgpuInitInfo::new(device, queue, surface_format);
+    /// let mut renderer = WgpuRenderer::new(init_info, &mut imgui_context)?;
+    /// ```
+    pub fn new(init_info: WgpuInitInfo, imgui_ctx: &mut Context) -> RendererResult<Self> {
+        let mut renderer = Self::empty();
+        renderer.init_with_context(init_info, imgui_ctx)?;
+        Ok(renderer)
+    }
+
+    /// Create an empty WGPU renderer for advanced usage
+    ///
+    /// This creates an uninitialized renderer that must be initialized later
+    /// using `init_with_context()`. Most users should use `new()` instead.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
+    ///
+    /// let mut renderer = WgpuRenderer::empty();
+    /// let init_info = WgpuInitInfo::new(device, queue, surface_format);
+    /// renderer.init_with_context(init_info, &mut imgui_context)?;
+    /// ```
+    pub fn empty() -> Self {
         Self {
             backend_data: None,
             shader_manager: ShaderManager::new(),
@@ -59,6 +93,28 @@ impl WgpuRenderer {
         self.create_device_objects(&mut backend_data)?;
 
         self.backend_data = Some(backend_data);
+        Ok(())
+    }
+
+    /// Initialize the renderer with ImGui context configuration
+    ///
+    /// This is a convenience method that combines init() and configure_imgui_context()
+    /// to ensure proper initialization order, similar to the glow backend approach.
+    pub fn init_with_context(
+        &mut self,
+        init_info: WgpuInitInfo,
+        imgui_ctx: &mut Context,
+    ) -> RendererResult<()> {
+        // First initialize the renderer
+        self.init(init_info)?;
+
+        // Then configure the ImGui context with backend capabilities
+        // This must be done BEFORE preparing the font atlas
+        self.configure_imgui_context(imgui_ctx);
+
+        // Finally prepare the font atlas
+        self.prepare_font_atlas(imgui_ctx)?;
+
         Ok(())
     }
 
@@ -251,7 +307,7 @@ impl WgpuRenderer {
     ///
     /// With the new texture management system in Dear ImGui 1.92+, font textures are
     /// automatically managed through ImDrawData->Textures[] during rendering.
-    /// We only need to build the font atlas here; texture creation happens automatically.
+    /// However, we need to ensure the font atlas is built and ready before the first render.
     fn reload_font_texture(
         &mut self,
         imgui_ctx: &mut Context,
@@ -261,16 +317,22 @@ impl WgpuRenderer {
         let mut fonts = imgui_ctx.font_atlas_mut();
 
         // Build the font atlas if not already built
-        // With RENDERER_HAS_TEXTURES, Dear ImGui will automatically create the texture
-        // through the new texture management system during the first render call
+        // This prepares the font data but doesn't create GPU textures yet
         if !fonts.is_built() {
             fonts.build();
         }
 
-        // Note: With the new texture management system (RENDERER_HAS_TEXTURES),
-        // we don't manually create font textures here. Instead, Dear ImGui will
-        // automatically create and manage font textures through ImDrawData->Textures[]
-        // during the render process.
+        // CRITICAL: Set the correct texture reference for the font atlas
+        // The font atlas needs to have a non-zero texture ID so that Dear ImGui
+        // will request texture creation through ImTextureStatus_WantCreate
+
+        // Use texture ID 1 for the font atlas (ID 0 is reserved for null/invalid)
+        let font_texture_id = 1u64;
+        let texture_ref = dear_imgui::texture::create_texture_ref(font_texture_id);
+        fonts.set_tex_ref(texture_ref);
+
+        // The actual texture creation will happen automatically during rendering
+        // when Dear ImGui requests it through ImTextureStatus_WantCreate
 
         Ok(())
     }
@@ -646,6 +708,6 @@ impl WgpuRenderer {
 
 impl Default for WgpuRenderer {
     fn default() -> Self {
-        Self::new()
+        Self::empty()
     }
 }

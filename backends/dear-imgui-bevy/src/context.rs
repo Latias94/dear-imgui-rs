@@ -8,21 +8,24 @@ use bevy::{
 use dear_imgui::{Context, OwnedDrawData};
 use std::{
     collections::HashMap,
-    ptr::NonNull,
     sync::{Arc, RwLock},
 };
 
+// use crate::texture::TextureRegistry; // TODO: Re-enable when texture system is complete
+
 /// The ImGui context resource for Bevy integration.
 ///
-/// This resource manages the Dear ImGui context and provides thread-safe access
+/// This resource manages the Dear ImGui context and provides safe access
 /// to the UI building functionality. It should be accessed as a `NonSendMut` resource
-/// in Bevy systems.
+/// in Bevy systems, as Dear ImGui contexts are not thread-safe.
+///
+/// # Safety
+/// This type does NOT implement Send/Sync, ensuring it can only be used
+/// as a NonSend resource in Bevy, which is the correct and safe approach.
 #[derive(Resource)]
 pub struct ImguiContext {
     /// The underlying Dear ImGui context
     ctx: RwLock<Context>,
-    /// Current UI pointer (only valid during frame rendering)
-    ui: Option<NonNull<dear_imgui::Ui>>,
     /// Registered Bevy textures mapped to ImGui texture IDs
     textures: HashMap<u32, Arc<StrongHandle>>,
     /// Texture modification state for render thread synchronization
@@ -45,27 +48,50 @@ struct TextureModifyState {
 impl ImguiContext {
     /// Create a new ImGui context
     pub(crate) fn new(ctx: Context) -> Self {
-        // Key mappings will be handled in the input system
-
         Self {
             ctx: RwLock::new(ctx),
-            ui: None,
             textures: HashMap::new(),
             texture_modify: RwLock::new(TextureModifyState::default()),
             rendered_draw_data: RwLock::new(OwnedDrawData::default()),
         }
     }
 
-    /// Get mutable access to the current UI frame.
+    /// Execute a closure with mutable access to the Dear ImGui context
     ///
-    /// This method should only be called during the Update phase when a frame is active.
-    /// Panics if called outside of an active ImGui frame.
-    pub fn ui(&mut self) -> &mut dear_imgui::Ui {
-        unsafe {
-            self.ui
-                .expect("Not currently rendering an imgui frame! Make sure to call this during Update phase.")
-                .as_mut()
-        }
+    /// This is the safe way to access the context for operations that need
+    /// mutable access, such as creating frames or modifying settings.
+    pub fn with_context<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut Context) -> R,
+    {
+        let mut ctx = self.ctx.write().expect("Failed to acquire context lock");
+        f(&mut *ctx)
+    }
+
+    /// Execute a closure with a complete Dear ImGui frame
+    ///
+    /// This method manages the complete frame lifecycle:
+    /// 1. Starts a new frame
+    /// 2. Executes the user closure with the UI
+    /// 3. Does NOT call render - that's handled by the end frame system
+    ///
+    /// This is the recommended way for user systems to interact with Dear ImGui.
+    pub fn with_ui<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut dear_imgui::Ui) -> R,
+    {
+        let mut ctx = self.ctx.write().expect("Failed to acquire context lock");
+        let ui = ctx.frame();
+        f(ui)
+    }
+
+    /// Execute a closure with read-only access to the Dear ImGui context
+    pub fn with_context_read<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&Context) -> R,
+    {
+        let ctx = self.ctx.read().expect("Failed to acquire context lock");
+        f(&*ctx)
     }
 
     /// Register a Bevy texture with ImGui.
@@ -103,11 +129,6 @@ impl ImguiContext {
         &self.ctx
     }
 
-    /// Set the current UI pointer (internal use)
-    pub(crate) fn set_ui(&mut self, ui: Option<NonNull<dear_imgui::Ui>>) {
-        self.ui = ui;
-    }
-
     /// Get texture modification state (internal use)
     pub(crate) fn texture_modify(&self) -> &RwLock<TextureModifyState> {
         &self.texture_modify
@@ -124,7 +145,8 @@ impl ImguiContext {
     }
 }
 
-// Safety: ImguiContext is designed to be used as NonSend in Bevy
-// The RwLock ensures thread safety for the parts that need it
-unsafe impl Send for ImguiContext {}
-unsafe impl Sync for ImguiContext {}
+// Note: We do NOT implement Send/Sync for ImguiContext
+// This ensures it can only be used as a NonSend resource in Bevy,
+// which is the correct and safe way to handle Dear ImGui contexts.
+// Dear ImGui contexts are not thread-safe and must be accessed from
+// the main thread only.

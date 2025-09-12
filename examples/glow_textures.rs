@@ -7,7 +7,7 @@
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
 use dear_imgui::*;
-use dear_imgui_glow::AutoRenderer;
+use dear_imgui_glow::GlowRenderer;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
@@ -45,7 +45,7 @@ impl TextureDemo {
 
     fn initialize(
         &mut self,
-        renderer: &mut AutoRenderer,
+        renderer: &mut GlowRenderer,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Generate a simple gradient texture
         self.generated_texture = Some(self.create_gradient_texture(renderer)?);
@@ -61,7 +61,7 @@ impl TextureDemo {
 
     fn create_gradient_texture(
         &self,
-        renderer: &mut AutoRenderer,
+        renderer: &mut GlowRenderer,
     ) -> Result<TextureId, Box<dyn std::error::Error>> {
         const WIDTH: u32 = 256;
         const HEIGHT: u32 = 256;
@@ -93,7 +93,7 @@ impl TextureDemo {
 
     fn create_checkerboard_texture(
         &self,
-        renderer: &mut AutoRenderer,
+        renderer: &mut GlowRenderer,
     ) -> Result<TextureId, Box<dyn std::error::Error>> {
         const WIDTH: u32 = 128;
         const HEIGHT: u32 = 128;
@@ -118,7 +118,7 @@ impl TextureDemo {
 
     fn create_animated_texture(
         &self,
-        renderer: &mut AutoRenderer,
+        renderer: &mut GlowRenderer,
     ) -> Result<TextureId, Box<dyn std::error::Error>> {
         const WIDTH: u32 = 64;
         const HEIGHT: u32 = 64;
@@ -141,7 +141,7 @@ impl TextureDemo {
 
     fn update_animated_texture(
         &mut self,
-        renderer: &mut AutoRenderer,
+        renderer: &mut GlowRenderer,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(texture_id) = self.animated_texture {
             const WIDTH: u32 = 64;
@@ -223,7 +223,7 @@ impl TextureDemo {
 struct ImguiState {
     context: Context,
     platform: WinitPlatform,
-    renderer: AutoRenderer,
+    renderer: GlowRenderer,
     texture_demo: TextureDemo,
     last_frame: Instant,
 }
@@ -293,7 +293,7 @@ impl AppWindow {
             })
         };
 
-        let mut renderer = AutoRenderer::new(gl, &mut imgui_context)?;
+        let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
         renderer.new_frame()?;
 
         // Initialize texture demo
@@ -347,16 +347,17 @@ impl AppWindow {
         let ui = self.imgui.context.frame();
 
         // Show texture demo UI
-        self.imgui.texture_demo.show_ui(&ui);
+        self.imgui.texture_demo.show_ui(ui);
 
         // Show demo window
         ui.show_demo_window(&mut true);
 
         // Render
-        let gl = self.imgui.renderer.gl_context();
-        unsafe {
-            gl.clear_color(0.05, 0.05, 0.1, 1.0);
-            gl.clear(glow::COLOR_BUFFER_BIT);
+        if let Some(gl) = self.imgui.renderer.gl_context() {
+            unsafe {
+                gl.clear_color(0.05, 0.05, 0.1, 1.0);
+                gl.clear(glow::COLOR_BUFFER_BIT);
+            }
         }
 
         self.imgui

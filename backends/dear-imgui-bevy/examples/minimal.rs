@@ -27,55 +27,42 @@ fn setup(mut commands: Commands) {
     commands.spawn(Camera3d::default());
 }
 
-fn ui_system(mut context: NonSendMut<ImguiContext>, mut state: ResMut<UiState>) {
-    println!("ui_system called!");
-    let ui = context.ui();
-    println!("Got UI context successfully!");
+fn ui_system(context: NonSendMut<ImguiContext>, mut state: ResMut<UiState>) {
+    context.with_ui(|ui| {
+        // Show the demo window
+        if state.demo_window_open {
+            ui.show_demo_window(&mut state.demo_window_open);
+        }
 
-    // Debug: Print display size and mouse info
-    let io = ui.io();
-    println!("Display size: {:?}", io.display_size());
-    println!(
-        "Display framebuffer scale: {:?}",
-        io.display_framebuffer_scale()
-    );
-    println!("Mouse pos: {:?}", io.mouse_pos());
+        // Show a custom window - use proper conditions to avoid flicker
+        ui.window("Hello Dear ImGui!")
+            .size([400.0, 300.0], Condition::FirstUseEver) // Only set size on first use
+            .position([100.0, 100.0], Condition::FirstUseEver) // Only set position on first use
+            .build(|| {
+                ui.text("Hello from dear-imgui-bevy!");
+                ui.text("This window should be stable now!");
+                ui.separator();
 
-    // Show the demo window
-    if state.demo_window_open {
-        println!("Showing demo window");
-        ui.show_demo_window(&mut state.demo_window_open);
-    }
+                if ui.button("Click me!") {
+                    state.counter += 1;
+                }
+                ui.same_line();
+                ui.text(format!("Clicked {} times", state.counter));
 
-    // Show a custom window - force it to be visible and in the center
-    println!("Creating custom window");
-    let window = ui
-        .window("Hello Dear ImGui!")
-        .size([400.0, 300.0], Condition::Always) // Force size every frame
-        .position([100.0, 100.0], Condition::Always) // Force position every frame
-        .bg_alpha(1.0) // Ensure it's not transparent
-        .build(|| {
-            println!("Inside window build callback");
-            ui.text("Hello from dear-imgui-bevy!");
-            ui.text("This window should be visible!");
-            ui.separator();
+                ui.separator();
+                ui.checkbox("Show demo window", &mut state.demo_window_open);
 
-            if ui.button("Click me!") {
-                state.counter += 1;
-                println!("Button clicked! Counter: {}", state.counter);
-            }
-            ui.same_line();
-            ui.text(format!("Clicked {} times", state.counter));
+                // Add some colorful content to make it more visible
+                ui.separator();
+                ui.text_colored([1.0, 0.0, 0.0, 1.0], "RED TEXT");
+                ui.text_colored([0.0, 1.0, 0.0, 1.0], "GREEN TEXT");
+                ui.text_colored([0.0, 0.0, 1.0, 1.0], "BLUE TEXT");
 
-            ui.separator();
-            ui.checkbox("Show demo window", &mut state.demo_window_open);
-
-            // Add some colorful content to make it more visible
-            ui.separator();
-            ui.text_colored([1.0, 0.0, 0.0, 1.0], "RED TEXT");
-            ui.text_colored([0.0, 1.0, 0.0, 1.0], "GREEN TEXT");
-            ui.text_colored([0.0, 0.0, 1.0, 1.0], "BLUE TEXT");
-        });
-
-    println!("Window created: {:?}", window.is_some());
+                // Show FPS info
+                ui.separator();
+                let io = ui.io();
+                ui.text(format!("FPS: {:.1}", io.framerate()));
+                ui.text(format!("Frame Time: {:.3}ms", 1000.0 / io.framerate()));
+            });
+    });
 }

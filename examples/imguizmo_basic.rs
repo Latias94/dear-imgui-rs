@@ -103,19 +103,11 @@ impl AppWindow {
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
 
-        let mut renderer = WgpuRenderer::new();
-
-        // Initialize the renderer with the new API
+        // Initialize the renderer with one-step initialization
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
-        renderer
-            .init(init_info)
-            .expect("Failed to initialize WGPU renderer");
-
-        // Prepare font atlas
-        renderer
-            .prepare_font_atlas(&mut context)
-            .expect("Failed to prepare font atlas");
+        let mut renderer =
+            WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
 
         // Log successful initialization
         dear_imgui::logging::log_context_created();

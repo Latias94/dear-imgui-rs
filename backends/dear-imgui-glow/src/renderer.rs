@@ -15,12 +15,17 @@ use crate::{
     state::GlStateBackup,
     texture::{SimpleTextureMap, TextureMap},
     to_byte_slice,
-    versions::{GlVersion, GlslVersion},
+    versions::GlVersion,
     GlBuffer, GlTexture, GlVertexArray,
 };
 
-/// Main renderer for Dear ImGui using Glow
-pub struct Renderer {
+/// Main renderer for Dear ImGui using Glow (OpenGL)
+///
+/// This renderer provides a unified API similar to the WGPU backend while maintaining
+/// flexibility for advanced use cases. It can either own the OpenGL context and texture
+/// management (simple usage) or work with externally managed resources (advanced usage).
+pub struct GlowRenderer {
+    // Core rendering state
     shaders: Shaders,
     state_backup: GlStateBackup,
     pub vbo_handle: Option<GlBuffer>,
@@ -31,17 +36,105 @@ pub struct Renderer {
     pub gl_version: GlVersion,
     pub has_clip_origin_support: bool,
     pub is_destroyed: bool,
+
+    // Resource management
+    gl_context: Option<std::rc::Rc<glow::Context>>, // None = externally managed
+    texture_map: Box<dyn TextureMap>,
 }
 
-impl Renderer {
-    /// Create a new renderer
+impl GlowRenderer {
+    /// Create a new Glow renderer with owned OpenGL context (recommended)
     ///
-    /// Following the official OpenGL3 backend approach: relies on OpenGL's GL_FRAMEBUFFER_SRGB
-    /// for automatic sRGB conversion rather than manual shader-based conversion.
-    pub fn new<T: TextureMap>(
+    /// This is the preferred way to create a Glow renderer as it handles all resource
+    /// management automatically and provides a simple API similar to the WGPU backend.
+    ///
+    /// # Arguments
+    /// * `gl` - OpenGL context (will be owned by the renderer)
+    /// * `imgui_context` - Dear ImGui context to configure
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use dear_imgui_glow::GlowRenderer;
+    ///
+    /// let mut renderer = GlowRenderer::new(gl_context, &mut imgui_context)?;
+    /// ```
+    pub fn new(gl: glow::Context, imgui_context: &mut ImGuiContext) -> InitResult<Self> {
+        let texture_map = Box::new(SimpleTextureMap::default());
+        Self::with_texture_map(Some(gl), imgui_context, texture_map)
+    }
+
+    /// Create a new Glow renderer with custom texture management (advanced)
+    ///
+    /// This method allows you to provide your own texture management implementation
+    /// and optionally manage the OpenGL context externally.
+    ///
+    /// # Arguments
+    /// * `gl` - OpenGL context (Some = owned, None = externally managed)
+    /// * `imgui_context` - Dear ImGui context to configure
+    /// * `texture_map` - Custom texture map implementation
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use dear_imgui_glow::{GlowRenderer, SimpleTextureMap};
+    ///
+    /// let texture_map = Box::new(SimpleTextureMap::default());
+    /// let mut renderer = GlowRenderer::with_texture_map(
+    ///     Some(gl_context),
+    ///     &mut imgui_context,
+    ///     texture_map
+    /// )?;
+    /// ```
+    pub fn with_texture_map(
+        gl: Option<glow::Context>,
+        imgui_context: &mut ImGuiContext,
+        texture_map: Box<dyn TextureMap>,
+    ) -> InitResult<Self> {
+        match gl {
+            Some(context) => {
+                let gl_rc = std::rc::Rc::new(context);
+                Self::init_internal(Some(gl_rc.clone()), &gl_rc, imgui_context, texture_map)
+            }
+            None => Err(InitError::Generic(
+                "OpenGL context is required for initialization".to_string(),
+            )),
+        }
+    }
+
+    /// Create a new Glow renderer with external OpenGL context (advanced)
+    ///
+    /// This method is for advanced users who want to manage the OpenGL context
+    /// externally while still using custom texture management.
+    ///
+    /// # Arguments
+    /// * `gl` - Reference to externally managed OpenGL context
+    /// * `imgui_context` - Dear ImGui context to configure
+    /// * `texture_map` - Custom texture map implementation
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use dear_imgui_glow::{GlowRenderer, SimpleTextureMap};
+    ///
+    /// let texture_map = Box::new(SimpleTextureMap::default());
+    /// let mut renderer = GlowRenderer::with_external_context(
+    ///     &gl_context,
+    ///     &mut imgui_context,
+    ///     texture_map
+    /// )?;
+    /// ```
+    pub fn with_external_context(
         gl: &Context,
         imgui_context: &mut ImGuiContext,
-        texture_map: &mut T,
+        texture_map: Box<dyn TextureMap>,
+    ) -> InitResult<Self> {
+        Self::init_internal(None, gl, imgui_context, texture_map)
+    }
+
+    /// Internal initialization method
+    fn init_internal(
+        owned_gl: Option<std::rc::Rc<glow::Context>>,
+        gl: &Context,
+        imgui_context: &mut ImGuiContext,
+        mut texture_map: Box<dyn TextureMap>,
     ) -> InitResult<Self> {
         let gl_version = GlVersion::read(gl);
 
@@ -73,7 +166,7 @@ impl Renderer {
         // This sets RENDERER_HAS_TEXTURES flag which is required for ImGui 1.92+
         Self::configure_imgui_context_static(imgui_context);
 
-        let font_atlas_texture = Self::prepare_font_atlas(gl, imgui_context, texture_map)?;
+        let font_atlas_texture = Self::prepare_font_atlas(gl, imgui_context, &mut *texture_map)?;
 
         let shaders = Shaders::new(gl, gl_version)?;
         let vbo_handle = unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?;
@@ -92,6 +185,8 @@ impl Renderer {
             gl_version,
             has_clip_origin_support,
             is_destroyed: false,
+            gl_context: owned_gl,
+            texture_map,
         };
 
         Ok(renderer)
@@ -102,10 +197,10 @@ impl Renderer {
     /// With the new texture management system (ImGuiBackendFlags_RendererHasTextures),
     /// we don't need to manually create font textures. The textures will be created
     /// automatically when needed through the ImTextureData system.
-    fn prepare_font_atlas<T: TextureMap>(
+    fn prepare_font_atlas(
         _gl: &Context,
         imgui_context: &mut ImGuiContext,
-        _texture_map: &mut T,
+        _texture_map: &mut dyn TextureMap,
     ) -> InitResult<GlTexture> {
         let mut fonts = imgui_context.fonts();
 
@@ -185,11 +280,6 @@ impl Renderer {
         io.set_backend_flags(flags);
     }
 
-    /// Configure the ImGui context for this renderer
-    fn configure_imgui_context(&self, imgui_context: &mut ImGuiContext) {
-        Self::configure_imgui_context_static(imgui_context);
-    }
-
     /// Destroy the renderer and free OpenGL resources
     pub fn destroy(&mut self, gl: &Context) {
         if self.is_destroyed {
@@ -222,13 +312,76 @@ impl Renderer {
         self.is_destroyed = true;
     }
 
+    /// Get a reference to the OpenGL context (if owned by the renderer)
+    pub fn gl_context(&self) -> Option<&std::rc::Rc<glow::Context>> {
+        self.gl_context.as_ref()
+    }
+
+    /// Get a reference to the texture map
+    pub fn texture_map(&self) -> &dyn TextureMap {
+        &*self.texture_map
+    }
+
+    /// Get a mutable reference to the texture map
+    pub fn texture_map_mut(&mut self) -> &mut dyn TextureMap {
+        &mut *self.texture_map
+    }
+
+    /// Called every frame to prepare for rendering
+    pub fn new_frame(&mut self) -> RenderResult<()> {
+        // Check if we need to recreate device objects
+        let needs_recreation = self.is_destroyed || self.shaders.program.is_none();
+
+        if needs_recreation {
+            if let Some(gl) = self.gl_context.clone() {
+                self.create_device_objects(&gl)?;
+            } else {
+                return Err(RenderError::Generic(
+                    "No OpenGL context available".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Render Dear ImGui draw data
-    pub fn render<T: TextureMap>(
-        &mut self,
-        gl: &Context,
-        texture_map: &T,
-        draw_data: &DrawData,
-    ) -> RenderResult<()> {
+    pub fn render(&mut self, draw_data: &DrawData) -> RenderResult<()> {
+        // Handle texture updates first, following the original Dear ImGui OpenGL3 implementation
+        for texture_data in draw_data.textures() {
+            if texture_data.status() != dear_imgui::TextureStatus::OK {
+                self.update_texture_from_data(texture_data)?;
+            }
+        }
+
+        if let Some(gl) = self.gl_context.clone() {
+            self.render_internal(&gl, draw_data)
+        } else {
+            Err(RenderError::Generic("No OpenGL context available. Use render_with_context() for externally managed contexts.".to_string()))
+        }
+    }
+
+    /// Advanced render method with external OpenGL context
+    pub fn render_with_context(&mut self, gl: &Context, draw_data: &DrawData) -> RenderResult<()> {
+        // Handle texture updates first
+        for texture_data in draw_data.textures() {
+            if texture_data.status() != dear_imgui::TextureStatus::OK {
+                self.update_texture_from_data(texture_data)?;
+            }
+        }
+
+        self.render_internal(gl, draw_data)
+    }
+
+    /// Get OpenGL context reference (owned or external)
+    fn get_gl_context(&self) -> RenderResult<&Context> {
+        match &self.gl_context {
+            Some(gl) => Ok(gl),
+            None => Err(RenderError::Generic("No OpenGL context available. Use render_with_context() for externally managed contexts.".to_string())),
+        }
+    }
+
+    /// Internal render implementation
+    fn render_internal(&mut self, gl: &Context, draw_data: &DrawData) -> RenderResult<()> {
         if self.is_destroyed {
             return Err(RenderError::RendererDestroyed);
         }
@@ -270,8 +423,12 @@ impl Renderer {
 
         self.set_up_render_state(gl, draw_data, fb_width, fb_height)?;
 
-        // Render draw lists
-        self.render_draw_lists(gl, texture_map, draw_data)?;
+        // Render draw lists - we need to avoid borrowing self and self.texture_map at the same time
+        // Create a raw pointer to avoid borrow checker issues
+        let texture_map_ptr = &*self.texture_map as *const dyn TextureMap;
+        unsafe {
+            self.render_draw_lists(gl, &*texture_map_ptr, draw_data)?;
+        }
 
         // Cleanup
         #[cfg(feature = "bind_vertex_array_support")]
@@ -413,15 +570,6 @@ impl Renderer {
         Ok(())
     }
 
-    /// Called every frame to prepare for rendering
-    pub fn new_frame(&mut self, gl: &Context) -> RenderResult<()> {
-        // Recreate device objects if they were destroyed
-        if self.is_destroyed || self.shaders.program.is_none() {
-            self.create_device_objects(gl)?;
-        }
-        Ok(())
-    }
-
     /// Create OpenGL device objects (buffers, shaders, etc.)
     pub fn create_device_objects(&mut self, gl: &Context) -> RenderResult<()> {
         if self.shaders.program.is_none() {
@@ -465,10 +613,10 @@ impl Renderer {
     }
 
     /// Render all draw lists
-    fn render_draw_lists<T: TextureMap>(
+    fn render_draw_lists(
         &mut self,
         gl: &Context,
-        texture_map: &T,
+        texture_map: &dyn TextureMap,
         draw_data: &DrawData,
     ) -> RenderResult<()> {
         gl_debug_message(gl, "start loop over draw lists");
@@ -549,10 +697,10 @@ impl Renderer {
     }
 
     /// Render elements with the given parameters
-    fn render_elements<T: TextureMap>(
+    fn render_elements(
         &self,
         gl: &Context,
-        texture_map: &T,
+        texture_map: &dyn TextureMap,
         count: usize,
         cmd_params: &DrawCmdParams,
         draw_data: &DrawData,
@@ -625,10 +773,6 @@ impl Renderer {
 
         Ok(())
     }
-
-    fn renderer_destroyed() -> RenderError {
-        RenderError::RendererDestroyed
-    }
 }
 
 /// Multi-viewport support functions
@@ -684,70 +828,7 @@ pub mod multi_viewport {
     }
 }
 
-/// Auto renderer that owns the OpenGL context and handles textures itself
-pub struct AutoRenderer {
-    gl: std::rc::Rc<glow::Context>,
-    texture_map: SimpleTextureMap,
-    renderer: Renderer,
-}
-
-impl AutoRenderer {
-    /// Create a new AutoRenderer for simple rendering
-    ///
-    /// Following the official OpenGL3 backend approach: relies on OpenGL's GL_FRAMEBUFFER_SRGB
-    /// for automatic sRGB conversion rather than manual shader-based conversion.
-    pub fn new(gl: glow::Context, imgui_context: &mut ImGuiContext) -> InitResult<Self> {
-        let mut texture_map = SimpleTextureMap::default();
-        let renderer = Renderer::new(&gl, imgui_context, &mut texture_map)?;
-        Ok(Self {
-            gl: std::rc::Rc::new(gl),
-            texture_map,
-            renderer,
-        })
-    }
-
-    /// Get a reference to the OpenGL context
-    #[inline]
-    pub fn gl_context(&self) -> &std::rc::Rc<glow::Context> {
-        &self.gl
-    }
-
-    /// Get a reference to the texture map
-    #[inline]
-    pub fn texture_map(&self) -> &SimpleTextureMap {
-        &self.texture_map
-    }
-
-    /// Get a mutable reference to the texture map
-    #[inline]
-    pub fn texture_map_mut(&mut self) -> &mut SimpleTextureMap {
-        &mut self.texture_map
-    }
-
-    /// Get a reference to the renderer
-    #[inline]
-    pub fn renderer(&self) -> &Renderer {
-        &self.renderer
-    }
-
-    /// Called every frame to prepare for rendering
-    pub fn new_frame(&mut self) -> RenderResult<()> {
-        self.renderer.new_frame(&self.gl)
-    }
-
-    /// Render Dear ImGui draw data
-    #[inline]
-    pub fn render(&mut self, draw_data: &DrawData) -> RenderResult<()> {
-        // Handle texture updates first, following the original Dear ImGui OpenGL3 implementation
-        for texture_data in draw_data.textures() {
-            if texture_data.status() != dear_imgui::TextureStatus::OK {
-                self.update_texture_from_data(texture_data)?;
-            }
-        }
-
-        self.renderer.render(&self.gl, &self.texture_map, draw_data)
-    }
-
+impl GlowRenderer {
     /// Update texture from Dear ImGui texture data
     /// Following the original Dear ImGui OpenGL3 implementation
     fn update_texture_from_data(
@@ -782,35 +863,36 @@ impl AutoRenderer {
         &mut self,
         texture_data: &dear_imgui::TextureData,
     ) -> RenderResult<()> {
+        let gl = self.get_gl_context()?;
         let width = texture_data.width() as u32;
         let height = texture_data.height() as u32;
         let format = texture_data.format();
 
         if let Some(pixels) = texture_data.pixels() {
             let gl_texture = unsafe {
-                let gl_texture = self.gl.create_texture().map_err(|e| {
+                let gl_texture = gl.create_texture().map_err(|e| {
                     RenderError::Generic(format!("Failed to create texture: {}", e))
                 })?;
 
-                self.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+                gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
 
                 // Set texture parameters
-                self.gl.tex_parameter_i32(
+                gl.tex_parameter_i32(
                     glow::TEXTURE_2D,
                     glow::TEXTURE_MIN_FILTER,
                     glow::LINEAR as i32,
                 );
-                self.gl.tex_parameter_i32(
+                gl.tex_parameter_i32(
                     glow::TEXTURE_2D,
                     glow::TEXTURE_MAG_FILTER,
                     glow::LINEAR as i32,
                 );
-                self.gl.tex_parameter_i32(
+                gl.tex_parameter_i32(
                     glow::TEXTURE_2D,
                     glow::TEXTURE_WRAP_S,
                     glow::CLAMP_TO_EDGE as i32,
                 );
-                self.gl.tex_parameter_i32(
+                gl.tex_parameter_i32(
                     glow::TEXTURE_2D,
                     glow::TEXTURE_WRAP_T,
                     glow::CLAMP_TO_EDGE as i32,
@@ -819,7 +901,7 @@ impl AutoRenderer {
                 // Upload texture data based on format
                 match format {
                     dear_imgui::TextureFormat::RGBA32 => {
-                        self.gl.tex_image_2d(
+                        gl.tex_image_2d(
                             glow::TEXTURE_2D,
                             0,
                             glow::RGBA as i32,
@@ -841,7 +923,7 @@ impl AutoRenderer {
                             rgba_data.push(alpha); // A
                         }
 
-                        self.gl.tex_image_2d(
+                        gl.tex_image_2d(
                             glow::TEXTURE_2D,
                             0,
                             glow::RGBA as i32,
@@ -855,7 +937,7 @@ impl AutoRenderer {
                     }
                 }
 
-                self.gl.bind_texture(glow::TEXTURE_2D, None);
+                gl.bind_texture(glow::TEXTURE_2D, None);
                 gl_texture
             };
 
@@ -885,11 +967,12 @@ impl AutoRenderer {
         &mut self,
         texture_data: &dear_imgui::TextureData,
     ) -> RenderResult<()> {
+        let gl = self.get_gl_context()?;
         let texture_id = texture_data.tex_id();
 
         if let Some(gl_texture) = self.texture_map.get(texture_id) {
             unsafe {
-                self.gl.delete_texture(gl_texture);
+                gl.delete_texture(gl_texture);
             }
             self.texture_map.remove(texture_id);
         }
@@ -906,7 +989,10 @@ impl AutoRenderer {
         data: &[u8],
     ) -> InitResult<()> {
         use crate::texture::update_imgui_texture;
-        let gl_texture = update_imgui_texture(&self.gl, texture_id, width, height, data)?;
+        let gl = self
+            .get_gl_context()
+            .map_err(|e| InitError::Generic(e.to_string()))?;
+        let gl_texture = update_imgui_texture(gl, texture_id, width, height, data)?;
 
         // Update the texture mapping with modern texture management
         self.texture_map
@@ -925,7 +1011,10 @@ impl AutoRenderer {
     ) -> InitResult<TextureId> {
         use crate::texture::create_texture_from_rgba;
 
-        let gl_texture = create_texture_from_rgba(&self.gl, width, height, data)?;
+        let gl = self
+            .get_gl_context()
+            .map_err(|e| InitError::Generic(e.to_string()))?;
+        let gl_texture = create_texture_from_rgba(gl, width, height, data)?;
         let texture_id =
             self.texture_map
                 .register_texture(gl_texture, width as i32, height as i32, format);
@@ -944,8 +1033,10 @@ impl AutoRenderer {
     }
 }
 
-impl Drop for AutoRenderer {
+impl Drop for GlowRenderer {
     fn drop(&mut self) {
-        self.renderer.destroy_device_objects(&self.gl);
+        if let Some(gl) = self.gl_context.take() {
+            self.destroy_device_objects(&gl);
+        }
     }
 }
