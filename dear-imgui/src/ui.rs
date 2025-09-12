@@ -257,4 +257,134 @@ impl Ui {
             );
         }
     }
+
+    // ============================================================================
+    // Focus and Navigation
+    // ============================================================================
+
+    /// Focuses keyboard on the next widget.
+    ///
+    /// This is the equivalent to [set_keyboard_focus_here_with_offset](Self::set_keyboard_focus_here_with_offset)
+    /// with `offset` set to 0.
+    #[doc(alias = "SetKeyboardFocusHere")]
+    pub fn set_keyboard_focus_here(&self) {
+        self.set_keyboard_focus_here_with_offset(0);
+    }
+
+    /// Focuses keyboard on a widget relative to current position.
+    ///
+    /// Use positive offset to focus on next widgets, negative offset to focus on previous widgets.
+    #[doc(alias = "SetKeyboardFocusHere")]
+    pub fn set_keyboard_focus_here_with_offset(&self, offset: i32) {
+        unsafe {
+            sys::ImGui_SetKeyboardFocusHere(offset);
+        }
+    }
+
+    /// Set next item to be open by default.
+    ///
+    /// This is useful for tree nodes, collapsing headers, etc.
+    #[doc(alias = "SetNextItemOpen")]
+    pub fn set_next_item_open(&self, is_open: bool) {
+        unsafe {
+            sys::ImGui_SetNextItemOpen(is_open, 0); // 0 = ImGuiCond_Always
+        }
+    }
+
+    /// Set next item to be open by default with condition.
+    #[doc(alias = "SetNextItemOpen")]
+    pub fn set_next_item_open_with_cond(&self, is_open: bool, cond: crate::Condition) {
+        unsafe {
+            sys::ImGui_SetNextItemOpen(is_open, cond as i32);
+        }
+    }
+
+    /// Set next item width.
+    ///
+    /// Set to 0.0 for default width, >0.0 for explicit width, <0.0 for relative width.
+    #[doc(alias = "SetNextItemWidth")]
+    pub fn set_next_item_width(&self, item_width: f32) {
+        unsafe {
+            sys::ImGui_SetNextItemWidth(item_width);
+        }
+    }
+
+    // ============================================================================
+    // Style Access
+    // ============================================================================
+
+    /// Returns a shared reference to the current [`Style`].
+    ///
+    /// ## Safety
+    ///
+    /// This function is tagged as `unsafe` because pushing via
+    /// [`push_style_color`](crate::Ui::push_style_color) or
+    /// [`push_style_var`](crate::Ui::push_style_var) or popping via
+    /// [`ColorStackToken::pop`](crate::ColorStackToken::pop) or
+    /// [`StyleStackToken::pop`](crate::StyleStackToken::pop) will modify the values in the returned
+    /// shared reference. Therefore, you should not retain this reference across calls to push and
+    /// pop. The [`clone_style`](Ui::clone_style) version may instead be used to avoid `unsafe`.
+    #[doc(alias = "GetStyle")]
+    pub unsafe fn style(&self) -> &crate::Style {
+        // safe because Style is a transparent wrapper around sys::ImGuiStyle
+        &*(sys::ImGui_GetStyle() as *const crate::Style)
+    }
+
+    /// Returns a copy of the current style.
+    ///
+    /// This is a safe alternative to [`style`](Self::style) that avoids the lifetime issues.
+    #[doc(alias = "GetStyle")]
+    pub fn clone_style(&self) -> crate::Style {
+        unsafe { self.style().clone() }
+    }
+
+    // ============================================================================
+    // Additional Demo, Debug, Information (non-duplicate methods)
+    // ============================================================================
+
+    /// Renders a debug log window.
+    ///
+    /// Displays a simplified log of important dear imgui events.
+    #[doc(alias = "ShowDebugLogWindow")]
+    pub fn show_debug_log_window(&self, opened: &mut bool) {
+        unsafe {
+            sys::ImGui_ShowDebugLogWindow(opened);
+        }
+    }
+
+    /// Renders an ID stack tool window.
+    ///
+    /// Hover items with mouse to query information about the source of their unique ID.
+    #[doc(alias = "ShowIDStackToolWindow")]
+    pub fn show_id_stack_tool_window(&self, opened: &mut bool) {
+        unsafe {
+            sys::ImGui_ShowIDStackToolWindow(opened);
+        }
+    }
+
+    /// Renders a style selector combo box.
+    ///
+    /// Returns true when a different style was selected.
+    #[doc(alias = "ShowStyleSelector")]
+    pub fn show_style_selector(&self, label: impl AsRef<str>) -> bool {
+        unsafe { sys::ImGui_ShowStyleSelector(self.scratch_txt(label)) }
+    }
+
+    /// Renders a font selector combo box.
+    #[doc(alias = "ShowFontSelector")]
+    pub fn show_font_selector(&self, label: impl AsRef<str>) {
+        unsafe {
+            sys::ImGui_ShowFontSelector(self.scratch_txt(label));
+        }
+    }
+
+    /// Returns the Dear ImGui version string
+    #[doc(alias = "GetVersion")]
+    pub fn get_version(&self) -> &str {
+        unsafe {
+            let version_ptr = sys::ImGui_GetVersion();
+            let c_str = std::ffi::CStr::from_ptr(version_ptr);
+            c_str.to_str().unwrap_or("Unknown")
+        }
+    }
 }

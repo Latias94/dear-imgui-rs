@@ -53,14 +53,8 @@ impl Default for HoveredFlags {
 /// Utility functions for Dear ImGui
 impl crate::ui::Ui {
     // ============================================================================
-    // Item/widget utilities (additional functions not in tooltip.rs)
+    // Item/widget utilities (non-duplicate functions)
     // ============================================================================
-
-    /// Returns `true` if the last item modified its underlying value this frame or was pressed
-    #[doc(alias = "IsItemEdited")]
-    pub fn is_item_edited(&self) -> bool {
-        unsafe { sys::ImGui_IsItemEdited() }
-    }
 
     /// Returns `true` if the last item open state was toggled
     #[doc(alias = "IsItemToggledOpen")]
@@ -434,5 +428,13 @@ impl crate::ui::Ui {
             [p3[0] - p1[0], p3[1] - p1[1]],
         );
         cross.abs() * 0.5
+    }
+
+    // Additional utility functions
+
+    /// Allows the next item to be overlapped by a subsequent item.
+    #[doc(alias = "SetNextItemAllowOverlap")]
+    pub fn set_next_item_allow_overlap(&self) {
+        unsafe { sys::ImGui_SetNextItemAllowOverlap() };
     }
 }
