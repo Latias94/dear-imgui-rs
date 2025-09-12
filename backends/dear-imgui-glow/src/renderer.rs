@@ -213,9 +213,7 @@ impl GlowRenderer {
 
         // Create a dummy 1x1 white texture as a placeholder
         let dummy_texture = unsafe {
-            let gl_texture = _gl
-                .create_texture()
-                .map_err(|e| InitError::CreateTexture(e))?;
+            let gl_texture = _gl.create_texture().map_err(InitError::CreateTexture)?;
 
             _gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
 
@@ -782,6 +780,11 @@ pub mod multi_viewport {
     use std::ffi::c_void;
 
     /// Render a viewport (called by ImGui for multi-viewport support)
+    ///
+    /// # Safety
+    ///
+    /// This function is called by ImGui's C code and must be called with valid pointers.
+    /// The viewport pointer must be valid and point to a valid ImGuiViewport structure.
     pub unsafe extern "C" fn render_window(
         viewport: *mut sys::ImGuiViewport,
         _render_arg: *mut c_void,

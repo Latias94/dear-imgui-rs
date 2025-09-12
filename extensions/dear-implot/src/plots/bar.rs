@@ -1,6 +1,6 @@
 //! Bar plot implementation
 
-use super::{safe_cstring, Plot, PlotData, PlotError};
+use super::{safe_cstring, Plot, PlotError};
 use crate::sys;
 
 /// Builder for bar plots with customization options
@@ -70,7 +70,7 @@ impl<'a> BarPlot<'a> {
 
 impl<'a> Plot for BarPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
 
@@ -127,13 +127,13 @@ impl<'a> PositionalBarPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        super::validate_data_lengths(&self.x_data, &self.y_data)
+        super::validate_data_lengths(self.x_data, self.y_data)
     }
 }
 
 impl<'a> Plot for PositionalBarPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
 

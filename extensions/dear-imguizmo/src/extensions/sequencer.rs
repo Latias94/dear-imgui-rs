@@ -4,7 +4,6 @@
 
 use crate::GuizmoResult;
 use dear_imgui::{DrawListMut, Ui};
-use glam::Vec2;
 
 bitflags::bitflags! {
     /// Sequencer options flags
@@ -83,18 +82,18 @@ impl Sequencer {
                 let window_size = [content_region[0], sequencer_height];
 
                 // Draw timeline background
-                if let Err(_) = self.draw_timeline_background(&draw_list, window_pos, window_size) {
+                if self
+                    .draw_timeline_background(&draw_list, window_pos, window_size)
+                    .is_err()
+                {
                     return;
                 }
 
                 // Draw frame ruler
-                if let Err(_) = self.draw_frame_ruler(
-                    &draw_list,
-                    window_pos,
-                    window_size,
-                    sequence,
-                    *first_frame,
-                ) {
+                if self
+                    .draw_frame_ruler(&draw_list, window_pos, window_size, sequence, *first_frame)
+                    .is_err()
+                {
                     return;
                 }
 
@@ -118,13 +117,16 @@ impl Sequencer {
                 }
 
                 // Draw current frame indicator
-                if let Err(_) = self.draw_current_frame_indicator(
-                    &draw_list,
-                    window_pos,
-                    window_size,
-                    *current_frame,
-                    *first_frame,
-                ) {
+                if self
+                    .draw_current_frame_indicator(
+                        &draw_list,
+                        window_pos,
+                        window_size,
+                        *current_frame,
+                        *first_frame,
+                    )
+                    .is_err()
+                {
                     return;
                 }
 
@@ -435,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_sequencer_creation() {
-        let sequencer = Sequencer::new();
+        let _sequencer = Sequencer::new();
         // Basic creation test
     }
 

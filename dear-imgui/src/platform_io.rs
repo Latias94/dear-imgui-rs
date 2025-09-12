@@ -5,7 +5,6 @@
 
 use crate::sys;
 use std::ffi::{c_char, c_void};
-use std::ptr;
 
 /// Platform IO structure for multi-viewport support
 ///

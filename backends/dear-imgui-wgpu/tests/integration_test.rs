@@ -2,7 +2,7 @@
 //!
 //! This test verifies that our improvements maintain compatibility with the C++ implementation
 
-use dear_imgui_wgpu::{Uniforms, WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{Uniforms, WgpuRenderer};
 use wgpu::*;
 
 /// Test that gamma correction values match the C++ implementation
@@ -141,7 +141,7 @@ fn test_orthographic_matrix() {
 /// Test that renderer can be created with default values
 #[test]
 fn test_renderer_creation() {
-    let renderer = WgpuRenderer::new();
+    let renderer = WgpuRenderer::empty();
     assert!(!renderer.is_initialized());
 
     // Test default creation

@@ -36,10 +36,10 @@ impl GlVersion {
                 (2, 0)
             } else {
                 // Try to parse manually
-                Self::parse_version_numbers(&version_string).unwrap_or((2, 0))
+                Self::parse_version_numbers(version_string).unwrap_or((2, 0))
             }
         } else {
-            Self::parse_version_numbers(&version_string).unwrap_or((2, 1))
+            Self::parse_version_numbers(version_string).unwrap_or((2, 1))
         };
 
         Self {

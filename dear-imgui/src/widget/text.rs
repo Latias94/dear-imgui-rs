@@ -1,5 +1,5 @@
 use crate::sys;
-use crate::{InputTextFlags, Ui};
+use crate::Ui;
 
 impl Ui {
     /// Display colored text

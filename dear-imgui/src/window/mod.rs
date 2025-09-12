@@ -1,6 +1,5 @@
 use bitflags::bitflags;
 use std::f32;
-use std::ptr;
 
 use crate::sys;
 use crate::{Condition, Ui};

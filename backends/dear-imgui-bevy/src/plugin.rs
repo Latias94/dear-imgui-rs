@@ -12,9 +12,9 @@ use crate::{
     },
     shaders::ImguiShaderPlugin,
     systems::{
-        imgui_end_frame_system, imgui_extract_frame_system,
-        imgui_new_frame_system, imgui_prepare_font_texture_system, imgui_update_render_context_system, imgui_update_textures_system,
-        setup_imgui_render_output_system,
+        imgui_end_frame_system, imgui_extract_frame_system, imgui_new_frame_system,
+        imgui_prepare_font_texture_system, imgui_update_render_context_system,
+        imgui_update_textures_system, setup_imgui_render_output_system,
     },
 };
 use bevy::{
@@ -79,7 +79,9 @@ impl Plugin for ImguiPlugin {
         app.add_plugins(ImguiShaderPlugin);
 
         // Add extract resource plugin for font texture
-        app.add_plugins(ExtractResourcePlugin::<crate::render_impl::systems::ExtractedImguiFontTexture>::default());
+        app.add_plugins(ExtractResourcePlugin::<
+            crate::render_impl::systems::ExtractedImguiFontTexture,
+        >::default());
 
         // Initialize texture manager resource
         app.insert_resource(crate::texture::BevyImguiTextureManager::new());
@@ -152,10 +154,7 @@ impl Plugin for ImguiPlugin {
             render_app.init_resource::<SpecializedRenderPipelines<ImguiPipeline>>();
 
             // Add render systems
-            render_app.add_systems(
-                ExtractSchedule,
-                imgui_extract_frame_system,
-            );
+            render_app.add_systems(ExtractSchedule, imgui_extract_frame_system);
             render_app.add_systems(
                 Render,
                 (

@@ -28,7 +28,7 @@ impl Shaders {
             // Create vertex shader
             let vertex_shader = gl
                 .create_shader(glow::VERTEX_SHADER)
-                .map_err(|e| InitError::CreateShader(e))?;
+                .map_err(InitError::CreateShader)?;
             gl.shader_source(vertex_shader, &vertex_shader_source);
             gl.compile_shader(vertex_shader);
 
@@ -44,7 +44,7 @@ impl Shaders {
             // Create fragment shader
             let fragment_shader = gl
                 .create_shader(glow::FRAGMENT_SHADER)
-                .map_err(|e| InitError::CreateShader(e))?;
+                .map_err(InitError::CreateShader)?;
             gl.shader_source(fragment_shader, &fragment_shader_source);
             gl.compile_shader(fragment_shader);
 
@@ -59,9 +59,7 @@ impl Shaders {
             }
 
             // Create program
-            let program = gl
-                .create_program()
-                .map_err(|e| InitError::CreateShader(e))?;
+            let program = gl.create_program().map_err(InitError::CreateShader)?;
             gl.attach_shader(program, vertex_shader);
             gl.attach_shader(program, fragment_shader);
             gl.link_program(program);
@@ -88,15 +86,13 @@ impl Shaders {
             let attrib_location_vtx_pos =
                 gl.get_attrib_location(program, "Position").ok_or_else(|| {
                     InitError::Generic("Could not find Position attribute".to_string())
-                })? as u32;
+                })?;
             let attrib_location_vtx_uv = gl
                 .get_attrib_location(program, "UV")
-                .ok_or_else(|| InitError::Generic("Could not find UV attribute".to_string()))?
-                as u32;
+                .ok_or_else(|| InitError::Generic("Could not find UV attribute".to_string()))?;
             let attrib_location_vtx_color = gl
                 .get_attrib_location(program, "Color")
-                .ok_or_else(|| InitError::Generic("Could not find Color attribute".to_string()))?
-                as u32;
+                .ok_or_else(|| InitError::Generic("Could not find Color attribute".to_string()))?;
 
             Ok(Self {
                 program: Some(program),

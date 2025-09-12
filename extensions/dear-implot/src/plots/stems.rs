@@ -1,6 +1,6 @@
 //! Stem plot implementation
 
-use super::{safe_cstring, validate_data_lengths, Plot, PlotData, PlotError};
+use super::{safe_cstring, validate_data_lengths, Plot, PlotError};
 use crate::sys;
 
 /// Builder for stem plots (lollipop charts)
@@ -55,13 +55,13 @@ impl<'a> StemPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        validate_data_lengths(&self.x_data, &self.y_data)
+        validate_data_lengths(self.x_data, self.y_data)
     }
 }
 
 impl<'a> Plot for StemPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return;
         }
 
@@ -74,7 +74,7 @@ impl<'a> Plot for StemPlot<'a> {
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.y_ref,
-                self.flags as i32,
+                self.flags,
             );
         }
     }

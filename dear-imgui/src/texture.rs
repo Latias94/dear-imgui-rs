@@ -6,7 +6,6 @@
 
 use crate::sys;
 use std::ffi::c_void;
-use std::ptr;
 
 /// Simple texture ID for backward compatibility
 ///

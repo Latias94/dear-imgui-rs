@@ -9,8 +9,8 @@ use bevy::{
     render::{
         render_asset::RenderAssets,
         render_resource::{
-            BindGroup, BindGroupEntry, BindGroupLayout, BindingResource, Sampler, SamplerDescriptor,
-            TextureView, TextureViewDescriptor,
+            BindGroup, BindGroupEntry, BindGroupLayout, BindingResource, Sampler,
+            SamplerDescriptor, TextureView, TextureViewDescriptor,
         },
         renderer::RenderDevice,
         texture::GpuImage,
@@ -161,7 +161,7 @@ impl BevyImguiTextureManager {
         tex_id: u64,
         image_handle: Handle<Image>,
         device: &RenderDevice,
-        queue: &bevy::render::renderer::RenderQueue,
+        _queue: &bevy::render::renderer::RenderQueue,
         gpu_images: &RenderAssets<GpuImage>,
         texture_bind_group_layout: &BindGroupLayout,
     ) -> Result<(), String> {
@@ -338,14 +338,23 @@ impl BevyImguiTextureManager {
 
             match status {
                 TextureStatus::WantCreate => {
-                    match self.create_texture_from_data(device, queue, gpu_images, texture_bind_group_layout, texture_data) {
+                    match self.create_texture_from_data(
+                        device,
+                        queue,
+                        gpu_images,
+                        texture_bind_group_layout,
+                        texture_data,
+                    ) {
                         Ok(bevy_texture_id) => {
                             let new_texture_id = TextureId::from(bevy_texture_id as usize);
                             texture_data.set_tex_id(new_texture_id);
                             texture_data.set_status(TextureStatus::OK);
                         }
                         Err(e) => {
-                            warn!("Failed to create texture for ID: {}, error: {}", current_tex_id, e);
+                            warn!(
+                                "Failed to create texture for ID: {}, error: {}",
+                                current_tex_id, e
+                            );
                         }
                     }
                 }
@@ -356,7 +365,13 @@ impl BevyImguiTextureManager {
                     // For now, we recreate the texture instead of updating in place
                     if self.contains_texture(internal_id) {
                         self.remove_texture(internal_id);
-                        match self.create_texture_from_data(device, queue, gpu_images, texture_bind_group_layout, texture_data) {
+                        match self.create_texture_from_data(
+                            device,
+                            queue,
+                            gpu_images,
+                            texture_bind_group_layout,
+                            texture_data,
+                        ) {
                             Ok(new_texture_id) => {
                                 if new_texture_id != internal_id {
                                     if let Some(texture) = self.remove_texture(new_texture_id) {
@@ -397,7 +412,13 @@ impl BevyImguiTextureManager {
     ) -> Result<TextureUpdateResult, String> {
         match texture_data.status() {
             TextureStatus::WantCreate => {
-                match self.create_texture_from_data(device, queue, gpu_images, texture_bind_group_layout, texture_data) {
+                match self.create_texture_from_data(
+                    device,
+                    queue,
+                    gpu_images,
+                    texture_bind_group_layout,
+                    texture_data,
+                ) {
                     Ok(texture_id) => Ok(TextureUpdateResult::Created {
                         texture_id: TextureId::from(texture_id as usize),
                     }),
@@ -410,7 +431,13 @@ impl BevyImguiTextureManager {
 
                 if self.contains_texture(internal_id) {
                     self.remove_texture(internal_id);
-                    match self.create_texture_from_data(device, queue, gpu_images, texture_bind_group_layout, texture_data) {
+                    match self.create_texture_from_data(
+                        device,
+                        queue,
+                        gpu_images,
+                        texture_bind_group_layout,
+                        texture_data,
+                    ) {
                         Ok(new_texture_id) => {
                             if new_texture_id != internal_id {
                                 if let Some(texture) = self.remove_texture(new_texture_id) {
@@ -535,7 +562,10 @@ impl TextureRegistry {
                     self.bind_groups.insert(texture_id, bind_group);
                 }
                 Err(e) => {
-                    warn!("Failed to create bind group for texture {}: {}", texture_id, e);
+                    warn!(
+                        "Failed to create bind group for texture {}: {}",
+                        texture_id, e
+                    );
                 }
             }
         }

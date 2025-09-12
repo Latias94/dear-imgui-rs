@@ -2288,6 +2288,7 @@ dependencies = [
  "cfg-if",
  "dear-imgui-sys",
  "mint",
+ "pkg-config",
  "xshell",
 ]
 

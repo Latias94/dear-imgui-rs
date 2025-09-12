@@ -59,7 +59,7 @@ impl<'a> StairsPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        validate_data_lengths(&self.x_data, &self.y_data)
+        validate_data_lengths(self.x_data, self.y_data)
     }
 
     /// Plot the stairs

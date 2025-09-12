@@ -316,7 +316,7 @@ impl LegendManager {
     }
 
     /// Begin a custom legend
-    pub fn begin_custom(label: &str, size: [f32; 2]) -> Result<LegendToken, PlotError> {
+    pub fn begin_custom(label: &str, _size: [f32; 2]) -> Result<LegendToken, PlotError> {
         let label_cstr =
             CString::new(label).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 

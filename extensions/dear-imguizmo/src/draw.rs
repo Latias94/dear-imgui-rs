@@ -4,10 +4,9 @@
 
 use crate::context::GuizmoContext;
 use crate::gizmo::ManipulationType;
-use crate::types::{Color, Mat4, Mode, Operation, Rect, Vec2, Vec3, Vec4};
+use crate::types::{Mat4, Operation, Rect, Vec2, Vec3, Vec4};
 use crate::{GuizmoError, GuizmoResult};
-use dear_imgui::{DrawListMut, Ui};
-use glam::Vec4Swizzles;
+use dear_imgui::DrawListMut;
 
 /// Colors for gizmo axes
 pub const AXIS_COLORS: [u32; 4] = [
@@ -109,7 +108,7 @@ pub fn draw_translation_gizmo(
     // Draw plane handles if needed
     if manipulation_type.is_plane_type() {
         draw_translation_planes(
-            &draw_list,
+            draw_list,
             &model_view_proj,
             &model,
             &viewport.as_viewport(),
@@ -155,7 +154,7 @@ pub fn draw_rotation_gizmo(
 
     // Debug: Always draw rotation circles regardless of manipulation type
     draw_rotation_circles(
-        &draw_list,
+        draw_list,
         &model_view_proj,
         &model,
         &state.viewport.as_viewport(),
@@ -200,7 +199,7 @@ pub fn draw_scale_gizmo(
 
     // Debug: Always draw scale handles regardless of manipulation type
     draw_scale_handles(
-        &draw_list,
+        draw_list,
         &model_view_proj,
         &model,
         &state.viewport.as_viewport(),

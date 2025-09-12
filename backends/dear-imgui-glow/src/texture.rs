@@ -164,9 +164,7 @@ pub fn create_texture_from_rgba(
     data: &[u8],
 ) -> InitResult<GlTexture> {
     unsafe {
-        let texture = gl
-            .create_texture()
-            .map_err(|e| InitError::CreateTexture(e))?;
+        let texture = gl.create_texture().map_err(InitError::CreateTexture)?;
 
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
         gl.tex_image_2d(
@@ -217,9 +215,7 @@ pub fn create_texture_from_alpha(
     data: &[u8],
 ) -> InitResult<GlTexture> {
     unsafe {
-        let texture = gl
-            .create_texture()
-            .map_err(|e| InitError::CreateTexture(e))?;
+        let texture = gl.create_texture().map_err(InitError::CreateTexture)?;
 
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 

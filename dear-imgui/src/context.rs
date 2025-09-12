@@ -10,7 +10,6 @@ use crate::fonts::{Font, FontAtlas, SharedFontAtlas};
 use crate::io::Io;
 
 use crate::sys;
-use crate::ui;
 
 /// An imgui context.
 ///

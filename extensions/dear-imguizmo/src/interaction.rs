@@ -5,7 +5,7 @@
 use crate::context::GuizmoState;
 use crate::gizmo::ManipulationType;
 use crate::types::{Mat4, Rect, Vec2, Vec3};
-use crate::{GuizmoError, GuizmoResult};
+use crate::GuizmoResult;
 use dear_imgui::Ui;
 
 /// Result of a hit test operation
@@ -33,7 +33,11 @@ impl Default for HitTestResult {
 }
 
 /// Check if mouse is over a gizmo element
-pub fn is_over_gizmo(ui: &Ui, state: &GuizmoState, mouse_pos: Vec2) -> GuizmoResult<HitTestResult> {
+pub fn is_over_gizmo(
+    _ui: &Ui,
+    state: &GuizmoState,
+    mouse_pos: Vec2,
+) -> GuizmoResult<HitTestResult> {
     let mut best_result = HitTestResult::default();
 
     // Test translation axes
@@ -431,7 +435,7 @@ fn handle_translation_interaction(
 ) -> GuizmoResult<bool> {
     // Calculate translation based on mouse movement
     let gizmo_center = state.model_matrix.transform_point3(Vec3::ZERO);
-    let screen_center =
+    let _screen_center =
         crate::draw::project_to_screen(&state.mvp, gizmo_center, &state.viewport.as_viewport())?;
 
     let mouse_delta = mouse_pos - state.mouse_down_pos;
@@ -498,7 +502,7 @@ fn handle_rotation_interaction(state: &mut GuizmoState, mouse_pos: Vec2) -> Guiz
 /// Handle scale interaction
 fn handle_scale_interaction(
     state: &mut GuizmoState,
-    mouse_pos: Vec2,
+    _mouse_pos: Vec2,
     delta: Vec2,
 ) -> GuizmoResult<bool> {
     let sensitivity = 0.01;

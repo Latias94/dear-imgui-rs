@@ -1,9 +1,6 @@
-use std::cell::UnsafeCell;
 use std::ffi::{CStr, CString};
 use std::fmt;
 use std::os::raw::c_char;
-use std::panic::catch_unwind;
-use std::process;
 use std::ptr;
 
 /// Trait for clipboard backends

@@ -7,7 +7,6 @@ use crate::{
     GuizmoResult,
 };
 use dear_imgui::{DrawListMut, Ui};
-use std::collections::HashMap;
 
 /// Node identifier
 pub type NodeId = u32;
@@ -162,12 +161,15 @@ impl GraphEditor {
                 let window_size = [size.x, size.y];
 
                 // Draw background grid
-                if let Err(_) = self.draw_grid(&draw_list, window_pos, window_size) {
+                if self.draw_grid(&draw_list, window_pos, window_size).is_err() {
                     return;
                 }
 
                 // Draw connections
-                if let Err(_) = self.draw_connections(&draw_list, delegate, window_pos) {
+                if self
+                    .draw_connections(&draw_list, delegate, window_pos)
+                    .is_err()
+                {
                     return;
                 }
 
@@ -219,7 +221,7 @@ impl GraphEditor {
 
     /// Set zoom level
     pub fn set_zoom(&mut self, zoom: f32) {
-        self.zoom = zoom.max(0.1).min(10.0);
+        self.zoom = zoom.clamp(0.1, 10.0);
     }
 
     /// Draw background grid

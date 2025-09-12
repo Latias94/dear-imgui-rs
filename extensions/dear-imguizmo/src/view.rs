@@ -8,7 +8,7 @@ use dear_imgui::Ui;
 use glam::{Mat4, Quat, Vec2, Vec3};
 
 /// ViewManipulate result
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ViewManipulateResult {
     /// Whether the view was modified
     pub modified: bool,
@@ -16,16 +16,6 @@ pub struct ViewManipulateResult {
     pub is_over: bool,
     /// Whether the view manipulator is being used
     pub is_using: bool,
-}
-
-impl Default for ViewManipulateResult {
-    fn default() -> Self {
-        Self {
-            modified: false,
-            is_over: false,
-            is_using: false,
-        }
-    }
 }
 
 /// Handle view manipulation with a view cube
@@ -164,7 +154,7 @@ fn draw_view_cube_faces(
         0xFFFFFF00, // Yellow (Back)
     ];
 
-    let face_labels = ["X", "-X", "Y", "-Y", "Z", "-Z"];
+    let _face_labels = ["X", "-X", "Y", "-Y", "Z", "-Z"];
 
     // Calculate face visibility and positions
     for (i, &normal) in face_normals.iter().enumerate() {

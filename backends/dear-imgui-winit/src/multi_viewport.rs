@@ -374,9 +374,7 @@ unsafe extern "C" fn winit_get_window_framebuffer_scale(
 
 /// Update window - called by ImGui for platform-specific updates
 unsafe extern "C" fn winit_update_window(vp: *mut dear_imgui::sys::ImGuiViewport) {
-    if vp.is_null() {
-        return;
-    }
+    if vp.is_null() {}
 
     // For now, this is a no-op. In GLFW implementation, this is used for
     // platform-specific window updates. Winit handles most of this automatically.

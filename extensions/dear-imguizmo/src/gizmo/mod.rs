@@ -146,6 +146,3 @@ impl ManipulationType {
 }
 
 // Re-export public API
-pub use manipulate::*;
-pub use rotate::*;
-pub use scale::*;

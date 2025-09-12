@@ -7,7 +7,7 @@ use crate::types::{Mat4, Mode, Operation};
 use crate::{GuizmoError, GuizmoResult};
 
 /// Result of a manipulation operation
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ManipulationResult {
     /// Whether the matrix was modified
     pub modified: bool,
@@ -15,16 +15,6 @@ pub struct ManipulationResult {
     pub delta: Option<Mat4>,
     /// Which specific operation was performed
     pub operation_used: Option<Operation>,
-}
-
-impl Default for ManipulationResult {
-    fn default() -> Self {
-        Self {
-            modified: false,
-            delta: None,
-            operation_used: None,
-        }
-    }
 }
 
 /// Core manipulation function
@@ -38,9 +28,9 @@ pub fn manipulate(
     mode: Mode,
     matrix: &mut Mat4,
     delta_matrix: Option<&mut Mat4>,
-    snap: Option<&[f32; 3]>,
-    local_bounds: Option<&[f32; 6]>,
-    bounds_snap: Option<&[f32; 3]>,
+    _snap: Option<&[f32; 3]>,
+    _local_bounds: Option<&[f32; 6]>,
+    _bounds_snap: Option<&[f32; 3]>,
 ) -> GuizmoResult<ManipulationResult> {
     // Validate inputs
     if !is_matrix_valid(view) {

@@ -65,7 +65,7 @@ impl ImguiContext {
         F: FnOnce(&mut Context) -> R,
     {
         let mut ctx = self.ctx.write().expect("Failed to acquire context lock");
-        f(&mut *ctx)
+        f(&mut ctx)
     }
 
     /// Execute a closure with a complete Dear ImGui frame
@@ -91,7 +91,7 @@ impl ImguiContext {
         F: FnOnce(&Context) -> R,
     {
         let ctx = self.ctx.read().expect("Failed to acquire context lock");
-        f(&*ctx)
+        f(&ctx)
     }
 
     /// Register a Bevy texture with ImGui.

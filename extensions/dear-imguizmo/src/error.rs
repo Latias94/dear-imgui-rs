@@ -6,7 +6,7 @@
 use thiserror::Error;
 
 #[cfg(feature = "tracing")]
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, warn};
 
 /// Result type for ImGuizmo operations
 pub type GuizmoResult<T> = Result<T, GuizmoError>;

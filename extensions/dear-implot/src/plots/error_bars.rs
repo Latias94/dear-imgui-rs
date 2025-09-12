@@ -1,6 +1,6 @@
 //! Error bars plot implementation
 
-use super::{safe_cstring, validate_data_lengths, Plot, PlotData, PlotError};
+use super::{safe_cstring, validate_data_lengths, Plot, PlotError};
 use crate::sys;
 
 /// Builder for error bars plots
@@ -53,7 +53,7 @@ impl<'a> ErrorBarsPlot<'a> {
     }
 
     /// Make error bars horizontal instead of vertical
-    pub fn horizontal(mut self) -> Self {
+    pub fn horizontal(self) -> Self {
         // Note: This would require a different flag or function
         // For now, we'll keep it as a placeholder
         self
@@ -61,8 +61,8 @@ impl<'a> ErrorBarsPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        validate_data_lengths(&self.x_data, &self.y_data)?;
-        validate_data_lengths(&self.x_data, &self.err_data)?;
+        validate_data_lengths(self.x_data, self.y_data)?;
+        validate_data_lengths(self.x_data, self.err_data)?;
 
         // Check for negative error values
         if self.err_data.iter().any(|&err| err < 0.0) {
@@ -77,7 +77,7 @@ impl<'a> ErrorBarsPlot<'a> {
 
 impl<'a> Plot for ErrorBarsPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return;
         }
 
@@ -90,7 +90,7 @@ impl<'a> Plot for ErrorBarsPlot<'a> {
                 self.y_data.as_ptr(),
                 self.err_data.as_ptr(),
                 self.x_data.len() as i32,
-                self.flags as i32,
+                self.flags,
             );
         }
     }
@@ -144,9 +144,9 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        validate_data_lengths(&self.x_data, &self.y_data)?;
-        validate_data_lengths(&self.x_data, &self.err_neg)?;
-        validate_data_lengths(&self.x_data, &self.err_pos)?;
+        validate_data_lengths(self.x_data, self.y_data)?;
+        validate_data_lengths(self.x_data, self.err_neg)?;
+        validate_data_lengths(self.x_data, self.err_pos)?;
 
         // Check for negative error values
         if self.err_neg.iter().any(|&err| err < 0.0) || self.err_pos.iter().any(|&err| err < 0.0) {
@@ -161,7 +161,7 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
 
 impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return;
         }
 
@@ -183,7 +183,7 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
                 self.y_data.as_ptr(),
                 avg_errors.as_ptr(),
                 self.x_data.len() as i32,
-                self.flags as i32,
+                self.flags,
             );
         }
     }
@@ -228,7 +228,7 @@ impl<'a> SimpleErrorBarsPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        validate_data_lengths(&self.values, &self.errors)?;
+        validate_data_lengths(self.values, self.errors)?;
 
         if self.errors.iter().any(|&err| err < 0.0) {
             return Err(PlotError::InvalidData(
@@ -242,7 +242,7 @@ impl<'a> SimpleErrorBarsPlot<'a> {
 
 impl<'a> Plot for SimpleErrorBarsPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return;
         }
 

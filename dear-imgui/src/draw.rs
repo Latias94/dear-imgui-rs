@@ -1,7 +1,6 @@
 use crate::texture::TextureId;
 use bitflags::bitflags;
 use std::marker::PhantomData;
-use std::os::raw::c_void;
 
 use crate::color::Color;
 use crate::sys;

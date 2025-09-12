@@ -1,6 +1,6 @@
 //! Heatmap plot implementation
 
-use super::{safe_cstring, Plot, PlotData, PlotError};
+use super::{safe_cstring, Plot, PlotError};
 use crate::sys;
 
 /// Builder for heatmap plots with extensive customization options
@@ -107,13 +107,13 @@ impl<'a> HeatmapPlot<'a> {
 
 impl<'a> Plot for HeatmapPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
 
         let label_cstr = safe_cstring(self.label);
 
-        let label_fmt_cstr = self.label_fmt.map(|fmt| safe_cstring(fmt));
+        let label_fmt_cstr = self.label_fmt.map(safe_cstring);
         let label_fmt_ptr = label_fmt_cstr
             .as_ref()
             .map(|cstr| cstr.as_ptr())
@@ -132,7 +132,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
                 self.bounds_min.y,
                 self.bounds_max.x,
                 self.bounds_max.y,
-                self.flags as i32,
+                self.flags,
             );
         }
     }
@@ -231,13 +231,13 @@ impl<'a> HeatmapPlotF32<'a> {
 
 impl<'a> Plot for HeatmapPlotF32<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return;
         }
 
         let label_cstr = safe_cstring(self.label);
 
-        let label_fmt_cstr = self.label_fmt.map(|fmt| safe_cstring(fmt));
+        let label_fmt_cstr = self.label_fmt.map(safe_cstring);
         let label_fmt_ptr = label_fmt_cstr
             .as_ref()
             .map(|cstr| cstr.as_ptr())
@@ -256,7 +256,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                 self.bounds_min.y,
                 self.bounds_max.x,
                 self.bounds_max.y,
-                self.flags as i32,
+                self.flags,
             );
         }
     }

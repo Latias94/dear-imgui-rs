@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::ffi::{CStr, CString};
 use std::fmt;
 use std::ops::{Deref, Index, RangeFull};
 use std::os::raw::c_char;

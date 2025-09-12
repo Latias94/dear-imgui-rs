@@ -6,19 +6,18 @@
 use crate::{
     context::GuizmoContext,
     draw::{calculate_gizmo_size, project_to_screen},
-    error::{GuizmoError, GuizmoResult},
+    error::GuizmoResult,
     gizmo::ManipulationType,
-    math::*,
     types::*,
 };
 use dear_imgui::Ui;
-use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec2, Vec3};
 
 /// Handle rotation manipulation
 pub fn handle_rotation(
     ui: &Ui,
     context: &GuizmoContext,
-    operation: Operation,
+    _operation: Operation,
     manipulation_type: ManipulationType,
 ) -> GuizmoResult<bool> {
     let mut state = context.state.borrow_mut();
@@ -37,8 +36,8 @@ pub fn handle_rotation(
 
     // Get current matrices
     let model_matrix = state.model_matrix;
-    let view_matrix = state.view_matrix;
-    let projection_matrix = state.projection_matrix;
+    let _view_matrix = state.view_matrix;
+    let _projection_matrix = state.projection_matrix;
     let mvp = state.mvp;
 
     // Calculate gizmo center in world space

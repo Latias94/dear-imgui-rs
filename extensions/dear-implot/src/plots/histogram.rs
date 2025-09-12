@@ -1,6 +1,6 @@
 //! Histogram plot implementation
 
-use super::{safe_cstring, Plot, PlotData, PlotError};
+use super::{safe_cstring, Plot, PlotError};
 use crate::sys;
 use crate::{BinMethod, HistogramFlags};
 
@@ -98,7 +98,7 @@ impl<'a> HistogramPlot<'a> {
 
 impl<'a> Plot for HistogramPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return;
         }
 
@@ -208,13 +208,13 @@ impl<'a> Histogram2DPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        super::validate_data_lengths(&self.x_values, &self.y_values)
+        super::validate_data_lengths(self.x_values, self.y_values)
     }
 }
 
 impl<'a> Plot for Histogram2DPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return;
         }
 

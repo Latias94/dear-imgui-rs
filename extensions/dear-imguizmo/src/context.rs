@@ -394,9 +394,9 @@ impl<'ui> GuizmoUi<'ui> {
         mode: Mode,
         matrix: &mut Mat4,
         delta_matrix: Option<&mut Mat4>,
-        snap: Option<&[f32; 3]>,
-        local_bounds: Option<&[f32; 6]>,
-        bounds_snap: Option<&[f32; 3]>,
+        _snap: Option<&[f32; 3]>,
+        _local_bounds: Option<&[f32; 6]>,
+        _bounds_snap: Option<&[f32; 3]>,
     ) -> GuizmoResult<bool> {
         println!("DEBUG: manipulate_with_options() called");
 
@@ -508,13 +508,13 @@ impl<'ui> GuizmoUi<'ui> {
         // Draw rotation gizmo
         if operation.contains(Operation::ROTATE) {
             println!("DEBUG: Drawing rotation gizmo");
-            crate::draw::draw_rotation_gizmo(draw_list, &self.context, operation, state.using)?;
+            crate::draw::draw_rotation_gizmo(draw_list, self.context, operation, state.using)?;
         }
 
         // Draw scale gizmo
         if operation.contains(Operation::SCALE) {
             println!("DEBUG: Drawing scale gizmo");
-            crate::draw::draw_scale_gizmo(draw_list, &self.context, operation, state.using)?;
+            crate::draw::draw_scale_gizmo(draw_list, self.context, operation, state.using)?;
         }
 
         // Handle mouse interaction
@@ -733,7 +733,7 @@ mod tests {
 
     #[test]
     fn test_viewport_setting() {
-        let context = GuizmoContext::new();
+        let _context = GuizmoContext::new();
         // We can't easily test GuizmoUi without a real ImGui context
         // This would require integration tests
     }

@@ -8,7 +8,7 @@ use bevy::{
 };
 use dear_imgui::{OwnedDrawData, TextureId};
 
-use tracing::{info, warn};
+use tracing::warn;
 
 /// Convert Bevy KeyCode to Dear ImGui Key
 fn bevy_key_to_imgui_key(key_code: KeyCode) -> Option<dear_imgui::Key> {
@@ -68,7 +68,7 @@ fn bevy_key_to_imgui_key(key_code: KeyCode) -> Option<dear_imgui::Key> {
         NumpadSubtract => None,
         NumpadAdd => None,
         NumpadEnter => Some(Key::Enter), // Use regular Enter for now
-        NumpadEqual => None, // Not available in current Dear ImGui version
+        NumpadEqual => None,             // Not available in current Dear ImGui version
         KeyA => Some(Key::A),
         KeyB => Some(Key::B),
         KeyC => Some(Key::C),
@@ -107,17 +107,17 @@ fn bevy_key_to_imgui_key(key_code: KeyCode) -> Option<dear_imgui::Key> {
         Digit8 => Some(Key::Key8),
         Digit9 => Some(Key::Key9),
         // Map punctuation keys - using Bevy's naming
-        Quote => None, // Bevy calls it Quote, not Apostrophe
-        Comma => None, // Skip for now
-        Minus => None, // Skip for now
-        Period => None, // Skip for now
-        Slash => None, // Skip for now
-        Semicolon => None, // Skip for now
-        Equal => None, // Skip for now
-        BracketLeft => None, // Skip for now
-        Backslash => None, // Skip for now
+        Quote => None,        // Bevy calls it Quote, not Apostrophe
+        Comma => None,        // Skip for now
+        Minus => None,        // Skip for now
+        Period => None,       // Skip for now
+        Slash => None,        // Skip for now
+        Semicolon => None,    // Skip for now
+        Equal => None,        // Skip for now
+        BracketLeft => None,  // Skip for now
+        Backslash => None,    // Skip for now
         BracketRight => None, // Skip for now
-        Backquote => None, // Skip for now
+        Backquote => None,    // Skip for now
         _ => None,
     }
 }
@@ -155,8 +155,6 @@ pub fn imgui_new_frame_system(
     // TODO: Add character input support when available in Bevy
     time: Res<Time>,
 ) {
-
-
     context.with_context(|ctx| {
         let io = ctx.io_mut();
 
@@ -199,14 +197,35 @@ pub fn imgui_new_frame_system(
         // TODO: Handle character input when available in Bevy
 
         // Handle modifier keys using individual key states
-        io.add_key_event(dear_imgui::Key::LeftCtrl, keyboard.pressed(KeyCode::ControlLeft));
-        io.add_key_event(dear_imgui::Key::RightCtrl, keyboard.pressed(KeyCode::ControlRight));
-        io.add_key_event(dear_imgui::Key::LeftShift, keyboard.pressed(KeyCode::ShiftLeft));
-        io.add_key_event(dear_imgui::Key::RightShift, keyboard.pressed(KeyCode::ShiftRight));
+        io.add_key_event(
+            dear_imgui::Key::LeftCtrl,
+            keyboard.pressed(KeyCode::ControlLeft),
+        );
+        io.add_key_event(
+            dear_imgui::Key::RightCtrl,
+            keyboard.pressed(KeyCode::ControlRight),
+        );
+        io.add_key_event(
+            dear_imgui::Key::LeftShift,
+            keyboard.pressed(KeyCode::ShiftLeft),
+        );
+        io.add_key_event(
+            dear_imgui::Key::RightShift,
+            keyboard.pressed(KeyCode::ShiftRight),
+        );
         io.add_key_event(dear_imgui::Key::LeftAlt, keyboard.pressed(KeyCode::AltLeft));
-        io.add_key_event(dear_imgui::Key::RightAlt, keyboard.pressed(KeyCode::AltRight));
-        io.add_key_event(dear_imgui::Key::LeftSuper, keyboard.pressed(KeyCode::SuperLeft));
-        io.add_key_event(dear_imgui::Key::RightSuper, keyboard.pressed(KeyCode::SuperRight));
+        io.add_key_event(
+            dear_imgui::Key::RightAlt,
+            keyboard.pressed(KeyCode::AltRight),
+        );
+        io.add_key_event(
+            dear_imgui::Key::LeftSuper,
+            keyboard.pressed(KeyCode::SuperLeft),
+        );
+        io.add_key_event(
+            dear_imgui::Key::RightSuper,
+            keyboard.pressed(KeyCode::SuperRight),
+        );
 
         // Handle mouse wheel
         for e in mouse_wheel.read() {
@@ -267,9 +286,7 @@ pub fn imgui_update_render_context_system(extracted_data: Option<Res<ExtractedIm
     if let Some(data) = extracted_data {
         // Draw data will be handled by the prepare systems
         // Don't take the data here, let the prepare system use it
-        if data.draw_data.is_some() {
-
-        }
+        if data.draw_data.is_some() {}
     }
 }
 
@@ -301,8 +318,6 @@ pub fn imgui_update_textures_system(
             &imgui_pipeline.texture_bind_group_layout,
         );
     }
-
-
 }
 
 /// System to initialize font texture in Dear ImGui context
@@ -317,7 +332,6 @@ pub fn imgui_prepare_font_texture_system(
         // Build the font atlas if not already built
         if !fonts.is_built() {
             fonts.build();
-
 
             // Get font texture data from Dear ImGui
             if let Some((pixels_ptr, width, height)) = unsafe { fonts.get_tex_data_ptr() } {
@@ -335,18 +349,17 @@ pub fn imgui_prepare_font_texture_system(
                 }
 
                 // Update the font texture resource
-                font_texture.width = width as u32;
-                font_texture.height = height as u32;
+                font_texture.width = width;
+                font_texture.height = height;
                 font_texture.data = rgba_data;
                 font_texture.needs_update = true;
 
                 // Set the font texture reference in Dear ImGui
                 // Use TextureId(0) for font texture to match the rendering system
                 let font_texture_id = TextureId::from(0usize);
-                let texture_ref = dear_imgui::texture::create_texture_ref(font_texture_id.id() as u64);
+                let texture_ref =
+                    dear_imgui::texture::create_texture_ref(font_texture_id.id() as u64);
                 fonts.set_tex_ref(texture_ref);
-
-
             } else {
                 warn!("Failed to get font texture data from Dear ImGui");
             }

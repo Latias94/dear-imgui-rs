@@ -402,7 +402,11 @@ pub fn queue_imgui_bind_groups_system(
                     if tex_id == 0 {
                         // Use font texture data from extracted resource
                         let (width, height, texture_data) = if extracted_font_texture.needs_update {
-                            (extracted_font_texture.width, extracted_font_texture.height, extracted_font_texture.data.clone())
+                            (
+                                extracted_font_texture.width,
+                                extracted_font_texture.height,
+                                extracted_font_texture.data.clone(),
+                            )
                         } else {
                             // Fallback to a basic white texture if font data is not available
                             let width = 256u32;
@@ -414,7 +418,8 @@ pub fn queue_imgui_bind_groups_system(
                         let bytes_per_pixel = 4u32;
 
                         // Create or update the font texture only if needed
-                        let needs_texture_creation = extracted_font_texture.texture.is_none() || extracted_font_texture.needs_update;
+                        let needs_texture_creation = extracted_font_texture.texture.is_none()
+                            || extracted_font_texture.needs_update;
 
                         if needs_texture_creation {
                             let texture = render_device.create_texture(&wgpu::TextureDescriptor {
@@ -446,7 +451,7 @@ pub fn queue_imgui_bind_groups_system(
                             );
 
                             // TODO: Store the Bevy texture handle instead of wgpu texture
-                    // extracted_font_texture.texture = Some(texture.clone());
+                            // extracted_font_texture.texture = Some(texture.clone());
                             extracted_font_texture.needs_update = false;
                         }
 
@@ -480,7 +485,8 @@ pub fn queue_imgui_bind_groups_system(
                             temp_texture.size(),
                         );
 
-                        let texture_view = temp_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        let texture_view =
+                            temp_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
                         let sampler = render_device.create_sampler(&wgpu::SamplerDescriptor {
                             label: Some("imgui_font_sampler"),

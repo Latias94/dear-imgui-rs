@@ -20,6 +20,7 @@ cfg-if.workspace = true
 bindgen.workspace = true
 cc.workspace = true
 xshell = "0.2"
+pkg-config = "0.3"
 
 [features]
 default = ["docking"]

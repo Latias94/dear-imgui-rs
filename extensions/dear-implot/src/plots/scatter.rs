@@ -1,6 +1,6 @@
 //! Scatter plot implementation
 
-use super::{safe_cstring, validate_data_lengths, Plot, PlotData, PlotError};
+use super::{safe_cstring, validate_data_lengths, Plot, PlotError};
 use crate::sys;
 
 /// Builder for scatter plots with customization options
@@ -46,13 +46,13 @@ impl<'a> ScatterPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        validate_data_lengths(&self.x_data, &self.y_data)
+        validate_data_lengths(self.x_data, self.y_data)
     }
 }
 
 impl<'a> Plot for ScatterPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
 

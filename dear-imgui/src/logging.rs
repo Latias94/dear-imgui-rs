@@ -4,7 +4,7 @@
 //! It supports both `tracing` (recommended) and `log` crate backends.
 
 #[cfg(feature = "tracing")]
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info};
 
 /// Initialize tracing subscriber with sensible defaults for Dear ImGui applications
 #[cfg(feature = "tracing")]
@@ -182,8 +182,6 @@ macro_rules! imgui_error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_logging_macros() {
         // Test that macros compile without tracing feature

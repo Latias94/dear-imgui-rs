@@ -138,9 +138,7 @@ mod columns;
 pub mod logging;
 
 // Re-export public API
-pub use clipboard::*;
 pub use color::*;
-pub use context::*;
 #[cfg(feature = "docking")]
 pub use dock_builder::*;
 pub use dock_space::*;
@@ -148,20 +146,8 @@ pub use dock_space::*;
 pub use draw::DrawListMut;
 pub use error::*;
 // Note: draw types are now in render module, no need to export draw::*
-pub use fonts::*;
-pub use input::*;
-pub use io::*;
-pub use list_clipper::*;
-pub use platform_io::*;
 pub use render::*;
-pub use string::*;
-pub use style::*;
-pub use text_filter::*;
 pub use texture::*;
-pub use ui::*;
-pub use utils::*;
-#[cfg(feature = "multi-viewport")]
-pub use viewport_backend::*;
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

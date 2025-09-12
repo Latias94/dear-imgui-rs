@@ -237,7 +237,7 @@ pub fn format_float(value: f32, decimals: usize) -> String {
 }
 
 /// Validate that a viewport has positive dimensions
-pub fn validate_viewport(x: f32, y: f32, width: f32, height: f32) -> GuizmoResult<()> {
+pub fn validate_viewport(_x: f32, _y: f32, width: f32, height: f32) -> GuizmoResult<()> {
     if width <= 0.0 {
         return Err(GuizmoError::invalid_viewport(format!(
             "Width must be positive, got {}",

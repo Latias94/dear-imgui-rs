@@ -97,7 +97,7 @@ impl CurveEditor {
         let mut modified = false;
 
         // Create child window for curve editor
-        ui.child_window(&format!("CurveEditor_{}", id))
+        ui.child_window(format!("CurveEditor_{}", id))
             .size([size.x, size.y])
             .border(true)
             .build(ui, || {
@@ -106,12 +106,15 @@ impl CurveEditor {
                 let window_size = [size.x, size.y];
 
                 // Draw background grid
-                if let Err(_) = self.draw_grid(&draw_list, window_pos, window_size) {
+                if self.draw_grid(&draw_list, window_pos, window_size).is_err() {
                     return;
                 }
 
                 // Draw curve
-                if let Err(_) = self.draw_curve(&draw_list, delegate, window_pos, window_size) {
+                if self
+                    .draw_curve(&draw_list, delegate, window_pos, window_size)
+                    .is_err()
+                {
                     return;
                 }
 

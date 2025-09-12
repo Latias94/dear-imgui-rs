@@ -1,6 +1,5 @@
 use crate::sys;
 use dear_imgui::{Context as ImGuiContext, Ui};
-use std::ptr;
 
 /// ImPlot context that manages the plotting state
 ///

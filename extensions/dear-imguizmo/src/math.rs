@@ -3,7 +3,7 @@
 //! This module provides matrix operations, transformations, and mathematical
 //! utilities using the glam library for efficient computation.
 
-use crate::types::{Mat4, Vec3, Vec4};
+use crate::types::{Mat4, Vec3};
 use crate::{GuizmoError, GuizmoResult};
 use glam::{Quat, Vec2};
 
@@ -131,7 +131,7 @@ pub fn orthonormalize_matrix(matrix: &Mat4) -> Mat4 {
     let translation = matrix.w_axis.truncate();
 
     // Extract and orthonormalize the 3x3 part
-    let mut x_axis = matrix.x_axis.truncate().normalize();
+    let x_axis = matrix.x_axis.truncate().normalize();
     let mut y_axis = matrix.y_axis.truncate();
     let mut z_axis = matrix.z_axis.truncate();
 
@@ -433,8 +433,7 @@ pub fn intersect_ray_plane(ray_origin: Vec3, ray_direction: Vec3, plane: [f32; 4
         return f32::INFINITY;
     }
 
-    let t = -(ray_origin.dot(plane_normal) + plane_distance) / denominator;
-    t
+    -(ray_origin.dot(plane_normal) + plane_distance) / denominator
 }
 
 /// Build a plane equation from a point and normal

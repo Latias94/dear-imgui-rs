@@ -1,4 +1,4 @@
-use crate::fonts::{Font, FontAtlas, FontId};
+use crate::fonts::FontId;
 use crate::style::{StyleColor, StyleVar};
 use crate::sys;
 use crate::Ui;

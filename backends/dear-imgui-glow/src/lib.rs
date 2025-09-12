@@ -34,8 +34,6 @@
 //! // renderer.render(draw_data).unwrap();
 //! ```
 
-use std::mem::size_of;
-
 // Re-export glow to make it easier for users to use the correct version.
 pub use glow;
 use glow::{Context, HasContext};
@@ -65,7 +63,7 @@ pub type GlUniformLocation = <Context as HasContext>::UniformLocation;
 /// Convert a slice to a byte slice
 #[inline]
 fn to_byte_slice<T>(slice: &[T]) -> &[u8] {
-    unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const u8, slice.len() * size_of::<T>()) }
+    unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const u8, std::mem::size_of_val(slice)) }
 }
 
 /// Debug message helper for OpenGL debugging

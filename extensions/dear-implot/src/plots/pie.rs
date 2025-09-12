@@ -1,6 +1,6 @@
 //! Pie chart plot implementation
 
-use super::{safe_cstring, Plot, PlotData, PlotError};
+use super::{safe_cstring, Plot, PlotError};
 use crate::sys;
 use crate::PieChartFlags;
 
@@ -113,7 +113,7 @@ impl<'a> PieChartPlot<'a> {
 
 impl<'a> Plot for PieChartPlot<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return;
         }
 
@@ -128,7 +128,7 @@ impl<'a> Plot for PieChartPlot<'a> {
         let label_ptrs: Vec<*const std::os::raw::c_char> =
             label_cstrs.iter().map(|cstr| cstr.as_ptr()).collect();
 
-        let label_fmt_cstr = self.label_fmt.map(|fmt| safe_cstring(fmt));
+        let label_fmt_cstr = self.label_fmt.map(safe_cstring);
         let label_fmt_ptr = label_fmt_cstr
             .as_ref()
             .map(|cstr| cstr.as_ptr())
@@ -254,7 +254,7 @@ impl<'a> PieChartPlotF32<'a> {
 
 impl<'a> Plot for PieChartPlotF32<'a> {
     fn plot(&self) {
-        if let Err(_) = self.validate() {
+        if self.validate().is_err() {
             return;
         }
 
@@ -267,7 +267,7 @@ impl<'a> Plot for PieChartPlotF32<'a> {
         let label_ptrs: Vec<*const std::os::raw::c_char> =
             label_cstrs.iter().map(|cstr| cstr.as_ptr()).collect();
 
-        let label_fmt_cstr = self.label_fmt.map(|fmt| safe_cstring(fmt));
+        let label_fmt_cstr = self.label_fmt.map(safe_cstring);
         let label_fmt_ptr = label_fmt_cstr
             .as_ref()
             .map(|cstr| cstr.as_ptr())

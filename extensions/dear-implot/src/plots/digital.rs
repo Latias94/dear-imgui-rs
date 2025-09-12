@@ -50,7 +50,7 @@ impl<'a> DigitalPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        validate_data_lengths(&self.x_data, &self.y_data)?;
+        validate_data_lengths(self.x_data, self.y_data)?;
 
         // Digital plots should have binary-like data (0/1, but we allow any values)
         // The validation is mainly for data length consistency

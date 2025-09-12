@@ -23,7 +23,6 @@ pub mod tree;
 // Re-export important types
 pub use popup::PopupFlags;
 pub use table::TableColumnSetup;
-pub use tooltip::HoveredFlags;
 
 // Widget implementations
 pub use self::button::*;
@@ -42,7 +41,6 @@ pub use self::selectable::*;
 pub use self::slider::*;
 pub use self::tab::*;
 pub use self::table::*;
-pub use self::text::*;
 pub use self::tooltip::*;
 pub use self::tree::*;
 
