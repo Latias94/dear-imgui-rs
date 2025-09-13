@@ -1,0 +1,46 @@
+[workspace]
+git_release_enable = false
+dependencies_update = true # run `cargo update` in the release PR
+
+git_release_body = """
+{{ changelog }}
+{% if remote.contributors %}
+### Contributors
+{% for contributor in remote.contributors %}
+* @{{ contributor.username }}
+{% endfor %}
+{% endif %}
+"""
+
+# Main library package
+[[package]]
+name = "dear-imgui"
+changelog_path = "./CHANGELOG.md"
+git_release_enable = true # create GitHub release
+
+# System bindings package
+[[package]]
+name = "dear-imgui-sys"
+git_release_enable = false # don't create separate releases for sys crate
+
+# Backend packages
+[[package]]
+name = "dear-imgui-winit"
+git_release_enable = false
+
+[[package]]
+name = "dear-imgui-wgpu"
+git_release_enable = false
+
+[[package]]
+name = "dear-imgui-glow"
+git_release_enable = false
+
+# Extension packages
+[[package]]
+name = "dear-implot-sys"
+git_release_enable = false
+
+[[package]]
+name = "dear-implot"
+git_release_enable = false

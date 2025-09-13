@@ -20,16 +20,6 @@ This project provides comprehensive Rust bindings for Dear ImGui v1.92+, featuri
 
 ## Key Features
 
-### Dear ImGui v1.92+ Features
-
-- **Dynamic Font Loading**: No need to pre-specify glyph ranges - characters load on-demand
-- **Runtime Font Scaling**: Adjust font sizes dynamically without reloading
-- **Modern Texture Management**: Automatic texture creation/update/destruction via `ImGuiBackendFlags_RendererHasTextures`
-- **Custom Font Loaders**: Support for FreeType and other advanced font rendering backends
-- **Enhanced Font Configuration**: Color emoji support, advanced hinting controls, pixel-perfect alignment
-
-### Core Functionality
-
 - **Complete Widget Set**: All Dear ImGui widgets with type-safe Rust APIs
 - **Advanced Tables**: Sorting, filtering, resizing, and custom rendering
 - **Custom Drawing**: Full DrawList API for custom graphics
@@ -47,7 +37,7 @@ dear-imgui/
 │   ├── dear-imgui-glow/    # OpenGL renderer backend
 │   └── dear-imgui-winit/   # Winit platform integration
 └── extensions/
-    ├── dear-imguizmo/      # 3D gizmo manipulation
+    ├── dear-imguizmo/      # 3D gizmo manipulation (Work in progress)
     └── dear-implot/        # Advanced plotting library
 ```
 
