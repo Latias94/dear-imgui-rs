@@ -2,8 +2,9 @@
 git_release_enable = false
 dependencies_update = true # run `cargo update` in the release PR
 allow_dirty = true # allow submodule updates without committing
-publish_no_verify = true # skip verification for first-time publish
-semver_check = false # disable semver checks for first-time publish
+publish_no_verify = false # enable verification for production releases
+semver_check = true # enable semver checks for production releases
+release_always = false # only release when PR is merged
 
 git_release_body = """
 {{ changelog }}
