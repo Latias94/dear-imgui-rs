@@ -205,9 +205,7 @@ impl FontAtlas {
 
     /// Gets the current font loader flags
     pub fn font_loader_flags(&self) -> FontLoaderFlags {
-        unsafe {
-            FontLoaderFlags((*self.raw).FontLoaderFlags)
-        }
+        unsafe { FontLoaderFlags((*self.raw).FontLoaderFlags) }
     }
 
     /// Add a font to the atlas using FontSource
@@ -227,7 +225,10 @@ impl FontAtlas {
         _merge_mode: bool,
     ) -> crate::fonts::FontId {
         match font_source {
-            FontSource::DefaultFontData { size_pixels, config } => {
+            FontSource::DefaultFontData {
+                size_pixels,
+                config,
+            } => {
                 // For v1.92+, we can use dynamic sizing by passing 0.0
                 let size = size_pixels.unwrap_or(0.0);
                 let mut cfg = config.clone().unwrap_or_default();
@@ -666,7 +667,7 @@ pub enum FontSource<'a> {
     /// With v1.92+, size_pixels can be 0.0 for dynamic sizing
     DefaultFontData {
         size_pixels: Option<f32>,
-        config: Option<FontConfig>
+        config: Option<FontConfig>,
     },
 
     /// Binary TTF/OTF font data

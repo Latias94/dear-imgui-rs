@@ -24,7 +24,10 @@ use crate::sys;
 /// **Note**: With Dear ImGui 1.92+ dynamic fonts, this is only needed for special cases
 /// where you want to explicitly control memory usage or exclude certain ranges.
 #[derive(Debug)]
-#[deprecated(since = "0.1.0", note = "Use dynamic font loading instead. Glyphs are now loaded on-demand automatically with Dear ImGui 1.92+.")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use dynamic font loading instead. Glyphs are now loaded on-demand automatically with Dear ImGui 1.92+."
+)]
 pub struct GlyphRangesBuilder {
     raw: sys::ImFontGlyphRangesBuilder,
 }

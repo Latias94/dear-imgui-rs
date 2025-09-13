@@ -1,8 +1,10 @@
 use std::env;
 use std::path::PathBuf;
-use std::io::Write;
 
-fn generate_wasm_bindings(_imgui_src: &PathBuf, out_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_wasm_bindings(
+    _imgui_src: &PathBuf,
+    out_path: &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
     // For WASM, we'll use the reference bindings as a base and add WASM import module
     let reference_bindings_path = PathBuf::from("src/bindings_reference.rs");
 
@@ -14,21 +16,21 @@ fn generate_wasm_bindings(_imgui_src: &PathBuf, out_path: &PathBuf) -> Result<()
     };
 
     // Replace the extern "C" block with WASM import module
-    let wasm_import_name = env::var("IMGUI_RS_WASM_IMPORT_NAME")
-        .unwrap_or_else(|_| "dear-imgui-sys".to_string());
-
-    // Find and replace extern "C" blocks with WASM import module
-    let mut wasm_content = base_content.clone();
+    let wasm_import_name =
+        env::var("IMGUI_RS_WASM_IMPORT_NAME").unwrap_or_else(|_| "dear-imgui-sys".to_string());
 
     // Add WASM import module at the beginning
-    let wasm_header = format!(r#"/* WASM bindings for Dear ImGui - based on reference bindings */
+    let wasm_header = format!(
+        r#"/* WASM bindings for Dear ImGui - based on reference bindings */
 
 #[allow(nonstandard_style, clippy::all)]
 
 // Override all extern "C" functions with WASM import module
 #[link(wasm_import_module = "{}")]
 extern "C" {{
-"#, wasm_import_name);
+"#,
+        wasm_import_name
+    );
 
     // Extract function declarations from the base content
     let mut functions = Vec::new();
@@ -98,15 +100,19 @@ extern "C" {{
     let bindings_path = out_path.join("bindings.rs");
     std::fs::write(&bindings_path, final_content)?;
 
-    println!("cargo:warning=Generated WASM bindings with import module: {}", wasm_import_name);
+    println!(
+        "cargo:warning=Generated WASM bindings with import module: {}",
+        wasm_import_name
+    );
     Ok(())
 }
 
 fn generate_minimal_wasm_bindings(out_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let wasm_import_name = env::var("IMGUI_RS_WASM_IMPORT_NAME")
-        .unwrap_or_else(|_| "dear-imgui-sys".to_string());
+    let wasm_import_name =
+        env::var("IMGUI_RS_WASM_IMPORT_NAME").unwrap_or_else(|_| "dear-imgui-sys".to_string());
 
-    let bindings_content = format!(r#"/* Minimal WASM bindings for Dear ImGui - automatically generated */
+    let bindings_content = format!(
+        r#"/* Minimal WASM bindings for Dear ImGui - automatically generated */
 
 #[allow(nonstandard_style, clippy::all)]
 
@@ -152,12 +158,17 @@ extern "C" {{
     pub fn ImGui_Button(label: *const ::core::ffi::c_char, size: *const ImVec2) -> bool;
     pub fn ImGui_GetVersion() -> *const ::core::ffi::c_char;
 }}
-"#, wasm_import_name = wasm_import_name);
+"#,
+        wasm_import_name = wasm_import_name
+    );
 
     let bindings_path = out_path.join("bindings.rs");
     std::fs::write(&bindings_path, bindings_content)?;
 
-    println!("cargo:warning=Generated minimal WASM bindings with import module: {}", wasm_import_name);
+    println!(
+        "cargo:warning=Generated minimal WASM bindings with import module: {}",
+        wasm_import_name
+    );
     Ok(())
 }
 
@@ -225,6 +236,7 @@ fn main() {
         r#"
 // WASM-specific configuration
 #define IMGUI_DISABLE_WIN32_DEFAULT_CLIPBOARD_FUNCTIONS
+#define IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
 
 // Only use the latest non-obsolete functions
 #define IMGUI_DISABLE_OBSOLETE_FUNCTIONS
@@ -275,7 +287,7 @@ extern thread_local ImGuiContext* MyImGuiTLS;
     // Generate bindings
     if target_arch == "wasm32" {
         // For WASM, generate proper WASM bindings with import module
-        generate_wasm_bindings(&imgui_src, &out_path).expect("Failed to generate WASM bindings");
+        // generate_wasm_bindings(&imgui_src, &out_path).expect("Failed to generate WASM bindings");
     } else {
         // Generate bindings for native targets
         let mut bindings = bindgen::Builder::default()
@@ -339,11 +351,7 @@ extern thread_local ImGuiContext* MyImGuiTLS;
     // Users should link against a pre-compiled WASM version of ImGui
     if target_arch != "wasm32" {
         let mut build = cc::Build::new();
-     if target_arch == "wasm32" {
-        build.define("IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS", "1");
-    } else {
-        build.cpp(true).std("c++20");
-    }
+        build.cpp(true).std("c++17");
 
         build.include(&imgui_src);
         build.file(manifest_dir.join("wrapper.cpp"));
@@ -362,10 +370,8 @@ extern thread_local ImGuiContext* MyImGuiTLS;
 
         build.compile("dear_imgui");
     } else {
-        // For WASM, we expect the user to provide their own ImGui compilation
-        // or use a JavaScript/WASM backend that handles ImGui rendering
-        println!("cargo:warning=WASM target detected. Skipping C++ compilation.");
-        println!("cargo:warning=For WASM, you'll need to provide ImGui rendering through JavaScript or a WASM backend.");
+        println!("cargo:warning=WASM target is not supported.");
+        // println!("cargo:warning=For WASM, you'll need to provide ImGui rendering through JavaScript or a WASM backend.");
     }
 
     // Export paths and defines for extension crates (similar to imgui-sys)

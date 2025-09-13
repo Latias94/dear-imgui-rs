@@ -35,7 +35,7 @@ tracing = ["dep:tracing", "dep:tracing-subscriber"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
 # Enable for WASM targets
-wasm = ["dear-imgui-sys/wasm"]
+# wasm = ["dear-imgui-sys/wasm"]
 # Enable tables API (stable in upstream)
 tables-api = []
 

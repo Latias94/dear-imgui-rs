@@ -35,7 +35,9 @@ impl Ui {
     /// Pass None for font to use the current font with the new size.
     pub fn push_font_with_size(&self, font: Option<&Font>, size: f32) {
         unsafe {
-            let font_ptr = font.map_or(std::ptr::null_mut(), |f| f as *const Font as *mut crate::sys::ImFont);
+            let font_ptr = font.map_or(std::ptr::null_mut(), |f| {
+                f as *const Font as *mut crate::sys::ImFont
+            });
             crate::sys::ImGui_PushFont(font_ptr, size);
         }
     }

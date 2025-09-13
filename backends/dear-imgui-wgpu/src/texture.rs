@@ -358,8 +358,7 @@ impl WgpuTextureManager {
                             // In the C++ implementation, they use the TextureView pointer as ImTextureID.
                             // In Rust, we can't get the raw pointer, so we use our internal texture ID.
                             // This works because our renderer will map the texture ID to the WGPU texture.
-                            let new_texture_id =
-                                dear_imgui::TextureId::from(wgpu_texture_id);
+                            let new_texture_id = dear_imgui::TextureId::from(wgpu_texture_id);
 
                             texture_data.set_tex_id(new_texture_id);
 

@@ -42,4 +42,4 @@ multi-viewport = ["docking"]
 # Enable freetype font rasterizer
 freetype = ["pkg-config"]
 # Enable for WASM targets
-wasm = []
+# wasm = []
