@@ -11,8 +11,8 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui = { path = "../../dear-imgui" }
-dear-imgui-sys = { path = "../../dear-imgui-sys" }
+dear-imgui = { path = "../../dear-imgui", version = "0.1" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.1" }
 glow = "0.16"
 memoffset = "0.9"
 smallvec = "1.0"
@@ -21,7 +21,7 @@ thiserror.workspace = true
 [features]
 default = [
     "gl_extensions_support",
-    "debug_message_insert_support", 
+    "debug_message_insert_support",
     "bind_vertex_array_support",
     "vertex_offset_support",
     "clip_origin_support",
