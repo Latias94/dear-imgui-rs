@@ -1,5 +1,11 @@
 struct ImGuiContext;
+
+// For WASM, we don't use thread_local as it may not be supported
+#if defined(__EMSCRIPTEN__) || defined(__wasm__) || defined(__wasm32__)
+ImGuiContext* MyImGuiTLS = nullptr;
+#else
 thread_local ImGuiContext* MyImGuiTLS;
+#endif
 
 #include "imgui.cpp"
 #include "imgui_widgets.cpp"

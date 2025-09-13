@@ -1,0 +1,2 @@
+[alias]
+run-wasm = "run --no-default-features --release --package run-wasm --"

@@ -9,6 +9,13 @@
 //! - **freetype**: Enable FreeType font rasterizer support
 //! - **wasm**: Enable WebAssembly compatibility
 //!
+//! ## WebAssembly Support
+//!
+//! When the `wasm` feature is enabled, this crate provides full WASM compatibility:
+//! - Disables platform-specific functions (file I/O, shell functions, etc.)
+//! - Configures Dear ImGui for WASM environment
+//! - Compatible with wasm-bindgen and web targets
+//!
 //! ## Safety
 //!
 //! This crate provides raw FFI bindings and is inherently unsafe. Users should
@@ -150,6 +157,13 @@ pub const HAS_FREETYPE: bool = true;
 
 #[cfg(not(feature = "freetype"))]
 pub const HAS_FREETYPE: bool = false;
+
+/// Check if WASM support is available
+#[cfg(feature = "wasm")]
+pub const HAS_WASM: bool = true;
+
+#[cfg(not(feature = "wasm"))]
+pub const HAS_WASM: bool = false;
 
 impl ImVec2 {
     #[inline]

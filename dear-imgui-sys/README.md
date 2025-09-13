@@ -11,7 +11,8 @@ This crate provides unsafe Rust bindings to the Dear ImGui C++ library. It uses 
 - **Direct C++ Bindings**: Uses bindgen to generate bindings directly from Dear ImGui C++ headers
 - **MSVC ABI Compatibility**: Includes fixes for MSVC compiler ABI issues with small C++ return types
 - **Docking Support**: Built with Dear ImGui's docking branch for advanced window management
-- **Cross-Platform**: Supports Windows, Linux, and macOS
+- **WebAssembly Support**: Full WASM compatibility with proper configuration for web targets
+- **Cross-Platform**: Supports Windows, Linux, macOS, and WebAssembly
 
 ## ABI Compatibility Issues and Solutions
 
@@ -108,6 +109,105 @@ if target_env == "msvc" {
 
 Our MSVC ABI fix implementation is based on the excellent work by [rodrigorc/easy-imgui-rs](https://github.com/rodrigorc/easy-imgui-rs/). This solution provides a robust and maintainable approach to handling C++ ABI compatibility issues in Rust FFI bindings.
 
+## WebAssembly Support
+
+This crate provides comprehensive WebAssembly (WASM) support through the `wasm` feature flag. The implementation automatically handles the complexities of cross-compilation and provides a seamless experience for WASM development.
+
+### WASM Implementation Details
+
+Our WASM support includes several key innovations:
+
+- **No C++ Cross-Compilation**: Skips C++ compilation for WASM targets to avoid toolchain complexity
+- **Pre-generated Bindings**: Uses reference bindings from native builds to ensure API compatibility
+- **Consistent API**: Uses the same `ImGui_*` function naming for both native and WASM targets
+- **Platform Abstraction**: Disables platform-specific functions that aren't available in WASM environments
+- **Thread-Local Storage**: Properly handles TLS limitations in WASM environments
+
+### Building for WASM
+
+1. **Install WASM target**:
+```bash
+rustup target add wasm32-unknown-unknown
+```
+
+2. **Build for WASM**:
+```bash
+# Basic WASM build
+cargo build --target wasm32-unknown-unknown --features wasm
+
+# With additional features
+cargo build --target wasm32-unknown-unknown --features "wasm,docking"
+
+# Check compilation (faster)
+cargo check --target wasm32-unknown-unknown --features wasm
+
+# Build WASM example
+cargo check --target wasm32-unknown-unknown --features wasm --example wasm_test
+```
+
+3. **Use the build script** (optional):
+```bash
+# Use the provided build script for automation
+./build-wasm.sh
+```
+
+### WASM Feature Flags
+
+```toml
+[dependencies]
+dear-imgui-sys = { version = "0.1.0", features = ["wasm"] }
+
+# Or with additional features
+dear-imgui-sys = { version = "0.1.0", features = ["wasm", "docking"] }
+```
+
+### Integration with wasm-bindgen
+
+The generated WASM binaries are compatible with wasm-bindgen:
+
+```bash
+# Generate JavaScript bindings
+wasm-bindgen --out-dir wasm --web target/wasm32-unknown-unknown/debug/your_app.wasm
+```
+
+### WASM Usage Example
+
+```rust
+use dear_imgui_sys::*;
+
+unsafe {
+    // Create ImGui context
+    let ctx = ImGui_CreateContext(std::ptr::null_mut());
+    ImGui_SetCurrentContext(ctx);
+
+    // Verify context is working
+    let current_ctx = ImGui_GetCurrentContext();
+    assert!(!current_ctx.is_null());
+
+    // Your ImGui code here...
+    // Note: You'll need to provide rendering through JavaScript/Canvas
+
+    // Cleanup
+    ImGui_DestroyContext(ctx);
+}
+```
+
+### Rendering in WASM
+
+Since WASM doesn't have direct access to graphics APIs, you'll need to:
+
+1. **Canvas API**: Render ImGui draw data to HTML5 Canvas through JavaScript
+2. **WebGL Backend**: Implement a WebGL-based renderer for ImGui
+3. **Existing Solutions**: Use existing WASM ImGui renderers or JavaScript bindings
+
+### WASM-Specific Considerations
+
+1. **No File System**: File operations are disabled by default in WASM builds
+2. **No Threading**: Uses global context instead of thread-local storage
+3. **Memory Management**: Ensure proper cleanup of ImGui contexts in WASM environment
+4. **Performance**: WASM builds may have different performance characteristics
+5. **Consistent API**: Uses the same `ImGui_*` naming convention for both native and WASM targets
+
 ## Usage
 
 This is a low-level sys crate. Most users should use the higher-level `dear-imgui` crate instead, which provides safe Rust wrappers around these bindings.
@@ -115,6 +215,9 @@ This is a low-level sys crate. Most users should use the higher-level `dear-imgu
 ```toml
 [dependencies]
 dear-imgui-sys = "0.1.0"
+
+# For WASM targets
+dear-imgui-sys = { version = "0.1.0", features = ["wasm"] }
 ```
 
 ## Potential Improvements

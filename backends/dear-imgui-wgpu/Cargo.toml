@@ -26,3 +26,4 @@ docking = ["dear-imgui/docking"]
 # multi-viewport = ["dear-imgui/multi-viewport"]
 # Enable WebGL support for WASM
 webgl = ["wgpu/webgl"]
+webgpu = ["wgpu/webgpu"]

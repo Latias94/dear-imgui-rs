@@ -97,35 +97,61 @@ pub mod windows {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "wasm"))]
+pub mod wasm {
+    use super::*;
+
+    // For WASM, use the same ImGui_* function names as native for consistency
+    pub use crate::ImGui_CreateContext as create_context;
+    pub use crate::ImGui_DestroyContext as destroy_context;
+    pub use crate::ImGui_GetCurrentContext as get_current_context;
+    pub use crate::ImGui_SetCurrentContext as set_current_context;
+    pub use crate::ImGui_GetIO as get_io;
+    pub use crate::ImGui_GetStyle as get_style;
+    pub use crate::ImGui_GetVersion as get_version;
+    pub use crate::ImGui_NewFrame as new_frame;
+    pub use crate::ImGui_Render as render;
+    pub use crate::ImGui_GetDrawData as get_draw_data;
+    pub use crate::ImGui_Begin as begin;
+    pub use crate::ImGui_End as end;
+    pub use crate::ImGui_Text as text;
+    pub use crate::ImGui_TextUnformatted as text_unformatted;
+    pub use crate::ImGui_Button as button;
+    pub use crate::ImGui_SetNextWindowSize as set_next_window_size;
+    pub use crate::ImGui_SetNextWindowPos as set_next_window_pos;
+    pub use crate::ImGui_SetNextWindowSizeConstraints as set_next_window_size_constraints;
+}
+
+#[cfg(all(not(target_os = "windows"), not(feature = "wasm")))]
 pub mod unix {
     use super::*;
 
-    // On non-Windows platforms, we can use the functions directly
-    // These are just aliases to the actual functions
-
-    pub use crate::igBegin as begin;
-    pub use crate::igButton as button;
-    pub use crate::igCreateContext as create_context;
-    pub use crate::igDestroyContext as destroy_context;
-    pub use crate::igEnd as end;
-    pub use crate::igGetCurrentContext as get_current_context;
-    pub use crate::igGetDrawData as get_draw_data;
-    pub use crate::igGetIO as get_io;
-    pub use crate::igGetStyle as get_style;
-    pub use crate::igGetVersion as get_version;
-    pub use crate::igNewFrame as new_frame;
-    pub use crate::igRender as render;
-    pub use crate::igSetCurrentContext as set_current_context;
-    pub use crate::igSetNextWindowPos as set_next_window_pos;
-    pub use crate::igSetNextWindowSize as set_next_window_size;
-    pub use crate::igSetNextWindowSizeConstraints as set_next_window_size_constraints;
-    pub use crate::igTextUnformatted as text_unformatted;
+    // On non-Windows native platforms, use the ImGui_* function names
+    pub use crate::ImGui_Begin as begin;
+    pub use crate::ImGui_Button as button;
+    pub use crate::ImGui_CreateContext as create_context;
+    pub use crate::ImGui_DestroyContext as destroy_context;
+    pub use crate::ImGui_End as end;
+    pub use crate::ImGui_GetCurrentContext as get_current_context;
+    pub use crate::ImGui_GetDrawData as get_draw_data;
+    pub use crate::ImGui_GetIO as get_io;
+    pub use crate::ImGui_GetStyle as get_style;
+    pub use crate::ImGui_GetVersion as get_version;
+    pub use crate::ImGui_NewFrame as new_frame;
+    pub use crate::ImGui_Render as render;
+    pub use crate::ImGui_SetCurrentContext as set_current_context;
+    pub use crate::ImGui_SetNextWindowPos as set_next_window_pos;
+    pub use crate::ImGui_SetNextWindowSize as set_next_window_size;
+    pub use crate::ImGui_SetNextWindowSizeConstraints as set_next_window_size_constraints;
+    pub use crate::ImGui_TextUnformatted as text_unformatted;
 }
 
 // Public API that automatically selects the right implementation
 #[cfg(target_os = "windows")]
 pub use windows::*;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "wasm"))]
+pub use wasm::*;
+
+#[cfg(all(not(target_os = "windows"), not(feature = "wasm")))]
 pub use unix::*;

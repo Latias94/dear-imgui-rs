@@ -13,8 +13,9 @@ This project provides comprehensive Rust bindings for Dear ImGui v1.92+, featuri
 - **Dynamic Font System**: On-demand glyph loading, runtime font size adjustment, and custom font loaders (FreeType support)
 - **Advanced Docking**: Complete window docking and layout management with DockSpace API
 - **Modern Backends**: WGPU v26, OpenGL via glow, with automatic texture lifecycle management
+- **WebAssembly Support**: Full WASM compatibility for web applications with zero C++ compilation
 - **Type Safety**: Memory-safe Rust wrappers with zero-cost abstractions
-- **Cross-Platform**: Windows, Linux, and macOS support
+- **Cross-Platform**: Windows, Linux, macOS, and Web (WASM) support
 
 **Note**: Multi-viewport support is not currently implemented but may be added in future releases.
 
@@ -87,6 +88,16 @@ cargo run --bin game_engine_docking  # Advanced docking layout
 cargo run --bin implot_basic         # Plotting with dear-implot
 ```
 
+### WebAssembly Example
+
+Build and run the WASM demo:
+
+```bash
+cd examples/wasm-demo
+./build-wasm.sh
+# Open http://localhost:8000 in your browser
+```
+
 ## Installation
 
 Add this to your `Cargo.toml`:
@@ -105,6 +116,17 @@ Or for OpenGL support:
 dear-imgui = "0.1"
 dear-imgui-glow = "0.1"  # For OpenGL backend
 dear-imgui-winit = "0.1" # For Winit integration
+```
+
+For WebAssembly support:
+
+```toml
+[dependencies]
+dear-imgui = { version = "0.1", features = ["wasm"] }
+dear-imgui-sys = { version = "0.1", features = ["wasm"] }
+winit = "0.30"
+wasm-bindgen = "0.2"
+web-sys = "0.3"
 ```
 
 ## Architecture

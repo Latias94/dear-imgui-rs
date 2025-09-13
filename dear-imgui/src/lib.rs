@@ -159,8 +159,13 @@ pub const HAS_DOCKING: bool = sys::HAS_DOCKING;
 #[doc(alias = "GetVersion")]
 pub fn dear_imgui_version() -> &'static str {
     unsafe {
-        let bytes =
-            std::ffi::CStr::from_ptr(sys::wrapper_functions::windows::get_version()).to_bytes();
+        #[cfg(target_os = "windows")]
+        let version_ptr = sys::wrapper_functions::windows::get_version();
+
+        #[cfg(not(target_os = "windows"))]
+        let version_ptr = sys::ImGui_GetVersion();
+
+        let bytes = std::ffi::CStr::from_ptr(version_ptr).to_bytes();
         std::str::from_utf8_unchecked(bytes)
     }
 }
