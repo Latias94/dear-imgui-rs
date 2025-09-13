@@ -209,9 +209,9 @@ impl TextureDemo {
 
                 ui.separator();
                 ui.text("Texture Management Info:");
-                ui.text("• All textures use the modern ImTextureData system");
-                ui.text("• Backend properly declares RENDERER_HAS_TEXTURES");
-                ui.text("• Textures are automatically managed by Dear ImGui");
+                ui.text(" All textures use the modern ImTextureData system");
+                ui.text(" Backend properly declares RENDERER_HAS_TEXTURES");
+                ui.text(" Textures are automatically managed by Dear ImGui");
             });
     }
 

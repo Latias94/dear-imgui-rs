@@ -1,5 +1,14 @@
 //! Glyph ranges for font loading
 //!
+//! **⚠️ DEPRECATED with Dear ImGui 1.92+**: With Dear ImGui 1.92+, glyph ranges are no longer needed
+//! for most use cases. The new dynamic font system loads glyphs on-demand automatically.
+//!
+//! This module is kept for backward compatibility and special use cases where you need
+//! to explicitly control which glyphs are loaded (e.g., for memory-constrained environments).
+//!
+//! **Recommended approach with Dear ImGui 1.92+**: Use `FontSource` without specifying glyph ranges.
+//! The system will automatically load any Unicode character as needed.
+//!
 //! This module provides utilities for specifying which character ranges
 //! should be loaded when adding fonts to the atlas.
 
@@ -7,9 +16,15 @@ use crate::sys;
 
 /// Builder for creating custom glyph ranges
 ///
+/// **⚠️ DEPRECATED with Dear ImGui 1.92+**: Consider using the new dynamic font system instead.
+///
 /// This allows you to specify exactly which characters should be loaded
 /// from a font, which can save memory and improve performance.
+///
+/// **Note**: With Dear ImGui 1.92+ dynamic fonts, this is only needed for special cases
+/// where you want to explicitly control memory usage or exclude certain ranges.
 #[derive(Debug)]
+#[deprecated(since = "0.1.0", note = "Use dynamic font loading instead. Glyphs are now loaded on-demand automatically with Dear ImGui 1.92+.")]
 pub struct GlyphRangesBuilder {
     raw: sys::ImFontGlyphRangesBuilder,
 }
@@ -65,6 +80,14 @@ impl Default for GlyphRangesBuilder {
 }
 
 /// Predefined glyph ranges for common character sets
+///
+/// **Note**: These ranges are still useful with Dear ImGui 1.92+ for:
+/// - Memory-constrained environments where you want to limit loaded glyphs
+/// - Font merging with `glyph_exclude_ranges()` to prevent conflicts
+/// - Explicit control over which characters are available
+///
+/// For most use cases, you can now omit glyph ranges and let the dynamic
+/// font system load glyphs on-demand.
 pub struct GlyphRanges;
 
 impl GlyphRanges {

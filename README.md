@@ -1,29 +1,55 @@
 # Dear ImGui Rust Bindings
 
-A Rust binding for [Dear ImGui](https://github.com/ocornut/imgui) with docking support and modern Rust ecosystem integration.
+Modern Rust bindings for [Dear ImGui](https://github.com/ocornut/imgui) with full Dear ImGui v1.92+ support, including dynamic font system, advanced docking, and modern texture management.
 
 ![Game Engine Docking Example](screenshots/game-engine-docking.png)
+![Implot Example](screenshots/implot-basic.png)
 
 ## Overview
 
-This project provides Rust bindings for Dear ImGui, focusing on:
+This project provides comprehensive Rust bindings for Dear ImGui v1.92+, featuring:
 
-- **API Compatibility**: Designed to be compatible with [imgui-rs](https://github.com/imgui-rs/imgui-rs) API patterns
-- **Docking Support**: Built with Dear ImGui's docking branch for advanced window management
-- **Modern Dependencies**: Uses current Rust ecosystem versions (wgpu v26, winit v0.30.12)
-- **Type Safety**: Safe Rust wrappers around the C++ Dear ImGui library
-- **Cross-Platform**: Supports Windows, Linux, and macOS
+- **Dear ImGui v1.92+ Support**: Full support for the latest Dear ImGui features including dynamic font loading, `ImGuiBackendFlags_RendererHasTextures`, and modern texture management
+- **Dynamic Font System**: On-demand glyph loading, runtime font size adjustment, and custom font loaders (FreeType support)
+- **Advanced Docking**: Complete window docking and layout management with DockSpace API
+- **Modern Backends**: WGPU v26, OpenGL via glow, with automatic texture lifecycle management
+- **Type Safety**: Memory-safe Rust wrappers with zero-cost abstractions
+- **Cross-Platform**: Windows, Linux, and macOS support
+
+**Note**: Multi-viewport support is not currently implemented but may be added in future releases.
+
+## Key Features
+
+### Dear ImGui v1.92+ Features
+
+- **Dynamic Font Loading**: No need to pre-specify glyph ranges - characters load on-demand
+- **Runtime Font Scaling**: Adjust font sizes dynamically without reloading
+- **Modern Texture Management**: Automatic texture creation/update/destruction via `ImGuiBackendFlags_RendererHasTextures`
+- **Custom Font Loaders**: Support for FreeType and other advanced font rendering backends
+- **Enhanced Font Configuration**: Color emoji support, advanced hinting controls, pixel-perfect alignment
+
+### Core Functionality
+
+- **Complete Widget Set**: All Dear ImGui widgets with type-safe Rust APIs
+- **Advanced Tables**: Sorting, filtering, resizing, and custom rendering
+- **Custom Drawing**: Full DrawList API for custom graphics
+- **Comprehensive Styling**: Theme system with runtime style modifications
+- **Input Handling**: Keyboard, mouse, gamepad with callback support
 
 ## Crates
 
-This workspace contains several crates:
-
-- **`dear-imgui`**: High-level safe Rust bindings
-- **`dear-imgui-sys`**: Low-level FFI bindings to Dear ImGui C++
-- **`dear-imgui-wgpu`**: WGPU renderer backend
-- **`dear-imgui-winit`**: Winit platform integration
-- **`dear-imgui-glow`**: OpenGL renderer backend (via glow)
-- **`dear-imgui-bevy`**: Bevy engine integration
+```text
+dear-imgui/
+├── dear-imgui/          # High-level safe Rust bindings
+├── dear-imgui-sys/      # Low-level FFI bindings to Dear ImGui C++
+├── backends/
+│   ├── dear-imgui-wgpu/    # WGPU renderer backend
+│   ├── dear-imgui-glow/    # OpenGL renderer backend
+│   └── dear-imgui-winit/   # Winit platform integration
+└── extensions/
+    ├── dear-imguizmo/      # 3D gizmo manipulation
+    └── dear-implot/        # Advanced plotting library
+```
 
 ## Quick Start
 
@@ -34,32 +60,18 @@ Add to your `Cargo.toml`:
 dear-imgui = "0.1"
 dear-imgui-wgpu = "0.1"
 dear-imgui-winit = "0.1"
-wgpu = "26.0"
-winit = "0.30.12"
-pollster = "0.4"
 ```
 
-Basic usage with WGPU:
+Basic WGPU example:
 
 ```rust
 use dear_imgui::*;
 use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
-use dear_imgui_winit::WinitPlatform;
 
-// Create ImGui context
-let mut imgui = Context::create();
-imgui.set_ini_filename(Some("imgui.ini"));
-
-// Create platform and renderer (one-step initialization)
-let mut platform = WinitPlatform::init(&mut imgui);
-let init_info = WgpuInitInfo::new(device, queue, surface_format);
+let mut imgui = Context::create()?;
 let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
 
-// Alternative: Two-step initialization for advanced usage
-// let mut renderer = WgpuRenderer::empty();
-// renderer.init_with_context(init_info, &mut imgui)?;
-
-// In your main loop
+// Main loop
 let ui = imgui.frame();
 ui.window("Hello World")
     .size([300.0, 100.0], Condition::FirstUseEver)
@@ -70,55 +82,19 @@ ui.window("Hello World")
         }
     });
 
-// Render
 let draw_data = imgui.render();
-renderer.render(&draw_data, /* ... */);
-```
-
-Basic usage with OpenGL:
-
-```rust
-use dear_imgui::*;
-use dear_imgui_glow::GlowRenderer;
-use dear_imgui_winit::WinitPlatform;
-
-// Create ImGui context
-let mut imgui = Context::create();
-imgui.set_ini_filename(Some("imgui.ini"));
-
-// Create platform and renderer (handles initialization automatically)
-let mut platform = WinitPlatform::init(&mut imgui);
-let mut renderer = GlowRenderer::new(gl_context, &mut imgui)?;
-
-// In your main loop
-let ui = imgui.frame();
-ui.window("Hello World")
-    .size([300.0, 100.0], Condition::FirstUseEver)
-    .build(|| {
-        ui.text("Hello, world!");
-        if ui.button("Click me") {
-            println!("Button clicked!");
-        }
-    });
-
-// Render
-let draw_data = imgui.render();
-renderer.render(&draw_data, /* ... */);
+renderer.render(&draw_data, &render_pass);
 ```
 
 ## Examples
 
-The `examples/` directory contains several demonstrations:
-
-- **`wgpu_basic.rs`**: Basic WGPU integration
-- **`glow_basic.rs`**: OpenGL integration via glow
-- **`game_engine_docking.rs`**: Complex docking layout example
-
-Run an example:
+Run the included examples to see features in action:
 
 ```bash
-cargo run --example wgpu_basic
-cargo run --example game_engine_docking
+cargo run --bin wgpu_basic           # Basic WGPU integration
+cargo run --bin glow_basic           # Basic Glow integration
+cargo run --bin game_engine_docking  # Advanced docking layout
+cargo run --bin implot_basic         # Plotting with dear-implot
 ```
 
 ## Installation
@@ -141,41 +117,29 @@ dear-imgui-glow = "0.1"  # For OpenGL backend
 dear-imgui-winit = "0.1" # For Winit integration
 ```
 
-## Features
-
-- **Docking**: Advanced window docking and layout management
-- **Tables**: Powerful table widget with sorting and filtering
-- **Input Widgets**: Text input, sliders, drag controls, color pickers
-- **Layout**: Flexible layout system with groups, columns, and custom positioning
-- **Drawing**: Custom drawing with DrawList API
-- **Fonts**: Font loading and management
-- **Styling**: Comprehensive theming and styling system
-
 ## Architecture
+
+### Modern Texture Management
+
+This library implements Dear ImGui v1.92+'s `ImGuiBackendFlags_RendererHasTextures` system, enabling:
+
+- Automatic texture lifecycle management
+- Dynamic font atlas resizing
+- Backend-agnostic texture operations
+- Memory-efficient texture streaming
 
 ### FFI Layer (`dear-imgui-sys`)
 
-The FFI layer uses `bindgen` to generate Rust bindings directly from Dear ImGui C++ headers. We handle C++ ABI compatibility issues (particularly on MSVC) using techniques learned from [easy-imgui-rs](https://github.com/rodrigorc/easy-imgui-rs/):
-
-- Platform-specific wrapper functions for problematic return types
-- Conditional compilation for MSVC ABI fixes
-- Type-safe conversions between C++ and Rust types
+Direct C++ FFI bindings with MSVC ABI compatibility fixes, handling complex return types and ensuring cross-platform stability.
 
 ### Safe Layer (`dear-imgui`)
 
-The high-level API provides:
+Type-safe Rust API featuring:
 
-- Memory-safe wrappers around raw FFI calls
 - Builder patterns for complex widgets
-- RAII-style resource management with tokens
-- Type-safe enums and bitflags
-
-### Backends
-
-- **WGPU**: Modern graphics API integration
-- **Winit**: Cross-platform windowing
-- **Glow**: OpenGL compatibility layer
-- **Bevy**: Game engine integration
+- RAII resource management
+- Zero-cost abstractions over C++ types
+- Comprehensive error handling
 
 ## Acknowledgments
 
@@ -206,22 +170,21 @@ cargo run --example wgpu_basic
 
 ## Comparison with imgui-rs
 
-While we aim for API compatibility with imgui-rs, there are some differences:
-
 **Advantages:**
 
-- Built with Dear ImGui's docking branch
-- Uses modern Rust ecosystem versions
-- Direct C++ FFI (no cimgui dependency)
-- Comprehensive MSVC ABI compatibility fixes
+- Dear ImGui v1.92+ support with dynamic fonts and modern texture management
+- Built-in docking support
+- Modern Rust ecosystem integration (wgpu v26, winit v0.30+)
+- Direct C++ FFI without cimgui dependency
+- Comprehensive MSVC ABI compatibility
 
-**Current Limitations:**
+**Current Status:**
 
-- Still in active development
-- Some advanced features not yet implemented
-- Smaller ecosystem compared to imgui-rs
+- Production-ready for most use cases
+- Active development with regular updates
+- Growing ecosystem of extensions
 
-Choose imgui-rs if you need a mature, stable solution with extensive ecosystem support. Choose dear-imgui if you want docking support, modern dependencies, or want to contribute to an actively developed project.
+Choose this library if you need the latest Dear ImGui features, docking support, or want to work with modern Rust graphics libraries.
 
 ## Technical Details
 

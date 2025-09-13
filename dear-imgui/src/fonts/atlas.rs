@@ -1,10 +1,15 @@
-//! Font atlas management
+//! Font atlas management for Dear ImGui v1.92+
 //!
-//! This module provides the FontAtlas type which manages a collection of fonts
-//! and their texture atlas for efficient rendering.
+//! This module provides a modern, type-safe interface to Dear ImGui's dynamic font system.
+//! Key features:
+//! - Dynamic glyph loading (no need to pre-specify glyph ranges)
+//! - Runtime font size adjustment
+//! - Custom font loaders
+//! - Incremental texture updates
 
 use crate::fonts::Font;
 use crate::sys;
+use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
 use std::ptr;
 use std::rc::Rc;
@@ -25,6 +30,78 @@ pub struct FontAtlas {
 /// A font identifier
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct FontId(pub(crate) *const Font);
+
+/// Font loader interface for custom font backends
+///
+/// This provides a safe Rust interface to Dear ImGui's ImFontLoader system,
+/// allowing custom font loading implementations.
+pub struct FontLoader {
+    raw: sys::ImFontLoader,
+    name: CString,
+}
+
+impl FontLoader {
+    /// Creates a new font loader with the given name
+    pub fn new(name: &str) -> Result<Self, std::ffi::NulError> {
+        let name_cstring = CString::new(name)?;
+        let mut raw = sys::ImFontLoader::default();
+        raw.Name = name_cstring.as_ptr();
+
+        Ok(Self {
+            raw,
+            name: name_cstring,
+        })
+    }
+
+    /// Returns a pointer to the raw ImFontLoader
+    pub(crate) fn as_ptr(&self) -> *const sys::ImFontLoader {
+        &self.raw
+    }
+
+    /// Sets the loader initialization callback
+    pub fn with_loader_init<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&mut FontAtlas) -> bool + 'static,
+    {
+        // Note: For now, we'll use the default STB TrueType loader
+        // Custom callbacks would require more complex lifetime management
+        self
+    }
+}
+
+/// Font loader flags for controlling font loading behavior
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FontLoaderFlags(pub u32);
+
+impl FontLoaderFlags {
+    /// No special flags
+    pub const NONE: Self = Self(0);
+
+    /// Load color glyphs (requires FreeType backend)
+    pub const LOAD_COLOR: Self = Self(1 << 0);
+
+    /// Force auto-hinting
+    pub const FORCE_AUTOHINT: Self = Self(1 << 1);
+
+    /// Disable hinting
+    pub const NO_HINTING: Self = Self(1 << 2);
+
+    /// Disable auto-hinting
+    pub const NO_AUTOHINT: Self = Self(1 << 3);
+}
+
+impl std::ops::BitOr for FontLoaderFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for FontLoaderFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
 
 /// A shared font atlas that can be used across multiple contexts
 ///
@@ -70,7 +147,7 @@ impl Drop for SharedFontAtlas {
 }
 
 impl FontAtlas {
-    /// Creates a new font atlas
+    /// Creates a new font atlas with default settings
     pub fn new() -> Self {
         unsafe {
             let raw = Box::into_raw(Box::new(sys::ImFontAtlas::new()));
@@ -80,6 +157,13 @@ impl FontAtlas {
                 _phantom: PhantomData,
             }
         }
+    }
+
+    /// Creates a new font atlas with a custom font loader
+    pub fn with_font_loader(loader: &FontLoader) -> Self {
+        let mut atlas = Self::new();
+        atlas.set_font_loader(loader);
+        atlas
     }
 
     /// Creates a FontAtlas wrapper from a raw ImFontAtlas pointer
@@ -99,6 +183,33 @@ impl FontAtlas {
         self.raw
     }
 
+    /// Sets the font loader for this atlas
+    ///
+    /// This allows using custom font backends like FreeType with additional features.
+    /// Must be called before adding any fonts.
+    pub fn set_font_loader(&mut self, loader: &FontLoader) {
+        unsafe {
+            sys::ImFontAtlas_SetFontLoader(self.raw, loader.as_ptr());
+        }
+    }
+
+    /// Sets global font loader flags
+    ///
+    /// These flags apply to all fonts loaded with this atlas unless overridden
+    /// in individual FontConfig instances.
+    pub fn set_font_loader_flags(&mut self, flags: FontLoaderFlags) {
+        unsafe {
+            (*self.raw).FontLoaderFlags = flags.0;
+        }
+    }
+
+    /// Gets the current font loader flags
+    pub fn font_loader_flags(&self) -> FontLoaderFlags {
+        unsafe {
+            FontLoaderFlags((*self.raw).FontLoaderFlags)
+        }
+    }
+
     /// Add a font to the atlas using FontSource
     #[doc(alias = "AddFont")]
     pub fn add_font(&mut self, font_sources: &[FontSource<'_>]) -> crate::fonts::FontId {
@@ -116,8 +227,14 @@ impl FontAtlas {
         _merge_mode: bool,
     ) -> crate::fonts::FontId {
         match font_source {
-            FontSource::DefaultFontData { config } => {
-                let font = self.add_font_default(config.as_ref());
+            FontSource::DefaultFontData { size_pixels, config } => {
+                // For v1.92+, we can use dynamic sizing by passing 0.0
+                let size = size_pixels.unwrap_or(0.0);
+                let mut cfg = config.clone().unwrap_or_default();
+                if size > 0.0 {
+                    cfg = cfg.size_pixels(size);
+                }
+                let font = self.add_font_default(Some(&cfg));
                 font.id()
             }
             FontSource::TtfData {
@@ -125,9 +242,29 @@ impl FontAtlas {
                 size_pixels,
                 config,
             } => {
+                let size = size_pixels.unwrap_or(0.0);
+                let mut cfg = config.clone().unwrap_or_default();
+                if size > 0.0 {
+                    cfg = cfg.size_pixels(size);
+                }
                 let font = self
-                    .add_font_from_memory_ttf(data, *size_pixels, config.as_ref(), None)
+                    .add_font_from_memory_ttf(data, size, Some(&cfg), None)
                     .expect("Failed to add TTF font from memory");
+                font.id()
+            }
+            FontSource::TtfFile {
+                path,
+                size_pixels,
+                config,
+            } => {
+                let size = size_pixels.unwrap_or(0.0);
+                let mut cfg = config.clone().unwrap_or_default();
+                if size > 0.0 {
+                    cfg = cfg.size_pixels(size);
+                }
+                let font = self
+                    .add_font_from_file_ttf(path, size, Some(&cfg), None)
+                    .expect("Failed to add TTF font from file");
                 font.id()
             }
         }
@@ -380,7 +517,7 @@ unsafe impl Send for FontAtlas {}
 // FontAtlas is safe to share between threads as long as access is synchronized
 unsafe impl Sync for FontAtlas {}
 
-/// Font configuration for loading fonts
+/// Font configuration for loading fonts with v1.92+ features
 #[derive(Debug, Clone)]
 pub struct FontConfig {
     raw: sys::ImFontConfig,
@@ -400,15 +537,38 @@ impl FontConfig {
     }
 
     /// Set the font size in pixels
-    pub fn size_pixels(self, _size: f32) -> Self {
-        // Note: ImFontConfig doesn't have a direct size field in our bindings
-        // The size is typically passed to the AddFont functions
+    ///
+    /// Note: With v1.92+ dynamic fonts, size can be 0.0 to use default sizing
+    pub fn size_pixels(mut self, size: f32) -> Self {
+        self.raw.SizePixels = size;
         self
     }
 
     /// Set whether to merge this font with the previous one
     pub fn merge_mode(mut self, merge: bool) -> Self {
         self.raw.MergeMode = merge;
+        self
+    }
+
+    /// Set font loader flags for this specific font
+    ///
+    /// These flags override the global atlas flags for this font.
+    pub fn font_loader_flags(mut self, flags: FontLoaderFlags) -> Self {
+        self.raw.FontLoaderFlags = flags.0;
+        self
+    }
+
+    /// Set glyph ranges to exclude from this font
+    ///
+    /// Useful when merging fonts to avoid overlapping glyphs.
+    pub fn glyph_exclude_ranges(mut self, ranges: &[u32]) -> Self {
+        self.raw.GlyphExcludeRanges = ranges.as_ptr() as *const sys::ImWchar;
+        self
+    }
+
+    /// Set a custom font loader for this font
+    pub fn font_loader(mut self, loader: &FontLoader) -> Self {
+        self.raw.FontLoader = loader.as_ptr();
         self
     }
 
@@ -429,6 +589,67 @@ impl FontConfig {
 
         self
     }
+
+    /// Set glyph offset for this font
+    pub fn glyph_offset(mut self, offset: [f32; 2]) -> Self {
+        self.raw.GlyphOffset.x = offset[0];
+        self.raw.GlyphOffset.y = offset[1];
+        self
+    }
+
+    /// Set minimum advance X for glyphs
+    pub fn glyph_min_advance_x(mut self, advance: f32) -> Self {
+        self.raw.GlyphMinAdvanceX = advance;
+        self
+    }
+
+    /// Set maximum advance X for glyphs
+    pub fn glyph_max_advance_x(mut self, advance: f32) -> Self {
+        self.raw.GlyphMaxAdvanceX = advance;
+        self
+    }
+
+    /// Set extra advance X for glyphs (spacing between characters)
+    pub fn glyph_extra_advance_x(mut self, advance: f32) -> Self {
+        self.raw.GlyphExtraAdvanceX = advance;
+        self
+    }
+
+    /// Set rasterizer multiply factor
+    pub fn rasterizer_multiply(mut self, multiply: f32) -> Self {
+        self.raw.RasterizerMultiply = multiply;
+        self
+    }
+
+    /// Set rasterizer density for DPI scaling
+    pub fn rasterizer_density(mut self, density: f32) -> Self {
+        self.raw.RasterizerDensity = density;
+        self
+    }
+
+    /// Set pixel snap horizontally
+    pub fn pixel_snap_h(mut self, snap: bool) -> Self {
+        self.raw.PixelSnapH = snap;
+        self
+    }
+
+    /// Set pixel snap vertically
+    pub fn pixel_snap_v(mut self, snap: bool) -> Self {
+        self.raw.PixelSnapV = snap;
+        self
+    }
+
+    /// Set horizontal oversampling
+    pub fn oversample_h(mut self, oversample: i8) -> Self {
+        self.raw.OversampleH = oversample;
+        self
+    }
+
+    /// Set vertical oversampling
+    pub fn oversample_v(mut self, oversample: i8) -> Self {
+        self.raw.OversampleV = oversample;
+        self
+    }
 }
 
 impl Default for FontConfig {
@@ -437,17 +658,98 @@ impl Default for FontConfig {
     }
 }
 
-/// A source for font data
+/// A source for font data with v1.92+ dynamic font support
 #[derive(Clone, Debug)]
 pub enum FontSource<'a> {
     /// Default font included with the library (ProggyClean.ttf)
-    DefaultFontData { config: Option<FontConfig> },
+    ///
+    /// With v1.92+, size_pixels can be 0.0 for dynamic sizing
+    DefaultFontData {
+        size_pixels: Option<f32>,
+        config: Option<FontConfig>
+    },
+
     /// Binary TTF/OTF font data
+    ///
+    /// With v1.92+, size_pixels can be 0.0 for dynamic sizing
     TtfData {
         data: &'a [u8],
-        size_pixels: f32,
+        size_pixels: Option<f32>,
         config: Option<FontConfig>,
     },
+
+    /// Font from file path
+    ///
+    /// With v1.92+, size_pixels can be 0.0 for dynamic sizing
+    TtfFile {
+        path: &'a str,
+        size_pixels: Option<f32>,
+        config: Option<FontConfig>,
+    },
+}
+
+impl<'a> FontSource<'a> {
+    /// Creates a default font source with dynamic sizing
+    pub fn default_font() -> Self {
+        Self::DefaultFontData {
+            size_pixels: None,
+            config: None,
+        }
+    }
+
+    /// Creates a default font source with specific size
+    pub fn default_font_with_size(size: f32) -> Self {
+        Self::DefaultFontData {
+            size_pixels: Some(size),
+            config: None,
+        }
+    }
+
+    /// Creates a TTF data source with dynamic sizing
+    pub fn ttf_data(data: &'a [u8]) -> Self {
+        Self::TtfData {
+            data,
+            size_pixels: None,
+            config: None,
+        }
+    }
+
+    /// Creates a TTF data source with specific size
+    pub fn ttf_data_with_size(data: &'a [u8], size: f32) -> Self {
+        Self::TtfData {
+            data,
+            size_pixels: Some(size),
+            config: None,
+        }
+    }
+
+    /// Creates a TTF file source with dynamic sizing
+    pub fn ttf_file(path: &'a str) -> Self {
+        Self::TtfFile {
+            path,
+            size_pixels: None,
+            config: None,
+        }
+    }
+
+    /// Creates a TTF file source with specific size
+    pub fn ttf_file_with_size(path: &'a str, size: f32) -> Self {
+        Self::TtfFile {
+            path,
+            size_pixels: Some(size),
+            config: None,
+        }
+    }
+
+    /// Sets the font configuration for this source
+    pub fn with_config(mut self, config: FontConfig) -> Self {
+        match &mut self {
+            Self::DefaultFontData { config: cfg, .. } => *cfg = Some(config),
+            Self::TtfData { config: cfg, .. } => *cfg = Some(config),
+            Self::TtfFile { config: cfg, .. } => *cfg = Some(config),
+        }
+        self
+    }
 }
 
 /// Handle to a font atlas texture

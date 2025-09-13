@@ -29,6 +29,30 @@ impl Ui {
         unsafe { crate::sys::ImGui_GetFontSize() }
     }
 
+    /// Push a font with dynamic size support (v1.92+ feature)
+    ///
+    /// This allows changing font size at runtime without pre-loading different sizes.
+    /// Pass None for font to use the current font with the new size.
+    pub fn push_font_with_size(&self, font: Option<&Font>, size: f32) {
+        unsafe {
+            let font_ptr = font.map_or(std::ptr::null_mut(), |f| f as *const Font as *mut crate::sys::ImFont);
+            crate::sys::ImGui_PushFont(font_ptr, size);
+        }
+    }
+
+    /// Execute a closure with a specific font and size (v1.92+ dynamic fonts)
+    pub fn with_font_and_size<F, R>(&self, font: Option<&Font>, size: f32, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        self.push_font_with_size(font, size);
+        let result = f();
+        unsafe {
+            crate::sys::ImGui_PopFont();
+        }
+        result
+    }
+
     /// Returns the UV coordinate for a white pixel.
     ///
     /// Useful for drawing custom shapes with the draw list API.
