@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2025-09-13
+
 ### Added
 - Initial release of dear-imgui Rust bindings with docking support
 - Support for Dear ImGui v1.92 features
