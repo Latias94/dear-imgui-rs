@@ -12,7 +12,7 @@ keywords.workspace = true
 
 [dependencies]
 dear-imgui = { path = "../../dear-imgui", version = "0.1" }
-dear-imgui-sys = { path = "../../dear-imgui-sys" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.1" }
 wgpu.workspace = true
 bytemuck = { version = "1.0", features = ["derive"] }
 smallvec = "1.0"
