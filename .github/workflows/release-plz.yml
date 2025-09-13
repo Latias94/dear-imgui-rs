@@ -21,6 +21,7 @@ jobs:
           # Use default GITHUB_TOKEN for now
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
+          submodules: recursive
       
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -52,6 +53,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
+          submodules: recursive
       
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
