@@ -32,7 +32,7 @@ multi-viewport = ["docking", "dear-imgui/multi-viewport", "dear-implot-sys/multi
 # Enable freetype font rasterizer
 freetype = ["dear-imgui/freetype", "dear-implot-sys/freetype"]
 # Enable for WASM targets
-wasm = ["dear-imgui/wasm", "dear-implot-sys/wasm"]
+# wasm = ["dear-imgui/wasm", "dear-implot-sys/wasm"]
 
 [dev-dependencies]
 approx = "0.5"

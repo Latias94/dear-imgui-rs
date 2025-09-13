@@ -31,7 +31,7 @@ multi-viewport = ["docking", "dear-imgui/multi-viewport"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui/freetype"]
 # Enable for WASM targets
-wasm = ["dear-imgui/wasm"]
+# wasm = ["dear-imgui/wasm"]
 # Enable tracing support for logging
 tracing = ["dep:tracing"]
 

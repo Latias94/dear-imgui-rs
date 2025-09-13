@@ -22,25 +22,31 @@ git_release_enable = true # create GitHub release
 [[package]]
 name = "dear-imgui-sys"
 git_release_enable = false # don't create separate releases for sys crate
+changelog_update = false # don't require changelog for sys crate
 
 # Backend packages
 [[package]]
 name = "dear-imgui-winit"
 git_release_enable = false
+changelog_update = false
 
 [[package]]
 name = "dear-imgui-wgpu"
 git_release_enable = false
+changelog_update = false
 
 [[package]]
 name = "dear-imgui-glow"
 git_release_enable = false
+changelog_update = false
 
 # Extension packages
 [[package]]
 name = "dear-implot-sys"
 git_release_enable = false
+changelog_update = false
 
 [[package]]
 name = "dear-implot"
 git_release_enable = false
+changelog_update = false
