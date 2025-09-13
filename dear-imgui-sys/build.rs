@@ -1,6 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
+#[allow(dead_code)]
 fn generate_wasm_bindings(
     _imgui_src: &PathBuf,
     out_path: &PathBuf,
