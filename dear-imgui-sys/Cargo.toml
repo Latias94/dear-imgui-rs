@@ -21,6 +21,7 @@ exclude = [
     "imgui/misc/debuggers/",
     "imgui/misc/fonts/",
     "imgui/misc/single_file/",
+    "src/bindings_reference.rs",
 ]
 
 [dependencies]

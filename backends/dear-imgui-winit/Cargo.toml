@@ -17,6 +17,15 @@ winit.workspace = true
 raw-window-handle = "0.6"
 cfg-if.workspace = true
 
+# WASM-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Window",
+] }
+
 [features]
 default = []
 # Enable docking features
