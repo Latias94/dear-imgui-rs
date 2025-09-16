@@ -10,6 +10,14 @@ create_token!(
     drop { sys::ImGui_EndGroup() }
 );
 
+create_token!(
+    /// Tracks a pushed clip rect that will be popped on drop.
+    pub struct ClipRectToken<'ui>;
+
+    /// Pops a clip rect pushed with [`Ui::push_clip_rect`].
+    drop { sys::ImGui_PopClipRect() }
+);
+
 /// # Cursor / Layout
 impl Ui {
     /// Renders a separator (generally horizontal).
@@ -241,5 +249,103 @@ impl Ui {
                 [pos.x, pos.y]
             }
         }
+    }
+}
+
+// ============================================================================
+// Metrics helpers & clip rect stack
+// ============================================================================
+
+impl Ui {
+    /// Return ~ FontSize.
+    #[doc(alias = "GetTextLineHeight")]
+    pub fn text_line_height(&self) -> f32 {
+        unsafe { sys::ImGui_GetTextLineHeight() }
+    }
+
+    /// Return ~ FontSize + style.ItemSpacing.y.
+    #[doc(alias = "GetTextLineHeightWithSpacing")]
+    pub fn text_line_height_with_spacing(&self) -> f32 {
+        unsafe { sys::ImGui_GetTextLineHeightWithSpacing() }
+    }
+
+    /// Return ~ FontSize + style.FramePadding.y * 2.
+    #[doc(alias = "GetFrameHeight")]
+    pub fn frame_height(&self) -> f32 {
+        unsafe { sys::ImGui_GetFrameHeight() }
+    }
+
+    /// Return ~ FontSize + style.FramePadding.y * 2 + style.ItemSpacing.y.
+    #[doc(alias = "GetFrameHeightWithSpacing")]
+    pub fn frame_height_with_spacing(&self) -> f32 {
+        unsafe { sys::ImGui_GetFrameHeightWithSpacing() }
+    }
+
+    /// Push a clipping rectangle in screen space.
+    #[doc(alias = "PushClipRect")]
+    pub fn push_clip_rect(
+        &self,
+        min: impl Into<[f32; 2]>,
+        max: impl Into<[f32; 2]>,
+        intersect_with_current: bool,
+    ) {
+        let min = min.into();
+        let max = max.into();
+        let min_v = sys::ImVec2 {
+            x: min[0],
+            y: min[1],
+        };
+        let max_v = sys::ImVec2 {
+            x: max[0],
+            y: max[1],
+        };
+        unsafe { sys::ImGui_PushClipRect(&min_v, &max_v, intersect_with_current) }
+    }
+
+    /// Pop a clipping rectangle from the stack.
+    #[doc(alias = "PopClipRect")]
+    pub fn pop_clip_rect(&self) {
+        unsafe { sys::ImGui_PopClipRect() }
+    }
+
+    /// Run a closure with a clip rect pushed and automatically popped.
+    pub fn with_clip_rect<R>(
+        &self,
+        min: impl Into<[f32; 2]>,
+        max: impl Into<[f32; 2]>,
+        intersect_with_current: bool,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        self.push_clip_rect(min, max, intersect_with_current);
+        let _t = ClipRectToken::new(self);
+        f()
+    }
+
+    /// Returns true if the specified rectangle (min,max) is visible (not clipped).
+    #[doc(alias = "IsRectVisible")]
+    pub fn is_rect_visible_min_max(
+        &self,
+        rect_min: impl Into<[f32; 2]>,
+        rect_max: impl Into<[f32; 2]>,
+    ) -> bool {
+        let mn = rect_min.into();
+        let mx = rect_max.into();
+        let mn_v = sys::ImVec2 { x: mn[0], y: mn[1] };
+        let mx_v = sys::ImVec2 { x: mx[0], y: mx[1] };
+        unsafe { sys::ImGui_IsRectVisible1(&mn_v, &mx_v) }
+    }
+
+    /// Returns true if a rectangle of given size at the current cursor pos is visible.
+    #[doc(alias = "IsRectVisible")]
+    pub fn is_rect_visible_with_size(&self, size: impl Into<[f32; 2]>) -> bool {
+        let s = size.into();
+        let v = sys::ImVec2 { x: s[0], y: s[1] };
+        unsafe { sys::ImGui_IsRectVisible(&v) }
+    }
+
+    /// Vertically align upcoming text baseline to FramePadding.y (align text to framed items).
+    #[doc(alias = "AlignTextToFramePadding")]
+    pub fn align_text_to_frame_padding(&self) {
+        unsafe { sys::ImGui_AlignTextToFramePadding() }
     }
 }

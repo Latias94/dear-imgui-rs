@@ -8,6 +8,7 @@ pub(crate) mod child_window;
 pub(crate) mod content_region;
 pub(crate) mod scroll;
 
+// Window-focused/hovered helpers are available via utils.rs variants.
 bitflags! {
     /// Window hover check option flags
     #[repr(transparent)]

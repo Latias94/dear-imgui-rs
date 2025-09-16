@@ -182,7 +182,12 @@ pub enum StyleColor {
     ResizeGripActive = sys::ImGuiCol_ResizeGripActive,
     Tab = sys::ImGuiCol_Tab,
     TabHovered = sys::ImGuiCol_TabHovered,
-    // TODO: Add missing tab colors when available in sys crate
+    // Newly added tab colors in docking branch
+    TabSelected = sys::ImGuiCol_TabSelected,
+    TabSelectedOverline = sys::ImGuiCol_TabSelectedOverline,
+    TabDimmed = sys::ImGuiCol_TabDimmed,
+    TabDimmedSelected = sys::ImGuiCol_TabDimmedSelected,
+    TabDimmedSelectedOverline = sys::ImGuiCol_TabDimmedSelectedOverline,
     #[cfg(feature = "docking")]
     DockingPreview = sys::ImGuiCol_DockingPreview,
     #[cfg(feature = "docking")]
@@ -197,8 +202,13 @@ pub enum StyleColor {
     TableRowBg = sys::ImGuiCol_TableRowBg,
     TableRowBgAlt = sys::ImGuiCol_TableRowBgAlt,
     TextSelectedBg = sys::ImGuiCol_TextSelectedBg,
+    TextLink = sys::ImGuiCol_TextLink,
+    TreeLines = sys::ImGuiCol_TreeLines,
+    InputTextCursor = sys::ImGuiCol_InputTextCursor,
     DragDropTarget = sys::ImGuiCol_DragDropTarget,
-    // TODO: Add missing navigation colors when available in sys crate
+    NavCursor = sys::ImGuiCol_NavCursor,
+    NavWindowingHighlight = sys::ImGuiCol_NavWindowingHighlight,
+    NavWindowingDimBg = sys::ImGuiCol_NavWindowingDimBg,
     ModalWindowDimBg = sys::ImGuiCol_ModalWindowDimBg,
 }
 

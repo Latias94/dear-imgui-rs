@@ -73,6 +73,14 @@ impl Ui {
     pub fn set_tooltip_formatted(&self, text: impl AsRef<str>) {
         self.set_tooltip(text);
     }
+
+    /// Sets a tooltip for the last item with simple text content.
+    /// More efficient than building a tooltip window for simple cases.
+    #[doc(alias = "SetItemTooltip")]
+    pub fn set_item_tooltip(&self, text: impl AsRef<str>) {
+        let text_ptr = self.scratch_txt(text);
+        unsafe { sys::ImGui_SetItemTooltip(text_ptr) }
+    }
 }
 
 /// # Item/Widget Utilities and Query Functions

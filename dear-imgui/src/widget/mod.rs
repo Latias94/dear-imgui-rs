@@ -22,7 +22,7 @@ pub mod tree;
 
 // Re-export important types
 pub use popup::PopupFlags;
-pub use table::TableColumnSetup;
+pub use table::{TableBgTarget, TableColumnSetup};
 
 // Widget implementations
 pub use self::button::*;

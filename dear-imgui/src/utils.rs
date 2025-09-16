@@ -120,6 +120,18 @@ impl crate::ui::Ui {
         unsafe { sys::ImGui_IsWindowFocused(0) }
     }
 
+    /// Returns `true` if the current window is appearing this frame.
+    #[doc(alias = "IsWindowAppearing")]
+    pub fn is_window_appearing(&self) -> bool {
+        unsafe { sys::ImGui_IsWindowAppearing() }
+    }
+
+    /// Returns `true` if the current window is collapsed.
+    #[doc(alias = "IsWindowCollapsed")]
+    pub fn is_window_collapsed(&self) -> bool {
+        unsafe { sys::ImGui_IsWindowCollapsed() }
+    }
+
     // ============================================================================
     // Additional input utilities (non-duplicate functions)
     // ============================================================================

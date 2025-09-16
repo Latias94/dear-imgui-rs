@@ -338,6 +338,102 @@ impl Ui {
         unsafe { self.style().clone() }
     }
 
+    /// Apply the built-in Dark style to the current style.
+    #[doc(alias = "StyleColorsDark")]
+    pub fn style_colors_dark(&self) {
+        unsafe { sys::ImGui_StyleColorsDark(std::ptr::null_mut()) }
+    }
+
+    /// Apply the built-in Light style to the current style.
+    #[doc(alias = "StyleColorsLight")]
+    pub fn style_colors_light(&self) {
+        unsafe { sys::ImGui_StyleColorsLight(std::ptr::null_mut()) }
+    }
+
+    /// Apply the built-in Classic style to the current style.
+    #[doc(alias = "StyleColorsClassic")]
+    pub fn style_colors_classic(&self) {
+        unsafe { sys::ImGui_StyleColorsClassic(std::ptr::null_mut()) }
+    }
+
+    /// Write the Dark style values into the provided [`Style`] object.
+    #[doc(alias = "StyleColorsDark")]
+    pub fn style_colors_dark_into(&self, dst: &mut crate::Style) {
+        unsafe { sys::ImGui_StyleColorsDark(dst as *mut _ as *mut sys::ImGuiStyle) }
+    }
+
+    /// Write the Light style values into the provided [`Style`] object.
+    #[doc(alias = "StyleColorsLight")]
+    pub fn style_colors_light_into(&self, dst: &mut crate::Style) {
+        unsafe { sys::ImGui_StyleColorsLight(dst as *mut _ as *mut sys::ImGuiStyle) }
+    }
+
+    /// Write the Classic style values into the provided [`Style`] object.
+    #[doc(alias = "StyleColorsClassic")]
+    pub fn style_colors_classic_into(&self, dst: &mut crate::Style) {
+        unsafe { sys::ImGui_StyleColorsClassic(dst as *mut _ as *mut sys::ImGuiStyle) }
+    }
+
+    /// Returns DPI scale currently associated to the current window's viewport.
+    #[doc(alias = "GetWindowDpiScale")]
+    pub fn window_dpi_scale(&self) -> f32 {
+        unsafe { sys::ImGui_GetWindowDpiScale() }
+    }
+
+    /// Display a text label with a boolean value (for quick debug UIs).
+    #[doc(alias = "Value")]
+    pub fn value_bool(&self, prefix: impl AsRef<str>, v: bool) {
+        unsafe { sys::ImGui_Value(self.scratch_txt(prefix), v) }
+    }
+
+    /// Get current window width (shortcut for `GetWindowSize().x`).
+    #[doc(alias = "GetWindowWidth")]
+    pub fn window_width(&self) -> f32 {
+        unsafe { sys::ImGui_GetWindowWidth() }
+    }
+
+    /// Get current window height (shortcut for `GetWindowSize().y`).
+    #[doc(alias = "GetWindowHeight")]
+    pub fn window_height(&self) -> f32 {
+        unsafe { sys::ImGui_GetWindowHeight() }
+    }
+
+    /// Get current window position in screen space.
+    #[doc(alias = "GetWindowPos")]
+    pub fn window_pos(&self) -> [f32; 2] {
+        unsafe {
+            #[cfg(target_env = "msvc")]
+            {
+                let rr = sys::ImGui_GetWindowPos();
+                let v: sys::ImVec2 = rr.into();
+                [v.x, v.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let v = sys::ImGui_GetWindowPos();
+                [v.x, v.y]
+            }
+        }
+    }
+
+    /// Get current window size.
+    #[doc(alias = "GetWindowSize")]
+    pub fn window_size(&self) -> [f32; 2] {
+        unsafe {
+            #[cfg(target_env = "msvc")]
+            {
+                let rr = sys::ImGui_GetWindowSize();
+                let v: sys::ImVec2 = rr.into();
+                [v.x, v.y]
+            }
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let v = sys::ImGui_GetWindowSize();
+                [v.x, v.y]
+            }
+        }
+    }
+
     // ============================================================================
     // Additional Demo, Debug, Information (non-duplicate methods)
     // ============================================================================
