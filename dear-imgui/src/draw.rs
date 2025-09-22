@@ -168,15 +168,15 @@ bitflags! {
     #[repr(transparent)]
     pub struct DrawListFlags: i32 {
         /// No flags
-        const NONE = sys::ImDrawListFlags_None;
+        const NONE = sys::ImDrawListFlags_None as i32;
         /// Enable anti-aliased lines/borders
-        const ANTI_ALIASED_LINES = sys::ImDrawListFlags_AntiAliasedLines;
+        const ANTI_ALIASED_LINES = sys::ImDrawListFlags_AntiAliasedLines as i32;
         /// Enable anti-aliased lines/borders using textures where possible
-        const ANTI_ALIASED_LINES_USE_TEX = sys::ImDrawListFlags_AntiAliasedLinesUseTex;
+        const ANTI_ALIASED_LINES_USE_TEX = sys::ImDrawListFlags_AntiAliasedLinesUseTex as i32;
         /// Enable anti-aliased edge around filled shapes
-        const ANTI_ALIASED_FILL = sys::ImDrawListFlags_AntiAliasedFill;
+        const ANTI_ALIASED_FILL = sys::ImDrawListFlags_AntiAliasedFill as i32;
         /// Can emit 'VtxOffset > 0' to allow large meshes
-        const ALLOW_VTX_OFFSET = sys::ImDrawListFlags_AllowVtxOffset;
+        const ALLOW_VTX_OFFSET = sys::ImDrawListFlags_AllowVtxOffset as i32;
     }
 }
 

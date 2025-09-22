@@ -368,13 +368,13 @@ bitflags::bitflags! {
         /// No flags
         const NONE = 0;
         /// Clamp value to min/max bounds when input manually with CTRL+Click. By default CTRL+Click allows going out of bounds.
-        const ALWAYS_CLAMP = sys::ImGuiSliderFlags_AlwaysClamp;
+        const ALWAYS_CLAMP = sys::ImGuiSliderFlags_AlwaysClamp as i32;
         /// Make the widget logarithmic (linear otherwise). Consider using ImGuiSliderFlags_NoRoundToFormat with this if using a format-string with small amount of digits.
-        const LOGARITHMIC = sys::ImGuiSliderFlags_Logarithmic;
+        const LOGARITHMIC = sys::ImGuiSliderFlags_Logarithmic as i32;
         /// Disable rounding underlying value to match precision of the display format string (e.g. %.3f values are rounded to those 3 digits)
-        const NO_ROUND_TO_FORMAT = sys::ImGuiSliderFlags_NoRoundToFormat;
+        const NO_ROUND_TO_FORMAT = sys::ImGuiSliderFlags_NoRoundToFormat as i32;
         /// Disable CTRL+Click or Enter key allowing to input text directly into the widget
-        const NO_INPUT = sys::ImGuiSliderFlags_NoInput;
+        const NO_INPUT = sys::ImGuiSliderFlags_NoInput as i32;
     }
 }
 

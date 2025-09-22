@@ -146,38 +146,52 @@ impl StyleStackToken<'_> {
 unsafe fn push_style_var(style_var: StyleVar) {
     use StyleVar::*;
     match style_var {
-        Alpha(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_Alpha, v),
-        DisabledAlpha(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_DisabledAlpha, v),
-        WindowPadding(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowPadding, &v.into()),
-        WindowRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_WindowRounding, v),
-        WindowBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_WindowBorderSize, v),
-        WindowMinSize(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowMinSize, &v.into()),
+        Alpha(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_Alpha as i32, v),
+        DisabledAlpha(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_DisabledAlpha as i32, v),
+        WindowPadding(v) => {
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowPadding as i32, &v.into())
+        }
+        WindowRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_WindowRounding as i32, v),
+        WindowBorderSize(v) => {
+            sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_WindowBorderSize as i32, v)
+        }
+        WindowMinSize(v) => {
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowMinSize as i32, &v.into())
+        }
         WindowTitleAlign(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowTitleAlign, &v.into())
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowTitleAlign as i32, &v.into())
         }
-        ChildRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ChildRounding, v),
-        ChildBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ChildBorderSize, v),
-        PopupRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_PopupRounding, v),
-        PopupBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_PopupBorderSize, v),
-        FramePadding(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_FramePadding, &v.into()),
-        FrameRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_FrameRounding, v),
-        FrameBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_FrameBorderSize, v),
-        ItemSpacing(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ItemSpacing, &v.into()),
+        ChildRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ChildRounding as i32, v),
+        ChildBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ChildBorderSize as i32, v),
+        PopupRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_PopupRounding as i32, v),
+        PopupBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_PopupBorderSize as i32, v),
+        FramePadding(v) => {
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_FramePadding as i32, &v.into())
+        }
+        FrameRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_FrameRounding as i32, v),
+        FrameBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_FrameBorderSize as i32, v),
+        ItemSpacing(v) => {
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ItemSpacing as i32, &v.into())
+        }
         ItemInnerSpacing(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ItemInnerSpacing, &v.into())
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ItemInnerSpacing as i32, &v.into())
         }
-        IndentSpacing(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_IndentSpacing, v),
-        CellPadding(v) => sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_CellPadding, &v.into()),
-        ScrollbarSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ScrollbarSize, v),
-        ScrollbarRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ScrollbarRounding, v),
-        GrabMinSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_GrabMinSize, v),
-        GrabRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_GrabRounding, v),
-        TabRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_TabRounding, v),
+        IndentSpacing(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_IndentSpacing as i32, v),
+        CellPadding(v) => {
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_CellPadding as i32, &v.into())
+        }
+        ScrollbarSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ScrollbarSize as i32, v),
+        ScrollbarRounding(v) => {
+            sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ScrollbarRounding as i32, v)
+        }
+        GrabMinSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_GrabMinSize as i32, v),
+        GrabRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_GrabRounding as i32, v),
+        TabRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_TabRounding as i32, v),
         ButtonTextAlign(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ButtonTextAlign, &v.into())
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ButtonTextAlign as i32, &v.into())
         }
         SelectableTextAlign(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_SelectableTextAlign, &v.into())
+            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_SelectableTextAlign as i32, &v.into())
         }
     }
 }

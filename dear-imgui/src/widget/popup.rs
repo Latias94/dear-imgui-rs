@@ -18,7 +18,7 @@ impl Ui {
     pub fn open_popup(&self, str_id: impl AsRef<str>) {
         let str_id_ptr = self.scratch_txt(str_id);
         unsafe {
-            sys::ImGui_OpenPopup(str_id_ptr, sys::ImGuiPopupFlags_None);
+            sys::ImGui_OpenPopup(str_id_ptr, sys::ImGuiPopupFlags_None as i32);
         }
     }
 
@@ -120,7 +120,7 @@ impl Ui {
     #[doc(alias = "IsPopupOpen")]
     pub fn is_popup_open(&self, str_id: impl AsRef<str>) -> bool {
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::ImGui_IsPopupOpen(str_id_ptr, sys::ImGuiPopupFlags_None) }
+        unsafe { sys::ImGui_IsPopupOpen(str_id_ptr, sys::ImGuiPopupFlags_None as i32) }
     }
 
     /// Returns true if the popup is open with flags.
@@ -148,7 +148,10 @@ impl Ui {
             .unwrap_or(std::ptr::null());
 
         let render = unsafe {
-            sys::ImGui_BeginPopupContextItem(str_id_ptr, sys::ImGuiPopupFlags_MouseButtonRight)
+            sys::ImGui_BeginPopupContextItem(
+                str_id_ptr,
+                sys::ImGuiPopupFlags_MouseButtonRight as i32,
+            )
         };
 
         if render {
@@ -175,7 +178,10 @@ impl Ui {
             .unwrap_or(std::ptr::null());
 
         let render = unsafe {
-            sys::ImGui_BeginPopupContextWindow(str_id_ptr, sys::ImGuiPopupFlags_MouseButtonRight)
+            sys::ImGui_BeginPopupContextWindow(
+                str_id_ptr,
+                sys::ImGuiPopupFlags_MouseButtonRight as i32,
+            )
         };
 
         if render {
@@ -202,7 +208,10 @@ impl Ui {
             .unwrap_or(std::ptr::null());
 
         let render = unsafe {
-            sys::ImGui_BeginPopupContextVoid(str_id_ptr, sys::ImGuiPopupFlags_MouseButtonRight)
+            sys::ImGui_BeginPopupContextVoid(
+                str_id_ptr,
+                sys::ImGuiPopupFlags_MouseButtonRight as i32,
+            )
         };
 
         if render {
@@ -219,21 +228,21 @@ bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct PopupFlags: i32 {
         /// No flags
-        const NONE = sys::ImGuiPopupFlags_None;
+        const NONE = sys::ImGuiPopupFlags_None as i32;
         /// For BeginPopupContext*(): open on Left Mouse release. Guaranteed to always be == 0 (same as ImGuiMouseButton_Left)
-        const MOUSE_BUTTON_LEFT = sys::ImGuiPopupFlags_MouseButtonLeft;
+        const MOUSE_BUTTON_LEFT = sys::ImGuiPopupFlags_MouseButtonLeft as i32;
         /// For BeginPopupContext*(): open on Right Mouse release. Guaranteed to always be == 1 (same as ImGuiMouseButton_Right)
-        const MOUSE_BUTTON_RIGHT = sys::ImGuiPopupFlags_MouseButtonRight;
+        const MOUSE_BUTTON_RIGHT = sys::ImGuiPopupFlags_MouseButtonRight as i32;
         /// For BeginPopupContext*(): open on Middle Mouse release. Guaranteed to always be == 2 (same as ImGuiMouseButton_Middle)
-        const MOUSE_BUTTON_MIDDLE = sys::ImGuiPopupFlags_MouseButtonMiddle;
+        const MOUSE_BUTTON_MIDDLE = sys::ImGuiPopupFlags_MouseButtonMiddle as i32;
         /// For OpenPopup*(), BeginPopupContext*(): don't open if there's already a popup at the same level of the popup stack
-        const NO_OPEN_OVER_EXISTING_POPUP = sys::ImGuiPopupFlags_NoOpenOverExistingPopup;
+        const NO_OPEN_OVER_EXISTING_POPUP = sys::ImGuiPopupFlags_NoOpenOverExistingPopup as i32;
         /// For BeginPopupContext*(): don't return true when hovering items, only when hovering empty space
-        const NO_OPEN_OVER_ITEMS = sys::ImGuiPopupFlags_NoOpenOverItems;
+        const NO_OPEN_OVER_ITEMS = sys::ImGuiPopupFlags_NoOpenOverItems as i32;
         /// For IsPopupOpen(): ignore the ImGuiID parameter and test for any popup
-        const ANY_POPUP_ID = sys::ImGuiPopupFlags_AnyPopupId;
+        const ANY_POPUP_ID = sys::ImGuiPopupFlags_AnyPopupId as i32;
         /// For IsPopupOpen(): search/test at any level of the popup stack (default test in the current level)
-        const ANY_POPUP_LEVEL = sys::ImGuiPopupFlags_AnyPopupLevel;
+        const ANY_POPUP_LEVEL = sys::ImGuiPopupFlags_AnyPopupLevel as i32;
         /// For IsPopupOpen(): test for any popup
         const ANY_POPUP = Self::ANY_POPUP_ID.bits() | Self::ANY_POPUP_LEVEL.bits();
     }

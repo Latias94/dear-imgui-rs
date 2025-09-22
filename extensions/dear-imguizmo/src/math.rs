@@ -472,27 +472,14 @@ pub fn matrices_approximately_equal(a: &Mat4, b: &Mat4, epsilon: f32) -> bool {
 
 /// Get the length of a segment in clip space
 pub fn get_segment_length_clip_space(start: Vec3, direction: Vec3, view_projection: &Mat4) -> f32 {
-    let start_clip = view_projection.transform_point3(start);
-    let end_clip = view_projection.transform_point3(start + direction);
+    // Use homogeneous coordinates and divide by w to get NDC
+    let start4 = *view_projection * glam::Vec4::new(start.x, start.y, start.z, 1.0);
+    let end_point = start + direction;
+    let end4 = *view_projection * glam::Vec4::new(end_point.x, end_point.y, end_point.z, 1.0);
 
-    // Convert to normalized device coordinates
-    let start_ndc = if start_clip.z != 0.0 {
-        Vec3::new(
-            start_clip.x / start_clip.z,
-            start_clip.y / start_clip.z,
-            start_clip.z,
-        )
-    } else {
-        start_clip
-    };
+    let start_ndc = (start4.truncate()) / start4.w.max(f32::EPSILON);
+    let end_ndc = (end4.truncate()) / end4.w.max(f32::EPSILON);
 
-    let end_ndc = if end_clip.z != 0.0 {
-        Vec3::new(end_clip.x / end_clip.z, end_clip.y / end_clip.z, end_clip.z)
-    } else {
-        end_clip
-    };
-
-    // Return the 2D distance in screen space
     (end_ndc.truncate() - start_ndc.truncate()).length()
 }
 

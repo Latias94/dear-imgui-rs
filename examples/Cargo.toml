@@ -33,18 +33,17 @@ path = "glow_textures.rs"
 name = "implot_basic"
 path = "implot_basic.rs"
 
-# ImGuizmo example temporarily disabled
-# [[bin]]
-# name = "imguizmo_basic"
-# path = "imguizmo_basic.rs"
+[[bin]]
+name = "imguizmo_basic"
+path = "imguizmo_basic.rs"
 
 [dependencies]
 dear-imgui = { path = "../dear-imgui" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow" }
-dear-implot = { path = "../extensions/dear-implot" }
-# dear-imguizmo = { path = "../extensions/dear-imguizmo" }
+dear-implot = { path = "../extensions/dear-implot", optional = true }
+dear-imguizmo = { path = "../extensions/dear-imguizmo" }
 wgpu = "26.0"
 winit = "0.30.12"
 tracing.workspace = true

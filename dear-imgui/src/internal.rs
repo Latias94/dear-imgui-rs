@@ -6,16 +6,16 @@ use std::slice;
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum DataType {
-    I8 = sys::ImGuiDataType_S8,
-    U8 = sys::ImGuiDataType_U8,
-    I16 = sys::ImGuiDataType_S16,
-    U16 = sys::ImGuiDataType_U16,
-    I32 = sys::ImGuiDataType_S32,
-    U32 = sys::ImGuiDataType_U32,
-    I64 = sys::ImGuiDataType_S64,
-    U64 = sys::ImGuiDataType_U64,
-    F32 = sys::ImGuiDataType_Float,
-    F64 = sys::ImGuiDataType_Double,
+    I8 = sys::ImGuiDataType_S8 as i32,
+    U8 = sys::ImGuiDataType_U8 as i32,
+    I16 = sys::ImGuiDataType_S16 as i32,
+    U16 = sys::ImGuiDataType_U16 as i32,
+    I32 = sys::ImGuiDataType_S32 as i32,
+    U32 = sys::ImGuiDataType_U32 as i32,
+    I64 = sys::ImGuiDataType_S64 as i32,
+    U64 = sys::ImGuiDataType_U64 as i32,
+    F32 = sys::ImGuiDataType_Float as i32,
+    F64 = sys::ImGuiDataType_Double as i32,
 }
 
 /// Primitive type marker.

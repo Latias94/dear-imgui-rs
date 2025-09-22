@@ -8,39 +8,39 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct HoveredFlags: i32 {
         /// Return true if directly over the item/window, not obstructed by another window, not obstructed by an active popup or modal blocking inputs under them.
-        const NONE = sys::ImGuiHoveredFlags_None;
+        const NONE = sys::ImGuiHoveredFlags_None as i32;
         /// IsWindowHovered() only: Return true if any children of the window is hovered
-        const CHILD_WINDOWS = sys::ImGuiHoveredFlags_ChildWindows;
+        const CHILD_WINDOWS = sys::ImGuiHoveredFlags_ChildWindows as i32;
         /// IsWindowHovered() only: Test from root window (top most parent of the current hierarchy)
-        const ROOT_WINDOW = sys::ImGuiHoveredFlags_RootWindow;
+        const ROOT_WINDOW = sys::ImGuiHoveredFlags_RootWindow as i32;
         /// IsWindowHovered() only: Return true if any window is hovered
-        const ANY_WINDOW = sys::ImGuiHoveredFlags_AnyWindow;
+        const ANY_WINDOW = sys::ImGuiHoveredFlags_AnyWindow as i32;
         /// IsWindowHovered() only: Do not consider popup hierarchy (do not treat popup emitter as parent of popup) (when used with _ChildWindows or _RootWindow)
-        const NO_POPUP_HIERARCHY = sys::ImGuiHoveredFlags_NoPopupHierarchy;
+        const NO_POPUP_HIERARCHY = sys::ImGuiHoveredFlags_NoPopupHierarchy as i32;
         /// IsWindowHovered() only: Consider docking hierarchy (treat dockspace host as parent of docked window) (when used with _ChildWindows or _RootWindow)
-        const DOCK_HIERARCHY = sys::ImGuiHoveredFlags_DockHierarchy;
+        const DOCK_HIERARCHY = sys::ImGuiHoveredFlags_DockHierarchy as i32;
         /// Return true even if a popup window is normally blocking access to this item/window
-        const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup;
+        const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup as i32;
         /// Return true even if an active item is blocking access to this item/window. Useful for Drag and Drop patterns.
-        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem;
+        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
         /// IsItemHovered() only: Return true even if the position is obstructed or overlapped by another window
-        const ALLOW_WHEN_OVERLAPPED = sys::ImGuiHoveredFlags_AllowWhenOverlapped;
+        const ALLOW_WHEN_OVERLAPPED = sys::ImGuiHoveredFlags_AllowWhenOverlapped as i32;
         /// IsItemHovered() only: Return true even if the item is disabled
-        const ALLOW_WHEN_DISABLED = sys::ImGuiHoveredFlags_AllowWhenDisabled;
+        const ALLOW_WHEN_DISABLED = sys::ImGuiHoveredFlags_AllowWhenDisabled as i32;
         /// IsItemHovered() only: Disable using gamepad/keyboard navigation state when active, always query mouse.
-        const NO_NAV_OVERRIDE = sys::ImGuiHoveredFlags_NoNavOverride;
+        const NO_NAV_OVERRIDE = sys::ImGuiHoveredFlags_NoNavOverride as i32;
         /// Shortcut for standard flags when using IsItemHovered() + SetTooltip() sequence.
-        const FOR_TOOLTIP = sys::ImGuiHoveredFlags_ForTooltip;
+        const FOR_TOOLTIP = sys::ImGuiHoveredFlags_ForTooltip as i32;
         /// Require mouse to be stationary for style.HoverStationaryDelay (~0.15 sec) _at least one time_. After this, can move on same item/window. Using the stationary test tends to reduces the need for a long delay.
-        const STATIONARY = sys::ImGuiHoveredFlags_Stationary;
+        const STATIONARY = sys::ImGuiHoveredFlags_Stationary as i32;
         /// IsItemHovered() only: Return true immediately (default). As opposed to IsItemHovered() returning true only after style.HoverDelayNormal elapsed (~0.30 sec)
-        const DELAY_NONE = sys::ImGuiHoveredFlags_DelayNone;
+        const DELAY_NONE = sys::ImGuiHoveredFlags_DelayNone as i32;
         /// IsItemHovered() only: Return true after style.HoverDelayShort elapsed (~0.10 sec)
-        const DELAY_SHORT = sys::ImGuiHoveredFlags_DelayShort;
+        const DELAY_SHORT = sys::ImGuiHoveredFlags_DelayShort as i32;
         /// IsItemHovered() only: Return true after style.HoverDelayNormal elapsed (~0.30 sec)
-        const DELAY_NORMAL = sys::ImGuiHoveredFlags_DelayNormal;
+        const DELAY_NORMAL = sys::ImGuiHoveredFlags_DelayNormal as i32;
         /// IsItemHovered() only: Disable shared delay system where moving from one item to a neighboring item keeps the previous timer for a short time (standard for tooltips with long delays)
-        const NO_SHARED_DELAY = sys::ImGuiHoveredFlags_NoSharedDelay;
+        const NO_SHARED_DELAY = sys::ImGuiHoveredFlags_NoSharedDelay as i32;
     }
 }
 

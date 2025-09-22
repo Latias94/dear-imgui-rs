@@ -37,17 +37,13 @@ impl Ui {
     /// Creates a vertical separator
     #[doc(alias = "SeparatorEx")]
     pub fn separator_vertical(&self) {
-        unsafe {
-            sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Vertical, 1.0);
-        }
+        unsafe { sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Vertical as i32, 1.0) }
     }
 
     /// Creates a horizontal separator
     #[doc(alias = "SeparatorEx")]
     pub fn separator_horizontal(&self) {
-        unsafe {
-            sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Horizontal, 1.0);
-        }
+        unsafe { sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Horizontal as i32, 1.0) }
     }
 
     /// Call between widgets or groups to layout them horizontally.

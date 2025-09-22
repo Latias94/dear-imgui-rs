@@ -624,6 +624,7 @@ dependencies = [
  "dear-imgui-glow",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
+ "dear-imguizmo",
  "dear-implot",
  "env_logger",
  "glow",
@@ -687,6 +688,21 @@ dependencies = [
  "raw-window-handle",
  "web-sys",
  "winit",
+]
+
+[[package]]
+name = "dear-imguizmo"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "bitflags 2.9.4",
+ "dear-imgui",
+ "glam",
+ "mint",
+ "pretty_assertions",
+ "thiserror 2.0.16",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -979,6 +995,15 @@ dependencies = [
  "khronos_api",
  "log",
  "xml-rs",
+]
+
+[[package]]
+name = "glam"
+version = "0.30.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34e4649b62c21fb8c737abe6449192ce96ecd16b5c0d606759fe43831b31bd95"
+dependencies = [
+ "mint",
 ]
 
 [[package]]

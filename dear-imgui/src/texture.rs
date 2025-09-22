@@ -110,9 +110,9 @@ pub type RawTextureId = *const c_void;
 #[repr(i32)]
 pub enum TextureFormat {
     /// 4 components per pixel, each is unsigned 8-bit. Total size = TexWidth * TexHeight * 4
-    RGBA32 = sys::ImTextureFormat_RGBA32,
+    RGBA32 = sys::ImTextureFormat_RGBA32 as i32,
     /// 1 component per pixel, each is unsigned 8-bit. Total size = TexWidth * TexHeight
-    Alpha8 = sys::ImTextureFormat_Alpha8,
+    Alpha8 = sys::ImTextureFormat_Alpha8 as i32,
 }
 
 impl From<sys::ImTextureFormat> for TextureFormat {
@@ -136,15 +136,15 @@ impl From<TextureFormat> for sys::ImTextureFormat {
 #[repr(i32)]
 pub enum TextureStatus {
     /// Texture is ready and can be used
-    OK = sys::ImTextureStatus_OK,
+    OK = sys::ImTextureStatus_OK as i32,
     /// Backend destroyed the texture
-    Destroyed = sys::ImTextureStatus_Destroyed,
+    Destroyed = sys::ImTextureStatus_Destroyed as i32,
     /// Requesting backend to create the texture. Set status OK when done.
-    WantCreate = sys::ImTextureStatus_WantCreate,
+    WantCreate = sys::ImTextureStatus_WantCreate as i32,
     /// Requesting backend to update specific blocks of pixels. Set status OK when done.
-    WantUpdates = sys::ImTextureStatus_WantUpdates,
+    WantUpdates = sys::ImTextureStatus_WantUpdates as i32,
     /// Requesting backend to destroy the texture. Set status to Destroyed when done.
-    WantDestroy = sys::ImTextureStatus_WantDestroy,
+    WantDestroy = sys::ImTextureStatus_WantDestroy as i32,
 }
 
 impl From<sys::ImTextureStatus> for TextureStatus {

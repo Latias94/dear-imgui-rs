@@ -9,11 +9,11 @@ bitflags::bitflags! {
         /// No flags
         const NONE = 0;
         /// React on left mouse button
-        const MOUSE_BUTTON_LEFT = sys::ImGuiButtonFlags_MouseButtonLeft;
+        const MOUSE_BUTTON_LEFT = sys::ImGuiButtonFlags_MouseButtonLeft as i32;
         /// React on right mouse button
-        const MOUSE_BUTTON_RIGHT = sys::ImGuiButtonFlags_MouseButtonRight;
+        const MOUSE_BUTTON_RIGHT = sys::ImGuiButtonFlags_MouseButtonRight as i32;
         /// React on middle mouse button
-        const MOUSE_BUTTON_MIDDLE = sys::ImGuiButtonFlags_MouseButtonMiddle;
+        const MOUSE_BUTTON_MIDDLE = sys::ImGuiButtonFlags_MouseButtonMiddle as i32;
     }
 }
 
@@ -133,7 +133,7 @@ impl Ui {
     /// Internally uses `PushItemFlag(ImGuiItemFlags_ButtonRepeat, repeat)`.
     #[doc(alias = "PushButtonRepeat")]
     pub fn push_button_repeat(&self, repeat: bool) {
-        unsafe { sys::ImGui_PushItemFlag(sys::ImGuiItemFlags_ButtonRepeat, repeat) }
+        unsafe { sys::ImGui_PushItemFlag(sys::ImGuiItemFlags_ButtonRepeat as i32, repeat) }
     }
 
     /// Pop the button repeat item flag.

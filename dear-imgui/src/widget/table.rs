@@ -302,11 +302,11 @@ impl Ui {
 bitflags::bitflags! {
     /// Flags for table rows
     #[repr(transparent)]
-pub struct TableRowFlags: i32 {
+    pub struct TableRowFlags: i32 {
         /// No flags
         const NONE = 0;
         /// Identify header row (set default background color + width of all columns)
-        const HEADERS = sys::ImGuiTableRowFlags_Headers;
+        const HEADERS = sys::ImGuiTableRowFlags_Headers as i32;
     }
 }
 
@@ -315,13 +315,13 @@ pub struct TableRowFlags: i32 {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TableBgTarget {
     /// No background target
-    None = sys::ImGuiTableBgTarget_None,
+    None = sys::ImGuiTableBgTarget_None as i32,
     /// First alternating row background
-    RowBg0 = sys::ImGuiTableBgTarget_RowBg0,
+    RowBg0 = sys::ImGuiTableBgTarget_RowBg0 as i32,
     /// Second alternating row background
-    RowBg1 = sys::ImGuiTableBgTarget_RowBg1,
+    RowBg1 = sys::ImGuiTableBgTarget_RowBg1 as i32,
     /// Cell background
-    CellBg = sys::ImGuiTableBgTarget_CellBg,
+    CellBg = sys::ImGuiTableBgTarget_CellBg as i32,
 }
 
 /// Sorting direction for table columns.

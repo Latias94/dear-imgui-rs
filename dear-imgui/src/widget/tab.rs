@@ -10,29 +10,29 @@ bitflags::bitflags! {
         /// No flags
         const NONE = 0;
         /// Allow manually dragging tabs to re-order them + New tabs are appended at the end of list
-        const REORDERABLE = sys::ImGuiTabBarFlags_Reorderable;
+        const REORDERABLE = sys::ImGuiTabBarFlags_Reorderable as i32;
         /// Automatically select new tabs when they appear
-        const AUTO_SELECT_NEW_TABS = sys::ImGuiTabBarFlags_AutoSelectNewTabs;
+        const AUTO_SELECT_NEW_TABS = sys::ImGuiTabBarFlags_AutoSelectNewTabs as i32;
         /// Disable buttons to open the tab list popup
-        const TAB_LIST_POPUP_BUTTON = sys::ImGuiTabBarFlags_TabListPopupButton;
+        const TAB_LIST_POPUP_BUTTON = sys::ImGuiTabBarFlags_TabListPopupButton as i32;
         /// Disable behavior of closing tabs (that are submitted with p_open != NULL) with middle mouse button. You can still repro this behavior on user's side with if (IsItemHovered() && IsMouseClicked(2)) *p_open = false.
-        const NO_CLOSE_WITH_MIDDLE_MOUSE_BUTTON = sys::ImGuiTabBarFlags_NoCloseWithMiddleMouseButton;
+        const NO_CLOSE_WITH_MIDDLE_MOUSE_BUTTON = sys::ImGuiTabBarFlags_NoCloseWithMiddleMouseButton as i32;
         /// Disable scrolling buttons (apply when fitting policy is ImGuiTabBarFlags_FittingPolicyScroll)
-        const NO_TAB_LIST_SCROLLING_BUTTONS = sys::ImGuiTabBarFlags_NoTabListScrollingButtons;
+        const NO_TAB_LIST_SCROLLING_BUTTONS = sys::ImGuiTabBarFlags_NoTabListScrollingButtons as i32;
         /// Disable tooltips when hovering a tab
-        const NO_TOOLTIP = sys::ImGuiTabBarFlags_NoTooltip;
+        const NO_TOOLTIP = sys::ImGuiTabBarFlags_NoTooltip as i32;
         /// Draw selected tab with a different color
-        const DRAW_SELECTED_OVERLINE = sys::ImGuiTabBarFlags_DrawSelectedOverline;
+        const DRAW_SELECTED_OVERLINE = sys::ImGuiTabBarFlags_DrawSelectedOverline as i32;
         /// Mixed fitting policy
-        const FITTING_POLICY_MIXED = sys::ImGuiTabBarFlags_FittingPolicyMixed;
+        const FITTING_POLICY_MIXED = sys::ImGuiTabBarFlags_FittingPolicyMixed as i32;
         /// Shrink tabs when they don't fit
-        const FITTING_POLICY_SHRINK = sys::ImGuiTabBarFlags_FittingPolicyShrink;
+        const FITTING_POLICY_SHRINK = sys::ImGuiTabBarFlags_FittingPolicyShrink as i32;
         /// Add scroll buttons when tabs don't fit
-        const FITTING_POLICY_SCROLL = sys::ImGuiTabBarFlags_FittingPolicyScroll;
+        const FITTING_POLICY_SCROLL = sys::ImGuiTabBarFlags_FittingPolicyScroll as i32;
         /// Mask for fitting policy flags
-        const FITTING_POLICY_MASK = sys::ImGuiTabBarFlags_FittingPolicyMask_;
+        const FITTING_POLICY_MASK = sys::ImGuiTabBarFlags_FittingPolicyMask_ as i32;
         /// Default fitting policy
-        const FITTING_POLICY_DEFAULT = sys::ImGuiTabBarFlags_FittingPolicyDefault_;
+        const FITTING_POLICY_DEFAULT = sys::ImGuiTabBarFlags_FittingPolicyDefault_ as i32;
     }
 }
 
@@ -44,21 +44,21 @@ bitflags::bitflags! {
         /// No flags
         const NONE = 0;
         /// Display a dot next to the title + tab is selected when clicking the X + closure is not assumed (will wait for user to stop submitting the tab). Otherwise closure is assumed when pressing the X, so if you keep submitting the tab may reappear at end of tab bar.
-        const UNSAVED_DOCUMENT = sys::ImGuiTabItemFlags_UnsavedDocument;
+        const UNSAVED_DOCUMENT = sys::ImGuiTabItemFlags_UnsavedDocument as i32;
         /// Trigger flag to programmatically make the tab selected when calling BeginTabItem()
-        const SET_SELECTED = sys::ImGuiTabItemFlags_SetSelected;
+        const SET_SELECTED = sys::ImGuiTabItemFlags_SetSelected as i32;
         /// Disable behavior of closing tabs (that are submitted with p_open != NULL) with middle mouse button. You can still repro this behavior on user's side with if (IsItemHovered() && IsMouseClicked(2)) *p_open = false.
-        const NO_CLOSE_WITH_MIDDLE_MOUSE_BUTTON = sys::ImGuiTabItemFlags_NoCloseWithMiddleMouseButton;
+        const NO_CLOSE_WITH_MIDDLE_MOUSE_BUTTON = sys::ImGuiTabItemFlags_NoCloseWithMiddleMouseButton as i32;
         /// Don't call PushID(tab->ID)/PopID() on BeginTabItem()/EndTabItem()
-        const NO_PUSH_ID = sys::ImGuiTabItemFlags_NoPushId;
+        const NO_PUSH_ID = sys::ImGuiTabItemFlags_NoPushId as i32;
         /// Disable tooltip for the given tab
-        const NO_TOOLTIP = sys::ImGuiTabItemFlags_NoTooltip;
+        const NO_TOOLTIP = sys::ImGuiTabItemFlags_NoTooltip as i32;
         /// Disable reordering this tab or having another tab cross over this tab
-        const NO_REORDER = sys::ImGuiTabItemFlags_NoReorder;
+        const NO_REORDER = sys::ImGuiTabItemFlags_NoReorder as i32;
         /// Enforce the tab position to the left of the tab bar (after the tab list popup button)
-        const LEADING = sys::ImGuiTabItemFlags_Leading;
+        const LEADING = sys::ImGuiTabItemFlags_Leading as i32;
         /// Enforce the tab position to the right of the tab bar (before the scrolling buttons)
-        const TRAILING = sys::ImGuiTabItemFlags_Trailing;
+        const TRAILING = sys::ImGuiTabItemFlags_Trailing as i32;
     }
 }
 

@@ -3,6 +3,7 @@
 //! This module provides the main context and UI structures for ImGuizmo,
 //! following the same pattern as dear-implot for safe Rust integration.
 
+use crate::types::ColorExt;
 use crate::types::{Mat4, Mode, Operation, Rect, Vec2, Vec3, Vec4};
 use crate::{GuizmoError, GuizmoResult, Style};
 use dear_imgui::internal::RawWrapper;
@@ -27,6 +28,8 @@ pub(crate) struct GuizmoState {
     pub(crate) enabled: bool,
     /// Whether orthographic projection is used
     pub(crate) orthographic: bool,
+    /// If true, orthographic state has been explicitly forced by user
+    pub(crate) orthographic_forced: bool,
     /// Current gizmo size in clip space
     pub(crate) gizmo_size_clip_space: f32,
     /// Whether axis flipping is allowed
@@ -35,6 +38,10 @@ pub(crate) struct GuizmoState {
     pub(crate) axis_limit: f32,
     /// Plane visibility limits
     pub(crate) plane_limit: f32,
+    /// Whether each axis is below projection visibility threshold
+    pub(crate) below_axis_limit: [bool; 3],
+    /// Whether each plane is below projection visibility threshold
+    pub(crate) below_plane_limit: [bool; 3],
     /// Axis mask (true = hidden, false = shown)
     pub(crate) axis_mask: [bool; 3],
     /// Current style
@@ -43,6 +50,28 @@ pub(crate) struct GuizmoState {
     pub(crate) draw_list: Option<*mut dear_imgui::sys::ImDrawList>,
     /// Whether we're using bounds manipulation
     pub(crate) using_bounds: bool,
+    /// Selected bounds corner index (-1 if none)
+    pub(crate) selected_bounds_corner: i32,
+    /// Selected bounds face index (-1 if none), order: [minX,maxX,minY,maxY,minZ,maxZ]
+    pub(crate) selected_bounds_face: i32,
+    /// Selected bounds edge index (-1 if none), order: X-parallel[0..3], Y-parallel[4..7], Z-parallel[8..11]
+    pub(crate) selected_bounds_edge: i32,
+    /// Hovered bounds corner index (-1 if none)
+    pub(crate) hover_bounds_corner: i32,
+    /// Hovered bounds face index (-1 if none)
+    pub(crate) hover_bounds_face: i32,
+    /// Hovered bounds edge index (-1 if none)
+    pub(crate) hover_bounds_edge: i32,
+    /// Optional local bounds [minx,maxx,miny,maxy,minz,maxz]
+    pub(crate) local_bounds: Option<[f32; 6]>,
+    /// Optional bounds snap [sx,sy,sz]
+    pub(crate) bounds_snap: Option<[f32; 3]>,
+    /// Bounds manipulation: best axis index (0=X,1=Y,2=Z)
+    pub(crate) bounds_best_axis: i32,
+    /// Bounds manipulation: active axes for this handle (e.g., corner has 2, edge has 1; -1 for none)
+    pub(crate) bounds_axes: [i32; 2],
+    /// Bounds manipulation: local pivot used for scaling around
+    pub(crate) bounds_local_pivot: Vec3,
     /// Current view matrix
     pub(crate) view_matrix: Mat4,
     /// Current projection matrix
@@ -115,14 +144,28 @@ impl Default for GuizmoState {
             is_view_manipulate_hovered: false,
             enabled: true,
             orthographic: false,
-            gizmo_size_clip_space: 1.0,
+            orthographic_forced: false,
+            gizmo_size_clip_space: 0.1,
             allow_axis_flip: true,
-            axis_limit: 0.05,
-            plane_limit: 0.2,
+            axis_limit: 0.0025,
+            plane_limit: 0.02,
             axis_mask: [false; 3],
+            below_axis_limit: [false; 3],
+            below_plane_limit: [false; 3],
             style: Style::default(),
             draw_list: None,
             using_bounds: false,
+            selected_bounds_corner: -1,
+            selected_bounds_face: -1,
+            selected_bounds_edge: -1,
+            hover_bounds_corner: -1,
+            hover_bounds_face: -1,
+            hover_bounds_edge: -1,
+            local_bounds: None,
+            bounds_snap: None,
+            bounds_best_axis: -1,
+            bounds_axes: [-1, -1],
+            bounds_local_pivot: Vec3::ZERO,
             view_matrix: Mat4::IDENTITY,
             projection_matrix: Mat4::IDENTITY,
             model_matrix: Mat4::IDENTITY,
@@ -265,6 +308,7 @@ impl<'ui> GuizmoUi<'ui> {
     pub fn set_orthographic(&self, orthographic: bool) {
         let mut state = self.context.state.borrow_mut();
         state.orthographic = orthographic;
+        state.orthographic_forced = true;
 
         crate::guizmo_debug!("Orthographic projection: {}", orthographic);
     }
@@ -279,7 +323,8 @@ impl<'ui> GuizmoUi<'ui> {
 
     /// Check if the gizmo is currently being used
     pub fn is_using(&self) -> bool {
-        self.context.state.borrow().using != crate::gizmo::ManipulationType::None
+        let s = self.context.state.borrow();
+        s.using != crate::gizmo::ManipulationType::None || s.using_bounds
     }
 
     /// Check if the mouse is over any gizmo element
@@ -359,10 +404,6 @@ impl<'ui> GuizmoUi<'ui> {
         mode: Mode,
         matrix: &mut Mat4,
     ) -> GuizmoResult<bool> {
-        println!(
-            "DEBUG: manipulate() called with operation: {:?}, mode: {:?}",
-            operation, mode
-        );
         self.manipulate_with_options(
             draw_list, view, projection, operation, mode, matrix, None, None, None, None,
         )
@@ -394,12 +435,10 @@ impl<'ui> GuizmoUi<'ui> {
         mode: Mode,
         matrix: &mut Mat4,
         delta_matrix: Option<&mut Mat4>,
-        _snap: Option<&[f32; 3]>,
+        snap: Option<&[f32; 3]>,
         _local_bounds: Option<&[f32; 6]>,
         _bounds_snap: Option<&[f32; 3]>,
     ) -> GuizmoResult<bool> {
-        println!("DEBUG: manipulate_with_options() called");
-
         // Validate inputs
         if !crate::math::is_matrix_finite(view) {
             return Err(crate::GuizmoError::invalid_matrix(
@@ -430,6 +469,10 @@ impl<'ui> GuizmoUi<'ui> {
             ));
         }
 
+        // Store bounds options
+        state.local_bounds = _local_bounds.copied();
+        state.bounds_snap = _bounds_snap.copied();
+
         // Set delta matrix to identity if provided
         if let Some(delta) = delta_matrix {
             *delta = Mat4::IDENTITY;
@@ -438,15 +481,10 @@ impl<'ui> GuizmoUi<'ui> {
         // Check if object is behind camera (for perspective projection)
         let mvp = *projection * *view * *matrix;
         let cam_space_pos = mvp.transform_point3(Vec3::ZERO);
-        println!(
-            "DEBUG: Camera space check - orthographic: {}, cam_space_pos.z: {}, using: {:?}",
-            state.orthographic, cam_space_pos.z, state.using
-        );
         if !state.orthographic
             && cam_space_pos.z < 0.001
             && state.using == crate::gizmo::ManipulationType::None
         {
-            println!("DEBUG: Object is behind camera, returning early");
             return Ok(false);
         }
 
@@ -480,41 +518,40 @@ impl<'ui> GuizmoUi<'ui> {
         let ui = self.ui;
         let mut modified = false;
 
-        // Draw translation gizmo
-        println!(
-            "DEBUG: Checking if operation contains TRANSLATE: operation={:?}, TRANSLATE={:?}",
-            operation,
-            Operation::TRANSLATE
+        // Compute gizmo size for consistent on-screen scale
+        let gizmo_center = state.model_matrix.transform_point3(Vec3::ZERO);
+        let gizmo_size = crate::draw::calculate_gizmo_size(
+            &state.view_matrix,
+            gizmo_center,
+            state.gizmo_size_clip_space,
         );
-        println!(
-            "DEBUG: operation.contains(Operation::TRANSLATE) = {}",
-            operation.contains(Operation::TRANSLATE)
-        );
-        if operation.contains(Operation::TRANSLATE) {
-            println!("DEBUG: Drawing translation gizmo");
-            crate::draw::draw_translation_gizmo(
-                draw_list,
-                state.mvp,
-                state.model_matrix,
-                state.viewport,
-                state.screen_factor,
-                operation,
-                state.using,
-            )?;
+
+        // Determine highlight manipulation type (hover takes precedence when not using)
+        let mouse = ui.io().mouse_pos();
+        let mouse_vec2 = Vec2::new(mouse[0], mouse[1]);
+        let hover_hit =
+            crate::interaction::is_over_gizmo(ui, &state, mouse_vec2).unwrap_or_default();
+        let highlight = if state.using != crate::gizmo::ManipulationType::None {
+            state.using
+        } else if hover_hit.hit {
+            hover_hit.manipulation_type
         } else {
-            println!("DEBUG: NOT drawing translation gizmo - condition failed");
+            crate::gizmo::ManipulationType::None
+        };
+
+        // Draw translation gizmo
+        if operation.contains(Operation::TRANSLATE) {
+            crate::draw::draw_translation_gizmo(draw_list, self.context, operation, highlight)?;
         }
 
         // Draw rotation gizmo
         if operation.contains(Operation::ROTATE) {
-            println!("DEBUG: Drawing rotation gizmo");
-            crate::draw::draw_rotation_gizmo(draw_list, self.context, operation, state.using)?;
+            crate::draw::draw_rotation_gizmo(draw_list, self.context, operation, highlight)?;
         }
 
         // Draw scale gizmo
         if operation.contains(Operation::SCALE) {
-            println!("DEBUG: Drawing scale gizmo");
-            crate::draw::draw_scale_gizmo(draw_list, self.context, operation, state.using)?;
+            crate::draw::draw_scale_gizmo(draw_list, self.context, operation, highlight)?;
         }
 
         // Handle mouse interaction
@@ -529,6 +566,35 @@ impl<'ui> GuizmoUi<'ui> {
                     state.mouse_down_pos = mouse_vec2;
                     crate::guizmo_trace!("Started manipulation: {:?}", state.using);
                 }
+            }
+        }
+
+        // Update bounds hover indices (corner > edge > face)
+        if state.local_bounds.is_some() {
+            let mouse_pos = ui.io().mouse_pos();
+            let mp = Vec2::new(mouse_pos[0], mouse_pos[1]);
+            state.hover_bounds_corner = match crate::interaction::is_over_bounds_corners(&state, mp)
+            {
+                Ok(Some(i)) => i as i32,
+                _ => -1,
+            };
+            if state.hover_bounds_corner < 0 {
+                state.hover_bounds_edge = match crate::interaction::is_over_bounds_edges(&state, mp)
+                {
+                    Ok(Some(i)) => i as i32,
+                    _ => -1,
+                };
+            } else {
+                state.hover_bounds_edge = -1;
+            }
+            if state.hover_bounds_corner < 0 && state.hover_bounds_edge < 0 {
+                state.hover_bounds_face = match crate::interaction::is_over_bounds_faces(&state, mp)
+                {
+                    Ok(Some(i)) => i as i32,
+                    _ => -1,
+                };
+            } else {
+                state.hover_bounds_face = -1;
             }
         }
 
@@ -550,6 +616,7 @@ impl<'ui> GuizmoUi<'ui> {
                 is_left_down,
                 is_left_clicked,
                 is_left_released,
+                snap,
             ) {
                 if interaction_result {
                     modified = true;
@@ -567,51 +634,183 @@ impl<'ui> GuizmoUi<'ui> {
             state.using = crate::gizmo::ManipulationType::None;
         }
 
+        // Draw bounds if provided
+        if let Some(local_bounds) = state.local_bounds {
+            let mvp = state.mvp;
+            let _ = crate::draw::draw_local_bounds(draw_list, &mvp, &state.viewport, &local_bounds);
+            let corners =
+                crate::draw::draw_bounds_handles(draw_list, &mvp, &state.viewport, &local_bounds)
+                    .unwrap_or([[0.0; 2]; 8]);
+            let faces = crate::draw::draw_bounds_face_handles(
+                draw_list,
+                &mvp,
+                &state.viewport,
+                &local_bounds,
+            )
+            .unwrap_or([[0.0; 2]; 6]);
+            let edges = crate::draw::draw_bounds_edge_handles(
+                draw_list,
+                &mvp,
+                &state.viewport,
+                &local_bounds,
+            )
+            .unwrap_or([[0.0; 2]; 12]);
+
+            // Highlight hovered/selected handles
+            let sel_col =
+                state.style.colors[crate::types::ColorElement::Selection as usize].as_u32();
+            let outline = 0xFF000000u32;
+            // Corner
+            if state.hover_bounds_corner >= 0 || state.selected_bounds_corner >= 0 {
+                let idx = if state.selected_bounds_corner >= 0 {
+                    state.selected_bounds_corner
+                } else {
+                    state.hover_bounds_corner
+                } as usize;
+                let p = corners[idx];
+                draw_list.add_circle(p, 6.0, sel_col).filled(true).build();
+                draw_list.add_circle(p, 6.0, outline).build();
+            }
+            // Edge
+            if state.hover_bounds_edge >= 0 || state.selected_bounds_edge >= 0 {
+                let idx = if state.selected_bounds_edge >= 0 {
+                    state.selected_bounds_edge
+                } else {
+                    state.hover_bounds_edge
+                } as usize;
+                let p = edges[idx];
+                // Diamond highlight
+                let s = 6.0;
+                let a = [p[0], p[1] - s];
+                let b = [p[0] + s, p[1]];
+                let c2 = [p[0], p[1] + s];
+                let d = [p[0] - s, p[1]];
+                draw_list
+                    .add_triangle(a, b, c2, sel_col)
+                    .filled(true)
+                    .build();
+                draw_list
+                    .add_triangle(a, c2, d, sel_col)
+                    .filled(true)
+                    .build();
+                draw_list.add_line(a, b, outline).build();
+                draw_list.add_line(b, c2, outline).build();
+                draw_list.add_line(c2, d, outline).build();
+                draw_list.add_line(d, a, outline).build();
+            }
+            // Face
+            if state.hover_bounds_face >= 0 || state.selected_bounds_face >= 0 {
+                let idx = if state.selected_bounds_face >= 0 {
+                    state.selected_bounds_face
+                } else {
+                    state.hover_bounds_face
+                } as usize;
+                let p = faces[idx];
+                let s = 7.0;
+                draw_list
+                    .add_rect([p[0] - s, p[1] - s], [p[0] + s, p[1] + s], sel_col)
+                    .filled(true)
+                    .build();
+                draw_list
+                    .add_rect([p[0] - s, p[1] - s], [p[0] + s, p[1] + s], outline)
+                    .build();
+            }
+        }
+
         Ok(modified)
     }
 
     /// Draw a grid in 3D space
-    pub fn draw_grid(&self, _view: &Mat4, _projection: &Mat4, _matrix: &Mat4, grid_size: f32) {
-        crate::guizmo_trace!("Drawing grid with size {}", grid_size);
-        // TODO: Implement grid drawing
+    pub fn draw_grid(&self, view: &Mat4, projection: &Mat4, matrix: &Mat4, grid_size: f32) {
+        let draw_list = self.ui.get_window_draw_list();
+        let _ = crate::draw::draw_grid(
+            &draw_list,
+            view,
+            projection,
+            matrix,
+            &self.context.state.borrow().viewport,
+            grid_size,
+        );
     }
 
     /// Draw debug cubes
-    pub fn draw_cubes(&self, _view: &Mat4, _projection: &Mat4, matrices: &[Mat4]) {
-        crate::guizmo_trace!("Drawing {} debug cubes", matrices.len());
-        // TODO: Implement cube drawing
+    pub fn draw_cubes(&self, view: &Mat4, projection: &Mat4, matrices: &[Mat4]) {
+        let draw_list = self.ui.get_window_draw_list();
+        let _ = crate::draw::draw_cubes(
+            &draw_list,
+            view,
+            projection,
+            matrices,
+            &self.context.state.borrow().viewport,
+        );
     }
 
     /// View manipulation cube
     pub fn view_manipulate(
         &self,
-        _view: &mut Mat4,
-        _length: f32,
+        view: &mut Mat4,
+        length: f32,
         position: [f32; 2],
         size: [f32; 2],
-        _background_color: u32,
+        background_color: u32,
     ) -> bool {
-        crate::guizmo_trace!(
-            "View manipulate at ({}, {}) with size ({}, {})",
-            position[0],
-            position[1],
-            size[0],
-            size[1]
-        );
-        // TODO: Implement view manipulation
-        false
+        match crate::view::view_manipulate(
+            self.ui,
+            self.context,
+            view,
+            length,
+            position,
+            size,
+            background_color,
+        ) {
+            Ok(result) => result.modified,
+            Err(_) => false,
+        }
     }
 
     /// Check if mouse is over a specific operation
-    pub fn is_over_operation(&self, _operation: Operation) -> bool {
-        // TODO: Implement operation-specific hover detection
-        false
+    pub fn is_over_operation(&self, operation: Operation) -> bool {
+        let ui = self.ui;
+        let sref = self.context.state.borrow();
+        let mouse = ui.io().mouse_pos();
+        let mouse_pos = Vec2::new(mouse[0], mouse[1]);
+        match crate::interaction::is_over_gizmo(ui, &sref, mouse_pos) {
+            Ok(hit) if hit.hit => {
+                use crate::gizmo::ManipulationType as MT;
+                match hit.manipulation_type {
+                    MT::MoveX | MT::MoveY | MT::MoveZ | MT::MoveXY | MT::MoveYZ | MT::MoveZX => {
+                        operation.intersects(Operation::TRANSLATE)
+                    }
+                    MT::RotateX | MT::RotateY | MT::RotateZ => {
+                        operation.intersects(Operation::ROTATE)
+                    }
+                    MT::ScaleX | MT::ScaleY | MT::ScaleZ => operation.intersects(Operation::SCALE),
+                    MT::ScaleXYZ => {
+                        operation.intersects(Operation::SCALE_UNIFORM)
+                            || operation.intersects(Operation::SCALE)
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
     }
 
     /// Check if a 3D position is under the mouse cursor
-    pub fn is_over_position(&self, _position: &Vec3, _pixel_radius: f32) -> bool {
-        // TODO: Implement position-based hover detection
-        false
+    pub fn is_over_position(&self, position: &Vec3, pixel_radius: f32) -> bool {
+        let sref = self.context.state.borrow();
+        if sref.viewport.width <= 0.0 || sref.viewport.height <= 0.0 {
+            return false;
+        }
+        let mvp = sref.view_projection * sref.model_matrix;
+        if let Ok(p) = crate::draw::project_to_screen(&mvp, *position, &sref.viewport.as_viewport())
+        {
+            let mouse = self.ui.io().mouse_pos();
+            let m = Vec2::new(mouse[0], mouse[1]);
+            (m - p).length() <= pixel_radius.max(1.0)
+        } else {
+            false
+        }
     }
 
     /// Compute context matrices and state for manipulation
@@ -637,10 +836,11 @@ impl<'ui> GuizmoUi<'ui> {
         // Normalize the model matrix for local transformations
         state.model_local = crate::math::orthonormalize_matrix(matrix);
 
-        // Compute combined matrices
-        state.view_projection = *view * *projection;
-        state.mvp = *matrix * state.view_projection;
-        state.mvp_local = state.model_local * state.view_projection;
+        // Compute combined matrices with glam (column vector) convention
+        // MVP = Projection * View * Model
+        state.view_projection = *projection * *view;
+        state.mvp = state.view_projection * *matrix;
+        state.mvp_local = state.view_projection * state.model_local;
 
         // Compute camera vectors from view matrix inverse
         let view_inverse = view.inverse();
@@ -649,13 +849,15 @@ impl<'ui> GuizmoUi<'ui> {
         state.camera_right = view_inverse.x_axis.truncate();
         state.camera_up = view_inverse.y_axis.truncate();
 
-        // Check if projection is orthographic
+        // Check if projection is orthographic (unless user forced a mode)
         // In orthographic projection, the w component of transformed points doesn't change with depth
-        let near_vec = Vec4::new(0.0, 0.0, 1.0, 1.0);
-        let far_vec = Vec4::new(0.0, 0.0, 2.0, 1.0);
-        let near_pos = *projection * near_vec;
-        let far_pos = *projection * far_vec;
-        state.orthographic = (near_pos.z / near_pos.w - far_pos.z / far_pos.w).abs() < 0.001;
+        if !state.orthographic_forced {
+            let near_vec = Vec4::new(0.0, 0.0, -1.0, 1.0);
+            let far_vec = Vec4::new(0.0, 0.0, 1.0, 1.0);
+            let near_pos = *projection * near_vec;
+            let far_pos = *projection * far_vec;
+            state.orthographic = (near_pos.z / near_pos.w - far_pos.z / far_pos.w).abs() < 0.001;
+        }
 
         // Compute screen factor for gizmo sizing
         // This ensures the gizmo appears the same size regardless of distance
@@ -673,6 +875,43 @@ impl<'ui> GuizmoUi<'ui> {
 
         // Compute ray for mouse picking
         self.compute_camera_ray(state)?;
+
+        // Compute axis/plane visibility flags based on projection
+        {
+            // Use local, orthonormalized axes to avoid scale skew
+            let x_dir = state.model_local.transform_vector3(Vec3::X);
+            let y_dir = state.model_local.transform_vector3(Vec3::Y);
+            let z_dir = state.model_local.transform_vector3(Vec3::Z);
+
+            let len_x = crate::math::get_segment_length_clip_space(
+                Vec3::ZERO,
+                x_dir,
+                &state.view_projection,
+            );
+            let len_y = crate::math::get_segment_length_clip_space(
+                Vec3::ZERO,
+                y_dir,
+                &state.view_projection,
+            );
+            let len_z = crate::math::get_segment_length_clip_space(
+                Vec3::ZERO,
+                z_dir,
+                &state.view_projection,
+            );
+
+            state.below_axis_limit[0] = len_x < state.axis_limit;
+            state.below_axis_limit[1] = len_y < state.axis_limit;
+            state.below_axis_limit[2] = len_z < state.axis_limit;
+
+            // Planes: approximate by projected lengths product
+            let area_x = len_y * len_z; // plane normal X (YZ plane)
+            let area_y = len_x * len_z; // plane normal Y (XZ plane)
+            let area_z = len_x * len_y; // plane normal Z (XY plane)
+
+            state.below_plane_limit[0] = area_x < state.plane_limit;
+            state.below_plane_limit[1] = area_y < state.plane_limit;
+            state.below_plane_limit[2] = area_z < state.plane_limit;
+        }
 
         crate::guizmo_trace!(
             "Context computed: orthographic={}, screen_factor={}",

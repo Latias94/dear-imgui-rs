@@ -14,15 +14,15 @@ bitflags! {
     #[repr(transparent)]
     pub struct WindowHoveredFlags: i32 {
         /// Return true if any child of the window is hovered
-        const CHILD_WINDOWS = sys::ImGuiHoveredFlags_ChildWindows;
+        const CHILD_WINDOWS = sys::ImGuiHoveredFlags_ChildWindows as i32;
         /// Test from root window (top-most parent of the current hierarchy)
-        const ROOT_WINDOW = sys::ImGuiHoveredFlags_RootWindow;
+        const ROOT_WINDOW = sys::ImGuiHoveredFlags_RootWindow as i32;
         /// Return true if any window is hovered
-        const ANY_WINDOW = sys::ImGuiHoveredFlags_AnyWindow;
+        const ANY_WINDOW = sys::ImGuiHoveredFlags_AnyWindow as i32;
         /// Return true even if a popup window is blocking access to this window
-        const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup;
+        const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup as i32;
         /// Return true even if an active item is blocking access to this window
-        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem;
+        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
         /// Test from root window, and return true if any child is hovered
         const ROOT_AND_CHILD_WINDOWS = Self::ROOT_WINDOW.bits() | Self::CHILD_WINDOWS.bits();
     }
@@ -33,11 +33,11 @@ bitflags! {
     #[repr(transparent)]
     pub struct WindowFocusedFlags: i32 {
         /// Return true if any child of the window is focused
-        const CHILD_WINDOWS = sys::ImGuiFocusedFlags_ChildWindows;
+        const CHILD_WINDOWS = sys::ImGuiFocusedFlags_ChildWindows as i32;
         /// Test from root window (top-most parent of the current hierarchy)
-        const ROOT_WINDOW = sys::ImGuiFocusedFlags_RootWindow;
+        const ROOT_WINDOW = sys::ImGuiFocusedFlags_RootWindow as i32;
         /// Return true if any window is focused
-        const ANY_WINDOW = sys::ImGuiFocusedFlags_AnyWindow;
+        const ANY_WINDOW = sys::ImGuiFocusedFlags_AnyWindow as i32;
         /// Test from root window, and return true if any child is focused
         const ROOT_AND_CHILD_WINDOWS = Self::ROOT_WINDOW.bits() | Self::CHILD_WINDOWS.bits();
     }
@@ -49,43 +49,43 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct WindowFlags: i32 {
         /// Disable title-bar
-        const NO_TITLE_BAR = sys::ImGuiWindowFlags_NoTitleBar;
+        const NO_TITLE_BAR = sys::ImGuiWindowFlags_NoTitleBar as i32;
         /// Disable user resizing with the lower-right grip
-        const NO_RESIZE = sys::ImGuiWindowFlags_NoResize;
+        const NO_RESIZE = sys::ImGuiWindowFlags_NoResize as i32;
         /// Disable user moving the window
-        const NO_MOVE = sys::ImGuiWindowFlags_NoMove;
+        const NO_MOVE = sys::ImGuiWindowFlags_NoMove as i32;
         /// Disable scrollbars (window can still scroll with mouse or programmatically)
-        const NO_SCROLLBAR = sys::ImGuiWindowFlags_NoScrollbar;
+        const NO_SCROLLBAR = sys::ImGuiWindowFlags_NoScrollbar as i32;
         /// Disable user vertically scrolling with mouse wheel
-        const NO_SCROLL_WITH_MOUSE = sys::ImGuiWindowFlags_NoScrollWithMouse;
+        const NO_SCROLL_WITH_MOUSE = sys::ImGuiWindowFlags_NoScrollWithMouse as i32;
         /// Disable user collapsing window by double-clicking on it
-        const NO_COLLAPSE = sys::ImGuiWindowFlags_NoCollapse;
+        const NO_COLLAPSE = sys::ImGuiWindowFlags_NoCollapse as i32;
         /// Resize every window to its content every frame
-        const ALWAYS_AUTO_RESIZE = sys::ImGuiWindowFlags_AlwaysAutoResize;
+        const ALWAYS_AUTO_RESIZE = sys::ImGuiWindowFlags_AlwaysAutoResize as i32;
         /// Disable drawing background color (WindowBg, etc.) and outside border
-        const NO_BACKGROUND = sys::ImGuiWindowFlags_NoBackground;
+        const NO_BACKGROUND = sys::ImGuiWindowFlags_NoBackground as i32;
         /// Never load/save settings in .ini file
-        const NO_SAVED_SETTINGS = sys::ImGuiWindowFlags_NoSavedSettings;
+        const NO_SAVED_SETTINGS = sys::ImGuiWindowFlags_NoSavedSettings as i32;
         /// Disable catching mouse, hovering test with pass through
-        const NO_MOUSE_INPUTS = sys::ImGuiWindowFlags_NoMouseInputs;
+        const NO_MOUSE_INPUTS = sys::ImGuiWindowFlags_NoMouseInputs as i32;
         /// Has a menu-bar
-        const MENU_BAR = sys::ImGuiWindowFlags_MenuBar;
+        const MENU_BAR = sys::ImGuiWindowFlags_MenuBar as i32;
         /// Allow horizontal scrollbar to appear (off by default)
-        const HORIZONTAL_SCROLLBAR = sys::ImGuiWindowFlags_HorizontalScrollbar;
+        const HORIZONTAL_SCROLLBAR = sys::ImGuiWindowFlags_HorizontalScrollbar as i32;
         /// Disable taking focus when transitioning from hidden to visible state
-        const NO_FOCUS_ON_APPEARING = sys::ImGuiWindowFlags_NoFocusOnAppearing;
+        const NO_FOCUS_ON_APPEARING = sys::ImGuiWindowFlags_NoFocusOnAppearing as i32;
         /// Disable bringing window to front when taking focus (e.g. clicking on it or programmatically giving it focus)
-        const NO_BRING_TO_FRONT_ON_FOCUS = sys::ImGuiWindowFlags_NoBringToFrontOnFocus;
+        const NO_BRING_TO_FRONT_ON_FOCUS = sys::ImGuiWindowFlags_NoBringToFrontOnFocus as i32;
         /// Always show vertical scrollbar (even if ContentSize.y < Size.y)
-        const ALWAYS_VERTICAL_SCROLLBAR = sys::ImGuiWindowFlags_AlwaysVerticalScrollbar;
+        const ALWAYS_VERTICAL_SCROLLBAR = sys::ImGuiWindowFlags_AlwaysVerticalScrollbar as i32;
         /// Always show horizontal scrollbar (even if ContentSize.x < Size.x)
-        const ALWAYS_HORIZONTAL_SCROLLBAR = sys::ImGuiWindowFlags_AlwaysHorizontalScrollbar;
+        const ALWAYS_HORIZONTAL_SCROLLBAR = sys::ImGuiWindowFlags_AlwaysHorizontalScrollbar as i32;
         /// No gamepad/keyboard navigation within the window
-        const NO_NAV_INPUTS = sys::ImGuiWindowFlags_NoNavInputs;
+        const NO_NAV_INPUTS = sys::ImGuiWindowFlags_NoNavInputs as i32;
         /// No focusing toward this window with gamepad/keyboard navigation (e.g. skipped by CTRL+TAB)
-        const NO_NAV_FOCUS = sys::ImGuiWindowFlags_NoNavFocus;
+        const NO_NAV_FOCUS = sys::ImGuiWindowFlags_NoNavFocus as i32;
         /// Display a dot next to the title. When used in a tab/docking context, tab is selected when clicking the X + closure is not assumed (will wait for user to stop submitting the tab). Otherwise closure is assumed when pressing the X, so if you keep submitting the tab may reappear at end of tab bar.
-        const UNSAVED_DOCUMENT = sys::ImGuiWindowFlags_UnsavedDocument;
+        const UNSAVED_DOCUMENT = sys::ImGuiWindowFlags_UnsavedDocument as i32;
         /// Disable gamepad/keyboard navigation and focusing
         const NO_NAV = Self::NO_NAV_INPUTS.bits() | Self::NO_NAV_FOCUS.bits();
         /// Disable all window decorations

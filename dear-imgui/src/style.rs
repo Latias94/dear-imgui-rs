@@ -110,25 +110,25 @@ bitflags! {
     #[repr(transparent)]
     pub struct HoveredFlags: i32 {
         /// Return true if directly over the item/window, not obstructed by another window
-        const NONE = sys::ImGuiHoveredFlags_None;
+        const NONE = sys::ImGuiHoveredFlags_None as i32;
         /// Return true even if a child window is normally blocking access
-        const CHILD_WINDOWS = sys::ImGuiHoveredFlags_ChildWindows;
+        const CHILD_WINDOWS = sys::ImGuiHoveredFlags_ChildWindows as i32;
         /// Return true even if an active item is blocking access
-        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem;
+        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
         /// Return true even if the position is obstructed or overlapped by another window
-        const ALLOW_WHEN_OVERLAPPED = sys::ImGuiHoveredFlags_AllowWhenOverlapped;
+        const ALLOW_WHEN_OVERLAPPED = sys::ImGuiHoveredFlags_AllowWhenOverlapped as i32;
         /// Require mouse to be stationary for style.HoverStationaryDelay (~0.15 sec)
-        const STATIONARY = sys::ImGuiHoveredFlags_Stationary;
+        const STATIONARY = sys::ImGuiHoveredFlags_Stationary as i32;
         /// IsItemHovered() only: Return true immediately (default)
-        const NO_DELAY_SHORT = sys::ImGuiHoveredFlags_DelayNone;
+        const NO_DELAY_SHORT = sys::ImGuiHoveredFlags_DelayNone as i32;
         /// IsItemHovered() only: Return true after HoverDelayShort elapsed (~0.15 sec)
-        const DELAY_SHORT = sys::ImGuiHoveredFlags_DelayShort;
+        const DELAY_SHORT = sys::ImGuiHoveredFlags_DelayShort as i32;
         /// IsItemHovered() only: Return true after HoverDelayNormal elapsed (~0.40 sec)
-        const DELAY_NORMAL = sys::ImGuiHoveredFlags_DelayNormal;
+        const DELAY_NORMAL = sys::ImGuiHoveredFlags_DelayNormal as i32;
         /// IsItemHovered() only: Disable shared delay system
-        const NO_SHARED_DELAY = sys::ImGuiHoveredFlags_NoSharedDelay;
+        const NO_SHARED_DELAY = sys::ImGuiHoveredFlags_NoSharedDelay as i32;
         /// For tooltip: Equivalent to Stationary + DelayShort
-        const FOR_TOOLTIP = sys::ImGuiHoveredFlags_ForTooltip;
+        const FOR_TOOLTIP = sys::ImGuiHoveredFlags_ForTooltip as i32;
     }
 }
 
@@ -147,69 +147,69 @@ pub enum Direction {
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum StyleColor {
-    Text = sys::ImGuiCol_Text,
-    TextDisabled = sys::ImGuiCol_TextDisabled,
-    WindowBg = sys::ImGuiCol_WindowBg,
-    ChildBg = sys::ImGuiCol_ChildBg,
-    PopupBg = sys::ImGuiCol_PopupBg,
-    Border = sys::ImGuiCol_Border,
-    BorderShadow = sys::ImGuiCol_BorderShadow,
-    FrameBg = sys::ImGuiCol_FrameBg,
-    FrameBgHovered = sys::ImGuiCol_FrameBgHovered,
-    FrameBgActive = sys::ImGuiCol_FrameBgActive,
-    TitleBg = sys::ImGuiCol_TitleBg,
-    TitleBgActive = sys::ImGuiCol_TitleBgActive,
-    TitleBgCollapsed = sys::ImGuiCol_TitleBgCollapsed,
-    MenuBarBg = sys::ImGuiCol_MenuBarBg,
-    ScrollbarBg = sys::ImGuiCol_ScrollbarBg,
-    ScrollbarGrab = sys::ImGuiCol_ScrollbarGrab,
-    ScrollbarGrabHovered = sys::ImGuiCol_ScrollbarGrabHovered,
-    ScrollbarGrabActive = sys::ImGuiCol_ScrollbarGrabActive,
-    CheckMark = sys::ImGuiCol_CheckMark,
-    SliderGrab = sys::ImGuiCol_SliderGrab,
-    SliderGrabActive = sys::ImGuiCol_SliderGrabActive,
-    Button = sys::ImGuiCol_Button,
-    ButtonHovered = sys::ImGuiCol_ButtonHovered,
-    ButtonActive = sys::ImGuiCol_ButtonActive,
-    Header = sys::ImGuiCol_Header,
-    HeaderHovered = sys::ImGuiCol_HeaderHovered,
-    HeaderActive = sys::ImGuiCol_HeaderActive,
-    Separator = sys::ImGuiCol_Separator,
-    SeparatorHovered = sys::ImGuiCol_SeparatorHovered,
-    SeparatorActive = sys::ImGuiCol_SeparatorActive,
-    ResizeGrip = sys::ImGuiCol_ResizeGrip,
-    ResizeGripHovered = sys::ImGuiCol_ResizeGripHovered,
-    ResizeGripActive = sys::ImGuiCol_ResizeGripActive,
-    Tab = sys::ImGuiCol_Tab,
-    TabHovered = sys::ImGuiCol_TabHovered,
+    Text = sys::ImGuiCol_Text as i32,
+    TextDisabled = sys::ImGuiCol_TextDisabled as i32,
+    WindowBg = sys::ImGuiCol_WindowBg as i32,
+    ChildBg = sys::ImGuiCol_ChildBg as i32,
+    PopupBg = sys::ImGuiCol_PopupBg as i32,
+    Border = sys::ImGuiCol_Border as i32,
+    BorderShadow = sys::ImGuiCol_BorderShadow as i32,
+    FrameBg = sys::ImGuiCol_FrameBg as i32,
+    FrameBgHovered = sys::ImGuiCol_FrameBgHovered as i32,
+    FrameBgActive = sys::ImGuiCol_FrameBgActive as i32,
+    TitleBg = sys::ImGuiCol_TitleBg as i32,
+    TitleBgActive = sys::ImGuiCol_TitleBgActive as i32,
+    TitleBgCollapsed = sys::ImGuiCol_TitleBgCollapsed as i32,
+    MenuBarBg = sys::ImGuiCol_MenuBarBg as i32,
+    ScrollbarBg = sys::ImGuiCol_ScrollbarBg as i32,
+    ScrollbarGrab = sys::ImGuiCol_ScrollbarGrab as i32,
+    ScrollbarGrabHovered = sys::ImGuiCol_ScrollbarGrabHovered as i32,
+    ScrollbarGrabActive = sys::ImGuiCol_ScrollbarGrabActive as i32,
+    CheckMark = sys::ImGuiCol_CheckMark as i32,
+    SliderGrab = sys::ImGuiCol_SliderGrab as i32,
+    SliderGrabActive = sys::ImGuiCol_SliderGrabActive as i32,
+    Button = sys::ImGuiCol_Button as i32,
+    ButtonHovered = sys::ImGuiCol_ButtonHovered as i32,
+    ButtonActive = sys::ImGuiCol_ButtonActive as i32,
+    Header = sys::ImGuiCol_Header as i32,
+    HeaderHovered = sys::ImGuiCol_HeaderHovered as i32,
+    HeaderActive = sys::ImGuiCol_HeaderActive as i32,
+    Separator = sys::ImGuiCol_Separator as i32,
+    SeparatorHovered = sys::ImGuiCol_SeparatorHovered as i32,
+    SeparatorActive = sys::ImGuiCol_SeparatorActive as i32,
+    ResizeGrip = sys::ImGuiCol_ResizeGrip as i32,
+    ResizeGripHovered = sys::ImGuiCol_ResizeGripHovered as i32,
+    ResizeGripActive = sys::ImGuiCol_ResizeGripActive as i32,
+    Tab = sys::ImGuiCol_Tab as i32,
+    TabHovered = sys::ImGuiCol_TabHovered as i32,
     // Newly added tab colors in docking branch
-    TabSelected = sys::ImGuiCol_TabSelected,
-    TabSelectedOverline = sys::ImGuiCol_TabSelectedOverline,
-    TabDimmed = sys::ImGuiCol_TabDimmed,
-    TabDimmedSelected = sys::ImGuiCol_TabDimmedSelected,
-    TabDimmedSelectedOverline = sys::ImGuiCol_TabDimmedSelectedOverline,
+    TabSelected = sys::ImGuiCol_TabSelected as i32,
+    TabSelectedOverline = sys::ImGuiCol_TabSelectedOverline as i32,
+    TabDimmed = sys::ImGuiCol_TabDimmed as i32,
+    TabDimmedSelected = sys::ImGuiCol_TabDimmedSelected as i32,
+    TabDimmedSelectedOverline = sys::ImGuiCol_TabDimmedSelectedOverline as i32,
     #[cfg(feature = "docking")]
-    DockingPreview = sys::ImGuiCol_DockingPreview,
+    DockingPreview = sys::ImGuiCol_DockingPreview as i32,
     #[cfg(feature = "docking")]
-    DockingEmptyBg = sys::ImGuiCol_DockingEmptyBg,
-    PlotLines = sys::ImGuiCol_PlotLines,
-    PlotLinesHovered = sys::ImGuiCol_PlotLinesHovered,
-    PlotHistogram = sys::ImGuiCol_PlotHistogram,
-    PlotHistogramHovered = sys::ImGuiCol_PlotHistogramHovered,
-    TableHeaderBg = sys::ImGuiCol_TableHeaderBg,
-    TableBorderStrong = sys::ImGuiCol_TableBorderStrong,
-    TableBorderLight = sys::ImGuiCol_TableBorderLight,
-    TableRowBg = sys::ImGuiCol_TableRowBg,
-    TableRowBgAlt = sys::ImGuiCol_TableRowBgAlt,
-    TextSelectedBg = sys::ImGuiCol_TextSelectedBg,
-    TextLink = sys::ImGuiCol_TextLink,
-    TreeLines = sys::ImGuiCol_TreeLines,
-    InputTextCursor = sys::ImGuiCol_InputTextCursor,
-    DragDropTarget = sys::ImGuiCol_DragDropTarget,
-    NavCursor = sys::ImGuiCol_NavCursor,
-    NavWindowingHighlight = sys::ImGuiCol_NavWindowingHighlight,
-    NavWindowingDimBg = sys::ImGuiCol_NavWindowingDimBg,
-    ModalWindowDimBg = sys::ImGuiCol_ModalWindowDimBg,
+    DockingEmptyBg = sys::ImGuiCol_DockingEmptyBg as i32,
+    PlotLines = sys::ImGuiCol_PlotLines as i32,
+    PlotLinesHovered = sys::ImGuiCol_PlotLinesHovered as i32,
+    PlotHistogram = sys::ImGuiCol_PlotHistogram as i32,
+    PlotHistogramHovered = sys::ImGuiCol_PlotHistogramHovered as i32,
+    TableHeaderBg = sys::ImGuiCol_TableHeaderBg as i32,
+    TableBorderStrong = sys::ImGuiCol_TableBorderStrong as i32,
+    TableBorderLight = sys::ImGuiCol_TableBorderLight as i32,
+    TableRowBg = sys::ImGuiCol_TableRowBg as i32,
+    TableRowBgAlt = sys::ImGuiCol_TableRowBgAlt as i32,
+    TextSelectedBg = sys::ImGuiCol_TextSelectedBg as i32,
+    TextLink = sys::ImGuiCol_TextLink as i32,
+    TreeLines = sys::ImGuiCol_TreeLines as i32,
+    InputTextCursor = sys::ImGuiCol_InputTextCursor as i32,
+    DragDropTarget = sys::ImGuiCol_DragDropTarget as i32,
+    NavCursor = sys::ImGuiCol_NavCursor as i32,
+    NavWindowingHighlight = sys::ImGuiCol_NavWindowingHighlight as i32,
+    NavWindowingDimBg = sys::ImGuiCol_NavWindowingDimBg as i32,
+    ModalWindowDimBg = sys::ImGuiCol_ModalWindowDimBg as i32,
 }
 
 impl StyleColor {

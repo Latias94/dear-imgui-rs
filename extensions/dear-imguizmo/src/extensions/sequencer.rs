@@ -44,6 +44,30 @@ pub trait SequenceInterface {
     fn get_item_end(&self, index: i32) -> i32;
     /// Get item color
     fn get_item_color(&self, index: i32) -> u32;
+
+    /// Number of available item types (for Add menu). Default: 0
+    fn get_item_type_count(&self) -> i32 {
+        0
+    }
+    /// Get item type display name. Default: empty
+    fn get_item_type_name(&self, _type_index: i32) -> String {
+        String::new()
+    }
+
+    /// Add a new item of specified type. Default: no-op
+    fn add_item(&mut self, _type_index: i32) {}
+    /// Delete item at index. Default: no-op
+    fn del_item(&mut self, _index: i32) {}
+    /// Duplicate item at index. Default: no-op
+    fn duplicate_item(&mut self, _index: i32) {}
+    /// Copy selection. Default: no-op
+    fn copy(&mut self) {}
+    /// Paste items. Default: no-op
+    fn paste(&mut self) {}
+    /// Begin edit callback. Default: no-op
+    fn begin_edit(&mut self, _index: i32) {}
+    /// End edit callback. Default: no-op
+    fn end_edit(&mut self) {}
 }
 
 /// Sequencer widget
@@ -59,7 +83,7 @@ impl Sequencer {
     pub fn render<T: SequenceInterface>(
         &self,
         ui: &Ui,
-        sequence: &T,
+        sequence: &mut T,
         current_frame: &mut i32,
         expanded: &mut bool,
         selected_entry: &mut Option<i32>,
@@ -80,6 +104,37 @@ impl Sequencer {
                 let draw_list = ui.get_window_draw_list();
                 let window_pos = ui.cursor_screen_pos();
                 let window_size = [content_region[0], sequencer_height];
+
+                // Header with controls
+                let header_height = 24.0;
+                draw_list
+                    .add_rect(
+                        window_pos,
+                        [
+                            window_pos[0] + window_size[0],
+                            window_pos[1] + header_height,
+                        ],
+                        0xFF3D3837,
+                    )
+                    .filled(true)
+                    .build();
+
+                // Add button
+                if options.contains(SequencerOptions::ADD) {
+                    ui.set_cursor_screen_pos([window_pos[0] + 6.0, window_pos[1] + 3.0]);
+                    if ui.button("+") {
+                        ui.open_popup("addEntry");
+                    }
+                    ui.popup("addEntry", || {
+                        for i in 0..sequence.get_item_type_count() {
+                            let name = sequence.get_item_type_name(i);
+                            if ui.selectable_config(&name).build() {
+                                sequence.add_item(i);
+                                *selected_entry = Some(sequence.get_item_count() - 1);
+                            }
+                        }
+                    });
+                }
 
                 // Draw timeline background
                 if self

@@ -28,8 +28,30 @@ struct ImguiState {
     projection_matrix: glam::Mat4,
     current_operation: Operation,
     current_mode: Mode,
+    // Projection and helpers
+    use_orthographic: bool,
+    fov_degrees: f32,
+    ortho_height: f32,
+    // Helpers drawing
+    show_grid: bool,
+    grid_size: f32,
+    show_cubes: bool,
+    cube_mats: [glam::Mat4; 3],
+    // Snapping
     use_snap: bool,
-    snap_values: [f32; 3],
+    translate_snap: [f32; 3],
+    rotate_snap_deg: f32,
+    scale_snap: [f32; 3],
+    universal_snap_mode: i32, // 0=Translate 1=Rotate 2=Scale
+    // Bounds editing
+    enable_bounds: bool,
+    local_bounds: [f32; 6],
+    bounds_snap: [f32; 3],
+    // Visibility/behavior
+    allow_axis_flip: bool,
+    axis_limit: f32,
+    plane_limit: f32,
+    gizmo_size_clip: f32,
     show_view_manipulate: bool,
     view_manipulate_size: f32,
     camera_distance: f32,
@@ -135,11 +157,33 @@ impl AppWindow {
             gizmo_context,
             object_matrix,
             view_matrix: create_view_matrix(8.0, 0.0, 0.0),
-            projection_matrix: create_projection_matrix(45.0, 1280.0 / 720.0, 0.1, 100.0),
-            current_operation: Operation::TRANSLATE,
+            projection_matrix: create_perspective_for_aspect(45.0, 1280.0 / 720.0, 0.1, 100.0),
+            current_operation: Operation::UNIVERSAL,
             current_mode: Mode::World,
-            use_snap: false,
-            snap_values: [1.0, 1.0, 1.0],
+            use_orthographic: false,
+            fov_degrees: 45.0,
+            ortho_height: 10.0,
+            show_grid: true,
+            grid_size: 1.0,
+            show_cubes: true,
+            cube_mats: [
+                glam::Mat4::from_translation(glam::vec3(-2.0, 0.0, -2.0)),
+                glam::Mat4::from_translation(glam::vec3(2.0, 0.0, 2.0)),
+                glam::Mat4::from_scale(glam::vec3(0.75, 0.75, 0.75))
+                    * glam::Mat4::from_translation(glam::vec3(0.0, 1.0, -3.0)),
+            ],
+            use_snap: true,
+            translate_snap: [0.5, 0.5, 0.5],
+            rotate_snap_deg: 15.0,
+            scale_snap: [0.1, 0.1, 0.1],
+            universal_snap_mode: 1,
+            enable_bounds: false,
+            local_bounds: [-0.5, 0.5, -0.5, 0.5, -0.5, 0.5],
+            bounds_snap: [0.1, 0.1, 0.1],
+            allow_axis_flip: true,
+            axis_limit: 0.0025,
+            plane_limit: 0.02,
+            gizmo_size_clip: 0.1,
             show_view_manipulate: true,
             view_manipulate_size: 128.0,
             camera_distance: 8.0,
@@ -165,7 +209,11 @@ impl AppWindow {
 
             // Update projection matrix for new aspect ratio
             let aspect = new_size.width as f32 / new_size.height as f32;
-            self.imgui.projection_matrix = create_projection_matrix(45.0, aspect, 0.1, 100.0);
+            self.imgui.projection_matrix = if self.imgui.use_orthographic {
+                create_orthographic_for_aspect(self.imgui.ortho_height, aspect, 0.1, 100.0)
+            } else {
+                create_perspective_for_aspect(self.imgui.fov_degrees, aspect, 0.1, 100.0)
+            };
         }
     }
 }
@@ -184,8 +232,14 @@ fn create_view_matrix(distance: f32, angle_x: f32, angle_y: f32) -> glam::Mat4 {
     glam::Mat4::look_at_rh(eye, center, up)
 }
 
-fn create_projection_matrix(fov_degrees: f32, aspect: f32, near: f32, far: f32) -> glam::Mat4 {
+fn create_perspective_for_aspect(fov_degrees: f32, aspect: f32, near: f32, far: f32) -> glam::Mat4 {
     glam::Mat4::perspective_rh(fov_degrees.to_radians(), aspect, near, far)
+}
+
+fn create_orthographic_for_aspect(height: f32, aspect: f32, near: f32, far: f32) -> glam::Mat4 {
+    let half_h = height * 0.5;
+    let half_w = half_h * aspect;
+    glam::Mat4::orthographic_rh(-half_w, half_w, -half_h, half_h, near, far)
 }
 
 impl AppWindow {
@@ -216,75 +270,141 @@ impl AppWindow {
 
         // Set the viewport for ImGuizmo (full window)
         let window_size = ui.io().display_size();
-        gizmo_ui.set_rect(0.0, 0.0, window_size[0], window_size[1]);
+        let _ = gizmo_ui.set_rect(0.0, 0.0, window_size[0], window_size[1]);
 
         // Control panel
         ui.window("ImGuizmo Controls")
-            .size([300.0, 400.0], Condition::FirstUseEver)
+            .size([360.0, 560.0], Condition::FirstUseEver)
             .position([10.0, 10.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("3D Gizmo Manipulation Demo");
+                ui.text("ImGuizmo: common features demo");
                 ui.separator();
 
-                // Test drawing in ImGui window
-                let draw_list = ui.get_window_draw_list();
-                let cursor_pos = ui.cursor_screen_pos();
-
-                // Draw test lines in the window
-                draw_list
-                    .add_line(
-                        [cursor_pos[0], cursor_pos[1]],
-                        [cursor_pos[0] + 100.0, cursor_pos[1] + 50.0],
-                        0xFF00FF00, // Green
-                    )
-                    .thickness(3.0)
-                    .build();
-
-                draw_list
-                    .add_line(
-                        [cursor_pos[0], cursor_pos[1]],
-                        [cursor_pos[0] + 50.0, cursor_pos[1] + 100.0],
-                        0xFF0000FF, // Red
-                    )
-                    .thickness(3.0)
-                    .build();
-
-                ui.dummy([120.0, 120.0]); // Make space for the lines
-
                 // Operation selection
-                ui.text("Operation:");
-                let mut op_translate = self.imgui.current_operation.contains(Operation::TRANSLATE);
-                let mut op_rotate = self.imgui.current_operation.contains(Operation::ROTATE);
-                let mut op_scale = self.imgui.current_operation.contains(Operation::SCALE);
-
-                if ui.radio_button("Translate", op_translate && !op_rotate && !op_scale) {
+                ui.text("Operation");
+                if ui.radio_button(
+                    "Universal",
+                    self.imgui.current_operation == Operation::UNIVERSAL,
+                ) {
+                    self.imgui.current_operation = Operation::UNIVERSAL;
+                }
+                if ui.radio_button(
+                    "Translate",
+                    self.imgui.current_operation == Operation::TRANSLATE,
+                ) {
                     self.imgui.current_operation = Operation::TRANSLATE;
                 }
-                if ui.radio_button("Rotate", op_rotate && !op_translate && !op_scale) {
+                if ui.radio_button("Rotate", self.imgui.current_operation == Operation::ROTATE) {
                     self.imgui.current_operation = Operation::ROTATE;
                 }
-                if ui.radio_button("Scale", op_scale && !op_translate && !op_rotate) {
+                if ui.radio_button("Scale", self.imgui.current_operation == Operation::SCALE) {
                     self.imgui.current_operation = Operation::SCALE;
                 }
 
                 ui.separator();
 
                 // Mode selection
-                ui.text("Coordinate System:");
-                let mut is_world = matches!(self.imgui.current_mode, Mode::World);
-                if ui.radio_button("World", is_world) {
+                ui.text("Coordinate System");
+                if ui.radio_button("World", matches!(self.imgui.current_mode, Mode::World)) {
                     self.imgui.current_mode = Mode::World;
                 }
-                if ui.radio_button("Local", !is_world) {
+                if ui.radio_button("Local", matches!(self.imgui.current_mode, Mode::Local)) {
                     self.imgui.current_mode = Mode::Local;
                 }
+
+                ui.separator();
+
+                // Projection
+                ui.text("Projection");
+                ui.checkbox("Orthographic", &mut self.imgui.use_orthographic);
+                if self.imgui.use_orthographic {
+                    ui.slider("Ortho Height", 2.0, 50.0, &mut self.imgui.ortho_height);
+                } else {
+                    ui.slider("FOV (deg)", 10.0, 120.0, &mut self.imgui.fov_degrees);
+                }
+
+                // Apply projection immediately
+                let aspect = self.surface_desc.width as f32 / self.surface_desc.height as f32;
+                self.imgui.projection_matrix = if self.imgui.use_orthographic {
+                    create_orthographic_for_aspect(self.imgui.ortho_height, aspect, 0.1, 100.0)
+                } else {
+                    create_perspective_for_aspect(self.imgui.fov_degrees, aspect, 0.1, 100.0)
+                };
 
                 ui.separator();
 
                 // Snap settings
                 ui.checkbox("Enable Snap", &mut self.imgui.use_snap);
                 if self.imgui.use_snap {
-                    ui.drag_float3("Snap Values", &mut self.imgui.snap_values);
+                    if self.imgui.current_operation == Operation::UNIVERSAL {
+                        ui.text("Universal snap applies to:");
+                        if ui.radio_button("Translate", self.imgui.universal_snap_mode == 0) {
+                            self.imgui.universal_snap_mode = 0;
+                        }
+                        ui.same_line();
+                        if ui.radio_button("Rotate", self.imgui.universal_snap_mode == 1) {
+                            self.imgui.universal_snap_mode = 1;
+                        }
+                        ui.same_line();
+                        if ui.radio_button("Scale", self.imgui.universal_snap_mode == 2) {
+                            self.imgui.universal_snap_mode = 2;
+                        }
+                    }
+                    ui.drag_float3("Translate snap", &mut self.imgui.translate_snap);
+                    ui.slider(
+                        "Rotate snap (deg)",
+                        1.0,
+                        90.0,
+                        &mut self.imgui.rotate_snap_deg,
+                    );
+                    ui.drag_float3("Scale snap", &mut self.imgui.scale_snap);
+                }
+
+                ui.separator();
+
+                // Behavior & size
+                ui.text("Behavior");
+                ui.checkbox("Allow axis flip", &mut self.imgui.allow_axis_flip);
+                ui.slider(
+                    "Gizmo size (clip)",
+                    0.05,
+                    0.3,
+                    &mut self.imgui.gizmo_size_clip,
+                );
+                ui.slider("Axis limit", 0.0, 0.02, &mut self.imgui.axis_limit);
+                ui.slider("Plane limit", 0.0, 0.2, &mut self.imgui.plane_limit);
+
+                ui.separator();
+
+                // Helpers
+                ui.text("Helpers");
+                ui.checkbox("Draw grid", &mut self.imgui.show_grid);
+                if self.imgui.show_grid {
+                    ui.slider("Grid size", 0.25, 5.0, &mut self.imgui.grid_size);
+                }
+                ui.checkbox("Draw sample cubes", &mut self.imgui.show_cubes);
+
+                ui.separator();
+
+                // Bounds
+                ui.text("Bounds");
+                ui.checkbox("Enable local bounds editing", &mut self.imgui.enable_bounds);
+                if self.imgui.enable_bounds {
+                    let mut bmin = [
+                        self.imgui.local_bounds[0],
+                        self.imgui.local_bounds[2],
+                        self.imgui.local_bounds[4],
+                    ];
+                    let mut bmax = [
+                        self.imgui.local_bounds[1],
+                        self.imgui.local_bounds[3],
+                        self.imgui.local_bounds[5],
+                    ];
+                    ui.drag_float3("Bounds min", &mut bmin);
+                    ui.drag_float3("Bounds max", &mut bmax);
+                    self.imgui.local_bounds =
+                        [bmin[0], bmax[0], bmin[1], bmax[1], bmin[2], bmax[2]];
+                    ui.drag_float3("Bounds snap", &mut self.imgui.bounds_snap);
                 }
 
                 ui.separator();
@@ -323,7 +443,6 @@ impl AppWindow {
                     self.imgui.camera_angle_x = 0.0;
                     self.imgui.camera_angle_y = 0.0;
                 }
-
                 if ui.button("Reset Object") {
                     self.imgui.object_matrix = glam::Mat4::IDENTITY;
                 }
@@ -346,8 +465,8 @@ impl AppWindow {
         // Main 3D manipulation in a dedicated window
         let manipulation_result = ui
             .window("3D Gizmo Viewport")
-            .size([800.0, 600.0], Condition::FirstUseEver)
-            .position([320.0, 10.0], Condition::FirstUseEver)
+            .size([920.0, 680.0], Condition::FirstUseEver)
+            .position([380.0, 10.0], Condition::FirstUseEver)
             .build(|| {
                 // Set the gizmo viewport to this window's content area
                 let content_region = ui.content_region_avail();
@@ -361,39 +480,84 @@ impl AppWindow {
                     content_region[1],
                 );
 
-                ui.text("3D Gizmo should appear here");
-                ui.text(format!(
-                    "Viewport: [{:.0}, {:.0}] size: [{:.0}, {:.0}]",
-                    cursor_pos[0], cursor_pos[1], content_region[0], content_region[1]
-                ));
-
-                // Reserve space for the gizmo
+                // Reserve space for the gizmo (we draw into the window background)
                 ui.dummy(content_region);
 
-                // Get the window draw list for gizmo rendering
+                // Apply per-frame gizmo settings
+                gizmo_ui.set_orthographic(self.imgui.use_orthographic);
+                gizmo_ui.allow_axis_flip(self.imgui.allow_axis_flip);
+                gizmo_ui.set_gizmo_size_clip_space(self.imgui.gizmo_size_clip);
+                gizmo_ui.set_axis_limit(self.imgui.axis_limit);
+                gizmo_ui.set_plane_limit(self.imgui.plane_limit);
+
+                // Get the window draw list for gizmo rendering and helpers
                 let draw_list = ui.get_window_draw_list();
 
-                // Now perform the gizmo manipulation
-                if self.imgui.use_snap {
-                    gizmo_ui.manipulate_with_snap(
-                        &draw_list,
+                // Draw helpers
+                if self.imgui.show_grid {
+                    gizmo_ui.draw_grid(
                         &self.imgui.view_matrix,
                         &self.imgui.projection_matrix,
-                        self.imgui.current_operation,
-                        self.imgui.current_mode,
-                        &mut self.imgui.object_matrix,
-                        Some(&self.imgui.snap_values),
-                    )
-                } else {
-                    gizmo_ui.manipulate(
-                        &draw_list,
-                        &self.imgui.view_matrix,
-                        &self.imgui.projection_matrix,
-                        self.imgui.current_operation,
-                        self.imgui.current_mode,
-                        &mut self.imgui.object_matrix,
-                    )
+                        &glam::Mat4::IDENTITY,
+                        self.imgui.grid_size,
+                    );
                 }
+                if self.imgui.show_cubes {
+                    gizmo_ui.draw_cubes(
+                        &self.imgui.view_matrix,
+                        &self.imgui.projection_matrix,
+                        &self.imgui.cube_mats,
+                    );
+                }
+
+                // Build snap option according to operation
+                let mut rot_snap_arr = [self.imgui.rotate_snap_deg, 0.0, 0.0];
+                let snap_opt: Option<&[f32; 3]> = if self.imgui.use_snap {
+                    let op = self.imgui.current_operation;
+                    if op == Operation::UNIVERSAL {
+                        match self.imgui.universal_snap_mode {
+                            0 => Some(&self.imgui.translate_snap),
+                            1 => Some(&rot_snap_arr),
+                            _ => Some(&self.imgui.scale_snap),
+                        }
+                    } else if op.intersects(Operation::ROTATE) {
+                        Some(&rot_snap_arr)
+                    } else if op.intersects(Operation::TRANSLATE) {
+                        Some(&self.imgui.translate_snap)
+                    } else if op.intersects(Operation::SCALE | Operation::SCALE_UNIFORM) {
+                        Some(&self.imgui.scale_snap)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                // Bounds options
+                let local_bounds_opt = if self.imgui.enable_bounds {
+                    Some(&self.imgui.local_bounds)
+                } else {
+                    None
+                };
+                let bounds_snap_opt = if self.imgui.enable_bounds {
+                    Some(&self.imgui.bounds_snap)
+                } else {
+                    None
+                };
+
+                // Perform the gizmo manipulation (full options)
+                gizmo_ui.manipulate_with_options(
+                    &draw_list,
+                    &self.imgui.view_matrix,
+                    &self.imgui.projection_matrix,
+                    self.imgui.current_operation,
+                    self.imgui.current_mode,
+                    &mut self.imgui.object_matrix,
+                    None,
+                    snap_opt,
+                    local_bounds_opt,
+                    bounds_snap_opt,
+                )
             })
             .unwrap_or(Ok(false));
 
@@ -439,7 +603,7 @@ impl AppWindow {
 
         // Matrix information window
         ui.window("Matrix Information")
-            .size([350.0, 200.0], Condition::FirstUseEver)
+            .size([420.0, 260.0], Condition::FirstUseEver)
             .position(
                 [window_size[0] - 360.0, window_size[1] - 210.0],
                 Condition::FirstUseEver,
@@ -467,9 +631,10 @@ impl AppWindow {
                 ui.text(&format!("Operation: {:?}", self.imgui.current_operation));
                 ui.text(&format!("Mode: {:?}", self.imgui.current_mode));
                 ui.text(&format!("Using: {}", gizmo_ui.is_using()));
+                ui.text(&format!("Over Any: {}", gizmo_ui.is_over()));
                 ui.text(&format!(
-                    "Over Operation: {}",
-                    gizmo_ui.is_over_operation(self.imgui.current_operation)
+                    "Over Op(Translate): {}",
+                    gizmo_ui.is_over_operation(Operation::TRANSLATE)
                 ));
             });
 

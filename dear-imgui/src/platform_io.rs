@@ -437,22 +437,23 @@ impl Viewport {
     ///
     /// Note: Main viewport is typically identified by ID == 0 or by checking if it's not a platform window
     pub fn is_main(&self) -> bool {
-        self.raw.ID == 0 || (self.raw.Flags & sys::ImGuiViewportFlags_IsPlatformWindow) == 0
+        self.raw.ID == 0
+            || (self.raw.Flags & (sys::ImGuiViewportFlags_IsPlatformWindow as i32)) == 0
     }
 
     /// Check if this is a platform window (not the main viewport)
     pub fn is_platform_window(&self) -> bool {
-        (self.raw.Flags & sys::ImGuiViewportFlags_IsPlatformWindow) != 0
+        (self.raw.Flags & (sys::ImGuiViewportFlags_IsPlatformWindow as i32)) != 0
     }
 
     /// Check if this is a platform monitor
     pub fn is_platform_monitor(&self) -> bool {
-        (self.raw.Flags & sys::ImGuiViewportFlags_IsPlatformMonitor) != 0
+        (self.raw.Flags & (sys::ImGuiViewportFlags_IsPlatformMonitor as i32)) != 0
     }
 
     /// Check if this viewport is owned by the application
     pub fn is_owned_by_app(&self) -> bool {
-        (self.raw.Flags & sys::ImGuiViewportFlags_OwnedByApp) != 0
+        (self.raw.Flags & (sys::ImGuiViewportFlags_OwnedByApp as i32)) != 0
     }
 
     /// Get the platform user data
