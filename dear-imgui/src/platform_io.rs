@@ -436,24 +436,48 @@ impl Viewport {
     /// Check if this is the main viewport
     ///
     /// Note: Main viewport is typically identified by ID == 0 or by checking if it's not a platform window
+    #[cfg(feature = "multi-viewport")]
     pub fn is_main(&self) -> bool {
         self.raw.ID == 0
-            || (self.raw.Flags & (sys::ImGuiViewportFlags_IsPlatformWindow as i32)) == 0
+            || (self.raw.Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) == 0
+    }
+
+    #[cfg(not(feature = "multi-viewport"))]
+    pub fn is_main(&self) -> bool {
+        self.raw.ID == 0
     }
 
     /// Check if this is a platform window (not the main viewport)
+    #[cfg(feature = "multi-viewport")]
     pub fn is_platform_window(&self) -> bool {
-        (self.raw.Flags & (sys::ImGuiViewportFlags_IsPlatformWindow as i32)) != 0
+        (self.raw.Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) != 0
+    }
+
+    #[cfg(not(feature = "multi-viewport"))]
+    pub fn is_platform_window(&self) -> bool {
+        false
     }
 
     /// Check if this is a platform monitor
+    #[cfg(feature = "multi-viewport")]
     pub fn is_platform_monitor(&self) -> bool {
-        (self.raw.Flags & (sys::ImGuiViewportFlags_IsPlatformMonitor as i32)) != 0
+        (self.raw.Flags & (crate::ViewportFlags::IS_PLATFORM_MONITOR.bits())) != 0
+    }
+
+    #[cfg(not(feature = "multi-viewport"))]
+    pub fn is_platform_monitor(&self) -> bool {
+        false
     }
 
     /// Check if this viewport is owned by the application
+    #[cfg(feature = "multi-viewport")]
     pub fn is_owned_by_app(&self) -> bool {
-        (self.raw.Flags & (sys::ImGuiViewportFlags_OwnedByApp as i32)) != 0
+        (self.raw.Flags & (crate::ViewportFlags::OWNED_BY_APP.bits())) != 0
+    }
+
+    #[cfg(not(feature = "multi-viewport"))]
+    pub fn is_owned_by_app(&self) -> bool {
+        false
     }
 
     /// Get the platform user data

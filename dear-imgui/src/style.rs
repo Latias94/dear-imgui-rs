@@ -136,11 +136,11 @@ bitflags! {
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum Direction {
-    None = sys::ImGuiDir_None,
-    Left = sys::ImGuiDir_Left,
-    Right = sys::ImGuiDir_Right,
-    Up = sys::ImGuiDir_Up,
-    Down = sys::ImGuiDir_Down,
+    None = sys::ImGuiDir_None as i32,
+    Left = sys::ImGuiDir_Left as i32,
+    Right = sys::ImGuiDir_Right as i32,
+    Up = sys::ImGuiDir_Up as i32,
+    Down = sys::ImGuiDir_Down as i32,
 }
 
 /// Style color identifier

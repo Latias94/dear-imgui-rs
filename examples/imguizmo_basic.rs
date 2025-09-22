@@ -490,10 +490,7 @@ impl AppWindow {
                 gizmo_ui.set_axis_limit(self.imgui.axis_limit);
                 gizmo_ui.set_plane_limit(self.imgui.plane_limit);
 
-                // Get the window draw list for gizmo rendering and helpers
-                let draw_list = ui.get_window_draw_list();
-
-                // Draw helpers
+                // Draw helpers first (these methods create their own DrawListMut internally)
                 if self.imgui.show_grid {
                     gizmo_ui.draw_grid(
                         &self.imgui.view_matrix,
@@ -509,6 +506,9 @@ impl AppWindow {
                         &self.imgui.cube_mats,
                     );
                 }
+
+                // Get the window draw list for gizmo rendering (after helpers are done)
+                let draw_list = ui.get_window_draw_list();
 
                 // Build snap option according to operation
                 let mut rot_snap_arr = [self.imgui.rotate_snap_deg, 0.0, 0.0];

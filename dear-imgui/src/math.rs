@@ -41,13 +41,13 @@ pub type ColorU32 = u32;
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum Condition {
     /// No condition (always set the variable)
-    Always = sys::ImGuiCond_Always,
+    Always = sys::ImGuiCond_Always as i32,
     /// Set the variable once per runtime session (only the first call will succeed)
-    Once = sys::ImGuiCond_Once,
+    Once = sys::ImGuiCond_Once as i32,
     /// Set the variable if the object/window has no persistently saved data (no entry in .ini file)
-    FirstUseEver = sys::ImGuiCond_FirstUseEver,
+    FirstUseEver = sys::ImGuiCond_FirstUseEver as i32,
     /// Set the variable if the object/window is appearing after being hidden/inactive (or the first time)
-    Appearing = sys::ImGuiCond_Appearing,
+    Appearing = sys::ImGuiCond_Appearing as i32,
 }
 
 /// Utility functions for color conversion

@@ -406,11 +406,11 @@ impl<'a> Iterator for TableSortSpecsIter<'a> {
             let spec = &*ptr.add(self.index);
             self.index += 1;
             let d = spec.SortDirection as u8;
-            let dir = if d == sys::ImGuiSortDirection_None {
+            let dir = if d == sys::ImGuiSortDirection_None as u8 {
                 SortDirection::None
-            } else if d == sys::ImGuiSortDirection_Ascending {
+            } else if d == sys::ImGuiSortDirection_Ascending as u8 {
                 SortDirection::Ascending
-            } else if d == sys::ImGuiSortDirection_Descending {
+            } else if d == sys::ImGuiSortDirection_Descending as u8 {
                 SortDirection::Descending
             } else {
                 SortDirection::None

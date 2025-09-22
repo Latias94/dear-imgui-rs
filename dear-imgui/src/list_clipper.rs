@@ -36,11 +36,13 @@ impl ListClipper {
     }
 
     pub fn begin(self, ui: &Ui) -> ListClipperToken<'_> {
-        let mut list_clipper = unsafe { sys::ImGuiListClipper::new() };
+        let mut list_clipper = std::mem::MaybeUninit::<sys::ImGuiListClipper>::uninit();
         unsafe {
+            sys::ImGuiListClipper_ImGuiListClipper(list_clipper.as_mut_ptr());
+            let mut list_clipper = list_clipper.assume_init();
             list_clipper.Begin(self.items_count, self.items_height);
+            ListClipperToken::new(ui, list_clipper)
         }
-        ListClipperToken::new(ui, list_clipper)
     }
 }
 
@@ -126,7 +128,7 @@ impl<'ui> ListClipperToken<'ui> {
 impl Drop for ListClipperToken<'_> {
     fn drop(&mut self) {
         unsafe {
-            self.list_clipper.destruct();
+            sys::ImGuiListClipper_ImGuiListClipper_destructor(&mut self.list_clipper);
         };
     }
 }

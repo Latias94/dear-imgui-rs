@@ -102,14 +102,14 @@ fn test_dock_builder_basic() {
 #[test]
 fn test_split_direction_enum() {
     // Test SplitDirection enum conversion
-    assert_eq!(SplitDirection::Left as i32, sys::ImGuiDir_Left);
-    assert_eq!(SplitDirection::Right as i32, sys::ImGuiDir_Right);
-    assert_eq!(SplitDirection::Up as i32, sys::ImGuiDir_Up);
-    assert_eq!(SplitDirection::Down as i32, sys::ImGuiDir_Down);
+    assert_eq!(SplitDirection::Left as i32, sys::ImGuiDir_::Left as i32);
+    assert_eq!(SplitDirection::Right as i32, sys::ImGuiDir_::Right as i32);
+    assert_eq!(SplitDirection::Up as i32, sys::ImGuiDir_::Up as i32);
+    assert_eq!(SplitDirection::Down as i32, sys::ImGuiDir_::Down as i32);
 
     // Test conversion to ImGuiDir
     let dir: sys::ImGuiDir = SplitDirection::Left.into();
-    assert_eq!(dir, sys::ImGuiDir_Left);
+    assert_eq!(dir as i32, sys::ImGuiDir_::Left as i32);
 
     println!("✅ SplitDirection enum test passed");
 }

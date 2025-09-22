@@ -357,6 +357,37 @@ extern thread_local ImGuiContext* MyImGuiTLS;
         build.include(&imgui_src);
         build.file(manifest_dir.join("wrapper.cpp"));
 
+        // Align MSVC runtime selection with Rust's target to avoid /MDd (Debug CRT) issues
+        // Always match crt-static and keep non-debug CRT across profiles (see asset-importer-sys)
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        if target_env == "msvc" && target_os == "windows" {
+            // Enable C++ exceptions
+            build.flag("/EHsc");
+
+            let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+            let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
+            // Match Rust's CRT family (static/dynamic) without opting into debug CRT
+            build.static_crt(use_static_crt);
+            if use_static_crt {
+                build.flag("/MT");
+            } else {
+                build.flag("/MD");
+            }
+
+            // Preserve debug info without switching CRT to /MDd
+            let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
+            if profile == "debug" {
+                build.debug(true);
+                build.opt_level(0);
+            } else {
+                build.debug(false);
+                build.opt_level(2);
+            }
+
+            // Keep iterator debug level consistent with non-debug CRT
+            build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
+        }
+
         // Note: wrapper.cpp already includes all ImGui source files via #include
         // So we don't need to add them separately to avoid duplicate symbols
 

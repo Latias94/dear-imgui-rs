@@ -539,6 +539,9 @@ impl<'ui> GuizmoUi<'ui> {
             crate::gizmo::ManipulationType::None
         };
 
+        // Release the mutable borrow before calling draw functions
+        drop(state);
+
         // Draw translation gizmo
         if operation.contains(Operation::TRANSLATE) {
             crate::draw::draw_translation_gizmo(draw_list, self.context, operation, highlight)?;
@@ -553,6 +556,9 @@ impl<'ui> GuizmoUi<'ui> {
         if operation.contains(Operation::SCALE) {
             crate::draw::draw_scale_gizmo(draw_list, self.context, operation, highlight)?;
         }
+
+        // Re-borrow for mouse interaction handling
+        let mut state = self.context.state.borrow_mut();
 
         // Handle mouse interaction
         if ui.is_mouse_clicked(dear_imgui::MouseButton::Left) {
@@ -722,26 +728,30 @@ impl<'ui> GuizmoUi<'ui> {
 
     /// Draw a grid in 3D space
     pub fn draw_grid(&self, view: &Mat4, projection: &Mat4, matrix: &Mat4, grid_size: f32) {
+        // Extract viewport data first to avoid RefCell borrow conflicts
+        let viewport = self.context.state.borrow().viewport;
         let draw_list = self.ui.get_window_draw_list();
         let _ = crate::draw::draw_grid(
             &draw_list,
             view,
             projection,
             matrix,
-            &self.context.state.borrow().viewport,
+            &viewport,
             grid_size,
         );
     }
 
     /// Draw debug cubes
     pub fn draw_cubes(&self, view: &Mat4, projection: &Mat4, matrices: &[Mat4]) {
+        // Extract viewport data first to avoid RefCell borrow conflicts
+        let viewport = self.context.state.borrow().viewport;
         let draw_list = self.ui.get_window_draw_list();
         let _ = crate::draw::draw_cubes(
             &draw_list,
             view,
             projection,
             matrices,
-            &self.context.state.borrow().viewport,
+            &viewport,
         );
     }
 

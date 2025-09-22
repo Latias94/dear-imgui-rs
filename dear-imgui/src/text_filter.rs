@@ -92,11 +92,14 @@ impl TextFilter {
     /// ```
     pub fn new_with_filter(label: String, filter: String) -> Self {
         let filter_cstr = format!("{}\0", filter);
-        let raw = unsafe {
-            sys::ImGuiTextFilter::new(filter_cstr.as_ptr() as *const std::os::raw::c_char)
-        };
-
-        Self { id: label, raw }
+        unsafe {
+            let mut raw = std::mem::MaybeUninit::<sys::ImGuiTextFilter>::uninit();
+            sys::ImGuiTextFilter_ImGuiTextFilter(
+                raw.as_mut_ptr(),
+                filter_cstr.as_ptr() as *const std::os::raw::c_char,
+            );
+            Self { id: label, raw: raw.assume_init() }
+        }
     }
 
     /// Builds the TextFilter with its current filter pattern.

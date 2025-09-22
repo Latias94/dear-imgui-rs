@@ -89,7 +89,7 @@ impl Ui {
     /// This is typically used to show tooltips.
     #[doc(alias = "IsItemHovered")]
     pub fn is_item_hovered(&self) -> bool {
-        unsafe { sys::ImGui_IsItemHovered(sys::ImGuiHoveredFlags_None as i32) }
+        unsafe { sys::ImGui_IsItemHovered(super::HoveredFlags::NONE.bits()) }
     }
 
     /// Returns true if the last item is being hovered by mouse with specific flags.
@@ -113,7 +113,7 @@ impl Ui {
     /// Returns true if the last item was just clicked.
     #[doc(alias = "IsItemClicked")]
     pub fn is_item_clicked(&self) -> bool {
-        unsafe { sys::ImGui_IsItemClicked(sys::ImGuiMouseButton_Left as i32) }
+        unsafe { sys::ImGui_IsItemClicked(crate::input::MouseButton::Left as i32) }
     }
 
     /// Returns true if the last item was clicked with specific mouse button.

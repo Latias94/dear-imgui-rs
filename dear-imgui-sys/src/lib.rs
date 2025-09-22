@@ -41,6 +41,8 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 // Platform-specific function wrappers
 pub mod wrapper_functions;
 
+// Ensure common ImGui typedefs are available even if bindgen doesn't emit them explicitly
+
 /// Implement indexing for ImVector to provide array-like access
 impl<T> Index<usize> for ImVector<T> {
     type Output = T;

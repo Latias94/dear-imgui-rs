@@ -17,9 +17,7 @@ impl Ui {
     #[doc(alias = "OpenPopup")]
     pub fn open_popup(&self, str_id: impl AsRef<str>) {
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe {
-            sys::ImGui_OpenPopup(str_id_ptr, sys::ImGuiPopupFlags_None as i32);
-        }
+        unsafe { sys::ImGui_OpenPopup(str_id_ptr, PopupFlags::NONE.bits()) }
     }
 
     /// Instructs ImGui that a popup is open with flags.
@@ -120,7 +118,7 @@ impl Ui {
     #[doc(alias = "IsPopupOpen")]
     pub fn is_popup_open(&self, str_id: impl AsRef<str>) -> bool {
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::ImGui_IsPopupOpen(str_id_ptr, sys::ImGuiPopupFlags_None as i32) }
+        unsafe { sys::ImGui_IsPopupOpen(str_id_ptr, PopupFlags::NONE.bits()) }
     }
 
     /// Returns true if the popup is open with flags.
@@ -147,12 +145,7 @@ impl Ui {
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe {
-            sys::ImGui_BeginPopupContextItem(
-                str_id_ptr,
-                sys::ImGuiPopupFlags_MouseButtonRight as i32,
-            )
-        };
+        let render = unsafe { sys::ImGui_BeginPopupContextItem(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits()) };
 
         if render {
             Some(PopupToken::new(self))
@@ -177,12 +170,7 @@ impl Ui {
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe {
-            sys::ImGui_BeginPopupContextWindow(
-                str_id_ptr,
-                sys::ImGuiPopupFlags_MouseButtonRight as i32,
-            )
-        };
+        let render = unsafe { sys::ImGui_BeginPopupContextWindow(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits()) };
 
         if render {
             Some(PopupToken::new(self))
@@ -207,12 +195,7 @@ impl Ui {
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe {
-            sys::ImGui_BeginPopupContextVoid(
-                str_id_ptr,
-                sys::ImGuiPopupFlags_MouseButtonRight as i32,
-            )
-        };
+        let render = unsafe { sys::ImGui_BeginPopupContextVoid(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits()) };
 
         if render {
             Some(PopupToken::new(self))
