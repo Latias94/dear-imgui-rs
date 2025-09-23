@@ -1,10 +1,10 @@
 [submodule "extensions/dear-implot-sys/third-party/cimplot"]
 	path = extensions/dear-implot-sys/third-party/cimplot
-	url = https://github.com/cimgui/cimplot.git
+	url = https://github.com/cimgui/cimplot
 	branch = master
 [submodule "extensions/dear-imguizmo-sys/third-party/cimguizmo"]
 	path = extensions/dear-imguizmo-sys/third-party/cimguizmo
-	url = https://github.com/cimgui/cimguizmo.git
+	url = https://github.com/cimgui/cimguizmo
 [submodule "dear-imgui-sys/third-party/cimgui"]
 	path = dear-imgui-sys/third-party/cimgui
 	url = https://github.com/cimgui/cimgui.git
