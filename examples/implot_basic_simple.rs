@@ -24,7 +24,7 @@ struct ImguiState {
     context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
-    // plot_context: implot::PlotContext,
+    plot_context: implot::PlotContext,
     clear_color: wgpu::Color,
     last_frame: Instant,
 }
@@ -91,13 +91,14 @@ impl AppWindow {
         let init_info = dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
         let renderer = WgpuRenderer::new(init_info, &mut context)?;
 
-        // let plot_context = implot::PlotContext::create(&context);
+        let plot_context = implot::PlotContext::create(&context);
+        println!("Plot context created");
 
         let imgui = ImguiState {
             context,
             platform,
             renderer,
-            // plot_context,
+            plot_context,
             clear_color: wgpu::Color { r: 0.06, g: 0.06, b: 0.08, a: 1.0 },
             last_frame: Instant::now(),
         };
@@ -121,42 +122,42 @@ impl AppWindow {
         self.imgui.platform.prepare_frame(&self.window, &mut self.imgui.context);
 
         let ui = self.imgui.context.frame();
-        // let plot_ui = self.imgui.plot_context.get_plot_ui(&ui);
+        let plot_ui = self.imgui.plot_context.get_plot_ui(&ui);
 
         // test data
-        // let x_data: Vec<f64> = (0..64).map(|i| i as f64 * 0.1).collect();
-        // let y_data: Vec<f64> = x_data.iter().map(|x| x.sin()).collect();
-        //
-        // ui.window("Controls")
-        //     .size([320.0, 200.0], Condition::FirstUseEver)
-        //     .build(|| {
-        //         ui.checkbox("BeginPlot only", &mut app.begin_only);
-        //         ui.checkbox("PlotLine", &mut app.plot_line);
-        //         ui.checkbox("PlotScatter", &mut app.plot_scatter);
-        //         ui.checkbox("Call IsPlotHovered", &mut app.call_hover);
-        //         ui.checkbox("Call GetPlotMousePos", &mut app.call_mouse_pos);
-        //     });
+        let x_data: Vec<f64> = (0..64).map(|i| i as f64 * 0.1).collect();
+        let y_data: Vec<f64> = x_data.iter().map(|x| x.sin()).collect();
+        
+        ui.window("Controls")
+            .size([320.0, 200.0], Condition::FirstUseEver)
+            .build(|| {
+                ui.checkbox("BeginPlot only", &mut app.begin_only);
+                ui.checkbox("PlotLine", &mut app.plot_line);
+                ui.checkbox("PlotScatter", &mut app.plot_scatter);
+                ui.checkbox("Call IsPlotHovered", &mut app.call_hover);
+                ui.checkbox("Call GetPlotMousePos", &mut app.call_mouse_pos);
+            });
 
-        // ui.window("Plot Window")
-        //     .size([640.0, 360.0], Condition::FirstUseEver)
-        //     .build(|| {
-        //         if let Some(token) = plot_ui.begin_plot_with_size("Simple", [600.0, 320.0]) {
-        //             if app.plot_line {
-        //                 implot::LinePlot::new("line", &x_data, &y_data).plot();
-        //             }
-        //             if app.plot_scatter {
-        //                 implot::ScatterPlot::new("scatter", &x_data, &y_data).plot();
-        //             }
-        //             if app.call_hover {
-        //                 let _ = plot_ui.is_plot_hovered();
-        //             }
-        //             if app.call_mouse_pos {
-        //                 let _p = plot_ui.get_plot_mouse_pos(None);
-        //                 let _ = _p.x + _p.y; // use values
-        //             }
-        //             token.end();
-        //         }
-        //     });
+        ui.window("Plot Window")
+            .size([640.0, 360.0], Condition::FirstUseEver)
+            .build(|| {
+                if let Some(token) = plot_ui.begin_plot_with_size("Simple", [600.0, 320.0]) {
+                    if app.plot_line {
+                        implot::LinePlot::new("line", &x_data, &y_data).plot();
+                    }
+                    if app.plot_scatter {
+                        implot::ScatterPlot::new("scatter", &x_data, &y_data).plot();
+                    }
+                    if app.call_hover {
+                        let _ = plot_ui.is_plot_hovered();
+                    }
+                    if app.call_mouse_pos {
+                        let _p = plot_ui.get_plot_mouse_pos(None);
+                        let _ = _p.x + _p.y; // use values
+                    }
+                    token.end();
+                }
+            });
 
         // WGPU render
         let mut encoder = self

@@ -35,7 +35,7 @@ struct ImguiState {
     context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
-    // plot_context: PlotContext,  // Temporarily disabled
+    plot_context: PlotContext,
     clear_color: wgpu::Color,
     last_frame: Instant,
 }
@@ -109,23 +109,17 @@ impl AppWindow {
         // Initialize the renderer with one-step initialization
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
-        let renderer =
+        let mut renderer =
             WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
 
-        // Log successful initialization
-        dear_imgui::logging::log_context_created();
-        dear_imgui::logging::log_platform_init("Winit");
-        dear_imgui::logging::log_renderer_init("WGPU");
-
-        // Setup ImPlot - temporarily disabled for debugging
-        // let plot_context = PlotContext::create(&context);
-        // plot_context.set_as_current();
+        // Setup ImPlot
+        let plot_context = PlotContext::create(&context);
 
         let imgui = ImguiState {
             context,
             platform,
             renderer,
-            // plot_context,  // Temporarily disabled
+            plot_context,
             clear_color: wgpu::Color {
                 r: 0.1,
                 g: 0.2,
@@ -168,29 +162,45 @@ impl AppWindow {
             .prepare_frame(&self.window, &mut self.imgui.context);
 
         let ui = self.imgui.context.frame();
+        let plot_ui = self.imgui.plot_context.get_plot_ui(&ui);
 
-        // Simple test without ImPlot first
-        ui.window("Test Window")
-            .size([400.0, 300.0], Condition::FirstUseEver)
+        // Sample data for plots
+        let x_data: Vec<f64> = (0..100).map(|i| i as f64 * 0.1).collect();
+        let y_data: Vec<f64> = x_data.iter().map(|x| x.sin()).collect();
+        let scatter_x: Vec<f64> = (0..50).map(|i| i as f64 * 0.2).collect();
+        let scatter_y: Vec<f64> = scatter_x.iter().map(|x| (x * 2.0).cos()).collect();
+
+        // Additional data for new plot types
+        let bar_values = vec![1.0, 3.0, 2.0, 4.0, 3.0, 5.0, 4.0, 2.0];
+        let histogram_data = vec![1.0, 2.0, 1.0, 3.0, 2.0, 4.0, 3.0, 2.0, 1.0, 2.0, 3.0, 1.0];
+        let heatmap_data: Vec<f64> = (0..100)
+            .map(|i| ((i / 10) as f64 * 0.5).sin() * ((i % 10) as f64 * 0.3).cos())
+            .collect();
+        let errors = vec![0.1, 0.15, 0.2, 0.1, 0.25, 0.15, 0.1, 0.2];
+
+        // Data for new plot types
+        let stairs_x = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let stairs_y = vec![1.0, 3.0, 2.0, 4.0, 2.0, 5.0, 3.0];
+        let digital_x = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        let digital_y = vec![0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+
+        // Bar groups data: 3 series, 4 groups each
+        let group_labels = vec!["Series A", "Series B", "Series C"];
+        let group_values = vec![
+            2.0, 3.0, 1.0, 2.5, // Series A values for 4 groups
+            1.5, 2.5, 2.0, 3.0, // Series B values for 4 groups
+            3.0, 1.0, 2.5, 1.5, // Series C values for 4 groups
+        ];
+
+        // Main window with tabbed interface
+        ui.window("ImPlot Demo - Modular API Showcase")
+            .size([1200.0, 800.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("Hello from Dear ImGui!");
-                ui.text("If you see this, basic rendering works.");
+                ui.text("Welcome to Dear ImGui + ImPlot with New Modular API!");
+                ui.text("This demo showcases all the new plot types and features.");
                 ui.separator();
-                ui.text("ImPlot will be added back once basic rendering works...");
-            });
 
-        // ImPlot functionality will be added back once basic rendering works
-
-        // All ImPlot UI code temporarily removed for debugging
-            // Main window with tabbed interface
-            ui.window("ImPlot Demo - Modular API Showcase")
-                .size([1200.0, 800.0], Condition::FirstUseEver)
-                .build(|| {
-                    ui.text("Welcome to Dear ImGui + ImPlot with New Modular API!");
-                    ui.text("This demo showcases all the new plot types and features.");
-                    ui.separator();
-
-                    if let Some(tab_bar) = ui.tab_bar("PlotTabs") {
+                if let Some(tab_bar) = ui.tab_bar("PlotTabs") {
                     // Basic Plots Tab
                     if let Some(tab) = ui.tab_item("Basic Plots") {
                         ui.columns(2, "basic_plots", true);
@@ -430,10 +440,9 @@ impl AppWindow {
                         tab.end();
                     }
 
-                        tab_bar.end();
-                    }
-                });
-        }
+                    tab_bar.end();
+                }
+            });
 
         // Advanced Features Window
         ui.window("Advanced Features")
@@ -520,19 +529,12 @@ impl AppWindow {
             });
 
             let draw_data = self.imgui.context.render();
-
-            // Call new_frame before rendering (required for WGPU renderer)
-            self.imgui
-                .renderer
-                .new_frame()
-                .expect("Failed to prepare new frame");
-
             self.imgui
                 .renderer
                 .render_draw_data(&draw_data, &mut render_pass)?;
         }
 
-        self.queue.submit(Some(encoder.finish()));
+        self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
         Ok(())
