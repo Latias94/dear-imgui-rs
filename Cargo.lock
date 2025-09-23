@@ -775,6 +775,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cfg-if",
  "dear-imgui",
+ "dear-imgui-sys",
  "dear-implot-sys",
  "mint",
  "parking_lot",

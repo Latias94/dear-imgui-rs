@@ -18,6 +18,7 @@ features = ["freetype", "docking"]
 bitflags.workspace = true
 dear-imgui = { path = "../../dear-imgui", version = "0.1" }
 dear-implot-sys = { path = "../dear-implot-sys", version = "0.1" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.1" }
 mint.workspace = true
 parking_lot.workspace = true
 cfg-if.workspace = true
@@ -25,6 +26,8 @@ thiserror.workspace = true
 
 [features]
 default = ["docking"]
+# Enable linking the ImPlot demo symbols (off by default)
+demo = []
 # Enable docking branch features (default)
 docking = ["dear-imgui/docking", "dear-implot-sys/docking"]
 # Enable multi-viewport support (requires docking)

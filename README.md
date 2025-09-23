@@ -4,6 +4,7 @@ Modern Rust bindings for [Dear ImGui](https://github.com/ocornut/imgui) with ful
 
 ![Game Engine Docking Example](screenshots/game-engine-docking.png)
 ![Implot Example](screenshots/implot-basic.png)
+![Imguizmo Example](screenshots/imguizmo-basic.png)
 
 ## Overview
 

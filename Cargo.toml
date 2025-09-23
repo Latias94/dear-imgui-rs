@@ -12,7 +12,7 @@ members = [
     "extensions/dear-imguizmo",
     "examples",
 ]
-# Exclude dear-imguizmo from workspace as it's not ready for crates.io release
+
 exclude = [
     # keep empty
 ]

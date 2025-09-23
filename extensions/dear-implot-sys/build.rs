@@ -75,28 +75,7 @@ fn main() {
         .clang_arg("-x")
         .clang_arg("c++")
         .clang_arg("-std=c++17");
-
-    // TODO: Handle MSVC-specific issues later
-    // if target_env == "msvc" {
-    //     let blocklist_file = manifest_dir.join("msvc_blocklist.txt");
-    //     if let Ok(content) = std::fs::read_to_string(&blocklist_file) {
-    //         for line in content.lines() {
-    //             let line = line.trim();
-    //             if line.is_empty() || line.starts_with('#') {
-    //                 continue;
-    //             }
-    //             bindings = bindings.blocklist_function(line);
-    //         }
-    //     }
-
-    //     let msvc_wrapper_src = manifest_dir.join("implot_msvc_wrapper.cpp");
-    //     if msvc_wrapper_src.exists() {
-    //         bindings = bindings
-    //             .header(msvc_wrapper_src.to_string_lossy())
-    //             .allowlist_file(msvc_wrapper_src.to_string_lossy());
-    //     }
-    // }
-
+    
     let bindings = bindings.generate().expect("Unable to generate bindings");
 
     bindings
@@ -205,7 +184,8 @@ fn main() {
         build.file(cimplot_root.join("cimplot.cpp"));
         build.file(cimplot_root.join("implot/implot.cpp"));
         build.file(cimplot_root.join("implot/implot_items.cpp"));
-        // Include the demo sources to satisfy ImPlot_ShowDemoWindow
+        // Include the demo sources to satisfy ImPlot_ShowDemoWindow symbol required by cimplot wrapper
+        // (cimplot exports a C wrapper for ImPlot::ShowDemoWindow unconditionally).
         build.file(cimplot_root.join("implot/implot_demo.cpp"));
 
         build.compile("dear_implot");

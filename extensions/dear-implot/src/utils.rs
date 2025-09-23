@@ -117,9 +117,12 @@ pub fn is_plot_y_axis_hovered(y_axis_choice: Option<crate::YAxisChoice>) -> bool
     is_axis_hovered(y_axis)
 }
 
-/// Show the ImPlot demo window
+/// Show the ImPlot demo window (requires sys demo symbols to be linked)
+#[cfg(feature = "demo")]
 pub fn show_demo_window(show: &mut bool) {
-    unsafe {
-        sys::ImPlot_ShowDemoWindow(show);
-    }
+    unsafe { sys::ImPlot_ShowDemoWindow(show) }
 }
+
+/// Stub when demo feature is disabled
+#[cfg(not(feature = "demo"))]
+pub fn show_demo_window(_show: &mut bool) {}

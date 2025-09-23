@@ -327,8 +327,9 @@ fn main() {
     // For WASM, we skip C++ compilation as it requires special setup
     // Users should link against a pre-compiled WASM version of ImGui
     if target_arch != "wasm32" && !linked_prebuilt && env::var("IMGUI_SYS_SKIP_CC").is_err() {
-        let use_cmake =
-            env::var("IMGUI_SYS_USE_CMAKE").ok().is_some() || cfg!(target_os = "windows");
+        // Prefer building with cc on all platforms for consistent flags/runtime
+        // Use CMake only if explicitly requested via IMGUI_SYS_USE_CMAKE.
+        let use_cmake = env::var("IMGUI_SYS_USE_CMAKE").ok().is_some();
         if use_cmake && build_with_cmake(&manifest_dir) {
             // cmake path handled printing of link flags
         } else {
@@ -343,8 +344,8 @@ fn main() {
             build.include(&cimgui_root);
             build.include(&imgui_src);
 
-            // Define to expose enums/structs from cimgui.h consistently
-            build.define("CIMGUI_DEFINE_ENUMS_AND_STRUCTS", None);
+            // Do NOT define CIMGUI_DEFINE_ENUMS_AND_STRUCTS when compiling cimgui.cpp.
+            // That macro is only for header parsing (bindgen), not for building the implementation.
 
             // Core ImGui compilation units
             build.file(imgui_src.join("imgui.cpp"));
@@ -380,6 +381,8 @@ fn main() {
                 }
 
                 build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
+                // Ensure 32-bit ImWchar on MSVC path
+                build.define("IMGUI_USE_WCHAR32", None);
             }
 
             #[cfg(feature = "freetype")]
@@ -412,7 +415,10 @@ fn main() {
         // Export common defines that extensions might need
         println!("cargo:DEFINE_IMGUITEST=0");
         // Only export IMGUI_USE_WCHAR32 when actually enabled in our own build.
-        // We rely on CMake option IMGUI_WCHAR32 to drive this for native builds.
+        // We emit a define for dependents to consume (e.g., dear-implot-sys).
+        if cfg!(target_env = "msvc") {
+            println!("cargo:DEFINE_IMGUI_USE_WCHAR32=1");
+        }
     }
 }
 
@@ -483,7 +489,19 @@ fn build_with_cmake(manifest_dir: &Path) -> bool {
     cfg.profile(cmake_profile);
     // Ensure 32-bit ImWchar for consistency when using MSVC toolchain
     if cfg!(target_env = "msvc") {
-        cfg.define("CMAKE_CXX_FLAGS", "/DIMGUI_USE_WCHAR32");
+        // Prefer using the official CMake option for cimgui
+        cfg.define("IMGUI_WCHAR32", "ON");
+
+        // Align MSVC runtime library with Rust's target (static/dynamic CRT)
+        let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+        let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
+        let msvc_runtime = if use_static_crt {
+            "MultiThreaded"
+        } else {
+            "MultiThreadedDLL"
+        };
+        // Requires CMake 3.15+
+        cfg.define("CMAKE_MSVC_RUNTIME_LIBRARY", msvc_runtime);
     }
 
     let dst = cfg.build();

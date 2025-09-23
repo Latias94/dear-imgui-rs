@@ -30,6 +30,11 @@ path = "implot_basic.rs"
 required-features = ["dear-implot"]
 
 [[bin]]
+name = "implot_basic_simple"
+path = "implot_basic_simple.rs"
+required-features = ["dear-implot"]
+
+[[bin]]
 name = "imguizmo_basic"
 path = "imguizmo_basic.rs"
 required-features = ["dear-imguizmo"]
