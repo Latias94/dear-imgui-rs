@@ -26,12 +26,20 @@ exclude = [
 [dependencies]
 mint.workspace = true
 cfg-if.workspace = true
+flate2 = { version = "1", features = ["zlib-ng-compat"], default-features = false }
+tar = "0.4"
 
 [build-dependencies]
 bindgen.workspace = true
 cc.workspace = true
 pkg-config = { workspace = true, optional = true }
 xshell = "0.2"
+reqwest = { version = "0.11", features = ["blocking", "rustls-tls"], default-features = false }
+cmake = "0.1"
+
+[[bin]]
+name = "package"
+path = "bin/package/main.rs"
 
 [features]
 default = ["docking"]
@@ -42,4 +50,4 @@ multi-viewport = ["docking"]
 # Enable freetype font rasterizer
 freetype = ["pkg-config"]
 # Enable for WASM targets
-# wasm = []
+wasm = []

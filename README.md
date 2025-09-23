@@ -31,7 +31,7 @@ This project provides comprehensive Rust bindings for Dear ImGui v1.92+, featuri
 ```text
 dear-imgui/
 ├── dear-imgui/          # High-level safe Rust bindings
-├── dear-imgui-sys/      # Low-level FFI bindings to Dear ImGui C++
+├── dear-imgui-sys/      # Low-level FFI bindings via cimgui (C API)
 ├── backends/
 │   ├── dear-imgui-wgpu/    # WGPU renderer backend
 │   ├── dear-imgui-glow/    # OpenGL renderer backend
@@ -120,7 +120,10 @@ This library implements Dear ImGui v1.92+'s `ImGuiBackendFlags_RendererHasTextur
 
 ### FFI Layer (`dear-imgui-sys`)
 
-Direct C++ FFI bindings with MSVC ABI compatibility fixes, handling complex return types and ensuring cross-platform stability.
+- Based on cimgui (C API) for Dear ImGui (docking branch)
+- Bindings are generated with bindgen from vendored headers
+- Cross-platform friendly（no C++ ABI/MSVC quirks）
+- Windows native builds prefer CMake (auto-detects VS/SDK); prebuilt static libraries are supported
 
 ### Safe Layer (`dear-imgui`)
 
@@ -165,8 +168,7 @@ cargo run --example wgpu_basic
 - Dear ImGui v1.92+ support with dynamic fonts and modern texture management
 - Built-in docking support
 - Modern Rust ecosystem integration (wgpu v26, winit v0.30+)
-- Direct C++ FFI without cimgui dependency
-- Comprehensive MSVC ABI compatibility
+- Uses cimgui C API (avoids C++ ABI issues), simpler cross-platform builds
 
 **Current Status:**
 
@@ -176,17 +178,39 @@ cargo run --example wgpu_basic
 
 Choose this library if you need the latest Dear ImGui features, docking support, or want to work with modern Rust graphics libraries.
 
-## Technical Details
+## Build & Packaging (sys)
 
-### MSVC ABI Compatibility
+`dear-imgui-sys` uses cimgui + bindgen and supports multiple link strategies:
 
-One of the key technical challenges in creating Rust bindings for C++ libraries is handling ABI (Application Binary Interface) compatibility issues. This is particularly problematic on MSVC where small C++ class return types can cause crashes.
+- Prebuilt static library（recommended）
+  - Set `IMGUI_SYS_LIB_DIR=...` to a folder containing the static lib
+    - Windows: `dear_imgui.lib`
+    - Linux/macOS: `libdear_imgui.a`
+  - Or set `IMGUI_SYS_PREBUILT_URL=...` to a direct URL of the static lib
+  - We publish platform archives in Releases (include + static lib)
 
-Our solution, inspired by [easy-imgui-rs](https://github.com/rodrigorc/easy-imgui-rs/), includes:
+- Native build from source
+  - Windows prefers CMake (auto-detects VS/SDK); set `IMGUI_SYS_USE_CMAKE=1` to force CMake elsewhere
+  - Otherwise falls back to cc crate
 
-1. **FFI-Safe Wrapper Types**: Convert C++ types like `ImVec2` to POD equivalents
-2. **C Wrapper Functions**: Provide C-compatible interfaces for problematic functions
-3. **Conditional Compilation**: Apply fixes only where needed (MSVC targets)
-4. **Selective Function Blocking**: Block problematic functions during bindgen and provide manual implementations
+- Fast Rust-only checks
+  - Set `IMGUI_SYS_SKIP_CC=1` to skip native C/C++ compilation while iterating
 
-See [`dear-imgui-sys/README.md`](dear-imgui-sys/README.md) for detailed technical information.
+Docs.rs
+- On docs.rs we generate bindings offline from vendored headers or use `src/bindings_pregenerated.rs` if present.
+
+Examples
+- `cargo run -p dear-imgui-examples --bin wgpu_basic`
+- `cargo run -p dear-imgui-examples --bin game_engine_docking`
+
+Prebuilt packages
+- Naming: `dear-imgui-prebuilt-{version}-{target}-static[-{md|mt}].tar.gz`
+  - Example (Windows MD): `dear-imgui-prebuilt-0.1.0-x86_64-pc-windows-msvc-static-md.tar.gz`
+  - Example (Linux): `dear-imgui-prebuilt-0.1.0-x86_64-unknown-linux-gnu-static.tar.gz`
+- Contents:
+  - `include/imgui/*` (Dear ImGui headers)
+  - `include/cimgui/cimgui.h`
+  - `lib/dear_imgui.lib` (Windows) or `lib/libdear_imgui.a` (Linux/macOS)
+- Use:
+  - Extract somewhere and set `IMGUI_SYS_LIB_DIR` to the folder containing the static library
+  - Or host the static library and set `IMGUI_SYS_PREBUILT_URL` to its direct URL

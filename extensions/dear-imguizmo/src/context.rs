@@ -270,9 +270,9 @@ impl GuizmoContext {
     /// Check if we can activate manipulation (mouse clicked and not over UI)
     pub fn can_activate() -> bool {
         unsafe {
-            dear_imgui::sys::ImGui_IsMouseClicked(0, false)
-                && !dear_imgui::sys::ImGui_IsAnyItemHovered()
-                && !dear_imgui::sys::ImGui_IsAnyItemActive()
+            dear_imgui::sys::igIsMouseClicked_Bool(0, false)
+                && !dear_imgui::sys::igIsAnyItemHovered()
+                && !dear_imgui::sys::igIsAnyItemActive()
         }
     }
 }
@@ -731,14 +731,7 @@ impl<'ui> GuizmoUi<'ui> {
         // Extract viewport data first to avoid RefCell borrow conflicts
         let viewport = self.context.state.borrow().viewport;
         let draw_list = self.ui.get_window_draw_list();
-        let _ = crate::draw::draw_grid(
-            &draw_list,
-            view,
-            projection,
-            matrix,
-            &viewport,
-            grid_size,
-        );
+        let _ = crate::draw::draw_grid(&draw_list, view, projection, matrix, &viewport, grid_size);
     }
 
     /// Draw debug cubes
@@ -746,13 +739,7 @@ impl<'ui> GuizmoUi<'ui> {
         // Extract viewport data first to avoid RefCell borrow conflicts
         let viewport = self.context.state.borrow().viewport;
         let draw_list = self.ui.get_window_draw_list();
-        let _ = crate::draw::draw_cubes(
-            &draw_list,
-            view,
-            projection,
-            matrices,
-            &viewport,
-        );
+        let _ = crate::draw::draw_cubes(&draw_list, view, projection, matrices, &viewport);
     }
 
     /// View manipulation cube
@@ -934,7 +921,7 @@ impl<'ui> GuizmoUi<'ui> {
 
     /// Compute camera ray for mouse picking
     fn compute_camera_ray(&self, state: &mut std::cell::RefMut<GuizmoState>) -> GuizmoResult<()> {
-        let io = unsafe { dear_imgui::sys::ImGui_GetIO() };
+        let io = unsafe { dear_imgui::sys::igGetIO_Nil() };
         let mouse_pos = unsafe { (*io).MousePos };
 
         // Convert mouse position to normalized device coordinates

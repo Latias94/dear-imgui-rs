@@ -84,11 +84,11 @@ impl Ui {
         let outer_size_vec: sys::ImVec2 = outer_size.into().into();
 
         let should_render = unsafe {
-            sys::ImGui_BeginTable(
+            sys::igBeginTable(
                 str_id_ptr,
                 column_count as i32,
                 flags.bits(),
-                &outer_size_vec,
+                outer_size_vec,
                 inner_width,
             )
         };
@@ -151,25 +151,25 @@ impl Ui {
     ) {
         let label_ptr = self.scratch_txt(label);
         unsafe {
-            sys::ImGui_TableSetupColumn(label_ptr, flags.bits(), init_width_or_weight, user_id);
+            sys::igTableSetupColumn(label_ptr, flags.bits(), init_width_or_weight, user_id);
         }
     }
 
     /// Submit all headers cells based on data provided to TableSetupColumn() + submit context menu
     pub fn table_headers_row(&self) {
         unsafe {
-            sys::ImGui_TableHeadersRow();
+            sys::igTableHeadersRow();
         }
     }
 
     /// Append into the next column (or first column of next row if currently in last column)
     pub fn table_next_column(&self) -> bool {
-        unsafe { sys::ImGui_TableNextColumn() }
+        unsafe { sys::igTableNextColumn() }
     }
 
     /// Append into the specified column
     pub fn table_set_column_index(&self, column_n: i32) -> bool {
-        unsafe { sys::ImGui_TableSetColumnIndex(column_n) }
+        unsafe { sys::igTableSetColumnIndex(column_n) }
     }
 
     /// Append into the next row
@@ -180,46 +180,46 @@ impl Ui {
     /// Append into the next row with flags and minimum height
     pub fn table_next_row_with_flags(&self, flags: TableRowFlags, min_row_height: f32) {
         unsafe {
-            sys::ImGui_TableNextRow(flags.bits(), min_row_height);
+            sys::igTableNextRow(flags.bits(), min_row_height);
         }
     }
 
     /// Freeze columns/rows so they stay visible when scrolling.
     #[doc(alias = "TableSetupScrollFreeze")]
     pub fn table_setup_scroll_freeze(&self, frozen_cols: i32, frozen_rows: i32) {
-        unsafe { sys::ImGui_TableSetupScrollFreeze(frozen_cols, frozen_rows) }
+        unsafe { sys::igTableSetupScrollFreeze(frozen_cols, frozen_rows) }
     }
 
     /// Submit one header cell at current column position.
     #[doc(alias = "TableHeader")]
     pub fn table_header(&self, label: impl AsRef<str>) {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::ImGui_TableHeader(label_ptr) }
+        unsafe { sys::igTableHeader(label_ptr) }
     }
 
     /// Return columns count.
     #[doc(alias = "TableGetColumnCount")]
     pub fn table_get_column_count(&self) -> i32 {
-        unsafe { sys::ImGui_TableGetColumnCount() }
+        unsafe { sys::igTableGetColumnCount() }
     }
 
     /// Return current column index.
     #[doc(alias = "TableGetColumnIndex")]
     pub fn table_get_column_index(&self) -> i32 {
-        unsafe { sys::ImGui_TableGetColumnIndex() }
+        unsafe { sys::igTableGetColumnIndex() }
     }
 
     /// Return current row index.
     #[doc(alias = "TableGetRowIndex")]
     pub fn table_get_row_index(&self) -> i32 {
-        unsafe { sys::ImGui_TableGetRowIndex() }
+        unsafe { sys::igTableGetRowIndex() }
     }
 
     /// Return the name of a column by index.
     #[doc(alias = "TableGetColumnName")]
     pub fn table_get_column_name(&self, column_n: i32) -> &str {
         unsafe {
-            let ptr = sys::ImGui_TableGetColumnName(column_n);
+            let ptr = sys::igTableGetColumnName_Int(column_n);
             if ptr.is_null() {
                 ""
             } else {
@@ -231,25 +231,25 @@ impl Ui {
     /// Return the flags of a column by index.
     #[doc(alias = "TableGetColumnFlags")]
     pub fn table_get_column_flags(&self, column_n: i32) -> TableColumnFlags {
-        unsafe { TableColumnFlags::from_bits_truncate(sys::ImGui_TableGetColumnFlags(column_n)) }
+        unsafe { TableColumnFlags::from_bits_truncate(sys::igTableGetColumnFlags(column_n)) }
     }
 
     /// Enable/disable a column by index.
     #[doc(alias = "TableSetColumnEnabled")]
     pub fn table_set_column_enabled(&self, column_n: i32, enabled: bool) {
-        unsafe { sys::ImGui_TableSetColumnEnabled(column_n, enabled) }
+        unsafe { sys::igTableSetColumnEnabled(column_n, enabled) }
     }
 
     /// Return hovered column index, or -1 when none.
     #[doc(alias = "TableGetHoveredColumn")]
     pub fn table_get_hovered_column(&self) -> i32 {
-        unsafe { sys::ImGui_TableGetHoveredColumn() }
+        unsafe { sys::igTableGetHoveredColumn() }
     }
 
     /// Set column width (for fixed-width columns).
     #[doc(alias = "TableSetColumnWidth")]
     pub fn table_set_column_width(&self, column_n: i32, width: f32) {
-        unsafe { sys::ImGui_TableSetColumnWidth(column_n, width) }
+        unsafe { sys::igTableSetColumnWidth(column_n, width) }
     }
 
     /// Set a table background color target.
@@ -257,19 +257,19 @@ impl Ui {
     /// Color is provided as `ImU32` (e.g. from `u32` RGBA).
     #[doc(alias = "TableSetBgColor")]
     pub fn table_set_bg_color_u32(&self, target: TableBgTarget, color: u32, column_n: i32) {
-        unsafe { sys::ImGui_TableSetBgColor(target as i32, color, column_n) }
+        unsafe { sys::igTableSetBgColor(target as i32, color, column_n) }
     }
 
     /// Return hovered row index, or -1 when none.
     #[doc(alias = "TableGetHoveredRow")]
     pub fn table_get_hovered_row(&self) -> i32 {
-        unsafe { sys::ImGui_TableGetHoveredRow() }
+        unsafe { sys::igTableGetHoveredRow() }
     }
 
     /// Header row height in pixels.
     #[doc(alias = "TableGetHeaderRowHeight")]
     pub fn table_get_header_row_height(&self) -> f32 {
-        unsafe { sys::ImGui_TableGetHeaderRowHeight() }
+        unsafe { sys::igTableGetHeaderRowHeight() }
     }
 
     /// Set sort direction for a column. Optionally append to existing sort specs (multi-sort).
@@ -280,7 +280,7 @@ impl Ui {
         dir: SortDirection,
         append_to_sort_specs: bool,
     ) {
-        unsafe { sys::ImGui_TableSetColumnSortDirection(column_n, dir as u8, append_to_sort_specs) }
+        unsafe { sys::igTableSetColumnSortDirection(column_n, dir as i32, append_to_sort_specs) }
     }
 
     /// Get current table sort specifications, if any.
@@ -289,7 +289,7 @@ impl Ui {
     #[doc(alias = "TableGetSortSpecs")]
     pub fn table_get_sort_specs(&self) -> Option<TableSortSpecs<'_>> {
         unsafe {
-            let ptr = sys::ImGui_TableGetSortSpecs();
+            let ptr = sys::igTableGetSortSpecs();
             if ptr.is_null() {
                 None
             } else {
@@ -328,9 +328,9 @@ pub enum TableBgTarget {
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SortDirection {
-    None = sys::ImGuiSortDirection_None,
-    Ascending = sys::ImGuiSortDirection_Ascending,
-    Descending = sys::ImGuiSortDirection_Descending,
+    None = sys::ImGuiSortDirection_None as u8,
+    Ascending = sys::ImGuiSortDirection_Ascending as u8,
+    Descending = sys::ImGuiSortDirection_Descending as u8,
 }
 
 /// One column sort spec.
@@ -446,7 +446,7 @@ impl<'ui> TableToken<'ui> {
 impl<'ui> Drop for TableToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndTable();
+            sys::igEndTable();
         }
     }
 }
@@ -459,31 +459,31 @@ impl Ui {
     /// Maximum label width used for angled headers (when enabled in style/options).
     #[doc(alias = "TableGetHeaderAngledMaxLabelWidth")]
     pub fn table_get_header_angled_max_label_width(&self) -> f32 {
-        unsafe { sys::ImGui_TableGetHeaderAngledMaxLabelWidth() }
+        unsafe { sys::igTableGetHeaderAngledMaxLabelWidth() }
     }
 
     /// Push background draw channel for the current table and return a token to pop it.
     #[doc(alias = "TablePushBackgroundChannel")]
     pub fn table_push_background_channel(&self) {
-        unsafe { sys::ImGui_TablePushBackgroundChannel() }
+        unsafe { sys::igTablePushBackgroundChannel() }
     }
 
     /// Pop background draw channel for the current table.
     #[doc(alias = "TablePopBackgroundChannel")]
     pub fn table_pop_background_channel(&self) {
-        unsafe { sys::ImGui_TablePopBackgroundChannel() }
+        unsafe { sys::igTablePopBackgroundChannel() }
     }
 
     /// Push column draw channel for the given column index and return a token to pop it.
     #[doc(alias = "TablePushColumnChannel")]
     pub fn table_push_column_channel(&self, column_n: i32) {
-        unsafe { sys::ImGui_TablePushColumnChannel(column_n) }
+        unsafe { sys::igTablePushColumnChannel(column_n) }
     }
 
     /// Pop column draw channel.
     #[doc(alias = "TablePopColumnChannel")]
     pub fn table_pop_column_channel(&self) {
-        unsafe { sys::ImGui_TablePopColumnChannel() }
+        unsafe { sys::igTablePopColumnChannel() }
     }
 
     /// Run a closure after pushing table background channel (auto-pop on return).

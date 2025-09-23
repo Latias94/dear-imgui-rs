@@ -39,7 +39,7 @@ impl Ui {
         let label_ptr = self.scratch_txt(label);
         let preview_ptr = self.scratch_txt(preview_value);
 
-        let should_render = unsafe { sys::ImGui_BeginCombo(label_ptr, preview_ptr, flags.bits()) };
+        let should_render = unsafe { sys::igBeginCombo(label_ptr, preview_ptr, flags.bits()) };
 
         if should_render {
             Some(ComboBoxToken::new(self))
@@ -75,8 +75,7 @@ impl Ui {
     ) -> Option<ComboBoxToken<'_>> {
         let label_ptr = self.scratch_txt(label);
 
-        let should_render =
-            unsafe { sys::ImGui_BeginCombo(label_ptr, std::ptr::null(), flags.bits()) };
+        let should_render = unsafe { sys::igBeginCombo(label_ptr, std::ptr::null(), flags.bits()) };
 
         if should_render {
             Some(ComboBoxToken::new(self))
@@ -138,7 +137,7 @@ impl Ui {
     /// Sets the default focus for the next item
     pub fn set_item_default_focus(&self) {
         unsafe {
-            sys::ImGui_SetItemDefaultFocus();
+            sys::igSetItemDefaultFocus();
         }
     }
 }
@@ -185,8 +184,7 @@ impl<'ui, Label: AsRef<str>> ComboBox<'ui, Label> {
             .map(|p| self.ui.scratch_txt(p))
             .unwrap_or(std::ptr::null());
 
-        let should_render =
-            unsafe { sys::ImGui_BeginCombo(label_ptr, preview_ptr, self.flags.bits()) };
+        let should_render = unsafe { sys::igBeginCombo(label_ptr, preview_ptr, self.flags.bits()) };
 
         if should_render {
             Some(ComboBoxToken::new(self.ui))
@@ -217,7 +215,7 @@ impl<'ui> ComboBoxToken<'ui> {
 impl<'ui> Drop for ComboBoxToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndCombo();
+            sys::igEndCombo();
         }
     }
 }

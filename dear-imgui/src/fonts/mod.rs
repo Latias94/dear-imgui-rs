@@ -20,13 +20,13 @@ impl Ui {
     /// Returns the current font
     #[doc(alias = "GetFont")]
     pub fn current_font(&self) -> &Font {
-        unsafe { Font::from_raw(crate::sys::ImGui_GetFont()) }
+        unsafe { Font::from_raw(crate::sys::igGetFont()) }
     }
 
     /// Returns the current font size (= height in pixels) with font scale applied
     #[doc(alias = "GetFontSize")]
     pub fn current_font_size(&self) -> f32 {
-        unsafe { crate::sys::ImGui_GetFontSize() }
+        unsafe { crate::sys::igGetFontSize() }
     }
 
     /// Push a font with dynamic size support (v1.92+ feature)
@@ -38,7 +38,7 @@ impl Ui {
             let font_ptr = font.map_or(std::ptr::null_mut(), |f| {
                 f as *const Font as *mut crate::sys::ImFont
             });
-            crate::sys::ImGui_PushFont(font_ptr, size);
+            crate::sys::igPushFont(font_ptr, size);
         }
     }
 
@@ -50,7 +50,7 @@ impl Ui {
         self.push_font_with_size(font, size);
         let result = f();
         unsafe {
-            crate::sys::ImGui_PopFont();
+            crate::sys::igPopFont();
         }
         result
     }
@@ -61,17 +61,9 @@ impl Ui {
     #[doc(alias = "GetFontTexUvWhitePixel")]
     pub fn font_tex_uv_white_pixel(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let uv_rr = crate::sys::ImGui_GetFontTexUvWhitePixel();
-                let uv: crate::sys::ImVec2 = uv_rr.into();
-                [uv.x, uv.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let uv = crate::sys::ImGui_GetFontTexUvWhitePixel();
-                [uv.x, uv.y]
-            }
+            let mut uv = crate::sys::ImVec2 { x: 0.0, y: 0.0 };
+            crate::sys::igGetFontTexUvWhitePixel(&mut uv);
+            [uv.x, uv.y]
         }
     }
 
@@ -82,6 +74,6 @@ impl Ui {
     #[doc(alias = "SetWindowFontScale")]
     pub fn set_window_font_scale(&self, _scale: f32) {
         // TODO: Implement when SetWindowFontScale is available in our Dear ImGui version
-        // unsafe { crate::sys::ImGui_SetWindowFontScale(scale) }
+        // unsafe { crate::sys::igSetWindowFontScale(scale) }
     }
 }

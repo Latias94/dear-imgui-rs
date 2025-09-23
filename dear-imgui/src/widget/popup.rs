@@ -17,7 +17,7 @@ impl Ui {
     #[doc(alias = "OpenPopup")]
     pub fn open_popup(&self, str_id: impl AsRef<str>) {
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::ImGui_OpenPopup(str_id_ptr, PopupFlags::NONE.bits()) }
+        unsafe { sys::igOpenPopup_Str(str_id_ptr, PopupFlags::NONE.bits()) }
     }
 
     /// Instructs ImGui that a popup is open with flags.
@@ -25,7 +25,7 @@ impl Ui {
     pub fn open_popup_with_flags(&self, str_id: impl AsRef<str>, flags: PopupFlags) {
         let str_id_ptr = self.scratch_txt(str_id);
         unsafe {
-            sys::ImGui_OpenPopup(str_id_ptr, flags.bits());
+            sys::igOpenPopup_Str(str_id_ptr, flags.bits());
         }
     }
 
@@ -46,7 +46,7 @@ impl Ui {
         flags: WindowFlags,
     ) -> Option<PopupToken<'_>> {
         let str_id_ptr = self.scratch_txt(str_id);
-        let render = unsafe { sys::ImGui_BeginPopup(str_id_ptr, flags.bits()) };
+        let render = unsafe { sys::igBeginPopup(str_id_ptr, flags.bits()) };
 
         if render {
             Some(PopupToken::new(self))
@@ -76,7 +76,7 @@ impl Ui {
     pub fn begin_modal_popup(&self, name: impl AsRef<str>) -> Option<ModalPopupToken<'_>> {
         let name_ptr = self.scratch_txt(name);
         let render = unsafe {
-            sys::ImGui_BeginPopupModal(name_ptr, std::ptr::null_mut(), WindowFlags::empty().bits())
+            sys::igBeginPopupModal(name_ptr, std::ptr::null_mut(), WindowFlags::empty().bits())
         };
 
         if render {
@@ -110,7 +110,7 @@ impl Ui {
     #[doc(alias = "CloseCurrentPopup")]
     pub fn close_current_popup(&self) {
         unsafe {
-            sys::ImGui_CloseCurrentPopup();
+            sys::igCloseCurrentPopup();
         }
     }
 
@@ -118,14 +118,14 @@ impl Ui {
     #[doc(alias = "IsPopupOpen")]
     pub fn is_popup_open(&self, str_id: impl AsRef<str>) -> bool {
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::ImGui_IsPopupOpen(str_id_ptr, PopupFlags::NONE.bits()) }
+        unsafe { sys::igIsPopupOpen_Str(str_id_ptr, PopupFlags::NONE.bits()) }
     }
 
     /// Returns true if the popup is open with flags.
     #[doc(alias = "IsPopupOpen")]
     pub fn is_popup_open_with_flags(&self, str_id: impl AsRef<str>, flags: PopupFlags) -> bool {
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::ImGui_IsPopupOpen(str_id_ptr, flags.bits()) }
+        unsafe { sys::igIsPopupOpen_Str(str_id_ptr, flags.bits()) }
     }
 
     /// Begin a popup context menu for the last item.
@@ -145,7 +145,9 @@ impl Ui {
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe { sys::ImGui_BeginPopupContextItem(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits()) };
+        let render = unsafe {
+            sys::igBeginPopupContextItem(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
+        };
 
         if render {
             Some(PopupToken::new(self))
@@ -170,7 +172,9 @@ impl Ui {
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe { sys::ImGui_BeginPopupContextWindow(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits()) };
+        let render = unsafe {
+            sys::igBeginPopupContextWindow(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
+        };
 
         if render {
             Some(PopupToken::new(self))
@@ -195,7 +199,9 @@ impl Ui {
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe { sys::ImGui_BeginPopupContextVoid(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits()) };
+        let render = unsafe {
+            sys::igBeginPopupContextVoid(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
+        };
 
         if render {
             Some(PopupToken::new(self))
@@ -262,7 +268,7 @@ impl<'ui> ModalPopup<'ui> {
             .map(|o| o as *mut bool)
             .unwrap_or(std::ptr::null_mut());
 
-        let render = unsafe { sys::ImGui_BeginPopupModal(name_ptr, opened_ptr, self.flags.bits()) };
+        let render = unsafe { sys::igBeginPopupModal(name_ptr, opened_ptr, self.flags.bits()) };
 
         if render {
             Some(ModalPopupToken::new(self.ui))
@@ -293,7 +299,7 @@ impl<'ui> PopupToken<'ui> {
 impl<'ui> Drop for PopupToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndPopup();
+            sys::igEndPopup();
         }
     }
 }
@@ -319,7 +325,7 @@ impl<'ui> ModalPopupToken<'ui> {
 impl<'ui> Drop for ModalPopupToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndPopup();
+            sys::igEndPopup();
         }
     }
 }

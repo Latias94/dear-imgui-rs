@@ -448,7 +448,7 @@ impl WgpuRenderer {
         // Note: We need to be careful with lifetimes here, so we'll set it just before rendering
         // and clear it immediately after
         unsafe {
-            let platform_io = dear_imgui::sys::ImGui_GetPlatformIO();
+            let platform_io = dear_imgui::sys::igGetPlatformIO_Nil();
 
             // Create a temporary render state structure
             let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);

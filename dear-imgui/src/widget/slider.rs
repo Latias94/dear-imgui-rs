@@ -100,7 +100,7 @@ where
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::ImGui_SliderScalar(
+            sys::igSliderScalar(
                 label,
                 Data::KIND as i32,
                 value as *mut Data as *mut c_void,
@@ -121,7 +121,7 @@ where
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::ImGui_SliderScalarN(
+            sys::igSliderScalarN(
                 label,
                 Data::KIND as i32,
                 values.as_mut_ptr() as *mut c_void,
@@ -237,9 +237,9 @@ where
             let (label, display_format) = ui.scratch_txt_with_opt(self.label, self.display_format);
             let size = sys::ImVec2::new(self.size[0], self.size[1]);
 
-            sys::ImGui_VSliderScalar(
+            sys::igVSliderScalar(
                 label,
-                &size,
+                size,
                 Data::KIND as i32,
                 value as *mut Data as *mut c_void,
                 &self.min as *const Data as *const c_void,
@@ -348,7 +348,7 @@ where
         unsafe {
             let (label, display_format) = ui.scratch_txt_two(self.label, self.display_format);
 
-            sys::ImGui_SliderAngle(
+            sys::igSliderAngle(
                 label,
                 value_rad as *mut _,
                 self.min_degrees,

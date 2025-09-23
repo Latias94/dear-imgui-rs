@@ -195,7 +195,7 @@ impl DrawData {
                 x: fb_scale[0],
                 y: fb_scale[1],
             };
-            sys::ImDrawData_ScaleClipRects(RawWrapper::raw_mut(self), &scale);
+            sys::ImDrawData_ScaleClipRects(RawWrapper::raw_mut(self), scale);
         }
     }
 }
@@ -425,7 +425,7 @@ impl From<&DrawData> for OwnedDrawData {
         unsafe {
             // Allocate memory for the new DrawData
             let result =
-                sys::ImGui_MemAlloc(std::mem::size_of::<sys::ImDrawData>()) as *mut sys::ImDrawData;
+                sys::igMemAlloc(std::mem::size_of::<sys::ImDrawData>()) as *mut sys::ImDrawData;
             if result.is_null() {
                 panic!("Failed to allocate memory for OwnedDrawData");
             }
@@ -470,7 +470,7 @@ impl Drop for OwnedDrawData {
                 // Note: Since we don't have ImDrawData_destroy in our bindings,
                 // we use MemFree directly. This is safe because ImDrawData
                 // doesn't have complex destructors in the C++ side.
-                sys::ImGui_MemFree(self.draw_data as *mut std::ffi::c_void);
+                sys::igMemFree(self.draw_data as *mut std::ffi::c_void);
                 self.draw_data = std::ptr::null_mut();
             }
         }

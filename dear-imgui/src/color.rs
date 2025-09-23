@@ -209,7 +209,7 @@ impl Color {
 /// Color edit flags for color picker widgets
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-pub enum ColorEditFlags {
+pub(crate) enum ColorEditFlags {
     /// No flags
     None = 0,
     /// ColorEdit, ColorPicker, ColorButton: ignore Alpha component (will only read 3 components from the input pointer).

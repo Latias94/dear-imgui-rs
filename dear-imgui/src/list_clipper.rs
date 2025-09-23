@@ -36,12 +36,10 @@ impl ListClipper {
     }
 
     pub fn begin(self, ui: &Ui) -> ListClipperToken<'_> {
-        let mut list_clipper = std::mem::MaybeUninit::<sys::ImGuiListClipper>::uninit();
         unsafe {
-            sys::ImGuiListClipper_ImGuiListClipper(list_clipper.as_mut_ptr());
-            let mut list_clipper = list_clipper.assume_init();
-            list_clipper.Begin(self.items_count, self.items_height);
-            ListClipperToken::new(ui, list_clipper)
+            let ptr = sys::ImGuiListClipper_ImGuiListClipper();
+            sys::ImGuiListClipper_Begin(ptr, self.items_count, self.items_height);
+            ListClipperToken::new(ui, ptr)
         }
     }
 }
@@ -52,7 +50,7 @@ impl ListClipper {
 /// For example you have a list of 1 million buttons, and the list
 /// clipper will help you only draw the ones which are visible.
 pub struct ListClipperToken<'ui> {
-    list_clipper: sys::ImGuiListClipper,
+    list_clipper: *mut sys::ImGuiListClipper,
     _phantom: PhantomData<&'ui Ui>,
 
     /// In upstream imgui < 1.87, calling step too many times will
@@ -66,7 +64,7 @@ pub struct ListClipperToken<'ui> {
 }
 
 impl<'ui> ListClipperToken<'ui> {
-    fn new(_: &Ui, list_clipper: sys::ImGuiListClipper) -> Self {
+    fn new(_: &Ui, list_clipper: *mut sys::ImGuiListClipper) -> Self {
         Self {
             list_clipper,
             _phantom: PhantomData,
@@ -87,12 +85,12 @@ impl<'ui> ListClipperToken<'ui> {
     pub fn step(&mut self) -> bool {
         let is_imgui_1_88_or_higher = false;
         if is_imgui_1_88_or_higher {
-            unsafe { self.list_clipper.Step() }
+            unsafe { sys::ImGuiListClipper_Step(self.list_clipper) }
         } else {
             if self.consumed_workaround {
                 panic!("ListClipperToken::step called after it has previously returned false");
             }
-            let ret = unsafe { self.list_clipper.Step() };
+            let ret = unsafe { sys::ImGuiListClipper_Step(self.list_clipper) };
             if !ret {
                 self.consumed_workaround = true;
             }
@@ -104,18 +102,18 @@ impl<'ui> ListClipperToken<'ui> {
     /// `step`. You can call it sooner but typically not needed.
     pub fn end(&mut self) {
         unsafe {
-            self.list_clipper.End();
+            sys::ImGuiListClipper_End(self.list_clipper);
         }
     }
 
     /// First item to call, updated each call to `step`
     pub fn display_start(&self) -> i32 {
-        self.list_clipper.DisplayStart
+        unsafe { (*self.list_clipper).DisplayStart }
     }
 
     /// End of items to call (exclusive), updated each call to `step`
     pub fn display_end(&self) -> i32 {
-        self.list_clipper.DisplayEnd
+        unsafe { (*self.list_clipper).DisplayEnd }
     }
 
     /// Get an iterator which outputs all visible indexes. This is the
@@ -128,7 +126,7 @@ impl<'ui> ListClipperToken<'ui> {
 impl Drop for ListClipperToken<'_> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGuiListClipper_ImGuiListClipper_destructor(&mut self.list_clipper);
+            sys::ImGuiListClipper_destroy(self.list_clipper);
         };
     }
 }

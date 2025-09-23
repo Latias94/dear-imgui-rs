@@ -98,7 +98,7 @@ impl Io {
     /// Creates a new Io instance from the current context
     pub(crate) fn from_raw() -> &'static mut Self {
         unsafe {
-            let io_ptr = sys::ImGui_GetIO();
+            let io_ptr = sys::igGetIO_Nil();
             &mut *(io_ptr as *mut Self)
         }
     }

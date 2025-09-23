@@ -8,7 +8,6 @@ members = [
     "backends/dear-imgui-glow",
     "extensions/dear-implot-sys",
     "extensions/dear-implot",
-    "extensions/dear-imguizmo",
     "examples",
 ]
 # Exclude dear-imguizmo from workspace as it's not ready for crates.io release

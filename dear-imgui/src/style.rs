@@ -99,7 +99,7 @@ impl Style {
     /// Creates a new Style instance from the current context
     pub(crate) fn from_raw() -> Self {
         unsafe {
-            let style_ptr = sys::ImGui_GetStyle();
+            let style_ptr = sys::igGetStyle();
             *(style_ptr as *const Style)
         }
     }

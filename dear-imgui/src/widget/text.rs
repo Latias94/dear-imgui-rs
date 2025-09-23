@@ -13,7 +13,7 @@ impl Ui {
                 z: color[2],
                 w: color[3],
             };
-            sys::ImGui_TextColored(&color_vec, text_ptr);
+            sys::igTextColored(color_vec, text_ptr);
         }
     }
 
@@ -22,7 +22,7 @@ impl Ui {
     pub fn text_disabled(&self, text: impl AsRef<str>) {
         let text_ptr = self.scratch_txt(text);
         unsafe {
-            sys::ImGui_TextDisabled(text_ptr);
+            sys::igTextDisabled(text_ptr);
         }
     }
 
@@ -31,7 +31,7 @@ impl Ui {
     pub fn text_wrapped(&self, text: impl AsRef<str>) {
         let text_ptr = self.scratch_txt(text);
         unsafe {
-            sys::ImGui_TextWrapped(text_ptr);
+            sys::igTextWrapped(text_ptr);
         }
     }
 
@@ -40,7 +40,7 @@ impl Ui {
     pub fn label_text(&self, label: impl AsRef<str>, text: impl AsRef<str>) {
         let (label_ptr, text_ptr) = self.scratch_txt_two(label, text);
         unsafe {
-            sys::ImGui_LabelText(label_ptr, text_ptr);
+            sys::igLabelText(label_ptr, text_ptr);
         }
     }
 }

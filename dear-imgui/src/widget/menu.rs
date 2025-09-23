@@ -12,7 +12,7 @@ impl Ui {
     #[must_use]
     #[doc(alias = "BeginMainMenuBar")]
     pub fn begin_main_menu_bar(&self) -> Option<MainMenuBarToken<'_>> {
-        if unsafe { sys::ImGui_BeginMainMenuBar() } {
+        if unsafe { sys::igBeginMainMenuBar() } {
             Some(MainMenuBarToken::new(self))
         } else {
             None
@@ -28,7 +28,7 @@ impl Ui {
     #[must_use]
     #[doc(alias = "BeginMenuBar")]
     pub fn begin_menu_bar(&self) -> Option<MenuBarToken<'_>> {
-        if unsafe { sys::ImGui_BeginMenuBar() } {
+        if unsafe { sys::igBeginMenuBar() } {
             Some(MenuBarToken::new(self))
         } else {
             None
@@ -61,7 +61,7 @@ impl Ui {
         enabled: bool,
     ) -> Option<MenuToken<'_>> {
         let label_ptr = self.scratch_txt(label);
-        if unsafe { sys::ImGui_BeginMenu(label_ptr, enabled) } {
+        if unsafe { sys::igBeginMenu(label_ptr, enabled) } {
             Some(MenuToken::new(self))
         } else {
             None
@@ -95,7 +95,7 @@ impl Ui {
     #[doc(alias = "MenuItem")]
     pub fn menu_item(&self, label: impl AsRef<str>) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::ImGui_MenuItem(label_ptr, std::ptr::null(), false, true) }
+        unsafe { sys::igMenuItemEx(label_ptr, std::ptr::null(), std::ptr::null(), false, true) }
     }
 
     /// Creates a menu item with a shortcut.
@@ -109,7 +109,7 @@ impl Ui {
     ) -> bool {
         let label_ptr = self.scratch_txt(label);
         let shortcut_ptr = self.scratch_txt(shortcut);
-        unsafe { sys::ImGui_MenuItem(label_ptr, shortcut_ptr, false, true) }
+        unsafe { sys::igMenuItemEx(label_ptr, std::ptr::null(), shortcut_ptr, false, true) }
     }
 }
 
@@ -134,7 +134,7 @@ impl<'ui> MainMenuBarToken<'ui> {
 impl<'ui> Drop for MainMenuBarToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndMainMenuBar();
+            sys::igEndMainMenuBar();
         }
     }
 }
@@ -160,7 +160,7 @@ impl<'ui> MenuBarToken<'ui> {
 impl<'ui> Drop for MenuBarToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndMenuBar();
+            sys::igEndMenuBar();
         }
     }
 }
@@ -186,7 +186,7 @@ impl<'ui> MenuToken<'ui> {
 impl<'ui> Drop for MenuToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndMenu();
+            sys::igEndMenu();
         }
     }
 }

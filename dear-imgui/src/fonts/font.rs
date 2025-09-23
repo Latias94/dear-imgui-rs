@@ -46,7 +46,7 @@ impl Font {
     /// Check if a glyph is available in this font
     #[doc(alias = "IsGlyphInFont")]
     pub fn is_glyph_in_font(&self, c: char) -> bool {
-        unsafe { sys::ImFont_IsGlyphInFont(self.raw, c as u32) }
+        unsafe { sys::ImFont_IsGlyphInFont(self.raw, c as u16) }
     }
 
     /// Calculate text size for the given text
@@ -61,16 +61,19 @@ impl Font {
         unsafe {
             let text_start = text.as_ptr() as *const std::os::raw::c_char;
             let text_end = text_start.add(text.len());
-            let result = sys::ImFont_CalcTextSizeA(
+            let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
+            let mut out_remaining: *const std::os::raw::c_char = std::ptr::null();
+            sys::ImFont_CalcTextSizeA(
+                &mut out,
                 self.raw,
                 size,
                 max_width,
                 wrap_width,
                 text_start,
                 text_end,
-                std::ptr::null_mut(),
+                &mut out_remaining,
             );
-            [result.x, result.y]
+            [out.x, out.y]
         }
     }
 
@@ -95,7 +98,7 @@ impl Font {
     /// Add character remapping
     #[doc(alias = "AddRemapChar")]
     pub fn add_remap_char(&mut self, from: char, to: char) {
-        unsafe { sys::ImFont_AddRemapChar(self.raw, from as u32, to as u32) }
+        unsafe { sys::ImFont_AddRemapChar(self.raw, from as u16, to as u16) }
     }
 
     /// Check if a glyph range is unused

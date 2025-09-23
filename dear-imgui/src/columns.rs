@@ -38,7 +38,7 @@ impl Ui {
     /// * `border` - Whether to draw borders between columns
     #[doc(alias = "Columns")]
     pub fn columns(&self, count: i32, id: impl AsRef<str>, border: bool) {
-        unsafe { sys::ImGui_Columns(count, self.scratch_txt(id), border) }
+        unsafe { sys::igColumns(count, self.scratch_txt(id), border) }
     }
 
     /// Begin columns layout with advanced flags.
@@ -49,13 +49,13 @@ impl Ui {
     /// * `flags` - Column flags
     #[doc(alias = "BeginColumns")]
     pub fn begin_columns(&self, id: impl AsRef<str>, count: i32, flags: OldColumnFlags) {
-        unsafe { sys::ImGui_BeginColumns(self.scratch_txt(id), count, flags.bits()) }
+        unsafe { sys::igBeginColumns(self.scratch_txt(id), count, flags.bits()) }
     }
 
     /// End columns layout.
     #[doc(alias = "EndColumns")]
     pub fn end_columns(&self) {
-        unsafe { sys::ImGui_EndColumns() }
+        unsafe { sys::igEndColumns() }
     }
 
     /// Switches to the next column.
@@ -63,67 +63,67 @@ impl Ui {
     /// If the current row is finished, switches to first column of the next row
     #[doc(alias = "NextColumn")]
     pub fn next_column(&self) {
-        unsafe { sys::ImGui_NextColumn() }
+        unsafe { sys::igNextColumn() }
     }
 
     /// Returns the index of the current column
     #[doc(alias = "GetColumnIndex")]
     pub fn current_column_index(&self) -> i32 {
-        unsafe { sys::ImGui_GetColumnIndex() }
+        unsafe { sys::igGetColumnIndex() }
     }
 
     /// Returns the width of the current column (in pixels)
     #[doc(alias = "GetColumnWidth")]
     pub fn current_column_width(&self) -> f32 {
-        unsafe { sys::ImGui_GetColumnWidth(-1) }
+        unsafe { sys::igGetColumnWidth(-1) }
     }
 
     /// Returns the width of the given column (in pixels)
     #[doc(alias = "GetColumnWidth")]
     pub fn column_width(&self, column_index: i32) -> f32 {
-        unsafe { sys::ImGui_GetColumnWidth(column_index) }
+        unsafe { sys::igGetColumnWidth(column_index) }
     }
 
     /// Sets the width of the current column (in pixels)
     #[doc(alias = "SetColumnWidth")]
     pub fn set_current_column_width(&self, width: f32) {
-        unsafe { sys::ImGui_SetColumnWidth(-1, width) };
+        unsafe { sys::igSetColumnWidth(-1, width) };
     }
 
     /// Sets the width of the given column (in pixels)
     #[doc(alias = "SetColumnWidth")]
     pub fn set_column_width(&self, column_index: i32, width: f32) {
-        unsafe { sys::ImGui_SetColumnWidth(column_index, width) };
+        unsafe { sys::igSetColumnWidth(column_index, width) };
     }
 
     /// Returns the offset of the current column (in pixels from the left side of the content region)
     #[doc(alias = "GetColumnOffset")]
     pub fn current_column_offset(&self) -> f32 {
-        unsafe { sys::ImGui_GetColumnOffset(-1) }
+        unsafe { sys::igGetColumnOffset(-1) }
     }
 
     /// Returns the offset of the given column (in pixels from the left side of the content region)
     #[doc(alias = "GetColumnOffset")]
     pub fn column_offset(&self, column_index: i32) -> f32 {
-        unsafe { sys::ImGui_GetColumnOffset(column_index) }
+        unsafe { sys::igGetColumnOffset(column_index) }
     }
 
     /// Sets the offset of the current column (in pixels from the left side of the content region)
     #[doc(alias = "SetColumnOffset")]
     pub fn set_current_column_offset(&self, offset_x: f32) {
-        unsafe { sys::ImGui_SetColumnOffset(-1, offset_x) };
+        unsafe { sys::igSetColumnOffset(-1, offset_x) };
     }
 
     /// Sets the offset of the given column (in pixels from the left side of the content region)
     #[doc(alias = "SetColumnOffset")]
     pub fn set_column_offset(&self, column_index: i32, offset_x: f32) {
-        unsafe { sys::ImGui_SetColumnOffset(column_index, offset_x) };
+        unsafe { sys::igSetColumnOffset(column_index, offset_x) };
     }
 
     /// Returns the current amount of columns
     #[doc(alias = "GetColumnsCount")]
     pub fn column_count(&self) -> i32 {
-        unsafe { sys::ImGui_GetColumnsCount() }
+        unsafe { sys::igGetColumnsCount() }
     }
 
     // ============================================================================
@@ -134,25 +134,25 @@ impl Ui {
     /// This is useful for custom drawing within columns.
     #[doc(alias = "PushColumnClipRect")]
     pub fn push_column_clip_rect(&self, column_index: i32) {
-        unsafe { sys::ImGui_PushColumnClipRect(column_index) }
+        unsafe { sys::igPushColumnClipRect(column_index) }
     }
 
     /// Push columns background for drawing.
     #[doc(alias = "PushColumnsBackground")]
     pub fn push_columns_background(&self) {
-        unsafe { sys::ImGui_PushColumnsBackground() }
+        unsafe { sys::igPushColumnsBackground() }
     }
 
     /// Pop columns background.
     #[doc(alias = "PopColumnsBackground")]
     pub fn pop_columns_background(&self) {
-        unsafe { sys::ImGui_PopColumnsBackground() }
+        unsafe { sys::igPopColumnsBackground() }
     }
 
     /// Get columns ID for the given string ID and count.
     #[doc(alias = "GetColumnsID")]
     pub fn get_columns_id(&self, str_id: impl AsRef<str>, count: i32) -> u32 {
-        unsafe { sys::ImGui_GetColumnsID(self.scratch_txt(str_id), count) }
+        unsafe { sys::igGetColumnsID(self.scratch_txt(str_id), count) }
     }
 
     // ============================================================================

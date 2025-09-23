@@ -1,127 +1,75 @@
 # dear-imgui-sys
 
-Low-level Rust bindings for Dear ImGui C++ library using bindgen.
+Low-level Rust bindings for Dear ImGui via cimgui (C API) + bindgen.
 
 ## Overview
 
-This crate provides unsafe Rust bindings to the Dear ImGui C++ library. It uses `bindgen` to automatically generate FFI bindings from the C++ headers, enabling direct access to the Dear ImGui API from Rust.
+This crate provides unsafe Rust bindings to the Dear ImGui docking branch using the cimgui C API. Bindings are generated with bindgen from vendored headers, avoiding C++ ABI pitfalls and making cross-platform builds simpler.
 
 ## Key Features
 
-- **Direct C++ Bindings**: Uses bindgen to generate bindings directly from Dear ImGui C++ headers
-- **MSVC ABI Compatibility**: Includes fixes for MSVC compiler ABI issues with small C++ return types
-- **Docking Support**: Built with Dear ImGui's docking branch for advanced window management
-- **WebAssembly Support**: Full WASM compatibility with proper configuration for web targets
-- **Cross-Platform**: Supports Windows, Linux, macOS, and WebAssembly
+- **cimgui-based bindings**: Generate from C API headers (no C++ ABI/MSVC quirks)
+- **Docking Support**: Built against the docking branch
+- **Windows-friendly**: Native builds prefer CMake (auto-detects VS/SDK)
+- **Prebuilt Support**: Link a prebuilt static library instead of building locally
+- **Docs.rs Offline**: Use pregenerated or offline-generated bindings
 
-## ABI Compatibility Issues and Solutions
+## Build & Link Options
 
-### The Problem
+You can choose one of the following strategies:
 
-When using `bindgen` to generate bindings for C++ libraries, there are known ABI (Application Binary Interface) compatibility issues, particularly with functions that return small C++ class types. This affects multiple platforms:
+1) Prebuilt static library（recommended）
+- Set `IMGUI_SYS_LIB_DIR=...` to the folder containing the static lib
+  - Windows: `dear_imgui.lib`
+  - Linux/macOS: `libdear_imgui.a`
+- Or set `IMGUI_SYS_PREBUILT_URL=...` to a direct URL of the static lib
+- Releases contain platform archives (include + static lib)
 
-- **Linux**: System V AMD64 ABI requires non-trivial C++ objects to be returned by pointer ([bindgen#778](https://github.com/rust-lang/rust-bindgen/issues/778))
-- **MSVC**: Special handling for small non-POD types causes crashes ([bindgen#2865](https://github.com/rust-lang/rust-bindgen/issues/2865))
-- **General**: bindgen assumes register return for small classes ([bindgen#2992](https://github.com/rust-lang/rust-bindgen/issues/2992))
+2) Native build from source
+- Windows prefers CMake automatically; set `IMGUI_SYS_USE_CMAKE=1` to force CMake elsewhere
+- Otherwise falls back to cc crate
 
-### Our Solution
+Build examples:
+- Windows (CMake auto):
+  - Requirements: Visual Studio (C++ build tools), CMake
+  - `cargo build -p dear-imgui-sys`
+- Linux:
+  - Requirements: build-essential, pkg-config, LLVM/Clang (for bindgen)
+  - `sudo apt-get install -y build-essential pkg-config llvm`
+  - `cargo build -p dear-imgui-sys`
+- macOS:
+  - Requirements: Xcode Command Line Tools
+  - `xcode-select --install` (if needed)
+  - `cargo build -p dear-imgui-sys`
 
-We implement the solution pioneered by [easy-imgui-rs](https://github.com/rodrigorc/easy-imgui-rs/), which provides a robust fix for MSVC ABI issues:
+3) Fast Rust-only iteration
+- Set `IMGUI_SYS_SKIP_CC=1` to skip native C/C++ compilation while iterating on Rust code
 
-#### 1. **FFI-Safe Wrapper Types**
-```cpp
-// FFI-safe POD type equivalent to ImVec2
-struct ImVec2_rr { 
-    float x, y; 
-};
+## Docs.rs / Offline
+
+When `DOCS_RS=1` is detected, the build script:
+- Tries to use `src/bindings_pregenerated.rs` (if present)
+- Else runs bindgen against vendored headers (offline, no network), and writes to `OUT_DIR/bindings.rs`
+- Skips native linking
+
+To refresh the pregenerated bindings locally:
 ```
-
-#### 2. **C Wrapper Functions**
-```cpp
-extern "C" {
-    ImVec2_rr ImGui_GetContentRegionAvail() { 
-        return _rr(ImGui::GetContentRegionAvail()); 
-    }
-}
+IMGUI_SYS_SKIP_CC=1 cargo build -p dear-imgui-sys
+cp target/debug/build/dear-imgui-sys-*/out/bindings.rs dear-imgui-sys/src/bindings_pregenerated.rs
 ```
-
-#### 3. **Selective Function Blocking**
-```txt
-# msvc_blocklist.txt - Functions that need MSVC ABI fixes
-ImGui::GetContentRegionAvail
-ImGui::GetCursorScreenPos
-ImGui::GetItemRectMin
-# ... other problematic functions
+或使用工具脚本：
 ```
-
-#### 4. **Conditional Compilation**
-```rust
-pub fn content_region_avail(&self) -> [f32; 2] {
-    unsafe {
-        #[cfg(target_env = "msvc")]
-        {
-            let size_rr = sys::ImGui_GetContentRegionAvail();
-            let size: sys::ImVec2 = size_rr.into();
-            [size.x, size.y]
-        }
-        #[cfg(not(target_env = "msvc"))]
-        {
-            let size = sys::ImGui_GetContentRegionAvail();
-            [size.x, size.y]
-        }
-    }
-}
+python tools/update_cimgui_and_bindings.py --branch docking_inter
 ```
-
-### Why This Solution Works
-
-1. **Platform-Specific**: Only applies fixes where needed (MSVC targets)
-2. **Type-Safe**: Maintains Rust's type safety through proper conversions
-3. **Minimal Impact**: Only affects problematic functions, not the entire API
-4. **Proven**: Successfully used by multiple Dear ImGui Rust bindings
-
-## Build Configuration
-
-The build system automatically detects the target environment and applies appropriate fixes:
-
-```rust
-// build.rs
-if target_env == "msvc" {
-    // Apply MSVC ABI fixes
-    builder = builder
-        .header("hack_msvc.cpp")
-        .allowlist_file("hack_msvc.cpp");
-        
-    // Block problematic functions
-    for line in blocklist_content.lines() {
-        builder = builder.blocklist_function(line.trim());
-    }
-}
-```
-
-## Related Issues
-
-- [rust-lang/rust-bindgen#778](https://github.com/rust-lang/rust-bindgen/issues/778) - Wrong ABI used for small C++ classes on Linux
-- [rust-lang/rust-bindgen#2865](https://github.com/rust-lang/rust-bindgen/issues/2865) - C++ ABI in MSVC and function returning non-POD type  
-- [rust-lang/rust-bindgen#2992](https://github.com/rust-lang/rust-bindgen/issues/2992) - bindgen wrongly assumes return by register for tiny C++ classes
-
-## Acknowledgments
-
-Our MSVC ABI fix implementation is based on the excellent work by [rodrigorc/easy-imgui-rs](https://github.com/rodrigorc/easy-imgui-rs/). This solution provides a robust and maintainable approach to handling C++ ABI compatibility issues in Rust FFI bindings.
 
 ## WebAssembly Support
 
 This crate provides comprehensive WebAssembly (WASM) support through the `wasm` feature flag. The implementation automatically handles the complexities of cross-compilation and provides a seamless experience for WASM development.
 
-### WASM Implementation Details
+### WASM Notes
 
-Our WASM support includes several key innovations:
-
-- **No C++ Cross-Compilation**: Skips C++ compilation for WASM targets to avoid toolchain complexity
-- **Pre-generated Bindings**: Uses reference bindings from native builds to ensure API compatibility
-- **Consistent API**: Uses the same `ImGui_*` function naming for both native and WASM targets
-- **Platform Abstraction**: Disables platform-specific functions that aren't available in WASM environments
-- **Thread-Local Storage**: Properly handles TLS limitations in WASM environments
+- Skips native C/C++ compilation for wasm targets
+- Uses offline-generated bindings for type-checking
 
 ### Building for WASM
 
@@ -171,26 +119,7 @@ wasm-bindgen --out-dir wasm --web target/wasm32-unknown-unknown/debug/your_app.w
 ```
 
 ### WASM Usage Example
-
-```rust
-use dear_imgui_sys::*;
-
-unsafe {
-    // Create ImGui context
-    let ctx = ImGui_CreateContext(std::ptr::null_mut());
-    ImGui_SetCurrentContext(ctx);
-
-    // Verify context is working
-    let current_ctx = ImGui_GetCurrentContext();
-    assert!(!current_ctx.is_null());
-
-    // Your ImGui code here...
-    // Note: You'll need to provide rendering through JavaScript/Canvas
-
-    // Cleanup
-    ImGui_DestroyContext(ctx);
-}
-```
+`wasm` 目标依赖于你的渲染集成（WebGL/Canvas 等），本 crate 仅提供类型层面的可用性。
 
 ### Rendering in WASM
 

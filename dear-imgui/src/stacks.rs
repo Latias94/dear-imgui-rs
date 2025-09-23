@@ -32,7 +32,7 @@ impl Ui {
         // For now, we'll use a simplified approach without full validation
         // TODO: Add proper FontAtlas integration for validation
         let font_ptr = id.0 as *mut sys::ImFont;
-        unsafe { sys::ImGui_PushFont(font_ptr, 0.0) };
+        unsafe { sys::igPushFont(font_ptr, 0.0) };
         FontStackToken::new(self)
     }
 
@@ -59,9 +59,9 @@ impl Ui {
     ) -> ColorStackToken<'_> {
         let color_array = color.into();
         unsafe {
-            sys::ImGui_PushStyleColor1(
+            sys::igPushStyleColor_Vec4(
                 style_color as i32,
-                &sys::ImVec4 {
+                sys::ImVec4 {
                     x: color_array[0],
                     y: color_array[1],
                     z: color_array[2],
@@ -100,7 +100,7 @@ create_token!(
     pub struct FontStackToken<'ui>;
 
     /// Pops a change from the font stack.
-    drop { sys::ImGui_PopFont() }
+    drop { sys::igPopFont() }
 );
 
 impl FontStackToken<'_> {
@@ -116,7 +116,7 @@ create_token!(
     pub struct ColorStackToken<'ui>;
 
     /// Pops a change from the color stack.
-    drop { sys::ImGui_PopStyleColor(1) }
+    drop { sys::igPopStyleColor(1) }
 );
 
 impl ColorStackToken<'_> {
@@ -132,7 +132,7 @@ create_token!(
     pub struct StyleStackToken<'ui>;
 
     /// Pops a change from the style stack.
-    drop { sys::ImGui_PopStyleVar(1) }
+    drop { sys::igPopStyleVar(1) }
 );
 
 impl StyleStackToken<'_> {
@@ -146,52 +146,76 @@ impl StyleStackToken<'_> {
 unsafe fn push_style_var(style_var: StyleVar) {
     use StyleVar::*;
     match style_var {
-        Alpha(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_Alpha as i32, v),
-        DisabledAlpha(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_DisabledAlpha as i32, v),
+        Alpha(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_Alpha as i32, v),
+        DisabledAlpha(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DisabledAlpha as i32, v),
         WindowPadding(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowPadding as i32, &v.into())
+            let p: [f32; 2] = v.into();
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowPadding as i32, vec)
         }
-        WindowRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_WindowRounding as i32, v),
+        WindowRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowRounding as i32, v),
         WindowBorderSize(v) => {
-            sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_WindowBorderSize as i32, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowBorderSize as i32, v)
         }
         WindowMinSize(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowMinSize as i32, &v.into())
+            let p: [f32; 2] = v.into();
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowMinSize as i32, vec)
         }
         WindowTitleAlign(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_WindowTitleAlign as i32, &v.into())
+            let p: [f32; 2] = v.into();
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowTitleAlign as i32, vec)
         }
-        ChildRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ChildRounding as i32, v),
-        ChildBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ChildBorderSize as i32, v),
-        PopupRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_PopupRounding as i32, v),
-        PopupBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_PopupBorderSize as i32, v),
+        ChildRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ChildRounding as i32, v),
+        ChildBorderSize(v) => {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ChildBorderSize as i32, v)
+        }
+        PopupRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupRounding as i32, v),
+        PopupBorderSize(v) => {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupBorderSize as i32, v)
+        }
         FramePadding(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_FramePadding as i32, &v.into())
+            let p: [f32; 2] = v.into();
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_FramePadding as i32, vec)
         }
-        FrameRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_FrameRounding as i32, v),
-        FrameBorderSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_FrameBorderSize as i32, v),
+        FrameRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameRounding as i32, v),
+        FrameBorderSize(v) => {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameBorderSize as i32, v)
+        }
         ItemSpacing(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ItemSpacing as i32, &v.into())
+            let p: [f32; 2] = v.into();
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemSpacing as i32, vec)
         }
         ItemInnerSpacing(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ItemInnerSpacing as i32, &v.into())
+            let p: [f32; 2] = v.into();
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemInnerSpacing as i32, vec)
         }
-        IndentSpacing(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_IndentSpacing as i32, v),
+        IndentSpacing(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_IndentSpacing as i32, v),
         CellPadding(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_CellPadding as i32, &v.into())
+            let p: [f32; 2] = v.into();
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_CellPadding as i32, vec)
         }
-        ScrollbarSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ScrollbarSize as i32, v),
+        ScrollbarSize(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarSize as i32, v),
         ScrollbarRounding(v) => {
-            sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_ScrollbarRounding as i32, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarRounding as i32, v)
         }
-        GrabMinSize(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_GrabMinSize as i32, v),
-        GrabRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_GrabRounding as i32, v),
-        TabRounding(v) => sys::ImGui_PushStyleVar(sys::ImGuiStyleVar_TabRounding as i32, v),
+        GrabMinSize(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabMinSize as i32, v),
+        GrabRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabRounding as i32, v),
+        TabRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabRounding as i32, v),
         ButtonTextAlign(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_ButtonTextAlign as i32, &v.into())
+            let p: [f32; 2] = v.into();
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ButtonTextAlign as i32, vec)
         }
         SelectableTextAlign(v) => {
-            sys::ImGui_PushStyleVar1(sys::ImGuiStyleVar_SelectableTextAlign as i32, &v.into())
+            let p: [f32; 2] = v.into();
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_SelectableTextAlign as i32, vec)
         }
     }
 }
@@ -209,7 +233,7 @@ impl Ui {
     ///   the right side)
     #[doc(alias = "PushItemWidth")]
     pub fn push_item_width(&self, item_width: f32) -> ItemWidthStackToken<'_> {
-        unsafe { sys::ImGui_PushItemWidth(item_width) };
+        unsafe { sys::igPushItemWidth(item_width) };
         ItemWidthStackToken::new(self)
     }
 
@@ -221,8 +245,9 @@ impl Ui {
     pub fn push_item_width_text(&self, text: impl AsRef<str>) -> ItemWidthStackToken<'_> {
         let text_width = unsafe {
             let text_ptr = self.scratch_txt(text);
-            let size = sys::ImGui_CalcTextSize(text_ptr, std::ptr::null(), false, -1.0);
-            size.x
+            let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igCalcTextSize(&mut out, text_ptr, std::ptr::null(), false, -1.0);
+            out.x
         };
         self.push_item_width(text_width)
     }
@@ -237,7 +262,7 @@ impl Ui {
     /// - `wrap_pos_x > 0.0`: wrap at `wrap_pos_x` position in window local space
     #[doc(alias = "PushTextWrapPos")]
     pub fn push_text_wrap_pos(&self, wrap_pos_x: f32) -> TextWrapPosStackToken<'_> {
-        unsafe { sys::ImGui_PushTextWrapPos(wrap_pos_x) };
+        unsafe { sys::igPushTextWrapPos(wrap_pos_x) };
         TextWrapPosStackToken::new(self)
     }
 }
@@ -249,7 +274,7 @@ create_token!(
 
     /// Pops an item width change made with [`Ui::push_item_width`].
     #[doc(alias = "PopItemWidth")]
-    drop { sys::ImGui_PopItemWidth() }
+    drop { sys::igPopItemWidth() }
 );
 
 create_token!(
@@ -259,7 +284,7 @@ create_token!(
 
     /// Pops a text wrap position change made with [`Ui::push_text_wrap_pos`].
     #[doc(alias = "PopTextWrapPos")]
-    drop { sys::ImGui_PopTextWrapPos() }
+    drop { sys::igPopTextWrapPos() }
 );
 
 /// # ID stack
@@ -302,9 +327,9 @@ impl Ui {
         let id = id.into();
         unsafe {
             match id {
-                Id::Int(i) => sys::ImGui_PushID3(i),
-                Id::Str(s) => sys::ImGui_PushID(self.scratch_txt(s)),
-                Id::Ptr(p) => sys::ImGui_PushID2(p),
+                Id::Int(i) => sys::igPushID_Int(i),
+                Id::Str(s) => sys::igPushID_Str(self.scratch_txt(s)),
+                Id::Ptr(p) => sys::igPushID_Ptr(p),
             }
         }
         IdStackToken::new(self)
@@ -317,7 +342,7 @@ create_token!(
     pub struct IdStackToken<'ui>;
 
     /// Pops a change from the ID stack
-    drop { sys::ImGui_PopID() }
+    drop { sys::igPopID() }
 );
 
 impl IdStackToken<'_> {

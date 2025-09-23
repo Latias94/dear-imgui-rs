@@ -25,7 +25,7 @@ impl Ui {
     /// Returns an immutable reference to the inputs/outputs object
     #[doc(alias = "GetIO")]
     pub fn io(&self) -> &crate::io::Io {
-        unsafe { &*(sys::ImGui_GetIO() as *const crate::io::Io) }
+        unsafe { &*(sys::igGetIO_Nil() as *const crate::io::Io) }
     }
 
     /// Internal method to push a single text to our scratch buffer.
@@ -83,7 +83,7 @@ impl Ui {
         unsafe {
             let start = s.as_ptr();
             let end = start.add(s.len());
-            crate::sys::ImGui_TextUnformatted(
+            crate::sys::igTextUnformatted(
                 start as *const std::os::raw::c_char,
                 end as *const std::os::raw::c_char,
             );
@@ -118,7 +118,7 @@ impl Ui {
     #[doc(alias = "ShowDemoWindow")]
     pub fn show_demo_window(&self, opened: &mut bool) {
         unsafe {
-            crate::sys::ImGui_ShowDemoWindow(opened);
+            crate::sys::igShowDemoWindow(opened);
         }
     }
 
@@ -128,7 +128,7 @@ impl Ui {
     #[doc(alias = "ShowAboutWindow")]
     pub fn show_about_window(&self, opened: &mut bool) {
         unsafe {
-            crate::sys::ImGui_ShowAboutWindow(opened);
+            crate::sys::igShowAboutWindow(opened);
         }
     }
 
@@ -139,7 +139,7 @@ impl Ui {
     #[doc(alias = "ShowMetricsWindow")]
     pub fn show_metrics_window(&self, opened: &mut bool) {
         unsafe {
-            crate::sys::ImGui_ShowMetricsWindow(opened);
+            crate::sys::igShowMetricsWindow(opened);
         }
     }
 
@@ -147,7 +147,7 @@ impl Ui {
     #[doc(alias = "ShowStyleEditor")]
     pub fn show_style_editor(&self, style: &mut crate::style::Style) {
         unsafe {
-            crate::sys::ImGui_ShowStyleEditor(style.raw_mut());
+            crate::sys::igShowStyleEditor(style.raw_mut());
         }
     }
 
@@ -155,7 +155,7 @@ impl Ui {
     #[doc(alias = "ShowStyleEditor")]
     pub fn show_default_style_editor(&self) {
         unsafe {
-            crate::sys::ImGui_ShowStyleEditor(std::ptr::null_mut());
+            crate::sys::igShowStyleEditor(std::ptr::null_mut());
         }
     }
 
@@ -163,7 +163,7 @@ impl Ui {
     #[doc(alias = "ShowUserGuide")]
     pub fn show_user_guide(&self) {
         unsafe {
-            crate::sys::ImGui_ShowUserGuide();
+            crate::sys::igShowUserGuide();
         }
     }
 
@@ -229,7 +229,7 @@ impl Ui {
     #[doc(alias = "GetMouseCursor")]
     pub fn mouse_cursor(&self) -> Option<MouseCursor> {
         unsafe {
-            match sys::ImGui_GetMouseCursor() {
+            match sys::igGetMouseCursor() {
                 sys::ImGuiMouseCursor_Arrow => Some(MouseCursor::Arrow),
                 sys::ImGuiMouseCursor_TextInput => Some(MouseCursor::TextInput),
                 sys::ImGuiMouseCursor_ResizeAll => Some(MouseCursor::ResizeAll),
@@ -250,7 +250,7 @@ impl Ui {
     #[doc(alias = "SetMouseCursor")]
     pub fn set_mouse_cursor(&self, cursor_type: Option<MouseCursor>) {
         unsafe {
-            sys::ImGui_SetMouseCursor(
+            sys::igSetMouseCursor(
                 cursor_type
                     .map(|x| x as i32)
                     .unwrap_or(sys::ImGuiMouseCursor_None),
@@ -277,7 +277,7 @@ impl Ui {
     #[doc(alias = "SetKeyboardFocusHere")]
     pub fn set_keyboard_focus_here_with_offset(&self, offset: i32) {
         unsafe {
-            sys::ImGui_SetKeyboardFocusHere(offset);
+            sys::igSetKeyboardFocusHere(offset);
         }
     }
 
@@ -287,7 +287,7 @@ impl Ui {
     #[doc(alias = "SetNextItemOpen")]
     pub fn set_next_item_open(&self, is_open: bool) {
         unsafe {
-            sys::ImGui_SetNextItemOpen(is_open, 0); // 0 = ImGuiCond_Always
+            sys::igSetNextItemOpen(is_open, 0); // 0 = ImGuiCond_Always
         }
     }
 
@@ -295,7 +295,7 @@ impl Ui {
     #[doc(alias = "SetNextItemOpen")]
     pub fn set_next_item_open_with_cond(&self, is_open: bool, cond: crate::Condition) {
         unsafe {
-            sys::ImGui_SetNextItemOpen(is_open, cond as i32);
+            sys::igSetNextItemOpen(is_open, cond as i32);
         }
     }
 
@@ -305,7 +305,7 @@ impl Ui {
     #[doc(alias = "SetNextItemWidth")]
     pub fn set_next_item_width(&self, item_width: f32) {
         unsafe {
-            sys::ImGui_SetNextItemWidth(item_width);
+            sys::igSetNextItemWidth(item_width);
         }
     }
 
@@ -327,7 +327,7 @@ impl Ui {
     #[doc(alias = "GetStyle")]
     pub unsafe fn style(&self) -> &crate::Style {
         // safe because Style is a transparent wrapper around sys::ImGuiStyle
-        &*(sys::ImGui_GetStyle() as *const crate::Style)
+        &*(sys::igGetStyle() as *const crate::Style)
     }
 
     /// Returns a copy of the current style.
@@ -341,78 +341,70 @@ impl Ui {
     /// Apply the built-in Dark style to the current style.
     #[doc(alias = "StyleColorsDark")]
     pub fn style_colors_dark(&self) {
-        unsafe { sys::ImGui_StyleColorsDark(std::ptr::null_mut()) }
+        unsafe { sys::igStyleColorsDark(std::ptr::null_mut()) }
     }
 
     /// Apply the built-in Light style to the current style.
     #[doc(alias = "StyleColorsLight")]
     pub fn style_colors_light(&self) {
-        unsafe { sys::ImGui_StyleColorsLight(std::ptr::null_mut()) }
+        unsafe { sys::igStyleColorsLight(std::ptr::null_mut()) }
     }
 
     /// Apply the built-in Classic style to the current style.
     #[doc(alias = "StyleColorsClassic")]
     pub fn style_colors_classic(&self) {
-        unsafe { sys::ImGui_StyleColorsClassic(std::ptr::null_mut()) }
+        unsafe { sys::igStyleColorsClassic(std::ptr::null_mut()) }
     }
 
     /// Write the Dark style values into the provided [`Style`] object.
     #[doc(alias = "StyleColorsDark")]
     pub fn style_colors_dark_into(&self, dst: &mut crate::Style) {
-        unsafe { sys::ImGui_StyleColorsDark(dst as *mut _ as *mut sys::ImGuiStyle) }
+        unsafe { sys::igStyleColorsDark(dst as *mut _ as *mut sys::ImGuiStyle) }
     }
 
     /// Write the Light style values into the provided [`Style`] object.
     #[doc(alias = "StyleColorsLight")]
     pub fn style_colors_light_into(&self, dst: &mut crate::Style) {
-        unsafe { sys::ImGui_StyleColorsLight(dst as *mut _ as *mut sys::ImGuiStyle) }
+        unsafe { sys::igStyleColorsLight(dst as *mut _ as *mut sys::ImGuiStyle) }
     }
 
     /// Write the Classic style values into the provided [`Style`] object.
     #[doc(alias = "StyleColorsClassic")]
     pub fn style_colors_classic_into(&self, dst: &mut crate::Style) {
-        unsafe { sys::ImGui_StyleColorsClassic(dst as *mut _ as *mut sys::ImGuiStyle) }
+        unsafe { sys::igStyleColorsClassic(dst as *mut _ as *mut sys::ImGuiStyle) }
     }
 
     /// Returns DPI scale currently associated to the current window's viewport.
     #[doc(alias = "GetWindowDpiScale")]
     pub fn window_dpi_scale(&self) -> f32 {
-        unsafe { sys::ImGui_GetWindowDpiScale() }
+        unsafe { sys::igGetWindowDpiScale() }
     }
 
     /// Display a text label with a boolean value (for quick debug UIs).
     #[doc(alias = "Value")]
     pub fn value_bool(&self, prefix: impl AsRef<str>, v: bool) {
-        unsafe { sys::ImGui_Value(self.scratch_txt(prefix), v) }
+        unsafe { sys::igValue_Bool(self.scratch_txt(prefix), v) }
     }
 
     /// Get current window width (shortcut for `GetWindowSize().x`).
     #[doc(alias = "GetWindowWidth")]
     pub fn window_width(&self) -> f32 {
-        unsafe { sys::ImGui_GetWindowWidth() }
+        unsafe { sys::igGetWindowWidth() }
     }
 
     /// Get current window height (shortcut for `GetWindowSize().y`).
     #[doc(alias = "GetWindowHeight")]
     pub fn window_height(&self) -> f32 {
-        unsafe { sys::ImGui_GetWindowHeight() }
+        unsafe { sys::igGetWindowHeight() }
     }
 
     /// Get current window position in screen space.
     #[doc(alias = "GetWindowPos")]
     pub fn window_pos(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let rr = sys::ImGui_GetWindowPos();
-                let v: sys::ImVec2 = rr.into();
-                [v.x, v.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let v = sys::ImGui_GetWindowPos();
-                [v.x, v.y]
-            }
+            let mut v = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetWindowPos(&mut v);
+            [v.x, v.y]
         }
     }
 
@@ -420,17 +412,9 @@ impl Ui {
     #[doc(alias = "GetWindowSize")]
     pub fn window_size(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let rr = sys::ImGui_GetWindowSize();
-                let v: sys::ImVec2 = rr.into();
-                [v.x, v.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let v = sys::ImGui_GetWindowSize();
-                [v.x, v.y]
-            }
+            let mut v = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetWindowSize(&mut v);
+            [v.x, v.y]
         }
     }
 
@@ -444,7 +428,7 @@ impl Ui {
     #[doc(alias = "ShowDebugLogWindow")]
     pub fn show_debug_log_window(&self, opened: &mut bool) {
         unsafe {
-            sys::ImGui_ShowDebugLogWindow(opened);
+            sys::igShowDebugLogWindow(opened);
         }
     }
 
@@ -454,7 +438,7 @@ impl Ui {
     #[doc(alias = "ShowIDStackToolWindow")]
     pub fn show_id_stack_tool_window(&self, opened: &mut bool) {
         unsafe {
-            sys::ImGui_ShowIDStackToolWindow(opened);
+            sys::igShowIDStackToolWindow(opened);
         }
     }
 
@@ -463,14 +447,14 @@ impl Ui {
     /// Returns true when a different style was selected.
     #[doc(alias = "ShowStyleSelector")]
     pub fn show_style_selector(&self, label: impl AsRef<str>) -> bool {
-        unsafe { sys::ImGui_ShowStyleSelector(self.scratch_txt(label)) }
+        unsafe { sys::igShowStyleSelector(self.scratch_txt(label)) }
     }
 
     /// Renders a font selector combo box.
     #[doc(alias = "ShowFontSelector")]
     pub fn show_font_selector(&self, label: impl AsRef<str>) {
         unsafe {
-            sys::ImGui_ShowFontSelector(self.scratch_txt(label));
+            sys::igShowFontSelector(self.scratch_txt(label));
         }
     }
 
@@ -478,7 +462,7 @@ impl Ui {
     #[doc(alias = "GetVersion")]
     pub fn get_version(&self) -> &str {
         unsafe {
-            let version_ptr = sys::ImGui_GetVersion();
+            let version_ptr = sys::igGetVersion();
             let c_str = std::ffi::CStr::from_ptr(version_ptr);
             c_str.to_str().unwrap_or("Unknown")
         }

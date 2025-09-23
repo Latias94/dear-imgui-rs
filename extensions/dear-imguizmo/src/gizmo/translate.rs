@@ -34,7 +34,7 @@ pub fn handle_translation(
     {
         // Capture mouse input
         unsafe {
-            dear_imgui::sys::ImGui_SetNextFrameWantCaptureMouse(true);
+            dear_imgui::sys::igSetNextFrameWantCaptureMouse(true);
         }
 
         // Compute intersection with translation plane
@@ -102,7 +102,7 @@ pub fn handle_translation(
         *matrix = result;
 
         // Check if mouse is released
-        let io = unsafe { dear_imgui::sys::ImGui_GetIO() };
+        let io = unsafe { dear_imgui::sys::igGetIO_Nil() };
         if !unsafe { (*io).MouseDown[0] } {
             state.using = ManipulationType::None;
         }
@@ -116,7 +116,7 @@ pub fn handle_translation(
 
         if move_type != ManipulationType::None {
             unsafe {
-                dear_imgui::sys::ImGui_SetNextFrameWantCaptureMouse(true);
+                dear_imgui::sys::igSetNextFrameWantCaptureMouse(true);
             }
         }
 

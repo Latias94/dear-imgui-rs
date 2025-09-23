@@ -94,9 +94,9 @@ impl<'ui> ChildWindow<'ui> {
                 x: self.size[0],
                 y: self.size[1],
             };
-            sys::ImGui_BeginChild(
+            sys::igBeginChild_Str(
                 name_cstr.as_ptr(),
-                &size_vec,
+                size_vec,
                 self.child_flags.bits() as i32,
                 self.flags.bits(),
             )
@@ -113,7 +113,7 @@ impl<'ui> ChildWindow<'ui> {
         } else {
             // If BeginChild returns false, call EndChild immediately and return None
             unsafe {
-                sys::ImGui_EndChild();
+                sys::igEndChild();
             }
             None
         }
@@ -128,7 +128,7 @@ pub struct ChildWindowToken<'ui> {
 impl<'ui> Drop for ChildWindowToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndChild();
+            sys::igEndChild();
         }
     }
 }

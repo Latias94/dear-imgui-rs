@@ -264,68 +264,70 @@ impl crate::Ui {
     /// Check if a key is being held down
     #[doc(alias = "IsKeyDown")]
     pub fn is_key_down(&self, key: Key) -> bool {
-        unsafe { sys::ImGui_IsKeyDown(key as i32) }
+        unsafe { sys::igIsKeyDown_Nil(key as i32) }
     }
 
     /// Check if a key was pressed (went from !Down to Down)
     #[doc(alias = "IsKeyPressed")]
     pub fn is_key_pressed(&self, key: Key) -> bool {
-        unsafe { sys::ImGui_IsKeyPressed(key as i32, true) }
+        unsafe { sys::igIsKeyPressed_Bool(key as i32, true) }
     }
 
     /// Check if a key was pressed (went from !Down to Down), with repeat
     #[doc(alias = "IsKeyPressed")]
     pub fn is_key_pressed_with_repeat(&self, key: Key, repeat: bool) -> bool {
-        unsafe { sys::ImGui_IsKeyPressed(key as i32, repeat) }
+        unsafe { sys::igIsKeyPressed_Bool(key as i32, repeat) }
     }
 
     /// Check if a key was released (went from Down to !Down)
     #[doc(alias = "IsKeyReleased")]
     pub fn is_key_released(&self, key: Key) -> bool {
-        unsafe { sys::ImGui_IsKeyReleased(key as i32) }
+        unsafe { sys::igIsKeyReleased_Nil(key as i32) }
     }
 
     /// Check if a mouse button is being held down
     #[doc(alias = "IsMouseDown")]
     pub fn is_mouse_down(&self, button: MouseButton) -> bool {
-        unsafe { sys::ImGui_IsMouseDown(button as i32) }
+        unsafe { sys::igIsMouseDown_Nil(button as i32) }
     }
 
     /// Check if a mouse button was clicked (went from !Down to Down)
     #[doc(alias = "IsMouseClicked")]
     pub fn is_mouse_clicked(&self, button: MouseButton) -> bool {
-        unsafe { sys::ImGui_IsMouseClicked(button as i32, false) }
+        unsafe { sys::igIsMouseClicked_Bool(button as i32, false) }
     }
 
     /// Check if a mouse button was clicked, with repeat
     #[doc(alias = "IsMouseClicked")]
     pub fn is_mouse_clicked_with_repeat(&self, button: MouseButton, repeat: bool) -> bool {
-        unsafe { sys::ImGui_IsMouseClicked(button as i32, repeat) }
+        unsafe { sys::igIsMouseClicked_Bool(button as i32, repeat) }
     }
 
     /// Check if a mouse button was released (went from Down to !Down)
     #[doc(alias = "IsMouseReleased")]
     pub fn is_mouse_released(&self, button: MouseButton) -> bool {
-        unsafe { sys::ImGui_IsMouseReleased(button as i32) }
+        unsafe { sys::igIsMouseReleased_Nil(button as i32) }
     }
 
     /// Check if a mouse button was double-clicked
     #[doc(alias = "IsMouseDoubleClicked")]
     pub fn is_mouse_double_clicked(&self, button: MouseButton) -> bool {
-        unsafe { sys::ImGui_IsMouseDoubleClicked(button as i32) }
+        unsafe { sys::igIsMouseDoubleClicked_Nil(button as i32) }
     }
 
     /// Get mouse position in screen coordinates
     #[doc(alias = "GetMousePos")]
     pub fn mouse_pos(&self) -> [f32; 2] {
-        let pos = unsafe { sys::ImGui_GetMousePos() };
+        let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+        unsafe { sys::igGetMousePos(&mut pos) };
         [pos.x, pos.y]
     }
 
     /// Get mouse position when a specific button was clicked
     #[doc(alias = "GetMousePosOnOpeningCurrentPopup")]
     pub fn mouse_pos_on_opening_current_popup(&self) -> [f32; 2] {
-        let pos = unsafe { sys::ImGui_GetMousePosOnOpeningCurrentPopup() };
+        let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+        unsafe { sys::igGetMousePosOnOpeningCurrentPopup(&mut pos) };
         [pos.x, pos.y]
     }
 
@@ -333,9 +335,9 @@ impl crate::Ui {
     #[doc(alias = "IsMouseHoveringRect")]
     pub fn is_mouse_hovering_rect(&self, r_min: [f32; 2], r_max: [f32; 2]) -> bool {
         unsafe {
-            sys::ImGui_IsMouseHoveringRect(
-                &sys::ImVec2::new(r_min[0], r_min[1]),
-                &sys::ImVec2::new(r_max[0], r_max[1]),
+            sys::igIsMouseHoveringRect(
+                sys::ImVec2::new(r_min[0], r_min[1]),
+                sys::ImVec2::new(r_max[0], r_max[1]),
                 true,
             )
         }
@@ -350,9 +352,9 @@ impl crate::Ui {
         clip: bool,
     ) -> bool {
         unsafe {
-            sys::ImGui_IsMouseHoveringRect(
-                &sys::ImVec2::new(r_min[0], r_min[1]),
-                &sys::ImVec2::new(r_max[0], r_max[1]),
+            sys::igIsMouseHoveringRect(
+                sys::ImVec2::new(r_min[0], r_min[1]),
+                sys::ImVec2::new(r_max[0], r_max[1]),
                 clip,
             )
         }
@@ -361,7 +363,7 @@ impl crate::Ui {
     /// Check if mouse is dragging
     #[doc(alias = "IsMouseDragging")]
     pub fn is_mouse_dragging(&self, button: MouseButton) -> bool {
-        unsafe { sys::ImGui_IsMouseDragging(button as i32, -1.0) }
+        unsafe { sys::igIsMouseDragging(button as i32, -1.0) }
     }
 
     /// Check if mouse is dragging with threshold
@@ -371,13 +373,14 @@ impl crate::Ui {
         button: MouseButton,
         lock_threshold: f32,
     ) -> bool {
-        unsafe { sys::ImGui_IsMouseDragging(button as i32, lock_threshold) }
+        unsafe { sys::igIsMouseDragging(button as i32, lock_threshold) }
     }
 
     /// Get mouse drag delta
     #[doc(alias = "GetMouseDragDelta")]
     pub fn mouse_drag_delta(&self, button: MouseButton) -> [f32; 2] {
-        let delta = unsafe { sys::ImGui_GetMouseDragDelta(button as i32, -1.0) };
+        let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
+        unsafe { sys::igGetMouseDragDelta(&mut delta, button as i32, -1.0) };
         [delta.x, delta.y]
     }
 
@@ -388,13 +391,14 @@ impl crate::Ui {
         button: MouseButton,
         lock_threshold: f32,
     ) -> [f32; 2] {
-        let delta = unsafe { sys::ImGui_GetMouseDragDelta(button as i32, lock_threshold) };
+        let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
+        unsafe { sys::igGetMouseDragDelta(&mut delta, button as i32, lock_threshold) };
         [delta.x, delta.y]
     }
 
     /// Reset mouse drag delta for a specific button
     #[doc(alias = "ResetMouseDragDelta")]
     pub fn reset_mouse_drag_delta(&self, button: MouseButton) {
-        unsafe { sys::ImGui_ResetMouseDragDelta(button as i32) }
+        unsafe { sys::igResetMouseDragDelta(button as i32) }
     }
 }

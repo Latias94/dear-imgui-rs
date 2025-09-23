@@ -59,24 +59,16 @@ impl crate::ui::Ui {
     /// Returns `true` if the last item open state was toggled
     #[doc(alias = "IsItemToggledOpen")]
     pub fn is_item_toggled_open(&self) -> bool {
-        unsafe { sys::ImGui_IsItemToggledOpen() }
+        unsafe { sys::igIsItemToggledOpen() }
     }
 
     /// Returns the upper-left bounding rectangle of the last item (screen space)
     #[doc(alias = "GetItemRectMin")]
     pub fn item_rect_min(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let rect_rr = sys::ImGui_GetItemRectMin();
-                let rect: sys::ImVec2 = rect_rr.into();
-                [rect.x, rect.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let rect = sys::ImGui_GetItemRectMin();
-                [rect.x, rect.y]
-            }
+            let mut rect = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetItemRectMin(&mut rect);
+            [rect.x, rect.y]
         }
     }
 
@@ -84,17 +76,9 @@ impl crate::ui::Ui {
     #[doc(alias = "GetItemRectMax")]
     pub fn item_rect_max(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let rect_rr = sys::ImGui_GetItemRectMax();
-                let rect: sys::ImVec2 = rect_rr.into();
-                [rect.x, rect.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let rect = sys::ImGui_GetItemRectMax();
-                [rect.x, rect.y]
-            }
+            let mut rect = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetItemRectMax(&mut rect);
+            [rect.x, rect.y]
         }
     }
 
@@ -105,31 +89,31 @@ impl crate::ui::Ui {
     /// Returns `true` if the current window is hovered (and typically: not blocked by a popup/modal)
     #[doc(alias = "IsWindowHovered")]
     pub fn is_window_hovered(&self) -> bool {
-        unsafe { sys::ImGui_IsWindowHovered(HoveredFlags::NONE.bits()) }
+        unsafe { sys::igIsWindowHovered(HoveredFlags::NONE.bits()) }
     }
 
     /// Returns `true` if the current window is hovered based on the given flags
     #[doc(alias = "IsWindowHovered")]
     pub fn is_window_hovered_with_flags(&self, flags: HoveredFlags) -> bool {
-        unsafe { sys::ImGui_IsWindowHovered(flags.bits()) }
+        unsafe { sys::igIsWindowHovered(flags.bits()) }
     }
 
     /// Returns `true` if the current window is focused (and typically: not blocked by a popup/modal)
     #[doc(alias = "IsWindowFocused")]
     pub fn is_window_focused(&self) -> bool {
-        unsafe { sys::ImGui_IsWindowFocused(0) }
+        unsafe { sys::igIsWindowFocused(0) }
     }
 
     /// Returns `true` if the current window is appearing this frame.
     #[doc(alias = "IsWindowAppearing")]
     pub fn is_window_appearing(&self) -> bool {
-        unsafe { sys::ImGui_IsWindowAppearing() }
+        unsafe { sys::igIsWindowAppearing() }
     }
 
     /// Returns `true` if the current window is collapsed.
     #[doc(alias = "IsWindowCollapsed")]
     pub fn is_window_collapsed(&self) -> bool {
-        unsafe { sys::ImGui_IsWindowCollapsed() }
+        unsafe { sys::igIsWindowCollapsed() }
     }
 
     // ============================================================================
@@ -139,14 +123,14 @@ impl crate::ui::Ui {
     /// Returns the number of times the key was pressed in the current frame
     #[doc(alias = "GetKeyPressedAmount")]
     pub fn get_key_pressed_amount(&self, key: Key, repeat_delay: f32, rate: f32) -> i32 {
-        unsafe { sys::ImGui_GetKeyPressedAmount(key as i32, repeat_delay, rate) }
+        unsafe { sys::igGetKeyPressedAmount(key as i32, repeat_delay, rate) }
     }
 
     /// Returns the name of a key
     #[doc(alias = "GetKeyName")]
     pub fn get_key_name(&self, key: Key) -> &str {
         unsafe {
-            let name_ptr = sys::ImGui_GetKeyName(key as i32);
+            let name_ptr = sys::igGetKeyName(key as i32);
             let c_str = std::ffi::CStr::from_ptr(name_ptr);
             c_str.to_str().unwrap_or("Unknown")
         }
@@ -155,7 +139,7 @@ impl crate::ui::Ui {
     /// Returns the number of times the mouse button was clicked in the current frame
     #[doc(alias = "GetMouseClickedCount")]
     pub fn get_mouse_clicked_count(&self, button: MouseButton) -> i32 {
-        unsafe { sys::ImGui_GetMouseClickedCount(button as i32) }
+        unsafe { sys::igGetMouseClickedCount(button as i32) }
     }
 
     /// Returns the mouse position in screen coordinates
@@ -164,13 +148,14 @@ impl crate::ui::Ui {
         unsafe {
             #[cfg(target_env = "msvc")]
             {
-                let pos_rr = sys::ImGui_GetMousePos();
-                let pos: sys::ImVec2 = pos_rr.into();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetMousePos(&mut pos);
                 [pos.x, pos.y]
             }
             #[cfg(not(target_env = "msvc"))]
             {
-                let pos = sys::ImGui_GetMousePos();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetMousePos(&mut pos);
                 [pos.x, pos.y]
             }
         }
@@ -182,13 +167,14 @@ impl crate::ui::Ui {
         unsafe {
             #[cfg(target_env = "msvc")]
             {
-                let pos_rr = sys::ImGui_GetMousePosOnOpeningCurrentPopup();
-                let pos: sys::ImVec2 = pos_rr.into();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetMousePosOnOpeningCurrentPopup(&mut pos);
                 [pos.x, pos.y]
             }
             #[cfg(not(target_env = "msvc"))]
             {
-                let pos = sys::ImGui_GetMousePosOnOpeningCurrentPopup();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetMousePosOnOpeningCurrentPopup(&mut pos);
                 [pos.x, pos.y]
             }
         }
@@ -200,13 +186,14 @@ impl crate::ui::Ui {
         unsafe {
             #[cfg(target_env = "msvc")]
             {
-                let delta_rr = sys::ImGui_GetMouseDragDelta(button as i32, lock_threshold);
-                let delta: sys::ImVec2 = delta_rr.into();
+                let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetMouseDragDelta(&mut delta, button as i32, lock_threshold);
                 [delta.x, delta.y]
             }
             #[cfg(not(target_env = "msvc"))]
             {
-                let delta = sys::ImGui_GetMouseDragDelta(button as i32, lock_threshold);
+                let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetMouseDragDelta(&mut delta, button as i32, lock_threshold);
                 [delta.x, delta.y]
             }
         }
@@ -215,19 +202,19 @@ impl crate::ui::Ui {
     /// Returns the mouse wheel delta
     #[doc(alias = "GetIO")]
     pub fn get_mouse_wheel(&self) -> f32 {
-        unsafe { (*sys::ImGui_GetIO()).MouseWheel }
+        unsafe { (*sys::igGetIO_Nil()).MouseWheel }
     }
 
     /// Returns the horizontal mouse wheel delta
     #[doc(alias = "GetIO")]
     pub fn get_mouse_wheel_h(&self) -> f32 {
-        unsafe { (*sys::ImGui_GetIO()).MouseWheelH }
+        unsafe { (*sys::igGetIO_Nil()).MouseWheelH }
     }
 
     /// Returns `true` if any mouse button is down
     #[doc(alias = "IsAnyMouseDown")]
     pub fn is_any_mouse_down(&self) -> bool {
-        unsafe { sys::ImGui_IsAnyMouseDown() }
+        unsafe { sys::igIsAnyMouseDown() }
     }
 
     // ============================================================================
@@ -237,13 +224,13 @@ impl crate::ui::Ui {
     /// Get global imgui time. Incremented by io.DeltaTime every frame.
     #[doc(alias = "GetTime")]
     pub fn time(&self) -> f64 {
-        unsafe { sys::ImGui_GetTime() }
+        unsafe { sys::igGetTime() }
     }
 
     /// Get global imgui frame count. Incremented by 1 every frame.
     #[doc(alias = "GetFrameCount")]
     pub fn frame_count(&self) -> i32 {
-        unsafe { sys::ImGui_GetFrameCount() }
+        unsafe { sys::igGetFrameCount() }
     }
 
     /// Returns a single style color from the user interface style.
@@ -253,7 +240,7 @@ impl crate::ui::Ui {
     #[doc(alias = "GetStyle")]
     pub fn style_color(&self, style_color: StyleColor) -> [f32; 4] {
         unsafe {
-            let style_ptr = sys::ImGui_GetStyle();
+            let style_ptr = sys::igGetStyle();
             let colors = (*style_ptr).Colors.as_ptr();
             let color = *colors.add(style_color as usize);
             [color.x, color.y, color.z, color.w]
@@ -268,7 +255,7 @@ impl crate::ui::Ui {
     #[doc(alias = "GetStyleColorName")]
     pub fn style_color_name(&self, style_color: StyleColor) -> &'static str {
         unsafe {
-            let name_ptr = sys::ImGui_GetStyleColorName(style_color as sys::ImGuiCol);
+            let name_ptr = sys::igGetStyleColorName(style_color as sys::ImGuiCol);
             let c_str = std::ffi::CStr::from_ptr(name_ptr);
             c_str.to_str().unwrap_or("Unknown")
         }
@@ -282,7 +269,7 @@ impl crate::ui::Ui {
                 x: size[0],
                 y: size[1],
             };
-            sys::ImGui_IsRectVisible(&size)
+            sys::igIsRectVisible_Nil(size)
         }
     }
 
@@ -298,7 +285,7 @@ impl crate::ui::Ui {
                 x: rect_max[0],
                 y: rect_max[1],
             };
-            sys::ImGui_IsRectVisible1(&rect_min, &rect_max)
+            sys::igIsRectVisible_Vec2(rect_min, rect_max)
         }
     }
 
@@ -310,13 +297,14 @@ impl crate::ui::Ui {
         unsafe {
             #[cfg(target_env = "msvc")]
             {
-                let pos_rr = sys::ImGui_GetCursorScreenPos();
-                let pos: sys::ImVec2 = pos_rr.into();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetCursorScreenPos(&mut pos);
                 [pos.x, pos.y]
             }
             #[cfg(not(target_env = "msvc"))]
             {
-                let pos = sys::ImGui_GetCursorScreenPos();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetCursorScreenPos(&mut pos);
                 [pos.x, pos.y]
             }
         }
@@ -328,13 +316,14 @@ impl crate::ui::Ui {
         unsafe {
             #[cfg(target_env = "msvc")]
             {
-                let size_rr = sys::ImGui_GetContentRegionAvail();
-                let size: sys::ImVec2 = size_rr.into();
+                let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetContentRegionAvail(&mut size);
                 [size.x, size.y]
             }
             #[cfg(not(target_env = "msvc"))]
             {
-                let size = sys::ImGui_GetContentRegionAvail();
+                let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetContentRegionAvail(&mut size);
                 [size.x, size.y]
             }
         }
@@ -447,6 +436,6 @@ impl crate::ui::Ui {
     /// Allows the next item to be overlapped by a subsequent item.
     #[doc(alias = "SetNextItemAllowOverlap")]
     pub fn set_next_item_allow_overlap(&self) {
-        unsafe { sys::ImGui_SetNextItemAllowOverlap() };
+        unsafe { sys::igSetNextItemAllowOverlap() };
     }
 }

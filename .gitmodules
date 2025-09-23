@@ -1,7 +1,7 @@
-[submodule "dear-imgui-sys/imgui"]
-	path = dear-imgui-sys/imgui
-	url = https://github.com/ocornut/imgui.git
-	branch = docking
 [submodule "extensions/dear-implot-sys/third-party/implot"]
 	path = extensions/dear-implot-sys/third-party/implot
 	url = https://github.com/epezent/implot.git
+[submodule "dear-imgui-sys/third-party/cimgui"]
+	path = dear-imgui-sys/third-party/cimgui
+	url = https://github.com/cimgui/cimgui.git
+	branch = docking_inter
