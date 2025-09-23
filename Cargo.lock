@@ -737,15 +737,23 @@ dependencies = [
 name = "dear-imguizmo"
 version = "0.1.0"
 dependencies = [
- "approx",
- "bitflags 2.9.4",
  "dear-imgui",
- "glam",
- "mint",
- "pretty_assertions",
+ "dear-imguizmo-sys",
  "thiserror 2.0.16",
- "tracing",
- "tracing-subscriber",
+]
+
+[[package]]
+name = "dear-imguizmo-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cfg-if",
+ "dear-imgui-sys",
+ "mint",
+ "pkg-config",
+ "reqwest",
+ "xshell",
 ]
 
 [[package]]
@@ -773,6 +781,7 @@ dependencies = [
  "dear-imgui-sys",
  "mint",
  "pkg-config",
+ "reqwest",
  "xshell",
 ]
 
@@ -1140,15 +1149,6 @@ dependencies = [
  "khronos_api",
  "log",
  "xml-rs",
-]
-
-[[package]]
-name = "glam"
-version = "0.30.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34e4649b62c21fb8c737abe6449192ce96ecd16b5c0d606759fe43831b31bd95"
-dependencies = [
- "mint",
 ]
 
 [[package]]
