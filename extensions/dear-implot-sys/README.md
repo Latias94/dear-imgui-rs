@@ -62,6 +62,7 @@ cargo build -p dear-implot-sys
 
 ## Notes
 
-- This crate always links against `dear_imgui` (static) as provided by `dear-imgui-sys`.
+- Linking to the base ImGui static library is provided by `dear-imgui-sys`; this crate does not duplicate `cargo:rustc-link-lib` for it.
+- MSVC (Windows) builds align CRT and exception flags with `dear-imgui-sys`.
 - `docs.rs` builds generate bindings only and export include paths for downstream crates.
 - Higher-level Rust APIs live in `extensions/dear-implot/`. See that crate for usage patterns and examples.

@@ -672,6 +672,7 @@ dependencies = [
  "dear-imguizmo",
  "dear-implot",
  "env_logger",
+ "glam",
  "glow",
  "glutin",
  "glutin-winit",
@@ -743,8 +744,11 @@ dependencies = [
 name = "dear-imguizmo"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.9.4",
  "dear-imgui",
+ "dear-imgui-sys",
  "dear-imguizmo-sys",
+ "glam",
  "thiserror 2.0.16",
 ]
 
@@ -1162,6 +1166,12 @@ dependencies = [
  "log",
  "xml-rs",
 ]
+
+[[package]]
+name = "glam"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
 
 [[package]]
 name = "glob"

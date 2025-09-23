@@ -37,7 +37,7 @@ dear-imgui/
 │   ├── dear-imgui-glow/    # OpenGL renderer backend
 │   └── dear-imgui-winit/   # Winit platform integration
 └── extensions/
-    ├── dear-imguizmo/      # 3D gizmo manipulation (Work in progress)
+    ├── dear-imguizmo/      # 3D gizmo manipulation 
     └── dear-implot/        # Advanced plotting library
 ```
 
@@ -214,3 +214,4 @@ Prebuilt packages
 - Use:
   - Extract somewhere and set `IMGUI_SYS_LIB_DIR` to the folder containing the static library
   - Or host the static library and set `IMGUI_SYS_PREBUILT_URL` to its direct URL
+

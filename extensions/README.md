@@ -1,389 +1,68 @@
 # Dear ImGui Extensions
-**Ready to contribute?** Start by creating an issue to discuss your extension idea, and we'll help you get started! 🚀
 
-| Extension | Description | Status | Rust Crate | Original Repository |
-|-----------|-------------|--------|------------|-------------------|
-| **ImPlot** | Advanced plotting library for scientific/engineering applications | ✅ Complete | [dear-implot](./dear-implot) | [cimgui/cimplot](https://github.com/cimgui/cimplot) |
-| **ImGuizmo** | 3D transform gizmos (translate/rotate/scale) for ImGui | 🚧 In Progress | [dear-imguizmo](./dear-imguizmo) | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo) |
+Extensions in this workspace build on top of `dear-imgui-sys` (cimgui C API) to provide extra functionality like plotting and 3D gizmos.
 
-# Dear ImGui Extensions
+| Extension | Description            | Status    | Rust Crate                       | Upstream C API                                      |
+|-----------|------------------------|-----------|----------------------------------|-----------------------------------------------------|
+| ImPlot    | Scientific plotting    | Complete  | [dear-implot](./dear-implot)     | [cimgui/cimplot](https://github.com/cimgui/cimplot) |
+| ImGuizmo  | 3D transform gizmos    | Complete  | [dear-imguizmo](./dear-imguizmo) | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo) |
 
-This directory contains third-party extensions for the `dear-imgui` Rust binding. These extensions provide additional functionality beyond the core Dear ImGui library, such as plotting, 3D manipulation, node editing, and more.
+## Architecture
 
-## 🏗️ Architecture Overview
+All extensions use C bindings + bindgen (no C++ bindgen):
 
-Our extension system uses a hybrid architecture that maintains compatibility with the existing C++ bindgen approach while providing safe, idiomatic Rust APIs.
-
-```mermaid
-graph TB
-    subgraph "Dear ImGui Core"
-        A[dear-imgui-sys] --> B[dear-imgui]
-    end
-
-    subgraph "Extension Example: ImPlot"
-        C[dear-implot-sys] --> D[dear-implot]
-    end
-
-    subgraph "Application Layer"
-        E[Your Application]
-    end
-
-    A -->|Environment Variables<br/>DEP_DEAR_IMGUI_*| C
-    A -->|Static Linking<br/>libdear_imgui.a| C
-    B --> D
-    D --> E
-    B --> E
-
-    A -.->|Export Paths & Definitions| F[Build Environment]
-    C -.->|Read Environment Variables| F
-
-    style A fill:#e1f5fe
-    style C fill:#f3e5f5
-    style E fill:#e8f5e8
+```
+Core:        dear-imgui-sys (cimgui C API)  ->  dear-imgui (safe Rust)
+Extensions:  dear-xxx-sys (C API + bindgen) ->  dear-xxx (safe Rust)
 ```
 
-## 🔧 Key Technical Features
+Key points:
+- `*-sys` crates bind to C APIs (cimgui/cimplot/cimguizmo) with bindgen.
+- High-level crates wrap C APIs with RAII tokens and builder-style ergonomics.
+- `dear-imgui-sys` exports include paths and defines via `DEP_DEAR_IMGUI_*`; extensions inherit them for consistent builds.
+- Linking of the base ImGui static library is unified by `dear-imgui-sys` — extensions should not duplicate link flags for it.
 
-- **Environment Variable Passing**: Through Cargo's `links` mechanism, `dear-imgui-sys` passes build information to dependent crates
-- **Static Linking**: Extension `-sys` crates link to Dear ImGui's implementation via `cargo:rustc-link-lib=static=dear_imgui`
-- **Header File Sharing**: ImGui header file paths are passed through environment variables to avoid duplication
-- **Preprocessor Definition Sharing**: Ensures extensions use the same compilation options as Dear ImGui
-- **RAII Safety**: Token-based lifetime management ensures resource safety
-- **Type Safety**: Full Rust type system protection with builder patterns
+## Build Modes
 
-## 📚 Available Extensions
+Each `*-sys` crate supports multiple ways to obtain its own native static library (see each `-sys` README for details):
 
-This table lists Dear ImGui extensions compatible with our architecture. We currently maintain **ImPlot** in this repository, and we will continue to maintain this table to include community-developed third-party extensions.
+- Source build (default): compile upstream C/C++ sources with `cc`.
+- System/prebuilt: set a directory env var so Cargo can find the static lib.
+- Remote prebuilt: set a direct URL; the file is downloaded into `OUT_DIR/prebuilt/`.
 
-### 🏠 Extensions We Maintain
+Environment variables:
 
-| Extension | Description | Status | Rust Crate | Original Repository |
-|-----------|-------------|--------|------------|-------------------|
-| **ImPlot** | Advanced plotting library for scientific/engineering applications | ✅ Complete | [`dear-implot`](./dear-implot) | [epezent/implot](https://github.com/epezent/implot) |
+- ImPlot: `IMPLOT_SYS_LIB_DIR`, `IMPLOT_SYS_PREBUILT_URL`, `IMPLOT_SYS_SKIP_CC`.
+- ImGuizmo: `IMGUIZMO_SYS_LIB_DIR`, `IMGUIZMO_SYS_PREBUILT_URL`, `IMGUIZMO_SYS_SKIP_CC`.
 
-### 🌍 Community Extensions
+See also:
+- ImPlot details: `extensions/dear-implot-sys/README.md`.
+- ImGuizmo details: `extensions/dear-imguizmo-sys/README.md`.
 
-| Extension | Description | Status | Rust Crate | Original Repository | Maintainer |
-|-----------|-------------|--------|------------|-------------------|------------|
-| *Coming soon...* | *We welcome community contributions!* | | | | |
+## Submodules
 
-> **Note**: Community extensions are maintained by their respective authors. We list them here for discoverability but do not provide official support. Please contact the individual maintainers for issues and questions.
+Ensure third-party sources are available:
 
-**Legend:**
-
-- ✅ Complete: Fully implemented and tested
-- 🚧 Planned: Scheduled for future implementation
-- 🔄 In Progress: Currently being developed
-- ❌ Blocked: Waiting for dependencies or design decisions
-
-## 🚀 Quick Start
-
-### Using an Extension
-
-Add the extension to your `Cargo.toml`:
-
-```toml
-[dependencies]
-dear-imgui = { path = "path/to/dear-imgui" }
-dear-implot = { path = "path/to/extensions/dear-implot" }
+```
+git submodule update --init --recursive
 ```
 
-Use it in your application:
+## Best Practices
 
-```rust
-use dear_imgui::*;
-use dear_implot::*;
+Guidance on build scripts, bitflags vs enums, and data interop (mint/glam):
 
-fn main() {
-    let mut imgui_ctx = Context::create_or_panic();
-    let mut plot_ctx = PlotContext::create(&imgui_ctx);
+- `extensions/BEST_PRACTICES.md`
 
-    // In your render loop
-    let ui = imgui_ctx.frame();
-    let plot_ui = plot_ctx.get_plot_ui(&ui);
+## Examples
 
-    if let Some(token) = plot_ui.begin_plot("My Plot") {
-        plot_ui.plot_line("Data", &x_values, &y_values);
-        token.end();
-    }
-}
+Examples are in the top-level `examples/` crate and are feature-gated per extension:
+
+- `implot_basic` → `--features dear-implot`
+- `imguizmo_basic` → `--features dear-imguizmo`
+
+Run:
+
 ```
-
-## 🛠️ Creating a New Extension
-
-### Step 1: Set Up the Directory Structure
-
-Create the extension directory structure:
-
-```text
-extensions/
-└── dear-{extension}/
-    ├── Cargo.toml
-    ├── README.md
-    └── src/
-        ├── lib.rs
-        ├── context.rs
-        └── ...
-└── dear-{extension}-sys/
-    ├── Cargo.toml
-    ├── build.rs
-    ├── wrapper.cpp
-    ├── wrapper.h
-    ├── msvc_blocklist.txt (if needed)
-    ├── src/
-    │   └── lib.rs
-    └── third-party/
-        └── {extension}/ (git submodule)
+cargo run --bin implot_basic --features dear-implot
+cargo run --bin imguizmo_basic --features dear-imguizmo
 ```
-
-### Step 2: Create the `-sys` Crate
-
-The `-sys` crate provides low-level FFI bindings. Here's a template `Cargo.toml`:
-
-```toml
-[package]
-name = "dear-{extension}-sys"
-version = "0.1.0"
-edition = "2021"
-links = "dear_{extension}"
-
-[dependencies]
-dear-imgui-sys = { path = "../../dear-imgui-sys" }
-
-[build-dependencies]
-bindgen = "0.70"
-cc = "1.0"
-```
-
-### Step 3: Implement the Build Script
-
-Create `build.rs` that:
-
-1. Reads Dear ImGui environment variables
-2. Compiles the extension's C++ source
-3. Links against Dear ImGui's static library
-4. Generates Rust bindings
-
-```rust
-use std::env;
-use std::path::PathBuf;
-
-fn main() {
-    // Read Dear ImGui paths from environment variables
-    let imgui_include = env::var("DEP_DEAR_IMGUI_INCLUDE_PATH")
-        .expect("DEP_DEAR_IMGUI_INCLUDE_PATH not set");
-    let imgui_defines = env::var("DEP_DEAR_IMGUI_DEFINES")
-        .unwrap_or_default();
-
-    // Set up paths
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let extension_src = manifest_dir.join("third-party/{extension}");
-
-    // Compile C++ sources
-    let mut build = cc::Build::new();
-    build
-        .cpp(true)
-        .include(&imgui_include)
-        .include(&extension_src)
-        .file("wrapper.cpp")
-        .file(extension_src.join("{extension}.cpp"));
-
-    // Add Dear ImGui defines
-    for define in imgui_defines.split(',').filter(|s| !s.is_empty()) {
-        build.define(define, None);
-    }
-
-    // Link against Dear ImGui
-    println!("cargo:rustc-link-lib=static=dear_imgui");
-
-    build.compile("dear_{extension}");
-
-    // Generate bindings
-    let bindings = bindgen::Builder::default()
-        .header("wrapper.h")
-        .clang_arg(format!("-I{}", imgui_include))
-        .clang_arg(format!("-I{}", extension_src.display()))
-        .generate()
-        .expect("Unable to generate bindings");
-
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    bindings
-        .write_to_file(out_path.join("bindings.rs"))
-        .expect("Couldn't write bindings!");
-}
-```
-
-### Step 4: Create the High-Level Rust API
-
-The high-level crate provides safe, idiomatic Rust APIs. Template `Cargo.toml`:
-
-```toml
-[package]
-name = "dear-{extension}"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-dear-imgui = { path = "../../dear-imgui" }
-dear-{extension}-sys = { path = "../dear-{extension}-sys" }
-```
-
-Implement safe wrappers following these patterns:
-
-```rust
-// Context management
-pub struct ExtensionContext {
-    // Internal state
-}
-
-impl ExtensionContext {
-    pub fn create(imgui_ctx: &dear_imgui::Context) -> Self {
-        // Initialize extension context
-    }
-
-    pub fn get_ui<'ui>(&self, ui: &'ui dear_imgui::Ui) -> ExtensionUi<'ui> {
-        ExtensionUi { ui, context: self }
-    }
-}
-
-// RAII token for resource management
-pub struct ExtensionToken<'ui> {
-    ui: &'ui dear_imgui::Ui,
-}
-
-impl<'ui> ExtensionToken<'ui> {
-    pub fn end(self) {
-        // Cleanup when token is dropped
-    }
-}
-
-// Builder pattern for configuration
-pub struct ExtensionBuilder {
-    // Configuration options
-}
-
-impl ExtensionBuilder {
-    pub fn new() -> Self { /* ... */ }
-    pub fn with_option(mut self, value: T) -> Self { /* ... */ }
-    pub fn build(self, ui: &ExtensionUi) -> Option<ExtensionToken> { /* ... */ }
-}
-```
-
-### Step 5: Add to Workspace
-
-Update the root `Cargo.toml`:
-
-```toml
-[workspace]
-members = [
-    # ... existing members
-    "extensions/dear-{extension}-sys",
-    "extensions/dear-{extension}",
-]
-```
-
-### Step 6: Create Examples
-
-Add usage examples in the `examples/` directory:
-
-```rust
-use dear_imgui::*;
-use dear_{extension}::*;
-
-fn main() {
-    let mut imgui_ctx = Context::create_or_panic();
-    let mut ext_ctx = ExtensionContext::create(&imgui_ctx);
-
-    // Your example code here
-}
-```
-
-## 🤝 Extension Development
-
-### 🏗️ Our Approach
-
-We maintain a **selective set of extensions** in this repository that we actively support and maintain. However, we strongly encourage the community to create their own Dear ImGui extensions using the architectural patterns demonstrated here.
-
-### 🎯 Recommended Architecture Pattern
-
-For maximum compatibility and safety, we recommend following this pattern:
-
-```text
-your-dear-imgui-extension/
-├── your-extension-sys/          # Low-level FFI bindings
-│   ├── Cargo.toml              # Links to dear-imgui-sys
-│   ├── build.rs                # Reads DEP_DEAR_IMGUI_* env vars
-│   ├── wrapper.cpp/.h          # C++ wrapper functions
-│   └── src/lib.rs              # Generated bindings
-└── your-extension/             # High-level Rust API
-    ├── Cargo.toml              # Depends on dear-imgui + your-extension-sys
-    └── src/                    # Safe Rust wrappers with RAII
-```
-
-### 📋 Key Design Principles
-
-1. **Environment Variable Integration**: Use `DEP_DEAR_IMGUI_INCLUDE_PATH` and `DEP_DEAR_IMGUI_DEFINES`
-2. **Static Linking**: Link against Dear ImGui via `cargo:rustc-link-lib=static=dear_imgui`
-3. **RAII Safety**: Implement token-based lifetime management
-4. **Builder Patterns**: Provide fluent, type-safe configuration APIs
-
-## ImPlot (cimplot) Build Notes
-
-`dear-implot-sys` supports multiple ways to obtain the native `dear_implot` static library:
-
-- Default: source build of `cimplot.cpp` + `implot/*.cpp`
-- System/Prebuilt: set `IMPLOT_SYS_LIB_DIR` to a directory containing the static library
-- Remote Prebuilt: set `IMPLOT_SYS_PREBUILT_URL` to a direct URL to the static library
-- Skip native compilation entirely with `IMPLOT_SYS_SKIP_CC` (use with a prebuilt)
-
-Static library names expected by platform:
-
-- Windows (MSVC): `dear_implot.lib`
-- Unix: `libdear_implot.a`
-
-The build inherits include paths and compile-time defines from `dear-imgui-sys` (cimgui), so the two crates link consistently. See `extensions/dear-implot-sys/README.md` for details and usage examples.
-5. **Cross-Platform**: Ensure Windows, macOS, and Linux compatibility
-
-### 🚀 Independent Development
-
-**You don't need to contribute to this repository!** We encourage you to:
-
-- Create your own repository for your extension
-- Publish to crates.io with your preferred naming
-- Maintain your own release cycle and versioning
-- Build your own community around your extension
-
-### 💡 Naming Suggestions
-
-While not required, we suggest these naming patterns for consistency:
-
-- **Crate names**: `your-name-imgui-extension` or `imgui-extension-name`
-- **Sys crates**: `your-extension-sys` or `imgui-extension-sys`
-- **Repository**: `imgui-extension-rs` or `dear-imgui-extension-rs`
-
-### 📞 Getting Help
-
-- **Study the ImPlot Implementation**: Use `extensions/dear-implot/` as a complete reference
-- **Create Issues**: Ask questions about the architecture pattern
-- **Community Support**: Help each other in GitHub Discussions
-
-### � Community Extensions
-
-If you create an extension following this pattern, we encourage you to:
-
-- **Submit a PR to add your extension** to our extension table above for better discoverability
-- **Share it in Dear ImGui community forums** to reach more users
-- **Reference this architectural pattern** in your documentation to help others
-
-We maintain the extension table in this README as a central registry to help users discover compatible extensions. This makes it easier for the community to find and use Dear ImGui extensions that follow our recommended patterns.
-
-## 📖 Additional Resources
-
-- **Dear ImGui Documentation**: [https://github.com/ocornut/imgui](https://github.com/ocornut/imgui)
-- **Rust FFI Guide**: [https://doc.rust-lang.org/nomicon/ffi.html](https://doc.rust-lang.org/nomicon/ffi.html)
-- **Bindgen Book**: [https://rust-lang.github.io/rust-bindgen/](https://rust-lang.github.io/rust-bindgen/)
-- **ImPlot Reference**: See `extensions/dear-implot/` for a complete implementation example
-
----
-
-**Ready to contribute?** Start by creating an issue to discuss your extension idea, and we'll help you get started! 🚀

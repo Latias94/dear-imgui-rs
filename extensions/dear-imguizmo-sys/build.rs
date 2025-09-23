@@ -77,7 +77,7 @@ fn main() {
     if let Ok(dir) = env::var("IMGUIZMO_SYS_LIB_DIR") {
         if try_link_prebuilt(PathBuf::from(dir.clone()), &target_env) {
             linked_prebuilt = true;
-            println!("cargo:rustc-link-lib=static=dear_imgui");
+            // Do not link dear_imgui here; rely on dear-imgui-sys dependency to provide the correct native lib
         } else {
             println!("cargo:warning=IMGUIZMO_SYS_LIB_DIR set but library not found in {}", dir);
         }
@@ -88,7 +88,7 @@ fn main() {
                 Ok(dir) => {
                     if try_link_prebuilt(dir.clone(), &target_env) {
                         linked_prebuilt = true;
-                        println!("cargo:rustc-link-lib=static=dear_imgui");
+                        // Do not link dear_imgui here; rely on dear-imgui-sys dependency to provide the correct native lib
                     }
                 }
                 Err(e) => println!("cargo:warning=Failed to download prebuilt dear_imguizmo: {}", e),
@@ -102,12 +102,11 @@ fn main() {
         build.cpp(true).std("c++17");
 
         // Propagate dear-imgui defines
-        env::vars()
-            .filter_map(|(k, v)| k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_").map(|_| (k, v)))
-            .for_each(|(k, v)| {
-                let key = k.trim_start_matches("DEP_DEAR_IMGUI_DEFINE_");
-                build.define(key, v.as_str());
-            });
+        for (k, v) in env::vars() {
+            if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
+                build.define(suffix, v.as_str());
+            }
+        }
 
         build.include(&imgui_src);
         build.include(&cimgui_root);
@@ -117,8 +116,29 @@ fn main() {
         build.file(cimguizmo_root.join("cimguizmo.cpp"));
         build.file(cimguizmo_root.join("ImGuizmo/ImGuizmo.cpp"));
 
-        // Link dear_imgui
-        println!("cargo:rustc-link-lib=static=dear_imgui");
+        // Align MSVC runtime and exceptions to dear-imgui-sys
+        let target_env_now = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+        let target_os_now = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        if target_env_now == "msvc" && target_os_now == "windows" {
+            build.flag("/EHsc");
+            let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+            let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
+            build.static_crt(use_static_crt);
+            if use_static_crt {
+                build.flag("/MT");
+            } else {
+                build.flag("/MD");
+            }
+            let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
+            if profile == "debug" {
+                build.debug(true);
+                build.opt_level(0);
+            } else {
+                build.debug(false);
+                build.opt_level(2);
+            }
+            build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
+        }
 
         build.compile("dear_imguizmo");
     }

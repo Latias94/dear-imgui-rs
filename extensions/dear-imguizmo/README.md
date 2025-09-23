@@ -1,43 +1,58 @@
 # Dear ImGuizmo - Rust Bindings
 
-High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on top of `cimguizmo` (C API) and integrated with `dear-imgui`.
+High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on top of the C API (`cimguizmo`) and integrated with `dear-imgui`.
 
 ## Quick Start
 
 ```
 [dependencies]
 dear-imgui = "0.1"
-dear-imguizmo = { path = "path/to/extensions/dear-imguizmo" }
+dear-imguizmo = { path = "../../extensions/dear-imguizmo" }
 ```
 
-Basic usage:
+Minimal usage:
 
 ```rust
-use dear_imgui as imgui;
-use dear_imguizmo as guizmo;
+use dear_imgui::Context;
+use dear_imguizmo::{GuizmoContext, Operation, Mode};
+use glam::Mat4;
 
-let mut ctx = imgui::Context::create_or_panic();
+let mut ctx = Context::create_or_panic();
 let ui = ctx.frame();
 
-// Begin per-frame ImGuizmo drawing
-guizmo::begin_frame(&ui);
+// Build per-frame ImGuizmo UI bound to the current ImGui context
+let gizmo_ui = GuizmoContext::new().get_ui(&ui);
 
-// Configure the drawing rectangle to match the current window or viewport
-let [x, y] = [0.0, 0.0];
+// Set the drawing rectangle to the full viewport
 let [w, h] = ui.io().display_size;
-guizmo::set_rect(x, y, w, h);
+gizmo_ui.set_rect(0.0, 0.0, w, h);
 
-// Manipulate a model matrix using the current camera view/projection
-let mut model = [1.0_f32; 16];
-let view = [1.0_f32; 16];
-let proj = [1.0_f32; 16];
-let used = guizmo::manipulate(
-    &view, &proj,
-    guizmo::Operation::Translate,
-    guizmo::Mode::Local,
-    &mut model,
-    None,
-);
+// Matrices (column-major arrays)
+let mut model = Mat4::IDENTITY;
+let view = Mat4::IDENTITY;
+let proj = Mat4::IDENTITY;
+
+// Manipulate the model matrix
+let used = gizmo_ui
+    .manipulate_with_options(
+        &ui.get_window_draw_list(),
+        &view,
+        &proj,
+        Operation::TRANSLATE,
+        Mode::Local,
+        &mut model,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap_or(false);
+
+if used { /* object moved */ }
 ```
 
-See the crate docs for more helpers.
+See `examples/imguizmo_basic.rs` for a full demo with camera controls, snapping, bounds and helpers.
+
+## Notes
+
+- This crate depends on `dear-imguizmo-sys` (C API + bindgen). Linking to the base ImGui static library is provided by `dear-imgui-sys`; you do not need to configure it here.

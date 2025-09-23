@@ -57,6 +57,7 @@ struct ImguiState {
     camera_distance: f32,
     camera_angle_x: f32,
     camera_angle_y: f32,
+    lock_viewport_window_move: bool,
 }
 
 struct AppWindow {
@@ -189,6 +190,7 @@ impl AppWindow {
             camera_distance: 8.0,
             camera_angle_x: 0.0,
             camera_angle_y: 0.0,
+            lock_viewport_window_move: false,
         };
 
         Ok(Self {
@@ -467,6 +469,7 @@ impl AppWindow {
             .window("3D Gizmo Viewport")
             .size([920.0, 680.0], Condition::FirstUseEver)
             .position([380.0, 10.0], Condition::FirstUseEver)
+            .flags(WindowFlags::NO_MOVE | WindowFlags::NO_SCROLLBAR | WindowFlags::NO_SCROLL_WITH_MOUSE)
             .build(|| {
                 // Set the gizmo viewport to this window's content area
                 let content_region = ui.content_region_avail();
@@ -546,7 +549,7 @@ impl AppWindow {
                 };
 
                 // Perform the gizmo manipulation (full options)
-                gizmo_ui.manipulate_with_options(
+                let used = gizmo_ui.manipulate_with_options(
                     &draw_list,
                     &self.imgui.view_matrix,
                     &self.imgui.projection_matrix,
@@ -558,22 +561,19 @@ impl AppWindow {
                     local_bounds_opt,
                     bounds_snap_opt,
                 )
+                .unwrap_or(false);
+                // Update lock for next frame if gizmo is active or hovered
+                self.imgui.lock_viewport_window_move = used || gizmo_ui.is_over();
+                used
             })
-            .unwrap_or(Ok(false));
+            .unwrap_or(false);
 
         // Handle manipulation result
-        match manipulation_result {
-            Ok(modified) => {
-                if modified {
-                    info!(
-                        "Object manipulated with operation: {:?}",
-                        self.imgui.current_operation
-                    );
-                }
-            }
-            Err(e) => {
-                error!("Manipulation error: {:?}", e);
-            }
+        if manipulation_result {
+            info!(
+                "Object manipulated with operation: {:?}",
+                self.imgui.current_operation
+            );
         }
 
         // View manipulation (camera controls)

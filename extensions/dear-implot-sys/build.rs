@@ -196,9 +196,6 @@ fn main() {
         build.file(cimplot_root.join("implot/implot.cpp"));
         build.file(cimplot_root.join("implot/implot_items.cpp"));
 
-        // Link against dear-imgui-sys output
-        println!("cargo:rustc-link-lib=static=dear_imgui");
-
         build.compile("dear_implot");
 
         // Rerun hints
