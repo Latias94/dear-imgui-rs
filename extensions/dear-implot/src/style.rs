@@ -112,7 +112,10 @@ pub fn push_style_var_vec2(var: StyleVar, value: [f32; 2]) -> StyleVarToken {
     unsafe {
         sys::ImPlot_PushStyleVar_Vec2(
             var as sys::ImPlotStyleVar,
-            sys::ImVec2 { x: value[0], y: value[1] },
+            sys::ImVec2 {
+                x: value[0],
+                y: value[1],
+            },
         );
     }
     StyleVarToken { was_popped: false }
@@ -151,6 +154,11 @@ pub fn pop_colormap(count: i32) {
 pub fn add_colormap(name: &str, colors: &[sys::ImVec4], qualitative: bool) -> sys::ImPlotColormap_ {
     let name_cstr = std::ffi::CString::new(name).unwrap();
     unsafe {
-        sys::ImPlot_AddColormap_Vec4Ptr(name_cstr.as_ptr(), colors.as_ptr(), colors.len() as i32, qualitative)
+        sys::ImPlot_AddColormap_Vec4Ptr(
+            name_cstr.as_ptr(),
+            colors.as_ptr(),
+            colors.len() as i32,
+            qualitative,
+        )
     }
 }

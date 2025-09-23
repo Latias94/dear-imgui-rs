@@ -229,7 +229,11 @@ impl<'a> MultiAxisPlot<'a> {
 
                     unsafe {
                         let axis_enum = (i as i32) + 3; // ImAxis_Y1 = 3
-                        sys::ImPlot_SetupAxis(axis_enum, label_ptr, axis_config.flags.bits() as i32);
+                        sys::ImPlot_SetupAxis(
+                            axis_enum,
+                            label_ptr,
+                            axis_config.flags.bits() as i32,
+                        );
 
                         if let Some((min, max)) = axis_config.range {
                             sys::ImPlot_SetupAxisLimits(axis_enum, min, max, 0);

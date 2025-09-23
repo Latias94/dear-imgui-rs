@@ -12,9 +12,7 @@
 #![allow(clippy::all)]
 
 // Re-export Dear ImGui types for compatibility
-pub use dear_imgui_sys::{
-    ImDrawList, ImGuiContext, ImGuiID, ImVec2, ImVec4,
-};
+pub use dear_imgui_sys::{ImDrawList, ImGuiContext, ImGuiID, ImVec2, ImVec4};
 
 // Include generated bindings
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));

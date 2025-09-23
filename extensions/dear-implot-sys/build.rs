@@ -116,7 +116,9 @@ fn main() {
             // Still need to link dear_imgui from dear-imgui-sys
             println!("cargo:rustc-link-lib=static=dear_imgui");
         } else {
-            println!("cargo:warning=IMPLOT_SYS_LIB_DIR set but no library found; falling back to build");
+            println!(
+                "cargo:warning=IMPLOT_SYS_LIB_DIR set but no library found; falling back to build"
+            );
         }
     }
 
@@ -136,7 +138,10 @@ fn main() {
                     }
                 }
                 Err(e) => {
-                    println!("cargo:warning=Failed to download prebuilt dear_implot: {}", e);
+                    println!(
+                        "cargo:warning=Failed to download prebuilt dear_implot: {}",
+                        e
+                    );
                 }
             }
         }
@@ -215,7 +220,11 @@ fn main() {
 }
 
 fn expected_lib_name(target_env: &str) -> &'static str {
-    if target_env == "msvc" { "dear_implot.lib" } else { "libdear_implot.a" }
+    if target_env == "msvc" {
+        "dear_implot.lib"
+    } else {
+        "libdear_implot.a"
+    }
 }
 
 fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
@@ -233,7 +242,11 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     true
 }
 
-fn try_download_prebuilt(out_dir: &PathBuf, url: &str, target_env: &str) -> Result<PathBuf, String> {
+fn try_download_prebuilt(
+    out_dir: &PathBuf,
+    url: &str,
+    target_env: &str,
+) -> Result<PathBuf, String> {
     let lib_name = expected_lib_name(target_env);
     let dl_dir = out_dir.join("prebuilt");
     let _ = std::fs::create_dir_all(&dl_dir);
@@ -243,7 +256,10 @@ fn try_download_prebuilt(out_dir: &PathBuf, url: &str, target_env: &str) -> Resu
         return Ok(dl_dir);
     }
 
-    println!("cargo:warning=Downloading prebuilt dear_implot from {}", url);
+    println!(
+        "cargo:warning=Downloading prebuilt dear_implot from {}",
+        url
+    );
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()

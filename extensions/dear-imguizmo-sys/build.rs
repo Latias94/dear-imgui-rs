@@ -1,4 +1,7 @@
-use std::{env, path::{Path, PathBuf}};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -23,7 +26,10 @@ fn main() {
         panic!("cimgui root not found at {:?}", cimgui_root);
     }
     if !cimguizmo_root.exists() {
-        panic!("cimguizmo root not found at {:?}. Did you init submodules?", cimguizmo_root);
+        panic!(
+            "cimguizmo root not found at {:?}. Did you init submodules?",
+            cimguizmo_root
+        );
     }
 
     // Rerun hints and env tracking
@@ -66,7 +72,9 @@ fn main() {
         .clang_arg("c++")
         .clang_arg("-std=c++17");
 
-    let bindings = bindings.generate().expect("Unable to generate cimguizmo bindings");
+    let bindings = bindings
+        .generate()
+        .expect("Unable to generate cimguizmo bindings");
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write cimguizmo bindings!");
@@ -79,7 +87,10 @@ fn main() {
             linked_prebuilt = true;
             // Do not link dear_imgui here; rely on dear-imgui-sys dependency to provide the correct native lib
         } else {
-            println!("cargo:warning=IMGUIZMO_SYS_LIB_DIR set but library not found in {}", dir);
+            println!(
+                "cargo:warning=IMGUIZMO_SYS_LIB_DIR set but library not found in {}",
+                dir
+            );
         }
     }
     if !linked_prebuilt {
@@ -91,7 +102,10 @@ fn main() {
                         // Do not link dear_imgui here; rely on dear-imgui-sys dependency to provide the correct native lib
                     }
                 }
-                Err(e) => println!("cargo:warning=Failed to download prebuilt dear_imguizmo: {}", e),
+                Err(e) => println!(
+                    "cargo:warning=Failed to download prebuilt dear_imguizmo: {}",
+                    e
+                ),
             }
         }
     }
@@ -145,7 +159,11 @@ fn main() {
 }
 
 fn expected_lib_name(target_env: &str) -> &'static str {
-    if target_env == "msvc" { "dear_imguizmo.lib" } else { "libdear_imguizmo.a" }
+    if target_env == "msvc" {
+        "dear_imguizmo.lib"
+    } else {
+        "libdear_imguizmo.a"
+    }
 }
 
 fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
@@ -167,12 +185,18 @@ fn try_download_prebuilt(out_dir: &Path, url: &str, target_env: &str) -> Result<
     if dst.exists() {
         return Ok(dl_dir);
     }
-    println!("cargo:warning=Downloading prebuilt dear_imguizmo from {}", url);
+    println!(
+        "cargo:warning=Downloading prebuilt dear_imguizmo from {}",
+        url
+    );
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| format!("http client: {}", e))?;
-    let resp = client.get(url).send().map_err(|e| format!("http get: {}", e))?;
+    let resp = client
+        .get(url)
+        .send()
+        .map_err(|e| format!("http get: {}", e))?;
     if !resp.status().is_success() {
         return Err(format!("http status {}", resp.status()));
     }

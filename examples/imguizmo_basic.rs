@@ -469,7 +469,11 @@ impl AppWindow {
             .window("3D Gizmo Viewport")
             .size([920.0, 680.0], Condition::FirstUseEver)
             .position([380.0, 10.0], Condition::FirstUseEver)
-            .flags(WindowFlags::NO_MOVE | WindowFlags::NO_SCROLLBAR | WindowFlags::NO_SCROLL_WITH_MOUSE)
+            .flags(
+                WindowFlags::NO_MOVE
+                    | WindowFlags::NO_SCROLLBAR
+                    | WindowFlags::NO_SCROLL_WITH_MOUSE,
+            )
             .build(|| {
                 // Set the gizmo viewport to this window's content area
                 let content_region = ui.content_region_avail();
@@ -549,19 +553,20 @@ impl AppWindow {
                 };
 
                 // Perform the gizmo manipulation (full options)
-                let used = gizmo_ui.manipulate_with_options(
-                    &draw_list,
-                    &self.imgui.view_matrix,
-                    &self.imgui.projection_matrix,
-                    self.imgui.current_operation,
-                    self.imgui.current_mode,
-                    &mut self.imgui.object_matrix,
-                    None,
-                    snap_opt,
-                    local_bounds_opt,
-                    bounds_snap_opt,
-                )
-                .unwrap_or(false);
+                let used = gizmo_ui
+                    .manipulate_with_options(
+                        &draw_list,
+                        &self.imgui.view_matrix,
+                        &self.imgui.projection_matrix,
+                        self.imgui.current_operation,
+                        self.imgui.current_mode,
+                        &mut self.imgui.object_matrix,
+                        None,
+                        snap_opt,
+                        local_bounds_opt,
+                        bounds_snap_opt,
+                    )
+                    .unwrap_or(false);
                 // Update lock for next frame if gizmo is active or hovered
                 self.imgui.lock_viewport_window_move = used || gizmo_ui.is_over();
                 used

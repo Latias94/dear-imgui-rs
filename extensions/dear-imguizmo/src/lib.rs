@@ -1,8 +1,8 @@
 //! High-level safe helpers for ImGuizmo integrated with dear-imgui
 
-use dear_imguizmo_sys as sys;
 use dear_imgui::Ui;
 use dear_imgui_sys as imgui_sys;
+use dear_imguizmo_sys as sys;
 use glam::Mat4;
 use thiserror::Error;
 
@@ -33,10 +33,20 @@ bitflags::bitflags! {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Mode { Local, World }
+pub enum Mode {
+    Local,
+    World,
+}
 
-fn op_to_sys(flags: Operation) -> sys::OPERATION { flags.bits() as sys::OPERATION }
-fn mode_to_sys(m: Mode) -> sys::MODE { match m { Mode::Local => 0 as sys::MODE, Mode::World => 1 as sys::MODE } }
+fn op_to_sys(flags: Operation) -> sys::OPERATION {
+    flags.bits() as sys::OPERATION
+}
+fn mode_to_sys(m: Mode) -> sys::MODE {
+    match m {
+        Mode::Local => 0 as sys::MODE,
+        Mode::World => 1 as sys::MODE,
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum GizmoError {
@@ -49,7 +59,9 @@ pub enum GizmoError {
 pub struct GuizmoContext;
 
 impl GuizmoContext {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     pub fn get_ui<'ui>(&self, _ui: &'ui Ui) -> GizmoUi<'ui> {
         unsafe {
@@ -60,31 +72,75 @@ impl GuizmoContext {
     }
 }
 
-pub struct GizmoUi<'ui> { _ui: &'ui Ui }
+pub struct GizmoUi<'ui> {
+    _ui: &'ui Ui,
+}
 
 impl<'ui> GizmoUi<'ui> {
-    pub fn set_rect(&self, x: f32, y: f32, width: f32, height: f32) { unsafe { sys::ImGuizmo_SetRect(x, y, width, height) } }
-    pub fn set_orthographic(&self, is_ortho: bool) { unsafe { sys::ImGuizmo_SetOrthographic(is_ortho) } }
-    pub fn allow_axis_flip(&self, enable: bool) { unsafe { sys::ImGuizmo_AllowAxisFlip(enable) } }
-    pub fn set_gizmo_size_clip_space(&self, value: f32) { unsafe { sys::ImGuizmo_SetGizmoSizeClipSpace(value) } }
-    pub fn set_axis_limit(&self, value: f32) { unsafe { sys::ImGuizmo_SetAxisLimit(value) } }
-    pub fn set_plane_limit(&self, value: f32) { unsafe { sys::ImGuizmo_SetPlaneLimit(value) } }
+    pub fn set_rect(&self, x: f32, y: f32, width: f32, height: f32) {
+        unsafe { sys::ImGuizmo_SetRect(x, y, width, height) }
+    }
+    pub fn set_orthographic(&self, is_ortho: bool) {
+        unsafe { sys::ImGuizmo_SetOrthographic(is_ortho) }
+    }
+    pub fn allow_axis_flip(&self, enable: bool) {
+        unsafe { sys::ImGuizmo_AllowAxisFlip(enable) }
+    }
+    pub fn set_gizmo_size_clip_space(&self, value: f32) {
+        unsafe { sys::ImGuizmo_SetGizmoSizeClipSpace(value) }
+    }
+    pub fn set_axis_limit(&self, value: f32) {
+        unsafe { sys::ImGuizmo_SetAxisLimit(value) }
+    }
+    pub fn set_plane_limit(&self, value: f32) {
+        unsafe { sys::ImGuizmo_SetPlaneLimit(value) }
+    }
 
     pub fn draw_grid(&self, view: &Mat4, projection: &Mat4, model: &Mat4, grid_size: f32) {
-        unsafe { sys::ImGuizmo_DrawGrid(view.to_cols_array().as_ptr(), projection.to_cols_array().as_ptr(), model.to_cols_array().as_ptr(), grid_size) }
+        unsafe {
+            sys::ImGuizmo_DrawGrid(
+                view.to_cols_array().as_ptr(),
+                projection.to_cols_array().as_ptr(),
+                model.to_cols_array().as_ptr(),
+                grid_size,
+            )
+        }
     }
 
     pub fn draw_cubes(&self, view: &Mat4, projection: &Mat4, matrices: &[Mat4]) {
         let count = matrices.len() as i32;
-        if count == 0 { return; }
+        if count == 0 {
+            return;
+        }
         let mut flat: Vec<f32> = Vec::with_capacity((count as usize) * 16);
-        for m in matrices { flat.extend_from_slice(&m.to_cols_array()); }
-        unsafe { sys::ImGuizmo_DrawCubes(view.to_cols_array().as_ptr(), projection.to_cols_array().as_ptr(), flat.as_ptr(), count) }
+        for m in matrices {
+            flat.extend_from_slice(&m.to_cols_array());
+        }
+        unsafe {
+            sys::ImGuizmo_DrawCubes(
+                view.to_cols_array().as_ptr(),
+                projection.to_cols_array().as_ptr(),
+                flat.as_ptr(),
+                count,
+            )
+        }
     }
 
-    pub fn set_drawlist_window(&self) { unsafe { sys::ImGuizmo_SetDrawlist(imgui_sys::igGetWindowDrawList()) } }
-    pub fn set_drawlist_background(&self) { unsafe { sys::ImGuizmo_SetDrawlist(imgui_sys::igGetBackgroundDrawList(std::ptr::null_mut())) } }
-    pub fn set_drawlist_foreground(&self) { unsafe { sys::ImGuizmo_SetDrawlist(imgui_sys::igGetForegroundDrawList_ViewportPtr(std::ptr::null_mut())) } }
+    pub fn set_drawlist_window(&self) {
+        unsafe { sys::ImGuizmo_SetDrawlist(imgui_sys::igGetWindowDrawList()) }
+    }
+    pub fn set_drawlist_background(&self) {
+        unsafe {
+            sys::ImGuizmo_SetDrawlist(imgui_sys::igGetBackgroundDrawList(std::ptr::null_mut()))
+        }
+    }
+    pub fn set_drawlist_foreground(&self) {
+        unsafe {
+            sys::ImGuizmo_SetDrawlist(imgui_sys::igGetForegroundDrawList_ViewportPtr(
+                std::ptr::null_mut(),
+            ))
+        }
+    }
 
     pub fn manipulate_with_options(
         &self,
@@ -101,7 +157,11 @@ impl<'ui> GizmoUi<'ui> {
     ) -> Result<bool, GizmoError> {
         // Bind current window drawlist (cannot get raw from DrawListMut; use ig API)
         self.set_drawlist_window();
-        if let Some(lb) = local_bounds { if lb.len() != 6 { return Err(GizmoError::InvalidLocalBounds); } }
+        if let Some(lb) = local_bounds {
+            if lb.len() != 6 {
+                return Err(GizmoError::InvalidLocalBounds);
+            }
+        }
         // Prepare mutable arrays for model and optional delta outputs
         let mut model_arr = model_matrix.to_cols_array();
         let mut delta_arr = match &delta_matrix {
@@ -127,7 +187,9 @@ impl<'ui> GizmoUi<'ui> {
         };
         // Write back results
         *model_matrix = Mat4::from_cols_array(&model_arr);
-        if let Some(dm) = &mut delta_matrix { **dm = Mat4::from_cols_array(&delta_arr); }
+        if let Some(dm) = &mut delta_matrix {
+            **dm = Mat4::from_cols_array(&delta_arr);
+        }
         Ok(used)
     }
 
@@ -144,8 +206,14 @@ impl<'ui> GizmoUi<'ui> {
             sys::ImGuizmo_ViewManipulate_Float(
                 arr.as_mut_ptr(),
                 length,
-                sys::ImVec2 { x: position[0], y: position[1] },
-                sys::ImVec2 { x: size[0], y: size[1] },
+                sys::ImVec2 {
+                    x: position[0],
+                    y: position[1],
+                },
+                sys::ImVec2 {
+                    x: size[0],
+                    y: size[1],
+                },
                 background_color,
             );
         }
@@ -153,8 +221,16 @@ impl<'ui> GizmoUi<'ui> {
         unsafe { sys::ImGuizmo_IsUsingViewManipulate() }
     }
 
-    pub fn enable(&self, enable: bool) { unsafe { sys::ImGuizmo_Enable(enable) } }
-    pub fn is_over(&self) -> bool { unsafe { sys::ImGuizmo_IsOver_Nil() } }
-    pub fn is_using(&self) -> bool { unsafe { sys::ImGuizmo_IsUsing() } }
-    pub fn is_over_operation(&self, operation: Operation) -> bool { unsafe { sys::ImGuizmo_IsOver_OPERATION(op_to_sys(operation)) } }
+    pub fn enable(&self, enable: bool) {
+        unsafe { sys::ImGuizmo_Enable(enable) }
+    }
+    pub fn is_over(&self) -> bool {
+        unsafe { sys::ImGuizmo_IsOver_Nil() }
+    }
+    pub fn is_using(&self) -> bool {
+        unsafe { sys::ImGuizmo_IsUsing() }
+    }
+    pub fn is_over_operation(&self, operation: Operation) -> bool {
+        unsafe { sys::ImGuizmo_IsOver_OPERATION(op_to_sys(operation)) }
+    }
 }
