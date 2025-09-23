@@ -120,7 +120,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
             .unwrap_or(std::ptr::null());
 
         unsafe {
-            sys::ImPlot_PlotHeatmap_double(
+            sys::ImPlot_PlotHeatmap_doublePtr(
                 label_cstr.as_ptr(),
                 self.values.as_ptr(),
                 self.rows,
@@ -128,10 +128,8 @@ impl<'a> Plot for HeatmapPlot<'a> {
                 self.scale_min,
                 self.scale_max,
                 label_fmt_ptr,
-                self.bounds_min.x,
-                self.bounds_min.y,
-                self.bounds_max.x,
-                self.bounds_max.y,
+                self.bounds_min,
+                self.bounds_max,
                 self.flags,
             );
         }
@@ -244,7 +242,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
             .unwrap_or(std::ptr::null());
 
         unsafe {
-            sys::ImPlot_PlotHeatmap_float(
+            sys::ImPlot_PlotHeatmap_FloatPtr(
                 label_cstr.as_ptr(),
                 self.values.as_ptr(),
                 self.rows,
@@ -252,10 +250,8 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                 self.scale_min,
                 self.scale_max,
                 label_fmt_ptr,
-                self.bounds_min.x,
-                self.bounds_min.y,
-                self.bounds_max.x,
-                self.bounds_max.y,
+                self.bounds_min,
+                self.bounds_max,
                 self.flags,
             );
         }

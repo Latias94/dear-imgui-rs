@@ -62,12 +62,14 @@ impl<'a> DigitalPlot<'a> {
         let label_cstring = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotDigital_double(
+            sys::ImPlot_PlotDigital_doublePtr(
                 label_cstring.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.flags.bits() as i32,
+                self.offset,
+                self.stride,
             );
         }
     }
@@ -127,12 +129,14 @@ impl<'a> DigitalPlotF32<'a> {
         let label_cstring = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotDigital_float(
+            sys::ImPlot_PlotDigital_FloatPtr(
                 label_cstring.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.flags.bits() as i32,
+                0,
+                std::mem::size_of::<f32>() as i32,
             );
         }
     }
@@ -205,12 +209,14 @@ impl<'a> SimpleDigitalPlot<'a> {
         let label_cstring = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotDigital_double(
+            sys::ImPlot_PlotDigital_doublePtr(
                 label_cstring.as_ptr(),
                 x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.y_data.len() as i32,
                 self.flags.bits() as i32,
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }
@@ -277,12 +283,14 @@ impl<'a> BooleanDigitalPlot<'a> {
         let label_cstring = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotDigital_double(
+            sys::ImPlot_PlotDigital_doublePtr(
                 label_cstring.as_ptr(),
                 self.x_data.as_ptr(),
                 y_data_f64.as_ptr(),
                 self.x_data.len() as i32,
                 self.flags.bits() as i32,
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }

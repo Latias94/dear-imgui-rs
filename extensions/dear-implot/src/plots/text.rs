@@ -70,7 +70,7 @@ impl<'a> TextPlot<'a> {
                 text_cstring.as_ptr(),
                 self.x,
                 self.y,
-                &pix_offset as *const sys::ImVec2,
+                pix_offset,
                 self.flags.bits() as i32,
             );
         }
@@ -253,7 +253,7 @@ impl FormattedTextPlot {
                 text_cstring.as_ptr(),
                 self.x,
                 self.y,
-                &pix_offset as *const sys::ImVec2,
+                pix_offset,
                 self.flags.bits() as i32,
             );
         }

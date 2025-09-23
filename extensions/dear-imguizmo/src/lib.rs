@@ -1,171 +1,106 @@
-//! # Dear ImGuizmo - Pure Rust Implementation
-//!
-//! A pure Rust implementation of ImGuizmo, a 3D gizmo manipulation library for Dear ImGui.
-//! This crate provides comprehensive 3D transformation tools without requiring C++ FFI bindings.
-//!
-//! ## Features
-//!
-//! - **Pure Rust**: No C++ dependencies or FFI bindings
-//! - **Translation gizmos**: Move objects in 3D space with visual feedback
-//! - **Rotation gizmos**: Rotate objects around axes with arc visualization
-//! - **Scale gizmos**: Scale objects uniformly or per-axis
-//! - **View manipulation**: Interactive camera controls with cube view
-//! - **Grid rendering**: Draw reference grids for spatial orientation
-//! - **Matrix utilities**: Powered by glam for efficient math operations
-//! - **Customizable styling**: Configure colors, sizes, and appearance
-//! - **Extensions**: ImSequencer, ImCurveEdit, and GraphEditor modules
-//! - **Error handling**: Comprehensive error handling with thiserror
-//! - **Logging**: Integrated tracing support for debugging
-//!
-//! ## Quick Start
-//!
-//! ```rust,no_run
-//! use dear_imgui::*;
-//! use dear_imguizmo::*;
-//! use glam::Mat4;
-//!
-//! fn main() -> Result<()> {
-//!     let mut imgui_ctx = Context::create();
-//!     let mut gizmo_ctx = GuizmoContext::new();
-//!
-//!     // In your render loop
-//!     let ui = imgui_ctx.frame();
-//!     let gizmo_ui = gizmo_ctx.get_ui(&ui);
-//!
-//!     // Your transformation matrix
-//!     let mut transform = Mat4::IDENTITY;
-//!
-//!     // Camera matrices
-//!     let view = Mat4::look_at_rh(
-//!         glam::Vec3::new(0.0, 0.0, 5.0),
-//!         glam::Vec3::ZERO,
-//!         glam::Vec3::Y,
-//!     );
-//!     let projection = Mat4::perspective_rh(
-//!         45.0_f32.to_radians(),
-//!         16.0 / 9.0,
-//!         0.1,
-//!         100.0,
-//!     );
-//!
-//!     // Set the viewport
-//!     gizmo_ui.set_rect(0.0, 0.0, 800.0, 600.0);
-//!
-//!     // Manipulate the object
-//!     if gizmo_ui.manipulate(
-//!         &view,
-//!         &projection,
-//!         Operation::TRANSLATE,
-//!         Mode::WORLD,
-//!         &mut transform,
-//!     )? {
-//!         // Object was manipulated
-//!         println!("Object moved!");
-//!     }
-//!
-//!     Ok(())
-//! }
-//! ```
-//!
-//! ## Advanced Usage
-//!
-//! ```rust,no_run
-//! use dear_imgui::*;
-//! use dear_imguizmo::*;
-//! use glam::{Mat4, Vec3};
-//!
-//! fn advanced_example() -> Result<()> {
-//!     let mut imgui_ctx = Context::create();
-//!     let mut gizmo_ctx = GuizmoContext::new();
-//!
-//!     let ui = imgui_ctx.frame();
-//!     let gizmo_ui = gizmo_ctx.get_ui(&ui);
-//!
-//!     // Configure style
-//!     let mut style = gizmo_ui.get_style();
-//!     style.translation_line_thickness = 4.0;
-//!     style.colors[ColorElement::DirectionX as usize] = [1.0, 0.0, 0.0, 1.0];
-//!     gizmo_ui.set_style(&style);
-//!
-//!     // Enable snapping
-//!     let snap = [1.0, 1.0, 1.0]; // 1 unit snap
-//!
-//!     let mut transform = Mat4::IDENTITY;
-//!     let view = Mat4::look_at_rh(Vec3::new(5.0, 5.0, 5.0), Vec3::ZERO, Vec3::Y);
-//!     let projection = Mat4::perspective_rh(45.0_f32.to_radians(), 16.0/9.0, 0.1, 100.0);
-//!
-//!     // Multi-operation gizmo
-//!     let operation = Operation::TRANSLATE | Operation::ROTATE | Operation::SCALE_UNIFORM;
-//!
-//!     if gizmo_ui.manipulate_with_snap(
-//!         &view,
-//!         &projection,
-//!         operation,
-//!         Mode::LOCAL,
-//!         &mut transform,
-//!         Some(&snap),
-//!     )? {
-//!         println!("Transform changed with snapping!");
-//!     }
-//!
-//!     // Draw helper grid
-//!     gizmo_ui.draw_grid(&view, &projection, &Mat4::IDENTITY, 10.0);
-//!
-//!     // View manipulation cube
-//!     let mut view_matrix = view;
-//!     gizmo_ui.view_manipulate(
-//!         &mut view_matrix,
-//!         8.0, // distance
-//!         [650.0, 50.0], // position
-//!         [128.0, 128.0], // size
-//!         0x10101010, // background color
-//!     );
-//!
-//!     Ok(())
-//! }
-//! ```
+//! High-level safe helpers for ImGuizmo integrated with dear-imgui
 
-#![deny(missing_docs)]
-#![warn(clippy::all)]
-#![allow(clippy::too_many_arguments)] // ImGuizmo naturally has many parameters
+use dear_imguizmo_sys as sys;
+use dear_imgui::{self as imgui, Ui};
 
-// Re-export essential dependencies
-pub use dear_imgui as imgui;
-pub use glam;
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Operation {
+    Translate,
+    Rotate,
+    Scale,
+    Universal,
+}
 
-// Core modules
-mod context;
-mod error;
-mod math;
-mod style;
-mod types;
-mod utils;
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Local,
+    World,
+}
 
-// Feature modules
-mod draw;
-mod gizmo;
-mod interaction;
-mod view;
+impl From<Operation> for sys::OPERATION {
+    fn from(op: Operation) -> Self {
+        match op {
+            Operation::Translate => sys::OPERATION_TRANSLATE,
+            Operation::Rotate => sys::OPERATION_ROTATE,
+            Operation::Scale => sys::OPERATION_SCALE,
+            Operation::Universal => sys::OPERATION_UNIVERSAL,
+        }
+    }
+}
 
-// Extension modules
-pub mod extensions;
+impl From<Mode> for sys::MODE {
+    fn from(m: Mode) -> Self {
+        match m {
+            Mode::Local => sys::MODE_LOCAL,
+            Mode::World => sys::MODE_WORLD,
+        }
+    }
+}
 
-// Re-export public API
-pub use context::*;
-pub use error::*;
-pub use math::*;
-pub use style::*;
-pub use types::*;
-pub use utils::*;
+/// Call per-frame to initialize ImGuizmo state
+pub fn begin_frame(_ui: &Ui) {
+    unsafe {
+        sys::ImGuizmo_BeginFrame();
+    }
+}
 
-// Re-export commonly used types from dear-imgui
-pub use dear_imgui::{Context as ImGuiContext, Ui};
+/// Set drawing rectangle in screen coordinates
+pub fn set_rect(x: f32, y: f32, width: f32, height: f32) {
+    unsafe { sys::ImGuizmo_SetRect(x, y, width, height) }
+}
 
-/// Result type for ImGuizmo operations
-pub type Result<T> = std::result::Result<T, GuizmoError>;
+/// Set orthographic projection flag
+pub fn set_orthographic(is_ortho: bool) {
+    unsafe { sys::ImGuizmo_SetOrthographic(is_ortho) }
+}
 
-/// Version information
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Perform a manipulation on the given model matrix.
+/// Returns true if the gizmo is being used.
+pub fn manipulate(
+    view: &[f32; 16],
+    projection: &[f32; 16],
+    operation: Operation,
+    mode: Mode,
+    model_matrix: &mut [f32; 16],
+    delta_matrix: Option<&mut [f32; 16]>,
+    snap: Option<&[f32; 3]>,
+) -> bool {
+    let mut delta_tmp: [f32; 16];
+    let delta_ptr = if let Some(delta) = delta_matrix { delta.as_mut_ptr() } else {
+        delta_tmp = [0.0; 16];
+        std::ptr::null_mut()
+    };
+    let snap_ptr = snap.map(|s| s.as_ptr()).unwrap_or(std::ptr::null());
+    unsafe {
+        sys::ImGuizmo_Manipulate(
+            view.as_ptr(),
+            projection.as_ptr(),
+            operation.into(),
+            mode.into(),
+            model_matrix.as_mut_ptr(),
+            delta_ptr,
+            snap_ptr,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    }
+}
 
-/// Check if the library was compiled with tracing support
-pub const HAS_TRACING: bool = cfg!(feature = "tracing");
+/// Convenience: set draw list to current window's draw list
+pub fn set_drawlist(ui: &Ui) {
+    unsafe {
+        // Safety: ImGui current window draw list is valid during UI building
+        let draw_list = ui.get_window_draw_list();
+        sys::ImGuizmo_SetDrawlist(draw_list.raw());
+    }
+}
+
+/// Enable or disable ImGuizmo globally
+pub fn enable(enable: bool) {
+    unsafe { sys::ImGuizmo_Enable(enable) }
+}
+
+/// Query whether the gizmo is hovered/used
+pub fn is_over() -> bool { unsafe { sys::ImGuizmo_IsOver_Nil() } }
+pub fn is_using() -> bool { unsafe { sys::ImGuizmo_IsUsing() } }
+pub fn is_using_any() -> bool { unsafe { sys::ImGuizmo_IsUsingAny() } }

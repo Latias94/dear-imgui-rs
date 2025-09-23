@@ -109,7 +109,7 @@ impl<'a> BarGroupsPlot<'a> {
         let label_ptrs: Vec<*const i8> = label_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
 
         unsafe {
-            sys::ImPlot_PlotBarGroups_double(
+            sys::ImPlot_PlotBarGroups_doublePtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
                 self.item_count as i32,
@@ -230,7 +230,7 @@ impl<'a> BarGroupsPlotF32<'a> {
         let label_ptrs: Vec<*const i8> = label_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
 
         unsafe {
-            sys::ImPlot_PlotBarGroups_float(
+            sys::ImPlot_PlotBarGroups_FloatPtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
                 self.item_count as i32,

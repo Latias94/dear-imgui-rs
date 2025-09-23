@@ -1,6 +1,8 @@
 # Dear ImPlot - Rust Bindings
 
-High-level Rust bindings for ImPlot, the immediate mode plotting library. This crate provides safe, idiomatic Rust bindings designed to work seamlessly with dear-imgui (C++ bindgen) rather than imgui-rs (cimgui).
+High-level Rust bindings for ImPlot, the immediate mode plotting library. This crate provides safe, idiomatic Rust bindings designed to work seamlessly with `dear-imgui` (which uses cimgui C API) and `dear-implot-sys` (which uses cimplot C API).
+
+For native build/link options (source, system/prebuilt, remote prebuilt), see `extensions/dear-implot-sys/README.md`.
 
 ## Features
 

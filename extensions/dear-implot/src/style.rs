@@ -94,7 +94,7 @@ impl Drop for StyleColorToken {
 /// Push a float style variable to the stack
 pub fn push_style_var_f32(var: StyleVar, value: f32) -> StyleVarToken {
     unsafe {
-        sys::ImPlot_PushStyleVar(var as sys::ImPlotStyleVar_, value);
+        sys::ImPlot_PushStyleVar_Float(var as sys::ImPlotStyleVar, value);
     }
     StyleVarToken { was_popped: false }
 }
@@ -102,7 +102,7 @@ pub fn push_style_var_f32(var: StyleVar, value: f32) -> StyleVarToken {
 /// Push an integer style variable to the stack (converted to float)
 pub fn push_style_var_i32(var: StyleVar, value: i32) -> StyleVarToken {
     unsafe {
-        sys::ImPlot_PushStyleVar(var as sys::ImPlotStyleVar_, value as f32);
+        sys::ImPlot_PushStyleVar_Int(var as sys::ImPlotStyleVar, value);
     }
     StyleVarToken { was_popped: false }
 }
@@ -110,12 +110,9 @@ pub fn push_style_var_i32(var: StyleVar, value: i32) -> StyleVarToken {
 /// Push a Vec2 style variable to the stack
 pub fn push_style_var_vec2(var: StyleVar, value: [f32; 2]) -> StyleVarToken {
     unsafe {
-        sys::ImPlot_PushStyleVar2(
-            var as sys::ImPlotStyleVar_,
-            &sys::ImVec2 {
-                x: value[0],
-                y: value[1],
-            } as *const sys::ImVec2,
+        sys::ImPlot_PushStyleVar_Vec2(
+            var as sys::ImPlotStyleVar,
+            sys::ImVec2 { x: value[0], y: value[1] },
         );
     }
     StyleVarToken { was_popped: false }
@@ -131,7 +128,7 @@ pub fn push_style_color(element: crate::PlotColorElement, color: [f32; 4]) -> St
         let a = (color[3] * 255.0) as u32;
         let color_u32 = (a << 24) | (b << 16) | (g << 8) | r;
 
-        sys::ImPlot_PushStyleColor(element as sys::ImPlotCol_, color_u32);
+        sys::ImPlot_PushStyleColor_U32(element as sys::ImPlotCol_, color_u32);
     }
     StyleColorToken { was_popped: false }
 }
@@ -139,7 +136,7 @@ pub fn push_style_color(element: crate::PlotColorElement, color: [f32; 4]) -> St
 /// Push a colormap to the stack
 pub fn push_colormap(preset: crate::Colormap) {
     unsafe {
-        sys::ImPlot_PushColormap(preset as sys::ImPlotColormap_);
+        sys::ImPlot_PushColormap_PlotColormap(preset as sys::ImPlotColormap_);
     }
 }
 
@@ -154,11 +151,6 @@ pub fn pop_colormap(count: i32) {
 pub fn add_colormap(name: &str, colors: &[sys::ImVec4], qualitative: bool) -> sys::ImPlotColormap_ {
     let name_cstr = std::ffi::CString::new(name).unwrap();
     unsafe {
-        sys::ImPlot_AddColormap(
-            name_cstr.as_ptr(),
-            colors.as_ptr(),
-            colors.len() as i32,
-            qualitative,
-        )
+        sys::ImPlot_AddColormap_Vec4Ptr(name_cstr.as_ptr(), colors.as_ptr(), colors.len() as i32, qualitative)
     }
 }

@@ -84,13 +84,15 @@ impl<'a> Plot for ErrorBarsPlot<'a> {
         let label_cstr = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotErrorBars_double(
+            sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrInt(
                 label_cstr.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.err_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.flags,
+                self.offset,
+                self.stride,
             );
         }
     }
@@ -165,25 +167,19 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
             return;
         }
 
-        // Note: This would require a different wrapper function for asymmetric error bars
-        // For now, we'll use the symmetric version with the average of positive and negative errors
-        let avg_errors: Vec<f64> = self
-            .err_neg
-            .iter()
-            .zip(self.err_pos.iter())
-            .map(|(&neg, &pos)| (neg + pos) / 2.0)
-            .collect();
-
         let label_cstr = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotErrorBars_double(
+            sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrdoublePtr(
                 label_cstr.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
-                avg_errors.as_ptr(),
+                self.err_neg.as_ptr(),
+                self.err_pos.as_ptr(),
                 self.x_data.len() as i32,
                 self.flags,
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }
@@ -254,13 +250,15 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
             .collect();
 
         unsafe {
-            sys::ImPlot_PlotErrorBars_double(
+            sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrInt(
                 label_cstr.as_ptr(),
                 x_data.as_ptr(),
                 self.values.as_ptr(),
                 self.errors.as_ptr(),
                 self.values.len() as i32,
                 0, // flags
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }

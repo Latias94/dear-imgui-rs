@@ -68,13 +68,15 @@ impl<'a> Plot for ShadedPlot<'a> {
         let label_cstr = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotShaded_double(
+            sys::ImPlot_PlotShaded_doublePtrdoublePtrInt(
                 label_cstr.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.y_ref,
                 self.flags,
+                self.offset,
+                self.stride,
             );
         }
     }
@@ -130,13 +132,15 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
         // Note: This would require a different wrapper function for shaded between two lines
         // For now, we'll use the single line version with the first Y data
         unsafe {
-            sys::ImPlot_PlotShaded_double(
+            sys::ImPlot_PlotShaded_doublePtrdoublePtrdoublePtr(
                 label_cstr.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y1_data.as_ptr(),
+                self.y2_data.as_ptr(),
                 self.x_data.len() as i32,
-                0.0, // y_ref - this is a limitation of the current wrapper
                 self.flags,
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }
@@ -200,13 +204,15 @@ impl<'a> Plot for SimpleShadedPlot<'a> {
             .collect();
 
         unsafe {
-            sys::ImPlot_PlotShaded_double(
+            sys::ImPlot_PlotShaded_doublePtrdoublePtrInt(
                 label_cstr.as_ptr(),
                 x_data.as_ptr(),
                 self.values.as_ptr(),
                 self.values.len() as i32,
                 self.y_ref,
                 0, // flags
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }

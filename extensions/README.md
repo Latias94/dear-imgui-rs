@@ -1,4 +1,12 @@
 # Dear ImGui Extensions
+**Ready to contribute?** Start by creating an issue to discuss your extension idea, and we'll help you get started! 🚀
+
+| Extension | Description | Status | Rust Crate | Original Repository |
+|-----------|-------------|--------|------------|-------------------|
+| **ImPlot** | Advanced plotting library for scientific/engineering applications | ✅ Complete | [dear-implot](./dear-implot) | [cimgui/cimplot](https://github.com/cimgui/cimplot) |
+| **ImGuizmo** | 3D transform gizmos (translate/rotate/scale) for ImGui | 🚧 In Progress | [dear-imguizmo](./dear-imguizmo) | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo) |
+
+# Dear ImGui Extensions
 
 This directory contains third-party extensions for the `dear-imgui` Rust binding. These extensions provide additional functionality beyond the core Dear ImGui library, such as plotting, 3D manipulation, node editing, and more.
 
@@ -318,6 +326,22 @@ your-dear-imgui-extension/
 2. **Static Linking**: Link against Dear ImGui via `cargo:rustc-link-lib=static=dear_imgui`
 3. **RAII Safety**: Implement token-based lifetime management
 4. **Builder Patterns**: Provide fluent, type-safe configuration APIs
+
+## ImPlot (cimplot) Build Notes
+
+`dear-implot-sys` supports multiple ways to obtain the native `dear_implot` static library:
+
+- Default: source build of `cimplot.cpp` + `implot/*.cpp`
+- System/Prebuilt: set `IMPLOT_SYS_LIB_DIR` to a directory containing the static library
+- Remote Prebuilt: set `IMPLOT_SYS_PREBUILT_URL` to a direct URL to the static library
+- Skip native compilation entirely with `IMPLOT_SYS_SKIP_CC` (use with a prebuilt)
+
+Static library names expected by platform:
+
+- Windows (MSVC): `dear_implot.lib`
+- Unix: `libdear_implot.a`
+
+The build inherits include paths and compile-time defines from `dear-imgui-sys` (cimgui), so the two crates link consistently. See `extensions/dear-implot-sys/README.md` for details and usage examples.
 5. **Cross-Platform**: Ensure Windows, macOS, and Linux compatibility
 
 ### 🚀 Independent Development

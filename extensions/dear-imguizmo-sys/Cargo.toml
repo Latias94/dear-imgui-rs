@@ -1,15 +1,15 @@
 [package]
-name = "dear-implot-sys"
+name = "dear-imguizmo-sys"
 version.workspace = true
 edition.workspace = true
-description = "Low-level FFI bindings for ImPlot via cimplot (C API)"
+description = "Low-level FFI bindings for ImGuizmo via cimguizmo (C API)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
 build = "build.rs"
-links = "dear_implot"
+links = "dear_imguizmo"
 
 [dependencies]
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.1" }
@@ -25,11 +25,6 @@ reqwest = { version = "0.11", features = ["blocking", "rustls-tls"], default-fea
 
 [features]
 default = ["docking"]
-# Enable docking branch features (default)
 docking = ["dear-imgui-sys/docking"]
-# Enable multi-viewport support (requires docking)
 multi-viewport = ["docking", "dear-imgui-sys/multi-viewport"]
-# Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
-# Enable for WASM targets
-# wasm = ["dear-imgui-sys/wasm"]

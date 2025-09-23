@@ -8,7 +8,7 @@ pub struct LinePlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [f64],
-    flags: sys::ImPlotLineFlags_,
+    flags: sys::ImPlotLineFlags,
     offset: i32,
     stride: i32,
 }
@@ -27,7 +27,7 @@ impl<'a> LinePlot<'a> {
     }
 
     /// Set line flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotLineFlags_) -> Self {
+    pub fn with_flags(mut self, flags: sys::ImPlotLineFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -59,11 +59,14 @@ impl<'a> Plot for LinePlot<'a> {
         let label_cstr = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotLine_double(
+            sys::ImPlot_PlotLine_doublePtrdoublePtr(
                 label_cstr.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
+                self.flags,
+                self.offset,
+                self.stride,
             );
         }
     }
@@ -121,11 +124,14 @@ impl<'a> Plot for SimpleLinePlot<'a> {
             .collect();
 
         unsafe {
-            sys::ImPlot_PlotLine_double(
+            sys::ImPlot_PlotLine_doublePtrdoublePtr(
                 label_cstr.as_ptr(),
                 x_data.as_ptr(),
                 self.values.as_ptr(),
                 self.values.len() as i32,
+                0,
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }

@@ -18,12 +18,16 @@ pub fn is_plot_selected() -> bool {
 pub fn get_plot_mouse_position(y_axis_choice: Option<crate::YAxisChoice>) -> sys::ImPlotPoint {
     let x_axis = 0; // ImAxis_X1
     let y_axis = match y_axis_choice {
-        Some(crate::YAxisChoice::First) => 1,  // ImAxis_Y1
-        Some(crate::YAxisChoice::Second) => 2, // ImAxis_Y2
-        Some(crate::YAxisChoice::Third) => 3,  // ImAxis_Y3
-        None => 1,                             // Default to Y1
+        Some(crate::YAxisChoice::First) => 3,  // ImAxis_Y1
+        Some(crate::YAxisChoice::Second) => 4, // ImAxis_Y2
+        Some(crate::YAxisChoice::Third) => 5,  // ImAxis_Y3
+        None => 3,                             // Default to Y1
     };
-    unsafe { sys::ImPlot_GetPlotMousePos(x_axis, y_axis) }
+    let mut out = sys::ImPlotPoint { x: 0.0, y: 0.0 };
+    unsafe {
+        sys::ImPlot_GetPlotMousePos(&mut out as *mut sys::ImPlotPoint, x_axis, y_axis);
+    }
+    out
 }
 
 /// Convert pixels to plot coordinates
@@ -31,18 +35,24 @@ pub fn pixels_to_plot(
     pixel_position: [f32; 2],
     y_axis_choice: Option<crate::YAxisChoice>,
 ) -> sys::ImPlotPoint {
-    let x_axis = 0; // ImAxis_X1
-    let y_axis = match y_axis_choice {
-        Some(crate::YAxisChoice::First) => 1,  // ImAxis_Y1
-        Some(crate::YAxisChoice::Second) => 2, // ImAxis_Y2
-        Some(crate::YAxisChoice::Third) => 3,  // ImAxis_Y3
-        None => 1,                             // Default to Y1
+    // Map absolute pixel coordinates to plot coordinates using current plot's axes
+    let y_index = match y_axis_choice {
+        Some(crate::YAxisChoice::First) => 0,
+        Some(crate::YAxisChoice::Second) => 1,
+        Some(crate::YAxisChoice::Third) => 2,
+        None => 0,
     };
-    let pixel_vec = sys::ImVec2 {
-        x: pixel_position[0],
-        y: pixel_position[1],
-    };
-    unsafe { sys::ImPlot_PixelsToPlot(&pixel_vec as *const sys::ImVec2, x_axis, y_axis) }
+    unsafe {
+        let plot = sys::ImPlot_GetCurrentPlot();
+        if plot.is_null() {
+            return sys::ImPlotPoint { x: 0.0, y: 0.0 };
+        }
+        let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, 0);
+        let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_index as i32);
+        let x = sys::ImPlotAxis_PixelsToPlot(x_axis_ptr, pixel_position[0]);
+        let y = sys::ImPlotAxis_PixelsToPlot(y_axis_ptr, pixel_position[1]);
+        sys::ImPlotPoint { x, y }
+    }
 }
 
 /// Convert plot coordinates to pixels
@@ -50,17 +60,23 @@ pub fn plot_to_pixels(
     plot_position: sys::ImPlotPoint,
     y_axis_choice: Option<crate::YAxisChoice>,
 ) -> [f32; 2] {
-    let x_axis = 0; // ImAxis_X1
-    let y_axis = match y_axis_choice {
-        Some(crate::YAxisChoice::First) => 1,  // ImAxis_Y1
-        Some(crate::YAxisChoice::Second) => 2, // ImAxis_Y2
-        Some(crate::YAxisChoice::Third) => 3,  // ImAxis_Y3
-        None => 1,                             // Default to Y1
+    let y_index = match y_axis_choice {
+        Some(crate::YAxisChoice::First) => 0,
+        Some(crate::YAxisChoice::Second) => 1,
+        Some(crate::YAxisChoice::Third) => 2,
+        None => 0,
     };
-    let pixel_position = unsafe {
-        sys::ImPlot_PlotToPixels(&plot_position as *const sys::ImPlotPoint, x_axis, y_axis)
-    };
-    [pixel_position.x, pixel_position.y]
+    unsafe {
+        let plot = sys::ImPlot_GetCurrentPlot();
+        if plot.is_null() {
+            return [0.0, 0.0];
+        }
+        let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, 0);
+        let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_index as i32);
+        let px = sys::ImPlotAxis_PlotToPixels(x_axis_ptr, plot_position.x);
+        let py = sys::ImPlotAxis_PlotToPixels(y_axis_ptr, plot_position.y);
+        [px, py]
+    }
 }
 
 /// Get the current plot limits
@@ -70,12 +86,14 @@ pub fn get_plot_limits(
 ) -> sys::ImPlotRect {
     let x_axis = 0; // ImAxis_X1
     let y_axis = match y_axis_choice {
-        Some(crate::YAxisChoice::First) => 1,  // ImAxis_Y1
-        Some(crate::YAxisChoice::Second) => 2, // ImAxis_Y2
-        Some(crate::YAxisChoice::Third) => 3,  // ImAxis_Y3
-        None => 1,                             // Default to Y1
+        Some(crate::YAxisChoice::First) => 3,  // ImAxis_Y1
+        Some(crate::YAxisChoice::Second) => 4, // ImAxis_Y2
+        Some(crate::YAxisChoice::Third) => 5,  // ImAxis_Y3
+        None => 3,                             // Default to Y1
     };
-    unsafe { sys::ImPlot_GetPlotLimits(x_axis, y_axis) }
+    let mut rect: sys::ImPlotRect = unsafe { std::mem::zeroed() };
+    unsafe { sys::ImPlot_GetPlotLimits(&mut rect as *mut sys::ImPlotRect, x_axis, y_axis) };
+    rect
 }
 
 /// Check if an axis is hovered
@@ -91,10 +109,10 @@ pub fn is_plot_x_axis_hovered() -> bool {
 /// Check if a Y axis is hovered
 pub fn is_plot_y_axis_hovered(y_axis_choice: Option<crate::YAxisChoice>) -> bool {
     let y_axis = match y_axis_choice {
-        Some(crate::YAxisChoice::First) => 1,  // ImAxis_Y1
-        Some(crate::YAxisChoice::Second) => 2, // ImAxis_Y2
-        Some(crate::YAxisChoice::Third) => 3,  // ImAxis_Y3
-        None => 1,                             // Default to Y1
+        Some(crate::YAxisChoice::First) => 3,  // ImAxis_Y1
+        Some(crate::YAxisChoice::Second) => 4, // ImAxis_Y2
+        Some(crate::YAxisChoice::Third) => 5,  // ImAxis_Y3
+        None => 3,                             // Default to Y1
     };
     is_axis_hovered(y_axis)
 }

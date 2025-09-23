@@ -93,7 +93,7 @@ impl<'ui> PlotUi<'ui> {
         let title_cstr = std::ffi::CString::new(title).ok()?;
 
         let size = sys::ImVec2 { x: -1.0, y: 0.0 };
-        let started = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), &size, 0) };
+        let started = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), size, 0) };
 
         if started {
             Some(PlotToken::new())
@@ -110,7 +110,7 @@ impl<'ui> PlotUi<'ui> {
             x: size[0],
             y: size[1],
         };
-        let started = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), &plot_size, 0) };
+        let started = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), plot_size, 0) };
 
         if started {
             Some(PlotToken::new())
@@ -130,11 +130,14 @@ impl<'ui> PlotUi<'ui> {
         let label_cstr = std::ffi::CString::new(label).unwrap_or_default();
 
         unsafe {
-            sys::ImPlot_PlotLine_double(
+            sys::ImPlot_PlotLine_doublePtrdoublePtr(
                 label_cstr.as_ptr(),
                 x_data.as_ptr(),
                 y_data.as_ptr(),
                 x_data.len() as i32,
+                0,
+                0,
+                0,
             );
         }
     }
@@ -148,11 +151,14 @@ impl<'ui> PlotUi<'ui> {
         let label_cstr = std::ffi::CString::new(label).unwrap_or_default();
 
         unsafe {
-            sys::ImPlot_PlotScatter_double(
+            sys::ImPlot_PlotScatter_doublePtrdoublePtr(
                 label_cstr.as_ptr(),
                 x_data.as_ptr(),
                 y_data.as_ptr(),
                 x_data.len() as i32,
+                0,
+                0,
+                0,
             );
         }
     }
@@ -165,9 +171,17 @@ impl<'ui> PlotUi<'ui> {
     /// Get the mouse position in plot coordinates
     pub fn get_plot_mouse_pos(&self, y_axis: Option<crate::YAxisChoice>) -> sys::ImPlotPoint {
         let y_axis_i32 = crate::y_axis_choice_option_to_i32(y_axis);
+        let y_axis = match y_axis_i32 {
+            0 => 3,
+            1 => 4,
+            2 => 5,
+            _ => 3,
+        };
+        let mut out = sys::ImPlotPoint { x: 0.0, y: 0.0 };
         unsafe {
-            sys::ImPlot_GetPlotMousePos(0, y_axis_i32) // x_axis = 0 (default)
+            sys::ImPlot_GetPlotMousePos(&mut out as *mut sys::ImPlotPoint, 0, y_axis);
         }
+        out
     }
 }
 
