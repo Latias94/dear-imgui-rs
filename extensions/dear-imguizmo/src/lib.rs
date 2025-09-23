@@ -3,8 +3,65 @@
 use dear_imgui::Ui;
 use dear_imgui_sys as imgui_sys;
 use dear_imguizmo_sys as sys;
-use glam::Mat4;
 use thiserror::Error;
+
+/// Trait to abstract over 4x4 column-major matrices used by ImGuizmo.
+pub trait Mat4Like: Sized {
+    fn to_cols_array(&self) -> [f32; 16];
+    fn set_from_cols_array(&mut self, arr: [f32; 16]);
+    fn identity() -> Self;
+    fn from_cols_array(arr: [f32; 16]) -> Self {
+        let mut out = Self::identity();
+        out.set_from_cols_array(arr);
+        out
+    }
+}
+
+impl Mat4Like for [f32; 16] {
+    fn to_cols_array(&self) -> [f32; 16] { *self }
+    fn set_from_cols_array(&mut self, arr: [f32; 16]) { *self = arr; }
+    fn identity() -> Self {
+        [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ]
+    }
+}
+
+#[cfg(feature = "glam")]
+impl Mat4Like for glam::Mat4 {
+    fn to_cols_array(&self) -> [f32; 16] { self.to_cols_array() }
+    fn set_from_cols_array(&mut self, arr: [f32; 16]) { *self = glam::Mat4::from_cols_array(&arr); }
+    fn identity() -> Self { glam::Mat4::IDENTITY }
+}
+
+#[cfg(feature = "mint")]
+impl Mat4Like for mint::ColumnMatrix4<f32> {
+    fn to_cols_array(&self) -> [f32; 16] {
+        [
+            self.x.x, self.x.y, self.x.z, self.x.w,
+            self.y.x, self.y.y, self.y.z, self.y.w,
+            self.z.x, self.z.y, self.z.z, self.z.w,
+            self.w.x, self.w.y, self.w.z, self.w.w,
+        ]
+    }
+    fn set_from_cols_array(&mut self, arr: [f32; 16]) {
+        self.x.x = arr[0];  self.x.y = arr[1];  self.x.z = arr[2];  self.x.w = arr[3];
+        self.y.x = arr[4];  self.y.y = arr[5];  self.y.z = arr[6];  self.y.w = arr[7];
+        self.z.x = arr[8];  self.z.y = arr[9];  self.z.z = arr[10]; self.z.w = arr[11];
+        self.w.x = arr[12]; self.w.y = arr[13]; self.w.z = arr[14]; self.w.w = arr[15];
+    }
+    fn identity() -> Self {
+        mint::ColumnMatrix4 {
+            x: mint::Vector4 { x: 1.0, y: 0.0, z: 0.0, w: 0.0 },
+            y: mint::Vector4 { x: 0.0, y: 1.0, z: 0.0, w: 0.0 },
+            z: mint::Vector4 { x: 0.0, y: 0.0, z: 1.0, w: 0.0 },
+            w: mint::Vector4 { x: 0.0, y: 0.0, z: 0.0, w: 1.0 },
+        }
+    }
+}
 
 bitflags::bitflags! {
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +120,9 @@ impl GuizmoContext {
         Self
     }
 
-    pub fn get_ui<'ui>(&self, _ui: &'ui Ui) -> GizmoUi<'ui> {
+    /// Begin an ImGuizmo frame for the given ImGui `Ui`.
+    /// Call exactly once per frame before using GizmoUi functions.
+    pub fn begin_frame<'ui>(&self, _ui: &'ui Ui) -> GizmoUi<'ui> {
         unsafe {
             sys::ImGuizmo_SetImGuiContext(imgui_sys::igGetCurrentContext());
             sys::ImGuizmo_BeginFrame();
@@ -77,6 +136,16 @@ pub struct GizmoUi<'ui> {
 }
 
 impl<'ui> GizmoUi<'ui> {
+    // ID helpers to match ImGuizmo ID stack usage in demos
+    pub fn set_id(&self, id: i32) {
+        unsafe { sys::ImGuizmo_SetID(id) }
+    }
+    pub fn push_id_int(&self, id: i32) {
+        unsafe { sys::ImGuizmo_PushID_Int(id) }
+    }
+    pub fn pop_id(&self) {
+        unsafe { sys::ImGuizmo_PopID() }
+    }
     pub fn set_rect(&self, x: f32, y: f32, width: f32, height: f32) {
         unsafe { sys::ImGuizmo_SetRect(x, y, width, height) }
     }
@@ -96,7 +165,7 @@ impl<'ui> GizmoUi<'ui> {
         unsafe { sys::ImGuizmo_SetPlaneLimit(value) }
     }
 
-    pub fn draw_grid(&self, view: &Mat4, projection: &Mat4, model: &Mat4, grid_size: f32) {
+    pub fn draw_grid<T: Mat4Like>(&self, view: &T, projection: &T, model: &T, grid_size: f32) {
         unsafe {
             sys::ImGuizmo_DrawGrid(
                 view.to_cols_array().as_ptr(),
@@ -107,7 +176,7 @@ impl<'ui> GizmoUi<'ui> {
         }
     }
 
-    pub fn draw_cubes(&self, view: &Mat4, projection: &Mat4, matrices: &[Mat4]) {
+    pub fn draw_cubes<T: Mat4Like>(&self, view: &T, projection: &T, matrices: &[T]) {
         let count = matrices.len() as i32;
         if count == 0 {
             return;
@@ -142,36 +211,30 @@ impl<'ui> GizmoUi<'ui> {
         }
     }
 
-    pub fn manipulate_with_options(
+    /// Manipulate using the currently bound draw list.
+    /// Call one of `set_drawlist_window/background/foreground` before invoking.
+    pub fn manipulate<T: Mat4Like>(
         &self,
-        _draw_list: &dear_imgui::DrawListMut<'_>,
-        view: &Mat4,
-        projection: &Mat4,
+        view: &T,
+        projection: &T,
         operation: Operation,
         mode: Mode,
-        model_matrix: &mut Mat4,
-        mut delta_matrix: Option<&mut Mat4>,
+        model_matrix: &mut T,
+        mut delta_matrix: Option<&mut T>,
         snap: Option<&[f32; 3]>,
         local_bounds: Option<&[f32; 6]>,
         bounds_snap: Option<&[f32; 3]>,
     ) -> Result<bool, GizmoError> {
-        // Bind current window drawlist (cannot get raw from DrawListMut; use ig API)
-        self.set_drawlist_window();
         if let Some(lb) = local_bounds {
             if lb.len() != 6 {
                 return Err(GizmoError::InvalidLocalBounds);
             }
         }
-        // Prepare mutable arrays for model and optional delta outputs
         let mut model_arr = model_matrix.to_cols_array();
         let mut delta_arr = match &delta_matrix {
             Some(dm) => dm.to_cols_array(),
-            None => Mat4::IDENTITY.to_cols_array(),
+            None => T::identity().to_cols_array(),
         };
-        let delta_ptr = delta_arr.as_mut_ptr();
-        let snap_ptr = snap.map(|s| s.as_ptr()).unwrap_or(std::ptr::null());
-        let lb_ptr = local_bounds.map(|b| b.as_ptr()).unwrap_or(std::ptr::null());
-        let bs_ptr = bounds_snap.map(|b| b.as_ptr()).unwrap_or(std::ptr::null());
         let used = unsafe {
             sys::ImGuizmo_Manipulate(
                 view.to_cols_array().as_ptr(),
@@ -179,23 +242,22 @@ impl<'ui> GizmoUi<'ui> {
                 op_to_sys(operation),
                 mode_to_sys(mode),
                 model_arr.as_mut_ptr(),
-                delta_ptr,
-                snap_ptr,
-                lb_ptr,
-                bs_ptr,
+                delta_arr.as_mut_ptr(),
+                snap.map(|s| s.as_ptr()).unwrap_or(std::ptr::null()),
+                local_bounds.map(|b| b.as_ptr()).unwrap_or(std::ptr::null()),
+                bounds_snap.map(|b| b.as_ptr()).unwrap_or(std::ptr::null()),
             )
         };
-        // Write back results
-        *model_matrix = Mat4::from_cols_array(&model_arr);
+        model_matrix.set_from_cols_array(model_arr);
         if let Some(dm) = &mut delta_matrix {
-            **dm = Mat4::from_cols_array(&delta_arr);
+            dm.set_from_cols_array(delta_arr);
         }
         Ok(used)
     }
 
-    pub fn view_manipulate(
+    pub fn view_manipulate<T: Mat4Like>(
         &self,
-        view: &mut Mat4,
+        view: &mut T,
         length: f32,
         position: [f32; 2],
         size: [f32; 2],
@@ -217,7 +279,7 @@ impl<'ui> GizmoUi<'ui> {
                 background_color,
             );
         }
-        *view = Mat4::from_cols_array(&arr);
+        view.set_from_cols_array(arr);
         unsafe { sys::ImGuizmo_IsUsingViewManipulate() }
     }
 
@@ -233,4 +295,41 @@ impl<'ui> GizmoUi<'ui> {
     pub fn is_over_operation(&self, operation: Operation) -> bool {
         unsafe { sys::ImGuizmo_IsOver_OPERATION(op_to_sys(operation)) }
     }
+}
+
+// Matrix utilities (Decompose/Recompose) mirroring ImGuizmo helpers
+pub fn decompose_matrix<T: Mat4Like>(mat: &T) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    let mut arr = mat.to_cols_array();
+    let mut tr = [0.0f32; 3];
+    let mut rt = [0.0f32; 3];
+    let mut sc = [1.0f32; 3];
+    unsafe {
+        sys::ImGuizmo_DecomposeMatrixToComponents(
+            arr.as_mut_ptr(),
+            tr.as_mut_ptr(),
+            rt.as_mut_ptr(),
+            sc.as_mut_ptr(),
+        );
+    }
+    (tr, rt, sc)
+}
+
+pub fn recompose_matrix<T: Mat4Like>(
+    translation: &[f32; 3],
+    rotation: &[f32; 3],
+    scale: &[f32; 3],
+) -> T {
+    let mut out = [0.0f32; 16];
+    let mut tr = *translation;
+    let mut rt = *rotation;
+    let mut sc = *scale;
+    unsafe {
+        sys::ImGuizmo_RecomposeMatrixFromComponents(
+            tr.as_mut_ptr(),
+            rt.as_mut_ptr(),
+            sc.as_mut_ptr(),
+            out.as_mut_ptr(),
+        );
+    }
+    T::from_cols_array(out)
 }

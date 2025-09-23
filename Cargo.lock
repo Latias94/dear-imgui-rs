@@ -749,6 +749,7 @@ dependencies = [
  "dear-imgui-sys",
  "dear-imguizmo-sys",
  "glam",
+ "mint",
  "thiserror 2.0.16",
 ]
 

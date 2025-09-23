@@ -191,15 +191,22 @@ fn main() {
 
         // Common defines and include directories
         build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
+        // Match ImWchar width with dear-imgui-sys (32-bit path)
+        if target_env == "msvc" {
+            build.define("IMGUI_USE_WCHAR32", None);
+        }
         build.include(&imgui_src);
         build.include(&cimgui_root);
         build.include(&cimplot_root);
         build.include(cimplot_root.join("implot"));
+        // Base cimgui link is provided by dear-imgui-sys; do not duplicate here.
 
         // Compile cimplot + implot sources
         build.file(cimplot_root.join("cimplot.cpp"));
         build.file(cimplot_root.join("implot/implot.cpp"));
         build.file(cimplot_root.join("implot/implot_items.cpp"));
+        // Include the demo sources to satisfy ImPlot_ShowDemoWindow
+        build.file(cimplot_root.join("implot/implot_demo.cpp"));
 
         build.compile("dear_implot");
 

@@ -2,6 +2,14 @@
 
 High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on top of the C API (`cimguizmo`) and integrated with `dear-imgui`.
 
+## Features
+
+- `glam` (default): Use `glam::Mat4` seamlessly in the high-level API.
+- `mint` (optional): Use `mint::ColumnMatrix4<f32>` seamlessly.
+- Without those features, you can always pass `[f32; 16]` (column-major) matrices.
+
+All matrix arguments in the API are generic over a `Mat4Like` trait, implemented for `[f32; 16]`, and when enabled, for `glam::Mat4` and `mint::ColumnMatrix4<f32>`.
+
 ## Quick Start
 
 ```
@@ -20,22 +28,24 @@ use glam::Mat4;
 let mut ctx = Context::create_or_panic();
 let ui = ctx.frame();
 
-// Build per-frame ImGuizmo UI bound to the current ImGui context
-let gizmo_ui = GuizmoContext::new().get_ui(&ui);
+// Begin ImGuizmo for this frame, bound to the current ImGui context
+let gizmo_ui = GuizmoContext::new().begin_frame(&ui);
 
 // Set the drawing rectangle to the full viewport
-let [w, h] = ui.io().display_size;
-gizmo_ui.set_rect(0.0, 0.0, w, h);
+let ds = ui.io().display_size();
+gizmo_ui.set_rect(0.0, 0.0, ds[0], ds[1]);
 
-// Matrices (column-major arrays)
+// Choose where to draw (window/background/foreground)
+gizmo_ui.set_drawlist_window();
+
+// Matrices (column-major). With the default `glam` feature, use `glam::Mat4`.
 let mut model = Mat4::IDENTITY;
 let view = Mat4::IDENTITY;
 let proj = Mat4::IDENTITY;
 
 // Manipulate the model matrix
-let used = gizmo_ui
-    .manipulate_with_options(
-        &ui.get_window_draw_list(),
+let used: bool = gizmo_ui
+    .manipulate(
         &view,
         &proj,
         Operation::TRANSLATE,

@@ -17,10 +17,13 @@ dear-imguizmo-sys = { path = "../dear-imguizmo-sys", version = "0.1" }
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.1" }
 thiserror.workspace = true
 bitflags = "2.5"
-glam = "0.27"
+glam = { version = "0.27", optional = true }
+mint = { version = "0.5", optional = true }
 
 [features]
-default = ["docking"]
+default = ["docking", "glam"]
 docking = ["dear-imgui/docking", "dear-imguizmo-sys/docking"]
 multi-viewport = ["docking", "dear-imgui/multi-viewport", "dear-imguizmo-sys/multi-viewport"]
 freetype = ["dear-imgui/freetype", "dear-imguizmo-sys/freetype"]
+glam = ["dep:glam"]
+mint = ["dep:mint"]

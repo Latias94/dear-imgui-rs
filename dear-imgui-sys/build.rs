@@ -411,7 +411,8 @@ fn main() {
 
         // Export common defines that extensions might need
         println!("cargo:DEFINE_IMGUITEST=0");
-        println!("cargo:DEFINE_IMGUI_USE_WCHAR32=");
+        // Only export IMGUI_USE_WCHAR32 when actually enabled in our own build.
+        // We rely on CMake option IMGUI_WCHAR32 to drive this for native builds.
     }
 }
 
@@ -480,12 +481,26 @@ fn build_with_cmake(manifest_dir: &Path) -> bool {
         "Release"
     };
     cfg.profile(cmake_profile);
+    // Ensure 32-bit ImWchar for consistency when using MSVC toolchain
+    if cfg!(target_env = "msvc") {
+        cfg.define("CMAKE_CXX_FLAGS", "/DIMGUI_USE_WCHAR32");
+    }
 
     let dst = cfg.build();
 
     // Library name is cimgui (no prefix on Windows, lib prefix on Unix)
-    // CMake crate copies libraries to dst/lib (or dst/Debug etc. on Windows older cmake)
-    let lib_dir_candidates = [dst.join("lib"), dst.join("build"), dst.clone()];
+    // CMake may copy libraries to dst/lib or generator-specific config dirs
+    let mut lib_dir_candidates = Vec::new();
+    lib_dir_candidates.push(dst.join("lib"));
+    lib_dir_candidates.push(dst.join("build"));
+    lib_dir_candidates.push(dst.clone());
+    // Common MSVC profiles
+    lib_dir_candidates.push(dst.join("build").join("RelWithDebInfo"));
+    lib_dir_candidates.push(dst.join("build").join("Release"));
+    lib_dir_candidates.push(dst.join("build").join("Debug"));
+    lib_dir_candidates.push(dst.join("RelWithDebInfo"));
+    lib_dir_candidates.push(dst.join("Release"));
+    lib_dir_candidates.push(dst.join("Debug"));
     for lib_dir in lib_dir_candidates.iter() {
         if lib_dir.exists() {
             println!("cargo:rustc-link-search=native={}", lib_dir.display());
