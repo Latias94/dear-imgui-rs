@@ -59,11 +59,11 @@ Tip: The ImNodes example includes multiple tabs (Hello, Multi-Editor, Style, Adv
 [dependencies]
 dear-imgui = "0.2"
 # choose a backend + platform integration
-dear-imgui-wgpu = "0.1"   # or dear-imgui-glow
-dear-imgui-winit = "0.1"
+dear-imgui-wgpu = "0.2"   # or dear-imgui-glow
+dear-imgui-winit = "0.2"
 ```
 
-## Version & FFI (short)
+## Version & FFI
 
 - FFI layer is generated from the cimgui “docking” branch matching Dear ImGui v1.92.3.
 - We avoid the C++ ABI by using the C API + bindgen. The safe layer mirrors imgui-rs style (RAII + builder).
@@ -89,7 +89,7 @@ This project builds upon the excellent work of several other projects:
 
 - **[Dear ImGui](https://github.com/ocornut/imgui)** by Omar Cornut - The original C++ immediate mode GUI library
 - **[imgui-rs](https://github.com/imgui-rs/imgui-rs)** - Provided the API design patterns and inspiration for the Rust binding approach
-- **[easy-imgui-rs](https://github.com/rodrigorc/easy-imgui-rs/)** by rodrigorc - Demonstrated solutions for C++ ABI compatibility issues and MSVC fixes that we adapted for our FFI layer
+- **[easy-imgui-rs](https://github.com/rodrigorc/easy-imgui-rs/)** by rodrigorc
 - **[imgui-wgpu-rs](https://github.com/Yatekii/imgui-wgpu-rs/)** - Provided reference implementation for WGPU backend integration
 
 

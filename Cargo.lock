@@ -688,14 +688,13 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-glow"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dear-imgui",
  "env_logger",
  "glow",
  "memoffset",
  "pollster",
- "smallvec",
  "thiserror 2.0.16",
  "winit",
 ]
@@ -718,22 +717,19 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-wgpu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytemuck",
  "dear-imgui",
- "smallvec",
  "thiserror 2.0.16",
  "wgpu",
 ]
 
 [[package]]
 name = "dear-imgui-winit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
- "cfg-if",
  "dear-imgui",
- "raw-window-handle",
  "web-sys",
  "winit",
 ]
@@ -759,9 +755,11 @@ dependencies = [
  "cc",
  "cfg-if",
  "dear-imgui-sys",
+ "flate2",
  "mint",
  "pkg-config",
  "reqwest 0.12.23",
+ "tar",
  "xshell",
 ]
 
@@ -783,8 +781,10 @@ dependencies = [
  "cc",
  "cfg-if",
  "dear-imgui-sys",
+ "flate2",
  "pkg-config",
  "reqwest 0.12.23",
+ "tar",
  "xshell",
 ]
 
@@ -807,8 +807,10 @@ dependencies = [
  "bindgen",
  "cc",
  "dear-imgui-sys",
+ "flate2",
  "pkg-config",
  "reqwest 0.11.27",
+ "tar",
  "xshell",
 ]
 

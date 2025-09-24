@@ -32,8 +32,8 @@ exclude = [
 [dependencies]
 mint.workspace = true
 cfg-if.workspace = true
-flate2 = { version = "1", features = ["zlib-ng-compat"], default-features = false }
-tar = "0.4"
+flate2 = { version = "1", features = ["zlib-ng-compat"], default-features = false, optional = true }
+tar = { version = "0.4", optional = true }
 
 [build-dependencies]
 bindgen.workspace = true
@@ -42,10 +42,13 @@ pkg-config = { workspace = true, optional = true }
 xshell = "0.2"
 reqwest = { version = "0.11", features = ["blocking", "rustls-tls"], default-features = false }
 cmake = "0.1"
+flate2 = "1"
+tar = "0.4"
 
 [[bin]]
 name = "package"
 path = "bin/package/main.rs"
+required-features = ["package-bin"]
 
 [features]
 default = ["docking"]
@@ -57,3 +60,4 @@ multi-viewport = ["docking"]
 freetype = ["pkg-config"]
 # Enable for WASM targets
 wasm = []
+package-bin = ["dep:flate2", "dep:tar"]

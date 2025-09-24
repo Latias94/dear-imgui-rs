@@ -25,6 +25,8 @@ exclude = [
 [dependencies]
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
 cfg-if.workspace = true
+flate2 = { version = "1", features = ["zlib-ng-compat"], default-features = false, optional = true }
+tar = { version = "0.4", optional = true }
 
 [build-dependencies]
 bindgen.workspace = true
@@ -32,8 +34,16 @@ cc.workspace = true
 xshell = "0.2"
 pkg-config = "0.3"
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
+flate2 = "1"
+tar = "0.4"
+
+[[bin]]
+name = "package"
+path = "bin/package/main.rs"
+required-features = ["package-bin"]
 
 [features]
+package-bin = ["dep:flate2", "dep:tar"]
 default = ["docking"]
 # Enable docking branch features (default)
 docking = ["dear-imgui-sys/docking"]

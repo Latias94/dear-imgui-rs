@@ -1,4 +1,5 @@
-use std::{env, path::Path, path::PathBuf};
+use flate2::read::GzDecoder;
+use std::{env, fs, path::Path, path::PathBuf};
 
 #[derive(Clone, Debug)]
 struct BuildConfig {
@@ -100,10 +101,15 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
         );
     }
     if let Ok(url) = env::var("IMGUIZMO_SYS_PREBUILT_URL") {
-        if let Ok(dir) = try_download_prebuilt(&cfg.out_dir, &url, target_env) {
+        let cache_root = prebuilt_cache_root(cfg);
+        if let Ok(dir) = try_download_prebuilt(&cache_root, &url, target_env) {
             if try_link_prebuilt(dir.clone(), target_env) {
                 return true;
             }
+        }
+    } else if let Some(dir) = try_download_prebuilt_from_release(cfg) {
+        if try_link_prebuilt(dir.clone(), target_env) {
+            return true;
         }
     }
     false
@@ -201,10 +207,59 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     true
 }
 
-fn try_download_prebuilt(out_dir: &Path, url: &str, target_env: &str) -> Result<PathBuf, String> {
+fn try_download_prebuilt(
+    cache_root: &Path,
+    url: &str,
+    target_env: &str,
+) -> Result<PathBuf, String> {
     let lib_name = expected_lib_name(target_env);
-    let dl_dir = out_dir.join("prebuilt");
-    let _ = std::fs::create_dir_all(&dl_dir);
+    let dl_dir = cache_root.join("download");
+    let _ = fs::create_dir_all(&dl_dir);
+    if url.ends_with(".tar.gz") || url.ends_with(".tgz") {
+        let fname = url.split('/').last().unwrap_or("prebuilt.tar.gz");
+        let archive_path = dl_dir.join(fname);
+        if !archive_path.exists() {
+            println!(
+                "cargo:warning=Downloading prebuilt dear_imguizmo archive from {}",
+                url
+            );
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .map_err(|e| format!("http client: {}", e))?;
+            let resp = client
+                .get(url)
+                .send()
+                .map_err(|e| format!("http get: {}", e))?;
+            if !resp.status().is_success() {
+                return Err(format!("http status {}", resp.status()));
+            }
+            let bytes = resp.bytes().map_err(|e| format!("read body: {}", e))?;
+            fs::write(&archive_path, &bytes)
+                .map_err(|e| format!("write {}: {}", archive_path.display(), e))?;
+        }
+        let extract_dir = prebuilt_extract_dir_env(cache_root, target_env);
+        if extract_dir.exists() {
+            let _ = std::fs::remove_dir_all(&extract_dir);
+        }
+        fs::create_dir_all(&extract_dir)
+            .map_err(|e| format!("create dir {}: {}", extract_dir.display(), e))?;
+        let file = fs::File::open(&archive_path)
+            .map_err(|e| format!("open {}: {}", archive_path.display(), e))?;
+        let mut archive = tar::Archive::new(GzDecoder::new(file));
+        archive
+            .unpack(&extract_dir)
+            .map_err(|e| format!("unpack {}: {}", archive_path.display(), e))?;
+        let lib_dir = extract_dir.join("lib");
+        if lib_dir.join(lib_name).exists() {
+            return Ok(lib_dir);
+        }
+        if extract_dir.join(lib_name).exists() {
+            return Ok(extract_dir);
+        }
+        return Err("extracted archive did not contain expected library".into());
+    }
+
     let dst = dl_dir.join(lib_name);
     if dst.exists() {
         return Ok(dl_dir);
@@ -225,6 +280,118 @@ fn try_download_prebuilt(out_dir: &Path, url: &str, target_env: &str) -> Result<
         return Err(format!("http status {}", resp.status()));
     }
     let bytes = resp.bytes().map_err(|e| format!("read body: {}", e))?;
-    std::fs::write(&dst, &bytes).map_err(|e| format!("write {}: {}", dst.display(), e))?;
+    fs::write(&dst, &bytes).map_err(|e| format!("write {}: {}", dst.display(), e))?;
     Ok(dl_dir)
+}
+
+fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
+    let offline = matches!(
+        env::var("CARGO_NET_OFFLINE").ok().as_deref(),
+        Some("true") | Some("1") | Some("yes")
+    );
+    if offline {
+        return None;
+    }
+
+    let version = env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    let link_type = "static";
+    let crt_suffix = if cfg.is_windows() && cfg.is_msvc() {
+        if cfg.use_static_crt() { "-mt" } else { "-md" }
+    } else {
+        ""
+    };
+    let archive_name = format!(
+        "dear-imguizmo-prebuilt-{}-{}-{}{}.tar.gz",
+        version,
+        env::var("TARGET").unwrap_or_default(),
+        link_type,
+        crt_suffix
+    );
+    let tags = [
+        format!("dear-imguizmo-sys-v{}", version),
+        format!("v{}", version),
+    ];
+    if let Ok(pkg_dir) = env::var("IMGUIZMO_SYS_PACKAGE_DIR") {
+        let archive_path = PathBuf::from(pkg_dir).join(&archive_name);
+        if archive_path.exists() {
+            let cache_root = prebuilt_cache_root(cfg);
+            if let Ok(lib_dir) = extract_archive_to_cache(
+                &archive_path,
+                &cache_root,
+                expected_lib_name(&cfg.target_env),
+            ) {
+                return Some(lib_dir);
+            }
+        }
+    }
+    let cache_root = prebuilt_cache_root(cfg);
+    for tag in &tags {
+        let url = format!(
+            "https://github.com/Latias94/dear-imgui/releases/download/{}/{}",
+            tag, archive_name
+        );
+        if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
+            return Some(lib_dir);
+        }
+    }
+    None
+}
+
+fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
+    if let Ok(dir) = env::var("IMGUIZMO_SYS_CACHE_DIR") {
+        return PathBuf::from(dir);
+    }
+    let target_dir = env::var("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| cfg.manifest_dir.parent().unwrap().join("target"));
+    target_dir.join("dear-imguizmo-prebuilt")
+}
+
+fn prebuilt_extract_dir_env(cache_root: &Path, target_env: &str) -> PathBuf {
+    let target = env::var("TARGET").unwrap_or_default();
+    let crt_suffix = if target_env == "msvc" {
+        let tf = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+        if tf.split(',').any(|f| f == "crt-static") {
+            "-mt"
+        } else {
+            "-md"
+        }
+    } else {
+        ""
+    };
+    cache_root
+        .join(target)
+        .join(format!("static{}", crt_suffix))
+}
+
+fn extract_archive_to_cache(
+    archive_path: &Path,
+    cache_root: &Path,
+    lib_name: &str,
+) -> Result<PathBuf, String> {
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    let extract_dir = prebuilt_extract_dir_env(cache_root, &target_env);
+    if extract_dir.exists() {
+        let lib_dir = extract_dir.join("lib");
+        if lib_dir.join(lib_name).exists() || extract_dir.join(lib_name).exists() {
+            return Ok(lib_dir);
+        }
+        let _ = std::fs::remove_dir_all(&extract_dir);
+    }
+    fs::create_dir_all(&extract_dir)
+        .map_err(|e| format!("create dir {}: {}", extract_dir.display(), e))?;
+    let file = fs::File::open(archive_path)
+        .map_err(|e| format!("open {}: {}", archive_path.display(), e))?;
+    let mut archive = tar::Archive::new(GzDecoder::new(file));
+    archive
+        .unpack(&extract_dir)
+        .map_err(|e| format!("unpack {}: {}", archive_path.display(), e))?;
+    let lib_dir = extract_dir.join("lib");
+    if lib_dir.join(lib_name).exists() {
+        return Ok(lib_dir);
+    }
+    if extract_dir.join(lib_name).exists() {
+        return Ok(extract_dir);
+    }
+    Err("extracted archive did not contain expected library".into())
 }

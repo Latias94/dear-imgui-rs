@@ -1,65 +1,46 @@
 [changelog]
-header = "# Changelog\n\nAll notable changes to this project are documented here.\n\n"
-body = "{{#each releases}}\n## {{#if tag_name}}{{tag_name}}{{else}}Unreleased{{/if}}\n{{#if date}} ({{date}}){{/if}}\n\n{{#if commits}}\n{{#each commits}}
-- {{message_title}} ({{#if scope}}{{scope}}: {{/if}}{{id}}) by {{#if author}}@{{author.name}}{{/if}}
-{{/each}}\n{{/if}}\n{{#each groups}}
-### {{title}}\n
-{{#each commits}}
-- {{message_title}}{{#if breaking}} (BREAKING){{/if}}
-{{/each}}\n
-{{/each}}\n{{/each}}\n"
+header = """
+# Changelog
+
+All notable changes to this project are documented here.
+
+"""
+body = """
+{% for release in releases %}
+## {{ release.version | default(value="Unreleased") }}{% if release.timestamp %} ({{ release.timestamp | date(format="%Y-%m-%d") }}){% endif %}
+
+{% if release.commits | length == 0 %}
+- No significant changes.
+{% endif %}
+
+{% for group, commits in release.commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | trim }}{% if commit.breaking %} (BREAKING){% endif %}{% if commit.scope %} [{{ commit.scope }}]{% endif %} ({{ commit.id | truncate(length=7) }}){% if commit.author.name %} by @{{ commit.author.name }}{% endif %}
+{% endfor %}
+{% endfor %}
+
+{% endfor %}
+"""
 trim = true
 
 [git]
 conventional_commits = true
 filter_unconventional = true
 split_commits = false
-commit_preprocessors = []
 tag_pattern = ".*"
 protect_breaking_commits = true
 skip_tags = false
-# Release-plz tags per crate look like `crate-vX.Y.Z` by default; we accept all.
 
-[git.cliff]
-body = ""
-
-[[git.cliff.groups]]
-title = "Breaking Changes"
-regex = "(?i)BREAKING CHANGE|!"
-order = 0
-
-[[git.cliff.groups]]
-title = "Features"
-regex = "^feat"
-order = 10
-
-[[git.cliff.groups]]
-title = "Fixes"
-regex = "^fix"
-order = 20
-
-[[git.cliff.groups]]
-title = "Performance"
-regex = "^perf"
-order = 30
-
-[[git.cliff.groups]]
-title = "Refactor"
-regex = "^refactor"
-order = 40
-
-[[git.cliff.groups]]
-title = "Docs"
-regex = "^docs"
-order = 50
-
-[[git.cliff.groups]]
-title = "Build"
-regex = "^build|^deps|^ci"
-order = 60
-
-[[git.cliff.groups]]
-title = "Chore"
-regex = "^chore|^style|^test"
-order = 70
+# Group commits by conventional prefixes
+commit_parsers = [
+  { message = "BREAKING CHANGE", group = "Breaking Changes" },
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactor" },
+  { message = "^docs", group = "Docs" },
+  { message = "^build|^deps|^ci", group = "Build" },
+  { message = "^chore|^style|^test", group = "Chore" }
+]
 
