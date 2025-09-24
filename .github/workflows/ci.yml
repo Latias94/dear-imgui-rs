@@ -65,7 +65,7 @@ jobs:
         run: cargo build -p dear-imgui-examples --features "dear-imguizmo dear-imnodes dear-implot"
 
   publish-check:
-    name: Publish dry-run (ubuntu)
+    name: Package check (ubuntu)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -76,7 +76,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cargo publish --dry-run (selected crates)
+      - name: Cargo package (selected crates)
         shell: bash
         run: |
           set -euo pipefail
@@ -90,8 +90,8 @@ jobs:
             extensions/dear-implot
           )
           for manifest in "${crates[@]}"; do
-            echo "::group::dry-run $manifest"
-            cargo publish --dry-run --manifest-path "$manifest/Cargo.toml"
+            echo "::group::package $manifest"
+            cargo package --manifest-path "$manifest/Cargo.toml"
             echo "::endgroup::"
           done
 

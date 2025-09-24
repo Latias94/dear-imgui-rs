@@ -94,6 +94,7 @@ unsafe impl Sync for PlotContext {}
 /// This struct ensures that plots can only be created when both ImGui and ImPlot
 /// contexts are available and properly set up.
 pub struct PlotUi<'ui> {
+    #[allow(dead_code)]
     context: &'ui PlotContext,
 }
 

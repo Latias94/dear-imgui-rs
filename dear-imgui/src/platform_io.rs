@@ -229,31 +229,48 @@ impl PlatformIo {
     /// Get access to the monitors vector
     #[cfg(feature = "multi-viewport")]
     pub fn monitors(&self) -> &ImVector<sys::ImGuiPlatformMonitor> {
-        &self.raw.Monitors
+        // Cast bindgen-generated ImVector_ImGuiPlatformMonitor to our generic ImVector<T>
+        unsafe {
+            &*((&self.raw.Monitors as *const sys::ImVector_ImGuiPlatformMonitor)
+                as *const ImVector<sys::ImGuiPlatformMonitor>)
+        }
     }
 
     /// Get mutable access to the monitors vector
     #[cfg(feature = "multi-viewport")]
     pub fn monitors_mut(&mut self) -> &mut ImVector<sys::ImGuiPlatformMonitor> {
-        &mut self.raw.Monitors
+        // Cast bindgen-generated ImVector_ImGuiPlatformMonitor to our generic ImVector<T>
+        unsafe {
+            &mut *((&mut self.raw.Monitors as *mut sys::ImVector_ImGuiPlatformMonitor)
+                as *mut ImVector<sys::ImGuiPlatformMonitor>)
+        }
     }
 
     /// Get access to the viewports vector
     #[cfg(feature = "multi-viewport")]
     pub fn viewports(&self) -> &ImVector<*mut sys::ImGuiViewport> {
-        &self.raw.Viewports
+        // Cast bindgen-generated ImVector_ImGuiViewportPtr to our generic ImVector<T>
+        unsafe {
+            &*((&self.raw.Viewports as *const sys::ImVector_ImGuiViewportPtr)
+                as *const ImVector<*mut sys::ImGuiViewport>)
+        }
     }
 
     /// Get mutable access to the viewports vector
     #[cfg(feature = "multi-viewport")]
     pub fn viewports_mut(&mut self) -> &mut ImVector<*mut sys::ImGuiViewport> {
-        &mut self.raw.Viewports
+        // Cast bindgen-generated ImVector_ImGuiViewportPtr to our generic ImVector<T>
+        unsafe {
+            &mut *((&mut self.raw.Viewports as *mut sys::ImVector_ImGuiViewportPtr)
+                as *mut ImVector<*mut sys::ImGuiViewport>)
+        }
     }
 
     /// Get an iterator over all viewports
     #[cfg(feature = "multi-viewport")]
     pub fn viewports_iter(&self) -> impl Iterator<Item = &Viewport> {
         self.viewports()
+            .as_slice()
             .iter()
             .map(|&ptr| unsafe { Viewport::from_raw(ptr) })
     }
@@ -262,6 +279,7 @@ impl PlatformIo {
     #[cfg(feature = "multi-viewport")]
     pub fn viewports_iter_mut(&mut self) -> impl Iterator<Item = &mut Viewport> {
         self.viewports_mut()
+            .as_slice_mut()
             .iter_mut()
             .map(|&mut ptr| unsafe { Viewport::from_raw_mut(ptr) })
     }

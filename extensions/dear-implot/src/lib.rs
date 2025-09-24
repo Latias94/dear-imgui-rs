@@ -75,7 +75,6 @@ pub use plots::{
 
 // Constants
 const IMPLOT_AUTO: i32 = -1;
-const NUMBER_OF_Y_AXES: usize = 3;
 
 /// Choice of Y axis for multi-axis plots
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

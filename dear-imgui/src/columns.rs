@@ -8,17 +8,17 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct OldColumnFlags: i32 {
         /// No flags
-        const NONE = sys::ImGuiOldColumnFlags_None as i32;
+        const NONE = sys::ImGuiOldColumnFlags_None;
         /// Disable column dividers
-        const NO_BORDER = sys::ImGuiOldColumnFlags_NoBorder as i32;
+        const NO_BORDER = sys::ImGuiOldColumnFlags_NoBorder;
         /// Disable resizing columns by dragging dividers
-        const NO_RESIZE = sys::ImGuiOldColumnFlags_NoResize as i32;
+        const NO_RESIZE = sys::ImGuiOldColumnFlags_NoResize;
         /// Disable column width preservation when the total width changes
-        const NO_PRESERVE_WIDTHS = sys::ImGuiOldColumnFlags_NoPreserveWidths as i32;
+        const NO_PRESERVE_WIDTHS = sys::ImGuiOldColumnFlags_NoPreserveWidths;
         /// Disable forcing columns to fit within window
-        const NO_FORCE_WITHIN_WINDOW = sys::ImGuiOldColumnFlags_NoForceWithinWindow as i32;
+        const NO_FORCE_WITHIN_WINDOW = sys::ImGuiOldColumnFlags_NoForceWithinWindow;
         /// Restore pre-1.51 behavior of extending the parent window contents size
-        const GROW_PARENT_CONTENTS_SIZE = sys::ImGuiOldColumnFlags_GrowParentContentsSize as i32;
+        const GROW_PARENT_CONTENTS_SIZE = sys::ImGuiOldColumnFlags_GrowParentContentsSize;
     }
 }
 

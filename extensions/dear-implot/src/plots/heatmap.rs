@@ -77,7 +77,7 @@ impl<'a> HeatmapPlot<'a> {
 
     /// Use column-major data ordering instead of row-major
     pub fn column_major(mut self) -> Self {
-        self.flags |= (sys::ImPlotHeatmapFlags_ColMajor as sys::ImPlotHeatmapFlags);
+        self.flags |= sys::ImPlotHeatmapFlags_ColMajor as sys::ImPlotHeatmapFlags;
         self
     }
 
@@ -199,7 +199,7 @@ impl<'a> HeatmapPlotF32<'a> {
 
     /// Use column-major data ordering
     pub fn column_major(mut self) -> Self {
-        self.flags |= (sys::ImPlotHeatmapFlags_ColMajor as sys::ImPlotHeatmapFlags);
+        self.flags |= sys::ImPlotHeatmapFlags_ColMajor as sys::ImPlotHeatmapFlags;
         self
     }
 

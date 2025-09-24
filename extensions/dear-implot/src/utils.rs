@@ -41,7 +41,7 @@ pub fn pixels_to_plot(
             return sys::ImPlotPoint { x: 0.0, y: 0.0 };
         }
         let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, 0);
-        let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_index as i32);
+        let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_index);
         let x = sys::ImPlotAxis_PixelsToPlot(x_axis_ptr, pixel_position[0]);
         let y = sys::ImPlotAxis_PixelsToPlot(y_axis_ptr, pixel_position[1]);
         sys::ImPlotPoint { x, y }
@@ -65,7 +65,7 @@ pub fn plot_to_pixels(
             return [0.0, 0.0];
         }
         let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, 0);
-        let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_index as i32);
+        let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_index);
         let px = sys::ImPlotAxis_PlotToPixels(x_axis_ptr, plot_position.x);
         let py = sys::ImPlotAxis_PlotToPixels(y_axis_ptr, plot_position.y);
         [px, py]
