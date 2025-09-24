@@ -123,14 +123,14 @@ impl crate::ui::Ui {
     /// Returns the number of times the key was pressed in the current frame
     #[doc(alias = "GetKeyPressedAmount")]
     pub fn get_key_pressed_amount(&self, key: Key, repeat_delay: f32, rate: f32) -> i32 {
-        unsafe { sys::igGetKeyPressedAmount(key as i32, repeat_delay, rate) }
+        unsafe { sys::igGetKeyPressedAmount(key.into(), repeat_delay, rate) }
     }
 
     /// Returns the name of a key
     #[doc(alias = "GetKeyName")]
     pub fn get_key_name(&self, key: Key) -> &str {
         unsafe {
-            let name_ptr = sys::igGetKeyName(key as i32);
+            let name_ptr = sys::igGetKeyName(key.into());
             let c_str = std::ffi::CStr::from_ptr(name_ptr);
             c_str.to_str().unwrap_or("Unknown")
         }
@@ -139,7 +139,7 @@ impl crate::ui::Ui {
     /// Returns the number of times the mouse button was clicked in the current frame
     #[doc(alias = "GetMouseClickedCount")]
     pub fn get_mouse_clicked_count(&self, button: MouseButton) -> i32 {
-        unsafe { sys::igGetMouseClickedCount(button as i32) }
+        unsafe { sys::igGetMouseClickedCount(button.into()) }
     }
 
     /// Returns the mouse position in screen coordinates
@@ -187,13 +187,13 @@ impl crate::ui::Ui {
             #[cfg(target_env = "msvc")]
             {
                 let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetMouseDragDelta(&mut delta, button as i32, lock_threshold);
+                sys::igGetMouseDragDelta(&mut delta, button.into(), lock_threshold);
                 [delta.x, delta.y]
             }
             #[cfg(not(target_env = "msvc"))]
             {
                 let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetMouseDragDelta(&mut delta, button as i32, lock_threshold);
+                sys::igGetMouseDragDelta(&mut delta, button.into(), lock_threshold);
                 [delta.x, delta.y]
             }
         }

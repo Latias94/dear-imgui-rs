@@ -191,6 +191,20 @@ pub enum Key {
     F12 = sys::ImGuiKey_F12,
 }
 
+impl From<MouseButton> for sys::ImGuiMouseButton {
+    #[inline]
+    fn from(value: MouseButton) -> sys::ImGuiMouseButton {
+        value as sys::ImGuiMouseButton
+    }
+}
+
+impl From<Key> for sys::ImGuiKey {
+    #[inline]
+    fn from(value: Key) -> sys::ImGuiKey {
+        value as sys::ImGuiKey
+    }
+}
+
 bitflags! {
     /// Key modifier flags
     #[repr(transparent)]
@@ -264,55 +278,55 @@ impl crate::Ui {
     /// Check if a key is being held down
     #[doc(alias = "IsKeyDown")]
     pub fn is_key_down(&self, key: Key) -> bool {
-        unsafe { sys::igIsKeyDown_Nil(key as i32) }
+        unsafe { sys::igIsKeyDown_Nil(key as sys::ImGuiKey) }
     }
 
     /// Check if a key was pressed (went from !Down to Down)
     #[doc(alias = "IsKeyPressed")]
     pub fn is_key_pressed(&self, key: Key) -> bool {
-        unsafe { sys::igIsKeyPressed_Bool(key as i32, true) }
+        unsafe { sys::igIsKeyPressed_Bool(key as sys::ImGuiKey, true) }
     }
 
     /// Check if a key was pressed (went from !Down to Down), with repeat
     #[doc(alias = "IsKeyPressed")]
     pub fn is_key_pressed_with_repeat(&self, key: Key, repeat: bool) -> bool {
-        unsafe { sys::igIsKeyPressed_Bool(key as i32, repeat) }
+        unsafe { sys::igIsKeyPressed_Bool(key as sys::ImGuiKey, repeat) }
     }
 
     /// Check if a key was released (went from Down to !Down)
     #[doc(alias = "IsKeyReleased")]
     pub fn is_key_released(&self, key: Key) -> bool {
-        unsafe { sys::igIsKeyReleased_Nil(key as i32) }
+        unsafe { sys::igIsKeyReleased_Nil(key as sys::ImGuiKey) }
     }
 
     /// Check if a mouse button is being held down
     #[doc(alias = "IsMouseDown")]
     pub fn is_mouse_down(&self, button: MouseButton) -> bool {
-        unsafe { sys::igIsMouseDown_Nil(button as i32) }
+        unsafe { sys::igIsMouseDown_Nil(button.into()) }
     }
 
     /// Check if a mouse button was clicked (went from !Down to Down)
     #[doc(alias = "IsMouseClicked")]
     pub fn is_mouse_clicked(&self, button: MouseButton) -> bool {
-        unsafe { sys::igIsMouseClicked_Bool(button as i32, false) }
+        unsafe { sys::igIsMouseClicked_Bool(button.into(), false) }
     }
 
     /// Check if a mouse button was clicked, with repeat
     #[doc(alias = "IsMouseClicked")]
     pub fn is_mouse_clicked_with_repeat(&self, button: MouseButton, repeat: bool) -> bool {
-        unsafe { sys::igIsMouseClicked_Bool(button as i32, repeat) }
+        unsafe { sys::igIsMouseClicked_Bool(button.into(), repeat) }
     }
 
     /// Check if a mouse button was released (went from Down to !Down)
     #[doc(alias = "IsMouseReleased")]
     pub fn is_mouse_released(&self, button: MouseButton) -> bool {
-        unsafe { sys::igIsMouseReleased_Nil(button as i32) }
+        unsafe { sys::igIsMouseReleased_Nil(button.into()) }
     }
 
     /// Check if a mouse button was double-clicked
     #[doc(alias = "IsMouseDoubleClicked")]
     pub fn is_mouse_double_clicked(&self, button: MouseButton) -> bool {
-        unsafe { sys::igIsMouseDoubleClicked_Nil(button as i32) }
+        unsafe { sys::igIsMouseDoubleClicked_Nil(button.into()) }
     }
 
     /// Get mouse position in screen coordinates

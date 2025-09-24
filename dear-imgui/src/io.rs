@@ -244,7 +244,7 @@ impl Io {
     /// Add a key event to the input queue
     pub fn add_key_event(&mut self, key: crate::Key, down: bool) {
         unsafe {
-            sys::ImGuiIO_AddKeyEvent(&mut self.0 as *mut _, key as i32, down);
+            sys::ImGuiIO_AddKeyEvent(&mut self.0 as *mut _, key.into(), down);
         }
     }
 
@@ -265,7 +265,7 @@ impl Io {
     /// Add a mouse button event to the input queue
     pub fn add_mouse_button_event(&mut self, button: crate::input::MouseButton, down: bool) {
         unsafe {
-            sys::ImGuiIO_AddMouseButtonEvent(&mut self.0 as *mut _, button as i32, down);
+            sys::ImGuiIO_AddMouseButtonEvent(&mut self.0 as *mut _, button.into(), down);
         }
     }
 

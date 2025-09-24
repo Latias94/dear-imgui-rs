@@ -100,7 +100,7 @@ create_token!(
     pub struct FontStackToken<'ui>;
 
     /// Pops a change from the font stack.
-    drop { sys::igPopFont() }
+    drop { unsafe { sys::igPopFont() } }
 );
 
 impl FontStackToken<'_> {
@@ -116,7 +116,7 @@ create_token!(
     pub struct ColorStackToken<'ui>;
 
     /// Pops a change from the color stack.
-    drop { sys::igPopStyleColor(1) }
+    drop { unsafe { sys::igPopStyleColor(1) } }
 );
 
 impl ColorStackToken<'_> {
@@ -146,76 +146,96 @@ impl StyleStackToken<'_> {
 unsafe fn push_style_var(style_var: StyleVar) {
     use StyleVar::*;
     match style_var {
-        Alpha(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_Alpha as i32, v),
-        DisabledAlpha(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DisabledAlpha as i32, v),
+        Alpha(v) => unsafe { sys::igPushStyleVar_Float(sys::ImGuiStyleVar_Alpha as i32, v) },
+        DisabledAlpha(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DisabledAlpha as i32, v)
+        },
         WindowPadding(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowPadding as i32, vec)
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowPadding as i32, vec) }
         }
-        WindowRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowRounding as i32, v),
-        WindowBorderSize(v) => {
+        WindowRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowRounding as i32, v)
+        },
+        WindowBorderSize(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowBorderSize as i32, v)
-        }
+        },
         WindowMinSize(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowMinSize as i32, vec)
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowMinSize as i32, vec) }
         }
         WindowTitleAlign(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowTitleAlign as i32, vec)
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowTitleAlign as i32, vec) }
         }
-        ChildRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ChildRounding as i32, v),
-        ChildBorderSize(v) => {
+        ChildRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ChildRounding as i32, v)
+        },
+        ChildBorderSize(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ChildBorderSize as i32, v)
-        }
-        PopupRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupRounding as i32, v),
-        PopupBorderSize(v) => {
+        },
+        PopupRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupRounding as i32, v)
+        },
+        PopupBorderSize(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupBorderSize as i32, v)
-        }
+        },
         FramePadding(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_FramePadding as i32, vec)
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_FramePadding as i32, vec) }
         }
-        FrameRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameRounding as i32, v),
-        FrameBorderSize(v) => {
+        FrameRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameRounding as i32, v)
+        },
+        FrameBorderSize(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameBorderSize as i32, v)
-        }
+        },
         ItemSpacing(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemSpacing as i32, vec)
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemSpacing as i32, vec) }
         }
         ItemInnerSpacing(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemInnerSpacing as i32, vec)
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemInnerSpacing as i32, vec) }
         }
-        IndentSpacing(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_IndentSpacing as i32, v),
+        IndentSpacing(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_IndentSpacing as i32, v)
+        },
         CellPadding(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_CellPadding as i32, vec)
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_CellPadding as i32, vec) }
         }
-        ScrollbarSize(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarSize as i32, v),
-        ScrollbarRounding(v) => {
+        ScrollbarSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarSize as i32, v)
+        },
+        ScrollbarRounding(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarRounding as i32, v)
-        }
-        GrabMinSize(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabMinSize as i32, v),
-        GrabRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabRounding as i32, v),
-        TabRounding(v) => sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabRounding as i32, v),
+        },
+        GrabMinSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabMinSize as i32, v)
+        },
+        GrabRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabRounding as i32, v)
+        },
+        TabRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabRounding as i32, v)
+        },
         ButtonTextAlign(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ButtonTextAlign as i32, vec)
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ButtonTextAlign as i32, vec) }
         }
         SelectableTextAlign(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_SelectableTextAlign as i32, vec)
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_SelectableTextAlign as i32, vec) }
         }
     }
 }
@@ -246,7 +266,7 @@ impl Ui {
         let text_width = unsafe {
             let text_ptr = self.scratch_txt(text);
             let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igCalcTextSize(&mut out, text_ptr, std::ptr::null(), false, -1.0);
+            unsafe { sys::igCalcTextSize(&mut out, text_ptr, std::ptr::null(), false, -1.0) };
             out.x
         };
         self.push_item_width(text_width)
@@ -274,7 +294,7 @@ create_token!(
 
     /// Pops an item width change made with [`Ui::push_item_width`].
     #[doc(alias = "PopItemWidth")]
-    drop { sys::igPopItemWidth() }
+    drop { unsafe { sys::igPopItemWidth() } }
 );
 
 create_token!(
@@ -284,7 +304,7 @@ create_token!(
 
     /// Pops a text wrap position change made with [`Ui::push_text_wrap_pos`].
     #[doc(alias = "PopTextWrapPos")]
-    drop { sys::igPopTextWrapPos() }
+    drop { unsafe { sys::igPopTextWrapPos() } }
 );
 
 /// # ID stack

@@ -325,12 +325,13 @@ impl<'ui> DragDropTarget<'ui> {
         name: impl AsRef<str>,
         flags: DragDropFlags,
     ) -> Option<DragDropPayload> {
-        let inner = sys::igAcceptDragDropPayload(self.0.scratch_txt(name), flags.bits() as i32);
+        let inner =
+            unsafe { sys::igAcceptDragDropPayload(self.0.scratch_txt(name), flags.bits() as i32) };
 
         if inner.is_null() {
             None
         } else {
-            let inner = *inner;
+            let inner = unsafe { *inner };
             Some(DragDropPayload {
                 data: inner.Data,
                 size: inner.DataSize as usize,
