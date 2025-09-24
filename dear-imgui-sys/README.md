@@ -59,7 +59,7 @@ cp target/debug/build/dear-imgui-sys-*/out/bindings.rs dear-imgui-sys/src/bindin
 ```
 或使用工具脚本：
 ```
-python tools/update_cimgui_and_bindings.py --branch docking_inter
+python tools/update_submodule_and_bindings.py --branch docking_inter
 ```
 
 ## WebAssembly Support

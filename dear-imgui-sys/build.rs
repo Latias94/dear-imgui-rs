@@ -117,6 +117,9 @@ fn docsrs_build(cfg: &BuildConfig) {
     }
     let cimgui_root = cfg.cimgui_root();
     let imgui_src = cfg.imgui_src();
+    // Expose include paths to dependent crates during docs.rs builds
+    println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
+    println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
     let mut bindings = bindgen::Builder::default()
         .header(cimgui_root.join("cimgui.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -138,9 +141,11 @@ fn docsrs_build(cfg: &BuildConfig) {
     let bindings = bindings
         .generate()
         .expect("Unable to generate bindings from cimgui.h (docs.rs)");
+    let out = cfg.out_dir.join("bindings.rs");
     bindings
-        .write_to_file(cfg.out_dir.join("bindings.rs"))
+        .write_to_file(&out)
         .expect("Couldn't write bindings (docs.rs)!");
+    sanitize_bindings_file(&out);
     println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
 }
@@ -176,9 +181,11 @@ fn generate_bindings_native(cfg: &BuildConfig) {
     let bindings = bindings
         .generate()
         .expect("Unable to generate bindings from cimgui.h");
+    let out = cfg.out_dir.join("bindings.rs");
     bindings
-        .write_to_file(cfg.out_dir.join("bindings.rs"))
+        .write_to_file(&out)
         .expect("Couldn't write bindings!");
+    sanitize_bindings_file(&out);
 }
 
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
@@ -583,8 +590,11 @@ fn build_with_cmake(manifest_dir: &Path) -> bool {
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
     let preg = Path::new("src").join("bindings_pregenerated.rs");
     if preg.exists() {
-        match std::fs::copy(&preg, out_dir.join("bindings.rs")) {
-            Ok(_) => {
+        match std::fs::read_to_string(&preg).and_then(|content| {
+            let sanitized = sanitize_bindings_string(&content);
+            std::fs::write(out_dir.join("bindings.rs"), sanitized)
+        }) {
+            Ok(()) => {
                 println!(
                     "cargo:warning=Using pregenerated bindings: {}",
                     preg.display()
@@ -592,11 +602,42 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
                 true
             }
             Err(e) => {
-                println!("cargo:warning=Failed to copy pregenerated bindings: {}", e);
+                println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
                 false
             }
         }
     } else {
         false
     }
+}
+
+fn sanitize_bindings_file(path: &Path) {
+    if let Ok(content) = std::fs::read_to_string(path) {
+        let sanitized = sanitize_bindings_string(&content);
+        let _ = std::fs::write(path, sanitized);
+    }
+}
+
+fn sanitize_bindings_string(content: &str) -> String {
+    // Remove any inner attributes like #![allow(...)] which may be emitted by bindgen
+    // and can be rejected depending on include context. Also drop an immediate blank
+    // line following such attributes to keep the file tidy.
+    let mut out = String::with_capacity(content.len());
+    let mut skip_next_blank = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#![") {
+            skip_next_blank = true;
+            continue; // drop this line
+        }
+        if skip_next_blank {
+            if trimmed.is_empty() {
+                continue;
+            }
+            skip_next_blank = false;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }

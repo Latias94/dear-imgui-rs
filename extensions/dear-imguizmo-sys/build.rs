@@ -37,6 +37,7 @@ impl BuildConfig {
 }
 
 fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
+    // Prefer paths exported by dear-imgui-sys build script (prefix comes from links = "dear-imgui")
     let imgui_src = env::var_os("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH")
         .or_else(|| env::var_os("DEP_DEAR_IMGUI_THIRD_PARTY"))
         .map(PathBuf::from)
@@ -53,7 +54,75 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+fn use_pregenerated_bindings(out_dir: &Path) -> bool {
+    let preg = Path::new("src").join("bindings_pregenerated.rs");
+    if preg.exists() {
+        match std::fs::read_to_string(&preg).and_then(|content| {
+            let sanitized = sanitize_bindings_string(&content);
+            std::fs::write(out_dir.join("bindings.rs"), sanitized)
+        }) {
+            Ok(()) => {
+                println!(
+                    "cargo:warning=Using pregenerated bindings: {}",
+                    preg.display()
+                );
+                true
+            }
+            Err(e) => {
+                println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
+                false
+            }
+        }
+    } else {
+        false
+    }
+}
+
+fn sanitize_bindings_file(path: &Path) {
+    if let Ok(content) = std::fs::read_to_string(path) {
+        let sanitized = sanitize_bindings_string(&content);
+        let _ = std::fs::write(path, sanitized);
+    }
+}
+
+fn sanitize_bindings_string(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut skip_next_blank = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#![") {
+            skip_next_blank = true;
+            continue;
+        }
+        if skip_next_blank {
+            if trimmed.is_empty() {
+                continue;
+            }
+            skip_next_blank = false;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 fn docsrs_build(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+    println!("cargo:warning=DOCS_RS detected: generating bindings, skipping native build");
+    println!("cargo:rustc-cfg=docsrs");
+
+    if use_pregenerated_bindings(&cfg.out_dir) {
+        return;
+    }
+
+    // Fallback: try to generate bindings from headers if available
+    if !imgui_src.exists() || !cimgui_root.exists() || !cimguizmo_root.exists() {
+        panic!(
+            "DOCS_RS build: Required headers not found and no pregenerated bindings present.\n\
+             Please add src/bindings_pregenerated.rs (full bindgen output) to enable docs.rs builds.\n\
+             Run: cargo build -p dear-imguizmo-sys && cp target/debug/build/dear-imguizmo-sys-*/out/bindings.rs extensions/dear-imguizmo-sys/src/bindings_pregenerated.rs"
+        );
+    }
+
     let bindings = bindgen::Builder::default()
         .header(cimguizmo_root.join("cimguizmo.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -84,9 +153,11 @@ fn docsrs_build(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cimg
         .clang_arg("-std=c++17")
         .generate()
         .expect("Unable to generate cimguizmo bindings");
+    let out = cfg.out_dir.join("bindings.rs");
     bindings
-        .write_to_file(cfg.out_dir.join("bindings.rs"))
+        .write_to_file(&out)
         .expect("Couldn't write cimguizmo bindings!");
+    sanitize_bindings_file(&out);
 }
 
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
@@ -193,6 +264,8 @@ fn main() {
     };
     if !cfg.docs_rs && !linked_prebuilt && env::var("IMGUIZMO_SYS_SKIP_CC").is_err() {
         build_with_cc(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
+    } else if cfg.docs_rs {
+        docsrs_build(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
     }
 }
 

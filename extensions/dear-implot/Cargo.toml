@@ -12,7 +12,7 @@ keywords.workspace = true
 readme = "README.md"
 
 [package.metadata.docs.rs]
-features = ["freetype", "docking"]
+features = ["freetype"]
 
 [dependencies]
 bitflags.workspace = true
@@ -25,13 +25,12 @@ dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
 #thiserror.workspace = true
 
 [features]
-default = ["docking"]
+default = []
 # Enable linking the ImPlot demo symbols (off by default)
 demo = []
-# Enable docking branch features (default)
-docking = ["dear-imgui/docking", "dear-implot-sys/docking"]
-# Enable multi-viewport support (requires docking)
-multi-viewport = ["docking", "dear-imgui/multi-viewport", "dear-implot-sys/multi-viewport"]
+# Docking is always enabled; remove feature.
+# Enable multi-viewport support (commented out while WIP)
+# multi-viewport = ["dear-imgui/multi-viewport", "dear-implot-sys/multi-viewport"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui/freetype", "dear-implot-sys/freetype"]
 # Enable for WASM targets

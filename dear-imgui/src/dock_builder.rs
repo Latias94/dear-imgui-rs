@@ -4,9 +4,9 @@
 //! create and manage dock layouts. This is useful for creating complex docking
 //! layouts that would be difficult to achieve through manual docking.
 //!
-//! # Features
+//! # Notes
 //!
-//! This module is only available when the `docking` feature is enabled (default).
+//! Docking is always enabled in this crate; no feature flag required.
 //!
 //! # Basic Usage
 //!

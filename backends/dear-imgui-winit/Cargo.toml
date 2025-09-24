@@ -27,7 +27,6 @@ web-sys = { version = "0.3", features = [
 
 [features]
 default = []
-# Enable docking features
-docking = ["dear-imgui/docking"]
 # Enable multi-viewport support
-multi-viewport = ["dear-imgui/multi-viewport"]
+# (commented out while WIP)
+# multi-viewport = ["dear-imgui/multi-viewport"]

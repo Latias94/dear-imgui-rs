@@ -16,8 +16,8 @@ bitflags.workspace = true
 thiserror.workspace = true
 
 [features]
-default = ["docking"]
-docking = ["dear-imgui/docking", "dear-imnodes-sys/docking"]
-multi-viewport = ["docking", "dear-imgui/multi-viewport", "dear-imnodes-sys/multi-viewport"]
+default = []
+# Docking is always enabled; remove feature.
+# Enable multi-viewport support (commented out while WIP)
+# multi-viewport = ["dear-imgui/multi-viewport", "dear-imnodes-sys/multi-viewport"]
 freetype = ["dear-imgui/freetype", "dear-imnodes-sys/freetype"]
-

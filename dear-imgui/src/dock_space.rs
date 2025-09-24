@@ -3,9 +3,9 @@
 //! This module provides high-level Rust bindings for Dear ImGui's docking system,
 //! allowing you to create dockable windows and manage dock spaces.
 //!
-//! # Features
+//! # Notes
 //!
-//! This module is only available when the `docking` feature is enabled (default).
+//! Docking is always enabled in this crate; no feature flag required.
 //!
 //! # Basic Usage
 //!
@@ -399,7 +399,6 @@ impl Ui {
     }
 }
 
-#[cfg(feature = "docking")]
 impl crate::Condition {
     /// Converts the condition to ImGui's internal representation
     pub(crate) fn as_imgui_cond(self) -> sys::ImGuiCond {

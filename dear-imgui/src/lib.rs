@@ -92,7 +92,6 @@ pub use self::columns::*;
 mod clipboard;
 mod color;
 mod context;
-#[cfg(feature = "docking")]
 mod dock_builder;
 mod dock_space;
 mod draw;
@@ -139,7 +138,6 @@ pub mod logging;
 
 // Re-export public API
 pub use color::*;
-#[cfg(feature = "docking")]
 pub use dock_builder::*;
 pub use dock_space::*;
 // Export DrawListMut for extensions

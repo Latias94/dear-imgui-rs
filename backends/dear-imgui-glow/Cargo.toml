@@ -28,10 +28,9 @@ default = [
     "polygon_mode_support",
     "primitive_restart_support",
 ]
-# Enable docking features
-docking = ["dear-imgui/docking"]
 # Enable multi-viewport support
-multi-viewport = ["dear-imgui/multi-viewport"]
+# (commented out while WIP)
+# multi-viewport = ["dear-imgui/multi-viewport"]
 # Enable checking for OpenGL extensions
 gl_extensions_support = []
 # Support for `gl.debug_message_insert`

@@ -50,6 +50,10 @@ ui.window("Hello")
 ## Examples
 
 ```bash
+# Clone with submodules
+git clone https://github.com/Latias94/dear-imgui
+git submodule update --init --recursive
+
 # Core & docking
 cargo run -p dear-imgui-examples --bin game_engine_docking
 

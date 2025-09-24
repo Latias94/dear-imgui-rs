@@ -1,72 +1,101 @@
-# Releasing
+# Releasing (sys crates with offline docs.rs)
 
-This repository is a Cargo workspace containing multiple crates:
+The 4 `-sys` crates must build docs on docs.rs without network or submodules. Before publishing, pre-generate `src/bindings_pregenerated.rs` so docs.rs can compile in a fully offline environment.
 
-- Core: `dear-imgui`, `dear-imgui-sys`
-- Backends: `dear-imgui-winit`, `dear-imgui-wgpu`, `dear-imgui-glow`
-- Extensions: `dear-imguizmo[-sys]`, `dear-imnodes[-sys]`, `dear-implot[-sys]`
+Supported crates:
+- `dear-imgui-sys` (third-party: cimgui)
+- `extensions/dear-implot-sys` (third-party: cimplot)
+- `extensions/dear-imnodes-sys` (third-party: cimnodes)
+- `extensions/dear-imguizmo-sys` (third-party: cimguizmo)
 
-We use independent versioning per crate and automate releases with
-[release-plz](https://github.com/MarcoIeni/release-plz).
+## Prerequisites
+- `git`, `cargo`, and `python3` (>= 3.7) in PATH.
+- Clean working tree (or use a temp branch).
+- If you want to update third-party code, allow the script to update submodules/branches.
 
-## Versioning policy
+## Script (generate pregenerated bindings + optional submodule update)
 
-- Crates are versioned independently (no shared workspace version).
-- Follow semantic versioning. For 0.y.z series, treat `y` as the compatibility band.
-- Breaking changes MUST be marked in commits (see below) and cause a version bump.
+Script: `tools/update_submodule_and_bindings.py`
 
-## Conventional commits
+Key flags:
+- `--crates`: comma-separated list or `all`.
+- `--profile`: `debug` or `release` (affects target build dir only).
+- `--submodules`: `update` (update all known submodules), `auto` (update only selected crates), `skip` (don’t touch submodules).
+- Per-submodule branches:
+  - `--cimgui-branch` (default `docking_inter`)
+  - `--cimplot-branch` (default `master`)
+  - `--cimnodes-branch` (default `master`)
+  - `--cimguizmo-branch` (default `master`)
 
-Use Conventional Commits to drive changelogs and suggested bumps:
-
-- `feat(scope): ...` → minor bump (or major if `!`/breaking)
-- `fix(scope): ...` → patch bump
-- `perf:`, `refactor:`, `docs:`, `build:`, `ci:`, `chore:`, `test:` are grouped accordingly
-- Add `!` to the type (e.g. `feat!:`) or include `BREAKING CHANGE: ...` in the footer for breaking changes
-- Scope tip: include the crate name when possible, e.g. `fix(imnodes): ...`
-
-## Changelog
-
-- Workspace changelog configuration lives in `.github/changelog.toml` (git-cliff).
-- Per-crate changelogs:
-  - `dear-imgui`: `CHANGELOG.md` at repo root
-  - `dear-imguizmo`: `extensions/dear-imguizmo/CHANGELOG.md`
-  - `dear-imnodes`: `extensions/dear-imnodes/CHANGELOG.md`
-  - `dear-implot`: (optional) can add a crate-specific changelog if/when desired
-- `-sys` crates do not require a changelog entry by policy.
-
-## Release flow
-
-1) Push your changes (PR) → CI builds on Linux/macOS/Windows.
-2) On merges to `main`, `release-plz` opens/updates a "Release" PR:
-   - Bumps versions for crates with changes
-   - Updates changelogs using conventional commits
-   - Updates dependent versions when needed
-3) Review the Release PR; ensure examples build with extensions.
-4) Merge the Release PR:
-   - `release-plz` publishes changed crates to crates.io in dependency order
-   - Creates GitHub Releases for `dear-imgui`, `dear-imguizmo`, and `dear-imnodes` (safe crates)
-
-## Tags and GitHub Releases
-
-- Per-crate tags are created (e.g. `dear-imnodes-v0.1.3`).
-- GitHub Releases are enabled for safe crates, disabled for `-sys` crates.
-
-## Dry-run publish check
-
-CI runs a `cargo publish --dry-run` matrix for major crates to validate packaging.
-Run locally as needed:
-
+Examples
+- dear-imgui-sys only (update submodule + pregenerate, Release):
 ```
-for p in dear-imgui dear-imgui-winit dear-imgui-wgpu dear-imgui-glow \
-         dear-imguizmo dear-imnodes dear-implot; do
-  cargo publish --dry-run -p $p
-done
+python tools/update_submodule_and_bindings.py \
+  --crates dear-imgui-sys \
+  --submodules update \
+  --cimgui-branch docking_inter \
+  --profile release
 ```
 
-## Notes for `-sys` crates
+- All 4 -sys crates (update all submodules + pregenerate, Release):
+```
+python tools/update_submodule_and_bindings.py \
+  --crates all --submodules update --profile release \
+  --cimgui-branch docking_inter \
+  --cimplot-branch master \
+  --cimnodes-branch master \
+  --cimguizmo-branch master
+```
 
-- Avoid mandatory network downloads in `build.rs` (provide env/feature switches).
-- Ensure `include`/`exclude` in Cargo.toml are set to ship only required files.
-- Keep `links` unique per crate.
+- Regenerate pregenerated bindings only (no submodule changes):
+```
+python tools/update_submodule_and_bindings.py \
+  --crates dear-implot-sys,dear-imnodes-sys \
+  --submodules skip --profile debug
+```
 
+What the script does
+- Optionally updates chosen submodules (`git fetch/checkout/pull` + `submodule update --init --recursive`).
+- For each crate, runs `cargo build -p <crate>` with `*_SYS_SKIP_CC=1` to skip native builds and only emit bindgen output.
+- Copies `target/<profile>/build/<crate>-*/out/bindings.rs` into `<crate>/src/bindings_pregenerated.rs` (adds a comment header only).
+
+## Pre-publish checks
+Verify the 4 `-sys` crates have pregenerated bindings and build in docs mode locally:
+
+Windows (PowerShell):
+```
+$env:DOCS_RS = '1'; cargo check -p dear-imgui-sys
+$env:DOCS_RS = '1'; cargo check -p dear-implot-sys
+$env:DOCS_RS = '1'; cargo check -p dear-imnodes-sys
+$env:DOCS_RS = '1'; cargo check -p dear-imguizmo-sys
+```
+
+Linux/macOS:
+```
+DOCS_RS=1 cargo check -p dear-imgui-sys
+DOCS_RS=1 cargo check -p dear-implot-sys
+DOCS_RS=1 cargo check -p dear-imnodes-sys
+DOCS_RS=1 cargo check -p dear-imguizmo-sys
+```
+
+These checks generate/use bindings only and won’t build/link native code.
+
+## Recommended publish order
+1) Run the script to pregenerate bindings (and update submodules if needed).
+2) Commit changes (includes submodule pointers and pregenerated files):
+```
+git add -A
+git commit -m "chore(sys): update third-party and pregenerated bindings"
+```
+3) Tag and publish crates:
+```
+cargo publish -p dear-imgui-sys
+cargo publish -p dear-implot-sys
+cargo publish -p dear-imnodes-sys
+cargo publish -p dear-imguizmo-sys
+```
+
+## Notes
+- Docking is always enabled; the `multi-viewport` feature is currently commented out (WIP).
+- docs.rs offline builds rely solely on `bindings_pregenerated.rs` (no submodules or network). Source builds still require submodules or prebuilt artifacts.
+- If you need extra docs.rs cfgs later, extend each `-sys` crate’s `DOCS_RS` path in its `build.rs`.

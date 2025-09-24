@@ -12,6 +12,13 @@ keywords.workspace = true
 build = "build.rs"
 links = "dear-imgui"
 
+# docs.rs configuration for offline builds
+[package.metadata.docs.rs]
+no-default-features = true
+all-features = false
+features = []
+rustdoc-args = ["--cfg", "docsrs"]
+
 # Exclude unnecessary files to reduce package size
 exclude = [
     # Exclude heavy upstream folders from cimgui/imgui submodule
@@ -51,11 +58,10 @@ path = "bin/package/main.rs"
 required-features = ["package-bin"]
 
 [features]
-default = ["docking", "prebuilt"]
-# Enable docking branch features (default)
-docking = []
-# Enable multi-viewport support (requires docking)
-multi-viewport = ["docking"]
+default = ["prebuilt"]
+# Docking is always enabled; feature removed.
+# Enable multi-viewport support (commented out while WIP)
+# multi-viewport = []
 # Enable freetype font rasterizer
 freetype = ["pkg-config"]
 # Enable for WASM targets

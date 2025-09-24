@@ -33,8 +33,10 @@
 #![allow(unnecessary_transmutes)]
 #![allow(clippy::all)]
 
-// Include the generated bindings from bindgen
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+// Bindings are generated into OUT_DIR and included via a submodule so that
+// possible inner attributes in the generated file are accepted at module root.
+mod ffi;
+pub use ffi::*;
 
 // Ensure common ImGui typedefs are available even if bindgen doesn't emit them explicitly
 
@@ -51,12 +53,8 @@ pub use ImVec4 as Vector4;
 /// Version information for the Dear ImGui library
 pub const IMGUI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Check if docking features are available
-#[cfg(feature = "docking")]
+/// Docking features are always available in this crate
 pub const HAS_DOCKING: bool = true;
-
-#[cfg(not(feature = "docking"))]
-pub const HAS_DOCKING: bool = false;
 
 /// Check if FreeType support is available
 #[cfg(feature = "freetype")]

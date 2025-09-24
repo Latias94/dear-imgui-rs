@@ -21,9 +21,10 @@ glam = { version = "0.27", optional = true }
 mint = { version = "0.5", optional = true }
 
 [features]
-default = ["docking", "glam"]
-docking = ["dear-imgui/docking", "dear-imguizmo-sys/docking"]
-multi-viewport = ["docking", "dear-imgui/multi-viewport", "dear-imguizmo-sys/multi-viewport"]
+default = ["glam"]
+# Docking is always enabled; remove feature.
+# Enable multi-viewport support (commented out while WIP)
+# multi-viewport = ["dear-imgui/multi-viewport", "dear-imguizmo-sys/multi-viewport"]
 freetype = ["dear-imgui/freetype", "dear-imguizmo-sys/freetype"]
 glam = ["dep:glam"]
 mint = ["dep:mint"]

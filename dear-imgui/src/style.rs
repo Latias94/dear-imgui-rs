@@ -188,9 +188,7 @@ pub enum StyleColor {
     TabDimmed = sys::ImGuiCol_TabDimmed as i32,
     TabDimmedSelected = sys::ImGuiCol_TabDimmedSelected as i32,
     TabDimmedSelectedOverline = sys::ImGuiCol_TabDimmedSelectedOverline as i32,
-    #[cfg(feature = "docking")]
     DockingPreview = sys::ImGuiCol_DockingPreview as i32,
-    #[cfg(feature = "docking")]
     DockingEmptyBg = sys::ImGuiCol_DockingEmptyBg as i32,
     PlotLines = sys::ImGuiCol_PlotLines as i32,
     PlotLinesHovered = sys::ImGuiCol_PlotLinesHovered as i32,
