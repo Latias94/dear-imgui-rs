@@ -158,6 +158,36 @@ impl<T> Default for ImVector<T> {
     }
 }
 
+impl<T> ImVector<T> {
+    /// Returns an iterator over the elements
+    #[inline]
+    pub fn iter(&self) -> slice::Iter<'_, T> {
+        self.as_slice().iter()
+    }
+
+    /// Returns a mutable iterator over the elements
+    #[inline]
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, T> {
+        self.as_slice_mut().iter_mut()
+    }
+}
+
+/// Cast a bindgen-generated `ImVector_*` to our generic `ImVector<T>` view.
+///
+/// Safety: `raw` must be a pointer/reference to a C `ImVector` instantiated
+/// with the same element type `T` (layout-compatible). Only use with
+/// bindgen-generated `ImVector_*` structs from dear-imgui-sys.
+#[inline]
+pub unsafe fn imvector_cast_ref<T, R>(raw: &R) -> &ImVector<T> {
+    unsafe { &*(raw as *const R as *const ImVector<T>) }
+}
+
+/// Mutable variant of [`imvector_cast_ref`]. See its safety contract.
+#[inline]
+pub unsafe fn imvector_cast_mut<T, R>(raw: &mut R) -> &mut ImVector<T> {
+    unsafe { &mut *(raw as *mut R as *mut ImVector<T>) }
+}
+
 /// Marks a type as a transparent wrapper over a raw type
 pub trait RawWrapper {
     /// Wrapped raw type

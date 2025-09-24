@@ -146,90 +146,96 @@ impl StyleStackToken<'_> {
 unsafe fn push_style_var(style_var: StyleVar) {
     use StyleVar::*;
     match style_var {
-        Alpha(v) => unsafe { sys::igPushStyleVar_Float(sys::ImGuiStyleVar_Alpha, v) },
+        Alpha(v) => unsafe { sys::igPushStyleVar_Float(sys::ImGuiStyleVar_Alpha as i32, v) },
         DisabledAlpha(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DisabledAlpha, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DisabledAlpha as i32, v)
         },
         WindowPadding(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowPadding, vec) }
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowPadding as i32, vec) }
         }
         WindowRounding(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowRounding, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowRounding as i32, v)
         },
         WindowBorderSize(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowBorderSize, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowBorderSize as i32, v)
         },
         WindowMinSize(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowMinSize, vec) }
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowMinSize as i32, vec) }
         }
         WindowTitleAlign(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowTitleAlign, vec) }
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowTitleAlign as i32, vec) }
         }
         ChildRounding(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ChildRounding, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ChildRounding as i32, v)
         },
         ChildBorderSize(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ChildBorderSize, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ChildBorderSize as i32, v)
         },
         PopupRounding(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupRounding, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupRounding as i32, v)
         },
         PopupBorderSize(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupBorderSize, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupBorderSize as i32, v)
         },
         FramePadding(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_FramePadding, vec) }
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_FramePadding as i32, vec) }
         }
         FrameRounding(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameRounding, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameRounding as i32, v)
         },
         FrameBorderSize(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameBorderSize, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameBorderSize as i32, v)
         },
         ItemSpacing(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemSpacing, vec) }
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemSpacing as i32, vec) }
         }
         ItemInnerSpacing(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemInnerSpacing, vec) }
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemInnerSpacing as i32, vec) }
         }
         IndentSpacing(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_IndentSpacing, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_IndentSpacing as i32, v)
         },
         CellPadding(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_CellPadding, vec) }
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_CellPadding as i32, vec) }
         }
         ScrollbarSize(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarSize, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarSize as i32, v)
         },
         ScrollbarRounding(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarRounding, v)
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarRounding as i32, v)
         },
-        GrabMinSize(v) => unsafe { sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabMinSize, v) },
-        GrabRounding(v) => unsafe { sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabRounding, v) },
-        TabRounding(v) => unsafe { sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabRounding, v) },
+        GrabMinSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabMinSize as i32, v)
+        },
+        GrabRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabRounding as i32, v)
+        },
+        TabRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabRounding as i32, v)
+        },
         ButtonTextAlign(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ButtonTextAlign, vec) }
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ButtonTextAlign as i32, vec) }
         }
         SelectableTextAlign(v) => {
             let p: [f32; 2] = v.into();
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
-            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_SelectableTextAlign, vec) }
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_SelectableTextAlign as i32, vec) }
         }
     }
 }

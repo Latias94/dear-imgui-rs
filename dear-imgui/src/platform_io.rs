@@ -229,40 +229,44 @@ impl PlatformIo {
     /// Get access to the monitors vector
     #[cfg(feature = "multi-viewport")]
     pub fn monitors(&self) -> &ImVector<sys::ImGuiPlatformMonitor> {
-        // Cast bindgen-generated ImVector_ImGuiPlatformMonitor to our generic ImVector<T>
         unsafe {
-            &*((&self.raw.Monitors as *const sys::ImVector_ImGuiPlatformMonitor)
-                as *const ImVector<sys::ImGuiPlatformMonitor>)
+            crate::internal::imvector_cast_ref::<
+                sys::ImGuiPlatformMonitor,
+                sys::ImVector_ImGuiPlatformMonitor,
+            >(&self.raw.Monitors)
         }
     }
 
     /// Get mutable access to the monitors vector
     #[cfg(feature = "multi-viewport")]
     pub fn monitors_mut(&mut self) -> &mut ImVector<sys::ImGuiPlatformMonitor> {
-        // Cast bindgen-generated ImVector_ImGuiPlatformMonitor to our generic ImVector<T>
         unsafe {
-            &mut *((&mut self.raw.Monitors as *mut sys::ImVector_ImGuiPlatformMonitor)
-                as *mut ImVector<sys::ImGuiPlatformMonitor>)
+            crate::internal::imvector_cast_mut::<
+                sys::ImGuiPlatformMonitor,
+                sys::ImVector_ImGuiPlatformMonitor,
+            >(&mut self.raw.Monitors)
         }
     }
 
     /// Get access to the viewports vector
     #[cfg(feature = "multi-viewport")]
     pub fn viewports(&self) -> &ImVector<*mut sys::ImGuiViewport> {
-        // Cast bindgen-generated ImVector_ImGuiViewportPtr to our generic ImVector<T>
         unsafe {
-            &*((&self.raw.Viewports as *const sys::ImVector_ImGuiViewportPtr)
-                as *const ImVector<*mut sys::ImGuiViewport>)
+            crate::internal::imvector_cast_ref::<
+                *mut sys::ImGuiViewport,
+                sys::ImVector_ImGuiViewportPtr,
+            >(&self.raw.Viewports)
         }
     }
 
     /// Get mutable access to the viewports vector
     #[cfg(feature = "multi-viewport")]
     pub fn viewports_mut(&mut self) -> &mut ImVector<*mut sys::ImGuiViewport> {
-        // Cast bindgen-generated ImVector_ImGuiViewportPtr to our generic ImVector<T>
         unsafe {
-            &mut *((&mut self.raw.Viewports as *mut sys::ImVector_ImGuiViewportPtr)
-                as *mut ImVector<*mut sys::ImGuiViewport>)
+            crate::internal::imvector_cast_mut::<
+                *mut sys::ImGuiViewport,
+                sys::ImVector_ImGuiViewportPtr,
+            >(&mut self.raw.Viewports)
         }
     }
 
@@ -270,7 +274,6 @@ impl PlatformIo {
     #[cfg(feature = "multi-viewport")]
     pub fn viewports_iter(&self) -> impl Iterator<Item = &Viewport> {
         self.viewports()
-            .as_slice()
             .iter()
             .map(|&ptr| unsafe { Viewport::from_raw(ptr) })
     }
@@ -279,7 +282,6 @@ impl PlatformIo {
     #[cfg(feature = "multi-viewport")]
     pub fn viewports_iter_mut(&mut self) -> impl Iterator<Item = &mut Viewport> {
         self.viewports_mut()
-            .as_slice_mut()
             .iter_mut()
             .map(|&mut ptr| unsafe { Viewport::from_raw_mut(ptr) })
     }
