@@ -80,20 +80,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          crates=(
-            dear-imgui
-            backends/dear-imgui-winit
-            backends/dear-imgui-wgpu
-            backends/dear-imgui-glow
-            extensions/dear-imguizmo
-            extensions/dear-imnodes
-            extensions/dear-implot
-          )
-          for manifest in "${crates[@]}"; do
-            echo "::group::package $manifest"
-            cargo package --manifest-path "$manifest/Cargo.toml"
-            echo "::endgroup::"
-          done
+          # Before first publish, only package -sys crates that don't require
+          # unpublished internal deps from crates.io. 'dear-imgui-sys' is the root.
+          echo "::group::package dear-imgui-sys"
+          cargo package -p dear-imgui-sys
+          echo "::endgroup::"
+
+          # Note: other -sys crates depend on dear-imgui-sys by version and will fail
+          # packaging until dear-imgui-sys is published. We keep their packaging disabled
+          # here to avoid false CI failures pre-release.
 
   fmt:
     name: Format

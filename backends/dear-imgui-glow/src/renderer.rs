@@ -792,8 +792,7 @@ pub mod multi_viewport {
         if viewport.is_null() {
             return;
         }
-
-        let viewport = &*viewport;
+        let viewport = unsafe { &*viewport };
 
         // Clear the viewport if needed using Dear ImGui's ViewportFlags
         let flags = ViewportFlags::from_bits_truncate(viewport.Flags);
