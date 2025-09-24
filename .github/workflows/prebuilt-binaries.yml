@@ -92,52 +92,52 @@ jobs:
         run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> $env:GITHUB_ENV
 
       - name: Build dear-imgui-sys (Release)
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == '' || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',all,') || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',dear-imgui-sys,')))
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys')))
         run: cargo build -p dear-imgui-sys --release --target ${{ matrix.target }}
         env:
           TARGET: ${{ matrix.target }}
 
       - name: Package dear-imgui-sys static library + headers
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == '' || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',all,') || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',dear-imgui-sys,')))
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys')))
         run: cargo run -p dear-imgui-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-implot-sys (Release)
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == '' || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',all,') || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',dear-implot-sys,')))
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-implot-sys')))
         run: cargo build -p dear-implot-sys --release --target ${{ matrix.target }}
         env:
           TARGET: ${{ matrix.target }}
 
       - name: Package dear-implot-sys static library + headers
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == '' || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',all,') || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',dear-implot-sys,')))
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-implot-sys')))
         run: cargo run -p dear-implot-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-imnodes-sys (Release)
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == '' || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',all,') || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',dear-imnodes-sys,')))
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imnodes-sys')))
         run: cargo build -p dear-imnodes-sys --release --target ${{ matrix.target }}
         env:
           TARGET: ${{ matrix.target }}
 
       - name: Package dear-imnodes-sys static library + headers
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == '' || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',all,') || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',dear-imnodes-sys,')))
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imnodes-sys')))
         run: cargo run -p dear-imnodes-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-imguizmo-sys (Release)
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == '' || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',all,') || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',dear-imguizmo-sys,')))
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imguizmo-sys')))
         run: cargo build -p dear-imguizmo-sys --release --target ${{ matrix.target }}
         env:
           TARGET: ${{ matrix.target }}
 
       - name: Package dear-imguizmo-sys static library + headers
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == '' || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',all,') || contains(format(',{0},', replace(inputs.crates, ' ', '')), ',dear-imguizmo-sys,')))
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imguizmo-sys')))
         run: cargo run -p dear-imguizmo-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
