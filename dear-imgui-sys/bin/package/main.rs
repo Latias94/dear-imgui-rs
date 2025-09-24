@@ -68,7 +68,7 @@ fn locate_sys_out_dir(workspace_root: &std::path::Path, target: &str) -> Result<
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let workspace_root = manifest_dir.parent().unwrap();
-    let out_dir = PathBuf::from(
+    let _out_dir = PathBuf::from(
         env::var("OUT_DIR").unwrap_or_else(|_| workspace_root.join("target").display().to_string()),
     );
 

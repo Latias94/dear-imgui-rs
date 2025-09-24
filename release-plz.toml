@@ -5,6 +5,8 @@ allow_dirty = true # allow submodule updates without committing
 publish_no_verify = false # enable verification for production releases
 semver_check = true # enable semver checks for production releases
 release_always = false # only release when PR is merged
+changelog_config = ".github/changelog.toml" # use git-cliff conventional commit config
+pr_labels = ["release"]
 
 git_release_body = """
 {{ changelog }}
@@ -31,20 +33,30 @@ changelog_update = false # don't require changelog for sys crate
 # Backend packages
 [[package]]
 name = "dear-imgui-winit"
-git_release_enable = false
-changelog_update = false
+git_release_enable = true
+changelog_path = "./backends/dear-imgui-winit/CHANGELOG.md"
 
 [[package]]
 name = "dear-imgui-wgpu"
+git_release_enable = true
+changelog_path = "./backends/dear-imgui-wgpu/CHANGELOG.md"
+
+[[package]]
+name = "dear-imgui-glow"
+git_release_enable = true
+changelog_path = "./backends/dear-imgui-glow/CHANGELOG.md"
+
+# Extension packages
+[[package]]
+name = "dear-imguizmo-sys"
 git_release_enable = false
 changelog_update = false
 
 [[package]]
-name = "dear-imgui-glow"
-git_release_enable = false
-changelog_update = false
+name = "dear-imguizmo"
+changelog_path = "./extensions/dear-imguizmo/CHANGELOG.md"
+git_release_enable = true
 
-# Extension packages
 [[package]]
 name = "dear-implot-sys"
 git_release_enable = false
@@ -52,5 +64,15 @@ changelog_update = false
 
 [[package]]
 name = "dear-implot"
+git_release_enable = true
+changelog_path = "./extensions/dear-implot/CHANGELOG.md"
+
+[[package]]
+name = "dear-imnodes-sys"
 git_release_enable = false
 changelog_update = false
+
+[[package]]
+name = "dear-imnodes"
+changelog_path = "./extensions/dear-imnodes/CHANGELOG.md"
+git_release_enable = true

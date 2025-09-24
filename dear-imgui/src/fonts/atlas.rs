@@ -9,7 +9,7 @@
 
 use crate::fonts::Font;
 use crate::sys;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::marker::PhantomData;
 use std::ptr;
 use std::rc::Rc;
@@ -59,7 +59,7 @@ impl FontLoader {
     }
 
     /// Sets the loader initialization callback
-    pub fn with_loader_init<F>(mut self, callback: F) -> Self
+    pub fn with_loader_init<F>(self, _callback: F) -> Self
     where
         F: Fn(&mut FontAtlas) -> bool + 'static,
     {
@@ -437,22 +437,24 @@ impl FontAtlas {
     /// The returned pointer is only valid while the FontAtlas exists and the texture is built.
     /// The caller must ensure proper lifetime management.
     pub unsafe fn get_tex_data_ptr(&self) -> Option<(*const u8, u32, u32)> {
-        if (*self.raw).TexIsBuilt {
-            let tex_data = (*self.raw).TexData;
-            if !tex_data.is_null() {
-                let width = (*tex_data).Width as u32;
-                let height = (*tex_data).Height as u32;
-                let pixels = (*tex_data).Pixels;
-                if !pixels.is_null() {
-                    Some((pixels, width, height))
+        unsafe {
+            if (*self.raw).TexIsBuilt {
+                let tex_data = (*self.raw).TexData;
+                if !tex_data.is_null() {
+                    let width = (*tex_data).Width as u32;
+                    let height = (*tex_data).Height as u32;
+                    let pixels = (*tex_data).Pixels;
+                    if !pixels.is_null() {
+                        Some((pixels, width, height))
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
-        } else {
-            None
         }
     }
 

@@ -30,7 +30,7 @@ impl Font {
     /// # Safety
     /// The caller must ensure that the pointer is valid and points to a valid ImFont
     pub unsafe fn from_raw(raw: *mut sys::ImFont) -> &'static Self {
-        &*(raw as *const Self)
+        unsafe { &*(raw as *const Self) }
     }
 
     /// Returns the identifier of this font

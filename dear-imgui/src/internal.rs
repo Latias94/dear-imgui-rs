@@ -192,7 +192,7 @@ pub unsafe trait RawCast<T>: Sized {
     /// It is up to the caller to guarantee the cast is valid.
     #[inline]
     unsafe fn from_raw(raw: &T) -> &Self {
-        &*(raw as *const _ as *const Self)
+        unsafe { &*(raw as *const _ as *const Self) }
     }
 
     /// Casts a mutable reference from the raw type
@@ -202,7 +202,7 @@ pub unsafe trait RawCast<T>: Sized {
     /// It is up to the caller to guarantee the cast is valid.
     #[inline]
     unsafe fn from_raw_mut(raw: &mut T) -> &mut Self {
-        &mut *(raw as *mut _ as *mut Self)
+        unsafe { &mut *(raw as *mut _ as *mut Self) }
     }
 
     /// Casts an immutable reference to the raw type
@@ -212,7 +212,7 @@ pub unsafe trait RawCast<T>: Sized {
     /// It is up to the caller to guarantee the cast is valid.
     #[inline]
     unsafe fn raw(&self) -> &T {
-        &*(self as *const _ as *const T)
+        unsafe { &*(self as *const _ as *const T) }
     }
 
     /// Casts a mutable reference to the raw type
@@ -222,6 +222,6 @@ pub unsafe trait RawCast<T>: Sized {
     /// It is up to the caller to guarantee the cast is valid.
     #[inline]
     unsafe fn raw_mut(&mut self) -> &mut T {
-        &mut *(self as *mut _ as *mut T)
+        unsafe { &mut *(self as *mut _ as *mut T) }
     }
 }

@@ -64,6 +64,37 @@ jobs:
       - name: Build examples with extensions
         run: cargo build -p dear-imgui-examples --features "dear-imguizmo dear-imnodes dear-implot"
 
+  publish-check:
+    name: Publish dry-run (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo publish --dry-run (selected crates)
+        shell: bash
+        run: |
+          set -euo pipefail
+          crates=(
+            dear-imgui
+            backends/dear-imgui-winit
+            backends/dear-imgui-wgpu
+            backends/dear-imgui-glow
+            extensions/dear-imguizmo
+            extensions/dear-imnodes
+            extensions/dear-implot
+          )
+          for manifest in "${crates[@]}"; do
+            echo "::group::dry-run $manifest"
+            cargo publish --dry-run --manifest-path "$manifest/Cargo.toml"
+            echo "::endgroup::"
+          done
+
   fmt:
     name: Format
     runs-on: ubuntu-latest

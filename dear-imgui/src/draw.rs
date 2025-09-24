@@ -217,13 +217,15 @@ impl DrawList {
 
     /// Get command buffer as slice
     unsafe fn cmd_buffer(&self) -> &[sys::ImDrawCmd] {
-        if (*self.0).CmdBuffer.Size <= 0 || (*self.0).CmdBuffer.Data.is_null() {
-            return &[];
+        unsafe {
+            if (*self.0).CmdBuffer.Size <= 0 || (*self.0).CmdBuffer.Data.is_null() {
+                return &[];
+            }
+            std::slice::from_raw_parts(
+                (*self.0).CmdBuffer.Data as *const sys::ImDrawCmd,
+                (*self.0).CmdBuffer.Size as usize,
+            )
         }
-        std::slice::from_raw_parts(
-            (*self.0).CmdBuffer.Data as *const sys::ImDrawCmd,
-            (*self.0).CmdBuffer.Size as usize,
-        )
     }
 
     /// Get vertex buffer

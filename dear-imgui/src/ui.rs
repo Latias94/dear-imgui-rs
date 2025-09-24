@@ -326,8 +326,10 @@ impl Ui {
     /// pop. The [`clone_style`](Ui::clone_style) version may instead be used to avoid `unsafe`.
     #[doc(alias = "GetStyle")]
     pub unsafe fn style(&self) -> &crate::Style {
-        // safe because Style is a transparent wrapper around sys::ImGuiStyle
-        &*(sys::igGetStyle() as *const crate::Style)
+        unsafe {
+            // safe because Style is a transparent wrapper around sys::ImGuiStyle
+            &*(sys::igGetStyle() as *const crate::Style)
+        }
     }
 
     /// Returns a copy of the current style.

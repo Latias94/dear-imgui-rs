@@ -89,12 +89,12 @@ impl Ui {
     /// This is typically used to show tooltips.
     #[doc(alias = "IsItemHovered")]
     pub fn is_item_hovered(&self) -> bool {
-        unsafe { sys::igIsItemHovered(super::HoveredFlags::NONE.bits()) }
+        unsafe { sys::igIsItemHovered(crate::HoveredFlags::NONE.bits()) }
     }
 
     /// Returns true if the last item is being hovered by mouse with specific flags.
     #[doc(alias = "IsItemHovered")]
-    pub fn is_item_hovered_with_flags(&self, flags: HoveredFlags) -> bool {
+    pub fn is_item_hovered_with_flags(&self, flags: crate::HoveredFlags) -> bool {
         unsafe { sys::igIsItemHovered(flags.bits()) }
     }
 
@@ -184,32 +184,6 @@ impl Ui {
             sys::igGetItemRectSize(&mut size);
             [size.x, size.y]
         }
-    }
-}
-
-bitflags::bitflags! {
-    /// Flags for IsItemHovered()
-    #[repr(transparent)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub struct HoveredFlags: i32 {
-        /// No flags
-        const NONE = sys::ImGuiHoveredFlags_None as i32;
-        /// Return true if directly over the item/window, not obstructed by another window
-        const CHILD_WINDOWS = sys::ImGuiHoveredFlags_ChildWindows as i32;
-        /// Return true if any window is hovered
-        const ROOT_WINDOW = sys::ImGuiHoveredFlags_RootWindow as i32;
-        /// Return true if any child of the window is hovered
-        const ANY_WINDOW = sys::ImGuiHoveredFlags_AnyWindow as i32;
-        /// Return true even if a popup window is normally blocking access to this item/window
-        const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup as i32;
-        /// Return true even if an active item is blocking access to this item/window
-        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
-        /// Return true even if the position is obstructed or overlapped by another window
-        const ALLOW_WHEN_OVERLAPPED = sys::ImGuiHoveredFlags_AllowWhenOverlapped as i32;
-        /// Return true even if the item is disabled
-        const ALLOW_WHEN_DISABLED = sys::ImGuiHoveredFlags_AllowWhenDisabled as i32;
-        /// Disable using gamepad/keyboard navigation state when active, always query mouse
-        const NO_NAV_OVERRIDE = sys::ImGuiHoveredFlags_NoNavOverride as i32;
     }
 }
 

@@ -11,6 +11,16 @@ keywords.workspace = true
 build = "build.rs"
 links = "dear_implot"
 
+# Exclude heavy upstream folders from package tarball
+exclude = [
+    "third-party/cimplot/example_glfw_opengl3/**",
+    "third-party/cimplot/generator/**",
+    "third-party/cimplot/implot/.github/**",
+    "third-party/cimplot/implot/examples/**",
+    "third-party/cimplot/implot/misc/**",
+    "third-party/cimplot/implot/docs/**",
+]
+
 [dependencies]
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
 #mint.workspace = true

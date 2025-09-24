@@ -11,6 +11,17 @@ keywords.workspace = true
 build = "build.rs"
 links = "dear_imnodes"
 
+# Exclude heavy upstream folders from package tarball
+exclude = [
+    "third-party/cimnodes/imnodes/.github/**",
+    "third-party/cimnodes/imnodes/vcpkg/**",
+    "third-party/cimnodes/imnodes/examples/**",
+    "third-party/cimnodes/imnodes/example/**",
+    "third-party/cimnodes/imnodes/misc/**",
+    "third-party/cimnodes/imnodes/docs/**",
+    "third-party/cimnodes/imnodes/generator/**",
+]
+
 [dependencies]
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
 cfg-if.workspace = true
@@ -30,4 +41,3 @@ docking = ["dear-imgui-sys/docking"]
 multi-viewport = ["docking", "dear-imgui-sys/multi-viewport"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
-

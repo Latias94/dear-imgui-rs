@@ -3,7 +3,7 @@
 //! This module provides access to Dear ImGui's platform IO system, which handles
 //! multi-viewport and platform-specific functionality.
 
-use crate::sys;
+use crate::{internal::ImVector, sys};
 use std::ffi::{c_char, c_void};
 
 /// Platform IO structure for multi-viewport support
@@ -23,7 +23,7 @@ impl PlatformIo {
     /// The caller must ensure that the pointer is valid and points to a valid
     /// `ImGuiPlatformIO` structure.
     pub unsafe fn from_raw(raw: *const sys::ImGuiPlatformIO) -> &'static Self {
-        &*(raw as *const Self)
+        unsafe { &*(raw as *const Self) }
     }
 
     /// Get a mutable reference to the platform IO from a raw pointer
@@ -33,7 +33,7 @@ impl PlatformIo {
     /// The caller must ensure that the pointer is valid and points to a valid
     /// `ImGuiPlatformIO` structure, and that no other references exist.
     pub unsafe fn from_raw_mut(raw: *mut sys::ImGuiPlatformIO) -> &'static mut Self {
-        &mut *(raw as *mut Self)
+        unsafe { &mut *(raw as *mut Self) }
     }
 
     /// Get the raw pointer to the underlying `ImGuiPlatformIO`
@@ -228,25 +228,25 @@ impl PlatformIo {
 
     /// Get access to the monitors vector
     #[cfg(feature = "multi-viewport")]
-    pub fn monitors(&self) -> &sys::ImVector<sys::ImGuiPlatformMonitor> {
+    pub fn monitors(&self) -> &ImVector<sys::ImGuiPlatformMonitor> {
         &self.raw.Monitors
     }
 
     /// Get mutable access to the monitors vector
     #[cfg(feature = "multi-viewport")]
-    pub fn monitors_mut(&mut self) -> &mut sys::ImVector<sys::ImGuiPlatformMonitor> {
+    pub fn monitors_mut(&mut self) -> &mut ImVector<sys::ImGuiPlatformMonitor> {
         &mut self.raw.Monitors
     }
 
     /// Get access to the viewports vector
     #[cfg(feature = "multi-viewport")]
-    pub fn viewports(&self) -> &sys::ImVector<*mut sys::ImGuiViewport> {
+    pub fn viewports(&self) -> &ImVector<*mut sys::ImGuiViewport> {
         &self.raw.Viewports
     }
 
     /// Get mutable access to the viewports vector
     #[cfg(feature = "multi-viewport")]
-    pub fn viewports_mut(&mut self) -> &mut sys::ImVector<*mut sys::ImGuiViewport> {
+    pub fn viewports_mut(&mut self) -> &mut ImVector<*mut sys::ImGuiViewport> {
         &mut self.raw.Viewports
     }
 
@@ -373,7 +373,7 @@ impl Viewport {
     /// The caller must ensure that the pointer is valid and points to a valid
     /// `ImGuiViewport` structure.
     pub unsafe fn from_raw(raw: *const sys::ImGuiViewport) -> &'static Self {
-        &*(raw as *const Self)
+        unsafe { &*(raw as *const Self) }
     }
 
     /// Get a mutable reference to the viewport from a raw pointer
@@ -383,7 +383,7 @@ impl Viewport {
     /// The caller must ensure that the pointer is valid and points to a valid
     /// `ImGuiViewport` structure, and that no other references exist.
     pub unsafe fn from_raw_mut(raw: *mut sys::ImGuiViewport) -> &'static mut Self {
-        &mut *(raw as *mut Self)
+        unsafe { &mut *(raw as *mut Self) }
     }
 
     /// Get the raw pointer to the underlying `ImGuiViewport`

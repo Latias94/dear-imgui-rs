@@ -235,7 +235,7 @@ impl TextureData {
     /// The caller must ensure that the pointer is valid and points to a valid
     /// ImTextureData structure.
     pub unsafe fn from_raw(raw: *mut sys::ImTextureData) -> &'static mut Self {
-        &mut *(raw as *mut Self)
+        unsafe { &mut *(raw as *mut Self) }
     }
 
     /// Get the raw pointer to the underlying ImTextureData

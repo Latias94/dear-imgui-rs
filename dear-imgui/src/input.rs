@@ -222,8 +222,8 @@ bitflags! {
     }
 }
 
-/// Input text flags for text input widgets
 bitflags! {
+    /// Input text flags for text input widgets
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct InputTextFlags: i32 {

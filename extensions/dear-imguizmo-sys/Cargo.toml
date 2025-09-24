@@ -11,6 +11,14 @@ keywords.workspace = true
 build = "build.rs"
 links = "dear_imguizmo"
 
+# Exclude heavy upstream folders from package tarball
+exclude = [
+    "third-party/cimguizmo/ImGuizmo/example/**",
+    "third-party/cimguizmo/ImGuizmo/.github/**",
+    "third-party/cimguizmo/ImGuizmo/docs/**",
+    "third-party/cimguizmo/ImGuizmo/generator/**",
+]
+
 [dependencies]
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
 mint.workspace = true

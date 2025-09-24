@@ -809,13 +809,15 @@ impl TextCallbackData {
     /// [insert_chars]: Self::insert_chars
     /// [push_str]: Self::push_str
     pub unsafe fn str_as_bytes_mut(&mut self) -> &mut [u8] {
-        let str = std::str::from_utf8_mut(std::slice::from_raw_parts_mut(
-            (*(self.0)).Buf as *const _ as *mut _,
-            (*(self.0)).BufTextLen as usize,
-        ))
-        .expect("internal imgui error -- it boofed a utf8");
+        unsafe {
+            let str = std::str::from_utf8_mut(std::slice::from_raw_parts_mut(
+                (*(self.0)).Buf as *const _ as *mut _,
+                (*(self.0)).BufTextLen as usize,
+            ))
+            .expect("internal imgui error -- it boofed a utf8");
 
-        str.as_bytes_mut()
+            str.as_bytes_mut()
+        }
     }
 
     /// Sets the dirty flag on the text to imgui, indicating that

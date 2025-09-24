@@ -14,13 +14,19 @@ links = "dear-imgui"
 
 # Exclude unnecessary files to reduce package size
 exclude = [
-    "imgui/backends/",
-    "imgui/docs/", 
-    "imgui/examples/",
-    "imgui/misc/cpp/",
-    "imgui/misc/debuggers/",
-    "imgui/misc/fonts/",
-    "imgui/misc/single_file/",
+    # Exclude heavy upstream folders from cimgui/imgui submodule
+    "third-party/cimgui/imgui/backends/**",
+    "third-party/cimgui/imgui/docs/**", 
+    "third-party/cimgui/imgui/examples/**",
+    "third-party/cimgui/imgui/misc/cpp/**",
+    "third-party/cimgui/imgui/misc/debuggers/**",
+    "third-party/cimgui/imgui/misc/fonts/**",
+    "third-party/cimgui/imgui/misc/single_file/**",
+    # cimgui helper/test/generator content not needed for building
+    "third-party/cimgui/.github/**",
+    "third-party/cimgui/backend_test/**",
+    "third-party/cimgui/generator/**",
+    "third-party/cimgui/test/**",
 ]
 
 [dependencies]

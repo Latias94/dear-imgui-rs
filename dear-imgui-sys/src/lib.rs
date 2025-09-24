@@ -33,8 +33,6 @@
 #![allow(unnecessary_transmutes)]
 #![allow(clippy::all)]
 
-use std::ops::{Deref, DerefMut, Index, IndexMut};
-
 // Include the generated bindings from bindgen
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 

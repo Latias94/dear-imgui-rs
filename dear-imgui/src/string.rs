@@ -76,7 +76,7 @@ impl UiBuffer {
     /// This can return a pointer to undefined data if given a `pos >= self.buffer.len()`.
     /// This is marked as unsafe to reflect that.
     pub unsafe fn offset(&self, pos: usize) -> *const std::os::raw::c_char {
-        self.buffer.as_ptr().add(pos) as *const _
+        unsafe { self.buffer.as_ptr().add(pos) as *const _ }
     }
 
     /// Pushes a new scratch sheet text and return the byte index where the sub-string
@@ -207,14 +207,16 @@ impl ImString {
     /// This function is unsafe because it assumes the buffer contains valid UTF-8
     /// and has a null terminator somewhere within the allocated capacity.
     pub unsafe fn refresh_len(&mut self) {
-        // For now, we'll use a simple implementation without libc
-        // In a real implementation, you'd want to use libc::strlen or similar
-        let mut len = 0;
-        let ptr = self.as_ptr() as *const u8;
-        while *ptr.add(len) != 0 {
-            len += 1;
+        unsafe {
+            // For now, we'll use a simple implementation without libc
+            // In a real implementation, you'd want to use libc::strlen or similar
+            let mut len = 0;
+            let ptr = self.as_ptr() as *const u8;
+            while *ptr.add(len) != 0 {
+                len += 1;
+            }
+            self.0.set_len(len + 1);
         }
-        self.0.set_len(len + 1);
     }
 
     /// Returns the length of this `ImString` in bytes, excluding the null terminator

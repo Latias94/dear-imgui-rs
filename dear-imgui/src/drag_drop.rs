@@ -204,14 +204,21 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
         ptr: *const ffi::c_void,
         size: usize,
     ) -> Option<DragDropSourceTooltip<'ui>> {
-        let should_begin = sys::igBeginDragDropSource(self.flags.bits() as i32);
+        unsafe {
+            let should_begin = sys::igBeginDragDropSource(self.flags.bits() as i32);
 
-        if should_begin {
-            sys::igSetDragDropPayload(self.ui.scratch_txt(&self.name), ptr, size, self.cond as i32);
+            if should_begin {
+                sys::igSetDragDropPayload(
+                    self.ui.scratch_txt(&self.name),
+                    ptr,
+                    size,
+                    self.cond as i32,
+                );
 
-            Some(DragDropSourceTooltip::new(self.ui))
-        } else {
-            None
+                Some(DragDropSourceTooltip::new(self.ui))
+            } else {
+                None
+            }
         }
     }
 }

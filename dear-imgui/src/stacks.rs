@@ -263,7 +263,7 @@ impl Ui {
     /// `ItemWidthStackToken` goes out of scope, or `.end()` is called.
     #[doc(alias = "PushItemWidth")]
     pub fn push_item_width_text(&self, text: impl AsRef<str>) -> ItemWidthStackToken<'_> {
-        let text_width = unsafe {
+        let text_width = {
             let text_ptr = self.scratch_txt(text);
             let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
             unsafe { sys::igCalcTextSize(&mut out, text_ptr, std::ptr::null(), false, -1.0) };
