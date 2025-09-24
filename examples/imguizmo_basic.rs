@@ -10,8 +10,8 @@ use dear_imgui::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use dear_imguizmo as guizmo;
+use dear_imguizmo::graph::{Graph, GraphEditorExt, GraphView, Node, Pin, PinKind};
 use dear_imguizmo::GuizmoExt;
-use dear_imguizmo::graph::{Graph, GraphView, GraphEditorExt, Node, Pin, PinKind};
 use glam::{Mat4, Vec3};
 use pollster::block_on;
 use std::{sync::Arc, time::Instant};
@@ -121,22 +121,13 @@ impl Default for DemoState {
                     0.0, 0.0, 0.0, 1.0, // col3
                 ]),
                 Mat4::from_cols_array(&[
-                    1.0, 0.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0, 0.0,
-                    0.0, 0.0, 1.0, 0.0,
-                    2.0, 0.0, 0.0, 1.0,
+                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 2.0, 0.0, 0.0, 1.0,
                 ]),
                 Mat4::from_cols_array(&[
-                    1.0, 0.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0, 0.0,
-                    0.0, 0.0, 1.0, 0.0,
-                    2.0, 0.0, 2.0, 1.0,
+                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 2.0, 0.0, 2.0, 1.0,
                 ]),
                 Mat4::from_cols_array(&[
-                    1.0, 0.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0, 0.0,
-                    0.0, 0.0, 1.0, 0.0,
-                    0.0, 0.0, 2.0, 1.0,
+                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0,
                 ]),
             ],
 
@@ -206,14 +197,21 @@ impl AppWindow {
         platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
 
         // Initialize renderer
-        let init_info = dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
-        let renderer = WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
+        let init_info =
+            dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
+        let renderer =
+            WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
 
         let imgui = ImguiState {
             context,
             platform,
             renderer,
-            clear_color: wgpu::Color { r: 0.1, g: 0.2, b: 0.3, a: 1.0 },
+            clear_color: wgpu::Color {
+                r: 0.1,
+                g: 0.2,
+                b: 0.3,
+                a: 1.0,
+            },
             last_frame: Instant::now(),
         };
 
@@ -302,14 +300,19 @@ impl AppWindow {
                         ui.slider_f32("Ortho width", &mut self.state.ortho_width, 1.0, 20.0);
                     }
                     let mut view_dirty = false;
-                    view_dirty |= ui.slider_f32("Distance", &mut self.state.cam_distance, 1.0, 10.0);
+                    view_dirty |=
+                        ui.slider_f32("Distance", &mut self.state.cam_distance, 1.0, 10.0);
                     ui.slider_i32("Gizmo count", &mut self.state.gizmo_count, 1, 4);
 
                     if view_dirty || self.state.first_frame {
                         let eye = Vec3::new(
-                            self.state.cam_y_angle.cos() * self.state.cam_x_angle.cos() * self.state.cam_distance,
+                            self.state.cam_y_angle.cos()
+                                * self.state.cam_x_angle.cos()
+                                * self.state.cam_distance,
                             self.state.cam_x_angle.sin() * self.state.cam_distance,
-                            self.state.cam_y_angle.sin() * self.state.cam_x_angle.cos() * self.state.cam_distance,
+                            self.state.cam_y_angle.sin()
+                                * self.state.cam_x_angle.cos()
+                                * self.state.cam_distance,
                         );
                         self.state.camera_view = look_at(eye, Vec3::ZERO, Vec3::Y);
                         self.state.first_frame = false;
@@ -318,9 +321,7 @@ impl AppWindow {
                     ui.separator();
                     // Operation selection
                     match self.state.current_op_kind {
-                        OpKind::Translate => {
-                            if ui.radio_button("Translate", true) {}
-                        }
+                        OpKind::Translate => if ui.radio_button("Translate", true) {},
                         _ => {
                             if ui.radio_button("Translate", false) {
                                 self.state.current_op_kind = OpKind::Translate;
@@ -329,9 +330,7 @@ impl AppWindow {
                     }
                     ui.same_line();
                     match self.state.current_op_kind {
-                        OpKind::Rotate => {
-                            if ui.radio_button("Rotate", true) {}
-                        }
+                        OpKind::Rotate => if ui.radio_button("Rotate", true) {},
                         _ => {
                             if ui.radio_button("Rotate", false) {
                                 self.state.current_op_kind = OpKind::Rotate;
@@ -340,9 +339,7 @@ impl AppWindow {
                     }
                     ui.same_line();
                     match self.state.current_op_kind {
-                        OpKind::Scale => {
-                            if ui.radio_button("Scale", true) {}
-                        }
+                        OpKind::Scale => if ui.radio_button("Scale", true) {},
                         _ => {
                             if ui.radio_button("Scale", false) {
                                 self.state.current_op_kind = OpKind::Scale;
@@ -355,9 +352,7 @@ impl AppWindow {
                         // leave as-is, user can still toggle mode but ImGuizmo ignores it for Scale
                     }
                     match self.state.current_mode {
-                        guizmo::Mode::Local => {
-                            if ui.radio_button("Local", true) {}
-                        }
+                        guizmo::Mode::Local => if ui.radio_button("Local", true) {},
                         guizmo::Mode::World => {
                             if ui.radio_button("Local", false) {
                                 self.state.current_mode = guizmo::Mode::Local;
@@ -366,9 +361,7 @@ impl AppWindow {
                     }
                     ui.same_line();
                     match self.state.current_mode {
-                        guizmo::Mode::World => {
-                            if ui.radio_button("World", true) {}
-                        }
+                        guizmo::Mode::World => if ui.radio_button("World", true) {},
                         guizmo::Mode::Local => {
                             if ui.radio_button("World", false) {
                                 self.state.current_mode = guizmo::Mode::World;
@@ -381,7 +374,7 @@ impl AppWindow {
                     if self.state.use_snap {
                         match self.state.current_op_kind {
                             OpKind::Translate => {
-                            let _ = ui.input_scalar_n("Snap (Tr)", &mut self.state.snap);
+                                let _ = ui.input_scalar_n("Snap (Tr)", &mut self.state.snap);
                             }
                             OpKind::Rotate => {
                                 ui.input_float("Angle Snap", &mut self.state.snap[0]);
@@ -401,21 +394,50 @@ impl AppWindow {
                 let p_out0 = self.state.graph.alloc_pin_id();
                 let p_out1 = self.state.graph.alloc_pin_id();
                 let mut node1 = Node::new(n1, (-150.0_f32, -40.0), "Source");
-                node1.outputs.push(Pin::colored(p_out0, "Out0", PinKind::Output, [0.78, 0.39, 0.39, 1.0]));
-                node1.outputs.push(Pin::colored(p_out1, "Out1", PinKind::Output, [0.39, 0.78, 0.39, 1.0]));
+                node1.outputs.push(Pin::colored(
+                    p_out0,
+                    "Out0",
+                    PinKind::Output,
+                    [0.78, 0.39, 0.39, 1.0],
+                ));
+                node1.outputs.push(Pin::colored(
+                    p_out1,
+                    "Out1",
+                    PinKind::Output,
+                    [0.39, 0.78, 0.39, 1.0],
+                ));
                 // Node2: three colored inputs
                 let p_in0 = self.state.graph.alloc_pin_id();
                 let p_in1 = self.state.graph.alloc_pin_id();
                 let p_in2 = self.state.graph.alloc_pin_id();
                 let mut node2 = Node::new(n2, (150.0_f32, -40.0), "Sink");
-                node2.inputs.push(Pin::colored(p_in0, "In0", PinKind::Input, [0.78, 0.39, 0.39, 1.0]));
-                node2.inputs.push(Pin::colored(p_in1, "In1", PinKind::Input, [0.39, 0.78, 0.39, 1.0]));
-                node2.inputs.push(Pin::colored(p_in2, "In2", PinKind::Input, [0.39, 0.39, 0.78, 1.0]));
+                node2.inputs.push(Pin::colored(
+                    p_in0,
+                    "In0",
+                    PinKind::Input,
+                    [0.78, 0.39, 0.39, 1.0],
+                ));
+                node2.inputs.push(Pin::colored(
+                    p_in1,
+                    "In1",
+                    PinKind::Input,
+                    [0.39, 0.78, 0.39, 1.0],
+                ));
+                node2.inputs.push(Pin::colored(
+                    p_in2,
+                    "In2",
+                    PinKind::Input,
+                    [0.39, 0.39, 0.78, 1.0],
+                ));
                 self.state.graph.nodes.push(node1);
                 self.state.graph.nodes.push(node2);
                 // initial link
                 let lid = self.state.graph.alloc_link_id();
-                self.state.graph.links.push(dear_imguizmo::graph::Link{ id: lid, from: p_out0, to: p_in0 });
+                self.state.graph.links.push(dear_imguizmo::graph::Link {
+                    id: lid,
+                    from: p_out0,
+                    to: p_in0,
+                });
             }
 
             // Graph Editor window (toggle like C++ sample)
@@ -425,19 +447,32 @@ impl AppWindow {
                     .position([10.0, 360.0], Condition::FirstUseEver)
                     .build(|| {
                         if ui.button("Delete Selected") {
-                            dear_imguizmo::graph::delete_selected(&mut self.state.graph, &mut self.state.graph_view);
+                            dear_imguizmo::graph::delete_selected(
+                                &mut self.state.graph,
+                                &mut self.state.graph_view,
+                            );
                         }
                         ui.same_line();
                         if ui.button("Fit all nodes") {
                             let [wx, wy] = ui.window_pos();
                             let [ww, wh] = ui.window_size();
-                            dear_imguizmo::graph::fit_all_nodes(&self.state.graph, &mut self.state.graph_view, [wx, wy], [ww, wh]);
+                            dear_imguizmo::graph::fit_all_nodes(
+                                &self.state.graph,
+                                &mut self.state.graph_view,
+                                [wx, wy],
+                                [ww, wh],
+                            );
                         }
                         ui.same_line();
                         if ui.button("Fit selected nodes") {
                             let [wx, wy] = ui.window_pos();
                             let [ww, wh] = ui.window_size();
-                            dear_imguizmo::graph::fit_selected_nodes(&self.state.graph, &mut self.state.graph_view, [wx, wy], [ww, wh]);
+                            dear_imguizmo::graph::fit_selected_nodes(
+                                &self.state.graph,
+                                &mut self.state.graph_view,
+                                [wx, wy],
+                                [ww, wh],
+                            );
                         }
                         ui.same_line();
                         ui.checkbox("Show grid", &mut self.state.graph_grid_visible);
@@ -451,7 +486,10 @@ impl AppWindow {
                         ui.set_next_item_width(100.0);
                         let _ = ui.slider("Snap", 0.0, 50.0, &mut self.state.graph_snap);
                         ui.same_line();
-                        ui.text(format!("Selected: {} nodes", self.state.graph_view.selected_nodes.len()));
+                        ui.text(format!(
+                            "Selected: {} nodes",
+                            self.state.graph_view.selected_nodes.len()
+                        ));
                         let resp = ui
                             .graph_editor_config()
                             .graph(&mut self.state.graph)
@@ -473,7 +511,10 @@ impl AppWindow {
                                     if ui.menu_item("Delete Node") {
                                         self.state.graph_view.selected_nodes.clear();
                                         self.state.graph_view.selected_nodes.insert(nid);
-                                        dear_imguizmo::graph::delete_selected(&mut self.state.graph, &mut self.state.graph_view);
+                                        dear_imguizmo::graph::delete_selected(
+                                            &mut self.state.graph,
+                                            &mut self.state.graph_view,
+                                        );
                                         self.state.graph_ctx_evt = None;
                                     }
                                 } else {
@@ -482,21 +523,37 @@ impl AppWindow {
                                         let [wx, wy] = ui.window_pos();
                                         let mp = evt.mouse_pos;
                                         let wpos = [
-                                            (mp[0]-wx - self.state.graph_view.pan[0]) / self.state.graph_view.zoom,
-                                            (mp[1]-wy - self.state.graph_view.pan[1]) / self.state.graph_view.zoom,
+                                            (mp[0] - wx - self.state.graph_view.pan[0])
+                                                / self.state.graph_view.zoom,
+                                            (mp[1] - wy - self.state.graph_view.pan[1])
+                                                / self.state.graph_view.zoom,
                                         ];
                                         let nid = self.state.graph.alloc_node_id();
-                                        let mut node = Node::new(nid, (wpos[0], wpos[1]), "New Node");
+                                        let mut node =
+                                            Node::new(nid, (wpos[0], wpos[1]), "New Node");
                                         let pin_in = self.state.graph.alloc_pin_id();
                                         let pin_out = self.state.graph.alloc_pin_id();
-                                        node.inputs.push(Pin::colored(pin_in, "In", PinKind::Input, [0.78, 0.39, 0.39, 1.0]));
-                                        node.outputs.push(Pin::colored(pin_out, "Out", PinKind::Output, [0.39, 0.78, 0.39, 1.0]));
+                                        node.inputs.push(Pin::colored(
+                                            pin_in,
+                                            "In",
+                                            PinKind::Input,
+                                            [0.78, 0.39, 0.39, 1.0],
+                                        ));
+                                        node.outputs.push(Pin::colored(
+                                            pin_out,
+                                            "Out",
+                                            PinKind::Output,
+                                            [0.39, 0.78, 0.39, 1.0],
+                                        ));
                                         self.state.graph.nodes.push(node);
                                         self.state.graph_ctx_evt = None;
                                     }
                                 }
                                 if ui.menu_item("Delete Selected") {
-                                    dear_imguizmo::graph::delete_selected(&mut self.state.graph, &mut self.state.graph_view);
+                                    dear_imguizmo::graph::delete_selected(
+                                        &mut self.state.graph,
+                                        &mut self.state.graph_view,
+                                    );
                                     self.state.graph_ctx_evt = None;
                                 }
                             }
@@ -510,7 +567,11 @@ impl AppWindow {
                 OpKind::Rotate => guizmo::Operation::ROTATE,
                 OpKind::Scale => guizmo::Operation::SCALE,
             };
-            let snap_opt = if self.state.use_snap { Some(&self.state.snap) } else { None };
+            let snap_opt = if self.state.use_snap {
+                Some(&self.state.snap)
+            } else {
+                None
+            };
 
             if self.state.use_window {
                 let mut flags = WindowFlags::empty();
@@ -530,7 +591,12 @@ impl AppWindow {
 
                         // Draw grid + cubes
                         let identity = Mat4::IDENTITY;
-                        giz.draw_grid(&self.state.camera_view, &self.state.camera_proj, &identity, 100.0);
+                        giz.draw_grid(
+                            &self.state.camera_view,
+                            &self.state.camera_proj,
+                            &identity,
+                            100.0,
+                        );
                         let count = self.state.gizmo_count.clamp(1, 4) as usize;
                         giz.draw_cubes(
                             &self.state.camera_view,
@@ -542,12 +608,20 @@ impl AppWindow {
                         for i in 0..count {
                             let _id = giz.push_id(i as i32);
                             let mut m = giz
-                                .manipulate_config(&self.state.camera_view, &self.state.camera_proj, &mut self.state.objects[i])
+                                .manipulate_config(
+                                    &self.state.camera_view,
+                                    &self.state.camera_proj,
+                                    &mut self.state.objects[i],
+                                )
                                 .operation(op_bits)
                                 .mode(self.state.current_mode);
-                            if let Some(snap) = snap_opt { m = m.snap(*snap); }
+                            if let Some(snap) = snap_opt {
+                                m = m.snap(*snap);
+                            }
                             let _used = m.build();
-                            if giz.is_using() { self.state.last_using = i as i32; }
+                            if giz.is_using() {
+                                self.state.last_using = i as i32;
+                            }
                         }
 
                         // View manipulator on the top-right of the window
@@ -570,7 +644,12 @@ impl AppWindow {
                 giz.set_drawlist_background();
                 giz.set_rect(0.0, 0.0, ds[0], ds[1]);
                 let identity = Mat4::IDENTITY;
-                giz.draw_grid(&self.state.camera_view, &self.state.camera_proj, &identity, 100.0);
+                giz.draw_grid(
+                    &self.state.camera_view,
+                    &self.state.camera_proj,
+                    &identity,
+                    100.0,
+                );
                 let count = self.state.gizmo_count.clamp(1, 4) as usize;
                 giz.draw_cubes(
                     &self.state.camera_view,
@@ -581,12 +660,20 @@ impl AppWindow {
                 for i in 0..count {
                     let _id = giz.push_id(i as i32);
                     let mut m = giz
-                        .manipulate_config(&self.state.camera_view, &self.state.camera_proj, &mut self.state.objects[i])
+                        .manipulate_config(
+                            &self.state.camera_view,
+                            &self.state.camera_proj,
+                            &mut self.state.objects[i],
+                        )
                         .operation(op_bits)
                         .mode(self.state.current_mode);
-                    if let Some(snap) = snap_opt { m = m.snap(*snap); }
+                    if let Some(snap) = snap_opt {
+                        m = m.snap(*snap);
+                    }
                     let _used = m.build();
-                    if giz.is_using() { self.state.last_using = i as i32; }
+                    if giz.is_using() {
+                        self.state.last_using = i as i32;
+                    }
                 }
                 // View manipulator on the top-right of the screen
                 let pos = [ds[0] - 128.0, 0.0];
@@ -608,9 +695,11 @@ impl AppWindow {
                     let idx = self
                         .state
                         .last_using
-                        .clamp(0, (self.state.gizmo_count - 1).max(0)) as usize;
+                        .clamp(0, (self.state.gizmo_count - 1).max(0))
+                        as usize;
                     ui.text(format!("Editing object #{idx}"));
-                    let (mut tr, mut rt, mut sc) = guizmo::decompose_matrix(&self.state.objects[idx]);
+                    let (mut tr, mut rt, mut sc) =
+                        guizmo::decompose_matrix(&self.state.objects[idx]);
                     let _ = ui.input_scalar_n("Tr", &mut tr);
                     let _ = ui.input_scalar_n("Rt", &mut rt);
                     let _ = ui.input_scalar_n("Sc", &mut sc);
@@ -629,11 +718,15 @@ impl AppWindow {
         }
 
         // Rendering
-        let mut encoder =
-            self.device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("imgui encoder") });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("imgui encoder"),
+            });
         let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("imgui render pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -685,10 +778,11 @@ impl ApplicationHandler for App {
                 window_id: id,
                 event: event.clone(),
             };
-            window
-                .imgui
-                .platform
-                .handle_event(&mut window.imgui.context, &window.window, &winit_event);
+            window.imgui.platform.handle_event(
+                &mut window.imgui.context,
+                &window.window,
+                &winit_event,
+            );
 
             match event {
                 WindowEvent::CloseRequested => {
@@ -733,10 +827,22 @@ fn frustum(left: f32, right: f32, bottom: f32, top: f32, znear: f32, zfar: f32) 
     let temp3 = top - bottom;
     let temp4 = zfar - znear;
     Mat4::from_cols_array(&[
-        temp / temp2, 0.0, 0.0, 0.0,
-        0.0, temp / temp3, 0.0, 0.0,
-        (right + left) / temp2, (top + bottom) / temp3, (-zfar - znear) / temp4, -1.0,
-        0.0, 0.0, (-temp * zfar) / temp4, 0.0,
+        temp / temp2,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        temp / temp3,
+        0.0,
+        0.0,
+        (right + left) / temp2,
+        (top + bottom) / temp3,
+        (-zfar - znear) / temp4,
+        -1.0,
+        0.0,
+        0.0,
+        (-temp * zfar) / temp4,
+        0.0,
     ])
 }
 
@@ -748,10 +854,22 @@ fn perspective(fovy_degrees: f32, aspect_ratio: f32, znear: f32, zfar: f32) -> M
 
 fn orthographic(l: f32, r: f32, b: f32, t: f32, zn: f32, zf: f32) -> Mat4 {
     Mat4::from_cols_array(&[
-        2.0 / (r - l), 0.0, 0.0, 0.0,
-        0.0, 2.0 / (t - b), 0.0, 0.0,
-        0.0, 0.0, 1.0 / (zf - zn), 0.0,
-        (l + r) / (l - r), (t + b) / (b - t), zn / (zn - zf), 1.0,
+        2.0 / (r - l),
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.0 / (t - b),
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0 / (zf - zn),
+        0.0,
+        (l + r) / (l - r),
+        (t + b) / (b - t),
+        zn / (zn - zf),
+        1.0,
     ])
 }
 
@@ -762,9 +880,21 @@ fn look_at(eye: Vec3, at: Vec3, up: Vec3) -> Mat4 {
     y = z.cross(x).normalize_or_zero();
 
     Mat4::from_cols_array(&[
-        x.x, y.x, z.x, 0.0,
-        x.y, y.y, z.y, 0.0,
-        x.z, y.z, z.z, 0.0,
-        -x.dot(eye), -y.dot(eye), -z.dot(eye), 1.0,
+        x.x,
+        y.x,
+        z.x,
+        0.0,
+        x.y,
+        y.y,
+        z.y,
+        0.0,
+        x.z,
+        y.z,
+        z.z,
+        0.0,
+        -x.dot(eye),
+        -y.dot(eye),
+        -z.dot(eye),
+        1.0,
     ])
 }

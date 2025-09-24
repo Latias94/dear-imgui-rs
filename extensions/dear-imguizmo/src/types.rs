@@ -27,7 +27,9 @@ bitflags::bitflags! {
 }
 
 impl From<Operation> for sys::OPERATION {
-    fn from(value: Operation) -> Self { value.bits() as sys::OPERATION }
+    fn from(value: Operation) -> Self {
+        value.bits() as sys::OPERATION
+    }
 }
 
 bitflags::bitflags! {
@@ -79,7 +81,11 @@ pub enum Color {
 
 /// Draw list destination for ImGuizmo rendering
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DrawListTarget { Window, Background, Foreground }
+pub enum DrawListTarget {
+    Window,
+    Background,
+    Foreground,
+}
 
 /// Identifier accepted by ImGuizmo's ID stack
 #[derive(Copy, Clone, Debug)]
@@ -88,10 +94,26 @@ pub enum GuizmoId<'a> {
     Str(&'a str),
     Ptr(*const std::ffi::c_void),
 }
-impl From<i32> for GuizmoId<'_> { fn from(v: i32) -> Self { GuizmoId::Int(v) } }
-impl<'a> From<&'a str> for GuizmoId<'a> { fn from(s: &'a str) -> Self { GuizmoId::Str(s) } }
-impl<T> From<*const T> for GuizmoId<'_> { fn from(p: *const T) -> Self { GuizmoId::Ptr(p as _) } }
-impl<T> From<*mut T> for GuizmoId<'_> { fn from(p: *mut T) -> Self { GuizmoId::Ptr(p as _) } }
+impl From<i32> for GuizmoId<'_> {
+    fn from(v: i32) -> Self {
+        GuizmoId::Int(v)
+    }
+}
+impl<'a> From<&'a str> for GuizmoId<'a> {
+    fn from(s: &'a str) -> Self {
+        GuizmoId::Str(s)
+    }
+}
+impl<T> From<*const T> for GuizmoId<'_> {
+    fn from(p: *const T) -> Self {
+        GuizmoId::Ptr(p as _)
+    }
+}
+impl<T> From<*mut T> for GuizmoId<'_> {
+    fn from(p: *mut T) -> Self {
+        GuizmoId::Ptr(p as _)
+    }
+}
 
 /// Bounds type for typed bounds passing
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -101,8 +123,28 @@ pub struct Bounds {
 }
 
 /// Simple 3D vector adaptor for glam/mint/[f32;3]/tuples
-pub trait Vec3Like { fn to_array(self) -> [f32; 3]; }
-impl Vec3Like for [f32; 3] { fn to_array(self) -> [f32;3] { self } }
-impl Vec3Like for (f32, f32, f32) { fn to_array(self) -> [f32;3] { [self.0, self.1, self.2] } }
-#[cfg(feature = "glam")] impl Vec3Like for glam::Vec3 { fn to_array(self) -> [f32;3] { [self.x, self.y, self.z] } }
-#[cfg(feature = "mint")] impl Vec3Like for mint::Vector3<f32> { fn to_array(self) -> [f32;3] { [self.x, self.y, self.z] } }
+pub trait Vec3Like {
+    fn to_array(self) -> [f32; 3];
+}
+impl Vec3Like for [f32; 3] {
+    fn to_array(self) -> [f32; 3] {
+        self
+    }
+}
+impl Vec3Like for (f32, f32, f32) {
+    fn to_array(self) -> [f32; 3] {
+        [self.0, self.1, self.2]
+    }
+}
+#[cfg(feature = "glam")]
+impl Vec3Like for glam::Vec3 {
+    fn to_array(self) -> [f32; 3] {
+        [self.x, self.y, self.z]
+    }
+}
+#[cfg(feature = "mint")]
+impl Vec3Like for mint::Vector3<f32> {
+    fn to_array(self) -> [f32; 3] {
+        [self.x, self.y, self.z]
+    }
+}

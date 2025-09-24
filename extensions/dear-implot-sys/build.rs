@@ -75,7 +75,7 @@ fn main() {
         .clang_arg("-x")
         .clang_arg("c++")
         .clang_arg("-std=c++17");
-    
+
     let bindings = bindings.generate().expect("Unable to generate bindings");
 
     bindings

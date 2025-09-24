@@ -1,5 +1,5 @@
-use dear_imguizmo_sys as sys;
 use dear_imgui::Ui;
+use dear_imguizmo_sys as sys;
 use std::marker::PhantomData;
 
 use crate::types::Color;
@@ -72,6 +72,11 @@ impl<'ui> Style<'ui> {
         [c.x, c.y, c.z, c.w]
     }
     pub fn set_color(&mut self, idx: Color, rgba: [f32; 4]) {
-        self.as_mut().Colors[idx as usize] = sys::ImVec4 { x: rgba[0], y: rgba[1], z: rgba[2], w: rgba[3] };
+        self.as_mut().Colors[idx as usize] = sys::ImVec4 {
+            x: rgba[0],
+            y: rgba[1],
+            z: rgba[2],
+            w: rgba[3],
+        };
     }
 }
