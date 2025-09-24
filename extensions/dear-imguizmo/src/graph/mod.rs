@@ -273,6 +273,10 @@ impl<'ui> GraphEditor<'ui> {
         self.style.link_thickness = t;
         self
     }
+    pub fn scale_link_thickness_with_zoom(mut self, v: bool) -> Self {
+        self.style.scale_link_thickness_with_zoom = v;
+        self
+    }
     pub fn pin_radius(mut self, r: f32) -> Self {
         self.style.pin_radius = r;
         self
@@ -890,6 +894,8 @@ pub struct GraphStyle {
     pub output_pin_color: [f32; 4],
     pub link_color: [f32; 4],
     pub link_thickness: f32,
+    /// If true, scale link thickness by zoom for consistency
+    pub scale_link_thickness_with_zoom: bool,
     pub pin_radius: f32,
     pub pin_hover_factor: f32,
     pub node_rounding: f32,
@@ -933,6 +939,7 @@ impl Default for GraphStyle {
             output_pin_color: [0.78, 0.78, 0.39, 1.0],
             link_color: [0.71, 0.71, 0.47, 1.0],
             link_thickness: 2.0,
+            scale_link_thickness_with_zoom: false,
             pin_radius: 5.0,
             pin_hover_factor: 1.2,
             node_rounding: 4.0,
@@ -1268,42 +1275,24 @@ fn draw_link_variant(
     b: [f32; 2],
     color: [f32; 4],
     thickness: f32,
-    _zoom: f32,
+    zoom: f32,
     style: &GraphStyle,
 ) {
+    let mut th = thickness;
+    if style.scale_link_thickness_with_zoom {
+        // mildly scale with zoom for visual consistency
+        // clamp scaling to avoid extremes at very low/high zoom
+        let scale = zoom.clamp(0.6, 1.8);
+        th = thickness * scale;
+    }
     if style.display_links_as_curves {
-        draw_link_cubic(dl, a, b, color, thickness);
+        draw_link_cubic(dl, a, b, color, th);
     } else {
-        draw_link_straight(dl, a, b, color, thickness);
+        draw_link_straight(dl, a, b, color, th);
     }
 }
 
-fn hit_node(
-    graph: &Graph,
-    origin: [f32; 2],
-    view: &GraphView,
-    mouse: [f32; 2],
-    _style: &GraphStyle,
-) -> Option<(NodeId, [f32; 2])> {
-    for n in graph.nodes.iter().rev() {
-        // top-most last drawn
-        let pos = world_to_screen(n.pos, origin, view);
-        let sz = node_size(n);
-        let rect = [
-            pos[0],
-            pos[1],
-            pos[0] + sz[0] * view.zoom,
-            pos[1] + sz[1] * view.zoom,
-        ];
-        if mouse[0] >= rect[0] && mouse[0] <= rect[2] && mouse[1] >= rect[1] && mouse[1] <= rect[3]
-        {
-            let world_mouse = screen_to_world(mouse, origin, view);
-            let off = [world_mouse[0] - n.pos[0], world_mouse[1] - n.pos[1]];
-            return Some((n.id, off));
-        }
-    }
-    None
-}
+// hit_node(): replaced by hit_node_rect() for simpler usage; keep code minimal
 
 fn hit_node_rect(
     graph: &Graph,

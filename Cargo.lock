@@ -647,7 +647,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "dear-imgui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "approx",
  "bitflags 2.9.4",
@@ -670,6 +670,7 @@ dependencies = [
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "dear-imguizmo",
+ "dear-imnodes",
  "dear-implot",
  "env_logger",
  "glam",
@@ -690,7 +691,6 @@ name = "dear-imgui-glow"
 version = "0.1.0"
 dependencies = [
  "dear-imgui",
- "dear-imgui-sys",
  "env_logger",
  "glow",
  "memoffset",
@@ -702,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sys"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -722,7 +722,6 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "dear-imgui",
- "dear-imgui-sys",
  "smallvec",
  "thiserror 2.0.16",
  "wgpu",
@@ -734,7 +733,6 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "dear-imgui",
- "dear-imgui-sys",
  "raw-window-handle",
  "web-sys",
  "winit",
@@ -768,30 +766,47 @@ dependencies = [
 ]
 
 [[package]]
-name = "dear-implot"
+name = "dear-imnodes"
 version = "0.1.0"
 dependencies = [
- "approx",
  "bitflags 2.9.4",
- "cfg-if",
  "dear-imgui",
- "dear-imgui-sys",
- "dear-implot-sys",
- "mint",
- "parking_lot",
- "pretty_assertions",
+ "dear-imnodes-sys",
  "thiserror 2.0.16",
 ]
 
 [[package]]
-name = "dear-implot-sys"
+name = "dear-imnodes-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
  "cc",
  "cfg-if",
  "dear-imgui-sys",
- "mint",
+ "pkg-config",
+ "reqwest 0.12.23",
+ "xshell",
+]
+
+[[package]]
+name = "dear-implot"
+version = "0.2.0"
+dependencies = [
+ "approx",
+ "bitflags 2.9.4",
+ "dear-imgui",
+ "dear-imgui-sys",
+ "dear-implot-sys",
+ "pretty_assertions",
+]
+
+[[package]]
+name = "dear-implot-sys"
+version = "0.2.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "dear-imgui-sys",
  "pkg-config",
  "reqwest 0.11.27",
  "xshell",

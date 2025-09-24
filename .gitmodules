@@ -9,3 +9,6 @@
 	path = dear-imgui-sys/third-party/cimgui
 	url = https://github.com/cimgui/cimgui.git
 	branch = docking_inter
+[submodule "extensions/dear-imnodes-sys/third-party/cimnodes"]
+	path = extensions/dear-imnodes-sys/third-party/cimnodes
+	url = https://github.com/cimgui/cimnodes

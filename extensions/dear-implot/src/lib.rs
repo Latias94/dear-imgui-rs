@@ -331,5 +331,8 @@ bitflags::bitflags! {
 // Re-export all plot types for convenience
 pub use plots::*;
 
-// Re-export advanced features
-pub use advanced::*;
+// Re-export advanced features (explicit to avoid AxisFlags name clash)
+pub use advanced::{
+    LegendFlags, LegendLocation, LegendManager, LegendToken, MultiAxisPlot, MultiAxisToken,
+    SubplotFlags, SubplotGrid, SubplotToken, YAxisConfig,
+};

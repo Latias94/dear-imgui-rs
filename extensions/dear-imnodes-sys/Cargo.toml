@@ -1,19 +1,18 @@
 [package]
-name = "dear-imguizmo-sys"
+name = "dear-imnodes-sys"
 version = "0.1.0"
 edition.workspace = true
-description = "Low-level FFI bindings for ImGuizmo via cimguizmo (C API)"
+description = "Low-level FFI bindings for ImNodes via cimnodes (C API)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
 build = "build.rs"
-links = "dear_imguizmo"
+links = "dear_imnodes"
 
 [dependencies]
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
-mint.workspace = true
 cfg-if.workspace = true
 
 [build-dependencies]
@@ -25,6 +24,10 @@ reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-fea
 
 [features]
 default = ["docking"]
+# Enable docking branch features (default)
 docking = ["dear-imgui-sys/docking"]
+# Enable multi-viewport support (requires docking)
 multi-viewport = ["docking", "dear-imgui-sys/multi-viewport"]
+# Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
+

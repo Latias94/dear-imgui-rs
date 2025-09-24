@@ -83,6 +83,7 @@ struct DemoState {
     graph_view: GraphView,
     graph_grid_visible: bool,
     graph_links_curves: bool,
+    graph_scale_link_thickness: bool,
     graph_draw_io_on_hover: bool,
     graph_snap: f32,
     graph_minimap_enabled: bool,
@@ -135,6 +136,7 @@ impl Default for DemoState {
             graph_view: GraphView::default(),
             graph_grid_visible: true,
             graph_links_curves: true,
+            graph_scale_link_thickness: false,
             graph_draw_io_on_hover: false,
             graph_snap: 0.0,
             graph_minimap_enabled: true,
@@ -479,6 +481,11 @@ impl AppWindow {
                         ui.same_line();
                         ui.checkbox("Curved links", &mut self.state.graph_links_curves);
                         ui.same_line();
+                        ui.checkbox(
+                            "Scale thickness",
+                            &mut self.state.graph_scale_link_thickness,
+                        );
+                        ui.same_line();
                         ui.checkbox("IO text on hover", &mut self.state.graph_draw_io_on_hover);
                         ui.same_line();
                         ui.checkbox("Minimap", &mut self.state.graph_minimap_enabled);
@@ -496,6 +503,7 @@ impl AppWindow {
                             .view(&mut self.state.graph_view)
                             .grid_visible(self.state.graph_grid_visible)
                             .display_links_as_curves(self.state.graph_links_curves)
+                            .scale_link_thickness_with_zoom(self.state.graph_scale_link_thickness)
                             .draw_io_name_on_hover(self.state.graph_draw_io_on_hover)
                             .snap(self.state.graph_snap)
                             .minimap_enabled(self.state.graph_minimap_enabled)

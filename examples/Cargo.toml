@@ -6,6 +6,7 @@ edition.workspace = true
 [features]
 dear-implot = ["dep:dear-implot"]
 dear-imguizmo = ["dep:dear-imguizmo"]
+dear-imnodes = ["dep:dear-imnodes"]
 
 [[bin]]
 name = "wgpu_basic"
@@ -34,6 +35,12 @@ name = "imguizmo_basic"
 path = "imguizmo_basic.rs"
 required-features = ["dear-imguizmo"]
 
+[[bin]]
+name = "imnodes_basic"
+path = "imnodes_basic.rs"
+required-features = ["dear-imnodes"]
+
+
 [dependencies]
 dear-imgui = { path = "../dear-imgui" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit" }
@@ -41,6 +48,7 @@ dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow" }
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
+dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
 wgpu = "26.0"
 winit = "0.30.12"
 glam = "0.27"

@@ -66,3 +66,16 @@ Run:
 cargo run --bin implot_basic --features dear-implot
 cargo run --bin imguizmo_basic --features dear-imguizmo
 ```
+
+### New: ImNodes
+
+ImNodes (node editor widgets) is integrated similarly:
+
+- Crates: `extensions/dear-imnodes-sys` (C API via cimnodes) and `extensions/dear-imnodes` (safe API)
+- Example: `imnodes_basic` behind `--features dear-imnodes`
+
+Run:
+
+```
+cargo run --bin imnodes_basic --features dear-imnodes
+```
