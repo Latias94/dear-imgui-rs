@@ -26,6 +26,7 @@ struct ImguiState {
     nodes_context: imnodes::Context,
     editor_context: imnodes::EditorContext,
     editor_context_b: imnodes::EditorContext,
+    editor_context_shader: imnodes::EditorContext,
     saved_ini: Option<String>,
     clear_color: wgpu::Color,
     last_frame: Instant,
@@ -58,6 +59,7 @@ struct NodeOptions {
     pin_line_thickness: f32,
     pin_hover_radius: f32,
     pin_offset: f32,
+    auto_panning_speed: f32,
     color_title: [f32; 4],
     color_node_bg: [f32; 4],
     color_link: [f32; 4],
@@ -72,6 +74,7 @@ struct AppWindow {
     imgui: ImguiState,
     graph: GraphState,
     graph_b: GraphState,
+    graph_shader: GraphState,
     node_options: NodeOptions,
     ini_path: String,
     minimap_hovered: Option<i32>,
@@ -168,6 +171,7 @@ impl AppWindow {
             nodes_context,
             editor_context,
             editor_context_b,
+            editor_context_shader: imnodes::EditorContext::create(),
             saved_ini: None,
             clear_color: wgpu::Color {
                 r: 0.1,
@@ -209,6 +213,7 @@ impl AppWindow {
             pin_line_thickness: 1.0,
             pin_hover_radius: 10.0,
             pin_offset: 0.0,
+            auto_panning_speed: 200.0,
             color_title: [0.20, 0.40, 0.70, 1.0],
             color_node_bg: [0.15, 0.15, 0.15, 1.0],
             color_link: [0.60, 0.80, 1.00, 1.0],
@@ -223,6 +228,7 @@ impl AppWindow {
             imgui,
             graph,
             graph_b,
+            graph_shader: GraphState { next_link_id: 10000, links: Vec::new(), positions_initialized: false, added_nodes: Vec::new(), next_node_id: 3000 },
             node_options,
             ini_path: String::from("imnodes_state.ini"),
             minimap_hovered: None,
@@ -257,7 +263,7 @@ impl AppWindow {
 
         // Build a simple node editor UI
         ui.window("ImNodes Demo")
-            .size([800.0, 600.0], Condition::FirstUseEver)
+            .size([1100.0, 800.0], Condition::FirstUseEver)
             .position([50.0, 50.0], Condition::FirstUseEver)
             .build(|| {
                 if let Some(tab_bar) = ui.tab_bar("imnodes_tabs") {
@@ -416,6 +422,20 @@ impl AppWindow {
                                 Some(&self.imgui.editor_context),
                             );
                             editor.set_node_corner_rounding(self.node_options.corner_round);
+                            editor.end();
+                        }
+                        if ui.slider_f32(
+                            "Auto Pan Speed (LMB Box)",
+                            &mut self.node_options.auto_panning_speed,
+                            0.0,
+                            2000.0,
+                        ) {
+                            // 0 disables auto-panning while box selecting near edges
+                            let editor = ui.imnodes_editor(
+                                &self.imgui.nodes_context,
+                                Some(&self.imgui.editor_context),
+                            );
+                            editor.set_auto_panning_speed(self.node_options.auto_panning_speed);
                             editor.end();
                         }
                         if ui.slider_f32(
@@ -719,6 +739,82 @@ impl AppWindow {
                             e.set_pin_offset(self.node_options.pin_offset);
                             e.end();
                         }
+                        tab.end();
+                    }
+                    if let Some(tab) = ui.tab_item("Shader Graph") {
+                        let editor = ui.imnodes_editor(&self.imgui.nodes_context, Some(&self.imgui.editor_context_shader));
+                        // One-time layout and links
+                        if !self.graph_shader.positions_initialized {
+                            // Nodes: 3001 Texture, 3002 UV, 3003 Multiply, 3004 Add, 3005 Output
+                            editor.set_node_pos_grid(3001, [100.0, 100.0]);
+                            editor.set_node_pos_grid(3002, [100.0, 260.0]);
+                            editor.set_node_pos_grid(3003, [360.0, 140.0]);
+                            editor.set_node_pos_grid(3004, [580.0, 160.0]);
+                            editor.set_node_pos_grid(3005, [820.0, 180.0]);
+                            // Links initial (attr ids):
+                            // 30021 (UV out) -> 30011 (Texture UV in)
+                            // 30012 (Texture color out) -> 30032 (Multiply in A)
+                            // 30022 (Color const out) -> 30033 (Multiply in B)
+                            // 30031 (Multiply out) -> 30042 (Add in A)
+                            // 30023 (Color const2 out) -> 30043 (Add in B)
+                            // 30041 (Add out) -> 30052 (Output in)
+                            let mut push_link = |a: i32, b: i32| {
+                                let lid = self.graph_shader.next_link_id; self.graph_shader.next_link_id += 1;
+                                self.graph_shader.links.push((lid, a, b));
+                            };
+                            push_link(30021, 30011);
+                            push_link(30012, 30032);
+                            push_link(30022, 30033);
+                            push_link(30031, 30042);
+                            push_link(30023, 30043);
+                            push_link(30041, 30052);
+                            self.graph_shader.positions_initialized = true;
+                        }
+                        // Nodes
+                        // UV Node (3002)
+                        let n_uv = editor.node(3002);
+                        n_uv.title_bar(|| ui.text("UV"));
+                        { let _out = editor.output_attr(30021, imnodes::PinShape::CircleFilled); ui.text("UV"); _out.end(); }
+                        n_uv.end();
+                        // Texture Node (3001)
+                        let n_tex = editor.node(3001);
+                        n_tex.title_bar(|| ui.text("Texture2D"));
+                        { let _in = editor.input_attr(30011, imnodes::PinShape::Circle); ui.text("UV"); _in.end(); }
+                        { let _out = editor.output_attr(30012, imnodes::PinShape::QuadFilled); ui.text("Color"); _out.end(); }
+                        n_tex.end();
+                        // Multiply Node (3003)
+                        let n_mul = editor.node(3003);
+                        n_mul.title_bar(|| ui.text("Multiply"));
+                        { let _in = editor.input_attr(30032, imnodes::PinShape::Circle); ui.text("A"); _in.end(); }
+                        { let _in = editor.input_attr(30033, imnodes::PinShape::Circle); ui.text("B"); _in.end(); }
+                        { let _out = editor.output_attr(30031, imnodes::PinShape::TriangleFilled); ui.text("Out"); _out.end(); }
+                        n_mul.end();
+                        // Color Const nodes (3006/3007) as outputs
+                        let n_c1 = editor.node(3006);
+                        n_c1.title_bar(|| ui.text("ColorConst A"));
+                        { let _out = editor.output_attr(30022, imnodes::PinShape::QuadFilled); ui.text("Color"); _out.end(); }
+                        n_c1.end();
+                        let n_c2 = editor.node(3007);
+                        n_c2.title_bar(|| ui.text("ColorConst B"));
+                        { let _out = editor.output_attr(30023, imnodes::PinShape::QuadFilled); ui.text("Color"); _out.end(); }
+                        n_c2.end();
+                        // Add Node (3004)
+                        let n_add = editor.node(3004);
+                        n_add.title_bar(|| ui.text("Add"));
+                        { let _in = editor.input_attr(30042, imnodes::PinShape::Circle); ui.text("A"); _in.end(); }
+                        { let _in = editor.input_attr(30043, imnodes::PinShape::Circle); ui.text("B"); _in.end(); }
+                        { let _out = editor.output_attr(30041, imnodes::PinShape::TriangleFilled); ui.text("Out"); _out.end(); }
+                        n_add.end();
+                        // Output Node (3005)
+                        let n_out = editor.node(3005);
+                        n_out.title_bar(|| ui.text("Output"));
+                        { let _in = editor.input_attr(30052, imnodes::PinShape::Circle); ui.text("Color"); _in.end(); }
+                        n_out.end();
+
+                        // Draw links
+                        for (id, a, b) in &self.graph_shader.links { editor.link(*id, *a, *b); }
+
+                        editor.end();
                         tab.end();
                     }
                     if let Some(tab) = ui.tab_item("MiniMap Callback") {
