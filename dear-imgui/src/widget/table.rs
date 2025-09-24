@@ -280,7 +280,7 @@ impl Ui {
         dir: SortDirection,
         append_to_sort_specs: bool,
     ) {
-        unsafe { sys::igTableSetColumnSortDirection(column_n, dir as i32, append_to_sort_specs) }
+        unsafe { sys::igTableSetColumnSortDirection(column_n, dir.into(), append_to_sort_specs) }
     }
 
     /// Get current table sort specifications, if any.
@@ -331,6 +331,17 @@ pub enum SortDirection {
     None = sys::ImGuiSortDirection_None as u8,
     Ascending = sys::ImGuiSortDirection_Ascending as u8,
     Descending = sys::ImGuiSortDirection_Descending as u8,
+}
+
+impl From<SortDirection> for sys::ImGuiSortDirection {
+    #[inline]
+    fn from(value: SortDirection) -> sys::ImGuiSortDirection {
+        match value {
+            SortDirection::None => sys::ImGuiSortDirection_None,
+            SortDirection::Ascending => sys::ImGuiSortDirection_Ascending,
+            SortDirection::Descending => sys::ImGuiSortDirection_Descending,
+        }
+    }
 }
 
 /// One column sort spec.

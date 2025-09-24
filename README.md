@@ -18,7 +18,7 @@ Rust bindings and ecosystem around Dear ImGui, with docking, WGPU/GL backends, a
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-winit`
 - Extensions
   - `dear-imguizmo` — 3D gizmo (cimguizmo C API) + a pure‑Rust GraphEditor
-  - `dear-imnodes` — node editor (cimnodes C API), demo includes a Shader‑Graph style tab
+  - `dear-imnodes` — node editor (cimnodes C API)
   - `dear-implot` — plotting (cimplot C API)
 
 All crates are maintained together in this workspace.
