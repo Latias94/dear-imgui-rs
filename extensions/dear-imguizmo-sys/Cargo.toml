@@ -23,7 +23,7 @@ exclude = [
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
 mint.workspace = true
 cfg-if.workspace = true
-flate2 = { version = "1", features = ["zlib-ng-compat"], default-features = false, optional = true }
+flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
 
 [build-dependencies]
