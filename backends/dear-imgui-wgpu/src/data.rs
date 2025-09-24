@@ -39,7 +39,7 @@ impl WgpuRenderState {
     ///
     /// The caller must ensure that the device pointer is still valid.
     pub unsafe fn device(&self) -> &Device {
-        &*self.device
+        unsafe { &*self.device }
     }
 
     /// Get the render pass encoder reference
@@ -61,7 +61,7 @@ impl WgpuRenderState {
     /// interface to match C++ callback expectations.
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn render_pass_encoder(&self) -> &mut RenderPass<'_> {
-        &mut *(self.render_pass_encoder as *mut RenderPass)
+        unsafe { &mut *(self.render_pass_encoder as *mut RenderPass) }
     }
 }
 

@@ -177,8 +177,10 @@ impl<'ui> NodeEditor<'ui> {
         callback: &mut F,
     ) {
         unsafe extern "C" fn trampoline(node_id: i32, user: *mut c_void) {
-            let closure = &mut *(user as *mut &mut dyn FnMut(i32));
-            (closure)(node_id);
+            unsafe {
+                let closure = &mut *(user as *mut &mut dyn FnMut(i32));
+                (closure)(node_id);
+            }
         }
         let mut cb_obj: &mut dyn FnMut(i32) = callback;
         let user_ptr = &mut cb_obj as *mut _ as *mut c_void;
