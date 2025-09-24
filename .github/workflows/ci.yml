@@ -72,4 +72,3 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-# NOTE: clippy is intentionally disabled for now as requested.

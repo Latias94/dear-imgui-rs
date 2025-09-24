@@ -10,6 +10,8 @@ use dear_imgui::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use dear_imguizmo as guizmo;
+use dear_imguizmo::GuizmoExt;
+use dear_imguizmo::graph::{Graph, GraphView, GraphEditorExt, Node, Pin, PinKind};
 use glam::{Mat4, Vec3};
 use pollster::block_on;
 use std::{sync::Arc, time::Instant};
@@ -27,7 +29,6 @@ struct ImguiState {
     renderer: WgpuRenderer,
     clear_color: wgpu::Color,
     last_frame: Instant,
-    guizmo_ctx: guizmo::GuizmoContext,
 }
 
 struct AppWindow {
@@ -76,6 +77,17 @@ struct DemoState {
     // Objects
     last_using: i32,
     objects: [Mat4; 4],
+
+    // Graph editor
+    graph: Graph,
+    graph_view: GraphView,
+    graph_grid_visible: bool,
+    graph_links_curves: bool,
+    graph_draw_io_on_hover: bool,
+    graph_snap: f32,
+    graph_minimap_enabled: bool,
+    graph_show_editor: bool,
+    graph_ctx_evt: Option<dear_imguizmo::graph::RightClickEvent>,
 }
 
 impl Default for DemoState {
@@ -127,6 +139,16 @@ impl Default for DemoState {
                     0.0, 0.0, 2.0, 1.0,
                 ]),
             ],
+
+            graph: Graph::new(),
+            graph_view: GraphView::default(),
+            graph_grid_visible: true,
+            graph_links_curves: true,
+            graph_draw_io_on_hover: false,
+            graph_snap: 0.0,
+            graph_minimap_enabled: true,
+            graph_show_editor: true,
+            graph_ctx_evt: None,
         }
     }
 }
@@ -193,7 +215,6 @@ impl AppWindow {
             renderer,
             clear_color: wgpu::Color { r: 0.1, g: 0.2, b: 0.3, a: 1.0 },
             last_frame: Instant::now(),
-            guizmo_ctx: guizmo::GuizmoContext::new(),
         };
 
         Ok(Self {
@@ -251,7 +272,7 @@ impl AppWindow {
                 );
             }
 
-            let giz = self.imgui.guizmo_ctx.begin_frame(&ui);
+            let giz = ui.guizmo();
             giz.set_orthographic(!self.state.is_perspective);
 
             // Control window
@@ -372,6 +393,117 @@ impl AppWindow {
                     }
                 });
 
+            // Initialize a tiny graph on first frame
+            if self.state.first_frame && self.state.graph.nodes.is_empty() {
+                let n1 = self.state.graph.alloc_node_id();
+                let n2 = self.state.graph.alloc_node_id();
+                // Node1: two colored outputs
+                let p_out0 = self.state.graph.alloc_pin_id();
+                let p_out1 = self.state.graph.alloc_pin_id();
+                let mut node1 = Node::new(n1, (-150.0_f32, -40.0), "Source");
+                node1.outputs.push(Pin::colored(p_out0, "Out0", PinKind::Output, [0.78, 0.39, 0.39, 1.0]));
+                node1.outputs.push(Pin::colored(p_out1, "Out1", PinKind::Output, [0.39, 0.78, 0.39, 1.0]));
+                // Node2: three colored inputs
+                let p_in0 = self.state.graph.alloc_pin_id();
+                let p_in1 = self.state.graph.alloc_pin_id();
+                let p_in2 = self.state.graph.alloc_pin_id();
+                let mut node2 = Node::new(n2, (150.0_f32, -40.0), "Sink");
+                node2.inputs.push(Pin::colored(p_in0, "In0", PinKind::Input, [0.78, 0.39, 0.39, 1.0]));
+                node2.inputs.push(Pin::colored(p_in1, "In1", PinKind::Input, [0.39, 0.78, 0.39, 1.0]));
+                node2.inputs.push(Pin::colored(p_in2, "In2", PinKind::Input, [0.39, 0.39, 0.78, 1.0]));
+                self.state.graph.nodes.push(node1);
+                self.state.graph.nodes.push(node2);
+                // initial link
+                let lid = self.state.graph.alloc_link_id();
+                self.state.graph.links.push(dear_imguizmo::graph::Link{ id: lid, from: p_out0, to: p_in0 });
+            }
+
+            // Graph Editor window (toggle like C++ sample)
+            if self.state.graph_show_editor {
+                ui.window("Graph Editor")
+                    .size([420.0, 300.0], Condition::FirstUseEver)
+                    .position([10.0, 360.0], Condition::FirstUseEver)
+                    .build(|| {
+                        if ui.button("Delete Selected") {
+                            dear_imguizmo::graph::delete_selected(&mut self.state.graph, &mut self.state.graph_view);
+                        }
+                        ui.same_line();
+                        if ui.button("Fit all nodes") {
+                            let [wx, wy] = ui.window_pos();
+                            let [ww, wh] = ui.window_size();
+                            dear_imguizmo::graph::fit_all_nodes(&self.state.graph, &mut self.state.graph_view, [wx, wy], [ww, wh]);
+                        }
+                        ui.same_line();
+                        if ui.button("Fit selected nodes") {
+                            let [wx, wy] = ui.window_pos();
+                            let [ww, wh] = ui.window_size();
+                            dear_imguizmo::graph::fit_selected_nodes(&self.state.graph, &mut self.state.graph_view, [wx, wy], [ww, wh]);
+                        }
+                        ui.same_line();
+                        ui.checkbox("Show grid", &mut self.state.graph_grid_visible);
+                        ui.same_line();
+                        ui.checkbox("Curved links", &mut self.state.graph_links_curves);
+                        ui.same_line();
+                        ui.checkbox("IO text on hover", &mut self.state.graph_draw_io_on_hover);
+                        ui.same_line();
+                        ui.checkbox("Minimap", &mut self.state.graph_minimap_enabled);
+                        ui.same_line();
+                        ui.set_next_item_width(100.0);
+                        let _ = ui.slider("Snap", 0.0, 50.0, &mut self.state.graph_snap);
+                        ui.same_line();
+                        ui.text(format!("Selected: {} nodes", self.state.graph_view.selected_nodes.len()));
+                        let resp = ui
+                            .graph_editor_config()
+                            .graph(&mut self.state.graph)
+                            .view(&mut self.state.graph_view)
+                            .grid_visible(self.state.graph_grid_visible)
+                            .display_links_as_curves(self.state.graph_links_curves)
+                            .draw_io_name_on_hover(self.state.graph_draw_io_on_hover)
+                            .snap(self.state.graph_snap)
+                            .minimap_enabled(self.state.graph_minimap_enabled)
+                            .grid_spacing(28.0)
+                            .build();
+                        if let Some(evt) = resp.right_click {
+                            self.state.graph_ctx_evt = Some(evt);
+                            ui.open_popup("GraphCtx");
+                        }
+                        if let Some(_popup) = ui.begin_popup("GraphCtx") {
+                            if let Some(evt) = self.state.graph_ctx_evt {
+                                if let Some(nid) = evt.node {
+                                    if ui.menu_item("Delete Node") {
+                                        self.state.graph_view.selected_nodes.clear();
+                                        self.state.graph_view.selected_nodes.insert(nid);
+                                        dear_imguizmo::graph::delete_selected(&mut self.state.graph, &mut self.state.graph_view);
+                                        self.state.graph_ctx_evt = None;
+                                    }
+                                } else {
+                                    if ui.menu_item("Add Node Here") {
+                                        // convert screen pos to world
+                                        let [wx, wy] = ui.window_pos();
+                                        let mp = evt.mouse_pos;
+                                        let wpos = [
+                                            (mp[0]-wx - self.state.graph_view.pan[0]) / self.state.graph_view.zoom,
+                                            (mp[1]-wy - self.state.graph_view.pan[1]) / self.state.graph_view.zoom,
+                                        ];
+                                        let nid = self.state.graph.alloc_node_id();
+                                        let mut node = Node::new(nid, (wpos[0], wpos[1]), "New Node");
+                                        let pin_in = self.state.graph.alloc_pin_id();
+                                        let pin_out = self.state.graph.alloc_pin_id();
+                                        node.inputs.push(Pin::colored(pin_in, "In", PinKind::Input, [0.78, 0.39, 0.39, 1.0]));
+                                        node.outputs.push(Pin::colored(pin_out, "Out", PinKind::Output, [0.39, 0.78, 0.39, 1.0]));
+                                        self.state.graph.nodes.push(node);
+                                        self.state.graph_ctx_evt = None;
+                                    }
+                                }
+                                if ui.menu_item("Delete Selected") {
+                                    dear_imguizmo::graph::delete_selected(&mut self.state.graph, &mut self.state.graph_view);
+                                    self.state.graph_ctx_evt = None;
+                                }
+                            }
+                        }
+                    });
+            }
+
             // Gizmo viewport window (or fullscreen)
             let op_bits = match self.state.current_op_kind {
                 OpKind::Translate => guizmo::Operation::TRANSLATE,
@@ -408,22 +540,14 @@ impl AppWindow {
 
                         // Manipulate each cube (window drawlist already set)
                         for i in 0..count {
-                            giz.push_id_int(i as i32);
-                            let _ = giz.manipulate(
-                                &self.state.camera_view,
-                                &self.state.camera_proj,
-                                op_bits,
-                                self.state.current_mode,
-                                &mut self.state.objects[i],
-                                None,
-                                snap_opt,
-                                None,
-                                None,
-                            );
-                            if giz.is_using() {
-                                self.state.last_using = i as i32;
-                            }
-                            giz.pop_id();
+                            let _id = giz.push_id(i as i32);
+                            let mut m = giz
+                                .manipulate_config(&self.state.camera_view, &self.state.camera_proj, &mut self.state.objects[i])
+                                .operation(op_bits)
+                                .mode(self.state.current_mode);
+                            if let Some(snap) = snap_opt { m = m.snap(*snap); }
+                            let _used = m.build();
+                            if giz.is_using() { self.state.last_using = i as i32; }
                         }
 
                         // View manipulator on the top-right of the window
@@ -455,22 +579,14 @@ impl AppWindow {
                 );
                 // Manipulate (foreground drawlist already set)
                 for i in 0..count {
-                    giz.push_id_int(i as i32);
-                    let _ = giz.manipulate(
-                        &self.state.camera_view,
-                        &self.state.camera_proj,
-                        op_bits,
-                        self.state.current_mode,
-                        &mut self.state.objects[i],
-                        None,
-                        snap_opt,
-                        None,
-                        None,
-                    );
-                    if giz.is_using() {
-                        self.state.last_using = i as i32;
-                    }
-                    giz.pop_id();
+                    let _id = giz.push_id(i as i32);
+                    let mut m = giz
+                        .manipulate_config(&self.state.camera_view, &self.state.camera_proj, &mut self.state.objects[i])
+                        .operation(op_bits)
+                        .mode(self.state.current_mode);
+                    if let Some(snap) = snap_opt { m = m.snap(*snap); }
+                    let _used = m.build();
+                    if giz.is_using() { self.state.last_using = i as i32; }
                 }
                 // View manipulator on the top-right of the screen
                 let pos = [ds[0] - 128.0, 0.0];
@@ -499,6 +615,16 @@ impl AppWindow {
                     let _ = ui.input_scalar_n("Rt", &mut rt);
                     let _ = ui.input_scalar_n("Sc", &mut sc);
                     self.state.objects[idx] = guizmo::recompose_matrix(&tr, &rt, &sc);
+                });
+
+            // Additional controls like C++ sample: toggle Graph Editor visibility
+            ui.window("Graph Controls")
+                .size([300.0, 120.0], Condition::FirstUseEver)
+                .position([10.0, 680.0], Condition::FirstUseEver)
+                .build(|| {
+                    if ui.collapsing_header("Graph Editor", dear_imgui::TreeNodeFlags::empty()) {
+                        ui.checkbox("Show GraphEditor", &mut self.state.graph_show_editor);
+                    }
                 });
         }
 

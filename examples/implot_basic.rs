@@ -162,7 +162,7 @@ impl AppWindow {
             .prepare_frame(&self.window, &mut self.imgui.context);
 
         let ui = self.imgui.context.frame();
-        let plot_ui = self.imgui.plot_context.get_plot_ui(&ui);
+        let plot_ui = ui.implot(&self.imgui.plot_context);
 
         // Sample data for plots
         let x_data: Vec<f64> = (0..100).map(|i| i as f64 * 0.1).collect();

@@ -24,7 +24,8 @@ fn main() {
 
     // frame loop
     let ui = ctx.frame();
-    let plot_ui = plot_ctx.get_plot_ui(&ui);
+    // Ui extension: obtain PlotUi from Ui + PlotContext
+    let plot_ui = ui.implot(&plot_ctx);
     ui.window("Plot Example").build(|| {
         if let Some(token) = plot_ui.begin_plot("Line") {
             let x = [0.0, 1.0, 2.0, 3.0];
@@ -77,7 +78,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // In your main loop:
     let ui = ctx.frame();
-    let plot_ui = plot_ctx.get_plot_ui(&ui);
+    // Or via Ui extension:
+    let plot_ui = ui.implot(&plot_ctx);
 
     ui.window("My Plots")
         .size([800.0, 600.0], Condition::FirstUseEver)

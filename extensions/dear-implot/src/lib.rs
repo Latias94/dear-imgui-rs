@@ -94,6 +94,17 @@ fn y_axis_choice_option_to_i32(y_axis_choice: Option<YAxisChoice>) -> i32 {
     }
 }
 
+/// Ui extension for obtaining a PlotUi from an ImPlot PlotContext
+pub trait ImPlotExt {
+    fn implot<'ui>(&'ui self, ctx: &'ui PlotContext) -> PlotUi<'ui>;
+}
+
+impl ImPlotExt for Ui {
+    fn implot<'ui>(&'ui self, ctx: &'ui PlotContext) -> PlotUi<'ui> {
+        ctx.get_plot_ui(self)
+    }
+}
+
 /// Markers for plot points
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

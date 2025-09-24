@@ -7,13 +7,6 @@ pub fn is_plot_hovered() -> bool {
     unsafe { sys::ImPlot_IsPlotHovered() }
 }
 
-/// Check if the plot is selected (selection box)
-pub fn is_plot_selected() -> bool {
-    // Note: ImPlot_IsPlotQueried doesn't exist in current version
-    // This is a placeholder - check ImPlot documentation for correct function
-    false
-}
-
 /// Get the mouse position in plot coordinates
 pub fn get_plot_mouse_position(y_axis_choice: Option<crate::YAxisChoice>) -> sys::ImPlotPoint {
     let x_axis = 0; // ImAxis_X1

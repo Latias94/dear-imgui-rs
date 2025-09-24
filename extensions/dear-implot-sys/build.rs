@@ -92,8 +92,6 @@ fn main() {
     if let Ok(dir) = env::var("IMPLOT_SYS_LIB_DIR") {
         if try_link_prebuilt(PathBuf::from(dir), &target_env) {
             linked_prebuilt = true;
-            // Still need to link dear_imgui from dear-imgui-sys
-            println!("cargo:rustc-link-lib=static=dear_imgui");
         } else {
             println!(
                 "cargo:warning=IMPLOT_SYS_LIB_DIR set but no library found; falling back to build"
@@ -108,7 +106,6 @@ fn main() {
                 Ok(dir) => {
                     if try_link_prebuilt(dir.clone(), &target_env) {
                         linked_prebuilt = true;
-                        println!("cargo:rustc-link-lib=static=dear_imgui");
                     } else {
                         println!(
                             "cargo:warning=Downloaded prebuilt library but failed to link from {}",
