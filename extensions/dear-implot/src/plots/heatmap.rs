@@ -36,7 +36,7 @@ impl<'a> HeatmapPlot<'a> {
             label_fmt: Some("%.1f"),
             bounds_min: sys::ImPlotPoint { x: 0.0, y: 0.0 },
             bounds_max: sys::ImPlotPoint { x: 1.0, y: 1.0 },
-            flags: 0,
+            flags: 0 as sys::ImPlotHeatmapFlags,
         }
     }
 
@@ -77,7 +77,7 @@ impl<'a> HeatmapPlot<'a> {
 
     /// Use column-major data ordering instead of row-major
     pub fn column_major(mut self) -> Self {
-        self.flags |= sys::ImPlotHeatmapFlags_ColMajor;
+        self.flags |= (sys::ImPlotHeatmapFlags_ColMajor as sys::ImPlotHeatmapFlags);
         self
     }
 
@@ -167,7 +167,7 @@ impl<'a> HeatmapPlotF32<'a> {
             label_fmt: Some("%.1f"),
             bounds_min: sys::ImPlotPoint { x: 0.0, y: 0.0 },
             bounds_max: sys::ImPlotPoint { x: 1.0, y: 1.0 },
-            flags: 0,
+            flags: 0 as sys::ImPlotHeatmapFlags,
         }
     }
 
@@ -199,7 +199,7 @@ impl<'a> HeatmapPlotF32<'a> {
 
     /// Use column-major data ordering
     pub fn column_major(mut self) -> Self {
-        self.flags |= sys::ImPlotHeatmapFlags_ColMajor;
+        self.flags |= (sys::ImPlotHeatmapFlags_ColMajor as sys::ImPlotHeatmapFlags);
         self
     }
 
