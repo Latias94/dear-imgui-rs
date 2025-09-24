@@ -98,7 +98,7 @@ impl Io {
     /// Creates a new Io instance from the current context
     pub(crate) fn from_raw() -> &'static mut Self {
         unsafe {
-            let io_ptr = sys::ImGui_GetIO();
+            let io_ptr = sys::igGetIO_Nil();
             &mut *(io_ptr as *mut Self)
         }
     }
@@ -244,7 +244,7 @@ impl Io {
     /// Add a key event to the input queue
     pub fn add_key_event(&mut self, key: crate::Key, down: bool) {
         unsafe {
-            sys::ImGuiIO_AddKeyEvent(&mut self.0 as *mut _, key as i32, down);
+            sys::ImGuiIO_AddKeyEvent(&mut self.0 as *mut _, key.into(), down);
         }
     }
 
@@ -265,7 +265,7 @@ impl Io {
     /// Add a mouse button event to the input queue
     pub fn add_mouse_button_event(&mut self, button: crate::input::MouseButton, down: bool) {
         unsafe {
-            sys::ImGuiIO_AddMouseButtonEvent(&mut self.0 as *mut _, button as i32, down);
+            sys::ImGuiIO_AddMouseButtonEvent(&mut self.0 as *mut _, button.into(), down);
         }
     }
 
@@ -290,18 +290,14 @@ impl Io {
 
     /// Get the display framebuffer scale
     pub fn display_framebuffer_scale(&self) -> [f32; 2] {
-        unsafe {
-            let scale = self.0.DisplayFramebufferScale;
-            [scale.x, scale.y]
-        }
+        let scale = self.0.DisplayFramebufferScale;
+        [scale.x, scale.y]
     }
 
     /// Set the display framebuffer scale
     /// This is important for HiDPI displays to ensure proper rendering
     pub fn set_display_framebuffer_scale(&mut self, scale: [f32; 2]) {
-        unsafe {
-            self.0.DisplayFramebufferScale.x = scale[0];
-            self.0.DisplayFramebufferScale.y = scale[1];
-        }
+        self.0.DisplayFramebufferScale.x = scale[0];
+        self.0.DisplayFramebufferScale.y = scale[1];
     }
 }

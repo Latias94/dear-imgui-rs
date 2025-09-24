@@ -107,14 +107,14 @@ impl<'ui> Image<'ui> {
         };
 
         unsafe {
-            sys::ImGui_Image(
+            sys::igImage(
                 sys::ImTextureRef {
                     _TexData: std::ptr::null_mut(),
                     _TexID: self.texture_id.id() as sys::ImTextureID,
                 },
-                &size_vec,
-                &uv0_vec,
-                &uv1_vec,
+                size_vec,
+                uv0_vec,
+                uv1_vec,
             );
         }
     }
@@ -198,17 +198,17 @@ impl<'ui> ImageButton<'ui> {
         };
 
         unsafe {
-            sys::ImGui_ImageButton(
+            sys::igImageButton(
                 str_id_ptr,
                 sys::ImTextureRef {
                     _TexData: std::ptr::null_mut(),
                     _TexID: self.texture_id.id() as sys::ImTextureID,
                 },
-                &size_vec,
-                &uv0_vec,
-                &uv1_vec,
-                &bg_vec,
-                &tint_vec,
+                size_vec,
+                uv0_vec,
+                uv1_vec,
+                bg_vec,
+                tint_vec,
             )
         }
     }

@@ -1,7 +1,7 @@
+use crate::InputTextFlags;
 use crate::internal::DataTypeKind;
 use crate::sys;
 use crate::ui::Ui;
-use crate::InputTextFlags;
 use std::ffi::{c_int, c_void};
 use std::marker::PhantomData;
 use std::ptr;
@@ -315,7 +315,7 @@ where
 
         let result = unsafe {
             if hint_ptr.is_null() {
-                sys::ImGui_InputText(
+                sys::igInputText(
                     label_ptr,
                     buffer.as_mut_ptr() as *mut std::os::raw::c_char,
                     buffer.len(),
@@ -324,7 +324,7 @@ where
                     self.buf as *mut String as *mut std::ffi::c_void,
                 )
             } else {
-                sys::ImGui_InputTextWithHint(
+                sys::igInputTextWithHint(
                     label_ptr,
                     hint_ptr,
                     buffer.as_mut_ptr() as *mut std::os::raw::c_char,
@@ -400,11 +400,11 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
 
         let size_vec: sys::ImVec2 = self.size.into();
         let result = unsafe {
-            sys::ImGui_InputTextMultiline(
+            sys::igInputTextMultiline(
                 label_ptr,
                 buffer.as_mut_ptr() as *mut std::os::raw::c_char,
                 buffer.len(),
-                &size_vec,
+                size_vec,
                 self.flags.bits(),
                 None,
                 std::ptr::null_mut(),
@@ -470,7 +470,7 @@ impl<'ui> InputInt<'ui> {
     pub fn build(self, value: &mut i32) -> bool {
         let label_ptr = self.ui.scratch_txt(&self.label);
         unsafe {
-            sys::ImGui_InputInt(
+            sys::igInputInt(
                 label_ptr,
                 value as *mut i32,
                 self.step,
@@ -541,7 +541,7 @@ impl<'ui> InputFloat<'ui> {
         };
 
         unsafe {
-            sys::ImGui_InputFloat(
+            sys::igInputFloat(
                 label_ptr,
                 value as *mut f32,
                 self.step,
@@ -613,7 +613,7 @@ impl<'ui> InputDouble<'ui> {
         };
 
         unsafe {
-            sys::ImGui_InputDouble(
+            sys::igInputDouble(
                 label_ptr,
                 value as *mut f64,
                 self.step,
@@ -809,13 +809,15 @@ impl TextCallbackData {
     /// [insert_chars]: Self::insert_chars
     /// [push_str]: Self::push_str
     pub unsafe fn str_as_bytes_mut(&mut self) -> &mut [u8] {
-        let str = std::str::from_utf8_mut(std::slice::from_raw_parts_mut(
-            (*(self.0)).Buf as *const _ as *mut _,
-            (*(self.0)).BufTextLen as usize,
-        ))
-        .expect("internal imgui error -- it boofed a utf8");
+        unsafe {
+            let str = std::str::from_utf8_mut(std::slice::from_raw_parts_mut(
+                (*(self.0)).Buf as *const _ as *mut _,
+                (*(self.0)).BufTextLen as usize,
+            ))
+            .expect("internal imgui error -- it boofed a utf8");
 
-        str.as_bytes_mut()
+            str.as_bytes_mut()
+        }
     }
 
     /// Sets the dirty flag on the text to imgui, indicating that
@@ -970,7 +972,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::ImGui_InputScalar(
+            sys::igInputScalar(
                 one,
                 T::KIND as i32,
                 self.value as *mut T as *mut c_void,
@@ -1064,7 +1066,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::ImGui_InputScalarN(
+            sys::igInputScalarN(
                 one,
                 T::KIND as i32,
                 self.values.as_mut_ptr() as *mut c_void,
@@ -1136,7 +1138,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat2<'ui, 'p, L, F> {
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::ImGui_InputFloat2(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
+            sys::igInputFloat2(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
         }
     }
 }
@@ -1193,7 +1195,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat3<'ui, 'p, L, F> {
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::ImGui_InputFloat3(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
+            sys::igInputFloat3(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
         }
     }
 }
@@ -1250,7 +1252,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat4<'ui, 'p, L, F> {
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::ImGui_InputFloat4(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
+            sys::igInputFloat4(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
         }
     }
 }
@@ -1290,7 +1292,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt2<'ui, 'p, L> {
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
-            sys::ImGui_InputInt2(
+            sys::igInputInt2(
                 label_cstr,
                 self.value.as_mut_ptr(),
                 self.flags.bits() as i32,
@@ -1334,7 +1336,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt3<'ui, 'p, L> {
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
-            sys::ImGui_InputInt3(
+            sys::igInputInt3(
                 label_cstr,
                 self.value.as_mut_ptr(),
                 self.flags.bits() as i32,
@@ -1378,7 +1380,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt4<'ui, 'p, L> {
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
-            sys::ImGui_InputInt4(
+            sys::igInputInt4(
                 label_cstr,
                 self.value.as_mut_ptr(),
                 self.flags.bits() as i32,

@@ -1,5 +1,5 @@
-use crate::sys;
 use crate::Ui;
+use crate::sys;
 
 bitflags::bitflags! {
     /// Flags for invisible buttons
@@ -25,7 +25,7 @@ impl Ui {
     #[doc(alias = "Bullet")]
     pub fn bullet(&self) {
         unsafe {
-            sys::ImGui_Bullet();
+            sys::igBullet();
         }
     }
 
@@ -34,7 +34,7 @@ impl Ui {
     pub fn bullet_text(&self, text: impl AsRef<str>) {
         let text_ptr = self.scratch_txt(text);
         unsafe {
-            sys::ImGui_BulletText(text_ptr);
+            sys::igBulletText(text_ptr);
         }
     }
 }
@@ -44,7 +44,7 @@ impl Ui {
     #[doc(alias = "SmallButton")]
     pub fn small_button(&self, label: impl AsRef<str>) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::ImGui_SmallButton(label_ptr) }
+        unsafe { sys::igSmallButton(label_ptr) }
     }
 
     /// Creates an invisible button
@@ -63,14 +63,14 @@ impl Ui {
     ) -> bool {
         let id_ptr = self.scratch_txt(str_id);
         let size_vec: sys::ImVec2 = size.into().into();
-        unsafe { sys::ImGui_InvisibleButton(id_ptr, &size_vec, flags.bits()) }
+        unsafe { sys::igInvisibleButton(id_ptr, size_vec, flags.bits()) }
     }
 
     /// Creates an arrow button
     #[doc(alias = "ArrowButton")]
     pub fn arrow_button(&self, str_id: impl AsRef<str>, dir: crate::Direction) -> bool {
         let id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::ImGui_ArrowButton(id_ptr, dir as i32) }
+        unsafe { sys::igArrowButton(id_ptr, dir as i32) }
     }
 }
 
@@ -97,7 +97,7 @@ impl<'ui> DisabledToken<'ui> {
 
 impl<'ui> Drop for DisabledToken<'ui> {
     fn drop(&mut self) {
-        unsafe { sys::ImGui_EndDisabled() }
+        unsafe { sys::igEndDisabled() }
     }
 }
 
@@ -108,7 +108,7 @@ impl Ui {
     /// until the returned token is dropped.
     #[doc(alias = "BeginDisabled")]
     pub fn begin_disabled(&self) -> DisabledToken<'_> {
-        unsafe { sys::ImGui_BeginDisabled(true) }
+        unsafe { sys::igBeginDisabled(true) }
         DisabledToken::new(self)
     }
 
@@ -118,7 +118,7 @@ impl Ui {
     /// token being dropped to correctly balance the internal stack.
     #[doc(alias = "BeginDisabled")]
     pub fn begin_disabled_with_cond(&self, disabled: bool) -> DisabledToken<'_> {
-        unsafe { sys::ImGui_BeginDisabled(disabled) }
+        unsafe { sys::igBeginDisabled(disabled) }
         DisabledToken::new(self)
     }
 }
@@ -133,12 +133,12 @@ impl Ui {
     /// Internally uses `PushItemFlag(ImGuiItemFlags_ButtonRepeat, repeat)`.
     #[doc(alias = "PushButtonRepeat")]
     pub fn push_button_repeat(&self, repeat: bool) {
-        unsafe { sys::ImGui_PushItemFlag(sys::ImGuiItemFlags_ButtonRepeat as i32, repeat) }
+        unsafe { sys::igPushItemFlag(sys::ImGuiItemFlags_ButtonRepeat as i32, repeat) }
     }
 
     /// Pop the button repeat item flag.
     #[doc(alias = "PopButtonRepeat")]
     pub fn pop_button_repeat(&self) {
-        unsafe { sys::ImGui_PopItemFlag() }
+        unsafe { sys::igPopItemFlag() }
     }
 }

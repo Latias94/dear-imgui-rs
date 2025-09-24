@@ -1,5 +1,5 @@
-use crate::sys;
 use crate::Ui;
+use crate::sys;
 
 bitflags::bitflags! {
     /// Flags for selectables
@@ -136,11 +136,11 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
             y: self.size[1],
         };
         unsafe {
-            sys::ImGui_Selectable(
+            sys::igSelectable_Bool(
                 self.ui.scratch_txt(self.label),
                 self.selected,
                 self.flags.bits(),
-                &size_vec,
+                size_vec,
             )
         }
     }

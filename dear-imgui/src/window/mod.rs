@@ -200,7 +200,7 @@ impl<'ui> Window<'ui> {
                     x: size[0],
                     y: size[1],
                 };
-                crate::sys::ImGui_SetNextWindowSize(&size_vec, self.size_condition as i32);
+                crate::sys::igSetNextWindowSize(size_vec, self.size_condition as i32);
             }
         }
 
@@ -211,7 +211,7 @@ impl<'ui> Window<'ui> {
                     y: pos[1],
                 };
                 let pivot_vec = crate::sys::ImVec2 { x: 0.0, y: 0.0 };
-                crate::sys::ImGui_SetNextWindowPos(&pos_vec, self.pos_condition as i32, &pivot_vec);
+                crate::sys::igSetNextWindowPos(pos_vec, self.pos_condition as i32, pivot_vec);
             }
         }
 
@@ -221,37 +221,34 @@ impl<'ui> Window<'ui> {
                     x: content_size[0],
                     y: content_size[1],
                 };
-                crate::sys::ImGui_SetNextWindowContentSize(&content_size_vec);
+                crate::sys::igSetNextWindowContentSize(content_size_vec);
             }
         }
 
         if let Some(collapsed) = self.collapsed {
             unsafe {
-                crate::sys::ImGui_SetNextWindowCollapsed(
-                    collapsed,
-                    self.collapsed_condition as i32,
-                );
+                crate::sys::igSetNextWindowCollapsed(collapsed, self.collapsed_condition as i32);
             }
         }
 
         if let Some(focused) = self.focused {
             if focused {
                 unsafe {
-                    crate::sys::ImGui_SetNextWindowFocus();
+                    crate::sys::igSetNextWindowFocus();
                 }
             }
         }
 
         if let Some(alpha) = self.bg_alpha {
             unsafe {
-                crate::sys::ImGui_SetNextWindowBgAlpha(alpha);
+                crate::sys::igSetNextWindowBgAlpha(alpha);
             }
         }
 
         // Begin the window
         let mut open = true;
         let result =
-            unsafe { crate::sys::ImGui_Begin(name_cstr.as_ptr(), &mut open, self.flags.bits()) };
+            unsafe { crate::sys::igBegin(name_cstr.as_ptr(), &mut open, self.flags.bits()) };
 
         // IMPORTANT: According to ImGui documentation, Begin/End calls must be balanced.
         // If Begin returns false, we need to call End immediately and return None.
@@ -262,7 +259,7 @@ impl<'ui> Window<'ui> {
         } else {
             // If Begin returns false, call End immediately and return None
             unsafe {
-                crate::sys::ImGui_End();
+                crate::sys::igEnd();
             }
             None
         }
@@ -277,7 +274,7 @@ pub struct WindowToken<'ui> {
 impl<'ui> Drop for WindowToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            crate::sys::ImGui_End();
+            crate::sys::igEnd();
         }
     }
 }

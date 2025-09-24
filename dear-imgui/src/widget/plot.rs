@@ -100,7 +100,7 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
         unsafe {
-            sys::ImGui_PlotLines(
+            sys::igPlotLines_FloatPtr(
                 label_ptr,
                 self.values.as_ptr(),
                 self.values.len() as i32,
@@ -181,7 +181,7 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
         unsafe {
-            sys::ImGui_PlotHistogram(
+            sys::igPlotHistogram_FloatPtr(
                 label_ptr,
                 self.values.as_ptr(),
                 self.values.len() as i32,

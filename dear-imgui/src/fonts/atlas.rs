@@ -9,7 +9,7 @@
 
 use crate::fonts::Font;
 use crate::sys;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::marker::PhantomData;
 use std::ptr;
 use std::rc::Rc;
@@ -59,7 +59,7 @@ impl FontLoader {
     }
 
     /// Sets the loader initialization callback
-    pub fn with_loader_init<F>(mut self, callback: F) -> Self
+    pub fn with_loader_init<F>(self, _callback: F) -> Self
     where
         F: Fn(&mut FontAtlas) -> bool + 'static,
     {
@@ -114,8 +114,7 @@ impl SharedFontAtlas {
     /// Creates a new shared font atlas
     pub fn create() -> SharedFontAtlas {
         unsafe {
-            // Create a new ImFontAtlas instance using the proper constructor
-            let raw_atlas = Box::into_raw(Box::new(sys::ImFontAtlas::new()));
+            let raw_atlas = sys::ImFontAtlas_ImFontAtlas();
             SharedFontAtlas(Rc::new(raw_atlas))
         }
     }
@@ -138,8 +137,7 @@ impl Drop for SharedFontAtlas {
             unsafe {
                 let atlas_ptr = *self.0;
                 if !atlas_ptr.is_null() {
-                    // Clean up the atlas
-                    drop(Box::from_raw(atlas_ptr));
+                    sys::ImFontAtlas_destroy(atlas_ptr);
                 }
             }
         }
@@ -150,7 +148,7 @@ impl FontAtlas {
     /// Creates a new font atlas with default settings
     pub fn new() -> Self {
         unsafe {
-            let raw = Box::into_raw(Box::new(sys::ImFontAtlas::new()));
+            let raw = sys::ImFontAtlas_ImFontAtlas();
             Self {
                 raw,
                 owned: true,
@@ -297,7 +295,7 @@ impl FontAtlas {
         filename: &str,
         size_pixels: f32,
         font_cfg: Option<&FontConfig>,
-        glyph_ranges: Option<&[u32]>,
+        glyph_ranges: Option<&[sys::ImWchar]>,
     ) -> Option<&mut Font> {
         unsafe {
             let filename_cstr = std::ffi::CString::new(filename).ok()?;
@@ -327,7 +325,7 @@ impl FontAtlas {
         font_data: &[u8],
         size_pixels: f32,
         font_cfg: Option<&FontConfig>,
-        glyph_ranges: Option<&[u32]>,
+        glyph_ranges: Option<&[sys::ImWchar]>,
     ) -> Option<&mut Font> {
         unsafe {
             let cfg_ptr = font_cfg.map_or(ptr::null(), |cfg| cfg.raw());
@@ -376,7 +374,7 @@ impl FontAtlas {
 
     /// Get default glyph ranges (Basic Latin + Latin Supplement)
     #[doc(alias = "GetGlyphRangesDefault")]
-    pub fn get_glyph_ranges_default(&self) -> &[u32] {
+    pub fn get_glyph_ranges_default(&self) -> &[sys::ImWchar] {
         unsafe {
             let ptr = sys::ImFontAtlas_GetGlyphRangesDefault(self.raw);
             if ptr.is_null() {
@@ -399,13 +397,13 @@ impl FontAtlas {
     pub fn build(&mut self) -> bool {
         unsafe {
             // Initialize the build process
-            sys::ImFontAtlasBuildInit(self.raw);
+            sys::igImFontAtlasBuildInit(self.raw);
 
             // Perform the main build
-            sys::ImFontAtlasBuildMain(self.raw);
+            sys::igImFontAtlasBuildMain(self.raw);
 
             // Update pointers
-            sys::ImFontAtlasBuildUpdatePointers(self.raw);
+            sys::igImFontAtlasBuildUpdatePointers(self.raw);
 
             // Check if build was successful
             (*self.raw).TexIsBuilt
@@ -439,22 +437,24 @@ impl FontAtlas {
     /// The returned pointer is only valid while the FontAtlas exists and the texture is built.
     /// The caller must ensure proper lifetime management.
     pub unsafe fn get_tex_data_ptr(&self) -> Option<(*const u8, u32, u32)> {
-        if (*self.raw).TexIsBuilt {
-            let tex_data = (*self.raw).TexData;
-            if !tex_data.is_null() {
-                let width = (*tex_data).Width as u32;
-                let height = (*tex_data).Height as u32;
-                let pixels = (*tex_data).Pixels;
-                if !pixels.is_null() {
-                    Some((pixels, width, height))
+        unsafe {
+            if (*self.raw).TexIsBuilt {
+                let tex_data = (*self.raw).TexData;
+                if !tex_data.is_null() {
+                    let width = (*tex_data).Width as u32;
+                    let height = (*tex_data).Height as u32;
+                    let pixels = (*tex_data).Pixels;
+                    if !pixels.is_null() {
+                        Some((pixels, width, height))
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
-        } else {
-            None
         }
     }
 
@@ -506,8 +506,7 @@ impl Drop for FontAtlas {
     fn drop(&mut self) {
         if self.owned && !self.raw.is_null() {
             unsafe {
-                (*self.raw).destruct();
-                let _ = Box::from_raw(self.raw);
+                sys::ImFontAtlas_destroy(self.raw);
             }
         }
     }
@@ -528,7 +527,7 @@ impl FontConfig {
     /// Creates a new font configuration with default settings
     pub fn new() -> Self {
         Self {
-            raw: unsafe { sys::ImFontConfig::new() },
+            raw: Default::default(),
         }
     }
 

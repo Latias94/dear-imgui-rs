@@ -99,7 +99,7 @@ impl Style {
     /// Creates a new Style instance from the current context
     pub(crate) fn from_raw() -> Self {
         unsafe {
-            let style_ptr = sys::ImGui_GetStyle();
+            let style_ptr = sys::igGetStyle();
             *(style_ptr as *const Style)
         }
     }
@@ -280,11 +280,11 @@ impl RawWrapper for Style {
     type Raw = sys::ImGuiStyle;
 
     unsafe fn raw(&self) -> &Self::Raw {
-        &*(self as *const _ as *const Self::Raw)
+        unsafe { &*(self as *const _ as *const Self::Raw) }
     }
 
     unsafe fn raw_mut(&mut self) -> &mut Self::Raw {
-        &mut *(self as *mut _ as *mut Self::Raw)
+        unsafe { &mut *(self as *mut _ as *mut Self::Raw) }
     }
 }
 

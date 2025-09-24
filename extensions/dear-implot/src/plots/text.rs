@@ -1,8 +1,8 @@
 //! Text plot implementation
 
-use super::{safe_cstring, PlotData, PlotError};
-use crate::sys;
+use super::{PlotData, PlotError, safe_cstring};
 use crate::TextFlags;
+use crate::sys;
 
 /// Builder for text plots with extensive customization options
 ///
@@ -70,7 +70,7 @@ impl<'a> TextPlot<'a> {
                 text_cstring.as_ptr(),
                 self.x,
                 self.y,
-                &pix_offset as *const sys::ImVec2,
+                pix_offset,
                 self.flags.bits() as i32,
             );
         }
@@ -253,7 +253,7 @@ impl FormattedTextPlot {
                 text_cstring.as_ptr(),
                 self.x,
                 self.y,
-                &pix_offset as *const sys::ImVec2,
+                pix_offset,
                 self.flags.bits() as i32,
             );
         }

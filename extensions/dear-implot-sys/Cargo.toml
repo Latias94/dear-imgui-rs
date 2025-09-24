@@ -1,8 +1,8 @@
 [package]
 name = "dear-implot-sys"
-version.workspace = true
+version = "0.2.0"
 edition.workspace = true
-description = "Low-level FFI bindings for ImPlot using C++ bindgen"
+description = "Low-level FFI bindings for ImPlot via cimplot (C API)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -11,16 +11,27 @@ keywords.workspace = true
 build = "build.rs"
 links = "dear_implot"
 
+# Exclude heavy upstream folders from package tarball
+exclude = [
+    "third-party/cimplot/example_glfw_opengl3/**",
+    "third-party/cimplot/generator/**",
+    "third-party/cimplot/implot/.github/**",
+    "third-party/cimplot/implot/examples/**",
+    "third-party/cimplot/implot/misc/**",
+    "third-party/cimplot/implot/docs/**",
+]
+
 [dependencies]
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.1" }
-mint.workspace = true
-cfg-if.workspace = true
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
+#mint.workspace = true
+#cfg-if.workspace = true
 
 [build-dependencies]
 bindgen.workspace = true
 cc.workspace = true
 xshell = "0.2"
 pkg-config = "0.3"
+reqwest = { version = "0.11", features = ["blocking", "rustls-tls"], default-features = false }
 
 [features]
 default = ["docking"]

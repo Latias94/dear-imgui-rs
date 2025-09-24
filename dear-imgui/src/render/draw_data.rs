@@ -47,11 +47,11 @@ impl RawWrapper for DrawData {
     type Raw = sys::ImDrawData;
 
     unsafe fn raw(&self) -> &Self::Raw {
-        std::mem::transmute(self)
+        unsafe { std::mem::transmute(self) }
     }
 
     unsafe fn raw_mut(&mut self) -> &mut Self::Raw {
-        std::mem::transmute(self)
+        unsafe { std::mem::transmute(self) }
     }
 }
 
@@ -165,13 +165,15 @@ impl DrawData {
 
     #[inline]
     pub(crate) unsafe fn cmd_lists(&self) -> &[*const DrawList] {
-        if self.cmd_lists_count <= 0 || self.cmd_lists.data.is_null() {
-            return &[];
+        unsafe {
+            if self.cmd_lists_count <= 0 || self.cmd_lists.data.is_null() {
+                return &[];
+            }
+            slice::from_raw_parts(
+                self.cmd_lists.data as *const *const DrawList,
+                self.cmd_lists_count as usize,
+            )
         }
-        slice::from_raw_parts(
-            self.cmd_lists.data as *const *const DrawList,
-            self.cmd_lists_count as usize,
-        )
     }
 
     /// Converts all buffers from indexed to non-indexed, in case you cannot render indexed buffers
@@ -195,7 +197,7 @@ impl DrawData {
                 x: fb_scale[0],
                 y: fb_scale[1],
             };
-            sys::ImDrawData_ScaleClipRects(RawWrapper::raw_mut(self), &scale);
+            sys::ImDrawData_ScaleClipRects(RawWrapper::raw_mut(self), scale);
         }
     }
 }
@@ -238,11 +240,13 @@ impl RawWrapper for DrawList {
 impl DrawList {
     #[inline]
     pub(crate) unsafe fn cmd_buffer(&self) -> &[sys::ImDrawCmd] {
-        let cmd_buffer = &self.0.CmdBuffer;
-        if cmd_buffer.Size <= 0 || cmd_buffer.Data.is_null() {
-            return &[];
+        unsafe {
+            let cmd_buffer = &self.0.CmdBuffer;
+            if cmd_buffer.Size <= 0 || cmd_buffer.Data.is_null() {
+                return &[];
+            }
+            slice::from_raw_parts(cmd_buffer.Data, cmd_buffer.Size as usize)
         }
-        slice::from_raw_parts(cmd_buffer.Data, cmd_buffer.Size as usize)
     }
 
     /// Returns an iterator over the draw commands in this draw list
@@ -425,7 +429,7 @@ impl From<&DrawData> for OwnedDrawData {
         unsafe {
             // Allocate memory for the new DrawData
             let result =
-                sys::ImGui_MemAlloc(std::mem::size_of::<sys::ImDrawData>()) as *mut sys::ImDrawData;
+                sys::igMemAlloc(std::mem::size_of::<sys::ImDrawData>()) as *mut sys::ImDrawData;
             if result.is_null() {
                 panic!("Failed to allocate memory for OwnedDrawData");
             }
@@ -470,7 +474,7 @@ impl Drop for OwnedDrawData {
                 // Note: Since we don't have ImDrawData_destroy in our bindings,
                 // we use MemFree directly. This is safe because ImDrawData
                 // doesn't have complex destructors in the C++ side.
-                sys::ImGui_MemFree(self.draw_data as *mut std::ffi::c_void);
+                sys::igMemFree(self.draw_data as *mut std::ffi::c_void);
                 self.draw_data = std::ptr::null_mut();
             }
         }

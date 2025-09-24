@@ -1,7 +1,7 @@
+use crate::Condition;
 use crate::sys;
 use crate::ui::Ui;
 use crate::widget::TreeNodeFlags;
-use crate::Condition;
 
 /// Tree node ID that can be constructed from different types
 #[derive(Copy, Clone, Debug)]
@@ -72,7 +72,7 @@ impl Ui {
     #[doc(alias = "CollapsingHeader")]
     pub fn collapsing_header(&self, label: impl AsRef<str>, flags: TreeNodeFlags) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::ImGui_CollapsingHeader(label_ptr, flags.bits()) }
+        unsafe { sys::igCollapsingHeader_TreeNodeFlags(label_ptr, flags.bits()) }
     }
 }
 
@@ -204,7 +204,7 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
     pub fn push(self) -> Option<TreeNodeToken<'a>> {
         let open = unsafe {
             if self.opened_cond != Condition::Never {
-                sys::ImGui_SetNextItemOpen(self.opened, self.opened_cond as i32);
+                sys::igSetNextItemOpen(self.opened, self.opened_cond as i32);
             }
 
             match &self.id {
@@ -215,7 +215,7 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
                         .as_ref()
                         .map(|l| self.ui.scratch_txt(l))
                         .unwrap_or(id_ptr);
-                    sys::ImGui_TreeNodeEx1(id_ptr, self.flags.bits(), label_ptr)
+                    sys::igTreeNodeEx_StrStr(id_ptr, self.flags.bits(), label_ptr)
                 }
                 TreeNodeId::Ptr(ptr) => {
                     let label_ptr = self
@@ -223,7 +223,7 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
                         .as_ref()
                         .map(|l| self.ui.scratch_txt(l))
                         .unwrap_or(std::ptr::null());
-                    sys::ImGui_TreeNodeEx2(
+                    sys::igTreeNodeEx_Ptr(
                         *ptr as *const std::os::raw::c_void,
                         self.flags.bits(),
                         label_ptr,
@@ -235,7 +235,7 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
                         .as_ref()
                         .map(|l| self.ui.scratch_txt(l))
                         .unwrap_or(std::ptr::null());
-                    sys::ImGui_TreeNodeEx2(
+                    sys::igTreeNodeEx_Ptr(
                         *i as *const std::os::raw::c_void,
                         self.flags.bits(),
                         label_ptr,
@@ -273,7 +273,7 @@ impl<'ui> TreeNodeToken<'ui> {
 impl<'ui> Drop for TreeNodeToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_TreePop();
+            sys::igTreePop();
         }
     }
 }

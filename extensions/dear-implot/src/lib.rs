@@ -61,6 +61,7 @@ pub use utils::*;
 
 // Re-export new modular plot types for convenience
 pub use plots::{
+    Plot, PlotData, PlotError,
     bar::{BarPlot, PositionalBarPlot},
     error_bars::{AsymmetricErrorBarsPlot, ErrorBarsPlot, SimpleErrorBarsPlot},
     heatmap::{HeatmapPlot, HeatmapPlotF32},
@@ -70,12 +71,10 @@ pub use plots::{
     scatter::{ScatterPlot, SimpleScatterPlot},
     shaded::{ShadedBetweenPlot, ShadedPlot, SimpleShadedPlot},
     stems::{SimpleStemPlot, StemPlot},
-    Plot, PlotData, PlotError,
 };
 
 // Constants
 const IMPLOT_AUTO: i32 = -1;
-const NUMBER_OF_Y_AXES: usize = 3;
 
 /// Choice of Y axis for multi-axis plots
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +90,17 @@ fn y_axis_choice_option_to_i32(y_axis_choice: Option<YAxisChoice>) -> i32 {
     match y_axis_choice {
         Some(choice) => choice as i32,
         None => IMPLOT_AUTO,
+    }
+}
+
+/// Ui extension for obtaining a PlotUi from an ImPlot PlotContext
+pub trait ImPlotExt {
+    fn implot<'ui>(&'ui self, ctx: &'ui PlotContext) -> PlotUi<'ui>;
+}
+
+impl ImPlotExt for Ui {
+    fn implot<'ui>(&'ui self, ctx: &'ui PlotContext) -> PlotUi<'ui> {
+        ctx.get_plot_ui(self)
     }
 }
 
@@ -320,5 +330,8 @@ bitflags::bitflags! {
 // Re-export all plot types for convenience
 pub use plots::*;
 
-// Re-export advanced features
-pub use advanced::*;
+// Re-export advanced features (explicit to avoid AxisFlags name clash)
+pub use advanced::{
+    LegendFlags, LegendLocation, LegendManager, LegendToken, MultiAxisPlot, MultiAxisToken,
+    SubplotFlags, SubplotGrid, SubplotToken, YAxisConfig,
+};

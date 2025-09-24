@@ -1,8 +1,8 @@
 //! Bar groups plot implementation
 
-use super::{safe_cstring, PlotData, PlotError};
-use crate::sys;
+use super::{PlotData, PlotError, safe_cstring};
 use crate::BarGroupsFlags;
+use crate::sys;
 use std::ffi::CString;
 
 /// Builder for bar groups plots with extensive customization options
@@ -109,7 +109,7 @@ impl<'a> BarGroupsPlot<'a> {
         let label_ptrs: Vec<*const i8> = label_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
 
         unsafe {
-            sys::ImPlot_PlotBarGroups_double(
+            sys::ImPlot_PlotBarGroups_doublePtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
                 self.item_count as i32,
@@ -230,7 +230,7 @@ impl<'a> BarGroupsPlotF32<'a> {
         let label_ptrs: Vec<*const i8> = label_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
 
         unsafe {
-            sys::ImPlot_PlotBarGroups_float(
+            sys::ImPlot_PlotBarGroups_FloatPtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
                 self.item_count as i32,

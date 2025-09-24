@@ -1,5 +1,5 @@
-use crate::sys;
 use crate::Ui;
+use crate::sys;
 
 create_token!(
     /// Tracks a layout group that can be ended with `end` or by dropping.
@@ -7,7 +7,7 @@ create_token!(
 
     /// Drops the layout group manually. You can also just allow this token
     /// to drop on its own.
-    drop { sys::ImGui_EndGroup() }
+    drop { unsafe { sys::igEndGroup() } }
 );
 
 create_token!(
@@ -15,7 +15,7 @@ create_token!(
     pub struct ClipRectToken<'ui>;
 
     /// Pops a clip rect pushed with [`Ui::push_clip_rect`].
-    drop { sys::ImGui_PopClipRect() }
+    drop { unsafe { sys::igPopClipRect() } }
 );
 
 /// # Cursor / Layout
@@ -25,25 +25,25 @@ impl Ui {
     /// This becomes a vertical separator inside a menu bar or in horizontal layout mode.
     #[doc(alias = "Separator")]
     pub fn separator(&self) {
-        unsafe { sys::ImGui_Separator() }
+        unsafe { sys::igSeparator() }
     }
 
     /// Renders a separator with text.
     #[doc(alias = "SeparatorText")]
     pub fn separator_with_text(&self, text: impl AsRef<str>) {
-        unsafe { sys::ImGui_SeparatorText(self.scratch_txt(text)) }
+        unsafe { sys::igSeparatorText(self.scratch_txt(text)) }
     }
 
     /// Creates a vertical separator
     #[doc(alias = "SeparatorEx")]
     pub fn separator_vertical(&self) {
-        unsafe { sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Vertical as i32, 1.0) }
+        unsafe { sys::igSeparatorEx(sys::ImGuiSeparatorFlags_Vertical as i32, 1.0) }
     }
 
     /// Creates a horizontal separator
     #[doc(alias = "SeparatorEx")]
     pub fn separator_horizontal(&self) {
-        unsafe { sys::ImGui_SeparatorEx(sys::ImGuiSeparatorFlags_Horizontal as i32, 1.0) }
+        unsafe { sys::igSeparatorEx(sys::ImGuiSeparatorFlags_Horizontal as i32, 1.0) }
     }
 
     /// Call between widgets or groups to layout them horizontally.
@@ -73,19 +73,19 @@ impl Ui {
     /// X position is given in window coordinates.
     #[doc(alias = "SameLine")]
     pub fn same_line_with_spacing(&self, pos_x: f32, spacing_w: f32) {
-        unsafe { sys::ImGui_SameLine(pos_x, spacing_w) }
+        unsafe { sys::igSameLine(pos_x, spacing_w) }
     }
 
     /// Undo a `same_line` call or force a new line when in horizontal layout mode
     #[doc(alias = "NewLine")]
     pub fn new_line(&self) {
-        unsafe { sys::ImGui_NewLine() }
+        unsafe { sys::igNewLine() }
     }
 
     /// Adds vertical spacing
     #[doc(alias = "Spacing")]
     pub fn spacing(&self) {
-        unsafe { sys::ImGui_Spacing() }
+        unsafe { sys::igSpacing() }
     }
 
     /// Fills a space of `size` in pixels with nothing on the current window.
@@ -94,7 +94,7 @@ impl Ui {
     #[doc(alias = "Dummy")]
     pub fn dummy(&self, size: impl Into<[f32; 2]>) {
         let size_vec: sys::ImVec2 = size.into().into();
-        unsafe { sys::ImGui_Dummy(&size_vec) }
+        unsafe { sys::igDummy(size_vec) }
     }
 
     /// Moves content position to the right by `Style::indent_spacing`
@@ -109,7 +109,7 @@ impl Ui {
     /// Moves content position to the right by `width`
     #[doc(alias = "Indent")]
     pub fn indent_by(&self, width: f32) {
-        unsafe { sys::ImGui_Indent(width) };
+        unsafe { sys::igIndent(width) };
     }
 
     /// Moves content position to the left by `Style::indent_spacing`
@@ -124,7 +124,7 @@ impl Ui {
     /// Moves content position to the left by `width`
     #[doc(alias = "Unindent")]
     pub fn unindent_by(&self, width: f32) {
-        unsafe { sys::ImGui_Unindent(width) };
+        unsafe { sys::igUnindent(width) };
     }
 
     /// Creates a layout group and starts appending to it.
@@ -132,7 +132,7 @@ impl Ui {
     /// Returns a `GroupToken` that must be ended by calling `.end()`.
     #[doc(alias = "BeginGroup")]
     pub fn begin_group(&self) -> GroupToken<'_> {
-        unsafe { sys::ImGui_BeginGroup() };
+        unsafe { sys::igBeginGroup() };
         GroupToken::new(self)
     }
 
@@ -153,13 +153,14 @@ impl Ui {
         unsafe {
             #[cfg(target_env = "msvc")]
             {
-                let pos_rr = sys::ImGui_GetCursorPos();
-                let pos: sys::ImVec2 = pos_rr.into();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetCursorPos(&mut pos);
                 [pos.x, pos.y]
             }
             #[cfg(not(target_env = "msvc"))]
             {
-                let pos = sys::ImGui_GetCursorPos();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetCursorPos(&mut pos);
                 [pos.x, pos.y]
             }
         }
@@ -171,13 +172,14 @@ impl Ui {
         unsafe {
             #[cfg(target_env = "msvc")]
             {
-                let pos_rr = sys::ImGui_GetCursorScreenPos();
-                let pos: sys::ImVec2 = pos_rr.into();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetCursorScreenPos(&mut pos);
                 [pos.x, pos.y]
             }
             #[cfg(not(target_env = "msvc"))]
             {
-                let pos = sys::ImGui_GetCursorScreenPos();
+                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+                sys::igGetCursorScreenPos(&mut pos);
                 [pos.x, pos.y]
             }
         }
@@ -191,7 +193,7 @@ impl Ui {
             x: pos_array[0],
             y: pos_array[1],
         };
-        unsafe { sys::ImGui_SetCursorPos(&pos_vec) };
+        unsafe { sys::igSetCursorPos(pos_vec) };
     }
 
     /// Sets the cursor position (in absolute screen coordinates)
@@ -202,48 +204,40 @@ impl Ui {
             x: pos_array[0],
             y: pos_array[1],
         };
-        unsafe { sys::ImGui_SetCursorScreenPos(&pos_vec) };
+        unsafe { sys::igSetCursorScreenPos(pos_vec) };
     }
 
     /// Returns the X cursor position (in window coordinates)
     #[doc(alias = "GetCursorPosX")]
     pub fn cursor_pos_x(&self) -> f32 {
-        unsafe { sys::ImGui_GetCursorPosX() }
+        unsafe { sys::igGetCursorPosX() }
     }
 
     /// Returns the Y cursor position (in window coordinates)
     #[doc(alias = "GetCursorPosY")]
     pub fn cursor_pos_y(&self) -> f32 {
-        unsafe { sys::ImGui_GetCursorPosY() }
+        unsafe { sys::igGetCursorPosY() }
     }
 
     /// Sets the X cursor position (in window coordinates)
     #[doc(alias = "SetCursorPosX")]
     pub fn set_cursor_pos_x(&self, x: f32) {
-        unsafe { sys::ImGui_SetCursorPosX(x) };
+        unsafe { sys::igSetCursorPosX(x) };
     }
 
     /// Sets the Y cursor position (in window coordinates)
     #[doc(alias = "SetCursorPosY")]
     pub fn set_cursor_pos_y(&self, y: f32) {
-        unsafe { sys::ImGui_SetCursorPosY(y) };
+        unsafe { sys::igSetCursorPosY(y) };
     }
 
     /// Returns the initial cursor position (in window coordinates)
     #[doc(alias = "GetCursorStartPos")]
     pub fn cursor_start_pos(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let pos_rr = sys::ImGui_GetCursorStartPos();
-                let pos: sys::ImVec2 = pos_rr.into();
-                [pos.x, pos.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let pos = sys::ImGui_GetCursorStartPos();
-                [pos.x, pos.y]
-            }
+            let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetCursorStartPos(&mut pos);
+            [pos.x, pos.y]
         }
     }
 }
@@ -256,25 +250,25 @@ impl Ui {
     /// Return ~ FontSize.
     #[doc(alias = "GetTextLineHeight")]
     pub fn text_line_height(&self) -> f32 {
-        unsafe { sys::ImGui_GetTextLineHeight() }
+        unsafe { sys::igGetTextLineHeight() }
     }
 
     /// Return ~ FontSize + style.ItemSpacing.y.
     #[doc(alias = "GetTextLineHeightWithSpacing")]
     pub fn text_line_height_with_spacing(&self) -> f32 {
-        unsafe { sys::ImGui_GetTextLineHeightWithSpacing() }
+        unsafe { sys::igGetTextLineHeightWithSpacing() }
     }
 
     /// Return ~ FontSize + style.FramePadding.y * 2.
     #[doc(alias = "GetFrameHeight")]
     pub fn frame_height(&self) -> f32 {
-        unsafe { sys::ImGui_GetFrameHeight() }
+        unsafe { sys::igGetFrameHeight() }
     }
 
     /// Return ~ FontSize + style.FramePadding.y * 2 + style.ItemSpacing.y.
     #[doc(alias = "GetFrameHeightWithSpacing")]
     pub fn frame_height_with_spacing(&self) -> f32 {
-        unsafe { sys::ImGui_GetFrameHeightWithSpacing() }
+        unsafe { sys::igGetFrameHeightWithSpacing() }
     }
 
     /// Push a clipping rectangle in screen space.
@@ -295,13 +289,13 @@ impl Ui {
             x: max[0],
             y: max[1],
         };
-        unsafe { sys::ImGui_PushClipRect(&min_v, &max_v, intersect_with_current) }
+        unsafe { sys::igPushClipRect(min_v, max_v, intersect_with_current) }
     }
 
     /// Pop a clipping rectangle from the stack.
     #[doc(alias = "PopClipRect")]
     pub fn pop_clip_rect(&self) {
-        unsafe { sys::ImGui_PopClipRect() }
+        unsafe { sys::igPopClipRect() }
     }
 
     /// Run a closure with a clip rect pushed and automatically popped.
@@ -328,7 +322,7 @@ impl Ui {
         let mx = rect_max.into();
         let mn_v = sys::ImVec2 { x: mn[0], y: mn[1] };
         let mx_v = sys::ImVec2 { x: mx[0], y: mx[1] };
-        unsafe { sys::ImGui_IsRectVisible1(&mn_v, &mx_v) }
+        unsafe { sys::igIsRectVisible_Vec2(mn_v, mx_v) }
     }
 
     /// Returns true if a rectangle of given size at the current cursor pos is visible.
@@ -336,12 +330,12 @@ impl Ui {
     pub fn is_rect_visible_with_size(&self, size: impl Into<[f32; 2]>) -> bool {
         let s = size.into();
         let v = sys::ImVec2 { x: s[0], y: s[1] };
-        unsafe { sys::ImGui_IsRectVisible(&v) }
+        unsafe { sys::igIsRectVisible_Nil(v) }
     }
 
     /// Vertically align upcoming text baseline to FramePadding.y (align text to framed items).
     #[doc(alias = "AlignTextToFramePadding")]
     pub fn align_text_to_frame_padding(&self) {
-        unsafe { sys::ImGui_AlignTextToFramePadding() }
+        unsafe { sys::igAlignTextToFramePadding() }
     }
 }

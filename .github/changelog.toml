@@ -1,0 +1,65 @@
+[changelog]
+header = "# Changelog\n\nAll notable changes to this project are documented here.\n\n"
+body = "{{#each releases}}\n## {{#if tag_name}}{{tag_name}}{{else}}Unreleased{{/if}}\n{{#if date}} ({{date}}){{/if}}\n\n{{#if commits}}\n{{#each commits}}
+- {{message_title}} ({{#if scope}}{{scope}}: {{/if}}{{id}}) by {{#if author}}@{{author.name}}{{/if}}
+{{/each}}\n{{/if}}\n{{#each groups}}
+### {{title}}\n
+{{#each commits}}
+- {{message_title}}{{#if breaking}} (BREAKING){{/if}}
+{{/each}}\n
+{{/each}}\n{{/each}}\n"
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_preprocessors = []
+tag_pattern = ".*"
+protect_breaking_commits = true
+skip_tags = false
+# Release-plz tags per crate look like `crate-vX.Y.Z` by default; we accept all.
+
+[git.cliff]
+body = ""
+
+[[git.cliff.groups]]
+title = "Breaking Changes"
+regex = "(?i)BREAKING CHANGE|!"
+order = 0
+
+[[git.cliff.groups]]
+title = "Features"
+regex = "^feat"
+order = 10
+
+[[git.cliff.groups]]
+title = "Fixes"
+regex = "^fix"
+order = 20
+
+[[git.cliff.groups]]
+title = "Performance"
+regex = "^perf"
+order = 30
+
+[[git.cliff.groups]]
+title = "Refactor"
+regex = "^refactor"
+order = 40
+
+[[git.cliff.groups]]
+title = "Docs"
+regex = "^docs"
+order = 50
+
+[[git.cliff.groups]]
+title = "Build"
+regex = "^build|^deps|^ci"
+order = 60
+
+[[git.cliff.groups]]
+title = "Chore"
+regex = "^chore|^style|^test"
+order = 70
+

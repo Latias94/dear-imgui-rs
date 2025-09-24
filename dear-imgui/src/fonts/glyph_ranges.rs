@@ -29,14 +29,16 @@ use crate::sys;
     note = "Use dynamic font loading instead. Glyphs are now loaded on-demand automatically with Dear ImGui 1.92+."
 )]
 pub struct GlyphRangesBuilder {
-    raw: sys::ImFontGlyphRangesBuilder,
+    raw: *mut sys::ImFontGlyphRangesBuilder,
 }
 
 impl GlyphRangesBuilder {
     /// Creates a new glyph ranges builder
     pub fn new() -> Self {
-        Self {
-            raw: sys::ImFontGlyphRangesBuilder::default(),
+        unsafe {
+            Self {
+                raw: sys::ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder(),
+            }
         }
     }
 
@@ -46,7 +48,7 @@ impl GlyphRangesBuilder {
         unsafe {
             let text_start = text.as_ptr() as *const std::os::raw::c_char;
             let text_end = text_start.add(text.len());
-            self.raw.AddText(text_start, text_end);
+            sys::ImFontGlyphRangesBuilder_AddText(self.raw, text_start, text_end);
         }
     }
 
@@ -54,7 +56,10 @@ impl GlyphRangesBuilder {
     #[doc(alias = "AddRanges")]
     pub fn add_ranges(&mut self, ranges: &[u32]) {
         unsafe {
-            self.raw.AddRanges(ranges.as_ptr());
+            sys::ImFontGlyphRangesBuilder_AddRanges(
+                self.raw,
+                ranges.as_ptr() as *const sys::ImWchar,
+            );
         }
     }
 
@@ -62,14 +67,14 @@ impl GlyphRangesBuilder {
     #[doc(alias = "BuildRanges")]
     pub fn build_ranges(&mut self) -> Vec<u32> {
         unsafe {
-            let mut out_ranges = sys::ImVector::<u32>::default();
-            self.raw.BuildRanges(&mut out_ranges);
+            let mut out_ranges = std::mem::zeroed::<sys::ImVector_ImWchar>();
+            sys::ImFontGlyphRangesBuilder_BuildRanges(self.raw, &mut out_ranges);
 
             // Convert ImVector to Vec
             let len = out_ranges.Size as usize;
             let mut result = Vec::with_capacity(len);
             for i in 0..len {
-                result.push(*out_ranges.Data.add(i));
+                result.push(*out_ranges.Data.add(i) as u32);
             }
             result
         }

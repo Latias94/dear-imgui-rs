@@ -1,7 +1,9 @@
-//! Low-level FFI bindings for ImPlot with Dear ImGui C++ compatibility
+//! Low-level FFI bindings for ImPlot via the cimplot C API
 //!
-//! This crate provides raw, unsafe bindings to the ImPlot C++ library,
-//! designed to work with dear-imgui-sys (C++ bindgen) rather than imgui-sys (cimgui).
+//! This crate provides raw, unsafe bindings to the ImPlot library using the
+//! cimplot C API, designed to work together with `dear-imgui-sys` (which uses
+//! cimgui for Dear ImGui). This avoids C++ ABI issues and keeps builds
+//! consistent across platforms and toolchains.
 //!
 //! ## Features
 //!

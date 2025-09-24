@@ -235,7 +235,7 @@ impl TextureData {
     /// The caller must ensure that the pointer is valid and points to a valid
     /// ImTextureData structure.
     pub unsafe fn from_raw(raw: *mut sys::ImTextureData) -> &'static mut Self {
-        &mut *(raw as *mut Self)
+        unsafe { &mut *(raw as *mut Self) }
     }
 
     /// Get the raw pointer to the underlying ImTextureData
@@ -427,7 +427,7 @@ impl TextureData {
 
 /// Get the number of bytes per pixel for a texture format
 pub fn get_format_bytes_per_pixel(format: TextureFormat) -> i32 {
-    unsafe { sys::ImTextureDataGetFormatBytesPerPixel(format.into()) }
+    unsafe { sys::igImTextureDataGetFormatBytesPerPixel(format.into()) }
 }
 
 /// Create an ImTextureRef from a texture ID
@@ -444,7 +444,7 @@ pub fn create_texture_ref(texture_id: u64) -> sys::ImTextureRef {
 /// Get the name of a texture status (for debugging)
 pub fn get_status_name(status: TextureStatus) -> &'static str {
     unsafe {
-        let ptr = sys::ImTextureDataGetStatusName(status.into());
+        let ptr = sys::igImTextureDataGetStatusName(status.into());
         if ptr.is_null() {
             "Unknown"
         } else {
@@ -456,7 +456,7 @@ pub fn get_status_name(status: TextureStatus) -> &'static str {
 /// Get the name of a texture format (for debugging)
 pub fn get_format_name(format: TextureFormat) -> &'static str {
     unsafe {
-        let ptr = sys::ImTextureDataGetFormatName(format.into());
+        let ptr = sys::igImTextureDataGetFormatName(format.into());
         if ptr.is_null() {
             "Unknown"
         } else {

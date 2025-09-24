@@ -1,0 +1,43 @@
+[package]
+name = "dear-imnodes-sys"
+version = "0.1.0"
+edition.workspace = true
+description = "Low-level FFI bindings for ImNodes via cimnodes (C API)"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+build = "build.rs"
+links = "dear_imnodes"
+
+# Exclude heavy upstream folders from package tarball
+exclude = [
+    "third-party/cimnodes/imnodes/.github/**",
+    "third-party/cimnodes/imnodes/vcpkg/**",
+    "third-party/cimnodes/imnodes/examples/**",
+    "third-party/cimnodes/imnodes/example/**",
+    "third-party/cimnodes/imnodes/misc/**",
+    "third-party/cimnodes/imnodes/docs/**",
+    "third-party/cimnodes/imnodes/generator/**",
+]
+
+[dependencies]
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
+cfg-if.workspace = true
+
+[build-dependencies]
+bindgen.workspace = true
+cc.workspace = true
+xshell = "0.2"
+pkg-config = "0.3"
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
+
+[features]
+default = ["docking"]
+# Enable docking branch features (default)
+docking = ["dear-imgui-sys/docking"]
+# Enable multi-viewport support (requires docking)
+multi-viewport = ["docking", "dear-imgui-sys/multi-viewport"]
+# Enable freetype font rasterizer
+freetype = ["dear-imgui-sys/freetype"]

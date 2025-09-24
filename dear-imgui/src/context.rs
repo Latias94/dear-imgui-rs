@@ -58,12 +58,12 @@ static CTX_MUTEX: ReentrantMutex<()> = parking_lot::const_reentrant_mutex(());
 
 fn clear_current_context() {
     unsafe {
-        sys::ImGui_SetCurrentContext(ptr::null_mut());
+        sys::igSetCurrentContext(ptr::null_mut());
     }
 }
 
 fn no_current_context() -> bool {
-    let ctx = unsafe { sys::ImGui_GetCurrentContext() };
+    let ctx = unsafe { sys::igGetCurrentContext() };
     ctx.is_null()
 }
 
@@ -132,7 +132,7 @@ impl Context {
         };
 
         // Create the actual ImGui context
-        let raw = unsafe { sys::ImGui_CreateContext(shared_font_atlas_ptr) };
+        let raw = unsafe { sys::igCreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
             return Err(crate::error::ImGuiError::ContextCreation {
                 reason: "ImGui_CreateContext returned null".to_string(),
@@ -141,7 +141,7 @@ impl Context {
 
         // Set it as the current context
         unsafe {
-            sys::ImGui_SetCurrentContext(raw);
+            sys::igSetCurrentContext(raw);
         }
 
         Ok(Context {
@@ -160,7 +160,7 @@ impl Context {
     pub fn io_mut(&mut self) -> &mut Io {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let io_ptr = sys::ImGui_GetIO();
+            let io_ptr = sys::igGetIO_Nil();
             &mut *(io_ptr as *mut Io)
         }
     }
@@ -169,7 +169,7 @@ impl Context {
     pub fn io(&self) -> &crate::io::Io {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let io_ptr = sys::ImGui_GetIO();
+            let io_ptr = sys::igGetIO_Nil();
             &*(io_ptr as *const crate::io::Io)
         }
     }
@@ -178,7 +178,7 @@ impl Context {
     pub fn style(&self) -> &crate::style::Style {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let style_ptr = sys::ImGui_GetStyle();
+            let style_ptr = sys::igGetStyle();
             &*(style_ptr as *const crate::style::Style)
         }
     }
@@ -187,7 +187,7 @@ impl Context {
     pub fn style_mut(&mut self) -> &mut crate::style::Style {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let style_ptr = sys::ImGui_GetStyle();
+            let style_ptr = sys::igGetStyle();
             &mut *(style_ptr as *mut crate::style::Style)
         }
     }
@@ -198,7 +198,7 @@ impl Context {
 
         // Ensure font atlas is built before calling NewFrame
         unsafe {
-            let io = sys::ImGui_GetIO();
+            let io = sys::igGetIO_Nil();
             let fonts = (*io).Fonts;
 
             // Check if we need to add default font and build atlas
@@ -209,13 +209,13 @@ impl Context {
 
             if !(*fonts).TexIsBuilt {
                 // Build the font atlas using the main build function
-                sys::ImFontAtlasBuildMain(fonts);
+                sys::igImFontAtlasBuildMain(fonts);
 
                 // Mark the texture as built by setting a dummy texture ID
                 (*fonts).TexIsBuilt = true;
             }
 
-            sys::ImGui_NewFrame();
+            sys::igNewFrame();
         }
         &mut self.ui
     }
@@ -236,8 +236,8 @@ impl Context {
     pub fn render(&mut self) -> &crate::render::DrawData {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::ImGui_Render();
-            &*(sys::ImGui_GetDrawData() as *const crate::render::DrawData)
+            sys::igRender();
+            &*(sys::igGetDrawData() as *const crate::render::DrawData)
         }
     }
 
@@ -248,16 +248,12 @@ impl Context {
     pub fn draw_data(&self) -> Option<&crate::render::DrawData> {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let draw_data = sys::ImGui_GetDrawData();
+            let draw_data = sys::igGetDrawData();
             if draw_data.is_null() {
                 None
             } else {
                 let data = &*(draw_data as *const crate::render::DrawData);
-                if data.valid() {
-                    Some(data)
-                } else {
-                    None
-                }
+                if data.valid() { Some(data) } else { None }
             }
         }
     }
@@ -280,7 +276,7 @@ impl Context {
         };
 
         unsafe {
-            let io = sys::ImGui_GetIO();
+            let io = sys::igGetIO_Nil();
             let ptr = self
                 .ini_filename
                 .as_ref()
@@ -321,7 +317,7 @@ impl Context {
         };
 
         unsafe {
-            let io = sys::ImGui_GetIO();
+            let io = sys::igGetIO_Nil();
             let ptr = self
                 .log_filename
                 .as_ref()
@@ -362,7 +358,7 @@ impl Context {
         };
 
         unsafe {
-            let io = sys::ImGui_GetIO();
+            let io = sys::igGetIO_Nil();
             let ptr = self
                 .platform_name
                 .as_ref()
@@ -403,7 +399,7 @@ impl Context {
         };
 
         unsafe {
-            let io = sys::ImGui_GetIO();
+            let io = sys::igGetIO_Nil();
             let ptr = self
                 .renderer_name
                 .as_ref()
@@ -431,7 +427,7 @@ impl Context {
     pub fn platform_io_mut(&mut self) -> &mut crate::platform_io::PlatformIo {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let pio = sys::ImGui_GetPlatformIO();
+            let pio = sys::igGetPlatformIO_Nil();
             crate::platform_io::PlatformIo::from_raw_mut(pio)
         }
     }
@@ -452,14 +448,14 @@ impl Context {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             // Ensure main viewport is properly set up before updating platform windows
-            let main_viewport = sys::ImGui_GetMainViewport();
+            let main_viewport = sys::igGetMainViewport();
             if !main_viewport.is_null() && (*main_viewport).PlatformHandle.is_null() {
                 eprintln!("update_platform_windows: main viewport not set up, setting it up now");
                 // The main viewport needs to be set up - this should be done by the backend
                 // For now, we'll just log this and continue
             }
 
-            sys::ImGui_UpdatePlatformWindows();
+            sys::igUpdatePlatformWindows();
         }
     }
 
@@ -471,7 +467,7 @@ impl Context {
     pub fn render_platform_windows_default(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::ImGui_RenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
+            sys::igRenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
         }
     }
 
@@ -483,7 +479,7 @@ impl Context {
     pub fn destroy_platform_windows(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::ImGui_DestroyPlatformWindows();
+            sys::igDestroyPlatformWindows();
         }
     }
 
@@ -499,7 +495,7 @@ impl Context {
     }
 
     fn is_current_context(&self) -> bool {
-        let ctx = unsafe { sys::ImGui_GetCurrentContext() };
+        let ctx = unsafe { sys::igGetCurrentContext() };
         self.raw == ctx
     }
 
@@ -507,7 +503,7 @@ impl Context {
     pub fn push_font(&mut self, font: &Font) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::ImGui_PushFont(font.raw(), 0.0);
+            sys::igPushFont(font.raw(), 0.0);
         }
     }
 
@@ -518,7 +514,7 @@ impl Context {
     pub fn pop_font(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::ImGui_PopFont();
+            sys::igPopFont();
         }
     }
 
@@ -526,21 +522,21 @@ impl Context {
     #[doc(alias = "GetFont")]
     pub fn current_font(&self) -> &Font {
         let _guard = CTX_MUTEX.lock();
-        unsafe { Font::from_raw(sys::ImGui_GetFont()) }
+        unsafe { Font::from_raw(sys::igGetFont()) }
     }
 
     /// Get the current font size
     #[doc(alias = "GetFontSize")]
     pub fn current_font_size(&self) -> f32 {
         let _guard = CTX_MUTEX.lock();
-        unsafe { sys::ImGui_GetFontSize() }
+        unsafe { sys::igGetFontSize() }
     }
 
     /// Get the font atlas from the IO structure
     pub fn font_atlas(&self) -> FontAtlas {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let io = sys::ImGui_GetIO();
+            let io = sys::igGetIO_Nil();
             let atlas_ptr = (*io).Fonts;
             FontAtlas::from_raw(atlas_ptr)
         }
@@ -550,7 +546,7 @@ impl Context {
     pub fn font_atlas_mut(&mut self) -> FontAtlas {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let io = sys::ImGui_GetIO();
+            let io = sys::igGetIO_Nil();
             let atlas_ptr = (*io).Fonts;
             FontAtlas::from_raw(atlas_ptr)
         }
@@ -573,7 +569,7 @@ impl Context {
     pub fn load_ini_settings(&mut self, data: &str) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::ImGui_LoadIniSettingsFromMemory(data.as_ptr() as *const _, data.len());
+            sys::igLoadIniSettingsFromMemory(data.as_ptr() as *const _, data.len());
         }
     }
 
@@ -582,7 +578,7 @@ impl Context {
     pub fn save_ini_settings(&mut self, buf: &mut String) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let data_ptr = sys::ImGui_SaveIniSettingsToMemory(ptr::null_mut());
+            let data_ptr = sys::igSaveIniSettingsToMemory(ptr::null_mut());
             if !data_ptr.is_null() {
                 let data = std::ffi::CStr::from_ptr(data_ptr);
                 buf.push_str(&data.to_string_lossy());
@@ -597,7 +593,7 @@ impl Context {
 
         // Set the clipboard callbacks in the ImGui PlatformIO
         unsafe {
-            let platform_io = sys::ImGui_GetPlatformIO();
+            let platform_io = sys::igGetPlatformIO_Nil();
             (*platform_io).Platform_SetClipboardTextFn = Some(crate::clipboard::set_clipboard_text);
             (*platform_io).Platform_GetClipboardTextFn = Some(crate::clipboard::get_clipboard_text);
             (*platform_io).Platform_ClipboardUserData = clipboard_ctx.get() as *mut _;
@@ -612,10 +608,10 @@ impl Drop for Context {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             if !self.raw.is_null() {
-                if sys::ImGui_GetCurrentContext() == self.raw {
+                if sys::igGetCurrentContext() == self.raw {
                     clear_current_context();
                 }
-                sys::ImGui_DestroyContext(self.raw);
+                sys::igDestroyContext(self.raw);
             }
         }
     }
@@ -683,7 +679,7 @@ impl SuspendedContext {
             None => ptr::null_mut(),
         };
 
-        let raw = unsafe { sys::ImGui_CreateContext(shared_font_atlas_ptr) };
+        let raw = unsafe { sys::igCreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
             return Err(crate::error::ImGuiError::ContextCreation {
                 reason: "ImGui_CreateContext returned null".to_string(),
@@ -717,7 +713,7 @@ impl SuspendedContext {
         let _guard = CTX_MUTEX.lock();
         if no_current_context() {
             unsafe {
-                sys::ImGui_SetCurrentContext(self.0.raw);
+                sys::igSetCurrentContext(self.0.raw);
             }
             Ok(self.0)
         } else {

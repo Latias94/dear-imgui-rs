@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-sys"
-version.workspace = true
+version = "0.2.0"
 edition.workspace = true
 description = "Low level FFI bindings for Dear ImGui with docking support"
 license.workspace = true
@@ -14,24 +14,38 @@ links = "dear-imgui"
 
 # Exclude unnecessary files to reduce package size
 exclude = [
-    "imgui/backends/",
-    "imgui/docs/", 
-    "imgui/examples/",
-    "imgui/misc/cpp/",
-    "imgui/misc/debuggers/",
-    "imgui/misc/fonts/",
-    "imgui/misc/single_file/",
+    # Exclude heavy upstream folders from cimgui/imgui submodule
+    "third-party/cimgui/imgui/backends/**",
+    "third-party/cimgui/imgui/docs/**", 
+    "third-party/cimgui/imgui/examples/**",
+    "third-party/cimgui/imgui/misc/cpp/**",
+    "third-party/cimgui/imgui/misc/debuggers/**",
+    "third-party/cimgui/imgui/misc/fonts/**",
+    "third-party/cimgui/imgui/misc/single_file/**",
+    # cimgui helper/test/generator content not needed for building
+    "third-party/cimgui/.github/**",
+    "third-party/cimgui/backend_test/**",
+    "third-party/cimgui/generator/**",
+    "third-party/cimgui/test/**",
 ]
 
 [dependencies]
 mint.workspace = true
 cfg-if.workspace = true
+flate2 = { version = "1", features = ["zlib-ng-compat"], default-features = false }
+tar = "0.4"
 
 [build-dependencies]
 bindgen.workspace = true
 cc.workspace = true
 pkg-config = { workspace = true, optional = true }
 xshell = "0.2"
+reqwest = { version = "0.11", features = ["blocking", "rustls-tls"], default-features = false }
+cmake = "0.1"
+
+[[bin]]
+name = "package"
+path = "bin/package/main.rs"
 
 [features]
 default = ["docking"]
@@ -42,4 +56,4 @@ multi-viewport = ["docking"]
 # Enable freetype font rasterizer
 freetype = ["pkg-config"]
 # Enable for WASM targets
-# wasm = []
+wasm = []

@@ -161,9 +161,9 @@ impl Ui {
         flags: DockNodeFlags,
     ) -> sys::ImGuiID {
         unsafe {
-            sys::ImGui_DockSpaceOverViewport(
+            sys::igDockSpaceOverViewport(
                 dockspace_id,
-                sys::ImGui_GetMainViewport(),
+                sys::igGetMainViewport(),
                 flags.bits(),
                 ptr::null(),
             )
@@ -237,7 +237,7 @@ impl Ui {
             } else {
                 ptr::null()
             };
-            sys::ImGui_DockSpace(id, &size_vec as *const _, flags.bits(), window_class_ptr)
+            sys::igDockSpace(id, size_vec, flags.bits(), window_class_ptr)
         }
     }
 
@@ -289,7 +289,7 @@ impl Ui {
     #[doc(alias = "SetNextWindowDockID")]
     pub fn set_next_window_dock_id_with_cond(&self, dock_id: sys::ImGuiID, cond: crate::Condition) {
         unsafe {
-            sys::ImGui_SetNextWindowDockID(dock_id, cond as i32);
+            sys::igSetNextWindowDockID(dock_id, cond as i32);
         }
     }
 
@@ -343,7 +343,7 @@ impl Ui {
     pub fn set_next_window_class(&self, window_class: &WindowClass) {
         unsafe {
             let imgui_wc = window_class.to_imgui();
-            sys::ImGui_SetNextWindowClass(&imgui_wc as *const _);
+            sys::igSetNextWindowClass(&imgui_wc as *const _);
         }
     }
 
@@ -370,7 +370,7 @@ impl Ui {
     /// ```
     #[doc(alias = "GetWindowDockID")]
     pub fn get_window_dock_id(&self) -> sys::ImGuiID {
-        unsafe { sys::ImGui_GetWindowDockID() }
+        unsafe { sys::igGetWindowDockID() }
     }
 
     /// Checks if the current window is docked
@@ -395,7 +395,7 @@ impl Ui {
     /// ```
     #[doc(alias = "IsWindowDocked")]
     pub fn is_window_docked(&self) -> bool {
-        unsafe { sys::ImGui_IsWindowDocked() }
+        unsafe { sys::igIsWindowDocked() }
     }
 }
 

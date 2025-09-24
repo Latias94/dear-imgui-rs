@@ -1,5 +1,5 @@
-use crate::sys;
 use crate::Ui;
+use crate::sys;
 
 impl Ui {
     /// Creates a button with the given label
@@ -25,21 +25,21 @@ impl Ui {
     #[doc(alias = "Checkbox")]
     pub fn checkbox(&self, label: impl AsRef<str>, value: &mut bool) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::ImGui_Checkbox(label_ptr, value) }
+        unsafe { sys::igCheckbox(label_ptr, value) }
     }
 
     /// Creates a radio button
     #[doc(alias = "RadioButton")]
     pub fn radio_button(&self, label: impl AsRef<str>, active: bool) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::ImGui_RadioButton(label_ptr, active) }
+        unsafe { sys::igRadioButton_Bool(label_ptr, active) }
     }
 
     /// Creates a radio button with integer value
     #[doc(alias = "RadioButton")]
     pub fn radio_button_int(&self, label: impl AsRef<str>, v: &mut i32, v_button: i32) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::ImGui_RadioButton1(label_ptr, v, v_button) }
+        unsafe { sys::igRadioButton_IntPtr(label_ptr, v, v_button) }
     }
 
     /// Creates a radio button suitable for choosing an arbitrary value.
@@ -48,7 +48,7 @@ impl Ui {
     #[doc(alias = "RadioButtonBool")]
     pub fn radio_button_bool(&self, label: impl AsRef<str>, active: bool) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::ImGui_RadioButton(label_ptr, active) }
+        unsafe { sys::igRadioButton_Bool(label_ptr, active) }
     }
 
     /// Renders a checkbox suitable for toggling bit flags using a mask.
@@ -104,6 +104,6 @@ impl<'ui> Button<'ui> {
         let label_ptr = self.ui.scratch_txt(&self.label);
         let size = self.size.unwrap_or([0.0, 0.0]);
         let size_vec: sys::ImVec2 = size.into();
-        unsafe { sys::ImGui_Button(label_ptr, &size_vec) }
+        unsafe { sys::igButton(label_ptr, size_vec) }
     }
 }

@@ -3,7 +3,7 @@
 //! This module provides keyboard and mouse input mapping between winit events
 //! and Dear ImGui input system.
 
-use dear_imgui::{input::MouseButton as ImGuiMouseButton, Key};
+use dear_imgui::{Key, input::MouseButton as ImGuiMouseButton};
 use winit::event::MouseButton as WinitMouseButton;
 use winit::keyboard::{Key as WinitKey, KeyLocation, NamedKey};
 

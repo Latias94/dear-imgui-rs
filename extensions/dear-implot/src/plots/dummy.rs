@@ -1,8 +1,8 @@
 //! Dummy plot implementation
 
-use super::{safe_cstring, PlotData, PlotError};
-use crate::sys;
+use super::{PlotData, PlotError, safe_cstring};
 use crate::DummyFlags;
+use crate::sys;
 
 /// Builder for dummy plots
 ///

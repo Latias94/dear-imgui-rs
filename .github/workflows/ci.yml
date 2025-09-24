@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev \
+            mesa-common-dev libgl1-mesa-dev
+
+      - name: Install LLVM (libclang) for bindgen (Linux)
+        if: runner.os == 'Linux'
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          directory: ${{ runner.temp }}/llvm
+          cached: true
+          version: '14.0'
+
+      - name: Install macOS deps
+        if: runner.os == 'macOS'
+        run: brew update
+
+      - name: Install Windows deps
+        if: runner.os == 'Windows'
+        run: choco install -y llvm cmake
+
+      - name: Build workspace (native)
+        run: cargo build --workspace
+        env:
+          # Prefer CMake path on Windows (auto-detects VS/SDK)
+          IMGUI_SYS_USE_CMAKE: ${{ runner.os == 'Windows' && '1' || '' }}
+
+      - name: Build examples with extensions
+        run: cargo build -p dear-imgui-examples --features "dear-imguizmo dear-imnodes dear-implot"
+
+  publish-check:
+    name: Package check (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo package (selected crates)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Before first publish, only package -sys crates that don't require
+          # unpublished internal deps from crates.io. 'dear-imgui-sys' is the root.
+          echo "::group::package dear-imgui-sys"
+          cargo package -p dear-imgui-sys
+          echo "::endgroup::"
+
+          # Note: other -sys crates depend on dear-imgui-sys by version and will fail
+          # packaging until dear-imgui-sys is published. We keep their packaging disabled
+          # here to avoid false CI failures pre-release.
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+

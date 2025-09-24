@@ -1,181 +1,120 @@
-# Dear ImGuizmo
+# Dear ImGuizmo - Rust Bindings
 
-High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), a 3D gizmo library for Dear ImGui.
-
-ImGuizmo provides interactive 3D manipulation widgets (gizmos) for translation, rotation, and scaling operations in 3D space.
+High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on top of the C API (`cimguizmo`) and integrated with `dear-imgui`.
 
 ## Features
 
-- **Translation gizmos**: Move objects in 3D space along individual axes or planes
-- **Rotation gizmos**: Rotate objects around axes or screen space
-- **Scale gizmos**: Scale objects uniformly or per-axis
-- **View manipulation**: Interactive camera controls with view cube
-- **Grid rendering**: Draw reference grids in 3D space
-- **Matrix utilities**: Decompose and recompose transformation matrices
-- **Customizable styling**: Configure colors, sizes, and appearance
-- **Safe Rust API**: Memory-safe wrappers with RAII lifetime management
-- **Builder patterns**: Fluent, type-safe configuration APIs
+- `glam` (default): Use `glam::Mat4` seamlessly in the high-level API.
+- `mint` (optional): Use `mint::ColumnMatrix4<f32>` seamlessly.
+- Without those features, you can always pass `[f32; 16]` (column-major) matrices.
+
+All matrix arguments in the API are generic over a `Mat4Like` trait, implemented for `[f32; 16]`, and when enabled, for `glam::Mat4` and `mint::ColumnMatrix4<f32>`.
 
 ## Quick Start
 
-Add to your `Cargo.toml`:
-
-```toml
+```
 [dependencies]
-dear-imgui = { path = "path/to/dear-imgui" }
-dear-imguizmo = { path = "path/to/extensions/dear-imguizmo" }
+dear-imgui = "0.1"
+dear-imguizmo = { path = "../../extensions/dear-imguizmo" }
 ```
 
-Basic usage:
+Minimal usage (dear-imgui-style API):
 
 ```rust
-use dear_imgui::*;
-use dear_imguizmo::*;
+use dear_imgui::Context;
+use dear_imguizmo::{Operation, Mode, GuizmoExt};
+use glam::Mat4;
 
-fn main() {
-    let mut imgui_ctx = Context::create_or_panic();
-    let gizmo_ctx = GuizmoContext::create(&imgui_ctx);
+let mut ctx = Context::create_or_panic();
+let ui = ctx.frame();
 
-    // In your render loop
-    let ui = imgui_ctx.frame();
-    let gizmo_ui = gizmo_ctx.get_ui(&ui);
+// Begin ImGuizmo for this frame via Ui extension
+let giz = ui.guizmo();
 
-    // Set up the viewport
-    gizmo_ui.set_rect(0.0, 0.0, 800.0, 600.0);
+// Set the drawing rectangle to the full viewport
+let ds = ui.io().display_size();
+giz.set_rect(0.0, 0.0, ds[0], ds[1]);
 
-    // Your transformation matrix
-    let mut matrix = [1.0, 0.0, 0.0, 0.0,
-                      0.0, 1.0, 0.0, 0.0,
-                      0.0, 0.0, 1.0, 0.0,
-                      0.0, 0.0, 0.0, 1.0];
+// Choose where to draw (window/background/foreground)
+giz.set_drawlist_window();
 
-    // Camera matrices
-    let view = get_view_matrix();
-    let projection = get_projection_matrix();
+// Matrices (column-major). With the default `glam` feature, use `glam::Mat4`.
+let mut model = Mat4::IDENTITY;
+let view = Mat4::IDENTITY;
+let proj = Mat4::IDENTITY;
 
-    // Manipulate the object
-    if let Some(result) = gizmo_ui.manipulate(&view, &projection)
-        .operation(Operation::TRANSLATE)
-        .mode(Mode::WORLD)
-        .matrix(&mut matrix)
-        .build() {
-        
-        if result.used {
-            println!("Object was manipulated!");
-        }
-    }
-}
-```
-
-## Operations
-
-ImGuizmo supports various manipulation operations:
-
-```rust
-// Individual axis operations
-Operation::TRANSLATE_X | Operation::TRANSLATE_Y | Operation::TRANSLATE_Z
-Operation::ROTATE_X | Operation::ROTATE_Y | Operation::ROTATE_Z
-Operation::SCALE_X | Operation::SCALE_Y | Operation::SCALE_Z
-
-// Combined operations
-Operation::TRANSLATE  // All translation axes
-Operation::ROTATE     // All rotation axes + screen rotation
-Operation::SCALE      // All scale axes
-Operation::UNIVERSAL  // All operations combined
-```
-
-## Manipulation Modes
-
-- `Mode::Local`: Manipulate in object's local coordinate space
-- `Mode::World`: Manipulate in world coordinate space
-
-## Advanced Features
-
-### Snapping
-
-```rust
-let snap_values = [1.0, 1.0, 1.0]; // Snap to 1-unit grid
-gizmo_ui.manipulate(&view, &projection)
+// Manipulate the model matrix
+let used: bool = giz
+    .manipulate_config(&view, &proj, &mut model)
     .operation(Operation::TRANSLATE)
-    .matrix(&mut matrix)
-    .snap(&snap_values)
-    .build();
-```
-
-### View Manipulation
-
-```rust
-let mut view_matrix = get_view_matrix();
-gizmo_ui.view_manipulate(&mut view_matrix)
-    .position(10.0, 10.0)
-    .size(128.0, 128.0)
-    .length(8.0)
-    .build();
-```
-
-### Custom Styling
-
-```rust
-let style = StyleBuilder::new()
-    .translation_line_thickness(4.0)
-    .color(ColorType::DirectionX, [1.0, 0.0, 0.0, 1.0])
-    .color(ColorType::DirectionY, [0.0, 1.0, 0.0, 1.0])
-    .color(ColorType::DirectionZ, [0.0, 0.0, 1.0, 1.0])
+    .mode(Mode::Local)
+    //.snap([1.0, 1.0, 1.0])
+    //.bounds([minx,miny,minz], [maxx,maxy,maxz])
     .build();
 
-gizmo_ui.set_style(&style);
+if used { /* object moved */ }
 ```
 
-### Matrix Utilities
+See `examples/imguizmo_basic.rs` for a full demo with camera controls, snapping, bounds and helpers.
+
+Notes:
+- You can select draw target with `giz.set_drawlist(DrawListTarget::Window|Background|Foreground)`.
+- Use RAII ID helpers: `let _id = giz.push_id(i);`.
+- Style access: `let mut st = giz.style(); st.set_color(Color::Selection, [1.0,0.2,0.2,1.0]);`.
+  More fields: `translation_line_arrow_size()`, `rotation_outer_line_thickness()`,
+  `scale_line_circle_size()`, `hatched_axis_line_thickness()`, etc.
+ - `view_manipulate`/`view_manipulate_with_camera` accept any `Into<[f32;2]>` for position/size; `set_rect_pos_size` is available as a convenience.
+
+Builder extras:
+- `.drawlist(DrawListTarget::...)`, `.rect(x,y,w,h)`, `.orthographic(bool)`, `.gizmo_size_clip_space(f32)`
+- `.axis_mask(AxisMask::X | AxisMask::Z)`
+- `.translate_snap([f32;3])`, `.rotate_snap_deg(f32)`, `.scale_snap([f32;3])` (also accepts `(f32,f32,f32)`, `glam::Vec3`, `mint::Vector3<f32>`)
+
+## Notes
+
+- This crate depends on `dear-imguizmo-sys` (C API + bindgen). Linking to the base ImGui static library is provided by `dear-imgui-sys`; you do not need to configure it here.
+
+### Graph Editor (pure Rust, optional)
+
+We provide a minimal, pure-Rust graph editor aligned with dear-imgui style, under `dear_imguizmo::graph`. It aims to mirror ImGuizmo’s GraphEditor UX without relying on the C++ API.
 
 ```rust
-// Decompose matrix into components
-let (translation, rotation, scale) = gizmo_ui.decompose_matrix(&matrix)?;
+use dear_imguizmo::graph::{Graph, GraphView};
+use dear_imguizmo::graph::GraphEditorExt; // Ui extension
 
-// Modify components
-let mut new_translation = translation;
-new_translation[0] += 1.0; // Move 1 unit along X
+let mut graph = Graph::new();
+let mut view = GraphView::default();
+// populate graph.nodes/links ...
 
-// Recompose matrix
-let new_matrix = gizmo_ui.recompose_matrix(&new_translation, &rotation, &scale);
+ui.window("Graph")
+  .size([600.0, 400.0], dear_imgui::Condition::FirstUseEver)
+  .build(|| {
+      // Simple draw with defaults
+      let _resp = ui.graph_editor().draw(&mut graph, &mut view);
+
+      // Or configure style via builder
+      let _resp = ui
+          .graph_editor_config()
+          .graph(&mut graph)
+          .view(&mut view)
+          .grid_visible(true)
+          .grid_spacing(28.0)
+          .link_thickness(2.0)
+          .build();
+  });
 ```
 
-### ID Management
+Current features:
+- Grid (toggle visibility, custom spacing/color)
+- Panning (MMB), node dragging (LMB)
+- Selection (click, Ctrl multi-select, box select)
+- Link creation (drag from output to input), link selection
+- Link reconnection (drag near a link endpoint onto another pin)
+- Deletion via Delete key or helper `delete_selected(&mut Graph, &mut GraphView)`
+- Fit helpers: `fit_all_nodes(...)`, `fit_selected_nodes(...)`
 
-```rust
-// Automatic ID management with RAII
-{
-    let _id_guard = IdGuard::new(&gizmo_ui, "object1");
-    // Gizmo operations for object1
-} // ID automatically popped
+Notes:
+- Pin hover, node/link hover outlines are shown using `GraphStyle` colors.
+- Simple 2D interop: `graph::Vec2Like` supports `(f32,f32)`, `[f32;2]`, `mint::Vector2<f32>`, and (with `glam`) `glam::Vec2`.
+- This module is pure Rust and independent of the C++ GraphEditor; improvements are welcome.
 
-// Manual ID management
-gizmo_ui.push_id("object2");
-// Gizmo operations for object2
-gizmo_ui.pop_id();
-```
-
-## Examples
-
-Run the basic usage example:
-
-```bash
-cargo run --example basic_usage
-```
-
-## Architecture
-
-This crate follows the same architecture pattern as other Dear ImGui extensions:
-
-- `dear-imguizmo-sys`: Low-level FFI bindings to ImGuizmo C++
-- `dear-imguizmo`: High-level safe Rust API (this crate)
-
-## License
-
-This project is licensed under the same terms as Dear ImGui.
-
-ImGuizmo is licensed under the MIT License. See the [ImGuizmo repository](https://github.com/CedricGuillemet/ImGuizmo) for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.

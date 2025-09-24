@@ -77,7 +77,7 @@ impl DockBuilder {
     /// Do not store this pointer across frames.
     #[doc(alias = "DockBuilderGetNode")]
     pub fn get_node(node_id: sys::ImGuiID) -> *mut sys::ImGuiDockNode {
-        unsafe { sys::ImGui_DockBuilderGetNode(node_id) }
+        unsafe { sys::igDockBuilderGetNode(node_id) }
     }
 
     /// Adds a new dock node
@@ -99,7 +99,7 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderAddNode")]
     pub fn add_node(node_id: sys::ImGuiID, flags: crate::DockNodeFlags) -> sys::ImGuiID {
-        unsafe { sys::ImGui_DockBuilderAddNode(node_id, flags.bits()) }
+        unsafe { sys::igDockBuilderAddNode(node_id, flags.bits()) }
     }
 
     /// Removes a dock node
@@ -116,7 +116,7 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderRemoveNode")]
     pub fn remove_node(node_id: sys::ImGuiID) {
-        unsafe { sys::ImGui_DockBuilderRemoveNode(node_id) }
+        unsafe { sys::igDockBuilderRemoveNode(node_id) }
     }
 
     /// Removes all docked windows from a node
@@ -134,7 +134,7 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeDockedWindows")]
     pub fn remove_node_docked_windows(node_id: sys::ImGuiID, clear_settings_refs: bool) {
-        unsafe { sys::ImGui_DockBuilderRemoveNodeDockedWindows(node_id, clear_settings_refs) }
+        unsafe { sys::igDockBuilderRemoveNodeDockedWindows(node_id, clear_settings_refs) }
     }
 
     /// Removes all child nodes from a dock node
@@ -151,7 +151,7 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeChildNodes")]
     pub fn remove_node_child_nodes(node_id: sys::ImGuiID) {
-        unsafe { sys::ImGui_DockBuilderRemoveNodeChildNodes(node_id) }
+        unsafe { sys::igDockBuilderRemoveNodeChildNodes(node_id) }
     }
 
     /// Sets the position of a dock node
@@ -174,7 +174,7 @@ impl DockBuilder {
                 x: pos[0],
                 y: pos[1],
             };
-            sys::ImGui_DockBuilderSetNodePos(node_id, pos_vec)
+            sys::igDockBuilderSetNodePos(node_id, pos_vec)
         }
     }
 
@@ -198,7 +198,7 @@ impl DockBuilder {
                 x: size[0],
                 y: size[1],
             };
-            sys::ImGui_DockBuilderSetNodeSize(node_id, size_vec)
+            sys::igDockBuilderSetNodeSize(node_id, size_vec)
         }
     }
 
@@ -235,7 +235,7 @@ impl DockBuilder {
             } else {
                 ptr::null_mut()
             };
-            sys::ImGui_DockBuilderSplitNode(
+            sys::igDockBuilderSplitNode(
                 node_id,
                 split_dir.into(),
                 size_ratio_for_node_at_dir,
@@ -261,7 +261,7 @@ impl DockBuilder {
     #[doc(alias = "DockBuilderDockWindow")]
     pub fn dock_window(window_name: &str, node_id: sys::ImGuiID) {
         let c_name = CString::new(window_name).expect("Window name contained null byte");
-        unsafe { sys::ImGui_DockBuilderDockWindow(c_name.as_ptr(), node_id) }
+        unsafe { sys::igDockBuilderDockWindow(c_name.as_ptr(), node_id) }
     }
 
     /// Finishes the dock builder operations
@@ -282,6 +282,6 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderFinish")]
     pub fn finish(node_id: sys::ImGuiID) {
-        unsafe { sys::ImGui_DockBuilderFinish(node_id) }
+        unsafe { sys::igDockBuilderFinish(node_id) }
     }
 }

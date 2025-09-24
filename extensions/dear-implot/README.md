@@ -1,6 +1,45 @@
 # Dear ImPlot - Rust Bindings
 
-High-level Rust bindings for ImPlot, the immediate mode plotting library. This crate provides safe, idiomatic Rust bindings designed to work seamlessly with dear-imgui (C++ bindgen) rather than imgui-rs (cimgui).
+High-level Rust bindings for ImPlot, the immediate mode plotting library. This crate provides safe, idiomatic Rust bindings designed to work seamlessly with `dear-imgui` (which uses cimgui C API) and `dear-implot-sys` (which uses cimplot C API).
+
+For native build/link options (source, system/prebuilt, remote prebuilt), see `extensions/dear-implot-sys/README.md`.
+
+## Integration Quickstart
+
+This crate integrates with `dear-imgui` directly — add both crates, then build plots inside an ImGui window using a `PlotContext` bound to the current ImGui context.
+
+```toml
+[dependencies]
+dear-imgui = "0.1"
+dear-implot = { path = "../../extensions/dear-implot" }
+```
+
+```rust
+use dear_imgui as imgui;
+use dear_implot::*;
+
+fn main() {
+    let mut ctx = imgui::Context::create_or_panic();
+    let plot_ctx = PlotContext::create(&ctx);
+
+    // frame loop
+    let ui = ctx.frame();
+    // Ui extension: obtain PlotUi from Ui + PlotContext
+    let plot_ui = ui.implot(&plot_ctx);
+    ui.window("Plot Example").build(|| {
+        if let Some(token) = plot_ui.begin_plot("Line") {
+            let x = [0.0, 1.0, 2.0, 3.0];
+            let y = [0.0, 1.0, 4.0, 9.0];
+            LinePlot::new("y=x^2", &x, &y).plot();
+            token.end();
+        }
+    });
+}
+```
+
+Notes:
+- Base ImGui static library linking is handled by `dear-imgui-sys`; you do not need to link it here.
+- Refer to the `-sys` README for `IMPLOT_SYS_*` env vars when using prebuilt libraries.
 
 ## Features
 
@@ -39,7 +78,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // In your main loop:
     let ui = ctx.frame();
-    let plot_ui = plot_ctx.get_plot_ui(&ui);
+    // Or via Ui extension:
+    let plot_ui = ui.implot(&plot_ctx);
 
     ui.window("My Plots")
         .size([800.0, 600.0], Condition::FirstUseEver)

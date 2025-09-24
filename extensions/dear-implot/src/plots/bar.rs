@@ -1,6 +1,6 @@
 //! Bar plot implementation
 
-use super::{safe_cstring, Plot, PlotError};
+use super::{Plot, PlotError, safe_cstring};
 use crate::sys;
 
 /// Builder for bar plots with customization options
@@ -77,12 +77,15 @@ impl<'a> Plot for BarPlot<'a> {
         let label_cstr = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotBars_double(
+            sys::ImPlot_PlotBars_doublePtrInt(
                 label_cstr.as_ptr(),
                 self.values.as_ptr(),
                 self.values.len() as i32,
                 self.bar_size,
                 self.shift,
+                self.flags,
+                self.offset,
+                self.stride,
             );
         }
     }
@@ -139,15 +142,16 @@ impl<'a> Plot for PositionalBarPlot<'a> {
 
         let label_cstr = safe_cstring(self.label);
 
-        // Note: This would require a different wrapper function for positional bars
-        // For now, we'll use the simple version and ignore X positions
         unsafe {
-            sys::ImPlot_PlotBars_double(
+            sys::ImPlot_PlotBars_doublePtrdoublePtr(
                 label_cstr.as_ptr(),
+                self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.y_data.len() as i32,
                 self.bar_size,
-                0.0, // shift
+                self.flags,
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }

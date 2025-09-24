@@ -1,16 +1,25 @@
+//! ImGuizmo Basic Example (wgpu + winit)
+//!
+//! - Toggle full-view vs window viewport
+//! - Perspective/Orthographic camera, distance and FOV/width controls
+//! - Choose operation (Translate/Rotate/Scale) and mode (Local/World)
+//! - Optional snapping for translate/rotate/scale
+//! - Draw grid and multiple cubes, manipulate with gizmos
+
 use dear_imgui::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
-use dear_imguizmo::*;
+use dear_imguizmo as guizmo;
+use dear_imguizmo::GuizmoExt;
+use dear_imguizmo::graph::{Graph, GraphEditorExt, GraphView, Node, Pin, PinKind};
+use glam::{Mat4, Vec3};
 use pollster::block_on;
 use std::{sync::Arc, time::Instant};
-use tracing::{error, info};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
 
@@ -19,44 +28,7 @@ struct ImguiState {
     platform: WinitPlatform,
     renderer: WgpuRenderer,
     clear_color: wgpu::Color,
-    demo_open: bool,
     last_frame: Instant,
-    // ImGuizmo state
-    gizmo_context: GuizmoContext,
-    object_matrix: glam::Mat4,
-    view_matrix: glam::Mat4,
-    projection_matrix: glam::Mat4,
-    current_operation: Operation,
-    current_mode: Mode,
-    // Projection and helpers
-    use_orthographic: bool,
-    fov_degrees: f32,
-    ortho_height: f32,
-    // Helpers drawing
-    show_grid: bool,
-    grid_size: f32,
-    show_cubes: bool,
-    cube_mats: [glam::Mat4; 3],
-    // Snapping
-    use_snap: bool,
-    translate_snap: [f32; 3],
-    rotate_snap_deg: f32,
-    scale_snap: [f32; 3],
-    universal_snap_mode: i32, // 0=Translate 1=Rotate 2=Scale
-    // Bounds editing
-    enable_bounds: bool,
-    local_bounds: [f32; 6],
-    bounds_snap: [f32; 3],
-    // Visibility/behavior
-    allow_axis_flip: bool,
-    axis_limit: f32,
-    plane_limit: f32,
-    gizmo_size_clip: f32,
-    show_view_manipulate: bool,
-    view_manipulate_size: f32,
-    camera_distance: f32,
-    camera_angle_x: f32,
-    camera_angle_y: f32,
 }
 
 struct AppWindow {
@@ -66,15 +38,116 @@ struct AppWindow {
     surface_desc: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
     imgui: ImguiState,
+
+    // Demo state
+    state: DemoState,
 }
 
-#[derive(Default)]
-struct App {
-    window: Option<AppWindow>,
+#[derive(Clone, Copy)]
+enum OpKind {
+    Translate,
+    Rotate,
+    Scale,
+}
+
+struct DemoState {
+    // Viewport control
+    use_window: bool,
+    gizmo_count: i32,
+    gizmo_window_no_move: bool,
+
+    // Camera
+    is_perspective: bool,
+    fov_deg: f32,
+    ortho_width: f32,
+    cam_distance: f32,
+    cam_y_angle: f32,
+    cam_x_angle: f32,
+    first_frame: bool,
+
+    camera_view: Mat4,
+    camera_proj: Mat4,
+
+    // Operation & mode
+    current_op_kind: OpKind,
+    current_mode: guizmo::Mode,
+    use_snap: bool,
+    snap: [f32; 3],
+
+    // Objects
+    last_using: i32,
+    objects: [Mat4; 4],
+
+    // Graph editor
+    graph: Graph,
+    graph_view: GraphView,
+    graph_grid_visible: bool,
+    graph_links_curves: bool,
+    graph_scale_link_thickness: bool,
+    graph_draw_io_on_hover: bool,
+    graph_snap: f32,
+    graph_minimap_enabled: bool,
+    graph_show_editor: bool,
+    graph_ctx_evt: Option<dear_imguizmo::graph::RightClickEvent>,
+}
+
+impl Default for DemoState {
+    fn default() -> Self {
+        Self {
+            use_window: true,
+            gizmo_count: 1,
+            gizmo_window_no_move: false,
+
+            is_perspective: true,
+            fov_deg: 27.0,
+            ortho_width: 10.0,
+            cam_distance: 8.0,
+            cam_y_angle: 165.0_f32.to_radians(),
+            cam_x_angle: 32.0_f32.to_radians(),
+            first_frame: true,
+            camera_view: Mat4::IDENTITY,
+            camera_proj: Mat4::IDENTITY,
+
+            current_op_kind: OpKind::Translate,
+            current_mode: guizmo::Mode::World,
+            use_snap: false,
+            snap: [1.0, 1.0, 1.0],
+
+            last_using: 0,
+            objects: [
+                Mat4::from_cols_array(&[
+                    1.0, 0.0, 0.0, 0.0, // col0
+                    0.0, 1.0, 0.0, 0.0, // col1
+                    0.0, 0.0, 1.0, 0.0, // col2
+                    0.0, 0.0, 0.0, 1.0, // col3
+                ]),
+                Mat4::from_cols_array(&[
+                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 2.0, 0.0, 0.0, 1.0,
+                ]),
+                Mat4::from_cols_array(&[
+                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 2.0, 0.0, 2.0, 1.0,
+                ]),
+                Mat4::from_cols_array(&[
+                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 1.0,
+                ]),
+            ],
+
+            graph: Graph::new(),
+            graph_view: GraphView::default(),
+            graph_grid_visible: true,
+            graph_links_curves: true,
+            graph_scale_link_thickness: false,
+            graph_draw_io_on_hover: false,
+            graph_snap: 0.0,
+            graph_minimap_enabled: true,
+            graph_show_editor: true,
+            graph_ctx_evt: None,
+        }
+    }
 }
 
 impl AppWindow {
-    fn new(event_loop: &ActiveEventLoop) -> std::result::Result<Self, Box<dyn std::error::Error>> {
+    fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
@@ -87,7 +160,7 @@ impl AppWindow {
             Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
-                        .with_title(&format!("Dear ImGuizmo Demo - {version}"))
+                        .with_title(&format!("Dear ImGui + ImGuizmo Example - {version}"))
                         .with_inner_size(size),
                 )?,
             )
@@ -118,29 +191,18 @@ impl AppWindow {
 
         surface.configure(&device, &surface_desc);
 
-        // Setup ImGui immediately
+        // Setup ImGui
         let mut context = Context::create_or_panic();
         context.set_ini_filename_or_panic(None::<String>);
 
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
 
-        // Initialize the renderer with one-step initialization
+        // Initialize renderer
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
-        let mut renderer =
+        let renderer =
             WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
-
-        // Log successful initialization
-        dear_imgui::logging::log_context_created();
-        dear_imgui::logging::log_platform_init("Winit");
-        dear_imgui::logging::log_renderer_init("WGPU");
-
-        // Initialize ImGuizmo
-        let gizmo_context = GuizmoContext::new();
-
-        // Initialize matrices
-        let object_matrix = glam::Mat4::IDENTITY;
 
         let imgui = ImguiState {
             context,
@@ -152,43 +214,7 @@ impl AppWindow {
                 b: 0.3,
                 a: 1.0,
             },
-            demo_open: false,
             last_frame: Instant::now(),
-            gizmo_context,
-            object_matrix,
-            view_matrix: create_view_matrix(8.0, 0.0, 0.0),
-            projection_matrix: create_perspective_for_aspect(45.0, 1280.0 / 720.0, 0.1, 100.0),
-            current_operation: Operation::UNIVERSAL,
-            current_mode: Mode::World,
-            use_orthographic: false,
-            fov_degrees: 45.0,
-            ortho_height: 10.0,
-            show_grid: true,
-            grid_size: 1.0,
-            show_cubes: true,
-            cube_mats: [
-                glam::Mat4::from_translation(glam::vec3(-2.0, 0.0, -2.0)),
-                glam::Mat4::from_translation(glam::vec3(2.0, 0.0, 2.0)),
-                glam::Mat4::from_scale(glam::vec3(0.75, 0.75, 0.75))
-                    * glam::Mat4::from_translation(glam::vec3(0.0, 1.0, -3.0)),
-            ],
-            use_snap: true,
-            translate_snap: [0.5, 0.5, 0.5],
-            rotate_snap_deg: 15.0,
-            scale_snap: [0.1, 0.1, 0.1],
-            universal_snap_mode: 1,
-            enable_bounds: false,
-            local_bounds: [-0.5, 0.5, -0.5, 0.5, -0.5, 0.5],
-            bounds_snap: [0.1, 0.1, 0.1],
-            allow_axis_flip: true,
-            axis_limit: 0.0025,
-            plane_limit: 0.02,
-            gizmo_size_clip: 0.1,
-            show_view_manipulate: true,
-            view_manipulate_size: 128.0,
-            camera_distance: 8.0,
-            camera_angle_x: 0.0,
-            camera_angle_y: 0.0,
         };
 
         Ok(Self {
@@ -198,6 +224,7 @@ impl AppWindow {
             surface_desc,
             surface,
             imgui,
+            state: DemoState::default(),
         })
     }
 
@@ -206,578 +233,676 @@ impl AppWindow {
             self.surface_desc.width = new_size.width;
             self.surface_desc.height = new_size.height;
             self.surface.configure(&self.device, &self.surface_desc);
-
-            // Update projection matrix for new aspect ratio
-            let aspect = new_size.width as f32 / new_size.height as f32;
-            self.imgui.projection_matrix = if self.imgui.use_orthographic {
-                create_orthographic_for_aspect(self.imgui.ortho_height, aspect, 0.1, 100.0)
-            } else {
-                create_perspective_for_aspect(self.imgui.fov_degrees, aspect, 0.1, 100.0)
-            };
         }
     }
-}
 
-// Helper functions for matrix creation
-fn create_view_matrix(distance: f32, angle_x: f32, angle_y: f32) -> glam::Mat4 {
-    // Simple look-at matrix pointing towards origin
-    let eye_x = distance * angle_y.cos() * angle_x.cos();
-    let eye_y = distance * angle_x.sin();
-    let eye_z = distance * angle_y.sin() * angle_x.cos();
-
-    // Use glam's look_at_rh function
-    let eye = glam::Vec3::new(eye_x, eye_y, eye_z);
-    let center = glam::Vec3::ZERO;
-    let up = glam::Vec3::Y;
-    glam::Mat4::look_at_rh(eye, center, up)
-}
-
-fn create_perspective_for_aspect(fov_degrees: f32, aspect: f32, near: f32, far: f32) -> glam::Mat4 {
-    glam::Mat4::perspective_rh(fov_degrees.to_radians(), aspect, near, far)
-}
-
-fn create_orthographic_for_aspect(height: f32, aspect: f32, near: f32, far: f32) -> glam::Mat4 {
-    let half_h = height * 0.5;
-    let half_w = half_h * aspect;
-    glam::Mat4::orthographic_rh(-half_w, half_w, -half_h, half_h, near, far)
-}
-
-impl AppWindow {
-    fn render(&mut self) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
         let delta_time = now - self.imgui.last_frame;
-        let delta_secs = delta_time.as_secs_f32();
-
-        self.imgui.context.io_mut().set_delta_time(delta_secs);
         self.imgui.last_frame = now;
 
-        let frame = self.surface.get_current_texture()?;
+        self.imgui
+            .context
+            .io_mut()
+            .set_delta_time(delta_time.as_secs_f32());
 
         self.imgui
             .platform
             .prepare_frame(&self.window, &mut self.imgui.context);
+
         let ui = self.imgui.context.frame();
 
-        // Update view matrix based on camera controls
-        self.imgui.view_matrix = create_view_matrix(
-            self.imgui.camera_distance,
-            self.imgui.camera_angle_x,
-            self.imgui.camera_angle_y,
-        );
+        // Build UI
+        {
+            // Camera projection
+            let io = ui.io();
+            let ds = io.display_size();
+            let aspect = if ds[1] > 0.0 { ds[0] / ds[1] } else { 1.0 };
+            if self.state.is_perspective {
+                self.state.camera_proj = perspective(self.state.fov_deg, aspect, 0.1, 100.0);
+            } else {
+                let view_height = self.state.ortho_width * (ds[1] / ds[0]).max(0.0001);
+                self.state.camera_proj = orthographic(
+                    -self.state.ortho_width,
+                    self.state.ortho_width,
+                    -view_height,
+                    view_height,
+                    1000.0,
+                    -1000.0,
+                );
+            }
 
-        // Begin ImGuizmo frame
-        let gizmo_ui = self.imgui.gizmo_context.get_ui(&ui);
+            let giz = ui.guizmo();
+            giz.set_orthographic(!self.state.is_perspective);
 
-        // Set the viewport for ImGuizmo (full window)
-        let window_size = ui.io().display_size();
-        let _ = gizmo_ui.set_rect(0.0, 0.0, window_size[0], window_size[1]);
-
-        // Control panel
-        ui.window("ImGuizmo Controls")
-            .size([360.0, 560.0], Condition::FirstUseEver)
-            .position([10.0, 10.0], Condition::FirstUseEver)
-            .build(|| {
-                ui.text("ImGuizmo: common features demo");
-                ui.separator();
-
-                // Operation selection
-                ui.text("Operation");
-                if ui.radio_button(
-                    "Universal",
-                    self.imgui.current_operation == Operation::UNIVERSAL,
-                ) {
-                    self.imgui.current_operation = Operation::UNIVERSAL;
-                }
-                if ui.radio_button(
-                    "Translate",
-                    self.imgui.current_operation == Operation::TRANSLATE,
-                ) {
-                    self.imgui.current_operation = Operation::TRANSLATE;
-                }
-                if ui.radio_button("Rotate", self.imgui.current_operation == Operation::ROTATE) {
-                    self.imgui.current_operation = Operation::ROTATE;
-                }
-                if ui.radio_button("Scale", self.imgui.current_operation == Operation::SCALE) {
-                    self.imgui.current_operation = Operation::SCALE;
-                }
-
-                ui.separator();
-
-                // Mode selection
-                ui.text("Coordinate System");
-                if ui.radio_button("World", matches!(self.imgui.current_mode, Mode::World)) {
-                    self.imgui.current_mode = Mode::World;
-                }
-                if ui.radio_button("Local", matches!(self.imgui.current_mode, Mode::Local)) {
-                    self.imgui.current_mode = Mode::Local;
-                }
-
-                ui.separator();
-
-                // Projection
-                ui.text("Projection");
-                ui.checkbox("Orthographic", &mut self.imgui.use_orthographic);
-                if self.imgui.use_orthographic {
-                    ui.slider("Ortho Height", 2.0, 50.0, &mut self.imgui.ortho_height);
-                } else {
-                    ui.slider("FOV (deg)", 10.0, 120.0, &mut self.imgui.fov_degrees);
-                }
-
-                // Apply projection immediately
-                let aspect = self.surface_desc.width as f32 / self.surface_desc.height as f32;
-                self.imgui.projection_matrix = if self.imgui.use_orthographic {
-                    create_orthographic_for_aspect(self.imgui.ortho_height, aspect, 0.1, 100.0)
-                } else {
-                    create_perspective_for_aspect(self.imgui.fov_degrees, aspect, 0.1, 100.0)
-                };
-
-                ui.separator();
-
-                // Snap settings
-                ui.checkbox("Enable Snap", &mut self.imgui.use_snap);
-                if self.imgui.use_snap {
-                    if self.imgui.current_operation == Operation::UNIVERSAL {
-                        ui.text("Universal snap applies to:");
-                        if ui.radio_button("Translate", self.imgui.universal_snap_mode == 0) {
-                            self.imgui.universal_snap_mode = 0;
-                        }
-                        ui.same_line();
-                        if ui.radio_button("Rotate", self.imgui.universal_snap_mode == 1) {
-                            self.imgui.universal_snap_mode = 1;
-                        }
-                        ui.same_line();
-                        if ui.radio_button("Scale", self.imgui.universal_snap_mode == 2) {
-                            self.imgui.universal_snap_mode = 2;
-                        }
+            // Control window
+            ui.window("Editor")
+                .size([320.0, 340.0], Condition::FirstUseEver)
+                .position([10.0, 10.0], Condition::FirstUseEver)
+                .build(|| {
+                    if ui.radio_button("Full view", !self.state.use_window) {
+                        self.state.use_window = false;
                     }
-                    ui.drag_float3("Translate snap", &mut self.imgui.translate_snap);
-                    ui.slider(
-                        "Rotate snap (deg)",
-                        1.0,
-                        90.0,
-                        &mut self.imgui.rotate_snap_deg,
-                    );
-                    ui.drag_float3("Scale snap", &mut self.imgui.scale_snap);
-                }
+                    ui.same_line();
+                    if ui.radio_button("Window", self.state.use_window) {
+                        self.state.use_window = true;
+                    }
 
-                ui.separator();
-
-                // Behavior & size
-                ui.text("Behavior");
-                ui.checkbox("Allow axis flip", &mut self.imgui.allow_axis_flip);
-                ui.slider(
-                    "Gizmo size (clip)",
-                    0.05,
-                    0.3,
-                    &mut self.imgui.gizmo_size_clip,
-                );
-                ui.slider("Axis limit", 0.0, 0.02, &mut self.imgui.axis_limit);
-                ui.slider("Plane limit", 0.0, 0.2, &mut self.imgui.plane_limit);
-
-                ui.separator();
-
-                // Helpers
-                ui.text("Helpers");
-                ui.checkbox("Draw grid", &mut self.imgui.show_grid);
-                if self.imgui.show_grid {
-                    ui.slider("Grid size", 0.25, 5.0, &mut self.imgui.grid_size);
-                }
-                ui.checkbox("Draw sample cubes", &mut self.imgui.show_cubes);
-
-                ui.separator();
-
-                // Bounds
-                ui.text("Bounds");
-                ui.checkbox("Enable local bounds editing", &mut self.imgui.enable_bounds);
-                if self.imgui.enable_bounds {
-                    let mut bmin = [
-                        self.imgui.local_bounds[0],
-                        self.imgui.local_bounds[2],
-                        self.imgui.local_bounds[4],
-                    ];
-                    let mut bmax = [
-                        self.imgui.local_bounds[1],
-                        self.imgui.local_bounds[3],
-                        self.imgui.local_bounds[5],
-                    ];
-                    ui.drag_float3("Bounds min", &mut bmin);
-                    ui.drag_float3("Bounds max", &mut bmax);
-                    self.imgui.local_bounds =
-                        [bmin[0], bmax[0], bmin[1], bmax[1], bmin[2], bmax[2]];
-                    ui.drag_float3("Bounds snap", &mut self.imgui.bounds_snap);
-                }
-
-                ui.separator();
-
-                // View manipulation settings
-                ui.checkbox("Show View Manipulate", &mut self.imgui.show_view_manipulate);
-                if self.imgui.show_view_manipulate {
-                    ui.slider(
-                        "View Cube Size",
-                        64.0,
-                        256.0,
-                        &mut self.imgui.view_manipulate_size,
-                    );
-                }
-
-                ui.separator();
-
-                // Camera controls
-                ui.text("Camera Controls:");
-                ui.slider("Distance", 2.0, 20.0, &mut self.imgui.camera_distance);
-                ui.slider(
-                    "Angle X",
-                    -std::f32::consts::PI,
-                    std::f32::consts::PI,
-                    &mut self.imgui.camera_angle_x,
-                );
-                ui.slider(
-                    "Angle Y",
-                    -std::f32::consts::PI,
-                    std::f32::consts::PI,
-                    &mut self.imgui.camera_angle_y,
-                );
-
-                if ui.button("Reset Camera") {
-                    self.imgui.camera_distance = 8.0;
-                    self.imgui.camera_angle_x = 0.0;
-                    self.imgui.camera_angle_y = 0.0;
-                }
-                if ui.button("Reset Object") {
-                    self.imgui.object_matrix = glam::Mat4::IDENTITY;
-                }
-
-                ui.separator();
-
-                // Show demo window toggle
-                ui.checkbox("Show ImGui Demo", &mut self.imgui.demo_open);
-
-                ui.separator();
-
-                // Frame rate
-                ui.text(&format!(
-                    "Application average {:.3} ms/frame ({:.1} FPS)",
-                    1000.0 / ui.io().framerate(),
-                    ui.io().framerate()
-                ));
-            });
-
-        // Main 3D manipulation in a dedicated window
-        let manipulation_result = ui
-            .window("3D Gizmo Viewport")
-            .size([920.0, 680.0], Condition::FirstUseEver)
-            .position([380.0, 10.0], Condition::FirstUseEver)
-            .build(|| {
-                // Set the gizmo viewport to this window's content area
-                let content_region = ui.content_region_avail();
-                let cursor_pos = ui.cursor_screen_pos();
-
-                // Update gizmo viewport to match this window
-                let _ = gizmo_ui.set_rect(
-                    cursor_pos[0],
-                    cursor_pos[1],
-                    content_region[0],
-                    content_region[1],
-                );
-
-                // Reserve space for the gizmo (we draw into the window background)
-                ui.dummy(content_region);
-
-                // Apply per-frame gizmo settings
-                gizmo_ui.set_orthographic(self.imgui.use_orthographic);
-                gizmo_ui.allow_axis_flip(self.imgui.allow_axis_flip);
-                gizmo_ui.set_gizmo_size_clip_space(self.imgui.gizmo_size_clip);
-                gizmo_ui.set_axis_limit(self.imgui.axis_limit);
-                gizmo_ui.set_plane_limit(self.imgui.plane_limit);
-
-                // Draw helpers first (these methods create their own DrawListMut internally)
-                if self.imgui.show_grid {
-                    gizmo_ui.draw_grid(
-                        &self.imgui.view_matrix,
-                        &self.imgui.projection_matrix,
-                        &glam::Mat4::IDENTITY,
-                        self.imgui.grid_size,
-                    );
-                }
-                if self.imgui.show_cubes {
-                    gizmo_ui.draw_cubes(
-                        &self.imgui.view_matrix,
-                        &self.imgui.projection_matrix,
-                        &self.imgui.cube_mats,
-                    );
-                }
-
-                // Get the window draw list for gizmo rendering (after helpers are done)
-                let draw_list = ui.get_window_draw_list();
-
-                // Build snap option according to operation
-                let mut rot_snap_arr = [self.imgui.rotate_snap_deg, 0.0, 0.0];
-                let snap_opt: Option<&[f32; 3]> = if self.imgui.use_snap {
-                    let op = self.imgui.current_operation;
-                    if op == Operation::UNIVERSAL {
-                        match self.imgui.universal_snap_mode {
-                            0 => Some(&self.imgui.translate_snap),
-                            1 => Some(&rot_snap_arr),
-                            _ => Some(&self.imgui.scale_snap),
-                        }
-                    } else if op.intersects(Operation::ROTATE) {
-                        Some(&rot_snap_arr)
-                    } else if op.intersects(Operation::TRANSLATE) {
-                        Some(&self.imgui.translate_snap)
-                    } else if op.intersects(Operation::SCALE | Operation::SCALE_UNIFORM) {
-                        Some(&self.imgui.scale_snap)
+                    ui.text("Camera");
+                    if ui.radio_button("Perspective", self.state.is_perspective) {
+                        self.state.is_perspective = true;
+                    }
+                    ui.same_line();
+                    if ui.radio_button("Orthographic", !self.state.is_perspective) {
+                        self.state.is_perspective = false;
+                    }
+                    if self.state.is_perspective {
+                        ui.slider_f32("Fov", &mut self.state.fov_deg, 20.0, 110.0);
                     } else {
-                        None
+                        ui.slider_f32("Ortho width", &mut self.state.ortho_width, 1.0, 20.0);
                     }
-                } else {
-                    None
-                };
+                    let mut view_dirty = false;
+                    view_dirty |=
+                        ui.slider_f32("Distance", &mut self.state.cam_distance, 1.0, 10.0);
+                    ui.slider_i32("Gizmo count", &mut self.state.gizmo_count, 1, 4);
 
-                // Bounds options
-                let local_bounds_opt = if self.imgui.enable_bounds {
-                    Some(&self.imgui.local_bounds)
-                } else {
-                    None
-                };
-                let bounds_snap_opt = if self.imgui.enable_bounds {
-                    Some(&self.imgui.bounds_snap)
-                } else {
-                    None
-                };
+                    if view_dirty || self.state.first_frame {
+                        let eye = Vec3::new(
+                            self.state.cam_y_angle.cos()
+                                * self.state.cam_x_angle.cos()
+                                * self.state.cam_distance,
+                            self.state.cam_x_angle.sin() * self.state.cam_distance,
+                            self.state.cam_y_angle.sin()
+                                * self.state.cam_x_angle.cos()
+                                * self.state.cam_distance,
+                        );
+                        self.state.camera_view = look_at(eye, Vec3::ZERO, Vec3::Y);
+                        self.state.first_frame = false;
+                    }
 
-                // Perform the gizmo manipulation (full options)
-                gizmo_ui.manipulate_with_options(
-                    &draw_list,
-                    &self.imgui.view_matrix,
-                    &self.imgui.projection_matrix,
-                    self.imgui.current_operation,
-                    self.imgui.current_mode,
-                    &mut self.imgui.object_matrix,
-                    None,
-                    snap_opt,
-                    local_bounds_opt,
-                    bounds_snap_opt,
-                )
-            })
-            .unwrap_or(Ok(false));
+                    ui.separator();
+                    // Operation selection
+                    match self.state.current_op_kind {
+                        OpKind::Translate => if ui.radio_button("Translate", true) {},
+                        _ => {
+                            if ui.radio_button("Translate", false) {
+                                self.state.current_op_kind = OpKind::Translate;
+                            }
+                        }
+                    }
+                    ui.same_line();
+                    match self.state.current_op_kind {
+                        OpKind::Rotate => if ui.radio_button("Rotate", true) {},
+                        _ => {
+                            if ui.radio_button("Rotate", false) {
+                                self.state.current_op_kind = OpKind::Rotate;
+                            }
+                        }
+                    }
+                    ui.same_line();
+                    match self.state.current_op_kind {
+                        OpKind::Scale => if ui.radio_button("Scale", true) {},
+                        _ => {
+                            if ui.radio_button("Scale", false) {
+                                self.state.current_op_kind = OpKind::Scale;
+                            }
+                        }
+                    }
 
-        // Handle manipulation result
-        match manipulation_result {
-            Ok(modified) => {
-                if modified {
-                    info!(
-                        "Object manipulated with operation: {:?}",
-                        self.imgui.current_operation
-                    );
-                }
-            }
-            Err(e) => {
-                error!("Manipulation error: {:?}", e);
-            }
-        }
+                    // Mode selection (not available for Scale in original demo, but allowed here)
+                    if let OpKind::Scale = self.state.current_op_kind {
+                        // leave as-is, user can still toggle mode but ImGuizmo ignores it for Scale
+                    }
+                    match self.state.current_mode {
+                        guizmo::Mode::Local => if ui.radio_button("Local", true) {},
+                        guizmo::Mode::World => {
+                            if ui.radio_button("Local", false) {
+                                self.state.current_mode = guizmo::Mode::Local;
+                            }
+                        }
+                    }
+                    ui.same_line();
+                    match self.state.current_mode {
+                        guizmo::Mode::World => if ui.radio_button("World", true) {},
+                        guizmo::Mode::Local => {
+                            if ui.radio_button("World", false) {
+                                self.state.current_mode = guizmo::Mode::World;
+                            }
+                        }
+                    }
 
-        // View manipulation (camera controls)
-        if self.imgui.show_view_manipulate {
-            let window_size = ui.io().display_size();
-            let view_pos = [
-                window_size[0] - self.imgui.view_manipulate_size - 10.0,
-                10.0,
-            ];
-            let view_size = [
-                self.imgui.view_manipulate_size,
-                self.imgui.view_manipulate_size,
-            ];
+                    // Snap controls
+                    ui.checkbox("Enable snap", &mut self.state.use_snap);
+                    if self.state.use_snap {
+                        match self.state.current_op_kind {
+                            OpKind::Translate => {
+                                let _ = ui.input_scalar_n("Snap (Tr)", &mut self.state.snap);
+                            }
+                            OpKind::Rotate => {
+                                ui.input_float("Angle Snap", &mut self.state.snap[0]);
+                            }
+                            OpKind::Scale => {
+                                ui.input_float("Scale Snap", &mut self.state.snap[0]);
+                            }
+                        }
+                    }
+                });
 
-            let view_modified = gizmo_ui.view_manipulate(
-                &mut self.imgui.view_matrix,
-                8.0,
-                view_pos,
-                view_size,
-                0x10101050,
-            );
-
-            if view_modified {
-                info!("View manipulated");
-            }
-        }
-
-        // Matrix information window
-        ui.window("Matrix Information")
-            .size([420.0, 260.0], Condition::FirstUseEver)
-            .position(
-                [window_size[0] - 360.0, window_size[1] - 210.0],
-                Condition::FirstUseEver,
-            )
-            .build(|| {
-                ui.text("Object Transformation Matrix:");
-                ui.separator();
-
-                // Display matrix in a readable format
-                let matrix_array = self.imgui.object_matrix.to_cols_array();
-                for row in 0..4 {
-                    let start_idx = row * 4;
-                    ui.text(&format!(
-                        "[{:6.2}, {:6.2}, {:6.2}, {:6.2}]",
-                        matrix_array[start_idx],
-                        matrix_array[start_idx + 1],
-                        matrix_array[start_idx + 2],
-                        matrix_array[start_idx + 3]
-                    ));
-                }
-
-                ui.separator();
-
-                // Show gizmo state
-                ui.text(&format!("Operation: {:?}", self.imgui.current_operation));
-                ui.text(&format!("Mode: {:?}", self.imgui.current_mode));
-                ui.text(&format!("Using: {}", gizmo_ui.is_using()));
-                ui.text(&format!("Over Any: {}", gizmo_ui.is_over()));
-                ui.text(&format!(
-                    "Over Op(Translate): {}",
-                    gizmo_ui.is_over_operation(Operation::TRANSLATE)
+            // Initialize a tiny graph on first frame
+            if self.state.first_frame && self.state.graph.nodes.is_empty() {
+                let n1 = self.state.graph.alloc_node_id();
+                let n2 = self.state.graph.alloc_node_id();
+                // Node1: two colored outputs
+                let p_out0 = self.state.graph.alloc_pin_id();
+                let p_out1 = self.state.graph.alloc_pin_id();
+                let mut node1 = Node::new(n1, (-150.0_f32, -40.0), "Source");
+                node1.outputs.push(Pin::colored(
+                    p_out0,
+                    "Out0",
+                    PinKind::Output,
+                    [0.78, 0.39, 0.39, 1.0],
                 ));
-            });
+                node1.outputs.push(Pin::colored(
+                    p_out1,
+                    "Out1",
+                    PinKind::Output,
+                    [0.39, 0.78, 0.39, 1.0],
+                ));
+                // Node2: three colored inputs
+                let p_in0 = self.state.graph.alloc_pin_id();
+                let p_in1 = self.state.graph.alloc_pin_id();
+                let p_in2 = self.state.graph.alloc_pin_id();
+                let mut node2 = Node::new(n2, (150.0_f32, -40.0), "Sink");
+                node2.inputs.push(Pin::colored(
+                    p_in0,
+                    "In0",
+                    PinKind::Input,
+                    [0.78, 0.39, 0.39, 1.0],
+                ));
+                node2.inputs.push(Pin::colored(
+                    p_in1,
+                    "In1",
+                    PinKind::Input,
+                    [0.39, 0.78, 0.39, 1.0],
+                ));
+                node2.inputs.push(Pin::colored(
+                    p_in2,
+                    "In2",
+                    PinKind::Input,
+                    [0.39, 0.39, 0.78, 1.0],
+                ));
+                self.state.graph.nodes.push(node1);
+                self.state.graph.nodes.push(node2);
+                // initial link
+                let lid = self.state.graph.alloc_link_id();
+                self.state.graph.links.push(dear_imguizmo::graph::Link {
+                    id: lid,
+                    from: p_out0,
+                    to: p_in0,
+                });
+            }
 
-        // Show demo window if requested
-        if self.imgui.demo_open {
-            ui.show_demo_window(&mut self.imgui.demo_open);
+            // Graph Editor window (toggle like C++ sample)
+            if self.state.graph_show_editor {
+                ui.window("Graph Editor")
+                    .size([420.0, 300.0], Condition::FirstUseEver)
+                    .position([10.0, 360.0], Condition::FirstUseEver)
+                    .build(|| {
+                        if ui.button("Delete Selected") {
+                            dear_imguizmo::graph::delete_selected(
+                                &mut self.state.graph,
+                                &mut self.state.graph_view,
+                            );
+                        }
+                        ui.same_line();
+                        if ui.button("Fit all nodes") {
+                            let [wx, wy] = ui.window_pos();
+                            let [ww, wh] = ui.window_size();
+                            dear_imguizmo::graph::fit_all_nodes(
+                                &self.state.graph,
+                                &mut self.state.graph_view,
+                                [wx, wy],
+                                [ww, wh],
+                            );
+                        }
+                        ui.same_line();
+                        if ui.button("Fit selected nodes") {
+                            let [wx, wy] = ui.window_pos();
+                            let [ww, wh] = ui.window_size();
+                            dear_imguizmo::graph::fit_selected_nodes(
+                                &self.state.graph,
+                                &mut self.state.graph_view,
+                                [wx, wy],
+                                [ww, wh],
+                            );
+                        }
+                        ui.same_line();
+                        ui.checkbox("Show grid", &mut self.state.graph_grid_visible);
+                        ui.same_line();
+                        ui.checkbox("Curved links", &mut self.state.graph_links_curves);
+                        ui.same_line();
+                        ui.checkbox(
+                            "Scale thickness",
+                            &mut self.state.graph_scale_link_thickness,
+                        );
+                        ui.same_line();
+                        ui.checkbox("IO text on hover", &mut self.state.graph_draw_io_on_hover);
+                        ui.same_line();
+                        ui.checkbox("Minimap", &mut self.state.graph_minimap_enabled);
+                        ui.same_line();
+                        ui.set_next_item_width(100.0);
+                        let _ = ui.slider("Snap", 0.0, 50.0, &mut self.state.graph_snap);
+                        ui.same_line();
+                        ui.text(format!(
+                            "Selected: {} nodes",
+                            self.state.graph_view.selected_nodes.len()
+                        ));
+                        let resp = ui
+                            .graph_editor_config()
+                            .graph(&mut self.state.graph)
+                            .view(&mut self.state.graph_view)
+                            .grid_visible(self.state.graph_grid_visible)
+                            .display_links_as_curves(self.state.graph_links_curves)
+                            .scale_link_thickness_with_zoom(self.state.graph_scale_link_thickness)
+                            .draw_io_name_on_hover(self.state.graph_draw_io_on_hover)
+                            .snap(self.state.graph_snap)
+                            .minimap_enabled(self.state.graph_minimap_enabled)
+                            .grid_spacing(28.0)
+                            .build();
+                        if let Some(evt) = resp.right_click {
+                            self.state.graph_ctx_evt = Some(evt);
+                            ui.open_popup("GraphCtx");
+                        }
+                        if let Some(_popup) = ui.begin_popup("GraphCtx") {
+                            if let Some(evt) = self.state.graph_ctx_evt {
+                                if let Some(nid) = evt.node {
+                                    if ui.menu_item("Delete Node") {
+                                        self.state.graph_view.selected_nodes.clear();
+                                        self.state.graph_view.selected_nodes.insert(nid);
+                                        dear_imguizmo::graph::delete_selected(
+                                            &mut self.state.graph,
+                                            &mut self.state.graph_view,
+                                        );
+                                        self.state.graph_ctx_evt = None;
+                                    }
+                                } else {
+                                    if ui.menu_item("Add Node Here") {
+                                        // convert screen pos to world
+                                        let [wx, wy] = ui.window_pos();
+                                        let mp = evt.mouse_pos;
+                                        let wpos = [
+                                            (mp[0] - wx - self.state.graph_view.pan[0])
+                                                / self.state.graph_view.zoom,
+                                            (mp[1] - wy - self.state.graph_view.pan[1])
+                                                / self.state.graph_view.zoom,
+                                        ];
+                                        let nid = self.state.graph.alloc_node_id();
+                                        let mut node =
+                                            Node::new(nid, (wpos[0], wpos[1]), "New Node");
+                                        let pin_in = self.state.graph.alloc_pin_id();
+                                        let pin_out = self.state.graph.alloc_pin_id();
+                                        node.inputs.push(Pin::colored(
+                                            pin_in,
+                                            "In",
+                                            PinKind::Input,
+                                            [0.78, 0.39, 0.39, 1.0],
+                                        ));
+                                        node.outputs.push(Pin::colored(
+                                            pin_out,
+                                            "Out",
+                                            PinKind::Output,
+                                            [0.39, 0.78, 0.39, 1.0],
+                                        ));
+                                        self.state.graph.nodes.push(node);
+                                        self.state.graph_ctx_evt = None;
+                                    }
+                                }
+                                if ui.menu_item("Delete Selected") {
+                                    dear_imguizmo::graph::delete_selected(
+                                        &mut self.state.graph,
+                                        &mut self.state.graph_view,
+                                    );
+                                    self.state.graph_ctx_evt = None;
+                                }
+                            }
+                        }
+                    });
+            }
+
+            // Gizmo viewport window (or fullscreen)
+            let op_bits = match self.state.current_op_kind {
+                OpKind::Translate => guizmo::Operation::TRANSLATE,
+                OpKind::Rotate => guizmo::Operation::ROTATE,
+                OpKind::Scale => guizmo::Operation::SCALE,
+            };
+            let snap_opt = if self.state.use_snap {
+                Some(&self.state.snap)
+            } else {
+                None
+            };
+
+            if self.state.use_window {
+                let mut flags = WindowFlags::empty();
+                if self.state.gizmo_window_no_move {
+                    flags |= WindowFlags::NO_MOVE;
+                }
+                ui.window("Gizmo")
+                    .size([800.0, 400.0], Condition::FirstUseEver)
+                    .position([400.0, 20.0], Condition::FirstUseEver)
+                    .flags(flags)
+                    .build(|| {
+                        // Bind draw list to current window and set rect
+                        let [wx, wy] = ui.window_pos();
+                        let [ww, wh] = ui.window_size();
+                        giz.set_drawlist_window();
+                        giz.set_rect(wx, wy, ww, wh);
+
+                        // Draw grid + cubes
+                        let identity = Mat4::IDENTITY;
+                        giz.draw_grid(
+                            &self.state.camera_view,
+                            &self.state.camera_proj,
+                            &identity,
+                            100.0,
+                        );
+                        let count = self.state.gizmo_count.clamp(1, 4) as usize;
+                        giz.draw_cubes(
+                            &self.state.camera_view,
+                            &self.state.camera_proj,
+                            &self.state.objects[0..count],
+                        );
+
+                        // Manipulate each cube (window drawlist already set)
+                        for i in 0..count {
+                            let _id = giz.push_id(i as i32);
+                            let mut m = giz
+                                .manipulate_config(
+                                    &self.state.camera_view,
+                                    &self.state.camera_proj,
+                                    &mut self.state.objects[i],
+                                )
+                                .operation(op_bits)
+                                .mode(self.state.current_mode);
+                            if let Some(snap) = snap_opt {
+                                m = m.snap(*snap);
+                            }
+                            let _used = m.build();
+                            if giz.is_using() {
+                                self.state.last_using = i as i32;
+                            }
+                        }
+
+                        // View manipulator on the top-right of the window
+                        let pos = [wx + ww - 128.0, wy];
+                        let size = [128.0, 128.0];
+                        giz.view_manipulate(
+                            &mut self.state.camera_view,
+                            self.state.cam_distance,
+                            pos,
+                            size,
+                            0x10101010,
+                        );
+
+                        // Lock window move when interacting with gizmo
+                        self.state.gizmo_window_no_move = giz.is_over() || giz.is_using();
+                    });
+            } else {
+                // Full view
+                let ds = ui.io().display_size();
+                giz.set_drawlist_background();
+                giz.set_rect(0.0, 0.0, ds[0], ds[1]);
+                let identity = Mat4::IDENTITY;
+                giz.draw_grid(
+                    &self.state.camera_view,
+                    &self.state.camera_proj,
+                    &identity,
+                    100.0,
+                );
+                let count = self.state.gizmo_count.clamp(1, 4) as usize;
+                giz.draw_cubes(
+                    &self.state.camera_view,
+                    &self.state.camera_proj,
+                    &self.state.objects[0..count],
+                );
+                // Manipulate (foreground drawlist already set)
+                for i in 0..count {
+                    let _id = giz.push_id(i as i32);
+                    let mut m = giz
+                        .manipulate_config(
+                            &self.state.camera_view,
+                            &self.state.camera_proj,
+                            &mut self.state.objects[i],
+                        )
+                        .operation(op_bits)
+                        .mode(self.state.current_mode);
+                    if let Some(snap) = snap_opt {
+                        m = m.snap(*snap);
+                    }
+                    let _used = m.build();
+                    if giz.is_using() {
+                        self.state.last_using = i as i32;
+                    }
+                }
+                // View manipulator on the top-right of the screen
+                let pos = [ds[0] - 128.0, 0.0];
+                let size = [128.0, 128.0];
+                giz.view_manipulate(
+                    &mut self.state.camera_view,
+                    self.state.cam_distance,
+                    pos,
+                    size,
+                    0x10101010,
+                );
+            }
+
+            // Inspector for last selected matrix (decompose/recompose)
+            ui.window("Gizmo Inspector")
+                .size([320.0, 260.0], Condition::FirstUseEver)
+                .position([10.0, 360.0], Condition::FirstUseEver)
+                .build(|| {
+                    let idx = self
+                        .state
+                        .last_using
+                        .clamp(0, (self.state.gizmo_count - 1).max(0))
+                        as usize;
+                    ui.text(format!("Editing object #{idx}"));
+                    let (mut tr, mut rt, mut sc) =
+                        guizmo::decompose_matrix(&self.state.objects[idx]);
+                    let _ = ui.input_scalar_n("Tr", &mut tr);
+                    let _ = ui.input_scalar_n("Rt", &mut rt);
+                    let _ = ui.input_scalar_n("Sc", &mut sc);
+                    self.state.objects[idx] = guizmo::recompose_matrix(&tr, &rt, &sc);
+                });
+
+            // Additional controls like C++ sample: toggle Graph Editor visibility
+            ui.window("Graph Controls")
+                .size([300.0, 120.0], Condition::FirstUseEver)
+                .position([10.0, 680.0], Condition::FirstUseEver)
+                .build(|| {
+                    if ui.collapsing_header("Graph Editor", dear_imgui::TreeNodeFlags::empty()) {
+                        ui.checkbox("Show GraphEditor", &mut self.state.graph_show_editor);
+                    }
+                });
         }
 
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        // Rendering
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
+                label: Some("imgui encoder"),
             });
+        let output = self.surface.get_current_texture()?;
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("imgui render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(self.imgui.clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
         let draw_data = self.imgui.context.render();
-
-        {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.imgui.clear_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            // Call new_frame before rendering
-            self.imgui
-                .renderer
-                .new_frame()
-                .expect("Failed to prepare new frame");
-
-            if let Err(e) = self.imgui.renderer.render_draw_data(&draw_data, &mut rpass) {
-                error!("Failed to render draw data: {}", e);
-                return Err(Box::new(e));
-            }
-        }
-
+        self.imgui
+            .renderer
+            .render_draw_data(draw_data, &mut rpass)?;
+        drop(rpass);
         self.queue.submit(Some(encoder.finish()));
-        frame.present();
+        output.present();
+
         Ok(())
     }
+
+    // (build_ui removed; content moved inline into render())
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        // For compatibility with older winit versions and mobile platforms
         if self.window.is_none() {
             match AppWindow::new(event_loop) {
                 Ok(window) => {
                     self.window = Some(window);
-                    info!("Window created successfully in resumed");
                 }
                 Err(e) => {
-                    error!("Failed to create window in resumed: {e}");
+                    eprintln!("Failed to create window: {}", e);
                     event_loop.exit();
                 }
             }
         }
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        window_id: WindowId,
-        event: WindowEvent,
-    ) {
-        let window = match self.window.as_mut() {
-            Some(window) => window,
-            None => return,
-        };
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if let Some(window) = &mut self.window {
+            let winit_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
+                window_id: id,
+                event: event.clone(),
+            };
+            window.imgui.platform.handle_event(
+                &mut window.imgui.context,
+                &window.window,
+                &winit_event,
+            );
 
-        // Handle the event with ImGui first
-        let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-            window_id,
-            event: event.clone(),
-        };
-        window
-            .imgui
-            .platform
-            .handle_event(&mut window.imgui.context, &window.window, &full_event);
-
-        match event {
-            WindowEvent::Resized(physical_size) => {
-                window.resize(physical_size);
-                window.window.request_redraw();
-            }
-            WindowEvent::CloseRequested => {
-                info!("Close requested");
-                event_loop.exit();
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if event.logical_key == Key::Named(NamedKey::Escape) {
+            match event {
+                WindowEvent::CloseRequested => {
                     event_loop.exit();
                 }
-            }
-            WindowEvent::RedrawRequested => {
-                if let Err(e) = window.render() {
-                    error!("Render error: {e}");
+                WindowEvent::Resized(new_size) => {
+                    window.resize(new_size);
                 }
-                window.window.request_redraw();
+                WindowEvent::RedrawRequested => {
+                    if let Err(e) = window.render() {
+                        eprintln!("Render error: {}", e);
+                    }
+                    window.window.request_redraw();
+                }
+                _ => {}
             }
-            _ => {}
-        }
-    }
-
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Request redraw if we have a window
-        if let Some(window) = &self.window {
-            window.window.request_redraw();
         }
     }
 }
 
-fn main() {
-    // Initialize tracing with custom filter for demo
-    dear_imgui::logging::init_tracing_with_filter("dear_imgui=debug,imguizmo_basic=info,wgpu=warn");
+#[derive(Default)]
+struct App {
+    window: Option<AppWindow>,
+}
 
-    info!("Starting Dear ImGuizmo Basic Example");
-    info!("This example demonstrates:");
-    info!("  - 3D gizmo manipulation (translate, rotate, scale)");
-    info!("  - View manipulation with camera controls");
-    info!("  - Real-time matrix display");
-    info!("  - Coordinate system switching (World/Local)");
-    info!("  - Snap-to-grid functionality");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
 
-    let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::default();
+    event_loop.run_app(&mut app)?;
 
-    info!("Starting event loop...");
-    event_loop.run_app(&mut app).unwrap();
+    Ok(())
+}
 
-    info!("Dear ImGuizmo Basic Example finished");
+// --- Math helpers (match ImGuizmo demo behavior) ---
+fn frustum(left: f32, right: f32, bottom: f32, top: f32, znear: f32, zfar: f32) -> Mat4 {
+    let temp = 2.0 * znear;
+    let temp2 = right - left;
+    let temp3 = top - bottom;
+    let temp4 = zfar - znear;
+    Mat4::from_cols_array(&[
+        temp / temp2,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        temp / temp3,
+        0.0,
+        0.0,
+        (right + left) / temp2,
+        (top + bottom) / temp3,
+        (-zfar - znear) / temp4,
+        -1.0,
+        0.0,
+        0.0,
+        (-temp * zfar) / temp4,
+        0.0,
+    ])
+}
+
+fn perspective(fovy_degrees: f32, aspect_ratio: f32, znear: f32, zfar: f32) -> Mat4 {
+    let ymax = znear * (fovy_degrees.to_radians()).tan();
+    let xmax = ymax * aspect_ratio.max(0.0001);
+    frustum(-xmax, xmax, -ymax, ymax, znear, zfar)
+}
+
+fn orthographic(l: f32, r: f32, b: f32, t: f32, zn: f32, zf: f32) -> Mat4 {
+    Mat4::from_cols_array(&[
+        2.0 / (r - l),
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.0 / (t - b),
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0 / (zf - zn),
+        0.0,
+        (l + r) / (l - r),
+        (t + b) / (b - t),
+        zn / (zn - zf),
+        1.0,
+    ])
+}
+
+fn look_at(eye: Vec3, at: Vec3, up: Vec3) -> Mat4 {
+    let mut z = (eye - at).normalize_or_zero();
+    let mut y = up.normalize_or_zero();
+    let mut x = y.cross(z).normalize_or_zero();
+    y = z.cross(x).normalize_or_zero();
+
+    Mat4::from_cols_array(&[
+        x.x,
+        y.x,
+        z.x,
+        0.0,
+        x.y,
+        y.y,
+        z.y,
+        0.0,
+        x.z,
+        y.z,
+        z.z,
+        0.0,
+        -x.dot(eye),
+        -y.dot(eye),
+        -z.dot(eye),
+        1.0,
+    ])
 }

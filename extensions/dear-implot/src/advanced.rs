@@ -98,7 +98,7 @@ impl<'a> SubplotGrid<'a> {
                 title_cstr.as_ptr(),
                 self.rows,
                 self.cols,
-                &size_vec as *const sys::ImVec2,
+                size_vec,
                 self.flags.bits() as i32,
                 row_ratios_ptr,
                 col_ratios_ptr,
@@ -206,13 +206,7 @@ impl<'a> MultiAxisPlot<'a> {
             y: size[1],
         };
 
-        let success = unsafe {
-            sys::ImPlot_BeginPlot(
-                title_cstr.as_ptr(),
-                &size_vec as *const sys::ImVec2,
-                0, // flags
-            )
-        };
+        let success = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), size_vec, 0) };
 
         if success {
             // Setup additional Y-axes
@@ -234,19 +228,15 @@ impl<'a> MultiAxisPlot<'a> {
                         .unwrap_or(std::ptr::null());
 
                     unsafe {
+                        let axis_enum = (i as i32) + 3; // ImAxis_Y1 = 3
                         sys::ImPlot_SetupAxis(
-                            (i + 1) as i32, // Y-axis index
+                            axis_enum,
                             label_ptr,
                             axis_config.flags.bits() as i32,
                         );
 
                         if let Some((min, max)) = axis_config.range {
-                            sys::ImPlot_SetupAxisLimits(
-                                (i + 1) as i32,
-                                min,
-                                max,
-                                0, // condition
-                            );
+                            sys::ImPlot_SetupAxisLimits(axis_enum, min, max, 0);
                         }
                     }
                 }

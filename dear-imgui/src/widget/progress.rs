@@ -93,7 +93,7 @@ impl<'ui> ProgressBar<'ui> {
             .unwrap_or(std::ptr::null());
 
         unsafe {
-            sys::ImGui_ProgressBar(self.fraction, &size_vec, overlay_ptr);
+            sys::igProgressBar(self.fraction, size_vec, overlay_ptr);
         }
     }
 }

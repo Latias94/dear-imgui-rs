@@ -1,6 +1,6 @@
 //! Histogram plot implementation
 
-use super::{safe_cstring, Plot, PlotError};
+use super::{Plot, PlotError, safe_cstring};
 use crate::sys;
 use crate::{BinMethod, HistogramFlags};
 
@@ -104,21 +104,20 @@ impl<'a> Plot for HistogramPlot<'a> {
 
         let label_cstr = safe_cstring(self.label);
 
-        let (range_min, range_max) = if let Some(range) = &self.range {
-            (range.Min, range.Max)
+        let range = if let Some(range) = &self.range {
+            *range
         } else {
-            (0.0, 0.0) // Auto-range
+            sys::ImPlotRange { Min: 0.0, Max: 0.0 }
         };
 
         unsafe {
-            sys::ImPlot_PlotHistogram_double(
+            sys::ImPlot_PlotHistogram_doublePtr(
                 label_cstr.as_ptr(),
                 self.values.as_ptr(),
                 self.values.len() as i32,
                 self.bins,
                 self.bar_scale,
-                range_min,
-                range_max,
+                range,
                 self.flags.bits() as i32,
             );
         }
@@ -220,25 +219,24 @@ impl<'a> Plot for Histogram2DPlot<'a> {
 
         let label_cstr = safe_cstring(self.label);
 
-        let (range_x_min, range_x_max, range_y_min, range_y_max) = if let Some(range) = &self.range
-        {
-            (range.X.Min, range.X.Max, range.Y.Min, range.Y.Max)
+        let range = if let Some(range) = &self.range {
+            *range
         } else {
-            (0.0, 0.0, 0.0, 0.0) // Auto-range
+            sys::ImPlotRect {
+                X: sys::ImPlotRange { Min: 0.0, Max: 0.0 },
+                Y: sys::ImPlotRange { Min: 0.0, Max: 0.0 },
+            }
         };
 
         unsafe {
-            sys::ImPlot_PlotHistogram2D_double(
+            sys::ImPlot_PlotHistogram2D_doublePtr(
                 label_cstr.as_ptr(),
                 self.x_values.as_ptr(),
                 self.y_values.as_ptr(),
                 self.x_values.len() as i32,
                 self.x_bins,
                 self.y_bins,
-                range_x_min,
-                range_x_max,
-                range_y_min,
-                range_y_max,
+                range,
                 self.flags.bits() as i32,
             );
         }

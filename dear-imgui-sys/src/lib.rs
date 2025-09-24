@@ -1,7 +1,7 @@
-//! Low-level FFI bindings for Dear ImGui with docking support
+//! Low-level FFI bindings for Dear ImGui (via cimgui C API) with docking support
 //!
-//! This crate provides raw, unsafe bindings to the Dear ImGui C++ library,
-//! specifically the docking branch which includes docking and multi-viewport features.
+//! This crate provides raw, unsafe bindings to Dear ImGui using the cimgui C API,
+//! specifically targeting the docking branch (multi-viewport capable).
 //!
 //! ## Features
 //!
@@ -33,110 +33,15 @@
 #![allow(unnecessary_transmutes)]
 #![allow(clippy::all)]
 
-use std::ops::{Deref, DerefMut, Index, IndexMut};
-
 // Include the generated bindings from bindgen
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-// Platform-specific function wrappers
-pub mod wrapper_functions;
-
 // Ensure common ImGui typedefs are available even if bindgen doesn't emit them explicitly
 
-/// Implement indexing for ImVector to provide array-like access
-impl<T> Index<usize> for ImVector<T> {
-    type Output = T;
+// cimgui exposes typed vectors (e.g., ImVector_ImVec2) instead of a generic ImVector<T>.
+// The sys crate intentionally avoids adding higher-level helpers here.
 
-    fn index(&self, index: usize) -> &Self::Output {
-        if index >= self.Size as usize {
-            panic!(
-                "ImVector index {} out of bounds (size: {})",
-                index, self.Size
-            );
-        }
-        unsafe { &*self.Data.add(index) }
-    }
-}
-
-/// Implement mutable indexing for ImVector
-impl<T> IndexMut<usize> for ImVector<T> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        if index >= self.Size as usize {
-            panic!(
-                "ImVector index {} out of bounds (size: {})",
-                index, self.Size
-            );
-        }
-        unsafe { &mut *self.Data.add(index) }
-    }
-}
-
-/// Implement Deref to allow ImVector to be used as a slice
-impl<T> Deref for ImVector<T> {
-    type Target = [T];
-
-    fn deref(&self) -> &[T] {
-        unsafe {
-            if self.Size == 0 || self.Data.is_null() {
-                // Handle empty vector or null data pointer
-                &[]
-            } else {
-                std::slice::from_raw_parts(self.Data, self.Size as usize)
-            }
-        }
-    }
-}
-
-/// Implement DerefMut to allow mutable slice access to ImVector
-impl<T> DerefMut for ImVector<T> {
-    fn deref_mut(&mut self) -> &mut [T] {
-        unsafe {
-            if self.Size == 0 || self.Data.is_null() {
-                // Handle empty vector or null data pointer
-                &mut []
-            } else {
-                std::slice::from_raw_parts_mut(self.Data, self.Size as usize)
-            }
-        }
-    }
-}
-
-/// Implement iterator support for ImVector references
-impl<'a, T> IntoIterator for &'a ImVector<T> {
-    type Item = &'a T;
-    type IntoIter = std::slice::Iter<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.deref().iter()
-    }
-}
-
-/// Implement mutable iterator support for ImVector references
-impl<'a, T> IntoIterator for &'a mut ImVector<T> {
-    type Item = &'a mut T;
-    type IntoIter = std::slice::IterMut<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.deref_mut().iter_mut()
-    }
-}
-
-// MSVC ABI compatibility for ImVec2-returning functions
-#[cfg(target_env = "msvc")]
-impl From<ImVec2_Pod> for ImVec2 {
-    #[inline]
-    fn from(pod: ImVec2_Pod) -> ImVec2 {
-        ImVec2 { x: pod.x, y: pod.y }
-    }
-}
-
-#[cfg(target_env = "msvc")]
-impl From<ImVec2> for ImVec2_Pod {
-    #[inline]
-    fn from(v: ImVec2) -> ImVec2_Pod {
-        ImVec2_Pod { x: v.x, y: v.y }
-    }
-}
+// cimgui C API avoids C++ ABI pitfalls; no MSVC-specific conversions are required.
 
 // Re-export commonly used types for convenience
 pub use ImColor as Color;

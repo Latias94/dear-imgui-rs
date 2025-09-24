@@ -1,5 +1,5 @@
-use crate::sys;
 use crate::Ui;
+use crate::sys;
 
 impl Ui {
     /// Returns the size of the content region available for widgets
@@ -8,17 +8,9 @@ impl Ui {
     #[doc(alias = "GetContentRegionAvail")]
     pub fn content_region_avail(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let size_rr = sys::ImGui_GetContentRegionAvail();
-                let size: sys::ImVec2 = size_rr.into();
-                [size.x, size.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let size = sys::ImGui_GetContentRegionAvail();
-                [size.x, size.y]
-            }
+            let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetContentRegionAvail(&mut size);
+            [size.x, size.y]
         }
     }
 

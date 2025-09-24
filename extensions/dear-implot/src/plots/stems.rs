@@ -1,6 +1,6 @@
 //! Stem plot implementation
 
-use super::{safe_cstring, validate_data_lengths, Plot, PlotError};
+use super::{Plot, PlotError, safe_cstring, validate_data_lengths};
 use crate::sys;
 
 /// Builder for stem plots (lollipop charts)
@@ -68,13 +68,15 @@ impl<'a> Plot for StemPlot<'a> {
         let label_cstr = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotStems_double(
+            sys::ImPlot_PlotStems_doublePtrdoublePtr(
                 label_cstr.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.y_ref,
                 self.flags,
+                self.offset,
+                self.stride,
             );
         }
     }
@@ -138,13 +140,15 @@ impl<'a> Plot for SimpleStemPlot<'a> {
             .collect();
 
         unsafe {
-            sys::ImPlot_PlotStems_double(
+            sys::ImPlot_PlotStems_doublePtrdoublePtr(
                 label_cstr.as_ptr(),
                 x_data.as_ptr(),
                 self.values.as_ptr(),
                 self.values.len() as i32,
                 self.y_ref,
                 0, // flags
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }

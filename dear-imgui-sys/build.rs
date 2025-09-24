@@ -1,418 +1,409 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-#[allow(dead_code)]
-fn generate_wasm_bindings(
-    _imgui_src: &PathBuf,
-    out_path: &PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // For WASM, we'll use the reference bindings as a base and add WASM import module
-    let reference_bindings_path = PathBuf::from("src/bindings_reference.rs");
-
-    let base_content = if reference_bindings_path.exists() {
-        std::fs::read_to_string(&reference_bindings_path)?
-    } else {
-        // If reference bindings don't exist, generate minimal WASM bindings
-        return generate_minimal_wasm_bindings(out_path);
-    };
-
-    // Replace the extern "C" block with WASM import module
-    let wasm_import_name =
-        env::var("IMGUI_RS_WASM_IMPORT_NAME").unwrap_or_else(|_| "dear-imgui-sys".to_string());
-
-    // Add WASM import module at the beginning
-    let wasm_header = format!(
-        r#"/* WASM bindings for Dear ImGui - based on reference bindings */
-
-#[allow(nonstandard_style, clippy::all)]
-
-// Override all extern "C" functions with WASM import module
-#[link(wasm_import_module = "{}")]
-extern "C" {{
-"#,
-        wasm_import_name
-    );
-
-    // Extract function declarations from the base content
-    let mut functions = Vec::new();
-    let lines: Vec<&str> = base_content.lines().collect();
-    let mut in_extern_block = false;
-
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed.starts_with("extern \"C\"") {
-            in_extern_block = true;
-            continue;
-        }
-        if in_extern_block {
-            if trimmed == "}" {
-                in_extern_block = false;
-                continue;
-            }
-            if trimmed.starts_with("pub fn") && trimmed.ends_with(";") {
-                functions.push(format!("    {}", trimmed));
-            }
-        }
-    }
-
-    // Build the complete WASM bindings
-    let mut wasm_bindings = wasm_header;
-    for func in functions {
-        wasm_bindings.push_str(&func);
-        wasm_bindings.push('\n');
-    }
-    wasm_bindings.push_str("}\n\n");
-
-    // Add the rest of the content (types, constants, etc.) but remove extern blocks
-    let mut filtered_content = String::new();
-    let lines: Vec<&str> = base_content.lines().collect();
-    let mut in_extern_block = false;
-    let mut skip_line = false;
-
-    for line in lines {
-        let trimmed = line.trim();
-
-        if trimmed.starts_with("extern \"C\"") {
-            in_extern_block = true;
-            skip_line = true;
-            continue;
-        }
-
-        if in_extern_block {
-            if trimmed == "}" {
-                in_extern_block = false;
-                skip_line = true;
-                continue;
-            }
-            skip_line = true;
-            continue;
-        }
-
-        if !skip_line {
-            filtered_content.push_str(line);
-            filtered_content.push('\n');
-        }
-        skip_line = false;
-    }
-
-    // Combine WASM imports with filtered content
-    let final_content = format!("{}{}", wasm_bindings, filtered_content);
-
-    let bindings_path = out_path.join("bindings.rs");
-    std::fs::write(&bindings_path, final_content)?;
-
-    println!(
-        "cargo:warning=Generated WASM bindings with import module: {}",
-        wasm_import_name
-    );
-    Ok(())
+// Asset-importer style build configuration and structure
+#[derive(Clone, Debug)]
+struct BuildConfig {
+    manifest_dir: PathBuf,
+    out_dir: PathBuf,
+    target_os: String,
+    target_env: String,
+    target_arch: String,
+    target_triple: String,
+    profile: String,
+    docs_rs: bool,
 }
 
-fn generate_minimal_wasm_bindings(out_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let wasm_import_name =
-        env::var("IMGUI_RS_WASM_IMPORT_NAME").unwrap_or_else(|_| "dear-imgui-sys".to_string());
+impl BuildConfig {
+    fn new() -> Self {
+        Self {
+            manifest_dir: PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()),
+            out_dir: PathBuf::from(env::var("OUT_DIR").unwrap()),
+            target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
+            target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
+            target_arch: env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default(),
+            target_triple: env::var("TARGET").unwrap_or_default(),
+            profile: env::var("PROFILE").unwrap_or_else(|_| "release".to_string()),
+            docs_rs: env::var("DOCS_RS").is_ok(),
+        }
+    }
+    fn is_windows(&self) -> bool {
+        self.target_os == "windows"
+    }
+    fn is_msvc(&self) -> bool {
+        self.target_env == "msvc"
+    }
+    fn is_debug(&self) -> bool {
+        self.profile == "debug"
+    }
+    fn use_static_crt(&self) -> bool {
+        self.is_windows()
+            && self.is_msvc()
+            && env::var("CARGO_CFG_TARGET_FEATURE")
+                .unwrap_or_default()
+                .split(',')
+                .any(|f| f == "crt-static")
+    }
+    fn cimgui_root(&self) -> PathBuf {
+        self.manifest_dir.join("third-party/cimgui")
+    }
+    fn imgui_src(&self) -> PathBuf {
+        self.cimgui_root().join("imgui")
+    }
+}
 
-    let bindings_content = format!(
-        r#"/* Minimal WASM bindings for Dear ImGui - automatically generated */
-
-#[allow(nonstandard_style, clippy::all)]
-
-// Basic types
-pub type ImGuiContext = ::core::ffi::c_void;
-pub type ImFontAtlas = ::core::ffi::c_void;
-pub type ImDrawData = ::core::ffi::c_void;
-pub type ImGuiIO = ::core::ffi::c_void;
-pub type ImGuiStyle = ::core::ffi::c_void;
-pub type ImGuiWindowFlags = i32;
-pub type ImGuiCond = i32;
-
-// Constants
-pub const ImGuiCond_Always: i32 = 1 << 0;
-pub const ImGuiCond_Once: i32 = 1 << 1;
-pub const ImGuiCond_FirstUseEver: i32 = 1 << 2;
-pub const ImGuiCond_Appearing: i32 = 1 << 3;
-
-// Vector types
-#[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct ImVec2 {{
-    pub x: f32,
-    pub y: f32,
-}}
-
-// Core functions with WASM import module
-#[link(wasm_import_module = "{wasm_import_name}")]
-extern "C" {{
-    pub fn ImGui_CreateContext(shared_font_atlas: *mut ImFontAtlas) -> *mut ImGuiContext;
-    pub fn ImGui_DestroyContext(ctx: *mut ImGuiContext);
-    pub fn ImGui_GetCurrentContext() -> *mut ImGuiContext;
-    pub fn ImGui_SetCurrentContext(ctx: *mut ImGuiContext);
-    pub fn ImGui_GetIO() -> *mut ImGuiIO;
-    pub fn ImGui_GetStyle() -> *mut ImGuiStyle;
-    pub fn ImGui_NewFrame();
-    pub fn ImGui_Render();
-    pub fn ImGui_GetDrawData() -> *mut ImDrawData;
-    pub fn ImGui_ShowDemoWindow(p_open: *mut bool);
-    pub fn ImGui_Begin(name: *const ::core::ffi::c_char, p_open: *mut bool, flags: ImGuiWindowFlags) -> bool;
-    pub fn ImGui_End();
-    pub fn ImGui_Text(fmt: *const ::core::ffi::c_char, ...);
-    pub fn ImGui_Button(label: *const ::core::ffi::c_char, size: *const ImVec2) -> bool;
-    pub fn ImGui_GetVersion() -> *const ::core::ffi::c_char;
-}}
-"#,
-        wasm_import_name = wasm_import_name
-    );
-
-    let bindings_path = out_path.join("bindings.rs");
-    std::fs::write(&bindings_path, bindings_content)?;
-
-    println!(
-        "cargo:warning=Generated minimal WASM bindings with import module: {}",
-        wasm_import_name
-    );
-    Ok(())
+fn use_cmake_requested() -> bool {
+    // Treat empty as not set to avoid accidental enabling on CI
+    matches!(env::var("IMGUI_SYS_USE_CMAKE"), Ok(v) if !v.is_empty())
 }
 
 fn main() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap();
+    let cfg = BuildConfig::new();
 
-    // ImGui source files to copy
-    let imgui_src_files = [
-        "imgui.h",
-        "imgui_internal.h",
-        "imstb_textedit.h",
-        "imstb_rectpack.h",
-        "imstb_truetype.h",
-        "imgui.cpp",
-        "imgui_widgets.cpp",
-        "imgui_draw.cpp",
-        "imgui_tables.cpp",
-        "imgui_demo.cpp",
-    ];
-
-    let imgui_ori = manifest_dir.join("imgui");
-    let imgui_src = out_path.join("imgui_src");
-    let imgui_misc_ft = imgui_src.join("misc/freetype");
-
-    // Create output directories if they don't exist
-    std::fs::create_dir_all(&imgui_src).unwrap();
-    std::fs::create_dir_all(&imgui_misc_ft).unwrap();
-
-    // Helper function to check if file needs copying
-    let needs_copy = |src: &std::path::Path, dst: &std::path::Path| -> bool {
-        if !dst.exists() {
-            return true;
-        }
-        let src_time = std::fs::metadata(src).unwrap().modified().unwrap();
-        let dst_time = std::fs::metadata(dst).unwrap().modified().unwrap();
-        src_time > dst_time
-    };
-
-    // Copy ImGui source files only if needed
-    for ori in imgui_src_files {
-        let src = imgui_ori.join(ori);
-        let dst = imgui_src.join(ori);
-        if needs_copy(&src, &dst) {
-            std::fs::copy(&src, &dst).unwrap();
-        }
-        println!("cargo:rerun-if-changed={}", src.display());
-    }
-
-    // Copy freetype files only if needed
-    for ori in ["imgui_freetype.cpp", "imgui_freetype.h"] {
-        let src = imgui_ori.join("misc/freetype").join(ori);
-        let dst = imgui_misc_ft.join(ori);
-        if needs_copy(&src, &dst) {
-            std::fs::copy(&src, &dst).unwrap();
-        }
-        println!("cargo:rerun-if-changed={}", src.display());
-    }
-
-    // Write custom imconfig.h only if needed
-    let imconfig_path = imgui_src.join("imconfig.h");
-    let imconfig_content = if target_arch == "wasm32" {
-        r#"
-// WASM-specific configuration
-#define IMGUI_DISABLE_WIN32_DEFAULT_CLIPBOARD_FUNCTIONS
-#define IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
-
-// Only use the latest non-obsolete functions
-#define IMGUI_DISABLE_OBSOLETE_FUNCTIONS
-#define IMGUI_DISABLE_OBSOLETE_KEYIO
-// A Rust char is 32-bits, just do that
-#define IMGUI_USE_WCHAR32
-
-// For WASM, use a simple global context instead of thread_local
-struct ImGuiContext;
-extern ImGuiContext* MyImGuiTLS;
-#define GImGui MyImGuiTLS
-"#
-    } else {
-        r#"
-// This only works on windows, the arboard crate has better cross-support
-#define IMGUI_DISABLE_WIN32_DEFAULT_CLIPBOARD_FUNCTIONS
-
-// Only use the latest non-obsolete functions
-#define IMGUI_DISABLE_OBSOLETE_FUNCTIONS
-#define IMGUI_DISABLE_OBSOLETE_KEYIO
-// A Rust char is 32-bits, just do that
-#define IMGUI_USE_WCHAR32
-
-// Try to play thread-safe-ish. The variable definition is in wrapper.cpp
-struct ImGuiContext;
-extern thread_local ImGuiContext* MyImGuiTLS;
-#define GImGui MyImGuiTLS
-"#
-    };
-
-    let should_write = if imconfig_path.exists() {
-        std::fs::read_to_string(&imconfig_path).unwrap() != imconfig_content
-    } else {
-        true
-    };
-
-    if should_write {
-        std::fs::write(&imconfig_path, imconfig_content).unwrap();
-    }
-
-    println!("cargo:THIRD_PARTY={}", imgui_src.display());
-
-    // Register wrapper files for rerun detection
-    println!("cargo:rerun-if-changed=wrapper.cpp");
-    println!("cargo:rerun-if-changed=imgui_msvc_wrapper.cpp");
+    // Re-run triggers
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=IMGUI_SYS_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=IMGUI_SYS_SKIP_CC");
+    println!("cargo:rerun-if-env-changed=IMGUI_SYS_FORCE_BUILD");
+    println!("cargo:rerun-if-env-changed=IMGUI_SYS_PREBUILT_URL");
+    println!("cargo:rerun-if-env-changed=IMGUI_SYS_USE_CMAKE");
+    println!("cargo:rerun-if-env-changed=CARGO_NET_OFFLINE");
 
-    // Generate bindings
-    if target_arch == "wasm32" {
-        // For WASM, generate proper WASM bindings with import module
-        // generate_wasm_bindings(&imgui_src, &out_path).expect("Failed to generate WASM bindings");
-    } else {
-        // Generate bindings for native targets
-        let mut bindings = bindgen::Builder::default()
-            .header(imgui_src.join("imgui.h").to_string_lossy())
-            .header(imgui_src.join("imgui_internal.h").to_string_lossy())
-            .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-            .allowlist_function("ig.*")
-            .allowlist_function("Im.*")
-            .allowlist_type("Im.*")
-            .allowlist_var("Im.*")
-            .derive_default(true)
-            .derive_debug(true)
-            .derive_copy(true)
-            .derive_eq(true)
-            .derive_partialeq(true)
-            .derive_hash(true)
-            .prepend_enum_name(false)
-            .layout_tests(false)
-            .clang_arg(format!("-I{}", imgui_src.display()))
-            .clang_arg("-x")
-            .clang_arg("c++")
-            .clang_arg("-std=c++17");
+    // docs.rs: generate bindings only
+    if cfg.docs_rs {
+        docsrs_build(&cfg);
+        return;
+    }
 
-        if target_env == "msvc" {
-            let blocklist_file = manifest_dir.join("msvc_blocklist.txt");
-            if let Ok(content) = std::fs::read_to_string(&blocklist_file) {
-                for line in content.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line.starts_with('#') {
-                        continue;
+    // Native: always generate bindings from cimgui
+    generate_bindings_native(&cfg);
+
+    // Try prebuilt dear_imgui first (static lib)
+    let mut linked_prebuilt = try_link_prebuilt_all(&cfg);
+
+    // Build from sources when needed
+    if cfg.target_arch != "wasm32" && !linked_prebuilt && env::var("IMGUI_SYS_SKIP_CC").is_err() {
+        if use_cmake_requested() && build_with_cmake(&cfg.manifest_dir) {
+            // CMake path prints link flags and search paths
+        } else {
+            build_with_cc_cfg(&cfg);
+        }
+    } else if !linked_prebuilt {
+        if env::var("IMGUI_SYS_SKIP_CC").is_ok() {
+            println!("cargo:warning=Skipping C/C++ build due to IMGUI_SYS_SKIP_CC");
+        }
+        println!("cargo:warning=WASM target is not supported.");
+    }
+
+    // Export include paths/defines for extensions
+    export_include_paths(&cfg);
+}
+
+fn docsrs_build(cfg: &BuildConfig) {
+    println!("cargo:warning=DOCS_RS detected: generating bindings, skipping native build");
+    println!("cargo:rustc-cfg=docsrs");
+    if use_pregenerated_bindings(&cfg.out_dir) {
+        return;
+    }
+    let cimgui_root = cfg.cimgui_root();
+    let imgui_src = cfg.imgui_src();
+    let mut bindings = bindgen::Builder::default()
+        .header(cimgui_root.join("cimgui.h").to_string_lossy())
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .clang_arg(format!("-I{}", cimgui_root.display()))
+        .clang_arg(format!("-I{}", imgui_src.display()))
+        .allowlist_function("ig.*")
+        .allowlist_function("Im.*")
+        .allowlist_type("Im.*")
+        .allowlist_var("Im.*")
+        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .derive_default(true)
+        .derive_debug(true)
+        .derive_copy(true)
+        .derive_eq(true)
+        .derive_partialeq(true)
+        .derive_hash(true)
+        .prepend_enum_name(false)
+        .layout_tests(false);
+    let bindings = bindings
+        .generate()
+        .expect("Unable to generate bindings from cimgui.h (docs.rs)");
+    bindings
+        .write_to_file(cfg.out_dir.join("bindings.rs"))
+        .expect("Couldn't write bindings (docs.rs)!");
+    println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
+    println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
+}
+
+fn generate_bindings_native(cfg: &BuildConfig) {
+    let cimgui_root = cfg.cimgui_root();
+    let imgui_src = cfg.imgui_src();
+    let mut bindings = bindgen::Builder::default()
+        .header(cimgui_root.join("cimgui.h").to_string_lossy())
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .clang_arg(format!("-I{}", cimgui_root.display()))
+        .clang_arg(format!("-I{}", imgui_src.display()))
+        .allowlist_function("ig.*")
+        .allowlist_function("Im.*")
+        .allowlist_type("Im.*")
+        .allowlist_var("Im.*")
+        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .derive_default(true)
+        .derive_debug(true)
+        .derive_copy(true)
+        .derive_eq(true)
+        .derive_partialeq(true)
+        .derive_hash(true)
+        .prepend_enum_name(false)
+        .layout_tests(false);
+    #[cfg(feature = "freetype")]
+    if let Ok(freetype) = pkg_config::probe_library("freetype2") {
+        bindings = bindings.clang_arg("-DIMGUI_ENABLE_FREETYPE=1");
+        for include in &freetype.include_paths {
+            bindings = bindings.clang_args(["-I", &include.display().to_string()]);
+        }
+    }
+    let bindings = bindings
+        .generate()
+        .expect("Unable to generate bindings from cimgui.h");
+    bindings
+        .write_to_file(cfg.out_dir.join("bindings.rs"))
+        .expect("Couldn't write bindings!");
+}
+
+fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
+    let mut linked = false;
+    if cfg.target_arch != "wasm32" {
+        if let Some(lib_dir) = env::var_os("IMGUI_SYS_LIB_DIR") {
+            let lib_dir = PathBuf::from(lib_dir);
+            if try_link_prebuilt(&lib_dir, &cfg.target_env) {
+                println!(
+                    "cargo:warning=Using prebuilt dear_imgui from {}",
+                    lib_dir.display()
+                );
+                linked = true;
+            }
+        }
+        if !linked {
+            if let Some(url) = env::var_os("IMGUI_SYS_PREBUILT_URL") {
+                if let Ok(dl_dir) =
+                    try_download_prebuilt(&cfg.out_dir, &url.to_string_lossy(), &cfg.target_env)
+                {
+                    if try_link_prebuilt(&dl_dir, &cfg.target_env) {
+                        println!(
+                            "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
+                            dl_dir.display()
+                        );
+                        linked = true;
                     }
-                    bindings = bindings.blocklist_function(line);
                 }
             }
-
-            let msvc_wrapper_src = manifest_dir.join("imgui_msvc_wrapper.cpp");
-            if msvc_wrapper_src.exists() {
-                bindings = bindings
-                    .header(msvc_wrapper_src.to_string_lossy())
-                    .allowlist_file(msvc_wrapper_src.to_string_lossy());
+        }
+        if !linked {
+            let repo_prebuilt = cfg
+                .manifest_dir
+                .join("third-party")
+                .join("prebuilt")
+                .join(&cfg.target_triple);
+            if try_link_prebuilt(&repo_prebuilt, &cfg.target_env) {
+                println!(
+                    "cargo:warning=Using repo prebuilt dear_imgui from {}",
+                    repo_prebuilt.display()
+                );
+                linked = true;
             }
         }
-
-        #[cfg(feature = "freetype")]
-        if let Ok(freetype) = pkg_config::probe_library("freetype2") {
-            bindings = bindings.clang_arg("-DIMGUI_ENABLE_FREETYPE=1");
-            for include in &freetype.include_paths {
-                bindings = bindings.clang_args(["-I", &include.display().to_string()]);
-            }
-        }
-
-        let bindings = bindings.generate().expect("Unable to generate bindings");
-
-        bindings
-            .write_to_file(out_path.join("bindings.rs"))
-            .expect("Couldn't write bindings!");
     }
+    linked
+}
 
-    // Build ImGui
-    // For WASM, we skip C++ compilation as it requires special setup
-    // Users should link against a pre-compiled WASM version of ImGui
-    if target_arch != "wasm32" {
-        let mut build = cc::Build::new();
-        build.cpp(true).std("c++17");
-
-        build.include(&imgui_src);
-        build.file(manifest_dir.join("wrapper.cpp"));
-
-        // Align MSVC runtime selection with Rust's target to avoid /MDd (Debug CRT) issues
-        // Always match crt-static and keep non-debug CRT across profiles (see asset-importer-sys)
-        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        if target_env == "msvc" && target_os == "windows" {
-            // Enable C++ exceptions
-            build.flag("/EHsc");
-
-            let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-            let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
-            // Match Rust's CRT family (static/dynamic) without opting into debug CRT
-            build.static_crt(use_static_crt);
-            if use_static_crt {
-                build.flag("/MT");
-            } else {
-                build.flag("/MD");
-            }
-
-            // Preserve debug info without switching CRT to /MDd
-            let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
-            if profile == "debug" {
-                build.debug(true);
-                build.opt_level(0);
-            } else {
-                build.debug(false);
-                build.opt_level(2);
-            }
-
-            // Keep iterator debug level consistent with non-debug CRT
-            build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
+fn build_with_cc_cfg(cfg: &BuildConfig) {
+    let mut build = cc::Build::new();
+    build.cpp(true).std("c++17");
+    let cimgui_root = cfg.cimgui_root();
+    let imgui_src = cfg.imgui_src();
+    build.include(&cimgui_root);
+    build.include(&imgui_src);
+    build.file(imgui_src.join("imgui.cpp"));
+    build.file(imgui_src.join("imgui_draw.cpp"));
+    build.file(imgui_src.join("imgui_widgets.cpp"));
+    build.file(imgui_src.join("imgui_tables.cpp"));
+    build.file(imgui_src.join("imgui_demo.cpp"));
+    build.file(cimgui_root.join("cimgui.cpp"));
+    if cfg.is_msvc() && cfg.is_windows() {
+        build.flag("/EHsc");
+        let use_static = cfg.use_static_crt();
+        build.static_crt(use_static);
+        if use_static {
+            build.flag("/MT");
+        } else {
+            build.flag("/MD");
         }
-
-        // Note: wrapper.cpp already includes all ImGui source files via #include
-        // So we don't need to add them separately to avoid duplicate symbols
-
-        #[cfg(feature = "freetype")]
-        if let Ok(freetype) = pkg_config::probe_library("freetype2") {
-            build.define("IMGUI_ENABLE_FREETYPE", "1");
-            for include in &freetype.include_paths {
-                build.include(include.display().to_string());
-            }
-            build.file(imgui_misc_ft.join("imgui_freetype.cpp"));
+        if cfg.is_debug() {
+            build.debug(true);
+            build.opt_level(0);
+        } else {
+            build.debug(false);
+            build.opt_level(2);
         }
-
-        build.compile("dear_imgui");
-    } else {
-        println!("cargo:warning=WASM target is not supported.");
-        // println!("cargo:warning=For WASM, you'll need to provide ImGui rendering through JavaScript or a WASM backend.");
+        build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
+        build.define("IMGUI_USE_WCHAR32", None);
     }
+    #[cfg(feature = "freetype")]
+    if let Ok(freetype) = pkg_config::probe_library("freetype2") {
+        build.define("IMGUI_ENABLE_FREETYPE", Some("1"));
+        for include in &freetype.include_paths {
+            build.include(include.display().to_string());
+        }
+        build.file(cfg.imgui_src().join("misc/freetype/imgui_freetype.cpp"));
+    }
+    build.compile("dear_imgui");
+}
 
-    // Export paths and defines for extension crates (similar to imgui-sys)
-    println!("cargo:THIRD_PARTY={}", imgui_src.display());
-    println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
+fn export_include_paths(cfg: &BuildConfig) {
+    println!("cargo:THIRD_PARTY={}", cfg.imgui_src().display());
+    println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
+    println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
+    println!("cargo:DEFINE_IMGUITEST=0");
+    if cfg.is_msvc() {
+        println!("cargo:DEFINE_IMGUI_USE_WCHAR32=1");
+    }
+}
 
-    // Export common defines that extensions might need
-    println!("cargo:DEFINE_IMGUI_DEFINE_MATH_OPERATORS=");
+fn expected_lib_name(target_env: &str) -> &'static str {
     if target_env == "msvc" {
-        println!("cargo:DEFINE_IMGUI_API=__declspec(dllexport)");
+        "dear_imgui.lib"
+    } else {
+        "libdear_imgui.a"
+    }
+}
+
+fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
+    let lib_name = expected_lib_name(target_env);
+    let lib_path = dir.join(lib_name);
+    if !lib_path.exists() {
+        return false;
+    }
+    println!("cargo:rustc-link-search=native={}", dir.display());
+    println!("cargo:rustc-link-lib=static=dear_imgui");
+    true
+}
+
+fn try_download_prebuilt(out_dir: &Path, url: &str, target_env: &str) -> Result<PathBuf, String> {
+    let lib_name = expected_lib_name(target_env);
+    let dl_dir = out_dir.join("prebuilt");
+    let _ = std::fs::create_dir_all(&dl_dir);
+    let dst = dl_dir.join(lib_name);
+    if dst.exists() {
+        return Ok(dl_dir);
+    }
+    println!("cargo:warning=Downloading prebuilt dear_imgui from {}", url);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("create http client: {}", e))?;
+    let resp = client
+        .get(url)
+        .send()
+        .map_err(|e| format!("http get: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("http status {}", resp.status()));
+    }
+    let bytes = resp.bytes().map_err(|e| format!("read body: {}", e))?;
+    std::fs::write(&dst, &bytes).map_err(|e| format!("write {}: {}", dst.display(), e))?;
+    Ok(dl_dir)
+}
+
+fn build_with_cmake(manifest_dir: &Path) -> bool {
+    let cimgui_root = manifest_dir.join("third-party/cimgui");
+    if !cimgui_root.join("CMakeLists.txt").exists() {
+        return false;
+    }
+    println!("cargo:warning=Building cimgui with CMake");
+    let mut cfg = cmake::Config::new(&cimgui_root);
+    cfg.define("IMGUI_STATIC", "ON");
+    // Profile selection (RelWithDebInfo on MSVC when cargo debug)
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "release".into());
+    let cmake_profile = if cfg!(target_env = "msvc") && profile == "debug" {
+        "RelWithDebInfo"
+    } else if profile == "debug" {
+        "Debug"
+    } else {
+        "Release"
+    };
+    cfg.profile(cmake_profile);
+    if cfg!(target_env = "msvc") {
+        cfg.define("IMGUI_WCHAR32", "ON");
+        let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+        let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
+        let msvc_runtime = if use_static_crt {
+            "MultiThreaded"
+        } else {
+            "MultiThreadedDLL"
+        };
+        cfg.define("CMAKE_MSVC_RUNTIME_LIBRARY", msvc_runtime);
+    }
+    let dst = cfg.build();
+    // Gather lib dirs
+    let mut lib_dirs = vec![
+        dst.join("lib"),
+        dst.join("build"),
+        dst.clone(),
+        dst.join("build").join("RelWithDebInfo"),
+        dst.join("build").join("Release"),
+        dst.join("build").join("Debug"),
+        dst.join("RelWithDebInfo"),
+        dst.join("Release"),
+        dst.join("Debug"),
+    ];
+    let mut found = false;
+    for lib_dir in lib_dirs.drain(..) {
+        if lib_dir.exists() {
+            println!("cargo:rustc-link-search=native={}", lib_dir.display());
+            found = true;
+            #[cfg(not(target_env = "msvc"))]
+            {
+                let bare = lib_dir.join("cimgui.a");
+                let with_prefix = lib_dir.join("libcimgui.a");
+                if bare.exists() && !with_prefix.exists() {
+                    let _ = std::fs::copy(&bare, &with_prefix);
+                }
+            }
+        }
+    }
+    if !found {
+        println!("cargo:warning=Could not locate CMake lib output dir; linking may fail");
+    }
+    if cfg!(target_env = "msvc") {
+        println!("cargo:rustc-link-lib=static=cimgui");
+    } else {
+        println!("cargo:rustc-link-lib=static=:cimgui.a");
+    }
+    println!(
+        "cargo:IMGUI_INCLUDE_PATH={}",
+        cimgui_root.join("imgui").display()
+    );
+    println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
+    true
+}
+
+fn use_pregenerated_bindings(out_dir: &Path) -> bool {
+    let preg = Path::new("src").join("bindings_pregenerated.rs");
+    if preg.exists() {
+        match std::fs::copy(&preg, out_dir.join("bindings.rs")) {
+            Ok(_) => {
+                println!(
+                    "cargo:warning=Using pregenerated bindings: {}",
+                    preg.display()
+                );
+                true
+            }
+            Err(e) => {
+                println!("cargo:warning=Failed to copy pregenerated bindings: {}", e);
+                false
+            }
+        }
+    } else {
+        false
     }
 }

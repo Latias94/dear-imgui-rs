@@ -29,7 +29,7 @@
 //! - `word1,word2` - Include items containing "word1" OR "word2"
 //! - `word1,-word2` - Include items containing "word1" but NOT "word2"
 
-use crate::{sys, Ui};
+use crate::{Ui, sys};
 use std::ptr;
 
 /// Helper to parse and apply text filters
@@ -54,7 +54,7 @@ use std::ptr;
 /// ```
 pub struct TextFilter {
     id: String,
-    raw: sys::ImGuiTextFilter,
+    raw: *mut sys::ImGuiTextFilter,
 }
 
 impl TextFilter {
@@ -93,12 +93,10 @@ impl TextFilter {
     pub fn new_with_filter(label: String, filter: String) -> Self {
         let filter_cstr = format!("{}\0", filter);
         unsafe {
-            let mut raw = std::mem::MaybeUninit::<sys::ImGuiTextFilter>::uninit();
-            sys::ImGuiTextFilter_ImGuiTextFilter(
-                raw.as_mut_ptr(),
-                filter_cstr.as_ptr() as *const std::os::raw::c_char,
+            let raw = sys::ImGuiTextFilter_ImGuiTextFilter(
+                filter_cstr.as_ptr() as *const std::os::raw::c_char
             );
-            Self { id: label, raw: raw.assume_init() }
+            Self { id: label, raw }
         }
     }
 
@@ -123,7 +121,7 @@ impl TextFilter {
     /// ```
     pub fn build(&mut self) {
         unsafe {
-            self.raw.Build();
+            sys::ImGuiTextFilter_Build(self.raw);
         }
     }
 
@@ -170,8 +168,11 @@ impl TextFilter {
     pub fn draw_with_size(&mut self, width: f32) -> bool {
         let label_cstr = format!("{}\0", self.id);
         unsafe {
-            self.raw
-                .Draw(label_cstr.as_ptr() as *const std::os::raw::c_char, width)
+            sys::ImGuiTextFilter_Draw(
+                self.raw,
+                label_cstr.as_ptr() as *const std::os::raw::c_char,
+                width,
+            )
         }
     }
 
@@ -195,7 +196,7 @@ impl TextFilter {
     pub fn is_active(&self) -> bool {
         // IsActive() is an inline method: return !Filters.empty();
         // We need to check if the Filters vector is empty
-        self.raw.Filters.Size > 0
+        unsafe { (*self.raw).Filters.Size > 0 }
     }
 
     /// Returns true if the text matches the filter.
@@ -221,7 +222,8 @@ impl TextFilter {
     pub fn pass_filter(&self, text: &str) -> bool {
         let text_cstr = format!("{}\0", text);
         unsafe {
-            self.raw.PassFilter(
+            sys::ImGuiTextFilter_PassFilter(
+                self.raw,
                 text_cstr.as_ptr() as *const std::os::raw::c_char,
                 ptr::null(),
             )
@@ -252,7 +254,8 @@ impl TextFilter {
         let start_cstr = format!("{}\0", start);
         let end_cstr = format!("{}\0", end);
         unsafe {
-            self.raw.PassFilter(
+            sys::ImGuiTextFilter_PassFilter(
+                self.raw,
                 start_cstr.as_ptr() as *const std::os::raw::c_char,
                 end_cstr.as_ptr() as *const std::os::raw::c_char,
             )
@@ -279,8 +282,8 @@ impl TextFilter {
     pub fn clear(&mut self) {
         // Clear() is an inline method: InputBuf[0] = 0; Build();
         unsafe {
-            *self.raw.InputBuf.as_mut_ptr() = 0;
-            self.raw.Build();
+            (*self.raw).InputBuf[0] = 0;
+            sys::ImGuiTextFilter_Build(self.raw);
         }
     }
 }

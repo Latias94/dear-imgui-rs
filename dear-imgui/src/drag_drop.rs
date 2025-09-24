@@ -27,7 +27,7 @@
 //! }
 //! ```
 
-use crate::{sys, Condition, Ui};
+use crate::{Condition, Ui, sys};
 use std::{any, ffi};
 
 bitflags::bitflags! {
@@ -112,7 +112,7 @@ impl Ui {
     /// ```
     #[doc(alias = "BeginDragDropTarget")]
     pub fn drag_drop_target(&self) -> Option<DragDropTarget<'_>> {
-        let should_begin = unsafe { sys::ImGui_BeginDragDropTarget() };
+        let should_begin = unsafe { sys::igBeginDragDropTarget() };
         if should_begin {
             Some(DragDropTarget(self))
         } else {
@@ -204,19 +204,21 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
         ptr: *const ffi::c_void,
         size: usize,
     ) -> Option<DragDropSourceTooltip<'ui>> {
-        let should_begin = sys::ImGui_BeginDragDropSource(self.flags.bits() as i32);
+        unsafe {
+            let should_begin = sys::igBeginDragDropSource(self.flags.bits() as i32);
 
-        if should_begin {
-            sys::ImGui_SetDragDropPayload(
-                self.ui.scratch_txt(&self.name),
-                ptr,
-                size,
-                self.cond as i32,
-            );
+            if should_begin {
+                sys::igSetDragDropPayload(
+                    self.ui.scratch_txt(&self.name),
+                    ptr,
+                    size,
+                    self.cond as i32,
+                );
 
-            Some(DragDropSourceTooltip::new(self.ui))
-        } else {
-            None
+                Some(DragDropSourceTooltip::new(self.ui))
+            } else {
+                None
+            }
         }
     }
 }
@@ -246,7 +248,7 @@ impl<'ui> DragDropSourceTooltip<'ui> {
 impl Drop for DragDropSourceTooltip<'_> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndDragDropSource();
+            sys::igEndDragDropSource();
         }
     }
 }
@@ -330,12 +332,13 @@ impl<'ui> DragDropTarget<'ui> {
         name: impl AsRef<str>,
         flags: DragDropFlags,
     ) -> Option<DragDropPayload> {
-        let inner = sys::ImGui_AcceptDragDropPayload(self.0.scratch_txt(name), flags.bits() as i32);
+        let inner =
+            unsafe { sys::igAcceptDragDropPayload(self.0.scratch_txt(name), flags.bits() as i32) };
 
         if inner.is_null() {
             None
         } else {
-            let inner = *inner;
+            let inner = unsafe { *inner };
             Some(DragDropPayload {
                 data: inner.Data,
                 size: inner.DataSize as usize,
@@ -356,7 +359,7 @@ impl<'ui> DragDropTarget<'ui> {
 impl Drop for DragDropTarget<'_> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndDragDropTarget();
+            sys::igEndDragDropTarget();
         }
     }
 }

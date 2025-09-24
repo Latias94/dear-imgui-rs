@@ -1,8 +1,8 @@
 //! Pie chart plot implementation
 
-use super::{safe_cstring, Plot, PlotError};
-use crate::sys;
+use super::{Plot, PlotError, safe_cstring};
 use crate::PieChartFlags;
+use crate::sys;
 
 /// Builder for pie chart plots
 pub struct PieChartPlot<'a> {
@@ -135,7 +135,7 @@ impl<'a> Plot for PieChartPlot<'a> {
             .unwrap_or(std::ptr::null());
 
         unsafe {
-            sys::ImPlot_PlotPieChart_double(
+            sys::ImPlot_PlotPieChart_doublePtrStr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
                 self.values.len() as i32,
@@ -274,7 +274,7 @@ impl<'a> Plot for PieChartPlotF32<'a> {
             .unwrap_or(std::ptr::null());
 
         unsafe {
-            sys::ImPlot_PlotPieChart_float(
+            sys::ImPlot_PlotPieChart_FloatPtrStr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
                 self.values.len() as i32,

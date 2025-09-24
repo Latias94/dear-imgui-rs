@@ -9,7 +9,7 @@ use tracing::{debug, info};
 /// Initialize tracing subscriber with sensible defaults for Dear ImGui applications
 #[cfg(feature = "tracing")]
 pub fn init_tracing() {
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
 
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
@@ -29,7 +29,7 @@ pub fn init_tracing() {
 /// Initialize tracing subscriber with custom filter
 #[cfg(feature = "tracing")]
 pub fn init_tracing_with_filter(filter: &str) {
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
 
     let filter = EnvFilter::new(filter);
 
@@ -45,7 +45,7 @@ pub fn init_tracing_with_filter(filter: &str) {
 /// Initialize tracing subscriber for development with more verbose output
 #[cfg(feature = "tracing")]
 pub fn init_tracing_dev() {
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
 
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {

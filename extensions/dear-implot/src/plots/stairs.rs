@@ -1,8 +1,8 @@
 //! Stairs plot implementation
 
-use super::{safe_cstring, validate_data_lengths, PlotData, PlotError};
-use crate::sys;
+use super::{PlotData, PlotError, safe_cstring, validate_data_lengths};
 use crate::StairsFlags;
+use crate::sys;
 
 /// Builder for stairs plots with extensive customization options
 pub struct StairsPlot<'a> {
@@ -67,12 +67,14 @@ impl<'a> StairsPlot<'a> {
         let label_cstring = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotStairs_double(
+            sys::ImPlot_PlotStairs_doublePtrdoublePtr(
                 label_cstring.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.flags.bits() as i32,
+                self.offset,
+                self.stride,
             );
         }
     }
@@ -144,12 +146,14 @@ impl<'a> StairsPlotF32<'a> {
         let label_cstring = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotStairs_float(
+            sys::ImPlot_PlotStairs_FloatPtrFloatPtr(
                 label_cstring.as_ptr(),
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.flags.bits() as i32,
+                0,
+                std::mem::size_of::<f32>() as i32,
             );
         }
     }
@@ -234,12 +238,14 @@ impl<'a> SimpleStairsPlot<'a> {
         let label_cstring = safe_cstring(self.label);
 
         unsafe {
-            sys::ImPlot_PlotStairs_double(
+            sys::ImPlot_PlotStairs_doublePtrdoublePtr(
                 label_cstring.as_ptr(),
                 x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.y_data.len() as i32,
                 self.flags.bits() as i32,
+                0,
+                std::mem::size_of::<f64>() as i32,
             );
         }
     }

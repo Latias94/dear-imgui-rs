@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use crate::sys;
 use crate::Ui;
+use crate::sys;
 
 /// Builder for a list box widget
 #[derive(Clone, Debug)]
@@ -44,8 +44,7 @@ impl<T: AsRef<str>> ListBox<T> {
             x: self.size[0],
             y: self.size[1],
         };
-        let should_render =
-            unsafe { sys::ImGui_BeginListBox(ui.scratch_txt(self.label), &size_vec) };
+        let should_render = unsafe { sys::igBeginListBox(ui.scratch_txt(self.label), size_vec) };
         if should_render {
             Some(ListBoxToken::new(ui))
         } else {
@@ -82,7 +81,7 @@ impl<'ui> ListBoxToken<'ui> {
 impl<'ui> Drop for ListBoxToken<'ui> {
     fn drop(&mut self) {
         unsafe {
-            sys::ImGui_EndListBox();
+            sys::igEndListBox();
         }
     }
 }
