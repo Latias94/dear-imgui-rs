@@ -1,51 +1,67 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
-fn main() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+#[derive(Clone, Debug)]
+struct BuildConfig {
+    manifest_dir: PathBuf,
+    out_dir: PathBuf,
+    target_os: String,
+    target_env: String,
+    target_arch: String,
+    docs_rs: bool,
+}
 
-    // Get include paths from dear-imgui-sys environment variables
+impl BuildConfig {
+    fn new() -> Self {
+        Self {
+            manifest_dir: PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()),
+            out_dir: PathBuf::from(env::var("OUT_DIR").unwrap()),
+            target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
+            target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
+            target_arch: env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default(),
+            docs_rs: env::var("DOCS_RS").is_ok(),
+        }
+    }
+    fn is_msvc(&self) -> bool {
+        self.target_env == "msvc"
+    }
+    fn is_windows(&self) -> bool {
+        self.target_os == "windows"
+    }
+    fn use_static_crt(&self) -> bool {
+        self.is_msvc()
+            && self.is_windows()
+            && env::var("CARGO_CFG_TARGET_FEATURE")
+                .unwrap_or_default()
+                .split(',')
+                .any(|f| f == "crt-static")
+    }
+}
+
+fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     let imgui_src = env::var_os("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH")
         .or_else(|| env::var_os("DEP_DEAR_IMGUI_THIRD_PARTY"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| manifest_dir.join("../../dear-imgui-sys/imgui"));
+        .unwrap_or_else(|| cfg.manifest_dir.join("../../dear-imgui-sys/imgui"));
     let cimgui_root = env::var_os("DEP_DEAR_IMGUI_CIMGUI_INCLUDE_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|| manifest_dir.join("../../dear-imgui-sys/third-party/cimgui"));
+        .unwrap_or_else(|| {
+            cfg.manifest_dir
+                .join("../../dear-imgui-sys/third-party/cimgui")
+        });
+    (imgui_src, cimgui_root)
+}
 
-    // cimplot root (cimplot repo contains cimplot.{h,cpp} and an embedded implot/ directory)
-    let cimplot_root = manifest_dir.join("third-party/cimplot");
-
-    // Verify sources exist
-    if !imgui_src.exists() {
-        panic!(
-            "ImGui source not found at {:?}. Did you forget to initialize git submodules?",
-            imgui_src
-        );
-    }
-    if !cimplot_root.exists() {
-        panic!(
-            "cimplot source not found at {:?}. Did you forget to initialize git submodules?",
-            cimplot_root
-        );
-    }
-
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-
-    // docs.rs build: only generate bindings, skip native compilation
-    let is_docs_rs = std::env::var("DOCS_RS").is_ok();
-
-    // Generate bindings using bindgen from cimplot C API
+fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
     let bindings = bindgen::Builder::default()
         .header(cimplot_root.join("cimplot.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        // Only allow ImPlot-specific functions and types
         .allowlist_function("ImPlot.*")
         .allowlist_type("ImPlot.*")
         .allowlist_var("ImPlot.*")
         .allowlist_var("IMPLOT_.*")
-        // Block ImGui types that we'll re-export from dear-imgui-sys
         .blocklist_type("ImVec2")
         .blocklist_type("ImVec4")
         .blocklist_type("ImGuiCond")
@@ -74,130 +90,128 @@ fn main() {
         .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
         .clang_arg("-x")
         .clang_arg("c++")
-        .clang_arg("-std=c++17");
-
-    let bindings = bindings.generate().expect("Unable to generate bindings");
-
+        .clang_arg("-std=c++17")
+        .generate()
+        .expect("Unable to generate bindings");
     bindings
-        .write_to_file(out_path.join("bindings.rs"))
+        .write_to_file(cfg.out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings!");
+}
 
-    // Env change tracking
+fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
+    let target_env = &cfg.target_env;
+    if let Ok(dir) = env::var("IMPLOT_SYS_LIB_DIR") {
+        if try_link_prebuilt(PathBuf::from(dir), target_env) {
+            return true;
+        }
+        println!(
+            "cargo:warning=IMPLOT_SYS_LIB_DIR set but no library found; falling back to build"
+        );
+    }
+    if let Ok(url) = env::var("IMPLOT_SYS_PREBUILT_URL") {
+        if let Ok(dir) = try_download_prebuilt(&cfg.out_dir, &url, target_env) {
+            if try_link_prebuilt(dir.clone(), target_env) {
+                return true;
+            }
+            println!(
+                "cargo:warning=Downloaded prebuilt library but failed to link from {}",
+                dir.display()
+            );
+        }
+    }
+    false
+}
+
+fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+    let mut build = cc::Build::new();
+    if cfg.target_arch == "wasm32" {
+        build.define("IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS", "1");
+    } else {
+        build.cpp(true).std("c++17");
+    }
+
+    // MSVC flags align with dear-imgui-sys
+    if cfg.is_msvc() && cfg.is_windows() {
+        build.flag("/EHsc");
+        let use_static = cfg.use_static_crt();
+        build.static_crt(use_static);
+        if use_static {
+            build.flag("/MT");
+        } else {
+            build.flag("/MD");
+        }
+        let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
+        if profile == "debug" {
+            build.debug(true).opt_level(0);
+        } else {
+            build.debug(false).opt_level(2);
+        }
+        build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
+    }
+
+    // Inherit dear-imgui defines
+    for (k, v) in env::vars() {
+        if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
+            build.define(suffix, v.as_str());
+        }
+    }
+
+    // Includes and defines
+    build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
+    if cfg.is_msvc() {
+        build.define("IMGUI_USE_WCHAR32", None);
+    }
+    build.include(imgui_src);
+    build.include(cimgui_root);
+    build.include(cimplot_root);
+    build.include(cimplot_root.join("implot"));
+
+    // Sources
+    build.file(cimplot_root.join("cimplot.cpp"));
+    build.file(cimplot_root.join("implot/implot.cpp"));
+    build.file(cimplot_root.join("implot/implot_items.cpp"));
+    build.file(cimplot_root.join("implot/implot_demo.cpp"));
+
+    build.compile("dear_implot");
+}
+
+fn main() {
+    let cfg = BuildConfig::new();
+
+    // Rerun hints
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=third-party/cimplot/cimplot.h");
+    println!("cargo:rerun-if-changed=third-party/cimplot/cimplot.cpp");
+    println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot.h");
+    println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot.cpp");
+    println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot_items.cpp");
+    println!("cargo:rerun-if-changed=../../dear-imgui-sys");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_PREBUILT_URL");
 
-    // Try link prebuilt/system library if provided
-    let mut linked_prebuilt = false;
-    if let Ok(dir) = env::var("IMPLOT_SYS_LIB_DIR") {
-        if try_link_prebuilt(PathBuf::from(dir), &target_env) {
-            linked_prebuilt = true;
-        } else {
-            println!(
-                "cargo:warning=IMPLOT_SYS_LIB_DIR set but no library found; falling back to build"
-            );
-        }
+    let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
+    let cimplot_root = cfg.manifest_dir.join("third-party/cimplot");
+    if !imgui_src.exists() {
+        panic!(
+            "ImGui source not found at {:?}. Did you forget to initialize git submodules?",
+            imgui_src
+        );
+    }
+    if !cimplot_root.exists() {
+        panic!(
+            "cimplot source not found at {:?}. Did you forget to initialize git submodules?",
+            cimplot_root
+        );
     }
 
-    // Try download prebuilt if URL provided
-    if !linked_prebuilt {
-        if let Ok(url) = env::var("IMPLOT_SYS_PREBUILT_URL") {
-            match try_download_prebuilt(&out_path, &url, &target_env) {
-                Ok(dir) => {
-                    if try_link_prebuilt(dir.clone(), &target_env) {
-                        linked_prebuilt = true;
-                    } else {
-                        println!(
-                            "cargo:warning=Downloaded prebuilt library but failed to link from {}",
-                            dir.display()
-                        );
-                    }
-                }
-                Err(e) => {
-                    println!(
-                        "cargo:warning=Failed to download prebuilt dear_implot: {}",
-                        e
-                    );
-                }
-            }
-        }
-    }
+    // Generate bindings
+    generate_bindings(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
 
-    if !is_docs_rs && !linked_prebuilt && env::var("IMPLOT_SYS_SKIP_CC").is_err() {
-        // Build ImPlot (via cimplot + implot sources)
-        let mut build = cc::Build::new();
-        if target_arch == "wasm32" {
-            build.define("IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS", "1");
-        } else {
-            build.cpp(true).std("c++17");
-        }
-
-        // MSVC C++ runtime and exception model align with dear-imgui-sys
-        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        if target_env == "msvc" && target_os == "windows" {
-            build.flag("/EHsc");
-            let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-            let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
-            build.static_crt(use_static_crt);
-            if use_static_crt {
-                build.flag("/MT");
-            } else {
-                build.flag("/MD");
-            }
-            let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
-            if profile == "debug" {
-                build.debug(true);
-                build.opt_level(0);
-            } else {
-                build.debug(false);
-                build.opt_level(2);
-            }
-            build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
-        }
-
-        // Take over imgui preprocessor defines from the dear-imgui-sys crate
-        env::vars()
-            .filter_map(|(key, val)| {
-                key.strip_prefix("DEP_DEAR_IMGUI_DEFINE_")
-                    .map(|suffix| (suffix.to_string(), val.to_string()))
-            })
-            .for_each(|(k, v)| {
-                build.define(&k, v.as_str());
-            });
-
-        // Common defines and include directories
-        build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
-        // Match ImWchar width with dear-imgui-sys (32-bit path)
-        if target_env == "msvc" {
-            build.define("IMGUI_USE_WCHAR32", None);
-        }
-        build.include(&imgui_src);
-        build.include(&cimgui_root);
-        build.include(&cimplot_root);
-        build.include(cimplot_root.join("implot"));
-        // Base cimgui link is provided by dear-imgui-sys; do not duplicate here.
-
-        // Compile cimplot + implot sources
-        build.file(cimplot_root.join("cimplot.cpp"));
-        build.file(cimplot_root.join("implot/implot.cpp"));
-        build.file(cimplot_root.join("implot/implot_items.cpp"));
-        // Include the demo sources to satisfy ImPlot_ShowDemoWindow symbol required by cimplot wrapper
-        // (cimplot exports a C wrapper for ImPlot::ShowDemoWindow unconditionally).
-        build.file(cimplot_root.join("implot/implot_demo.cpp"));
-
-        build.compile("dear_implot");
-
-        // Rerun hints
-        println!("cargo:rerun-if-changed=build.rs");
-        println!("cargo:rerun-if-changed=third-party/cimplot/cimplot.h");
-        println!("cargo:rerun-if-changed=third-party/cimplot/cimplot.cpp");
-        println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot.h");
-        println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot.cpp");
-        println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot_items.cpp");
-        // Track dear-imgui-sys changes (defines/headers)
-        println!("cargo:rerun-if-changed=../../dear-imgui-sys");
-    } else if is_docs_rs {
-        // docs.rs path: still propagate include paths for dependents if any
+    let linked_prebuilt = try_link_prebuilt_all(&cfg);
+    if !cfg.docs_rs && !linked_prebuilt && env::var("IMPLOT_SYS_SKIP_CC").is_err() {
+        build_with_cc(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+    } else if cfg.docs_rs {
         println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
         println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
     }
