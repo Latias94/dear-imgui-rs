@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use crate::sys;
 use crate::Ui;
+use crate::sys;
 
 /// Builder for a list box widget
 #[derive(Clone, Debug)]

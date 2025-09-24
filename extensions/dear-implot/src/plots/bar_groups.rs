@@ -1,8 +1,8 @@
 //! Bar groups plot implementation
 
-use super::{safe_cstring, PlotData, PlotError};
-use crate::sys;
+use super::{PlotData, PlotError, safe_cstring};
 use crate::BarGroupsFlags;
+use crate::sys;
 use std::ffi::CString;
 
 /// Builder for bar groups plots with extensive customization options

@@ -1,7 +1,7 @@
+use crate::InputTextFlags;
 use crate::internal::DataTypeKind;
 use crate::sys;
 use crate::ui::Ui;
-use crate::InputTextFlags;
 use std::ffi::{c_int, c_void};
 use std::marker::PhantomData;
 use std::ptr;

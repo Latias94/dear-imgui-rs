@@ -6,10 +6,10 @@
 use std::os::raw::c_void;
 use std::ptr;
 
+use crate::Ui;
 use crate::internal::DataTypeKind;
 use crate::sys;
 use crate::widget::slider::SliderFlags;
-use crate::Ui;
 
 impl Ui {
     /// Creates a new drag slider widget. Returns true if the value has been edited.

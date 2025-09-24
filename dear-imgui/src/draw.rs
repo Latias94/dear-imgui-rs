@@ -385,7 +385,9 @@ impl DrawListMut<'_> {
             )
             .is_err()
         {
-            panic!("A DrawListMut is already in use! You can only have one DrawListMut in use at a time.");
+            panic!(
+                "A DrawListMut is already in use! You can only have one DrawListMut in use at a time."
+            );
         }
     }
 

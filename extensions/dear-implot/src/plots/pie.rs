@@ -1,8 +1,8 @@
 //! Pie chart plot implementation
 
-use super::{safe_cstring, Plot, PlotError};
-use crate::sys;
+use super::{Plot, PlotError, safe_cstring};
 use crate::PieChartFlags;
+use crate::sys;
 
 /// Builder for pie chart plots
 pub struct PieChartPlot<'a> {

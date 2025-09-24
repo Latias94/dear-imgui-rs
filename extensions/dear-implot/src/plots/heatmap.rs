@@ -1,6 +1,6 @@
 //! Heatmap plot implementation
 
-use super::{safe_cstring, Plot, PlotError};
+use super::{Plot, PlotError, safe_cstring};
 use crate::sys;
 
 /// Builder for heatmap plots with extensive customization options

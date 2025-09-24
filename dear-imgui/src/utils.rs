@@ -1,5 +1,5 @@
 use crate::input::{Key, MouseButton};
-use crate::{sys, StyleColor};
+use crate::{StyleColor, sys};
 use bitflags::bitflags;
 
 bitflags! {

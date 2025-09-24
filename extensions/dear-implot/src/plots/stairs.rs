@@ -1,8 +1,8 @@
 //! Stairs plot implementation
 
-use super::{safe_cstring, validate_data_lengths, PlotData, PlotError};
-use crate::sys;
+use super::{PlotData, PlotError, safe_cstring, validate_data_lengths};
 use crate::StairsFlags;
+use crate::sys;
 
 /// Builder for stairs plots with extensive customization options
 pub struct StairsPlot<'a> {

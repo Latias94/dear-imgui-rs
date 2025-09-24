@@ -1,8 +1,8 @@
 //! Digital plot implementation
 
-use super::{safe_cstring, validate_data_lengths, PlotData, PlotError};
-use crate::sys;
+use super::{PlotData, PlotError, safe_cstring, validate_data_lengths};
 use crate::DigitalFlags;
+use crate::sys;
 
 /// Builder for digital plots with extensive customization options
 ///

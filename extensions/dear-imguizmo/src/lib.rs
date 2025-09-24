@@ -7,7 +7,7 @@ mod style;
 mod types;
 mod ui;
 
-pub use mat::{decompose_matrix, recompose_matrix, Mat4Like};
+pub use mat::{Mat4Like, decompose_matrix, recompose_matrix};
 pub use op::Manipulate;
 pub use style::Style;
 pub use types::{AxisMask, Color, DrawListTarget, GuizmoId, Mode, Operation};

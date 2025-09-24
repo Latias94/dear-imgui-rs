@@ -1,14 +1,15 @@
 //! Main renderer implementation
 
 use dear_imgui::{
+    Context as ImGuiContext, TextureData, TextureFormat, TextureId,
     internal::RawWrapper,
     render::{DrawCmd, DrawCmdParams, DrawData, DrawVert},
-    Context as ImGuiContext, TextureData, TextureFormat, TextureId,
 };
 use glow::{Context, HasContext};
 use std::mem::size_of;
 
 use crate::{
+    GlBuffer, GlTexture, GlVertexArray,
     error::{InitError, InitResult, RenderError, RenderResult},
     gl_debug_message,
     shaders::Shaders,
@@ -16,7 +17,6 @@ use crate::{
     texture::{SimpleTextureMap, TextureMap},
     to_byte_slice,
     versions::GlVersion,
-    GlBuffer, GlTexture, GlVertexArray,
 };
 
 /// Main renderer for Dear ImGui using Glow (OpenGL)
@@ -776,7 +776,7 @@ impl GlowRenderer {
 /// Multi-viewport support functions
 #[cfg(feature = "multi-viewport")]
 pub mod multi_viewport {
-    use dear_imgui::{sys, ViewportFlags};
+    use dear_imgui::{ViewportFlags, sys};
     use std::ffi::c_void;
 
     /// Render a viewport (called by ImGui for multi-viewport support)

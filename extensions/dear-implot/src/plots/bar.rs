@@ -1,6 +1,6 @@
 //! Bar plot implementation
 
-use super::{safe_cstring, Plot, PlotError};
+use super::{Plot, PlotError, safe_cstring};
 use crate::sys;
 
 /// Builder for bar plots with customization options

@@ -77,7 +77,9 @@ unsafe impl DataTypeKind for usize {
         target_pointer_width = "32",
         target_pointer_width = "64"
     )))]
-    compile_error!("cannot impl DataTypeKind for usize: unsupported target pointer width. supported values are 16, 32, 64");
+    compile_error!(
+        "cannot impl DataTypeKind for usize: unsupported target pointer width. supported values are 16, 32, 64"
+    );
 }
 
 unsafe impl DataTypeKind for isize {
@@ -97,7 +99,9 @@ unsafe impl DataTypeKind for isize {
         target_pointer_width = "32",
         target_pointer_width = "64"
     )))]
-    compile_error!("cannot impl DataTypeKind for isize: unsupported target pointer width. supported values are 16, 32, 64");
+    compile_error!(
+        "cannot impl DataTypeKind for isize: unsupported target pointer width. supported values are 16, 32, 64"
+    );
 }
 
 /// A generic version of the raw imgui-sys ImVector struct types

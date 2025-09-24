@@ -27,7 +27,7 @@
 //! }
 //! ```
 
-use crate::{sys, Condition, Ui};
+use crate::{Condition, Ui, sys};
 use std::{any, ffi};
 
 bitflags::bitflags! {

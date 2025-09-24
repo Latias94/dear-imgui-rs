@@ -1,7 +1,7 @@
+use crate::Ui;
 use crate::fonts::FontId;
 use crate::style::{StyleColor, StyleVar};
 use crate::sys;
-use crate::Ui;
 
 /// # Parameter stacks (shared)
 impl Ui {

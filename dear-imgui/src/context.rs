@@ -253,11 +253,7 @@ impl Context {
                 None
             } else {
                 let data = &*(draw_data as *const crate::render::DrawData);
-                if data.valid() {
-                    Some(data)
-                } else {
-                    None
-                }
+                if data.valid() { Some(data) } else { None }
             }
         }
     }

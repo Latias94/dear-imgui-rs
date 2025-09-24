@@ -5,7 +5,7 @@
 //! OS windows for advanced UI layouts.
 
 use std::cell::RefCell;
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{CStr, c_char, c_void};
 
 use dear_imgui::Context;
 use winit::dpi::{LogicalPosition, LogicalSize};

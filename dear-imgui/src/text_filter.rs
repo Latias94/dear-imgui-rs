@@ -29,7 +29,7 @@
 //! - `word1,word2` - Include items containing "word1" OR "word2"
 //! - `word1,-word2` - Include items containing "word1" but NOT "word2"
 
-use crate::{sys, Ui};
+use crate::{Ui, sys};
 use std::ptr;
 
 /// Helper to parse and apply text filters

@@ -1,6 +1,6 @@
 use std::{env, fs, io::Write, path::PathBuf};
 
-use flate2::{write::GzEncoder, Compression};
+use flate2::{Compression, write::GzEncoder};
 
 fn expected_lib_name() -> &'static str {
     if cfg!(target_env = "msvc") {
@@ -46,11 +46,7 @@ fn locate_sys_out_dir(workspace_root: &std::path::Path, target: &str) -> Result<
                 let name = p.file_name()?.to_string_lossy().to_string();
                 if name.starts_with("dear-imgui-sys-") {
                     let out = p.join("out");
-                    if out.exists() {
-                        Some(out)
-                    } else {
-                        None
-                    }
+                    if out.exists() { Some(out) } else { None }
                 } else {
                     None
                 }

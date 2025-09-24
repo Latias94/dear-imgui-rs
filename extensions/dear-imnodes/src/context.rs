@@ -601,11 +601,7 @@ impl<'ui> NodeEditor<'ui> {
     pub fn is_link_destroyed(&self) -> Option<i32> {
         let mut id = 0i32;
         let destroyed = unsafe { sys::imnodes_IsLinkDestroyed(&mut id as *mut i32) };
-        if destroyed {
-            Some(id)
-        } else {
-            None
-        }
+        if destroyed { Some(id) } else { None }
     }
 }
 
@@ -808,11 +804,7 @@ impl PostEditor {
     pub fn is_link_destroyed(&self) -> Option<i32> {
         let mut id = 0i32;
         let destroyed = unsafe { sys::imnodes_IsLinkDestroyed(&mut id as *mut i32) };
-        if destroyed {
-            Some(id)
-        } else {
-            None
-        }
+        if destroyed { Some(id) } else { None }
     }
 
     pub fn is_editor_hovered(&self) -> bool {

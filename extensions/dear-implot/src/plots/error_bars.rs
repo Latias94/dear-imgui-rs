@@ -1,6 +1,6 @@
 //! Error bars plot implementation
 
-use super::{safe_cstring, validate_data_lengths, Plot, PlotError};
+use super::{Plot, PlotError, safe_cstring, validate_data_lengths};
 use crate::sys;
 
 /// Builder for error bars plots

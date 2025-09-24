@@ -1,6 +1,6 @@
 //! Histogram plot implementation
 
-use super::{safe_cstring, Plot, PlotError};
+use super::{Plot, PlotError, safe_cstring};
 use crate::sys;
 use crate::{BinMethod, HistogramFlags};
 

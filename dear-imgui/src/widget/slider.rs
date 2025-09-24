@@ -1,6 +1,6 @@
+use crate::Ui;
 use crate::internal::DataTypeKind;
 use crate::sys;
-use crate::Ui;
 use std::ffi::c_void;
 
 /// Builder for slider widgets

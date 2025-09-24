@@ -228,7 +228,13 @@ impl AppWindow {
             imgui,
             graph,
             graph_b,
-            graph_shader: GraphState { next_link_id: 10000, links: Vec::new(), positions_initialized: false, added_nodes: Vec::new(), next_node_id: 3000 },
+            graph_shader: GraphState {
+                next_link_id: 10000,
+                links: Vec::new(),
+                positions_initialized: false,
+                added_nodes: Vec::new(),
+                next_node_id: 3000,
+            },
             node_options,
             ini_path: String::from("imnodes_state.ini"),
             minimap_hovered: None,
@@ -742,7 +748,10 @@ impl AppWindow {
                         tab.end();
                     }
                     if let Some(tab) = ui.tab_item("Shader Graph") {
-                        let editor = ui.imnodes_editor(&self.imgui.nodes_context, Some(&self.imgui.editor_context_shader));
+                        let editor = ui.imnodes_editor(
+                            &self.imgui.nodes_context,
+                            Some(&self.imgui.editor_context_shader),
+                        );
                         // One-time layout and links
                         if !self.graph_shader.positions_initialized {
                             // Nodes: 3001 Texture, 3002 UV, 3003 Multiply, 3004 Add, 3005 Output
@@ -759,7 +768,8 @@ impl AppWindow {
                             // 30023 (Color const2 out) -> 30043 (Add in B)
                             // 30041 (Add out) -> 30052 (Output in)
                             let mut push_link = |a: i32, b: i32| {
-                                let lid = self.graph_shader.next_link_id; self.graph_shader.next_link_id += 1;
+                                let lid = self.graph_shader.next_link_id;
+                                self.graph_shader.next_link_id += 1;
                                 self.graph_shader.links.push((lid, a, b));
                             };
                             push_link(30021, 30011);
@@ -774,45 +784,95 @@ impl AppWindow {
                         // UV Node (3002)
                         let n_uv = editor.node(3002);
                         n_uv.title_bar(|| ui.text("UV"));
-                        { let _out = editor.output_attr(30021, imnodes::PinShape::CircleFilled); ui.text("UV"); _out.end(); }
+                        {
+                            let _out = editor.output_attr(30021, imnodes::PinShape::CircleFilled);
+                            ui.text("UV");
+                            _out.end();
+                        }
                         n_uv.end();
                         // Texture Node (3001)
                         let n_tex = editor.node(3001);
                         n_tex.title_bar(|| ui.text("Texture2D"));
-                        { let _in = editor.input_attr(30011, imnodes::PinShape::Circle); ui.text("UV"); _in.end(); }
-                        { let _out = editor.output_attr(30012, imnodes::PinShape::QuadFilled); ui.text("Color"); _out.end(); }
+                        {
+                            let _in = editor.input_attr(30011, imnodes::PinShape::Circle);
+                            ui.text("UV");
+                            _in.end();
+                        }
+                        {
+                            let _out = editor.output_attr(30012, imnodes::PinShape::QuadFilled);
+                            ui.text("Color");
+                            _out.end();
+                        }
                         n_tex.end();
                         // Multiply Node (3003)
                         let n_mul = editor.node(3003);
                         n_mul.title_bar(|| ui.text("Multiply"));
-                        { let _in = editor.input_attr(30032, imnodes::PinShape::Circle); ui.text("A"); _in.end(); }
-                        { let _in = editor.input_attr(30033, imnodes::PinShape::Circle); ui.text("B"); _in.end(); }
-                        { let _out = editor.output_attr(30031, imnodes::PinShape::TriangleFilled); ui.text("Out"); _out.end(); }
+                        {
+                            let _in = editor.input_attr(30032, imnodes::PinShape::Circle);
+                            ui.text("A");
+                            _in.end();
+                        }
+                        {
+                            let _in = editor.input_attr(30033, imnodes::PinShape::Circle);
+                            ui.text("B");
+                            _in.end();
+                        }
+                        {
+                            let _out = editor.output_attr(30031, imnodes::PinShape::TriangleFilled);
+                            ui.text("Out");
+                            _out.end();
+                        }
                         n_mul.end();
                         // Color Const nodes (3006/3007) as outputs
                         let n_c1 = editor.node(3006);
                         n_c1.title_bar(|| ui.text("ColorConst A"));
-                        { let _out = editor.output_attr(30022, imnodes::PinShape::QuadFilled); ui.text("Color"); _out.end(); }
+                        {
+                            let _out = editor.output_attr(30022, imnodes::PinShape::QuadFilled);
+                            ui.text("Color");
+                            _out.end();
+                        }
                         n_c1.end();
                         let n_c2 = editor.node(3007);
                         n_c2.title_bar(|| ui.text("ColorConst B"));
-                        { let _out = editor.output_attr(30023, imnodes::PinShape::QuadFilled); ui.text("Color"); _out.end(); }
+                        {
+                            let _out = editor.output_attr(30023, imnodes::PinShape::QuadFilled);
+                            ui.text("Color");
+                            _out.end();
+                        }
                         n_c2.end();
                         // Add Node (3004)
                         let n_add = editor.node(3004);
                         n_add.title_bar(|| ui.text("Add"));
-                        { let _in = editor.input_attr(30042, imnodes::PinShape::Circle); ui.text("A"); _in.end(); }
-                        { let _in = editor.input_attr(30043, imnodes::PinShape::Circle); ui.text("B"); _in.end(); }
-                        { let _out = editor.output_attr(30041, imnodes::PinShape::TriangleFilled); ui.text("Out"); _out.end(); }
+                        {
+                            let _in = editor.input_attr(30042, imnodes::PinShape::Circle);
+                            ui.text("A");
+                            _in.end();
+                        }
+                        {
+                            let _in = editor.input_attr(30043, imnodes::PinShape::Circle);
+                            ui.text("B");
+                            _in.end();
+                        }
+                        {
+                            let _out = editor.output_attr(30041, imnodes::PinShape::TriangleFilled);
+                            ui.text("Out");
+                            _out.end();
+                        }
                         n_add.end();
                         // Output Node (3005)
                         let n_out = editor.node(3005);
                         n_out.title_bar(|| ui.text("Output"));
-                        { let _in = editor.input_attr(30052, imnodes::PinShape::Circle); ui.text("Color"); _in.end(); }
+                        {
+                            let _in = editor.input_attr(30052, imnodes::PinShape::Circle);
+                            ui.text("Color");
+                            _in.end();
+                        }
                         n_out.end();
 
                         // Draw links
-                        for (id, a, b) in &self.graph_shader.links { editor.link(*id, *a, *b); }
+                        for (id, a, b) in &self.graph_shader.links {
+                            editor.link(*id, *a, *b);
+                        }
 
                         editor.end();
                         tab.end();

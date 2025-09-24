@@ -3,50 +3,71 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn main() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+#[derive(Clone, Debug)]
+struct BuildConfig {
+    manifest_dir: PathBuf,
+    out_dir: PathBuf,
+    target_os: String,
+    target_env: String,
+    docs_rs: bool,
+}
 
-    // Resolve include paths from dear-imgui-sys
+impl BuildConfig {
+    fn new() -> Self {
+        Self {
+            manifest_dir: PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()),
+            out_dir: PathBuf::from(env::var("OUT_DIR").unwrap()),
+            target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
+            target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
+            docs_rs: env::var("DOCS_RS").is_ok(),
+        }
+    }
+    fn is_msvc(&self) -> bool {
+        self.target_env == "msvc"
+    }
+    fn is_windows(&self) -> bool {
+        self.target_os == "windows"
+    }
+    fn use_static_crt(&self) -> bool {
+        self.is_msvc()
+            && self.is_windows()
+            && env::var("CARGO_CFG_TARGET_FEATURE")
+                .unwrap_or_default()
+                .split(',')
+                .any(|f| f == "crt-static")
+    }
+}
+
+fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     let imgui_src = env::var_os("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH")
         .or_else(|| env::var_os("DEP_DEAR_IMGUI_THIRD_PARTY"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| manifest_dir.join("../../dear-imgui-sys/third-party/cimgui/imgui"));
+        .unwrap_or_else(|| {
+            cfg.manifest_dir
+                .join("../../dear-imgui-sys/third-party/cimgui/imgui")
+        });
     let cimgui_root = env::var_os("DEP_DEAR_IMGUI_CIMGUI_INCLUDE_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|| manifest_dir.join("../../dear-imgui-sys/third-party/cimgui"));
+        .unwrap_or_else(|| {
+            cfg.manifest_dir
+                .join("../../dear-imgui-sys/third-party/cimgui")
+        });
+    (imgui_src, cimgui_root)
+}
 
-    // cimnodes root (contains cimnodes.{h,cpp} and an embedded imnodes/ directory)
-    let cimnodes_root = manifest_dir.join("third-party/cimnodes");
-
-    if !imgui_src.exists() {
-        panic!(
-            "ImGui include not found at {:?}. Did you forget to initialize dear-imgui-sys third-party?",
-            imgui_src
-        );
-    }
-    if !cimnodes_root.exists() {
-        panic!(
-            "cimnodes root not found at {:?}. Did you init submodules?",
-            cimnodes_root
-        );
-    }
-
-    // Rerun hints and env tracking
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=third-party/cimnodes/cimnodes.h");
-    println!("cargo:rerun-if-changed=third-party/cimnodes/cimnodes.cpp");
-    println!("cargo:rerun-if-changed=third-party/cimnodes/imnodes/imnodes.h");
-    println!("cargo:rerun-if-changed=third-party/cimnodes/imnodes/imnodes.cpp");
-    println!("cargo:rerun-if-changed=../../dear-imgui-sys");
-    println!("cargo:rerun-if-env-changed=IMNODES_SYS_LIB_DIR");
-    println!("cargo:rerun-if-env-changed=IMNODES_SYS_SKIP_CC");
-    println!("cargo:rerun-if-env-changed=IMNODES_SYS_PREBUILT_URL");
-
-    // Generate bindings from cimnodes.h
+fn generate_bindings(
+    cfg: &BuildConfig,
+    cimnodes_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
     let bindings = bindgen::Builder::default()
         .header(cimnodes_root.join("cimnodes.h").to_string_lossy())
-        .header(manifest_dir.join("shim/imnodes_extra.h").to_string_lossy())
+        .header(
+            cfg.manifest_dir
+                .join("shim/imnodes_extra.h")
+                .to_string_lossy(),
+        )
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .allowlist_function("imnodes_.*")
         .allowlist_function("EmulateThreeButtonMouse_.*")
@@ -76,93 +97,105 @@ fn main() {
         .layout_tests(false)
         .clang_arg("-x")
         .clang_arg("c++")
-        .clang_arg("-std=c++17");
-
-    let bindings = bindings
+        .clang_arg("-std=c++17")
         .generate()
         .expect("Unable to generate cimnodes bindings");
     bindings
-        .write_to_file(out_path.join("bindings.rs"))
+        .write_to_file(cfg.out_dir.join("bindings.rs"))
         .expect("Couldn't write cimnodes bindings!");
+}
 
-    // Try prebuilt paths
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    let mut linked_prebuilt = false;
+fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
+    let target_env = &cfg.target_env;
     if let Ok(dir) = env::var("IMNODES_SYS_LIB_DIR") {
-        if try_link_prebuilt(PathBuf::from(dir.clone()), &target_env) {
-            linked_prebuilt = true;
+        if try_link_prebuilt(PathBuf::from(dir.clone()), target_env) {
+            return true;
+        }
+        println!(
+            "cargo:warning=IMNODES_SYS_LIB_DIR set but library not found in {}",
+            dir
+        );
+    }
+    if let Ok(url) = env::var("IMNODES_SYS_PREBUILT_URL") {
+        if let Ok(dir) = try_download_prebuilt(&cfg.out_dir, &url, target_env) {
+            if try_link_prebuilt(dir.clone(), target_env) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn build_with_cc(cfg: &BuildConfig, cimnodes_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+    let mut build = cc::Build::new();
+    build.cpp(true).std("c++17");
+    for (k, v) in env::vars() {
+        if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
+            build.define(suffix, v.as_str());
+        }
+    }
+    build.include(imgui_src);
+    build.include(cimgui_root);
+    build.include(cimnodes_root);
+    build.include(cfg.manifest_dir.join("shim"));
+    build.include(cimnodes_root.join("imnodes"));
+    build.define("IMNODES_NAMESPACE", Some("imnodes"));
+    build.file(cimnodes_root.join("cimnodes.cpp"));
+    build.file(cimnodes_root.join("imnodes/imnodes.cpp"));
+    build.file(cfg.manifest_dir.join("shim/imnodes_extra.cpp"));
+    if cfg.is_msvc() && cfg.is_windows() {
+        build.flag("/EHsc");
+        let use_static = cfg.use_static_crt();
+        build.static_crt(use_static);
+        if use_static {
+            build.flag("/MT");
         } else {
-            println!(
-                "cargo:warning=IMNODES_SYS_LIB_DIR set but library not found in {}",
-                dir
-            );
+            build.flag("/MD");
         }
+        let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
+        if profile == "debug" {
+            build.debug(true).opt_level(0);
+        } else {
+            build.debug(false).opt_level(2);
+        }
+        build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
     }
-    if !linked_prebuilt {
-        if let Ok(url) = env::var("IMNODES_SYS_PREBUILT_URL") {
-            match try_download_prebuilt(&out_path, &url, &target_env) {
-                Ok(dir) => {
-                    if try_link_prebuilt(dir.clone(), &target_env) {
-                        linked_prebuilt = true;
-                    }
-                }
-                Err(e) => println!(
-                    "cargo:warning=Failed to download prebuilt dear_imnodes: {}",
-                    e
-                ),
-            }
-        }
+    build.compile("dear_imnodes");
+}
+
+fn main() {
+    let cfg = BuildConfig::new();
+
+    // Rerun hints
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=third-party/cimnodes/cimnodes.h");
+    println!("cargo:rerun-if-changed=third-party/cimnodes/cimnodes.cpp");
+    println!("cargo:rerun-if-changed=third-party/cimnodes/imnodes/imnodes.h");
+    println!("cargo:rerun-if-changed=third-party/cimnodes/imnodes/imnodes.cpp");
+    println!("cargo:rerun-if-changed=../../dear-imgui-sys");
+    println!("cargo:rerun-if-env-changed=IMNODES_SYS_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=IMNODES_SYS_SKIP_CC");
+    println!("cargo:rerun-if-env-changed=IMNODES_SYS_PREBUILT_URL");
+
+    let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
+    let cimnodes_root = cfg.manifest_dir.join("third-party/cimnodes");
+    if !imgui_src.exists() {
+        panic!("ImGui include not found at {:?}", imgui_src);
+    }
+    if !cimnodes_root.exists() {
+        panic!(
+            "cimnodes root not found at {:?}. Did you init submodules?",
+            cimnodes_root
+        );
     }
 
-    // Build from source if not linking prebuilt and not told to skip
-    if !linked_prebuilt && env::var("IMNODES_SYS_SKIP_CC").is_err() {
-        let mut build = cc::Build::new();
-        build.cpp(true).std("c++17");
+    // Generate bindings
+    generate_bindings(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
 
-        // Propagate dear-imgui defines
-        for (k, v) in env::vars() {
-            if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
-                build.define(suffix, v.as_str());
-            }
-        }
-
-        build.include(&imgui_src);
-        build.include(&cimgui_root);
-        build.include(&cimnodes_root);
-        build.include(manifest_dir.join("shim"));
-        build.include(cimnodes_root.join("imnodes"));
-        // Ensure namespace expected by cimnodes.cpp matches the header's namespace
-        build.define("IMNODES_NAMESPACE", Some("imnodes"));
-
-        build.file(cimnodes_root.join("cimnodes.cpp"));
-        build.file(cimnodes_root.join("imnodes/imnodes.cpp"));
-        build.file(manifest_dir.join("shim/imnodes_extra.cpp"));
-
-        // Align MSVC runtime and exceptions to dear-imgui-sys
-        let target_env_now = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-        let target_os_now = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        if target_env_now == "msvc" && target_os_now == "windows" {
-            build.flag("/EHsc");
-            let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-            let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
-            build.static_crt(use_static_crt);
-            if use_static_crt {
-                build.flag("/MT");
-            } else {
-                build.flag("/MD");
-            }
-            let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
-            if profile == "debug" {
-                build.debug(true);
-                build.opt_level(0);
-            } else {
-                build.debug(false);
-                build.opt_level(2);
-            }
-            build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
-        }
-
-        build.compile("dear_imnodes");
+    // Try prebuilt then build
+    let linked = try_link_prebuilt_all(&cfg);
+    if !cfg.docs_rs && !linked && env::var("IMNODES_SYS_SKIP_CC").is_err() {
+        build_with_cc(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
     }
 }
 

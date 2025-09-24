@@ -61,6 +61,7 @@ pub use utils::*;
 
 // Re-export new modular plot types for convenience
 pub use plots::{
+    Plot, PlotData, PlotError,
     bar::{BarPlot, PositionalBarPlot},
     error_bars::{AsymmetricErrorBarsPlot, ErrorBarsPlot, SimpleErrorBarsPlot},
     heatmap::{HeatmapPlot, HeatmapPlotF32},
@@ -70,7 +71,6 @@ pub use plots::{
     scatter::{ScatterPlot, SimpleScatterPlot},
     shaded::{ShadedBetweenPlot, ShadedPlot, SimpleShadedPlot},
     stems::{SimpleStemPlot, StemPlot},
-    Plot, PlotData, PlotError,
 };
 
 // Constants

@@ -7,7 +7,7 @@ use crate::{
     FrameResources, RenderResources, RendererError, RendererResult, ShaderManager, Uniforms,
     WgpuBackendData, WgpuInitInfo, WgpuTextureManager,
 };
-use dear_imgui::{render::DrawData, BackendFlags, Context};
+use dear_imgui::{BackendFlags, Context, render::DrawData};
 use wgpu::*;
 
 /// Main WGPU renderer for Dear ImGui

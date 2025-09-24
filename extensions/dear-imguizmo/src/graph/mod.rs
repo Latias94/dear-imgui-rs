@@ -1,6 +1,6 @@
 use dear_imgui::{
-    input::{Key, MouseButton},
     DrawListMut, Ui,
+    input::{Key, MouseButton},
 };
 use std::collections::HashSet;
 

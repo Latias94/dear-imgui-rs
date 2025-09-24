@@ -1,7 +1,7 @@
+use crate::Condition;
 use crate::sys;
 use crate::ui::Ui;
 use crate::widget::TreeNodeFlags;
-use crate::Condition;
 
 /// Tree node ID that can be constructed from different types
 #[derive(Copy, Clone, Debug)]

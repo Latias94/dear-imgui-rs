@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
-use crate::sys;
 use crate::Ui;
+use crate::sys;
 
 /// Used to render only the visible items when displaying a
 /// long list of items in a scrollable area.

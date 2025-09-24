@@ -1,5 +1,5 @@
-use crate::sys;
 use crate::Ui;
+use crate::sys;
 
 impl Ui {
     /// Display colored text
