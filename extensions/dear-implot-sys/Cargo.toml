@@ -36,6 +36,7 @@ pkg-config = "0.3"
 reqwest = { version = "0.11", features = ["blocking", "rustls-tls"], default-features = false }
 flate2 = "1"
 tar = "0.4"
+cmake = "0.1"
 
 [[bin]]
 name = "package"
@@ -44,7 +45,7 @@ required-features = ["package-bin"]
 
 [features]
 package-bin = ["dep:flate2", "dep:tar"]
-default = ["docking"]
+default = ["docking", "prebuilt"]
 # Enable docking branch features (default)
 docking = ["dear-imgui-sys/docking"]
 # Enable multi-viewport support (requires docking)
@@ -53,3 +54,5 @@ multi-viewport = ["docking", "dear-imgui-sys/multi-viewport"]
 freetype = ["dear-imgui-sys/freetype"]
 # Enable for WASM targets
 # wasm = ["dear-imgui-sys/wasm"]
+prebuilt = []
+build-from-source = []

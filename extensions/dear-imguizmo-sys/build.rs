@@ -162,6 +162,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_PREBUILT_URL");
+    println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_FORCE_BUILD");
+    println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_USE_CMAKE");
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimguizmo_root = cfg.manifest_dir.join("third-party/cimguizmo");
@@ -182,7 +184,13 @@ fn main() {
     docsrs_build(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
 
     // Link/build native
-    let linked_prebuilt = try_link_prebuilt_all(&cfg);
+    let force_build =
+        cfg!(feature = "build-from-source") || env::var("IMGUIZMO_SYS_FORCE_BUILD").is_ok();
+    let linked_prebuilt = if force_build {
+        false
+    } else {
+        try_link_prebuilt_all(&cfg)
+    };
     if !cfg.docs_rs && !linked_prebuilt && env::var("IMGUIZMO_SYS_SKIP_CC").is_err() {
         build_with_cc(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
     }
@@ -307,31 +315,42 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
         link_type,
         crt_suffix
     );
+    let archive_name_no_crt = format!(
+        "dear-imguizmo-prebuilt-{}-{}-{}.tar.gz",
+        version,
+        env::var("TARGET").unwrap_or_default(),
+        link_type
+    );
     let tags = [
         format!("dear-imguizmo-sys-v{}", version),
         format!("v{}", version),
     ];
     if let Ok(pkg_dir) = env::var("IMGUIZMO_SYS_PACKAGE_DIR") {
-        let archive_path = PathBuf::from(pkg_dir).join(&archive_name);
-        if archive_path.exists() {
-            let cache_root = prebuilt_cache_root(cfg);
-            if let Ok(lib_dir) = extract_archive_to_cache(
-                &archive_path,
-                &cache_root,
-                expected_lib_name(&cfg.target_env),
-            ) {
-                return Some(lib_dir);
+        let pkg_dir = PathBuf::from(pkg_dir);
+        for cand in [archive_name.clone(), archive_name_no_crt.clone()] {
+            let archive_path = pkg_dir.join(&cand);
+            if archive_path.exists() {
+                let cache_root = prebuilt_cache_root(cfg);
+                if let Ok(lib_dir) = extract_archive_to_cache(
+                    &archive_path,
+                    &cache_root,
+                    expected_lib_name(&cfg.target_env),
+                ) {
+                    return Some(lib_dir);
+                }
             }
         }
     }
     let cache_root = prebuilt_cache_root(cfg);
     for tag in &tags {
-        let url = format!(
-            "https://github.com/Latias94/dear-imgui/releases/download/{}/{}",
-            tag, archive_name
-        );
-        if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
-            return Some(lib_dir);
+        for name in [&archive_name, &archive_name_no_crt] {
+            let url = format!(
+                "https://github.com/Latias94/dear-imgui/releases/download/{}/{}",
+                tag, name
+            );
+            if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
+                return Some(lib_dir);
+            }
         }
     }
     None

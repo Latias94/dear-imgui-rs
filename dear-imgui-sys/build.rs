@@ -80,8 +80,16 @@ fn main() {
     // Native: always generate bindings from cimgui
     generate_bindings_native(&cfg);
 
-    // Try prebuilt dear_imgui first (static lib)
-    let mut linked_prebuilt = try_link_prebuilt_all(&cfg);
+    // Build strategy selection via features + env var override
+    let force_build =
+        cfg!(feature = "build-from-source") || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
+
+    // Try prebuilt dear_imgui first (static lib) unless force_build
+    let mut linked_prebuilt = if force_build {
+        false
+    } else {
+        try_link_prebuilt_all(&cfg)
+    };
 
     // Build from sources when needed
     if cfg.target_arch != "wasm32" && !linked_prebuilt && env::var("IMGUI_SYS_SKIP_CC").is_err() {
@@ -400,32 +408,41 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
         "dear-imgui-prebuilt-{}-{}-{}{}.tar.gz",
         version, cfg.target_triple, link_type, crt_suffix
     );
+    let archive_name_no_crt = format!(
+        "dear-imgui-prebuilt-{}-{}-{}.tar.gz",
+        version, cfg.target_triple, link_type
+    );
     let tags = [
         format!("dear-imgui-sys-v{}", version),
         format!("v{}", version),
     ];
     // If user provided local package dir, try extracting from there first
     if let Ok(pkg_dir) = env::var("IMGUI_SYS_PACKAGE_DIR") {
-        let archive_path = PathBuf::from(pkg_dir).join(&archive_name);
-        if archive_path.exists() {
-            let cache_root = prebuilt_cache_root(cfg);
-            if let Ok(lib_dir) = extract_archive_to_cache(
-                &archive_path,
-                &cache_root,
-                expected_lib_name(&cfg.target_env),
-            ) {
-                return Some(lib_dir);
+        let pkg_dir = PathBuf::from(pkg_dir);
+        for cand in [archive_name.clone(), archive_name_no_crt.clone()] {
+            let archive_path = pkg_dir.join(&cand);
+            if archive_path.exists() {
+                let cache_root = prebuilt_cache_root(cfg);
+                if let Ok(lib_dir) = extract_archive_to_cache(
+                    &archive_path,
+                    &cache_root,
+                    expected_lib_name(&cfg.target_env),
+                ) {
+                    return Some(lib_dir);
+                }
             }
         }
     }
     let cache_root = prebuilt_cache_root(cfg);
     for tag in &tags {
-        let url = format!(
-            "https://github.com/Latias94/dear-imgui/releases/download/{}/{}",
-            tag, archive_name
-        );
-        if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
-            return Some(lib_dir);
+        for name in [&archive_name, &archive_name_no_crt] {
+            let url = format!(
+                "https://github.com/Latias94/dear-imgui/releases/download/{}/{}",
+                tag, name
+            );
+            if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
+                return Some(lib_dir);
+            }
         }
     }
     None

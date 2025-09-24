@@ -51,7 +51,7 @@ path = "bin/package/main.rs"
 required-features = ["package-bin"]
 
 [features]
-default = ["docking"]
+default = ["docking", "prebuilt"]
 # Enable docking branch features (default)
 docking = []
 # Enable multi-viewport support (requires docking)
@@ -61,3 +61,5 @@ freetype = ["pkg-config"]
 # Enable for WASM targets
 wasm = []
 package-bin = ["dep:flate2", "dep:tar"]
+prebuilt = []
+build-from-source = []

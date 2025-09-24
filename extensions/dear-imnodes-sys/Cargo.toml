@@ -44,10 +44,12 @@ required-features = ["package-bin"]
 
 [features]
 package-bin = ["dep:flate2", "dep:tar"]
-default = ["docking"]
+default = ["docking", "prebuilt"]
 # Enable docking branch features (default)
 docking = ["dear-imgui-sys/docking"]
 # Enable multi-viewport support (requires docking)
 multi-viewport = ["docking", "dear-imgui-sys/multi-viewport"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
+prebuilt = []
+build-from-source = []

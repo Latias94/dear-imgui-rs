@@ -65,7 +65,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ format('{0}-{1}-{2}', matrix.target, matrix.crt || 'none', inputs.crates || 'all') }}
 
       - name: Install Linux deps
         if: runner.os == 'Linux'
@@ -102,6 +102,7 @@ jobs:
         run: cargo run -p dear-imgui-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-implot-sys (Release)
@@ -115,6 +116,7 @@ jobs:
         run: cargo run -p dear-implot-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          IMPLOT_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-imnodes-sys (Release)
@@ -128,6 +130,7 @@ jobs:
         run: cargo run -p dear-imnodes-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          IMNODES_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-imguizmo-sys (Release)
@@ -141,6 +144,7 @@ jobs:
         run: cargo run -p dear-imguizmo-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          IMGUIZMO_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
       - name: Upload to release

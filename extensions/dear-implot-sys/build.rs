@@ -41,6 +41,10 @@ impl BuildConfig {
     }
 }
 
+fn use_cmake_requested() -> bool {
+    matches!(env::var("IMPLOT_SYS_USE_CMAKE"), Ok(v) if !v.is_empty())
+}
+
 fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     let imgui_src = env::var_os("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH")
         .or_else(|| env::var_os("DEP_DEAR_IMGUI_THIRD_PARTY"))
@@ -195,6 +199,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_PREBUILT_URL");
+    println!("cargo:rerun-if-env-changed=IMPLOT_SYS_FORCE_BUILD");
+    println!("cargo:rerun-if-env-changed=IMPLOT_SYS_USE_CMAKE");
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimplot_root = cfg.manifest_dir.join("third-party/cimplot");
@@ -214,13 +220,79 @@ fn main() {
     // Generate bindings
     generate_bindings(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
 
-    let linked_prebuilt = try_link_prebuilt_all(&cfg);
-    if !cfg.docs_rs && !linked_prebuilt && env::var("IMPLOT_SYS_SKIP_CC").is_err() {
-        build_with_cc(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+    // Features: build-from-source forces source build; prebuilt is default
+    let force_build =
+        cfg!(feature = "build-from-source") || env::var("IMPLOT_SYS_FORCE_BUILD").is_ok();
+    let linked_prebuilt = if force_build {
+        false
+    } else {
+        try_link_prebuilt_all(&cfg)
+    };
+    if !cfg.docs_rs
+        && (force_build || (!linked_prebuilt && env::var("IMPLOT_SYS_SKIP_CC").is_err()))
+    {
+        if use_cmake_requested() && build_with_cmake(&cfg, &cimplot_root) {
+            // built via CMake
+        } else {
+            build_with_cc(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+        }
     } else if cfg.docs_rs {
         println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
         println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
     }
+}
+
+fn build_with_cmake(cfg: &BuildConfig, cimplot_root: &Path) -> bool {
+    let cmake_lists = cimplot_root.join("CMakeLists.txt");
+    if !cmake_lists.exists() {
+        return false;
+    }
+    println!("cargo:warning=Building cimplot with CMake");
+    let mut c = cmake::Config::new(cimplot_root);
+    c.define("IMGUI_STATIC", "ON");
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "release".into());
+    let cmake_profile = if cfg.is_msvc() && cfg.is_windows() && profile == "debug" {
+        "RelWithDebInfo"
+    } else if profile == "debug" {
+        "Debug"
+    } else {
+        "Release"
+    };
+    c.profile(cmake_profile);
+    if cfg.is_msvc() && cfg.is_windows() {
+        let tf = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+        let use_static = tf.split(',').any(|f| f == "crt-static");
+        let msvc_runtime = if use_static {
+            "MultiThreaded"
+        } else {
+            "MultiThreadedDLL"
+        };
+        c.define("CMAKE_MSVC_RUNTIME_LIBRARY", msvc_runtime);
+    }
+    let dst = c.build();
+    let candidates = [
+        dst.join("lib"),
+        dst.join("build"),
+        dst.clone(),
+        dst.join("build").join("Release"),
+        dst.join("build").join("RelWithDebInfo"),
+        dst.join("build").join("Debug"),
+        dst.join("Release"),
+        dst.join("RelWithDebInfo"),
+        dst.join("Debug"),
+    ];
+    let mut found = false;
+    for lib_dir in &candidates {
+        if lib_dir.exists() {
+            println!("cargo:rustc-link-search=native={}", lib_dir.display());
+            found = true;
+        }
+    }
+    if !found {
+        println!("cargo:warning=Could not locate CMake lib output dir; linking may fail");
+    }
+    println!("cargo:rustc-link-lib=static=cimplot");
+    true
 }
 
 fn expected_lib_name(target_env: &str) -> &'static str {
@@ -344,31 +416,42 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
         link_type,
         crt_suffix
     );
+    let archive_name_no_crt = format!(
+        "dear-implot-prebuilt-{}-{}-{}.tar.gz",
+        version,
+        env::var("TARGET").unwrap_or_default(),
+        link_type
+    );
     let tags = [
         format!("dear-implot-sys-v{}", version),
         format!("v{}", version),
     ];
     if let Ok(pkg_dir) = env::var("IMPLOT_SYS_PACKAGE_DIR") {
-        let archive_path = PathBuf::from(pkg_dir).join(&archive_name);
-        if archive_path.exists() {
-            let cache_root = prebuilt_cache_root(cfg);
-            if let Ok(lib_dir) = extract_archive_to_cache(
-                &archive_path,
-                &cache_root,
-                expected_lib_name(&cfg.target_env),
-            ) {
-                return Some(lib_dir);
+        let pkg_dir = PathBuf::from(pkg_dir);
+        for cand in [archive_name.clone(), archive_name_no_crt.clone()] {
+            let archive_path = pkg_dir.join(&cand);
+            if archive_path.exists() {
+                let cache_root = prebuilt_cache_root(cfg);
+                if let Ok(lib_dir) = extract_archive_to_cache(
+                    &archive_path,
+                    &cache_root,
+                    expected_lib_name(&cfg.target_env),
+                ) {
+                    return Some(lib_dir);
+                }
             }
         }
     }
     let cache_root = prebuilt_cache_root(cfg);
     for tag in &tags {
-        let url = format!(
-            "https://github.com/Latias94/dear-imgui/releases/download/{}/{}",
-            tag, archive_name
-        );
-        if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
-            return Some(lib_dir);
+        for name in [&archive_name, &archive_name_no_crt] {
+            let url = format!(
+                "https://github.com/Latias94/dear-imgui/releases/download/{}/{}",
+                tag, name
+            );
+            if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
+                return Some(lib_dir);
+            }
         }
     }
     None

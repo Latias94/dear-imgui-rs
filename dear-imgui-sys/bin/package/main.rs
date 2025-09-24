@@ -1,4 +1,8 @@
-use std::{env, fs, io::Write, path::PathBuf};
+use std::{
+    env, fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use flate2::{Compression, write::GzEncoder};
 
@@ -77,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-    let crt = if target_os == "windows" && target_env == "msvc" {
+    let mut crt = if target_os == "windows" && target_env == "msvc" {
         if target_features.split(',').any(|f| f == "crt-static") {
             "mt"
         } else {
@@ -86,6 +90,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         ""
     };
+    if let Ok(v) = env::var("IMGUI_SYS_PKG_CRT") {
+        if !v.is_empty() {
+            crt = Box::leak(v.into_boxed_str());
+        }
+    }
 
     let link_type = "static"; // we package static lib
 
@@ -127,8 +136,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cimgui_root = manifest_dir.join("third-party").join("cimgui");
     let imgui_include = cimgui_root.join("imgui");
     if imgui_include.exists() {
-        tar.append_dir_all("include/imgui", &imgui_include)?;
-        println!("Added include/imgui: {}", imgui_include.display());
+        // Only include header files, exclude heavy folders (examples, docs, backends, misc, .github)
+        append_headers_only(
+            &mut tar,
+            &imgui_include,
+            "include/imgui",
+            &["examples", "docs", "backends", "misc", ".github"],
+        )?;
+        println!(
+            "Added filtered include/imgui headers from: {}",
+            imgui_include.display()
+        );
     } else {
         eprintln!(
             "WARN: imgui include dir not found: {}",
@@ -144,6 +162,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         eprintln!("WARN: cimgui.h not found: {}", cimgui_h.display());
     }
+
+    // Licenses (project + third-party)
+    append_license_if_exists(
+        &mut tar,
+        &workspace_root.join("LICENSE-MIT"),
+        "licenses/PROJECT-LICENSE-MIT",
+    )?;
+    append_license_if_exists(
+        &mut tar,
+        &workspace_root.join("LICENSE-APACHE"),
+        "licenses/PROJECT-LICENSE-APACHE",
+    )?;
+    append_license_if_exists(
+        &mut tar,
+        &cimgui_root.join("imgui").join("LICENSE.txt"),
+        "licenses/imgui-LICENSE.txt",
+    )?;
+    append_license_if_exists(
+        &mut tar,
+        &cimgui_root.join("LICENSE"),
+        "licenses/cimgui-LICENSE",
+    )?;
 
     // Include library
     let lib_name = expected_lib_name();
@@ -170,5 +210,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tar.finish()?;
     println!("Package created: {}", pkg_dir.join(&ar_name).display());
+    Ok(())
+}
+
+fn append_headers_only(
+    tar: &mut tar::Builder<flate2::write::GzEncoder<fs::File>>,
+    src_dir: &Path,
+    dst_root: &str,
+    exclude_dirs: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    fn excluded(path: &Path, exclude_dirs: &[&str]) -> bool {
+        for comp in path.components() {
+            if let std::path::Component::Normal(os) = comp {
+                if let Some(name) = os.to_str() {
+                    if exclude_dirs.iter().any(|e| e == &name) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    let mut stack = vec![src_dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if excluded(&dir.strip_prefix(src_dir).unwrap_or(&dir), exclude_dirs) && dir != *src_dir {
+            continue;
+        }
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            let p = entry.path();
+            let rel = p.strip_prefix(src_dir).unwrap();
+            if p.is_dir() {
+                if !excluded(rel, exclude_dirs) {
+                    stack.push(p);
+                }
+            } else if p
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|s| s.eq_ignore_ascii_case("h"))
+                .unwrap_or(false)
+            {
+                let mut f = fs::File::open(&p)?;
+                let dst_path = format!("{}/{}", dst_root, rel.display());
+                tar.append_file(dst_path, &mut f)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn append_license_if_exists(
+    tar: &mut tar::Builder<flate2::write::GzEncoder<fs::File>>,
+    src: &Path,
+    dst: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if src.exists() {
+        let mut f = fs::File::open(src)?;
+        let mut hdr = tar::Header::new_gnu();
+        hdr.set_size(f.metadata()?.len());
+        hdr.set_mode(0o644);
+        hdr.set_cksum();
+        tar.append_data(&mut hdr, dst, &mut f)?;
+        println!("Added license: {} => {}", src.display(), dst);
+    } else {
+        eprintln!("WARN: license file missing: {}", src.display());
+    }
     Ok(())
 }
