@@ -1,0 +1,27 @@
+crate: dear-imgui-sys:
+  - dear-imgui-sys/**
+crate: dear-imgui:
+  - dear-imgui/**
+crate: backend-wgpu:
+  - backends/dear-imgui-wgpu/**
+crate: backend-glow:
+  - backends/dear-imgui-glow/**
+crate: backend-winit:
+  - backends/dear-imgui-winit/**
+crate: ext-implot:
+  - extensions/dear-implot/**
+  - extensions/dear-implot-sys/**
+crate: ext-imnodes:
+  - extensions/dear-imnodes/**
+  - extensions/dear-imnodes-sys/**
+crate: ext-imguizmo:
+  - extensions/dear-imguizmo/**
+  - extensions/dear-imguizmo-sys/**
+area: build:
+  - "**/build.rs"
+  - tools/build-support/**
+area: ci:
+  - .github/workflows/**
+area: docs:
+  - README.md
+  - docs/**

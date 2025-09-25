@@ -362,7 +362,7 @@ pub struct TableSortSpecs<'a> {
 impl<'a> TableSortSpecs<'a> {
     /// # Safety
     /// `raw` must be a valid pointer returned by ImGui_TableGetSortSpecs for the current table.
-    pub unsafe fn from_raw(raw: *mut sys::ImGuiTableSortSpecs) -> Self {
+    pub(crate) unsafe fn from_raw(raw: *mut sys::ImGuiTableSortSpecs) -> Self {
         Self {
             raw,
             _marker: std::marker::PhantomData,

@@ -278,6 +278,7 @@ impl DockBuilder {
     /// ```no_run
     /// # use dear_imgui::*;
     /// // ... create layout ...
+    /// let dockspace_id = 1; // placeholder dockspace id for example
     /// DockBuilder::finish(dockspace_id);
     /// ```
     #[doc(alias = "DockBuilderFinish")]

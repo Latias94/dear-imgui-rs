@@ -13,8 +13,11 @@ pub fn to_imgui_mouse_button(button: WinitMouseButton) -> Option<ImGuiMouseButto
         WinitMouseButton::Left => Some(ImGuiMouseButton::Left),
         WinitMouseButton::Right => Some(ImGuiMouseButton::Right),
         WinitMouseButton::Middle => Some(ImGuiMouseButton::Middle),
-        WinitMouseButton::Back => None, // Not supported in our MouseButton enum
-        WinitMouseButton::Forward => None, // Not supported in our MouseButton enum
+        WinitMouseButton::Back => Some(ImGuiMouseButton::Extra1),
+        WinitMouseButton::Forward => Some(ImGuiMouseButton::Extra2),
+        // Map common OS extra buttons if delivered as Other indices
+        WinitMouseButton::Other(3) => Some(ImGuiMouseButton::Extra1),
+        WinitMouseButton::Other(4) => Some(ImGuiMouseButton::Extra2),
         WinitMouseButton::Other(_) => None,
     }
 }
@@ -65,8 +68,25 @@ pub fn winit_key_to_imgui_key(key: &WinitKey, location: KeyLocation) -> Option<K
                 ('y' | 'Y', _) => Some(Key::Y),
                 ('z' | 'Z', _) => Some(Key::Z),
 
-                // For now, we only support the keys that are defined in our Key enum
-                // Most punctuation keys are not defined, so we'll skip them
+                // Punctuation
+                ('\'', _) => Some(Key::Apostrophe),
+                (',', _) => Some(Key::Comma),
+                ('-', KeyLocation::Standard) => Some(Key::Minus),
+                ('-', KeyLocation::Numpad) => Some(Key::KeypadSubtract),
+                ('.', KeyLocation::Standard) => Some(Key::Period),
+                ('.', KeyLocation::Numpad) => Some(Key::KeypadDecimal),
+                ('/', KeyLocation::Standard) => Some(Key::Slash),
+                ('/', KeyLocation::Numpad) => Some(Key::KeypadDivide),
+                ('*', KeyLocation::Numpad) => Some(Key::KeypadMultiply),
+                ('+', KeyLocation::Numpad) => Some(Key::KeypadAdd),
+                (';', _) => Some(Key::Semicolon),
+                ('=', KeyLocation::Standard) => Some(Key::Equal),
+                ('=', KeyLocation::Numpad) => Some(Key::KeypadEqual),
+                ('[', _) => Some(Key::LeftBracket),
+                ('\\', _) => Some(Key::Backslash),
+                (']', _) => Some(Key::RightBracket),
+                ('`', _) => Some(Key::GraveAccent),
+
                 _ => None,
             }
         }
@@ -89,7 +109,10 @@ pub fn winit_key_to_imgui_key(key: &WinitKey, location: KeyLocation) -> Option<K
             // Whitespace keys
             NamedKey::Tab => Some(Key::Tab),
             NamedKey::Space => Some(Key::Space),
-            NamedKey::Enter => Some(Key::Enter), // No separate keypad enter in our enum
+            NamedKey::Enter => match location {
+                KeyLocation::Numpad => Some(Key::KeypadEnter),
+                _ => Some(Key::Enter),
+            },
             NamedKey::Escape => Some(Key::Escape),
 
             // Modifier keys - distinguish left/right
@@ -127,15 +150,14 @@ pub fn winit_key_to_imgui_key(key: &WinitKey, location: KeyLocation) -> Option<K
             NamedKey::F10 => Some(Key::F10),
             NamedKey::F11 => Some(Key::F11),
             NamedKey::F12 => Some(Key::F12),
+            // Lock keys
+            NamedKey::CapsLock => Some(Key::CapsLock),
+            NamedKey::ScrollLock => Some(Key::ScrollLock),
+            NamedKey::NumLock => Some(Key::NumLock),
 
-            // Lock keys - not available in our Key enum
-            // NamedKey::CapsLock => Some(Key::CapsLock),
-            // NamedKey::ScrollLock => Some(Key::ScrollLock),
-            // NamedKey::NumLock => Some(Key::NumLock),
-
-            // Special keys - only Menu is available
-            // NamedKey::PrintScreen => Some(Key::PrintScreen),
-            // NamedKey::Pause => Some(Key::Pause),
+            // Special keys
+            NamedKey::PrintScreen => Some(Key::PrintScreen),
+            NamedKey::Pause => Some(Key::Pause),
             NamedKey::ContextMenu => Some(Key::Menu),
 
             _ => None,

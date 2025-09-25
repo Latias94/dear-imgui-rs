@@ -82,15 +82,14 @@ impl TextureMap for SimpleTextureMap {
         self.next_id += 1;
         let texture_id = TextureId::new(self.next_id as u64);
 
-        let mut texture_data = TextureData::new();
+        let mut boxed = TextureData::new();
 
-        texture_data.create(format, width, height);
+        boxed.create(format, width, height);
 
-        texture_data.set_tex_id(texture_id);
-        texture_data.set_status(TextureStatus::OK);
+        boxed.set_tex_id(texture_id);
+        boxed.set_status(TextureStatus::OK);
 
-        // 将 Box<TextureData> 转换为 TextureData 进行存储
-        let texture_data = *texture_data;
+        let texture_data = *boxed;
 
         self.textures.insert(texture_id, gl_texture);
         self.texture_data.insert(texture_id, texture_data);

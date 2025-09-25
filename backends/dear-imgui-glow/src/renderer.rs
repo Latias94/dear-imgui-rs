@@ -40,6 +40,10 @@ pub struct GlowRenderer {
     // Resource management
     gl_context: Option<std::rc::Rc<glow::Context>>, // None = externally managed
     texture_map: Box<dyn TextureMap>,
+    // Optional: enable GL_FRAMEBUFFER_SRGB during ImGui rendering
+    framebuffer_srgb: bool,
+    // Optional: override color gamma applied to vertex colors (None = auto)
+    color_gamma_override: Option<f32>,
 }
 
 impl GlowRenderer {
@@ -187,6 +191,8 @@ impl GlowRenderer {
             is_destroyed: false,
             gl_context: owned_gl,
             texture_map,
+            framebuffer_srgb: false,
+            color_gamma_override: None,
         };
 
         Ok(renderer)
@@ -198,50 +204,141 @@ impl GlowRenderer {
     /// we don't need to manually create font textures. The textures will be created
     /// automatically when needed through the ImTextureData system.
     fn prepare_font_atlas(
-        _gl: &Context,
+        gl: &Context,
         imgui_context: &mut ImGuiContext,
-        _texture_map: &mut dyn TextureMap,
+        texture_map: &mut dyn TextureMap,
     ) -> InitResult<GlTexture> {
         let mut fonts = imgui_context.fonts();
 
-        // Build the font atlas - this will trigger texture creation through the new system
+        // Build the font atlas CPU data
         fonts.build();
 
-        // With ImGuiBackendFlags_RendererHasTextures, we don't need to manually create textures.
-        // The texture will be created automatically when the first frame is rendered.
-        // We return a dummy texture here since the actual texture creation happens in render().
+        // Try to upload the font atlas immediately (legacy path / fallback),
+        // mirroring dear imgui's OpenGL3 backend and our WGPU backend behavior.
+        // This ensures the font texture is available even if draw_data-based
+        // texture updates are not triggered on the first frame.
+        let mut created_font_tex: Option<GlTexture> = None;
+        unsafe {
+            let tex = fonts.get_tex_data();
+            if !tex.is_null() {
+                let width = (*tex).Width as u32;
+                let height = (*tex).Height as u32;
+                let bpp = (*tex).BytesPerPixel;
+                let px_ptr = (*tex).Pixels as *const u8;
 
-        // Create a dummy 1x1 white texture as a placeholder
+                if !px_ptr.is_null() && width > 0 && height > 0 {
+                    // Prepare pixel buffer as RGBA8
+                    let rgba_pixels: Option<Vec<u8>> = match bpp {
+                        4 => {
+                            let size = (width as usize) * (height as usize) * 4;
+                            Some(std::slice::from_raw_parts(px_ptr, size).to_vec())
+                        }
+                        1 => {
+                            // NOTE(opt): For Alpha8 fonts/textures we currently expand to RGBA8 (white RGB + alpha)
+                            // for maximum compatibility across GL/ES/WebGL.
+                            // This can be optimized using single-channel textures + texture swizzle when available:
+                            // - Desktop GL 3.3+ (or ARB_texture_swizzle), GLES 3.0+ support TEXTURE_SWIZZLE_RGBA.
+                            // - Upload as RED/ALPHA/LUMINANCE depending on platform, then set swizzle to (1,1,1,R)
+                            //   so sampling returns vec4(1,1,1,alpha) without duplicating data to 4 channels.
+                            // - Requires feature/extension gating and fallback to RGBA path for older GL/ES/WebGL.
+                            let size = (width as usize) * (height as usize);
+                            let src = std::slice::from_raw_parts(px_ptr, size);
+                            let mut out = Vec::with_capacity(size * 4);
+                            for &a in src.iter() {
+                                out.extend_from_slice(&[255, 255, 255, a]);
+                            }
+                            Some(out)
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(pixels) = rgba_pixels {
+                        // Create GL texture and upload
+                        let gl_texture = gl.create_texture().map_err(InitError::CreateTexture)?;
+
+                        gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+                        // Pixel store alignment for tightly packed RGBA8
+                        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+                        gl.tex_image_2d(
+                            glow::TEXTURE_2D,
+                            0,
+                            glow::RGBA as i32,
+                            width as i32,
+                            height as i32,
+                            0,
+                            glow::RGBA,
+                            glow::UNSIGNED_BYTE,
+                            glow::PixelUnpackData::Slice(Some(&pixels)),
+                        );
+                        // Set texture params
+                        gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MIN_FILTER,
+                            glow::LINEAR as i32,
+                        );
+                        gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MAG_FILTER,
+                            glow::LINEAR as i32,
+                        );
+                        gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_S,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_T,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        gl.bind_texture(glow::TEXTURE_2D, None);
+
+                        // Register in our texture map and push TexID back to Dear ImGui
+                        let tex_id = texture_map.register_texture(
+                            gl_texture,
+                            width as i32,
+                            height as i32,
+                            TextureFormat::RGBA32,
+                        );
+                        fonts.set_texture_id(tex_id);
+
+                        created_font_tex = Some(gl_texture);
+                    }
+                }
+            }
+        }
+
+        if let Some(tex) = created_font_tex {
+            return Ok(tex);
+        }
+
+        // Fallback: create a 1x1 white texture as a last resort
         let dummy_texture = unsafe {
-            let gl_texture = _gl.create_texture().map_err(InitError::CreateTexture)?;
-
-            _gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
-
-            // Set texture parameters
-            _gl.tex_parameter_i32(
+            let gl_texture = gl.create_texture().map_err(InitError::CreateTexture)?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+            gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_MIN_FILTER,
                 glow::LINEAR as i32,
             );
-            _gl.tex_parameter_i32(
+            gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_MAG_FILTER,
                 glow::LINEAR as i32,
             );
-            _gl.tex_parameter_i32(
+            gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_WRAP_S,
                 glow::CLAMP_TO_EDGE as i32,
             );
-            _gl.tex_parameter_i32(
+            gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_WRAP_T,
                 glow::CLAMP_TO_EDGE as i32,
             );
-
-            // Upload 1x1 white pixel
             let white_pixel = [255u8, 255u8, 255u8, 255u8];
-            _gl.tex_image_2d(
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+            gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
                 glow::RGBA as i32,
@@ -252,9 +349,7 @@ impl GlowRenderer {
                 glow::UNSIGNED_BYTE,
                 glow::PixelUnpackData::Slice(Some(&white_pixel)),
             );
-
-            _gl.bind_texture(glow::TEXTURE_2D, None);
-
+            gl.bind_texture(glow::TEXTURE_2D, None);
             gl_texture
         };
 
@@ -340,6 +435,19 @@ impl GlowRenderer {
             }
         }
         Ok(())
+    }
+
+    /// Enable/disable GL_FRAMEBUFFER_SRGB around ImGui rendering
+    /// Default is disabled; prefer application-level control of sRGB.
+    pub fn set_framebuffer_srgb_enabled(&mut self, enabled: bool) {
+        self.framebuffer_srgb = enabled;
+    }
+
+    /// Override the color gamma applied to ImGui vertex colors.
+    /// Pass `Some(gamma)` to force a value (e.g., 2.2 or 1.0), or `None` to use auto:
+    /// auto = 2.2 when sRGB is enabled, otherwise 1.0.
+    pub fn set_color_gamma_override(&mut self, gamma: Option<f32>) {
+        self.color_gamma_override = gamma;
     }
 
     /// Render Dear ImGui draw data
@@ -437,6 +545,10 @@ impl GlowRenderer {
             self.vertex_array_object = None;
         }
 
+        // Optionally disable FRAMEBUFFER_SRGB before restoring state (we didn't back it up)
+        if self.framebuffer_srgb {
+            unsafe { gl.disable(glow::FRAMEBUFFER_SRGB) };
+        }
         self.state_backup.restore(gl, self.gl_version);
         gl_debug_message(gl, "dear-imgui-glow: end render");
 
@@ -452,6 +564,8 @@ impl GlowRenderer {
         fb_height: f32,
     ) -> RenderResult<()> {
         unsafe {
+            // Ensure sampler uses texture unit 0 (shader binds sampler to 0)
+            gl.active_texture(glow::TEXTURE0);
             // Setup render state: alpha-blending enabled, no face culling, no depth testing, scissor enabled, polygon fill
             gl.enable(glow::BLEND);
             gl.blend_equation(glow::FUNC_ADD);
@@ -465,6 +579,13 @@ impl GlowRenderer {
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::STENCIL_TEST);
             gl.enable(glow::SCISSOR_TEST);
+
+            // Optionally enable sRGB frame-buffer writes for sRGB-capable surfaces.
+            // Note: This is typically controlled by the application. We expose a toggle
+            // for convenience; it will be disabled after rendering to avoid leaking state.
+            if self.framebuffer_srgb {
+                gl.enable(glow::FRAMEBUFFER_SRGB);
+            }
 
             // Note: We don't enable GL_FRAMEBUFFER_SRGB here because:
             // 1. Modern applications typically create sRGB surfaces directly (e.g., glutin's .with_srgb(true))
@@ -518,6 +639,18 @@ impl GlowRenderer {
             }
             if let Some(location) = self.shaders.attrib_location_proj_mtx {
                 gl.uniform_matrix_4_f32_slice(Some(&location), false, &ortho_projection.concat());
+            }
+            if let Some(location) = self.shaders.attrib_location_color_gamma {
+                // Decode vertex color from sRGB when writing to sRGB framebuffer,
+                // otherwise pass-through (1.0). Allow override if set.
+                let gamma = self
+                    .color_gamma_override
+                    .unwrap_or(if self.framebuffer_srgb {
+                        2.2_f32
+                    } else {
+                        1.0_f32
+                    });
+                gl.uniform_1_f32(Some(&location), gamma);
             }
 
             #[cfg(feature = "bind_sampler_support")]
@@ -835,13 +968,13 @@ impl GlowRenderer {
     /// Following the original Dear ImGui OpenGL3 implementation
     fn update_texture_from_data(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &mut dear_imgui::TextureData,
     ) -> RenderResult<()> {
         use dear_imgui::TextureStatus;
 
         match texture_data.status() {
             TextureStatus::WantCreate => {
-                // Create new texture
+                // Create new texture and assign ID back to Dear ImGui
                 self.create_texture_from_data(texture_data)?;
             }
             TextureStatus::WantUpdates => {
@@ -863,7 +996,7 @@ impl GlowRenderer {
     /// Create a new texture from ImTextureData
     fn create_texture_from_data(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &mut dear_imgui::TextureData,
     ) -> RenderResult<()> {
         let gl = self.get_gl_context()?;
         let width = texture_data.width() as u32;
@@ -872,11 +1005,18 @@ impl GlowRenderer {
 
         if let Some(pixels) = texture_data.pixels() {
             let gl_texture = unsafe {
+                // Backup texture binding / active texture / unpack alignment
+                let last_active = gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32;
+                gl.active_texture(glow::TEXTURE0);
+                let last_texture = gl.get_parameter_i32(glow::TEXTURE_BINDING_2D) as u32;
+                let last_unpack = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
+
                 let gl_texture = gl.create_texture().map_err(|e| {
                     RenderError::Generic(format!("Failed to create texture: {}", e))
                 })?;
 
                 gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+                gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
 
                 // Set texture parameters
                 gl.tex_parameter_i32(
@@ -916,6 +1056,8 @@ impl GlowRenderer {
                         );
                     }
                     dear_imgui::TextureFormat::Alpha8 => {
+                        // NOTE(opt): Could use GL RED + TEXTURE_SWIZZLE to avoid 4x expansion when
+                        // GL 3.3+/GLES3.0+/ARB_texture_swizzle is available. See note in prepare_font_atlas().
                         // Convert Alpha8 to RGBA32 for OpenGL
                         let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
                         for &alpha in pixels {
@@ -939,16 +1081,24 @@ impl GlowRenderer {
                     }
                 }
 
-                gl.bind_texture(glow::TEXTURE_2D, None);
+                // Restore pixel store and previous binding
+                gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
+                if last_texture != 0 {
+                    let restore =
+                        glow::NativeTexture(std::num::NonZeroU32::new(last_texture).unwrap());
+                    gl.bind_texture(glow::TEXTURE_2D, Some(restore));
+                } else {
+                    gl.bind_texture(glow::TEXTURE_2D, None);
+                }
+                gl.active_texture(last_active);
                 gl_texture
             };
-
-            // Store the texture in our map
-            let texture_id = texture_data.tex_id();
-            self.texture_map.set(texture_id, gl_texture);
-
-            // TODO: Set the texture ID back to ImGui
-            // This would require calling texture_data.set_tex_id() but that needs mutable access
+            // Register texture and set ID back to Dear ImGui
+            let tex_id =
+                self.texture_map
+                    .register_texture(gl_texture, width as i32, height as i32, format);
+            texture_data.set_tex_id(tex_id);
+            texture_data.set_status(dear_imgui::TextureStatus::OK);
         }
 
         Ok(())
@@ -957,17 +1107,115 @@ impl GlowRenderer {
     /// Update an existing texture from ImTextureData
     fn update_existing_texture_from_data(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &mut dear_imgui::TextureData,
     ) -> RenderResult<()> {
-        // For now, we recreate the texture. A more efficient implementation would
-        // use glTexSubImage2D for partial updates.
-        self.create_texture_from_data(texture_data)
+        let gl = self.get_gl_context()?;
+        let tex_id = texture_data.tex_id();
+        let gl_texture = match self.texture_map.get(tex_id) {
+            Some(t) => t,
+            None => {
+                // If texture doesn't exist, create it fully
+                return self.create_texture_from_data(texture_data);
+            }
+        };
+
+        let width = texture_data.width() as u32;
+        let height = texture_data.height() as u32;
+        let bpp = texture_data.bytes_per_pixel() as usize;
+
+        let pixels = match texture_data.pixels() {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        // Backup texture binding / active texture / unpack alignment
+        let last_active = unsafe { gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32 };
+        let last_texture = unsafe { gl.get_parameter_i32(glow::TEXTURE_BINDING_2D) as u32 };
+        let last_unpack = unsafe { gl.get_parameter_i32(glow::UNPACK_ALIGNMENT) };
+        unsafe {
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        }
+
+        // Iterate update rects and upload each sub-region
+        // Reuse a single staging buffer to avoid repeated allocations
+        let mut sub_rgba: Vec<u8> = Vec::new();
+        for rect in texture_data.updates() {
+            let rx = rect.x as u32;
+            let ry = rect.y as u32;
+            let rw = rect.w as u32;
+            let rh = rect.h as u32;
+
+            if rw == 0 || rh == 0 {
+                continue;
+            }
+            if rx >= width || ry >= height {
+                continue;
+            }
+
+            let row_stride = (width as usize) * bpp;
+            let needed = (rw * rh * 4) as usize;
+            if sub_rgba.capacity() < needed {
+                sub_rgba.reserve(needed - sub_rgba.capacity());
+            }
+            sub_rgba.clear();
+
+            for row in 0..(rh as usize) {
+                let src_row_start = ((ry as usize + row) * row_stride) + (rx as usize) * bpp;
+                let src = &pixels[src_row_start..src_row_start + (rw as usize) * bpp];
+
+                match texture_data.format() {
+                    dear_imgui::TextureFormat::RGBA32 => {
+                        // Already RGBA, just append
+                        sub_rgba.extend_from_slice(src);
+                    }
+                    dear_imgui::TextureFormat::Alpha8 => {
+                        // NOTE(opt): Could use GL RED + TEXTURE_SWIZZLE (if available) to avoid expansion.
+                        // Convert A8 -> RGBA8 with white RGB
+                        for &a in src.iter() {
+                            sub_rgba.extend_from_slice(&[255, 255, 255, a]);
+                        }
+                    }
+                }
+            }
+
+            unsafe {
+                gl.tex_sub_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    rx as i32,
+                    ry as i32,
+                    rw as i32,
+                    rh as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(Some(&sub_rgba)),
+                );
+            }
+        }
+
+        // Restore previous binding and pixel store
+        unsafe {
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
+            if last_texture != 0 {
+                let restore = glow::NativeTexture(std::num::NonZeroU32::new(last_texture).unwrap());
+                gl.bind_texture(glow::TEXTURE_2D, Some(restore));
+            } else {
+                gl.bind_texture(glow::TEXTURE_2D, None);
+            }
+            gl.active_texture(last_active);
+        }
+
+        // Mark status OK after updates
+        texture_data.set_status(dear_imgui::TextureStatus::OK);
+        Ok(())
     }
 
     /// Destroy a texture from ImTextureData
     fn destroy_texture_from_data(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &mut dear_imgui::TextureData,
     ) -> RenderResult<()> {
         let gl = self.get_gl_context()?;
         let texture_id = texture_data.tex_id();
@@ -978,6 +1226,8 @@ impl GlowRenderer {
             }
             self.texture_map.remove(texture_id);
         }
+
+        texture_data.set_status(dear_imgui::TextureStatus::Destroyed);
 
         Ok(())
     }

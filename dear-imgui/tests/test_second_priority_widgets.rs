@@ -1,5 +1,5 @@
+use dear_imgui::HoveredFlags;
 use dear_imgui::input::MouseButton;
-use dear_imgui::tooltip::HoveredFlags;
 use dear_imgui::*;
 
 #[test]

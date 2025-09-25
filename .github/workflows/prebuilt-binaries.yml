@@ -27,6 +27,7 @@ jobs:
   build-prebuilt:
     name: Build ${{ matrix.target }}${{ matrix.crt && format(' ({0})', matrix.crt) || '' }}
     runs-on: ${{ matrix.os }}
+    if: ${{ github.event_name != 'release' || runner.os == 'Windows' }}
     permissions:
       contents: write
     strategy:
@@ -145,11 +146,11 @@ jobs:
 
       - name: Package dear-imgui-sys static library + headers (freetype)
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys')))
-        run: |
-          IMGUI_SYS_PKG_FEATURES=freetype cargo run -p dear-imgui-sys --features package-bin --bin package --release --target ${{ matrix.target }}
+        run: cargo run -p dear-imgui-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
+          IMGUI_SYS_PKG_FEATURES: freetype
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-implot-sys (Release)
@@ -194,9 +195,9 @@ jobs:
           IMGUIZMO_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
-      - name: Upload to release
+      - name: Upload to release (Windows only)
         uses: softprops/action-gh-release@v2
-        if: inputs.tag || github.event_name == 'release'
+        if: (inputs.tag || github.event_name == 'release') && runner.os == 'Windows'
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: ${{ github.workspace }}/packages/*.tar.gz

@@ -77,6 +77,31 @@ dear-imgui-wgpu = "0.2"   # or dear-imgui-glow
 dear-imgui-winit = "0.2"
 ```
 
+## Build Strategy
+
+- Default: build from source on all platforms. Prebuilt binaries are optional and off by default.
+- Windows: we publish prebuilt packages (MD/MT, with/without `freetype`). Linux/macOS may have CI artifacts but are not used automatically.
+- Opt-in prebuilt download from Release: enable either the crate feature `prebuilt` or set `<CRATE>_SYS_USE_PREBUILT=1`. Otherwise builds only use prebuilt when you explicitly point to them (e.g., `<CRATE>_SYS_LIB_DIR` or `<CRATE>_SYS_PREBUILT_URL`).
+
+Env vars per -sys crate:
+- `<CRATE>_SYS_LIB_DIR` — link from a dir containing the static lib
+- `<CRATE>_SYS_PREBUILT_URL` — explicit URL to `.a/.lib` or `.tar.gz` (always honored)
+- `<CRATE>_SYS_USE_PREBUILT=1` — allow auto download from GitHub Releases
+- `<CRATE>_SYS_PACKAGE_DIR` — local dir with `.tar.gz` packages
+- `<CRATE>_SYS_CACHE_DIR` — cache root for downloads/extraction
+- `<CRATE>_SYS_SKIP_CC` — skip C/C++ compilation
+- `<CRATE>_SYS_FORCE_BUILD` — force source build
+- `IMGUI_SYS_USE_CMAKE` / `IMPLOT_SYS_USE_CMAKE` — prefer CMake when available; otherwise cc
+- `CARGO_NET_OFFLINE=true` — forbid network; use only local packages or repo prebuilt
+
+Freetype: enable once anywhere. Turning on `freetype` in any extension (imnodes/imguizmo/implot) propagates to `dear-imgui-sys`. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).
+
+Quick examples (enable auto prebuilt download):
+
+- Feature: `cargo build -p dear-imgui-sys --features prebuilt`
+- Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-sys`
+- Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-sys`
+
 ## Compatibility (Latest)
 
 The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for full history and upgrade notes.
@@ -110,27 +135,6 @@ Maintenance rules
 - dear-imgui upgrades may require minor changes in backends/extensions if public APIs changed.
 - Backend external deps (wgpu/winit/glow) have their own breaking cycles and may drive backend bumps independently.
 
-## Prebuilt vs Build-From-Source
-
-- Default strategy: prebuilt (with fallback). All `-sys` crates default to feature `prebuilt`.
-  - Prefer using prebuilt static libraries when available (download or local package),
-    otherwise fall back to building from source (cc/CMake) automatically.
-- Force build from source: disable defaults and enable `build-from-source`.
-  - Example (single crate): `cargo build -p dear-imgui-sys --no-default-features --features "docking,build-from-source"`
-
-### Environment Variables (per -sys crate)
-
-- `<CRATE>_SYS_LIB_DIR` — link directly from a directory containing the static library.
-- `<CRATE>_SYS_PREBUILT_URL` — direct file URL to `.a/.lib` or `.tar.gz` package; `.tar.gz` is extracted to a cache.
-- `<CRATE>_SYS_PACKAGE_DIR` — local directory containing `.tar.gz` packages (no network).
-- `<CRATE>_SYS_CACHE_DIR` — cache root for downloads and extractions (default under `target/<crate>-prebuilt`).
-- `<CRATE>_SYS_SKIP_CC` — skip C/C++ compilation path.
-- `<CRATE>_SYS_FORCE_BUILD` — force building from source (same effect as `--features build-from-source`).
-- `IMGUI_SYS_USE_CMAKE` / `IMPLOT_SYS_USE_CMAKE` — prefer building via CMake when available, otherwise fall back to cc.
-- `CARGO_NET_OFFLINE=true` — forbid network access; use local packages or repo prebuilt only.
-
-Note: Use env vars for fine-grained control per crate (e.g., prebuilt for ImPlot while building ImNodes from source). Use features for a global strategy switch.
-
 ### CI (Prebuilt Binaries)
 
 - Workflow: `.github/workflows/prebuilt-binaries.yml`
@@ -139,6 +143,8 @@ Note: Use env vars for fine-grained control per crate (e.g., prebuilt for ImPlot
     - `crates`: comma-separated list (`all`, `dear-imgui-sys`, `dear-implot-sys`, `dear-imnodes-sys`, `dear-imguizmo-sys`)
   - Artifacts (branch builds) or Release assets (tag builds) include `.tar.gz` packages named:
     `dear-<name>-prebuilt-<version>-<target>-static[-mt|-md].tar.gz`
+  - Release download URLs default to owner/repo configured in `tools/build-support/src/lib.rs`.
+    Override via env: `BUILD_SUPPORT_GH_OWNER`, `BUILD_SUPPORT_GH_REPO`.
 
 
 ## Version & FFI
@@ -187,3 +193,4 @@ Dual-licensed under either of:
 
 - Apache License, Version 2.0 (<http://www.apache.org/licenses/LICENSE-2.0>)
 - MIT license (<http://opensource.org/licenses/MIT>)
+

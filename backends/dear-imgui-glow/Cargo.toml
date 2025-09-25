@@ -18,35 +18,35 @@ memoffset = "0.9"
 thiserror.workspace = true
 
 [features]
+# Core (default): only what's needed for robust ImGui rendering
 default = [
-    "gl_extensions_support",
-    "debug_message_insert_support",
     "bind_vertex_array_support",
     "vertex_offset_support",
-    "clip_origin_support",
+]
+
+# Extra optional GL capabilities (opt-in as a group)
+extras = [
+    "gl_extensions_support",
     "bind_sampler_support",
+    "clip_origin_support",
     "polygon_mode_support",
     "primitive_restart_support",
 ]
-# Enable multi-viewport support
-# (commented out while WIP)
-# multi-viewport = ["dear-imgui/multi-viewport"]
-# Enable checking for OpenGL extensions
-gl_extensions_support = []
-# Support for `gl.debug_message_insert`
-debug_message_insert_support = []
-# Support for `glBindVertexArray`
-bind_vertex_array_support = []
-# Support for `glDrawElementsBaseVertex`
-vertex_offset_support = []
-# Support for `GL_CLIP_ORIGIN`
-clip_origin_support = []
-# Support for `glBindSampler`
-bind_sampler_support = []
-# Support for `glPolygonMode`
-polygon_mode_support = []
-# Support for `GL_PRIMITIVE_RESTART`
-primitive_restart_support = []
+
+# Individual feature switches (used by `extras` or can be enabled ad-hoc)
+gl_extensions_support = []              # Optional extension queries
+bind_sampler_support = []               # `glBindSampler`
+clip_origin_support = []                # `GL_CLIP_ORIGIN`
+polygon_mode_support = []               # `glPolygonMode`
+primitive_restart_support = []          # `GL_PRIMITIVE_RESTART`
+bind_vertex_array_support = []          # `glBindVertexArray` (core)
+vertex_offset_support = []              # `glDrawElementsBaseVertex` (core)
+
+# Debug-only helper (no-op if disabled)
+debug_message_insert_support = []       # `gl.debug_message_insert`
+
+# Multi-viewport (WIP: declared but off by default)
+multi-viewport = []
 
 [dev-dependencies]
 env_logger.workspace = true

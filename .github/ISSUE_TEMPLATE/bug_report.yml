@@ -1,77 +1,90 @@
-name: 🐛 Bug Report
-description: Report a bug or unexpected behavior
-title: "[Bug]: "
-labels: ["bug"]
+name: Bug report
+description: File a bug to help us reproduce and fix issues quickly.
+labels: [bug, triage]
 body:
-  - type: markdown
+  - type: checkboxes
+    id: crates
     attributes:
-      value: |
-        Thanks for taking the time to report a bug! Please fill out the information below to help us investigate.
-
+      label: Affected crates
+      description: Select all crates impacted by this issue.
+      options:
+        - label: dear-imgui
+        - label: dear-imgui-sys
+        - label: backends/dear-imgui-wgpu
+        - label: backends/dear-imgui-glow
+        - label: backends/dear-imgui-winit
+        - label: extensions/dear-implot
+        - label: extensions/dear-implot-sys
+        - label: extensions/dear-imnodes
+        - label: extensions/dear-imnodes-sys
+        - label: extensions/dear-imguizmo
+        - label: extensions/dear-imguizmo-sys
+  - type: checkboxes
+    id: targets
+    attributes:
+      label: Target(s)
+      description: Select all that apply.
+      options:
+        - label: Windows x86_64-pc-windows-msvc (MD)
+        - label: Windows x86_64-pc-windows-msvc (MT)
+        - label: Linux x86_64-unknown-linux-gnu
+        - label: macOS x86_64-apple-darwin
+        - label: macOS aarch64-apple-darwin
+        - label: wasm32 (unknown or emscripten)
+  - type: dropdown
+    id: build_strategy
+    attributes:
+      label: Build strategy used
+      options:
+        - Source build
+        - Prebuilt (Release asset)
+        - Prebuilt (local package dir)
+        - Prebuilt (direct URL)
+        - Mixed / Unsure
+  - type: checkboxes
+    id: features
+    attributes:
+      label: Relevant features/flags
+      options:
+        - label: freetype
+        - label: build-from-source
+        - label: prebuilt (feature)
   - type: textarea
-    id: description
+    id: repro
     attributes:
-      label: Bug Description
-      description: A clear and concise description of what the bug is.
-      placeholder: Describe what happened and what you expected to happen.
-    validations:
-      required: true
-
-  - type: textarea
-    id: reproduction
-    attributes:
-      label: Steps to Reproduce
-      description: Provide a minimal code example that reproduces the issue.
+      label: Steps to reproduce
+      description: Smallest possible steps or a minimal repo to reproduce.
       placeholder: |
-        ```rust
-        // Your code here
-        ```
+        1. cargo build -p <crate> [options]
+        2. ...
+        3. Observe error
     validations:
       required: true
-
   - type: textarea
     id: expected
     attributes:
-      label: Expected Behavior
-      description: What did you expect to happen?
+      label: Expected behavior
     validations:
       required: true
-
   - type: textarea
     id: actual
     attributes:
-      label: Actual Behavior
-      description: What actually happened? Include any error messages.
+      label: Actual behavior / error logs
+      render: shell
     validations:
       required: true
-
   - type: input
-    id: version
+    id: versions
     attributes:
-      label: Dear ImGui Version
-      description: Which version of dear-imgui are you using?
-      placeholder: "0.2.0"
-    validations:
-      required: true
-
+      label: Version info
+      description: dear-imgui version(s), commit SHA, rustc/cargo versions.
+      placeholder: dear-imgui-sys 0.2.x, rustc 1.xx.x, cargo 1.xx.x
   - type: input
-    id: rust-version
+    id: os
     attributes:
-      label: Rust Version
-      description: Output of `rustc --version`
-      placeholder: "rustc 1.75.0 (82e1608df 2023-12-21)"
-    validations:
-      required: true
-
-  - type: input
-    id: platform
-    attributes:
-      label: Platform
-      description: What platform are you running on?
-      placeholder: "Windows / macOS / Linux"
-
+      label: OS / Toolchain
+      placeholder: Windows 11 23H2, MSVC; Ubuntu 22.04; macOS 14
   - type: textarea
-    id: additional
+    id: extra
     attributes:
-      label: Additional Context
-      description: Add any other context about the problem here.
+      label: Additional context

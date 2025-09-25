@@ -105,32 +105,7 @@ impl Style {
     }
 }
 
-bitflags! {
-    /// Flags for hover detection
-    #[repr(transparent)]
-    pub struct HoveredFlags: i32 {
-        /// Return true if directly over the item/window, not obstructed by another window
-        const NONE = sys::ImGuiHoveredFlags_None as i32;
-        /// Return true even if a child window is normally blocking access
-        const CHILD_WINDOWS = sys::ImGuiHoveredFlags_ChildWindows as i32;
-        /// Return true even if an active item is blocking access
-        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
-        /// Return true even if the position is obstructed or overlapped by another window
-        const ALLOW_WHEN_OVERLAPPED = sys::ImGuiHoveredFlags_AllowWhenOverlapped as i32;
-        /// Require mouse to be stationary for style.HoverStationaryDelay (~0.15 sec)
-        const STATIONARY = sys::ImGuiHoveredFlags_Stationary as i32;
-        /// IsItemHovered() only: Return true immediately (default)
-        const NO_DELAY_SHORT = sys::ImGuiHoveredFlags_DelayNone as i32;
-        /// IsItemHovered() only: Return true after HoverDelayShort elapsed (~0.15 sec)
-        const DELAY_SHORT = sys::ImGuiHoveredFlags_DelayShort as i32;
-        /// IsItemHovered() only: Return true after HoverDelayNormal elapsed (~0.40 sec)
-        const DELAY_NORMAL = sys::ImGuiHoveredFlags_DelayNormal as i32;
-        /// IsItemHovered() only: Disable shared delay system
-        const NO_SHARED_DELAY = sys::ImGuiHoveredFlags_NoSharedDelay as i32;
-        /// For tooltip: Equivalent to Stationary + DelayShort
-        const FOR_TOOLTIP = sys::ImGuiHoveredFlags_ForTooltip as i32;
-    }
-}
+// HoveredFlags are defined in utils.rs and re-exported at crate root.
 
 /// A cardinal direction
 #[repr(i32)]

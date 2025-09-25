@@ -140,6 +140,7 @@ impl Context {
     pub fn io_mut(&mut self) -> &mut Io {
         let _guard = CTX_MUTEX.lock();
         unsafe {
+            // Bindings provide igGetIO_Nil; use it to access current IO
             let io_ptr = sys::igGetIO_Nil();
             &mut *(io_ptr as *mut Io)
         }
@@ -149,6 +150,7 @@ impl Context {
     pub fn io(&self) -> &crate::io::Io {
         let _guard = CTX_MUTEX.lock();
         unsafe {
+            // Bindings provide igGetIO_Nil; use it to access current IO
             let io_ptr = sys::igGetIO_Nil();
             &*(io_ptr as *const crate::io::Io)
         }
@@ -175,30 +177,6 @@ impl Context {
     /// Creates a new frame and returns a Ui object for building the interface
     pub fn frame(&mut self) -> &mut crate::ui::Ui {
         let _guard = CTX_MUTEX.lock();
-
-        unsafe {
-            let io = sys::igGetIO_Nil();
-            if !io.is_null() {
-                let fonts = (*io).Fonts;
-
-                // Check if fonts pointer is valid
-                if !fonts.is_null() {
-                    // Check if we need to add default font and build atlas
-                    if (*fonts).Fonts.Size == 0 {
-                        // Add default font if no fonts are loaded
-                        sys::ImFontAtlas_AddFontDefault(fonts, ptr::null());
-                    }
-
-                    if !(*fonts).TexIsBuilt {
-                        // Build the font atlas using the main build function
-                        sys::igImFontAtlasBuildMain(fonts);
-
-                        // Mark the texture as built by setting a dummy texture ID
-                        (*fonts).TexIsBuilt = true;
-                    }
-                }
-            }
-        }
 
         unsafe {
             sys::igNewFrame();
@@ -468,7 +446,7 @@ impl Context {
     #[doc(alias = "GetFont")]
     pub fn current_font(&self) -> &Font {
         let _guard = CTX_MUTEX.lock();
-        unsafe { Font::from_raw(sys::igGetFont()) }
+        unsafe { Font::from_raw(sys::igGetFont() as *const _) }
     }
 
     /// Get the current font size
@@ -500,7 +478,6 @@ impl Context {
 
         #[cfg(not(target_arch = "wasm32"))]
         unsafe {
-            // Always use igGetIO_Nil for simplicity - it should return the current context's IO
             let io = sys::igGetIO_Nil();
             let atlas_ptr = (*io).Fonts;
             FontAtlas::from_raw(atlas_ptr)
@@ -657,5 +634,6 @@ impl SuspendedContext {
     }
 }
 
-unsafe impl Send for Context {}
-unsafe impl Sync for Context {}
+// Dear ImGui is not thread-safe. The Context must not be sent or shared across
+// threads. If you need multi-threaded rendering, capture render data via
+// OwnedDrawData and move that to another thread for rendering.

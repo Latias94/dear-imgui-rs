@@ -198,7 +198,7 @@ impl PlatformIo {
     ///
     /// The caller must ensure that the pointer is valid and points to a valid
     /// `ImGuiPlatformIO` structure.
-    pub unsafe fn from_raw(raw: *const sys::ImGuiPlatformIO) -> &'static Self {
+    pub(crate) unsafe fn from_raw(raw: *const sys::ImGuiPlatformIO) -> &'static Self {
         unsafe { &*(raw as *const Self) }
     }
 
@@ -841,7 +841,7 @@ impl Viewport {
     ///
     /// The caller must ensure that the pointer is valid and points to a valid
     /// `ImGuiViewport` structure.
-    pub unsafe fn from_raw(raw: *const sys::ImGuiViewport) -> &'static Self {
+    pub(crate) unsafe fn from_raw(raw: *const sys::ImGuiViewport) -> &'static Self {
         unsafe { &*(raw as *const Self) }
     }
 

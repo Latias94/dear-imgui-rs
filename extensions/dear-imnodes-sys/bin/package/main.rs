@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use build_support::{compose_archive_name, compose_manifest_bytes};
 use flate2::{Compression, write::GzEncoder};
 
 fn expected_lib_name() -> &'static str {
@@ -99,17 +100,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| PathBuf::from(env::var("OUT_DIR").unwrap()));
     fs::create_dir_all(&pkg_dir)?;
 
-    let ar_name = if crt.is_empty() {
-        format!(
-            "dear-imnodes-prebuilt-{}-{}-{}.tar.gz",
-            crate_version, target, link_type
-        )
-    } else {
-        format!(
-            "dear-imnodes-prebuilt-{}-{}-{}-{}.tar.gz",
-            crate_version, target, link_type, crt
-        )
-    };
+    let ar_name = compose_archive_name(
+        "dear-imnodes",
+        &crate_version,
+        &target,
+        link_type,
+        None,
+        crt,
+    );
 
     println!("Packaging dear-imnodes prebuilt:");
     println!("  Target: {}", target);
@@ -211,12 +209,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Added lib: {}", lib_path.display());
 
     // manifest
-    let mut manifest_txt = vec![];
-    writeln!(
-        &mut manifest_txt,
-        "dear-imnodes prebuilt\nversion={}\ntarget={}\nlink={}\ncrt={}",
-        crate_version, target, link_type, crt
-    )?;
+    let manifest_txt = compose_manifest_bytes(
+        "dear-imnodes",
+        &crate_version,
+        &target,
+        link_type,
+        crt,
+        None,
+    );
     let mut hdr = tar::Header::new_gnu();
     hdr.set_size(manifest_txt.len() as u64);
     hdr.set_mode(0o644);

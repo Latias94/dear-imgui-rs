@@ -260,9 +260,9 @@ impl AppWindow {
             ContextAttributesBuilder::new().build(Some(window.window_handle()?.as_raw()));
         let context = unsafe { cfg.display().create_context(&cfg, &context_attribs)? };
 
-        // Create surface
+        // Create surface (linear framebuffer for predictable hex -> output mapping)
         let surface_attribs = SurfaceAttributesBuilder::<WindowSurface>::new()
-            .with_srgb(Some(true))
+            .with_srgb(Some(false))
             .build(
                 window.window_handle()?.as_raw(),
                 NonZeroU32::new(1280).unwrap(),
@@ -294,6 +294,8 @@ impl AppWindow {
         };
 
         let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
+        // Use linear framebuffer (no sRGB conversion for ImGui rendering)
+        renderer.set_framebuffer_srgb_enabled(false);
         renderer.new_frame()?;
 
         // Initialize texture demo
@@ -355,14 +357,15 @@ impl AppWindow {
         // Render
         if let Some(gl) = self.imgui.renderer.gl_context() {
             unsafe {
-                gl.clear_color(0.05, 0.05, 0.1, 1.0);
+                // Unified clear color with glow_basic: [0.1, 0.2, 0.3]
+                gl.clear_color(0.1, 0.2, 0.3, 1.0);
                 gl.clear(glow::COLOR_BUFFER_BIT);
             }
         }
 
         self.imgui
             .platform
-            .prepare_render(&mut self.imgui.context, &self.window);
+            .prepare_render_with_ui(&ui, &self.window);
         let draw_data = self.imgui.context.render();
 
         self.imgui.renderer.new_frame()?;

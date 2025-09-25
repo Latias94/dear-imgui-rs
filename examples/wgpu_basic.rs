@@ -72,9 +72,21 @@ impl AppWindow {
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
 
         let size = LogicalSize::new(1280.0, 720.0);
+        // Pick an sRGB surface format when available for consistent visuals
+        let caps = surface.get_capabilities(&adapter);
+        let preferred_srgb = [
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ];
+        let format = preferred_srgb
+            .iter()
+            .cloned()
+            .find(|f| caps.formats.contains(f))
+            .unwrap_or(caps.formats[0]);
+
         let surface_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_capabilities(&adapter).formats[0],
+            format,
             width: size.width as u32,
             height: size.height as u32,
             present_mode: wgpu::PresentMode::Fifo,
@@ -95,8 +107,10 @@ impl AppWindow {
         // Method 1: One-step initialization (recommended)
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
-        let renderer =
+        let mut renderer =
             WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
+        // Unify visuals (sRGB): auto gamma by format, matches official practice
+        renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
         // Log successful initialization
         dear_imgui::logging::log_context_created();

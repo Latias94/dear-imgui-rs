@@ -64,6 +64,8 @@ pub use self::platform_io::*;
 pub use self::string::*;
 pub use self::style::*;
 pub use self::ui::*;
+// Re-export utility flags/types for convenience
+pub use self::utils::HoveredFlags;
 
 // Utility modules
 pub use self::list_clipper::*;

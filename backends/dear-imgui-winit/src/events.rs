@@ -6,6 +6,7 @@
 use dear_imgui::Context;
 use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseScrollDelta, TouchPhase};
 
+use std::cell::RefCell;
 use winit::window::Window;
 
 use crate::input::{to_imgui_mouse_button, winit_key_to_imgui_key};
@@ -13,6 +14,18 @@ use crate::input::{to_imgui_mouse_button, winit_key_to_imgui_key};
 /// Handle keyboard input events
 pub fn handle_keyboard_input(event: &KeyEvent, imgui_ctx: &mut Context) -> bool {
     let io = imgui_ctx.io_mut();
+
+    // Inject text for character input on key press (matches upstream imgui-winit behavior)
+    if event.state.is_pressed() {
+        if let Some(txt) = &event.text {
+            for ch in txt.chars() {
+                // Filter out DEL control code as upstream does
+                if ch != '\u{7f}' {
+                    io.add_input_character(ch);
+                }
+            }
+        }
+    }
 
     if let Some(imgui_key) = winit_key_to_imgui_key(&event.logical_key, event.location) {
         let pressed = event.state == ElementState::Pressed;
@@ -28,13 +41,20 @@ pub fn handle_mouse_wheel(delta: MouseScrollDelta, imgui_ctx: &mut Context) -> b
     let io = imgui_ctx.io_mut();
 
     match delta {
-        MouseScrollDelta::LineDelta(h, v) => {
-            io.add_mouse_wheel_event([h, v]);
-        }
+        MouseScrollDelta::LineDelta(h, v) => io.add_mouse_wheel_event([h, v]),
         MouseScrollDelta::PixelDelta(pos) => {
-            let h = pos.x as f32;
-            let v = pos.y as f32;
-            io.add_mouse_wheel_event([h / 100.0, v / 100.0]); // Scale pixel delta
+            // Follow upstream practice: treat pixel delta as +/- 1.0 per event
+            let h = match pos.x.partial_cmp(&0.0) {
+                Some(std::cmp::Ordering::Greater) => 1.0,
+                Some(std::cmp::Ordering::Less) => -1.0,
+                _ => 0.0,
+            };
+            let v = match pos.y.partial_cmp(&0.0) {
+                Some(std::cmp::Ordering::Greater) => 1.0,
+                Some(std::cmp::Ordering::Less) => -1.0,
+                _ => 0.0,
+            };
+            io.add_mouse_wheel_event([h, v]);
         }
     }
 
@@ -85,14 +105,8 @@ pub fn handle_modifiers_changed(modifiers: &winit::event::Modifiers, imgui_ctx: 
 /// Handle IME (Input Method Editor) events for international text input
 pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) {
     match ime {
-        Ime::Preedit(text, _cursor_range) => {
-            // Handle pre-edit text (text being composed)
-            // For now, we'll just add the characters as they come
-            for ch in text.chars() {
-                if !ch.is_control() {
-                    imgui_ctx.io_mut().add_input_character(ch);
-                }
-            }
+        Ime::Preedit(_text, _cursor_range) => {
+            // Do not inject preedit text into Dear ImGui; composition should be handled by the OS/IME.
         }
         Ime::Commit(text) => {
             // Handle committed text (final text input)
@@ -113,21 +127,50 @@ pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) {
 
 /// Handle touch events by converting them to mouse events
 pub fn handle_touch_event(touch: &winit::event::Touch, _window: &Window, _imgui_ctx: &mut Context) {
-    // Convert touch events to mouse events for basic touch support
-    match touch.phase {
-        TouchPhase::Started => {
-            // Treat touch start as left mouse button press
-            // We could add this to imgui_ctx if needed
-        }
-        TouchPhase::Moved => {
-            // Treat touch move as mouse move
-            // We could update mouse position here
-        }
-        TouchPhase::Ended | TouchPhase::Cancelled => {
-            // Treat touch end as left mouse button release
-            // We could add this to imgui_ctx if needed
-        }
+    thread_local! {
+        static ACTIVE_TOUCH: RefCell<Option<u64>> = const { RefCell::new(None) };
     }
+
+    // Convert touch events to mouse events for basic touch support
+    ACTIVE_TOUCH.with(|active| {
+        let mut active_id = active.borrow().clone();
+        let id = touch.id;
+        match touch.phase {
+            TouchPhase::Started => {
+                if active_id.is_none() {
+                    // Capture this touch as the active pointer
+                    *active.borrow_mut() = Some(id);
+                    let pos = touch.location.to_logical::<f64>(_window.scale_factor());
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_pos_event([pos.x as f32, pos.y as f32]);
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_button_event(dear_imgui::input::MouseButton::Left, true);
+                }
+            }
+            TouchPhase::Moved => {
+                if active_id == Some(id) {
+                    let pos = touch.location.to_logical::<f64>(_window.scale_factor());
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_pos_event([pos.x as f32, pos.y as f32]);
+                }
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if active_id == Some(id) {
+                    let pos = touch.location.to_logical::<f64>(_window.scale_factor());
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_pos_event([pos.x as f32, pos.y as f32]);
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_button_event(dear_imgui::input::MouseButton::Left, false);
+                    *active.borrow_mut() = None;
+                }
+            }
+        }
+    });
 }
 
 /// Handle device events (raw input events)
@@ -137,10 +180,9 @@ pub fn handle_device_event(_event: &DeviceEvent) {
 }
 
 /// Handle window focus events
-pub fn handle_focused(_focused: bool, _imgui_ctx: &mut Context) -> bool {
-    // Note: Our dear-imgui doesn't have set_app_focus_lost method
-    // We'll handle focus events differently or skip for now
-    // TODO: Add focus event handling if needed
+pub fn handle_focused(focused: bool, imgui_ctx: &mut Context) -> bool {
+    // Tell Dear ImGui about host window focus change
+    imgui_ctx.io_mut().add_focus_event(focused);
     false
 }
 

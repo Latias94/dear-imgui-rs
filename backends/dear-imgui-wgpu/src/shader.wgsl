@@ -52,6 +52,5 @@ fn srgb_to_linear(srgb: vec4<f32>) -> vec4<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
     let color = in.v_Color * textureSample(u_Texture, u_Sampler, in.v_UV);
-    let corrected_color = pow(color.rgb, vec3<f32>(uniforms.u_Gamma));
-    return FragmentOutput(vec4<f32>(corrected_color, color.a));
+    return FragmentOutput(color);
 }

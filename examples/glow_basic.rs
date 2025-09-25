@@ -31,6 +31,7 @@ struct ImguiState {
     renderer: GlowRenderer,
     clear_color: [f32; 4],
     demo_open: bool,
+    software_cursor: bool,
     last_frame: Instant,
 }
 
@@ -66,12 +67,14 @@ impl AppWindow {
             ContextAttributesBuilder::new().build(Some(window.window_handle()?.as_raw()));
         let context = unsafe { cfg.display().create_context(&cfg, &context_attribs)? };
 
-        // Create surface (using linear framebuffer like the reference implementation)
-        let surface_attribs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
-            window.window_handle()?.as_raw(),
-            NonZeroU32::new(1280).unwrap(),
-            NonZeroU32::new(720).unwrap(),
-        );
+        // Create surface (request sRGB-capable framebuffer for consistent visuals)
+        let surface_attribs = SurfaceAttributesBuilder::<WindowSurface>::new()
+            .with_srgb(Some(true))
+            .build(
+                window.window_handle()?.as_raw(),
+                NonZeroU32::new(1280).unwrap(),
+                NonZeroU32::new(720).unwrap(),
+            );
         let surface = unsafe {
             cfg.display()
                 .create_window_surface(&cfg, &surface_attribs)?
@@ -98,6 +101,8 @@ impl AppWindow {
         };
 
         let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
+        // Use sRGB framebuffer: enable FRAMEBUFFER_SRGB during ImGui rendering
+        renderer.set_framebuffer_srgb_enabled(true);
         renderer.new_frame()?;
 
         let imgui = ImguiState {
@@ -106,6 +111,7 @@ impl AppWindow {
             renderer,
             clear_color: [0.1, 0.2, 0.3, 1.0],
             demo_open: true,
+            software_cursor: false,
             last_frame: Instant::now(),
         };
 
@@ -136,6 +142,14 @@ impl AppWindow {
             .set_delta_time(delta_time.as_secs_f32());
         self.imgui.last_frame = now;
 
+        // Apply pending software cursor change before starting the frame
+        let want_sw = self.imgui.software_cursor;
+        if self.imgui.context.io().mouse_draw_cursor() != want_sw {
+            self.imgui
+                .platform
+                .set_software_cursor_enabled(&mut self.imgui.context, want_sw);
+        }
+
         self.imgui
             .platform
             .prepare_frame(&self.window, &mut self.imgui.context);
@@ -162,6 +176,13 @@ impl AppWindow {
                     self.imgui.demo_open = true;
                 }
 
+                // Toggle software cursor (ImGui-drawn cursor)
+                let mut sw = self.imgui.software_cursor;
+                if ui.checkbox("Software cursor (drawn by ImGui)", &mut sw) {
+                    // Defer IO change to next frame start to avoid borrow conflicts
+                    self.imgui.software_cursor = sw;
+                }
+
                 ui.text("Modern texture management features:");
                 ui.bullet_text("RENDERER_HAS_TEXTURES backend flag");
                 ui.bullet_text("Complete ImTextureData system");
@@ -176,6 +197,8 @@ impl AppWindow {
         // Render
         let gl = self.imgui.renderer.gl_context().unwrap();
         unsafe {
+            // Enable sRGB write for clear on sRGB-capable surface
+            gl.enable(glow::FRAMEBUFFER_SRGB);
             gl.clear_color(
                 self.imgui.clear_color[0],
                 self.imgui.clear_color[1],
@@ -183,11 +206,12 @@ impl AppWindow {
                 self.imgui.clear_color[3],
             );
             gl.clear(glow::COLOR_BUFFER_BIT);
+            gl.disable(glow::FRAMEBUFFER_SRGB);
         }
 
         self.imgui
             .platform
-            .prepare_render(&mut self.imgui.context, &self.window);
+            .prepare_render_with_ui(&ui, &self.window);
         let draw_data = self.imgui.context.render();
 
         self.imgui.renderer.new_frame()?;

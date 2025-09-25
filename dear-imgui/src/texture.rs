@@ -228,13 +228,10 @@ impl TextureData {
         unsafe { Box::from_raw(Box::into_raw(raw_data) as *mut Self) }
     }
 
-    /// Create a new texture data from raw pointer
+    /// Create a new texture data from raw pointer (crate-internal)
     ///
-    /// # Safety
-    ///
-    /// The caller must ensure that the pointer is valid and points to a valid
-    /// ImTextureData structure.
-    pub unsafe fn from_raw(raw: *mut sys::ImTextureData) -> &'static mut Self {
+    /// Safety: caller must ensure the pointer is valid for the returned lifetime.
+    pub(crate) unsafe fn from_raw<'a>(raw: *mut sys::ImTextureData) -> &'a mut Self {
         unsafe { &mut *(raw as *mut Self) }
     }
 
@@ -341,6 +338,26 @@ impl TextureData {
                     size,
                 ))
             }
+        }
+    }
+
+    /// Get the bounding box of all used pixels in the texture
+    pub fn used_rect(&self) -> TextureRect {
+        unsafe { TextureRect::from((*self.as_raw()).UsedRect) }
+    }
+
+    /// Get the bounding box of all queued updates
+    pub fn update_rect(&self) -> TextureRect {
+        unsafe { TextureRect::from((*self.as_raw()).UpdateRect) }
+    }
+
+    /// Iterate over queued update rectangles (copying to safe TextureRect)
+    pub fn updates(&self) -> impl Iterator<Item = TextureRect> + '_ {
+        unsafe {
+            let vec = &(*self.as_raw()).Updates;
+            let count = vec.Size as usize;
+            let data = vec.Data as *const sys::ImTextureRect;
+            (0..count).map(move |i| TextureRect::from(*data.add(i)))
         }
     }
 

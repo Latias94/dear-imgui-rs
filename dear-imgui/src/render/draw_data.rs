@@ -427,15 +427,11 @@ impl From<&DrawData> for OwnedDrawData {
     /// Construct `OwnedDrawData` from `DrawData` by creating a heap-allocated deep copy of the given `DrawData`
     fn from(value: &DrawData) -> Self {
         unsafe {
-            // Allocate memory for the new DrawData
-            let result =
-                sys::igMemAlloc(std::mem::size_of::<sys::ImDrawData>()) as *mut sys::ImDrawData;
+            // Allocate a new ImDrawData using the constructor
+            let result = sys::ImDrawData_ImDrawData();
             if result.is_null() {
-                panic!("Failed to allocate memory for OwnedDrawData");
+                panic!("Failed to allocate ImDrawData for OwnedDrawData");
             }
-
-            // Initialize with default values
-            std::ptr::write(result, sys::ImDrawData::default());
 
             // Copy basic fields from the source
             let source_ptr = RawWrapper::raw(value);
@@ -447,15 +443,23 @@ impl From<&DrawData> for OwnedDrawData {
             (*result).FramebufferScale = source_ptr.FramebufferScale;
             (*result).OwnerViewport = source_ptr.OwnerViewport;
 
-            // Copy draw lists - simplified approach
-            (*result).CmdListsCount = source_ptr.CmdListsCount;
+            // Copy draw lists by cloning each list to ensure OwnedDrawData owns its memory
+            (*result).CmdListsCount = 0;
             if source_ptr.CmdListsCount > 0 && !source_ptr.CmdLists.Data.is_null() {
-                // For now, we'll just reference the same draw lists
-                // A full implementation would need to deep copy each draw list
-                (*result).CmdLists.Data = source_ptr.CmdLists.Data;
-                (*result).CmdLists.Size = source_ptr.CmdLists.Size;
-                (*result).CmdLists.Capacity = source_ptr.CmdLists.Capacity;
+                for i in 0..(source_ptr.CmdListsCount as usize) {
+                    let src_list = *source_ptr.CmdLists.Data.add(i);
+                    if !src_list.is_null() {
+                        // Clone the output of the draw list to own it
+                        let cloned = sys::ImDrawList_CloneOutput(src_list);
+                        if !cloned.is_null() {
+                            sys::ImDrawData_AddDrawList(result, cloned);
+                        }
+                    }
+                }
             }
+
+            // Textures list is shared, do not duplicate (renderer treats it as read-only)
+            (*result).Textures = source_ptr.Textures;
 
             OwnedDrawData { draw_data: result }
         }
@@ -467,14 +471,20 @@ impl Drop for OwnedDrawData {
     fn drop(&mut self) {
         unsafe {
             if !self.draw_data.is_null() {
-                // Clear the draw data first to release any internal resources
-                sys::ImDrawData_Clear(self.draw_data);
+                // Destroy cloned draw lists if any
+                if !(*self.draw_data).CmdLists.Data.is_null() {
+                    for i in 0..(*self.draw_data).CmdListsCount as usize {
+                        let ptr = *(*self.draw_data).CmdLists.Data.add(i);
+                        if !ptr.is_null() {
+                            sys::ImDrawList_destroy(ptr);
+                        }
+                    }
+                    // Free the CmdLists array storage
+                    sys::igMemFree((*self.draw_data).CmdLists.Data as *mut std::ffi::c_void);
+                }
 
-                // Free the draw data structure itself
-                // Note: Since we don't have ImDrawData_destroy in our bindings,
-                // we use MemFree directly. This is safe because ImDrawData
-                // doesn't have complex destructors in the C++ side.
-                sys::igMemFree(self.draw_data as *mut std::ffi::c_void);
+                // Destroy the ImDrawData itself
+                sys::ImDrawData_destroy(self.draw_data);
                 self.draw_data = std::ptr::null_mut();
             }
         }
