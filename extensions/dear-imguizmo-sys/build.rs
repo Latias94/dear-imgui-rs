@@ -301,7 +301,7 @@ fn expected_lib_name(target_env: &str) -> &'static str {
 
 fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
-    let lib_path = dir.join(lib_name.as_str());
+    let lib_path = dir.join(lib_name);
     if !lib_path.exists() {
         return false;
     }
@@ -316,7 +316,7 @@ fn try_download_prebuilt(
     target_env: &str,
 ) -> Result<PathBuf, String> {
     let lib_name = expected_lib_name(target_env);
-    build_support::download_prebuilt(cache_root, url, lib_name.as_str(), target_env)
+    build_support::download_prebuilt(cache_root, url, lib_name, target_env)
 }
 
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
@@ -433,6 +433,4 @@ fn extract_archive_to_cache(
     Err("extracted archive did not contain expected library".into())
 }
 
-fn expected_lib_name(target_env: &str) -> String {
-    build_support::expected_lib_name(target_env, "dear_imguizmo")
-}
+// keep the existing expected_lib_name returning &'static str defined above

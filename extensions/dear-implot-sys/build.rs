@@ -415,9 +415,7 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     true
 }
 
-fn expected_lib_name(target_env: &str) -> String {
-    build_support::expected_lib_name(target_env, "dear_implot")
-}
+// keep the existing expected_lib_name returning &'static str defined above
 
 fn try_download_prebuilt(
     cache_root: &PathBuf,
@@ -425,7 +423,7 @@ fn try_download_prebuilt(
     target_env: &str,
 ) -> Result<PathBuf, String> {
     let lib_name = expected_lib_name(target_env);
-    build_support::download_prebuilt(cache_root, url, lib_name.as_str(), target_env)
+    build_support::download_prebuilt(cache_root, url, lib_name, target_env)
 }
 
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {

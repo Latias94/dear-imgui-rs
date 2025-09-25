@@ -316,9 +316,7 @@ fn sanitize_bindings_string(content: &str) -> String {
     out
 }
 
-fn expected_lib_name(target_env: &str) -> String {
-    build_support::expected_lib_name(target_env, "dear_imnodes")
-}
+// keep the existing expected_lib_name returning &'static str defined above
 
 fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
