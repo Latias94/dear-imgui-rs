@@ -1,1 +1,5 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Q&A and How‑to
+    url: https://github.com/Latias94/dear-imgui/discussions
+    about: Ask usage questions or share ideas in Discussions.

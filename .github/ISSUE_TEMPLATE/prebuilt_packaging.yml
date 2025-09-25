@@ -1,0 +1,59 @@
+name: Prebuilt/Packaging issue
+description: Problems with prebuilt archives or linking against them.
+labels: [prebuilt, bug, triage]
+body:
+  - type: dropdown
+    id: crate
+    attributes:
+      label: Affected crate
+      options:
+        - dear-imgui-sys
+        - dear-implot-sys
+        - dear-imnodes-sys
+        - dear-imguizmo-sys
+    validations:
+      required: true
+  - type: input
+    id: release_tag
+    attributes:
+      label: Release tag / URL
+      placeholder: e.g., v0.2.0 or full asset URL
+  - type: input
+    id: asset
+    attributes:
+      label: Asset filename
+      placeholder: dear-<name>-prebuilt-<version>-<target>-static[-freetype][-mt|-md].tar.gz
+  - type: input
+    id: target
+    attributes:
+      label: Target triple
+      placeholder: x86_64-pc-windows-msvc
+  - type: checkboxes
+    id: variants
+    attributes:
+      label: Variants
+      options:
+        - label: freetype
+        - label: MD (CRT)
+        - label: MT (CRT)
+  - type: checkboxes
+    id: how
+    attributes:
+      label: How did you consume it?
+      options:
+        - label: <CRATE>_SYS_PREBUILT_URL
+        - label: <CRATE>_SYS_PACKAGE_DIR
+        - label: auto download (feature/env)
+  - type: textarea
+    id: error
+    attributes:
+      label: Error / logs
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: manifest
+    attributes:
+      label: manifest.txt contents (if available)
+      description: Paste the manifest.txt from the archive.
+      render: text
