@@ -27,6 +27,7 @@ jobs:
   build-prebuilt:
     name: Build ${{ matrix.target }}${{ matrix.crt && format(' ({0})', matrix.crt) || '' }}
     runs-on: ${{ matrix.os }}
+    if: ${{ github.event_name != 'release' || runner.os == 'Windows' }}
     permissions:
       contents: write
     strategy:

@@ -51,7 +51,7 @@ required-features = ["package-bin"]
 
 [features]
 package-bin = ["dep:flate2", "dep:tar"]
-default = ["prebuilt"]
+default = []
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = ["dear-imgui-sys/multi-viewport"]

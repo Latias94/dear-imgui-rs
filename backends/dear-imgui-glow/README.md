@@ -27,12 +27,29 @@ renderer.render(&draw_data)?;
 
 ## sRGB / Gamma
 
-- No gamma (pow) in the shader by default. sRGB encoding is controlled by your surface/context.
-- If your window uses an sRGB surface, enable `GL_FRAMEBUFFER_SRGB` on your side, or let the renderer toggle it:
-  ```rust
-  renderer.set_framebuffer_srgb_enabled(true); // enabled before render, disabled after
-  ```
-- Pick exactly one path to avoid double correction: use an sRGB target (no shader pow) or a linear target (no shader pow).
+- Pipeline choice
+  - Linear FB: keep `FRAMEBUFFER_SRGB` disabled (default). Colors are passed through without gamma.
+  - sRGB FB: request an sRGB-capable surface and enable `FRAMEBUFFER_SRGB`.
+    ```rust
+    renderer.set_framebuffer_srgb_enabled(true) // enabled during render, disabled after
+    ```
+  - Pick exactly one path to avoid double correction.
+
+- Vertex color gamma (auto + override)
+  - The renderer applies gamma to ImGui vertex colors in the fragment shader via a `ColorGamma` uniform.
+  - Auto (default):
+    - `2.2` when `FRAMEBUFFER_SRGB` is enabled (decode vertex colors from sRGB → linear before write)
+    - `1.0` when `FRAMEBUFFER_SRGB` is disabled (pass-through)
+  - Override if needed:
+    ```rust
+    // Force a custom gamma (e.g., 2.2 or 1.0). Use None to restore auto.
+    renderer.set_color_gamma_override(Some(2.2));
+    renderer.set_color_gamma_override(None);
+    ```
+
+- Clear color
+  - `gl.clear_color(r,g,b,a)` is specified in linear space. With sRGB FB, the driver encodes it on write,
+    so the on-screen hex may not equal `r,g,b * 255` exactly (this is expected).
 
 ## Notes
 
@@ -49,3 +66,13 @@ renderer.render(&draw_data)?;
 
 See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
 
+## Features
+
+- Default (core): `bind_vertex_array_support`, `vertex_offset_support`
+- Extras (opt-in as a group): enable `extras` to include
+  `gl_extensions_support`, `bind_sampler_support`, `clip_origin_support`,
+  `polygon_mode_support`, `primitive_restart_support`
+- Debug helper: `debug_message_insert_support` (no-op if disabled)
+- Multi-viewport: `multi-viewport` (declared but currently not fully supported; off by default)
+
+Rule of thumb: use the defaults; turn on `extras` only if you need those GL knobs.

@@ -256,20 +256,33 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
             }
         }
         // Only attempt automatic release download when explicitly enabled.
-        let allow_auto_prebuilt = matches!(
+        let allow_feature = cfg!(feature = "prebuilt");
+        let allow_env = matches!(
             env::var("IMGUI_SYS_USE_PREBUILT").ok().as_deref(),
             Some("1") | Some("true") | Some("yes")
         );
-        if !linked
-            && allow_auto_prebuilt
-            && let Some(lib_dir) = try_download_prebuilt_from_release(cfg)
-            && try_link_prebuilt(&lib_dir, &cfg.target_env)
-        {
+        let allow_auto_prebuilt = allow_feature || allow_env;
+        if !linked && allow_auto_prebuilt {
+            let source = match (allow_feature, allow_env) {
+                (true, true) => "feature+env",
+                (true, false) => "feature",
+                (false, true) => "env",
+                _ => "",
+            };
+            let (owner, repo) = build_support::release_owner_repo();
             println!(
-                "cargo:warning=Downloaded and using prebuilt dear_imgui from release at {}",
-                lib_dir.display()
+                "cargo:warning=auto-prebuilt enabled (dear-imgui-sys): source={}, repo={}/{}",
+                source, owner, repo
             );
-            linked = true;
+            if let Some(lib_dir) = try_download_prebuilt_from_release(cfg)
+                && try_link_prebuilt(&lib_dir, &cfg.target_env)
+            {
+                println!(
+                    "cargo:warning=Downloaded and using prebuilt dear_imgui from release at {}",
+                    lib_dir.display()
+                );
+                linked = true;
+            }
         }
         if !linked {
             let repo_prebuilt = cfg
@@ -350,17 +363,13 @@ fn export_include_paths(cfg: &BuildConfig) {
     }
 }
 
-fn expected_lib_name(target_env: &str) -> &'static str {
-    if target_env == "msvc" {
-        "dear_imgui.lib"
-    } else {
-        "libdear_imgui.a"
-    }
+fn expected_lib_name(target_env: &str) -> String {
+    build_support::expected_lib_name(target_env, "dear_imgui")
 }
 
 fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
-    let lib_path = dir.join(lib_name);
+    let lib_path = dir.join(lib_name.as_str());
     if !lib_path.exists() {
         return false;
     }
@@ -465,7 +474,7 @@ fn try_download_prebuilt(
 ) -> Result<PathBuf, String> {
     let lib_name = expected_lib_name(target_env);
     println!("cargo:warning=Downloading prebuilt dear_imgui from {}", url);
-    build_support::download_prebuilt(cache_root, url, lib_name, target_env)
+    build_support::download_prebuilt(cache_root, url, lib_name.as_str(), target_env)
 }
 
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
@@ -532,7 +541,7 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
                 if let Ok(lib_dir) = build_support::extract_archive_to_cache(
                     &archive_path,
                     &cache_root,
-                    expected_lib_name(&cfg.target_env),
+                    expected_lib_name(&cfg.target_env).as_str(),
                 ) {
                     return Some(lib_dir);
                 }
@@ -541,7 +550,7 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
     }
 
     let cache_root = prebuilt_cache_root(cfg);
-    let urls = build_support::release_candidate_urls_default(&tags, &candidates);
+    let urls = build_support::release_candidate_urls_env(&tags, &candidates);
     for url in urls {
         if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
             return Some(lib_dir);
@@ -551,13 +560,11 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
 }
 
 fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
-    if let Ok(dir) = env::var("IMGUI_SYS_CACHE_DIR") {
-        return PathBuf::from(dir);
-    }
-    let target_dir = env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| cfg.manifest_dir.parent().unwrap().join("target"));
-    target_dir.join("dear-imgui-prebuilt")
+    build_support::prebuilt_cache_root_from_env_or_target(
+        &cfg.manifest_dir,
+        "IMGUI_SYS_CACHE_DIR",
+        "dear-imgui-prebuilt",
+    )
 }
 
 fn prebuilt_extract_dir_env(cache_root: &Path, target_env: &str) -> PathBuf {

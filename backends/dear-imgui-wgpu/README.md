@@ -44,3 +44,11 @@ See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full work
 
 - Targets native and Web (with `webgl`/`webgpu` features mapped to wgpu features).
 - External dependency updates (wgpu) may require coordinated version bumps.
+
+## Features
+
+- Default: no extra features required for native builds
+- `webgl`: forwards to `wgpu/webgl` (WASM + WebGL)
+- `webgpu`: forwards to `wgpu/webgpu` (WASM + WebGPU)
+
+Pick exactly one of `webgl` or `webgpu` for browser targets; for native leave both off.

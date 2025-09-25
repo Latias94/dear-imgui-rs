@@ -365,7 +365,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render(&mut self.imgui.context, &self.window);
+            .prepare_render_with_ui(&ui, &self.window);
         let draw_data = self.imgui.context.render();
 
         self.imgui.renderer.new_frame()?;

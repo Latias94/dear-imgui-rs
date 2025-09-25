@@ -66,9 +66,9 @@ impl AppWindow {
             ContextAttributesBuilder::new().build(Some(window.window_handle()?.as_raw()));
         let context = unsafe { cfg.display().create_context(&cfg, &context_attribs)? };
 
-        // Create surface (linear framebuffer for predictable hex -> output mapping)
+        // Create surface (request sRGB-capable framebuffer for consistent visuals)
         let surface_attribs = SurfaceAttributesBuilder::<WindowSurface>::new()
-            .with_srgb(Some(false))
+            .with_srgb(Some(true))
             .build(
                 window.window_handle()?.as_raw(),
                 NonZeroU32::new(1280).unwrap(),
@@ -100,8 +100,8 @@ impl AppWindow {
         };
 
         let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
-        // Use linear framebuffer (no sRGB conversion for ImGui rendering)
-        renderer.set_framebuffer_srgb_enabled(false);
+        // Use sRGB framebuffer: enable FRAMEBUFFER_SRGB during ImGui rendering
+        renderer.set_framebuffer_srgb_enabled(true);
         renderer.new_frame()?;
 
         let imgui = ImguiState {
@@ -180,6 +180,8 @@ impl AppWindow {
         // Render
         let gl = self.imgui.renderer.gl_context().unwrap();
         unsafe {
+            // Enable sRGB write for clear on sRGB-capable surface
+            gl.enable(glow::FRAMEBUFFER_SRGB);
             gl.clear_color(
                 self.imgui.clear_color[0],
                 self.imgui.clear_color[1],
@@ -187,11 +189,12 @@ impl AppWindow {
                 self.imgui.clear_color[3],
             );
             gl.clear(glow::COLOR_BUFFER_BIT);
+            gl.disable(glow::FRAMEBUFFER_SRGB);
         }
 
         self.imgui
             .platform
-            .prepare_render(&mut self.imgui.context, &self.window);
+            .prepare_render_with_ui(&ui, &self.window);
         let draw_data = self.imgui.context.render();
 
         self.imgui.renderer.new_frame()?;

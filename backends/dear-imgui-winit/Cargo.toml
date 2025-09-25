@@ -28,6 +28,5 @@ web-sys = { version = "0.3", features = [
 
 [features]
 default = []
-# Enable multi-viewport support
-# (commented out while WIP)
-# multi-viewport = ["dear-imgui/multi-viewport"]
+# Enable multi-viewport support (WIP). Declared to silence cfg warnings; kept off by default.
+multi-viewport = []

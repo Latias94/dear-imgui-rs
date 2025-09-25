@@ -5,8 +5,8 @@
 
 use instant::Instant;
 
-use dear_imgui::{BackendFlags, Context};
-use winit::dpi::LogicalSize;
+use dear_imgui::{BackendFlags, ConfigFlags, Context};
+use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{Event, WindowEvent};
 use winit::window::{Window, WindowAttributes};
 
@@ -48,6 +48,12 @@ impl WinitPlatform {
     /// let mut platform = WinitPlatform::new(&mut imgui_ctx);
     /// ```
     pub fn new(imgui_ctx: &mut Context) -> Self {
+        // Set backend platform name for diagnostics before borrowing Io
+        let _ = imgui_ctx.set_platform_name(Some(format!(
+            "dear-imgui-winit {}",
+            env!("CARGO_PKG_VERSION")
+        )));
+
         let io = imgui_ctx.io_mut();
 
         // Set backend flags
@@ -97,10 +103,14 @@ impl WinitPlatform {
             HiDpiMode::Rounded => window.scale_factor().round(),
         };
 
-        let logical_size = window.inner_size().to_logical(self.hidpi_factor);
+        // Convert via winit scale then adapt to our active HiDPI mode
+        let logical_size = window
+            .inner_size()
+            .to_logical(window.scale_factor());
+        let logical_size = self.scale_size_from_winit(window, logical_size);
         let io = imgui_ctx.io_mut();
 
-        io.set_display_size([logical_size.width, logical_size.height]);
+        io.set_display_size([logical_size.width as f32, logical_size.height as f32]);
         io.set_display_framebuffer_scale([self.hidpi_factor as f32, self.hidpi_factor as f32]);
     }
 
@@ -130,22 +140,36 @@ impl WinitPlatform {
     ) -> bool {
         match event {
             WindowEvent::Resized(physical_size) => {
-                let logical_size = physical_size.to_logical(self.hidpi_factor);
+                let logical_size = physical_size.to_logical(window.scale_factor());
+                let logical_size = self.scale_size_from_winit(window, logical_size);
                 imgui_ctx
                     .io_mut()
-                    .set_display_size([logical_size.width, logical_size.height]);
+                    .set_display_size([logical_size.width as f32, logical_size.height as f32]);
                 false
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                self.hidpi_factor = match self.hidpi_mode {
+                let new_hidpi = match self.hidpi_mode {
                     HiDpiMode::Default => *scale_factor,
                     HiDpiMode::Locked(factor) => factor,
                     HiDpiMode::Rounded => scale_factor.round(),
                 };
+                // Adjust mouse position proportionally when DPI factor changes
+                {
+                    let io = imgui_ctx.io_mut();
+                    let mouse = io.mouse_pos();
+                    if mouse[0].is_finite() && mouse[1].is_finite() && self.hidpi_factor > 0.0 {
+                        let scale = (new_hidpi / self.hidpi_factor) as f32;
+                        io.set_mouse_pos([mouse[0] * scale, mouse[1] * scale]);
+                    }
+                }
+                self.hidpi_factor = new_hidpi;
 
-                let logical_size = window.inner_size().to_logical(self.hidpi_factor);
+                let logical_size = window
+                    .inner_size()
+                    .to_logical(window.scale_factor());
+                let logical_size = self.scale_size_from_winit(window, logical_size);
                 let io = imgui_ctx.io_mut();
-                io.set_display_size([logical_size.width, logical_size.height]);
+                io.set_display_size([logical_size.width as f32, logical_size.height as f32]);
                 io.set_display_framebuffer_scale([
                     self.hidpi_factor as f32,
                     self.hidpi_factor as f32,
@@ -156,7 +180,9 @@ impl WinitPlatform {
                 events::handle_keyboard_input(event, imgui_ctx)
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let position = position.to_logical(self.hidpi_factor);
+                // Convert from winit logical to our active DPI logical
+                let position = position.to_logical(window.scale_factor());
+                let position = self.scale_pos_from_winit(window, position);
                 events::handle_cursor_moved([position.x, position.y], imgui_ctx)
             }
             WindowEvent::MouseInput { button, state, .. } => {
@@ -189,8 +215,16 @@ impl WinitPlatform {
 
         imgui_ctx.io_mut().set_delta_time(delta_s);
 
-        // Update cursor if needed
-        self.update_cursor(imgui_ctx, window);
+        // If backend supports setting mouse pos and ImGui requests it, honor it
+        if imgui_ctx.io().want_set_mouse_pos() {
+            let pos = imgui_ctx.io().mouse_pos();
+            let logical_pos = self.scale_pos_for_winit(
+                window,
+                LogicalPosition::new(pos[0] as f64, pos[1] as f64),
+            );
+            let _ = window.set_cursor_position(logical_pos);
+        }
+        // Note: cursor shape update is exposed via prepare_render_with_ui()
     }
 
     /// Prepare frame - alias for prepare_render for compatibility
@@ -198,18 +232,63 @@ impl WinitPlatform {
         self.prepare_render(imgui_ctx, window);
     }
 
-    /// Update the mouse cursor
-    fn update_cursor(&mut self, _imgui_ctx: &Context, window: &Window) {
-        // Note: Our dear-imgui doesn't have mouse_cursor() and mouse_draw_cursor() methods on Io
-        // We'll need to get this information from the UI context instead
-        let cursor = CursorSettings {
-            cursor: None,       // TODO: Get current cursor from UI context
-            draw_cursor: false, // TODO: Get draw cursor setting
-        };
+    /// Update cursor given a Ui reference (preferred, matches upstream)
+    pub fn prepare_render_with_ui(&mut self, ui: &dear_imgui::Ui, window: &Window) {
+        // Only change OS cursor if not disabled by config flags
+        if !ui
+            .io()
+            .config_flags()
+            .contains(ConfigFlags::NO_MOUSE_CURSOR_CHANGE)
+        {
+            // Our Io wrapper does not currently expose MouseDrawCursor, assume false (OS cursor)
+            let cursor = CursorSettings { cursor: ui.mouse_cursor(), draw_cursor: ui.io().mouse_draw_cursor() };
+            if self.cursor_cache != Some(cursor) {
+                cursor.apply(window);
+                self.cursor_cache = Some(cursor);
+            }
+        }
+    }
 
-        if self.cursor_cache != Some(cursor) {
-            cursor.apply(window);
-            self.cursor_cache = Some(cursor);
+    /// Scale a logical size from winit to our active HiDPI mode
+    pub fn scale_size_from_winit(
+        &self,
+        window: &Window,
+        logical_size: LogicalSize<f64>,
+    ) -> LogicalSize<f64> {
+        match self.hidpi_mode {
+            HiDpiMode::Default => logical_size,
+            // Convert to physical using winit scale, then back to logical with our factor
+            _ => logical_size
+                .to_physical::<f64>(window.scale_factor())
+                .to_logical(self.hidpi_factor),
+        }
+    }
+
+    /// Scale a logical position from winit to our active HiDPI mode
+    pub fn scale_pos_from_winit(
+        &self,
+        window: &Window,
+        logical_pos: LogicalPosition<f64>,
+    ) -> LogicalPosition<f64> {
+        match self.hidpi_mode {
+            HiDpiMode::Default => logical_pos,
+            _ => logical_pos
+                .to_physical::<f64>(window.scale_factor())
+                .to_logical(self.hidpi_factor),
+        }
+    }
+
+    /// Scale a logical position for winit based on our active HiDPI mode
+    pub fn scale_pos_for_winit(
+        &self,
+        window: &Window,
+        logical_pos: LogicalPosition<f64>,
+    ) -> LogicalPosition<f64> {
+        match self.hidpi_mode {
+            HiDpiMode::Default => logical_pos,
+            _ => logical_pos
+                .to_physical::<f64>(self.hidpi_factor)
+                .to_logical(window.scale_factor()),
         }
     }
 

@@ -190,6 +190,14 @@ impl Io {
     pub fn want_set_mouse_pos(&self) -> bool {
         self.0.WantSetMousePos
     }
+    /// Whether ImGui requests software-drawn mouse cursor
+    pub fn mouse_draw_cursor(&self) -> bool {
+        self.0.MouseDrawCursor
+    }
+    /// Enable or disable software-drawn mouse cursor
+    pub fn set_mouse_draw_cursor(&mut self, draw: bool) {
+        self.0.MouseDrawCursor = draw;
+    }
 
     /// Check if imgui wants to save ini settings
     pub fn want_save_ini_settings(&self) -> bool {
@@ -273,6 +281,14 @@ impl Io {
     pub fn add_mouse_wheel_event(&mut self, wheel: [f32; 2]) {
         unsafe {
             sys::ImGuiIO_AddMouseWheelEvent(&mut self.0 as *mut _, wheel[0], wheel[1]);
+        }
+    }
+
+    /// Notify Dear ImGui that the application window gained or lost focus
+    /// This mirrors `io.AddFocusEvent()` in Dear ImGui and is used by platform backends.
+    pub fn add_focus_event(&mut self, focused: bool) {
+        unsafe {
+            sys::ImGuiIO_AddFocusEvent(&mut self.0 as *mut _, focused);
         }
     }
 

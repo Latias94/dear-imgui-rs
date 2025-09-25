@@ -42,6 +42,8 @@ pub struct GlowRenderer {
     texture_map: Box<dyn TextureMap>,
     // Optional: enable GL_FRAMEBUFFER_SRGB during ImGui rendering
     framebuffer_srgb: bool,
+    // Optional: override color gamma applied to vertex colors (None = auto)
+    color_gamma_override: Option<f32>,
 }
 
 impl GlowRenderer {
@@ -190,6 +192,7 @@ impl GlowRenderer {
             gl_context: owned_gl,
             texture_map,
             framebuffer_srgb: false,
+            color_gamma_override: None,
         };
 
         Ok(renderer)
@@ -440,6 +443,13 @@ impl GlowRenderer {
         self.framebuffer_srgb = enabled;
     }
 
+    /// Override the color gamma applied to ImGui vertex colors.
+    /// Pass `Some(gamma)` to force a value (e.g., 2.2 or 1.0), or `None` to use auto:
+    /// auto = 2.2 when sRGB is enabled, otherwise 1.0.
+    pub fn set_color_gamma_override(&mut self, gamma: Option<f32>) {
+        self.color_gamma_override = gamma;
+    }
+
     /// Render Dear ImGui draw data
     pub fn render(&mut self, draw_data: &DrawData) -> RenderResult<()> {
         // Handle texture updates first, following the original Dear ImGui OpenGL3 implementation
@@ -629,6 +639,18 @@ impl GlowRenderer {
             }
             if let Some(location) = self.shaders.attrib_location_proj_mtx {
                 gl.uniform_matrix_4_f32_slice(Some(&location), false, &ortho_projection.concat());
+            }
+            if let Some(location) = self.shaders.attrib_location_color_gamma {
+                // Decode vertex color from sRGB when writing to sRGB framebuffer,
+                // otherwise pass-through (1.0). Allow override if set.
+                let gamma = self
+                    .color_gamma_override
+                    .unwrap_or(if self.framebuffer_srgb {
+                        2.2_f32
+                    } else {
+                        1.0_f32
+                    });
+                gl.uniform_1_f32(Some(&location), gamma);
             }
 
             #[cfg(feature = "bind_sampler_support")]

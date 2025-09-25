@@ -8,6 +8,7 @@ pub struct Shaders {
     pub program: Option<GlProgram>,
     pub attrib_location_tex: Option<GlUniformLocation>,
     pub attrib_location_proj_mtx: Option<GlUniformLocation>,
+    pub attrib_location_color_gamma: Option<GlUniformLocation>,
     pub attrib_location_vtx_pos: u32,
     pub attrib_location_vtx_uv: u32,
     pub attrib_location_vtx_color: u32,
@@ -81,6 +82,7 @@ impl Shaders {
             // Get uniform locations
             let attrib_location_tex = gl.get_uniform_location(program, "Texture");
             let attrib_location_proj_mtx = gl.get_uniform_location(program, "ProjMtx");
+            let attrib_location_color_gamma = gl.get_uniform_location(program, "ColorGamma");
 
             // Get attribute locations
             let attrib_location_vtx_pos =
@@ -98,6 +100,7 @@ impl Shaders {
                 program: Some(program),
                 attrib_location_tex,
                 attrib_location_proj_mtx,
+                attrib_location_color_gamma,
                 attrib_location_vtx_pos,
                 attrib_location_vtx_uv,
                 attrib_location_vtx_color,
@@ -184,10 +187,13 @@ void main()
 uniform sampler2D Texture;
 varying vec2 Frag_UV;
 varying vec4 Frag_Color;
+uniform float ColorGamma;
 
 void main()
 {{
-    gl_FragColor = Frag_Color * texture2D(Texture, Frag_UV.st);
+    vec4 col = Frag_Color;
+    col.rgb = pow(col.rgb, vec3(ColorGamma));
+    gl_FragColor = col * texture2D(Texture, Frag_UV.st);
 }}
 "#,
                 version = version_str,
@@ -206,10 +212,13 @@ uniform sampler2D Texture;
 in vec2 Frag_UV;
 in vec4 Frag_Color;
 out vec4 Out_Color;
+uniform float ColorGamma;
 
 void main()
 {{
-    Out_Color = Frag_Color * texture(Texture, Frag_UV.st);
+    vec4 col = Frag_Color;
+    col.rgb = pow(col.rgb, vec3(ColorGamma));
+    Out_Color = col * texture(Texture, Frag_UV.st);
 }}
 "#,
                 version = version_str,

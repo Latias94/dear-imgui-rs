@@ -128,15 +128,29 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
             );
         }
     } else {
-        let allow_auto_prebuilt = matches!(
+        let allow_feature = cfg!(feature = "prebuilt");
+        let allow_env = matches!(
             env::var("IMPLOT_SYS_USE_PREBUILT").ok().as_deref(),
             Some("1") | Some("true") | Some("yes")
         );
-        if allow_auto_prebuilt
-            && let Some(dir) = try_download_prebuilt_from_release(cfg)
-            && try_link_prebuilt(dir.clone(), target_env)
-        {
-            return true;
+        let allow_auto_prebuilt = allow_feature || allow_env;
+        if allow_auto_prebuilt {
+            let source = match (allow_feature, allow_env) {
+                (true, true) => "feature+env",
+                (true, false) => "feature",
+                (false, true) => "env",
+                _ => "",
+            };
+            let (owner, repo) = build_support::release_owner_repo();
+            println!(
+                "cargo:warning=auto-prebuilt enabled (dear-implot-sys): source={}, repo={}/{}",
+                source, owner, repo
+            );
+            if let Some(dir) = try_download_prebuilt_from_release(cfg)
+                && try_link_prebuilt(dir.clone(), target_env)
+            {
+                return true;
+            }
         }
     }
     false
@@ -230,7 +244,7 @@ fn main() {
     // Generate bindings
     generate_bindings(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
 
-    // Features: build-from-source forces source build; prebuilt is default
+    // Features: build-from-source forces source build; prebuilt is opt-in
     let force_build =
         cfg!(feature = "build-from-source") || env::var("IMPLOT_SYS_FORCE_BUILD").is_ok();
     let linked_prebuilt = if force_build {
@@ -388,7 +402,7 @@ fn expected_lib_name(target_env: &str) -> &'static str {
 
 fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
-    let lib_path = dir.join(lib_name);
+    let lib_path = dir.join(lib_name.as_str());
     if !lib_path.exists() {
         println!(
             "cargo:warning=prebuilt dear_implot not found at {}",
@@ -401,13 +415,17 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     true
 }
 
+fn expected_lib_name(target_env: &str) -> String {
+    build_support::expected_lib_name(target_env, "dear_implot")
+}
+
 fn try_download_prebuilt(
     cache_root: &PathBuf,
     url: &str,
     target_env: &str,
 ) -> Result<PathBuf, String> {
     let lib_name = expected_lib_name(target_env);
-    build_support::download_prebuilt(cache_root, url, lib_name, target_env)
+    build_support::download_prebuilt(cache_root, url, lib_name.as_str(), target_env)
 }
 
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
@@ -446,7 +464,7 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
     }
     let cache_root = prebuilt_cache_root(cfg);
     let names = vec![archive_name, archive_name_no_crt];
-    let urls = build_support::release_candidate_urls_default(&tags, &names);
+    let urls = build_support::release_candidate_urls_env(&tags, &names);
     for url in urls {
         if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
             return Some(lib_dir);
@@ -456,13 +474,11 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
 }
 
 fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
-    if let Ok(dir) = env::var("IMPLOT_SYS_CACHE_DIR") {
-        return PathBuf::from(dir);
-    }
-    let target_dir = env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| cfg.manifest_dir.parent().unwrap().join("target"));
-    target_dir.join("dear-implot-prebuilt")
+    build_support::prebuilt_cache_root_from_env_or_target(
+        &cfg.manifest_dir,
+        "IMPLOT_SYS_CACHE_DIR",
+        "dear-implot-prebuilt",
+    )
 }
 
 fn prebuilt_extract_dir_env(cache_root: &Path, target_env: &str) -> PathBuf {

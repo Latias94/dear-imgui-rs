@@ -30,6 +30,14 @@ pub fn msvc_crt_suffix_from_env(target_env: Option<&str>) -> Option<&'static str
     }
 }
 
+pub fn expected_lib_name(target_env: &str, base: &str) -> String {
+    if target_env == "msvc" {
+        format!("{}.lib", base)
+    } else {
+        format!("lib{}.a", base)
+    }
+}
+
 pub fn compose_archive_name(
     crate_short: &str,
     version: &str,
@@ -116,6 +124,19 @@ pub fn release_candidate_urls(
 
 pub fn release_candidate_urls_default(tags: &[String], names: &[String]) -> Vec<String> {
     release_candidate_urls(DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_REPO, tags, names)
+}
+
+pub fn release_owner_repo() -> (String, String) {
+    let owner =
+        env::var("BUILD_SUPPORT_GH_OWNER").unwrap_or_else(|_| DEFAULT_GITHUB_OWNER.to_string());
+    let repo =
+        env::var("BUILD_SUPPORT_GH_REPO").unwrap_or_else(|_| DEFAULT_GITHUB_REPO.to_string());
+    (owner, repo)
+}
+
+pub fn release_candidate_urls_env(tags: &[String], names: &[String]) -> Vec<String> {
+    let (owner, repo) = release_owner_repo();
+    release_candidate_urls(&owner, &repo, tags, names)
 }
 
 pub fn is_offline() -> bool {
@@ -226,6 +247,20 @@ pub fn download_prebuilt(
     let bytes = resp.bytes().map_err(|e| format!("read body: {}", e))?;
     std::fs::write(&dst, &bytes).map_err(|e| format!("write {}: {}", dst.display(), e))?;
     Ok(dl_dir)
+}
+
+pub fn prebuilt_cache_root_from_env_or_target(
+    manifest_dir: &Path,
+    cache_env_var: &str,
+    folder: &str,
+) -> PathBuf {
+    if let Ok(dir) = env::var(cache_env_var) {
+        return PathBuf::from(dir);
+    }
+    let target_dir = env::var("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| manifest_dir.parent().unwrap().join("target"));
+    target_dir.join(folder)
 }
 pub const DEFAULT_GITHUB_OWNER: &str = "Latias94";
 pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
