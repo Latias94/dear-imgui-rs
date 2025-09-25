@@ -95,8 +95,8 @@ jobs:
         if: runner.os == 'Windows'
         uses: lukka/run-vcpkg@v11
         with:
-          # Use a fixed commit for reproducibility; fall back to latest if omitted
-          # vcpkgGitCommitId: 9d84f3b3a7e60d4f8a0b6d2bf5d7f2b2e2c6a6ba
+          # Use a fixed commit for reproducibility
+          vcpkgGitCommitId: 9a98f93671f984351377044210854900bfd73171
           runVcpkgInstall: false
 
       - name: Install FreeType + pkgconf via vcpkg (Windows)
@@ -104,9 +104,11 @@ jobs:
         shell: pwsh
         run: |
           vcpkg install freetype:x64-windows pkgconf:x64-windows
-          echo "PKG_CONFIG_PATH=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
-          echo "PATH=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf;$env:PATH" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf\pkgconf.exe" >> $env:GITHUB_ENV
+          $root = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { '' }
+          if (-not $root) { throw 'VCPKG root not found in environment.' }
+          echo "PKG_CONFIG_PATH=$root\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
+          echo "PATH=$root\installed\x64-windows\tools\pkgconf;$env:PATH" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG=$root\installed\x64-windows\tools\pkgconf\pkgconf.exe" >> $env:GITHUB_ENV
 
       - name: Install FreeType (macOS)
         if: runner.os == 'macOS'

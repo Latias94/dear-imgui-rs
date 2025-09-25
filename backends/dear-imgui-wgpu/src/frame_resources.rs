@@ -124,10 +124,10 @@ impl FrameResources {
         };
 
         // Copy to host buffer first
-        if let Some(ref mut host_buffer) = self.vertex_buffer_host {
-            if vertex_bytes.len() <= host_buffer.len() {
-                host_buffer[..vertex_bytes.len()].copy_from_slice(vertex_bytes);
-            }
+        if let Some(ref mut host_buffer) = self.vertex_buffer_host
+            && vertex_bytes.len() <= host_buffer.len()
+        {
+            host_buffer[..vertex_bytes.len()].copy_from_slice(vertex_bytes);
         }
 
         // Upload to GPU with proper alignment
@@ -159,10 +159,10 @@ impl FrameResources {
         };
 
         // Copy to host buffer first
-        if let Some(ref mut host_buffer) = self.index_buffer_host {
-            if index_bytes.len() <= host_buffer.len() {
-                host_buffer[..index_bytes.len()].copy_from_slice(index_bytes);
-            }
+        if let Some(ref mut host_buffer) = self.index_buffer_host
+            && index_bytes.len() <= host_buffer.len()
+        {
+            host_buffer[..index_bytes.len()].copy_from_slice(index_bytes);
         }
 
         // Upload to GPU with proper alignment

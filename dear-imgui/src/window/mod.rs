@@ -231,11 +231,11 @@ impl<'ui> Window<'ui> {
             }
         }
 
-        if let Some(focused) = self.focused {
-            if focused {
-                unsafe {
-                    crate::sys::igSetNextWindowFocus();
-                }
+        if let Some(focused) = self.focused
+            && focused
+        {
+            unsafe {
+                crate::sys::igSetNextWindowFocus();
             }
         }
 

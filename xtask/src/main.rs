@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -9,7 +9,7 @@ fn project_root() -> PathBuf {
 }
 
 fn run() -> Result<()> {
-    let mut args = std::env::args().skip(1).collect::<Vec<_>>();
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
     let cmd = args.first().map(|s| s.as_str()).unwrap_or("wasm-bindgen");
     match cmd {
         "wasm-bindgen" => gen_wasm_bindings(args.get(1).map(|s| s.as_str()))?,
@@ -81,13 +81,22 @@ fn build_web_demo() -> Result<()> {
     let root = project_root();
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".into());
 
+    // Ensure pregenerated wasm bindings exist for import-style linking (imgui-sys-v0)
+    // If missing, generate them now so dear-imgui-sys does not attempt to bindgen for wasm.
+    {
+        let preg = root
+            .join("dear-imgui-sys")
+            .join("src")
+            .join("wasm_bindings_pregenerated.rs");
+        if !preg.exists() {
+            eprintln!("Generating pregenerated wasm bindings (import module: imgui-sys-v0)...");
+            gen_wasm_bindings(Some("imgui-sys-v0"))?;
+        }
+    }
+
     // 1) Build the web demo crate for wasm32-unknown-unknown
     eprintln!("Building dear-imgui-web-demo ({profile})...");
     let mut build_cmd = Command::new("cargo");
-    build_cmd.env(
-        "RUSTFLAGS",
-        "-C link-arg=--import-memory -C link-arg=--export-table",
-    );
     let status = build_cmd
         .args([
             "build",
@@ -116,7 +125,12 @@ fn build_web_demo() -> Result<()> {
     }
 
     let dist = root.join("target").join("web-demo");
-    let _ = fs::create_dir_all(&dist);
+    // Clean old outputs to avoid stale/mismatched JS/WASM pairs
+    if dist.exists() {
+        eprintln!("Cleaning old web-demo dir: {}", dist.display());
+        let _ = fs::remove_dir_all(&dist);
+    }
+    fs::create_dir_all(&dist)?;
 
     eprintln!("Running wasm-bindgen -> {}", dist.display());
     let status = Command::new("wasm-bindgen")
@@ -135,6 +149,120 @@ fn build_web_demo() -> Result<()> {
         anyhow::bail!("wasm-bindgen failed (install via `cargo install -f wasm-bindgen-cli`)");
     }
 
+    // 2b) Rewrite the generated wasm to import memory from `env` so we can share memory
+    // with the Emscripten-built provider (imgui-sys-v0). wasm-bindgen 0.2.104 no longer
+    // exposes `--import-memory`, so we do a small WAT roundtrip:
+    //   - Insert `(import "env" "memory" (memory ...))` right after `(module` (imports must be first)
+    //   - Insert `(export "memory" (memory 0))`
+    //   - Remove the original `(memory ...)` and its existing export if present
+    // wasm-bindgen may emit either hyphen or underscore versioned filenames in JS.
+    // Patch both variants if present, prioritizing the one referenced by the JS (hyphenated).
+    let main_bg_wasm_hyphen = dist.join(format!("{}{}_bg.wasm", pkg_name, ""));
+    let main_bg_wasm_underscore = dist.join(format!("{}_bg.wasm", pkg_name.replace('-', "_")));
+
+    let mut candidates = vec![];
+    if main_bg_wasm_hyphen.exists() {
+        candidates.push(main_bg_wasm_hyphen.clone());
+    }
+    if main_bg_wasm_underscore.exists() {
+        candidates.push(main_bg_wasm_underscore.clone());
+    }
+
+    if candidates.is_empty() {
+        anyhow::bail!("wasm-bindgen bg.wasm not found (checked hyphen and underscore variants)");
+    }
+
+    for main_bg_wasm in candidates {
+        let wat_path = dist.join("__wasm_tmp.wat");
+        let patched_wat_path = dist.join("__wasm_tmp_patched.wat");
+        // Print to WAT
+        let ok = Command::new("wasm-tools")
+            .args([
+                "print",
+                main_bg_wasm.to_str().unwrap(),
+                "-o",
+                wat_path.to_str().unwrap(),
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            let mut wat = std::fs::read_to_string(&wat_path).unwrap_or_default();
+            if !wat.contains("(import \"env\" \"memory\" (memory") {
+                // Find original memory line to derive initial/max
+                let mut original_mem_line_idx: Option<usize> = None;
+                // Use safe defaults to avoid starving the provider (too-small max leads to OOM)
+                let init_pages: String = "256".to_string();
+                let max_pages: String = "4096".to_string();
+                for (idx, line) in wat.lines().enumerate() {
+                    let t = line.trim_start();
+                    if t.starts_with("(memory") {
+                        original_mem_line_idx = Some(idx);
+                        break;
+                    }
+                }
+
+                if let Some(mem_idx) = original_mem_line_idx {
+                    let mut lines: Vec<String> = wat.lines().map(|s| s.to_string()).collect();
+                    // Remove original memory line
+                    lines.remove(mem_idx);
+                    // Also remove any existing memory export to avoid duplicate
+                    lines.retain(|l| l.trim() != "(export \"memory\" (memory 0))");
+                    // Insert import + export right after the `(module` line (imports must come first)
+                    if let Some(module_idx) = lines
+                        .iter()
+                        .position(|l| l.trim_start().starts_with("(module"))
+                    {
+                        let insert_at = module_idx + 1;
+                        lines.insert(
+                            insert_at,
+                            format!(
+                                "  (import \"env\" \"memory\" (memory (;0;) {} {}))",
+                                init_pages, max_pages
+                            ),
+                        );
+                        lines.insert(
+                            insert_at + 1,
+                            "  (export \"memory\" (memory 0))".to_string(),
+                        );
+                        wat = lines.join("\n");
+                        std::fs::write(&patched_wat_path, &wat)?;
+                        let ok2 = Command::new("wasm-tools")
+                            .args([
+                                "parse",
+                                patched_wat_path.to_str().unwrap(),
+                                "-o",
+                                main_bg_wasm.to_str().unwrap(),
+                            ])
+                            .status()
+                            .map(|s| s.success())
+                            .unwrap_or(false);
+                        if ok2 {
+                            eprintln!(
+                                "Patched {} to import memory from env",
+                                main_bg_wasm.display()
+                            );
+                        } else {
+                            eprintln!(
+                                "Warning: failed to assemble patched WAT; leaving wasm unmodified"
+                            );
+                        }
+                    } else {
+                        eprintln!("Warning: failed to locate (module ...) header; skipping memory import patch");
+                    }
+                } else {
+                    eprintln!("Warning: failed to find a (memory ...) declaration to patch");
+                }
+            }
+            let _ = std::fs::remove_file(&wat_path);
+            let _ = std::fs::remove_file(&patched_wat_path);
+        } else {
+            anyhow::bail!(
+                "wasm-tools not found or failed to print WAT; cannot patch memory import.\nInstall with: cargo install wasm-tools"
+            );
+        }
+    }
+
     // 3) Copy demo index.html
     let index_src = root.join("examples-wasm/web/index.html");
     let index_dst = dist.join("index.html");
@@ -144,16 +272,52 @@ fn build_web_demo() -> Result<()> {
     let js_main = dist.join(format!("{}.js", pkg_name));
     if js_main.exists() {
         let mut code = fs::read_to_string(&js_main)?;
-        // Ensure a global 'memory' binding referencing our shared memory exists.
-        if !code.contains("globalThis.__imgui_shared_memory") {
-            // Insert right after the first import line
-            if let Some(idx) = code.find("\nlet wasm;") {
-                let inject = "\nconst memory = globalThis.__imgui_shared_memory || new WebAssembly.Memory({ initial: 256, maximum: 4096 });\n";
-                code.insert_str(idx, inject);
-                fs::write(&js_main, &code)?;
-                eprintln!("Injected shared memory binding into {}", js_main.display());
+        // Ensure we hand a shared memory to the module as `env.memory` so the provider (emscripten)
+        // and main module use the same memory.
+        if !code.contains("__imgui_shared_memory") {
+            // Try to find the wasm-bindgen imports function header across versions
+            let header_pos = code
+                .find("function __wbg_get_imports()")
+                .or_else(|| code.find("function getImports()"));
+
+            // Choose insertion point: right after "const imports = {};" inside the function body
+            let mut insert_at: Option<usize> = None;
+            if let Some(h) = header_pos {
+                // Search for the first occurrence of the marker after the header
+                if let Some(rel) = code[h..].find("const imports = {};") {
+                    insert_at = Some(h + rel + "const imports = {};".len());
+                } else if let Some(open_idx) = code[h..].find("{\n") {
+                    // Fallback: insert right after opening brace
+                    insert_at = Some(h + open_idx + 2);
+                }
+            }
+            // Last resort: search globally for the marker
+            if insert_at.is_none() {
+                if let Some(global_rel) = code.find("const imports = {};") {
+                    insert_at = Some(global_rel + "const imports = {};".len());
+                }
+            }
+
+            if let Some(pos) = insert_at {
+                let inject = r#"
+        // Inject shared memory for import-style provider (imgui-sys-v0)
+        const __shared_mem = globalThis.__imgui_shared_memory || new WebAssembly.Memory({ initial: 256, maximum: 4096 });
+        if (!imports.env) imports.env = {};
+        if (!imports.env.memory) imports.env.memory = __shared_mem;
+"#;
+                code.insert_str(pos, inject);
+                eprintln!(
+                    "Patched wasm-bindgen imports in {} to provide env.memory",
+                    js_main.display()
+                );
+            } else {
+                anyhow::bail!(
+                    "Failed to locate insertion point in {} for memory injection (searched for __wbg_get_imports/getImports and 'const imports = {{}};')",
+                    js_main.display()
+                );
             }
         }
+        fs::write(&js_main, &code)?;
     }
 
     eprintln!("Web demo built at: {}", dist.display());
@@ -161,7 +325,7 @@ fn build_web_demo() -> Result<()> {
         "Serve this dir via any static server, e.g.\n  python -m http.server -d {} 8080",
         dist.display()
     );
-    eprintln!("Note: Runtime requires the 'imgui-sys-v0' module (cimgui) to be provided.\n      Without it, the page will fail to instantiate the WASM module.");
+    // Import-style build: remember to run `xtask build-cimgui-provider` to generate the provider.
     Ok(())
 }
 
@@ -218,70 +382,13 @@ fn build_cimgui_provider() -> Result<()> {
         }
     }
 
-    // 2) Compose em++ command to build imgui-sys-v0.wasm (shared imported memory)
+    // 2) Prepare export list from pregenerated bindings, then compile provider once with that list
     let sys_root = root.join("dear-imgui-sys");
     let cimgui_root = sys_root.join("third-party").join("cimgui");
     let imgui_src = cimgui_root.join("imgui");
+    let out_js = out_dir.join("imgui-sys-v0.js"); // Output to .js, not .wasm
 
-    let out_wasm = out_dir.join("imgui-sys-v0.wasm");
-
-    let mut cmd = Command::new(&empp);
-    cmd.arg("-std=c++17")
-        .arg("-O2")
-        .arg("--no-entry")
-        .arg("-s")
-        .arg("STANDALONE_WASM=1")
-        .arg("-s")
-        .arg("ENVIRONMENT=web")
-        .arg("-s")
-        .arg("IMPORTED_MEMORY=1")
-        .arg("-s")
-        .arg("ALLOW_MEMORY_GROWTH=1")
-        .arg("-s")
-        .arg("INITIAL_MEMORY=16777216")
-        .arg("-s")
-        .arg("FILESYSTEM=0")
-        .arg("-s")
-        .arg("EXPORT_ALL=1")
-        .arg("-fno-exceptions")
-        .arg("-fno-rtti")
-        .arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
-        .arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
-        .arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS")
-        .arg("-DIMGUI_USE_WCHAR32")
-        .arg("-I")
-        .arg(&cimgui_root)
-        .arg("-I")
-        .arg(&imgui_src)
-        .arg(cimgui_root.join("cimgui.cpp"))
-        .arg(imgui_src.join("imgui.cpp"))
-        .arg(imgui_src.join("imgui_draw.cpp"))
-        .arg(imgui_src.join("imgui_widgets.cpp"))
-        .arg(imgui_src.join("imgui_tables.cpp"))
-        .arg(imgui_src.join("imgui_demo.cpp"))
-        .arg("-o")
-        .arg(&out_wasm);
-
-    // Ensure tools can find config and binaries
-    let emscripten_dir = emcc.parent().unwrap();
-    let tool_bin = emscripten_dir.parent().unwrap().join("bin");
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let new_path = {
-        let mut p = std::env::split_paths(&path).collect::<Vec<_>>();
-        p.insert(0, emscripten_dir.to_path_buf());
-        p.insert(0, tool_bin);
-        std::env::join_paths(p).unwrap()
-    };
-    cmd.env("PATH", new_path);
-    cmd.env("EM_CONFIG", &em_config);
-
-    eprintln!("Building cimgui provider -> {}", out_wasm.display());
-    let status = cmd.status()?;
-    if !status.success() {
-        anyhow::bail!("em++ failed; see output for details");
-    }
-
-    // 3) Generate ES module glue that re-exports wasm instance exports under static names
+    // Generate ES module glue export names by scanning pregenerated wasm bindings
     let bindings = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
     let content =
         fs::read_to_string(&bindings).with_context(|| format!("read {}", bindings.display()))?;
@@ -314,27 +421,44 @@ fn build_cimgui_provider() -> Result<()> {
     let exports_path = out_dir.join("imgui_exports.json");
     fs::write(&exports_path, &exports_json)?;
 
-    // Rebuild the command with export list (place before -o)
+    // 2b) Compose em++ command to build imgui-sys-v0.wasm (shared imported memory) with explicit exports
+
     let mut cmd = Command::new(&empp);
     cmd.arg("-std=c++17")
         .arg("-O2")
-        .arg("--no-entry")
         .arg("-s")
-        .arg("STANDALONE_WASM=1")
+        .arg("MODULARIZE=1")  // Generate a module function
+        .arg("-s")
+        .arg("EXPORT_ES6=1")  // Export as ES6 module
         .arg("-s")
         .arg("ENVIRONMENT=web")
+        .arg("-s")
+        .arg("GLOBAL_BASE=67108864") // Place provider static data high to avoid overlap with main module
         .arg("-s")
         .arg("IMPORTED_MEMORY=1")
         .arg("-s")
         .arg("ALLOW_MEMORY_GROWTH=1")
         .arg("-s")
-        .arg("INITIAL_MEMORY=16777216")
+        .arg("INITIAL_MEMORY=134217728")
         .arg("-s")
         .arg("FILESYSTEM=0")
         .arg("-s")
-        .arg("EXPORT_ALL=1")
+        .arg("NO_EXIT_RUNTIME=1")
         .arg("-s")
-        .arg(format!("EXPORTED_FUNCTIONS=@{}", exports_path.display()))
+        .arg("MALLOC=emmalloc")
+        .arg("-s")
+        .arg("ASSERTIONS=1")
+        .arg("-s")
+        .arg("STACK_SIZE=1048576")
+        .arg("-s")
+        .arg("EXPORTED_RUNTIME_METHODS=[\"ccall\",\"cwrap\",\"allocate\",\"stackSave\",\"stackRestore\",\"stackAlloc\",\"UTF8ToString\",\"stringToUTF8\",\"lengthBytesUTF8\"]")
+        .arg("-s")
+        .arg(format!(
+            "EXPORTED_FUNCTIONS=@{}",
+            exports_path
+                .to_string_lossy()
+                .replace('\\', "/") // emscripten on Windows accepts fwd slashes
+        ))
         .arg("-fno-exceptions")
         .arg("-fno-rtti")
         .arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
@@ -352,49 +476,61 @@ fn build_cimgui_provider() -> Result<()> {
         .arg(imgui_src.join("imgui_tables.cpp"))
         .arg(imgui_src.join("imgui_demo.cpp"))
         .arg("-o")
-        .arg(&out_wasm);
+        .arg(&out_js); // Output to .js file for MODULARIZE mode
 
-    // Write module with top-level await
-    // Use .js extension instead of .mjs for broader server MIME compatibility
-    let js_path = out_dir.join("imgui-sys-v0.js");
+    // Ensure tools can find config and binaries
+    let emscripten_dir = emcc.parent().unwrap();
+    let tool_bin = emscripten_dir.parent().unwrap().join("bin");
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let new_path = {
+        let mut p = std::env::split_paths(&path).collect::<Vec<_>>();
+        p.insert(0, emscripten_dir.to_path_buf());
+        p.insert(0, tool_bin);
+        std::env::join_paths(p).unwrap()
+    };
+    cmd.env("PATH", new_path);
+    cmd.env("EM_CONFIG", &em_config);
+
+    eprintln!("Building cimgui provider -> {}", out_js.display());
+    let status = cmd.status()?;
+    if !status.success() {
+        anyhow::bail!("em++ failed; see output for details");
+    }
+
+    // 3) MODULARIZE=1 generates both .js and .wasm files
+    // The .js file is already created, now create the wrapper
+    let emscripten_js = out_dir.join("imgui-sys-v0.js");
+    if !emscripten_js.exists() {
+        anyhow::bail!("Emscripten output not found: {}", emscripten_js.display());
+    }
+
+    // Create wrapper module
+    let js_path = out_dir.join("imgui-sys-v0-wrapper.js");
     let mut js = String::new();
-    js.push_str("// Auto-generated imgui-sys-v0 provider.\n");
-    js.push_str("async function loadWasm(url, imports) {\n");
-    js.push_str("  try {\n");
-    js.push_str("    return await WebAssembly.instantiateStreaming(fetch(url), imports);\n");
-    js.push_str("  } catch (_) {\n");
-    js.push_str("    const resp = await fetch(url);\n");
-    js.push_str("    const bytes = await resp.arrayBuffer();\n");
-    js.push_str("    return await WebAssembly.instantiate(bytes, imports);\n");
-    js.push_str("  }\n");
-    js.push_str("}\n");
-    // Minimal import stubs for Emscripten standalone WASM (WASI-like)
-    js.push_str("const __return0 = (..._args) => 0;\n");
-    js.push_str("const __noop = (..._args) => {};\n");
-    js.push_str("const wasi = new Proxy({}, { get: (_t, prop) => {\n");
-    js.push_str("  if (prop === 'proc_exit') return (code) => { console.warn('[wasi] proc_exit', code); return 0; };\n");
-    js.push_str("  if (prop === 'fd_write') return __return0;\n");
-    js.push_str("  if (prop === 'fd_seek') return __return0;\n");
-    js.push_str("  if (prop === 'environ_sizes_get') return __return0;\n");
-    js.push_str("  if (prop === 'environ_get') return __return0;\n");
-    js.push_str("  if (prop === 'clock_time_get') return __return0;\n");
-    js.push_str("  if (prop === 'random_get') return __return0;\n");
-    js.push_str("  return __return0;\n");
-    js.push_str("}});\n");
-    js.push_str("const env = new Proxy({}, { get: (_t, prop) => {\n");
-    js.push_str("  if (prop === 'abort') return () => { throw new Error('abort'); };\n");
-    js.push_str("  if (prop === 'emscripten_notify_memory_growth') return __noop;\n");
-    js.push_str("  if (prop === 'emscripten_memcpy_big') return __return0;\n");
-    js.push_str("  return __return0;\n");
-    js.push_str("}});\n");
-    js.push_str("const emsc = new Proxy({}, { get: () => __return0 });\n");
+    js.push_str("// Auto-generated wrapper for imgui-sys-v0 provider\n");
+    js.push_str("import createModule from './imgui-sys-v0.js';\n");
+    js.push_str("\n");
+    js.push_str("// Use shared memory if available\n");
     js.push_str("const memory = globalThis.__imgui_shared_memory || new WebAssembly.Memory({initial:256, maximum:4096});\n");
-    js.push_str("const imports = { wasi_snapshot_preview1: wasi, wasi_unstable: wasi, env: Object.assign({ memory }, env), emsc };\n");
-    js.push_str("const { instance } = await loadWasm('imgui-sys-v0.wasm', imports);\n");
+    js.push_str("\n");
+    js.push_str("// Initialize the module with shared memory\n");
+    js.push_str("const Module = await createModule({\n");
+    js.push_str("  wasmMemory: memory,\n");
+    js.push_str("  printErr: (text) => console.warn('[imgui-sys-v0]', text),\n");
+    js.push_str("  print: (text) => console.log('[imgui-sys-v0]', text),\n");
+    js.push_str("});\n");
+    js.push_str(
+        "console.log('[imgui-sys-v0] Shared memory pages=', (memory.buffer.byteLength>>>16));\n",
+    );
+    js.push_str(
+        "console.log('[imgui-sys-v0] Module.wasmMemory===memory', Module.wasmMemory===memory);\n",
+    );
+    js.push_str("\n");
+    js.push_str("// Export all the functions\n");
     for n in &names {
         js.push_str(&format!(
-            "export function {0}(...args) {{ return (instance.exports['{0}'] ?? instance.exports['_{0}'])(...args); }}\n",
-            n
+            "export const {} = Module._{} || Module.{};\n",
+            n, n, n
         ));
     }
     fs::write(&js_path, js)?;
@@ -411,7 +547,7 @@ fn build_cimgui_provider() -> Result<()> {
         // Desired importmap snippet (no escaping in HTML) pointing to .js for better MIME defaults
         let importmap = r#"<script type="importmap">{
   "imports": {
-    "imgui-sys-v0": "./imgui-sys-v0.js"
+    "imgui-sys-v0": "./imgui-sys-v0-wrapper.js"
   }
 }</script>"#;
 
@@ -429,18 +565,21 @@ fn build_cimgui_provider() -> Result<()> {
             eprintln!("Normalized previously escaped importmap in index.html");
         }
 
-        // Replace legacy .mjs mapping to .js if present
-        if html.contains("imgui-sys-v0.mjs") {
-            html = html.replace("imgui-sys-v0.mjs", "imgui-sys-v0.js");
+        // Replace legacy .mjs or .js mapping to wrapper if present
+        if html.contains("imgui-sys-v0.mjs") || html.contains("imgui-sys-v0.js") {
+            html = html.replace("imgui-sys-v0.mjs", "imgui-sys-v0-wrapper.js");
+            html = html.replace("imgui-sys-v0.js", "imgui-sys-v0-wrapper.js");
             fs::write(&index, &html)?;
-            eprintln!("Updated importmap to use .js instead of .mjs for imgui-sys-v0");
+            eprintln!("Updated importmap to use wrapper for imgui-sys-v0");
         }
 
         // Inject importmap if it's still missing
-        if !html.contains("imgui-sys-v0.js") {
+        // Import map must be placed BEFORE any module scripts
+        if !html.contains("imgui-sys-v0-wrapper.js") && !html.contains("type=\"importmap\"") {
+            // Insert import map right after the closing </style> tag, before the body
             html = html.replace(
-                "<canvas id=\"wasm-canvas\"></canvas>",
-                &format!("<canvas id=\"wasm-canvas\"></canvas>\n{}", importmap),
+                "</style>\n  </head>",
+                &format!("</style>\n{}\n  </head>", importmap),
             );
             fs::write(&index, html)?;
             eprintln!("Patched index.html with importmap for imgui-sys-v0");

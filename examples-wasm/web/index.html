@@ -15,8 +15,24 @@
       // Prepare a shared memory for both provider (cimgui) and main (wasm-bindgen) modules
       // 256 pages (~16MiB) initial, growable up to 4096 pages (~256MiB)
       if (!globalThis.__imgui_shared_memory) {
-        globalThis.__imgui_shared_memory = new WebAssembly.Memory({ initial: 256, maximum: 4096 });
+        // Use a larger initial heap so provider static data placed high (GLOBAL_BASE) fits
+        // 2048 pages = 128MiB
+        globalThis.__imgui_shared_memory = new WebAssembly.Memory({ initial: 2048, maximum: 4096 });
       }
+
+      // Ensure canvas drawing buffer matches CSS size * devicePixelRatio
+      const canvas = document.getElementById('wasm-canvas');
+      function resizeCanvasToDisplaySize() {
+        const dpr = window.devicePixelRatio || 1;
+        const displayWidth = Math.floor(canvas.clientWidth * dpr);
+        const displayHeight = Math.floor(canvas.clientHeight * dpr);
+        if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+          canvas.width = displayWidth;
+          canvas.height = displayHeight;
+        }
+      }
+      window.addEventListener('resize', resizeCanvasToDisplaySize);
+      resizeCanvasToDisplaySize();
     </script>
     <script type="module">
       import init from './dear-imgui-web-demo.js';

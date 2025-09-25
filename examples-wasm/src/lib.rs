@@ -4,6 +4,7 @@ use dear_imgui::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use instant::Instant;
+use log::info;
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::prelude::*;
 use winit::{
@@ -24,6 +25,7 @@ struct ImguiState {
     clear_color: wgpu::Color,
     demo_open: bool,
     last_frame: Instant,
+    frames: u32,
 }
 
 struct AppWindow {
@@ -71,11 +73,13 @@ impl AppWindow {
             .find(|f| f.is_srgb())
             .unwrap_or(capabilities.formats[0]);
 
+        // Use physical size of the canvas for surface configuration (matches scissor/render target)
+        let physical = window.inner_size();
         let surface_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            width: size.width as u32,
-            height: size.height as u32,
+            width: physical.width.max(1),
+            height: physical.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
@@ -87,12 +91,21 @@ impl AppWindow {
         // Setup ImGui
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
+
+        // Set initial display size before creating platform
+        {
+            let io = context.io_mut();
+            io.set_display_size([1280.0, 720.0]);
+            io.set_display_framebuffer_scale([1.0, 1.0]);
+        }
+
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
 
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
-        let renderer = WgpuRenderer::new(init_info, &mut context)
+        // Skip font atlas preparation for WASM to avoid pointer issues
+        let renderer = WgpuRenderer::new_without_font_atlas(init_info, &mut context)
             .map_err(|e| JsValue::from_str(&format!("init renderer: {e}")))?;
 
         let imgui = ImguiState {
@@ -107,6 +120,7 @@ impl AppWindow {
             },
             demo_open: true,
             last_frame: Instant::now(),
+            frames: 0,
         };
 
         Ok(Self {
@@ -130,20 +144,60 @@ impl AppWindow {
     fn render(&mut self) -> Result<(), JsValue> {
         let now = Instant::now();
         let delta_time = now - self.imgui.last_frame;
-        self.imgui
-            .context
-            .io_mut()
-            .set_delta_time(delta_time.as_secs_f32());
+
+        // Query window size + HiDPI factor and update ImGui IO before NewFrame
+        {
+            let scale_factor = self.window.scale_factor() as f32;
+            let physical = self.window.inner_size();
+            // ImGui expects logical size in points, with framebuffer scale carrying the DPI factor
+            let logical_w = (physical.width as f32 / scale_factor).max(0.0);
+            let logical_h = (physical.height as f32 / scale_factor).max(0.0);
+
+            let io = self.imgui.context.io_mut();
+            io.set_display_size([logical_w, logical_h]);
+            io.set_display_framebuffer_scale([scale_factor, scale_factor]);
+            io.set_delta_time(delta_time.as_secs_f32());
+
+            // Log a few frames for debugging size plumbing
+            if self.imgui.frames < 3 {
+                info!(
+                    "IO set: logical={}x{}, framebuffer_scale={} (winit scale_factor={}), physical={}x{}, surface={}x{}",
+                    logical_w,
+                    logical_h,
+                    scale_factor,
+                    self.window.scale_factor(),
+                    physical.width,
+                    physical.height,
+                    self.surface_desc.width,
+                    self.surface_desc.height
+                );
+            }
+        }
         self.imgui.last_frame = now;
+        self.imgui.frames = self.imgui.frames.saturating_add(1);
+
+        // Allow winit platform backend to update IO (mouse/keyboard/text)
+        self.imgui
+            .platform
+            .prepare_frame(&self.window, &mut self.imgui.context);
+
+        // Skip rendering if surface is zero-sized (e.g., hidden tab)
+        if self.surface_desc.width == 0 || self.surface_desc.height == 0 {
+            return Ok(());
+        }
+
+        // Ensure surface matches current canvas/backing buffer size (DPR changes, CSS resize, etc.)
+        let physical = self.window.inner_size();
+        if physical.width != self.surface_desc.width || physical.height != self.surface_desc.height
+        {
+            self.resize(physical);
+        }
 
         let frame = self
             .surface
             .get_current_texture()
             .map_err(|e| JsValue::from_str(&format!("get_current_texture: {e}")))?;
 
-        self.imgui
-            .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
         let ui = self.imgui.context.frame();
 
         ui.window("Hello, Dear ImGui (Web)")

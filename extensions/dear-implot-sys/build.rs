@@ -127,10 +127,10 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
                 dir.display()
             );
         }
-    } else if let Some(dir) = try_download_prebuilt_from_release(cfg) {
-        if try_link_prebuilt(dir.clone(), target_env) {
-            return true;
-        }
+    } else if let Some(dir) = try_download_prebuilt_from_release(cfg)
+        && try_link_prebuilt(dir.clone(), target_env)
+    {
+        return true;
     }
     false
 }
@@ -261,7 +261,7 @@ fn docsrs_build(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui
         );
     }
 
-    generate_bindings(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+    generate_bindings(cfg, cimplot_root, imgui_src, cimgui_root);
     println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
 }
@@ -404,7 +404,7 @@ fn try_download_prebuilt(
     let _ = fs::create_dir_all(&dl_dir);
 
     if url.ends_with(".tar.gz") || url.ends_with(".tgz") {
-        let fname = url.split('/').last().unwrap_or("prebuilt.tar.gz");
+        let fname = url.split('/').next_back().unwrap_or("prebuilt.tar.gz");
         let archive_path = dl_dir.join(fname);
         if !archive_path.exists() {
             println!("cargo:warning=Downloading prebuilt archive from {}", url);

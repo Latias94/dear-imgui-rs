@@ -122,15 +122,15 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     }
     if let Ok(url) = env::var("IMNODES_SYS_PREBUILT_URL") {
         let cache_root = prebuilt_cache_root(cfg);
-        if let Ok(dir) = try_download_prebuilt(&cache_root, &url, target_env) {
-            if try_link_prebuilt(dir.clone(), target_env) {
-                return true;
-            }
-        }
-    } else if let Some(dir) = try_download_prebuilt_from_release(cfg) {
-        if try_link_prebuilt(dir.clone(), target_env) {
+        if let Ok(dir) = try_download_prebuilt(&cache_root, &url, target_env)
+            && try_link_prebuilt(dir.clone(), target_env)
+        {
             return true;
         }
+    } else if let Some(dir) = try_download_prebuilt_from_release(cfg)
+        && try_link_prebuilt(dir.clone(), target_env)
+    {
+        return true;
     }
     false
 }
@@ -226,11 +226,11 @@ fn docsrs_build(cfg: &BuildConfig) {
     }
 
     // Fallback: try to generate bindings from headers if available
-    let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
+    let (imgui_src, cimgui_root) = resolve_imgui_includes(cfg);
     let cimnodes_root = cfg.manifest_dir.join("third-party/cimnodes");
 
     if imgui_src.exists() && cimgui_root.exists() && cimnodes_root.exists() {
-        generate_bindings(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
+        generate_bindings(cfg, &cimnodes_root, &imgui_src, &cimgui_root);
         println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
         println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
     } else {
@@ -322,7 +322,7 @@ fn try_download_prebuilt(
     let dl_dir = cache_root.join("download");
     let _ = fs::create_dir_all(&dl_dir);
     if url.ends_with(".tar.gz") || url.ends_with(".tgz") {
-        let fname = url.split('/').last().unwrap_or("prebuilt.tar.gz");
+        let fname = url.split('/').next_back().unwrap_or("prebuilt.tar.gz");
         let archive_path = dl_dir.join(fname);
         if !archive_path.exists() {
             println!(

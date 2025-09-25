@@ -96,6 +96,28 @@ impl WgpuRenderer {
         Ok(())
     }
 
+    /// Initialize the renderer with ImGui context configuration (without font atlas for WASM)
+    ///
+    /// This is a variant of init_with_context that skips font atlas preparation,
+    /// useful for WASM builds where font atlas memory sharing is problematic.
+    pub fn new_without_font_atlas(
+        init_info: WgpuInitInfo,
+        imgui_ctx: &mut Context,
+    ) -> RendererResult<Self> {
+        let mut renderer = Self::empty();
+
+        // First initialize the renderer
+        renderer.init(init_info)?;
+
+        // Then configure the ImGui context with backend capabilities
+        renderer.configure_imgui_context(imgui_ctx);
+
+        // Skip font atlas preparation for WASM
+        // The default font will be used automatically by Dear ImGui
+
+        Ok(renderer)
+    }
+
     /// Initialize the renderer with ImGui context configuration
     ///
     /// This is a convenience method that combines init() and configure_imgui_context()
@@ -591,7 +613,7 @@ impl WgpuRenderer {
                     dear_imgui::render::DrawCmd::Elements { count, cmd_params } => {
                         // Get texture bind group
                         let texture_bind_group = {
-                            let tex_id = cmd_params.texture_id.id() as u64;
+                            let tex_id = cmd_params.texture_id.id();
                             if tex_id == 0 {
                                 // Use default texture for null/invalid texture ID
                                 if let Some(default_tex) = default_texture {

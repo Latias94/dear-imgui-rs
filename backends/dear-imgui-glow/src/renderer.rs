@@ -430,11 +430,11 @@ impl GlowRenderer {
 
         // Cleanup
         #[cfg(feature = "bind_vertex_array_support")]
-        if self.gl_version.bind_vertex_array_support() {
-            if let Some(vao) = self.vertex_array_object {
-                unsafe { gl.delete_vertex_array(vao) };
-                self.vertex_array_object = None;
-            }
+        if self.gl_version.bind_vertex_array_support()
+            && let Some(vao) = self.vertex_array_object
+        {
+            unsafe { gl.delete_vertex_array(vao) };
+            self.vertex_array_object = None;
         }
 
         self.state_backup.restore(gl, self.gl_version);

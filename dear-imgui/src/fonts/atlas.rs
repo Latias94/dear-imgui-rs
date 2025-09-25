@@ -395,6 +395,9 @@ impl FontAtlas {
     /// This is a simplified build process. For more control, use the individual build functions.
     #[doc(alias = "Build")]
     pub fn build(&mut self) -> bool {
+        if self.raw.is_null() {
+            return false;
+        }
         unsafe {
             // Initialize the build process
             sys::igImFontAtlasBuildInit(self.raw);
@@ -412,6 +415,9 @@ impl FontAtlas {
 
     /// Check if the texture is built
     pub fn is_built(&self) -> bool {
+        if self.raw.is_null() {
+            return false;
+        }
         unsafe { (*self.raw).TexIsBuilt }
     }
 
@@ -420,6 +426,9 @@ impl FontAtlas {
     /// Returns (min_width, min_height) if texture is built
     /// Note: Our Dear ImGui version uses a different texture management system
     pub fn get_tex_data_info(&self) -> Option<(u32, u32)> {
+        if self.raw.is_null() {
+            return None;
+        }
         unsafe {
             if (*self.raw).TexIsBuilt {
                 let min_width = (*self.raw).TexMinWidth as u32;
@@ -437,6 +446,9 @@ impl FontAtlas {
     /// The returned pointer is only valid while the FontAtlas exists and the texture is built.
     /// The caller must ensure proper lifetime management.
     pub unsafe fn get_tex_data_ptr(&self) -> Option<(*const u8, u32, u32)> {
+        if self.raw.is_null() {
+            return None;
+        }
         unsafe {
             if (*self.raw).TexIsBuilt {
                 let tex_data = (*self.raw).TexData;

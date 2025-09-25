@@ -176,25 +176,31 @@ impl Context {
     pub fn frame(&mut self) -> &mut crate::ui::Ui {
         let _guard = CTX_MUTEX.lock();
 
-        // Ensure font atlas is built before calling NewFrame
         unsafe {
             let io = sys::igGetIO_Nil();
-            let fonts = (*io).Fonts;
+            if !io.is_null() {
+                let fonts = (*io).Fonts;
 
-            // Check if we need to add default font and build atlas
-            if (*fonts).Fonts.Size == 0 {
-                // Add default font if no fonts are loaded
-                sys::ImFontAtlas_AddFontDefault(fonts, ptr::null());
+                // Check if fonts pointer is valid
+                if !fonts.is_null() {
+                    // Check if we need to add default font and build atlas
+                    if (*fonts).Fonts.Size == 0 {
+                        // Add default font if no fonts are loaded
+                        sys::ImFontAtlas_AddFontDefault(fonts, ptr::null());
+                    }
+
+                    if !(*fonts).TexIsBuilt {
+                        // Build the font atlas using the main build function
+                        sys::igImFontAtlasBuildMain(fonts);
+
+                        // Mark the texture as built by setting a dummy texture ID
+                        (*fonts).TexIsBuilt = true;
+                    }
+                }
             }
+        }
 
-            if !(*fonts).TexIsBuilt {
-                // Build the font atlas using the main build function
-                sys::igImFontAtlasBuildMain(fonts);
-
-                // Mark the texture as built by setting a dummy texture ID
-                (*fonts).TexIsBuilt = true;
-            }
-
+        unsafe {
             sys::igNewFrame();
         }
         &mut self.ui
@@ -485,7 +491,16 @@ impl Context {
     /// Get a mutable reference to the font atlas from the IO structure
     pub fn font_atlas_mut(&mut self) -> FontAtlas {
         let _guard = CTX_MUTEX.lock();
+
+        // For WASM, return a null atlas to avoid pointer issues
+        #[cfg(target_arch = "wasm32")]
+        {
+            return unsafe { FontAtlas::from_raw(ptr::null_mut()) };
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         unsafe {
+            // Always use igGetIO_Nil for simplicity - it should return the current context's IO
             let io = sys::igGetIO_Nil();
             let atlas_ptr = (*io).Fonts;
             FontAtlas::from_raw(atlas_ptr)

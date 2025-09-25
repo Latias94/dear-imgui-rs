@@ -87,7 +87,7 @@ fn main() {
         cfg!(feature = "build-from-source") || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
 
     // Try prebuilt dear_imgui first (static lib) unless force_build
-    let mut linked_prebuilt = if force_build {
+    let linked_prebuilt = if force_build {
         false
     } else {
         try_link_prebuilt_all(&cfg)
@@ -142,7 +142,7 @@ fn docsrs_build(cfg: &BuildConfig) {
     // Expose include paths to dependent crates during docs.rs builds
     println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
-    let mut bindings = bindgen::Builder::default()
+    let bindings = bindgen::Builder::default()
         .header(cimgui_root.join("cimgui.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .clang_arg(format!("-I{}", cimgui_root.display()))
@@ -174,13 +174,11 @@ fn docsrs_build(cfg: &BuildConfig) {
 
 fn generate_bindings_native(cfg: &BuildConfig) {
     // For wasm targets, prefer pregenerated bindings to avoid requiring a C sysroot
-    if cfg.target_arch == "wasm32" {
-        if use_pregenerated_bindings(&cfg.out_dir) {
-            // Expose include paths to dependent crates during wasm builds
-            println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
-            println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
-            return;
-        }
+    if cfg.target_arch == "wasm32" && use_pregenerated_bindings(&cfg.out_dir) {
+        // Expose include paths to dependent crates during wasm builds
+        println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
+        println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
+        return;
     }
 
     let cimgui_root = cfg.cimgui_root();
@@ -205,7 +203,11 @@ fn generate_bindings_native(cfg: &BuildConfig) {
         .layout_tests(false);
     #[cfg(feature = "freetype")]
     if let Ok(freetype) = pkg_config::probe_library("freetype2") {
-        bindings = bindings.clang_arg("-DIMGUI_ENABLE_FREETYPE=1");
+        // Mirror CMake behavior: when building with FreeType, also keep stb_truetype enabled
+        // so wrappers referencing stb helpers stay valid.
+        bindings = bindings
+            .clang_arg("-DIMGUI_ENABLE_FREETYPE=1")
+            .clang_arg("-DIMGUI_ENABLE_STB_TRUETYPE=1");
         for include in &freetype.include_paths {
             bindings = bindings.clang_args(["-I", &include.display().to_string()]);
         }
@@ -240,32 +242,28 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
                 linked = true;
             }
         }
-        if !linked {
-            if let Some(url) = env::var_os("IMGUI_SYS_PREBUILT_URL") {
-                let cache_root = prebuilt_cache_root(cfg);
-                if let Ok(lib_dir) =
-                    try_download_prebuilt(&cache_root, &url.to_string_lossy(), &cfg.target_env)
-                {
-                    if try_link_prebuilt(&lib_dir, &cfg.target_env) {
-                        println!(
-                            "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
-                            lib_dir.display()
-                        );
-                        linked = true;
-                    }
-                }
+        if !linked && let Some(url) = env::var_os("IMGUI_SYS_PREBUILT_URL") {
+            let cache_root = prebuilt_cache_root(cfg);
+            if let Ok(lib_dir) =
+                try_download_prebuilt(&cache_root, &url.to_string_lossy(), &cfg.target_env)
+                && try_link_prebuilt(&lib_dir, &cfg.target_env)
+            {
+                println!(
+                    "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
+                    lib_dir.display()
+                );
+                linked = true;
             }
         }
-        if !linked {
-            if let Some(lib_dir) = try_download_prebuilt_from_release(cfg) {
-                if try_link_prebuilt(&lib_dir, &cfg.target_env) {
-                    println!(
-                        "cargo:warning=Downloaded and using prebuilt dear_imgui from release at {}",
-                        lib_dir.display()
-                    );
-                    linked = true;
-                }
-            }
+        if !linked
+            && let Some(lib_dir) = try_download_prebuilt_from_release(cfg)
+            && try_link_prebuilt(&lib_dir, &cfg.target_env)
+        {
+            println!(
+                "cargo:warning=Downloaded and using prebuilt dear_imgui from release at {}",
+                lib_dir.display()
+            );
+            linked = true;
         }
         if !linked {
             let repo_prebuilt = cfg
@@ -296,7 +294,8 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     build.file(imgui_src.join("imgui_draw.cpp"));
     build.file(imgui_src.join("imgui_widgets.cpp"));
     build.file(imgui_src.join("imgui_tables.cpp"));
-    build.file(imgui_src.join("imgui_demo.cpp"));
+    // Avoid pulling stdio-heavy demo in wasm single-module path
+    // build.file(imgui_src.join("imgui_demo.cpp"));
     build.file(cimgui_root.join("cimgui.cpp"));
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -319,7 +318,12 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     }
     #[cfg(feature = "freetype")]
     if let Ok(freetype) = pkg_config::probe_library("freetype2") {
+        // Enable both FreeType and stb_truetype backends.
+        // ImGui 1.92 gates stb_truetype helpers (e.g. ImFontAtlasGetFontLoaderForStbTruetype)
+        // behind IMGUI_ENABLE_STB_TRUETYPE, while FreeType is selected when IMGUI_ENABLE_FREETYPE is defined.
+        // Defining both keeps the stb_ symbols available for cimgui wrappers while still defaulting to FreeType.
         build.define("IMGUI_ENABLE_FREETYPE", Some("1"));
+        build.define("IMGUI_ENABLE_STB_TRUETYPE", Some("1"));
         for include in &freetype.include_paths {
             build.include(include.display().to_string());
         }
@@ -358,15 +362,15 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
         if let Some(parent) = dir.parent() {
             let manifest = parent.join("manifest.txt");
             let mut ok = false;
-            if manifest.exists() {
-                if let Ok(s) = std::fs::read_to_string(&manifest) {
-                    for line in s.lines() {
-                        if let Some(rest) = line.strip_prefix("features=") {
-                            ok = rest
-                                .split(',')
-                                .any(|f| f.trim().eq_ignore_ascii_case("freetype"));
-                            break;
-                        }
+            if manifest.exists()
+                && let Ok(s) = std::fs::read_to_string(&manifest)
+            {
+                for line in s.lines() {
+                    if let Some(rest) = line.strip_prefix("features=") {
+                        ok = rest
+                            .split(',')
+                            .any(|f| f.trim().eq_ignore_ascii_case("freetype"));
+                        break;
                     }
                 }
             }
@@ -399,10 +403,49 @@ fn build_with_cc_wasm(cfg: &BuildConfig) {
     build.file(imgui_src.join("imgui_demo.cpp"));
     build.file(cimgui_root.join("cimgui.cpp"));
 
-    // Disable platform/file functions for wasm target
+    // If EMSDK is available, prefer its upstream clang++ for wasm32-unknown-unknown objects
+    if let Ok(emsdk) = std::env::var("EMSDK") {
+        let mut clangpp = PathBuf::from(emsdk.clone());
+        // EMSDK/upstream/bin/clang++
+        clangpp.push("upstream");
+        clangpp.push("bin");
+        clangpp.push(if cfg!(windows) {
+            "clang++.exe"
+        } else {
+            "clang++"
+        });
+        if clangpp.exists() {
+            build.compiler(clangpp);
+            build.flag("-target");
+            build.flag("wasm32-unknown-unknown");
+            // Use emscripten sysroot headers to resolve <string.h>, etc.
+            let mut sysroot = PathBuf::from(&emsdk);
+            sysroot.push("upstream");
+            sysroot.push("emscripten");
+            sysroot.push("cache");
+            sysroot.push("sysroot");
+            if sysroot.exists() {
+                build.flag(format!("--sysroot={}", sysroot.display()));
+            }
+        }
+    } else {
+        // Fallback: ask clang to target wasm32
+        build.flag("-target");
+        build.flag("wasm32-unknown-unknown");
+    }
+
+    // WASM-friendly defines
     build.define("IMGUI_DISABLE_FILE_FUNCTIONS", None);
     build.define("IMGUI_DISABLE_OSX_FUNCTIONS", None);
     build.define("IMGUI_DISABLE_WIN32_FUNCTIONS", None);
+    build.define("IMGUI_USE_WCHAR32", None);
+
+    // Avoid exceptions/RTTI
+    build.flag_if_supported("-fno-exceptions");
+    build.flag_if_supported("-fno-rtti");
+
+    // Do not link the C++ standard library for wasm32-unknown-unknown
+    build.cpp_link_stdlib(None);
 
     build.compile("dear_imgui");
 }
@@ -418,7 +461,7 @@ fn try_download_prebuilt(
 
     // If URL looks like an archive, download and extract
     if url.ends_with(".tar.gz") || url.ends_with(".tgz") {
-        let fname = url.split('/').last().unwrap_or("prebuilt.tar.gz");
+        let fname = url.split('/').next_back().unwrap_or("prebuilt.tar.gz");
         let archive_path = dl_dir.join(fname);
         if !archive_path.exists() {
             println!("cargo:warning=Downloading prebuilt archive from {}", url);
@@ -677,8 +720,13 @@ fn build_with_cmake(manifest_dir: &Path) -> bool {
 }
 
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
-    // Prefer wasm pregenerated bindings when targeting wasm32
-    let candidates = if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
+    // Prefer wasm pregenerated bindings when targeting wasm32, unless single-module is requested
+    let single_module = std::env::var("IMGUI_SYS_SINGLE_MODULE")
+        .ok()
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let is_wasm = std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32");
+    let candidates = if is_wasm && !single_module {
         vec![
             Path::new("src").join("wasm_bindings_pregenerated.rs"),
             Path::new("src").join("bindings_pregenerated.rs"),
