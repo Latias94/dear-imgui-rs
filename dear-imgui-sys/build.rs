@@ -294,8 +294,10 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     build.file(imgui_src.join("imgui_draw.cpp"));
     build.file(imgui_src.join("imgui_widgets.cpp"));
     build.file(imgui_src.join("imgui_tables.cpp"));
-    // Avoid pulling stdio-heavy demo in wasm single-module path
-    // build.file(imgui_src.join("imgui_demo.cpp"));
+    // Include official demo/metrics/debug windows for native builds so symbols like
+    // ImGui::ShowDemoWindow/ShowAboutWindow/ShowStyleEditor resolve.
+    // This is excluded from the WASM single‑module path below.
+    build.file(imgui_src.join("imgui_demo.cpp"));
     build.file(cimgui_root.join("cimgui.cpp"));
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
