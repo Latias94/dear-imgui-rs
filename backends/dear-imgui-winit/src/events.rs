@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_mouse_button_handling() {
-        let mut ctx = Context::create_or_panic();
+        let mut ctx = Context::create();
 
         let handled = handle_mouse_button(MouseButton::Left, ElementState::Pressed, &mut ctx);
         // The result depends on whether imgui wants to capture mouse
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_cursor_moved() {
-        let mut ctx = Context::create_or_panic();
+        let mut ctx = Context::create();
 
         let handled = handle_cursor_moved([100.0, 200.0], &mut ctx);
         // The result depends on whether imgui wants to capture mouse

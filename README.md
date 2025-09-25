@@ -36,7 +36,7 @@ All crates are maintained together in this workspace.
 ```rust
 use dear_imgui::*;
 
-let mut ctx = Context::create_or_panic();
+let mut ctx = Context::create();
 let ui = ctx.frame();
 ui.window("Hello")
   .size([300.0, 120.0], Condition::FirstUseEver)
@@ -45,6 +45,8 @@ ui.window("Hello")
       if ui.button("Click me") { println!("clicked"); }
   });
 // Rendering is done by a backend (e.g. dear-imgui-wgpu or dear-imgui-glow)
+
+// Tip: For fallible creation, use `Context::try_create()`
 ```
 
 ## Examples

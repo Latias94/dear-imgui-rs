@@ -81,6 +81,8 @@ fn main() {
     generate_bindings_native(&cfg);
 
     // Build strategy selection via features + env var override
+    // Force native build when explicitly requested or when sandboxed
+    // (we still prefer prebuilt if compatible, including freetype variants).
     let force_build =
         cfg!(feature = "build-from-source") || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
 
@@ -92,11 +94,31 @@ fn main() {
     };
 
     // Build from sources when needed
-    if cfg.target_arch != "wasm32" && !linked_prebuilt && env::var("IMGUI_SYS_SKIP_CC").is_err() {
-        if use_cmake_requested() && build_with_cmake(&cfg.manifest_dir) {
-            // CMake path prints link flags and search paths
+    if !linked_prebuilt && env::var("IMGUI_SYS_SKIP_CC").is_err() {
+        if cfg.target_arch == "wasm32" {
+            // If targeting Emscripten, attempt to compile C/C++ (requires emsdk toolchain)
+            if cfg.target_env == "emscripten" {
+                build_with_cc_wasm(&cfg);
+            } else {
+                // Unknown-unknown skeleton: compile only when explicitly requested
+                if env::var("IMGUI_SYS_WASM_CC").is_ok() {
+                    build_with_cc_wasm(&cfg);
+                } else {
+                    println!(
+                        "cargo:warning=WASM (unknown) skeleton: skipping native C/C++ build (set IMGUI_SYS_WASM_CC=1 to enable)"
+                    );
+                }
+            }
         } else {
-            build_with_cc_cfg(&cfg);
+            // When freetype is enabled, prefer cc path as our CMake path doesn't wire FT includes/defines yet.
+            if use_cmake_requested()
+                && !cfg!(feature = "freetype")
+                && build_with_cmake(&cfg.manifest_dir)
+            {
+                // CMake path prints link flags and search paths
+            } else {
+                build_with_cc_cfg(&cfg);
+            }
         }
     } else if !linked_prebuilt {
         if env::var("IMGUI_SYS_SKIP_CC").is_ok() {
@@ -151,6 +173,16 @@ fn docsrs_build(cfg: &BuildConfig) {
 }
 
 fn generate_bindings_native(cfg: &BuildConfig) {
+    // For wasm targets, prefer pregenerated bindings to avoid requiring a C sysroot
+    if cfg.target_arch == "wasm32" {
+        if use_pregenerated_bindings(&cfg.out_dir) {
+            // Expose include paths to dependent crates during wasm builds
+            println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
+            println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
+            return;
+        }
+    }
+
     let cimgui_root = cfg.cimgui_root();
     let imgui_src = cfg.imgui_src();
     let mut bindings = bindgen::Builder::default()
@@ -177,6 +209,13 @@ fn generate_bindings_native(cfg: &BuildConfig) {
         for include in &freetype.include_paths {
             bindings = bindings.clang_args(["-I", &include.display().to_string()]);
         }
+    }
+    // WASM-friendly: disable file/OS-specific functions in bindings when targeting wasm
+    if cfg.target_arch == "wasm32" {
+        bindings = bindings
+            .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
+            .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
+            .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
     }
     let bindings = bindings
         .generate()
@@ -313,9 +352,59 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
     if !lib_path.exists() {
         return false;
     }
+    // If freetype feature is enabled, only accept prebuilt if manifest declares it
+    if cfg!(feature = "freetype") {
+        // Expect manifest.txt in parent of lib dir (tar layout: <extract>/lib/<lib>)
+        if let Some(parent) = dir.parent() {
+            let manifest = parent.join("manifest.txt");
+            let mut ok = false;
+            if manifest.exists() {
+                if let Ok(s) = std::fs::read_to_string(&manifest) {
+                    for line in s.lines() {
+                        if let Some(rest) = line.strip_prefix("features=") {
+                            ok = rest
+                                .split(',')
+                                .any(|f| f.trim().eq_ignore_ascii_case("freetype"));
+                            break;
+                        }
+                    }
+                }
+            }
+            if !ok {
+                // Manifest missing or freetype not declared → refuse
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");
     true
+}
+
+// Minimal WASM (skeleton) build: compile cimgui + imgui with WASM-friendly defines.
+// This will be extended with proper toolchain flags in future iterations.
+fn build_with_cc_wasm(cfg: &BuildConfig) {
+    let mut build = cc::Build::new();
+    build.cpp(true).std("c++17");
+    let cimgui_root = cfg.cimgui_root();
+    let imgui_src = cfg.imgui_src();
+    build.include(&cimgui_root);
+    build.include(&imgui_src);
+    build.file(imgui_src.join("imgui.cpp"));
+    build.file(imgui_src.join("imgui_draw.cpp"));
+    build.file(imgui_src.join("imgui_widgets.cpp"));
+    build.file(imgui_src.join("imgui_tables.cpp"));
+    build.file(imgui_src.join("imgui_demo.cpp"));
+    build.file(cimgui_root.join("cimgui.cpp"));
+
+    // Disable platform/file functions for wasm target
+    build.define("IMGUI_DISABLE_FILE_FUNCTIONS", None);
+    build.define("IMGUI_DISABLE_OSX_FUNCTIONS", None);
+    build.define("IMGUI_DISABLE_WIN32_FUNCTIONS", None);
+
+    build.compile("dear_imgui");
 }
 
 fn try_download_prebuilt(
@@ -588,27 +677,37 @@ fn build_with_cmake(manifest_dir: &Path) -> bool {
 }
 
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
-    let preg = Path::new("src").join("bindings_pregenerated.rs");
-    if preg.exists() {
-        match std::fs::read_to_string(&preg).and_then(|content| {
-            let sanitized = sanitize_bindings_string(&content);
-            std::fs::write(out_dir.join("bindings.rs"), sanitized)
-        }) {
-            Ok(()) => {
-                println!(
-                    "cargo:warning=Using pregenerated bindings: {}",
-                    preg.display()
-                );
-                true
-            }
-            Err(e) => {
-                println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
-                false
+    // Prefer wasm pregenerated bindings when targeting wasm32
+    let candidates = if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
+        vec![
+            Path::new("src").join("wasm_bindings_pregenerated.rs"),
+            Path::new("src").join("bindings_pregenerated.rs"),
+        ]
+    } else {
+        vec![Path::new("src").join("bindings_pregenerated.rs")]
+    };
+
+    for preg in candidates {
+        if preg.exists() {
+            match std::fs::read_to_string(&preg).and_then(|content| {
+                let sanitized = sanitize_bindings_string(&content);
+                std::fs::write(out_dir.join("bindings.rs"), sanitized)
+            }) {
+                Ok(()) => {
+                    println!(
+                        "cargo:warning=Using pregenerated bindings: {}",
+                        preg.display()
+                    );
+                    return true;
+                }
+                Err(e) => {
+                    println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
+                    return false;
+                }
             }
         }
-    } else {
-        false
     }
+    false
 }
 
 fn sanitize_bindings_file(path: &Path) {

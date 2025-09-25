@@ -28,7 +28,7 @@ impl Ui {
 ///
 /// ```no_run
 /// # use dear_imgui::*;
-/// # let mut ctx = Context::create_or_panic();
+/// # let mut ctx = Context::create();
 /// # let ui = ctx.frame();
 /// ui.progress_bar(0.6)
 ///     .size([100.0, 12.0])

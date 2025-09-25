@@ -14,7 +14,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create_or_panic();
+    /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let mut text = String::new();
     /// if ui.input_text("Label", &mut text).build() {
@@ -36,7 +36,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create_or_panic();
+    /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let mut text = String::new();
     /// if ui.input_text_multiline("Label", &mut text, [200.0, 100.0]).build() {

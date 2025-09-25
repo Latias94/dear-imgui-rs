@@ -12,7 +12,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create_or_panic();
+    /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// ui.text("Hover over me");
     /// if ui.is_item_hovered() {
@@ -46,7 +46,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create_or_panic();
+    /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// ui.text("Hover over me");
     /// if ui.is_item_hovered() {

@@ -8,7 +8,7 @@
 //!
 //! ```no_run
 //! # use dear_imgui::*;
-//! # let mut ctx = Context::create_or_panic();
+//! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! let mut filter = TextFilter::new("Search".to_string());
 //!
@@ -41,7 +41,7 @@ use std::ptr;
 ///
 /// ```no_run
 /// # use dear_imgui::*;
-/// # let mut ctx = Context::create_or_panic();
+/// # let mut ctx = Context::create();
 /// # let ui = ctx.frame();
 /// // Create a filter with default empty pattern
 /// let mut filter = TextFilter::new("Search".to_string());
@@ -134,7 +134,7 @@ impl TextFilter {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create_or_panic();
+    /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let mut filter = TextFilter::new("Search".to_string());
     ///
@@ -157,7 +157,7 @@ impl TextFilter {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create_or_panic();
+    /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let mut filter = TextFilter::new("Search".to_string());
     ///
@@ -300,7 +300,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create_or_panic();
+    /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let filter = ui.text_filter("Search".to_string());
     /// ```
@@ -320,7 +320,7 @@ impl Ui {
     ///
     /// ```no_run
     /// # use dear_imgui::*;
-    /// # let mut ctx = Context::create_or_panic();
+    /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let filter = ui.text_filter_with_filter(
     ///     "Search".to_string(),

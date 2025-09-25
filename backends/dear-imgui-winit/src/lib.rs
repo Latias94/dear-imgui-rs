@@ -18,7 +18,7 @@
 //! use winit::event_loop::EventLoop;
 //!
 //! let event_loop = EventLoop::new().unwrap();
-//! let mut imgui_ctx = Context::create_or_panic();
+//! let mut imgui_ctx = Context::create();
 //! let mut platform = WinitPlatform::new(&mut imgui_ctx);
 //!
 //! // Use in your event loop...
@@ -34,7 +34,7 @@
 //! use winit::event_loop::EventLoop;
 //!
 //! let event_loop = EventLoop::new().unwrap();
-//! let mut imgui_ctx = Context::create_or_panic();
+//! let mut imgui_ctx = Context::create();
 //! imgui_ctx.enable_multi_viewport();
 //!
 //! let mut platform = WinitPlatform::new(&mut imgui_ctx);

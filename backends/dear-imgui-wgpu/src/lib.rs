@@ -25,7 +25,7 @@
 //! let (device, queue) = adapter.request_device(&DeviceDescriptor::default()).await?;
 //!
 //! // Create Dear ImGui context
-//! let mut imgui = Context::create_or_panic();
+//! let mut imgui = Context::create();
 //!
 //! // Create renderer
 //! let init_info = WgpuInitInfo::new(device, queue, TextureFormat::Bgra8UnormSrgb);
@@ -62,10 +62,3 @@ pub use renderer::*;
 pub use shaders::*;
 pub use texture::*;
 pub use uniforms::*;
-
-// Legacy compatibility exports
-#[deprecated(note = "Use the new modular API instead")]
-pub use crate::texture::WgpuTexture;
-
-#[deprecated(note = "Use WgpuTextureManager instead")]
-pub use crate::texture::WgpuTextureManager as WgpuTextureMap;

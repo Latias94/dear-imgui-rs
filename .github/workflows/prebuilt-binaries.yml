@@ -73,6 +73,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config
 
+      - name: Install FreeType (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfreetype6-dev
+
       - name: Install LLVM (libclang) for bindgen (Linux)
         if: runner.os == 'Linux'
         uses: KyleMayes/install-llvm-action@v1
@@ -84,6 +90,30 @@ jobs:
       - name: Install Windows deps
         if: runner.os == 'Windows'
         run: choco install -y llvm
+
+      - name: Setup vcpkg (Windows)
+        if: runner.os == 'Windows'
+        uses: lukka/run-vcpkg@v11
+        with:
+          # Use a fixed commit for reproducibility; fall back to latest if omitted
+          # vcpkgGitCommitId: 9d84f3b3a7e60d4f8a0b6d2bf5d7f2b2e2c6a6ba
+          runVcpkgInstall: false
+
+      - name: Install FreeType + pkgconf via vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install freetype:x64-windows pkgconf:x64-windows
+          echo "PKG_CONFIG_PATH=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
+          echo "PATH=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf;$env:PATH" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf\pkgconf.exe" >> $env:GITHUB_ENV
+
+      - name: Install FreeType (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install freetype pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/opt/freetype/lib/pkgconfig" >> $GITHUB_ENV
 
 
       - name: Select static CRT (Windows MT)
@@ -100,6 +130,21 @@ jobs:
       - name: Package dear-imgui-sys static library + headers
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys')))
         run: cargo run -p dear-imgui-sys --features package-bin --bin package --release --target ${{ matrix.target }}
+        env:
+          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
+          TARGET: ${{ matrix.target }}
+
+      - name: Build dear-imgui-sys (Release, freetype)
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys')))
+        run: cargo build -p dear-imgui-sys --release --no-default-features --features "freetype" --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - name: Package dear-imgui-sys static library + headers (freetype)
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys')))
+        run: |
+          IMGUI_SYS_PKG_FEATURES=freetype cargo run -p dear-imgui-sys --features package-bin --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}

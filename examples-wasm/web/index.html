@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dear ImGui Web Demo</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #111; }
+      #wasm-canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <canvas id="wasm-canvas"></canvas>
+    <script>
+      // Prepare a shared memory for both provider (cimgui) and main (wasm-bindgen) modules
+      // 256 pages (~16MiB) initial, growable up to 4096 pages (~256MiB)
+      if (!globalThis.__imgui_shared_memory) {
+        globalThis.__imgui_shared_memory = new WebAssembly.Memory({ initial: 256, maximum: 4096 });
+      }
+    </script>
+    <script type="module">
+      import init from './dear-imgui-web-demo.js';
+      init().catch(e => {
+        const msg = String(e && (e.message || e));
+        // Winit on web may throw to control flow; ignore this benign exception
+        if (msg.includes("Using exceptions for control flow")) return;
+        console.error('WASM init failed', e);
+      });
+    </script>
+  </body>
+  </html>

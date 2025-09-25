@@ -30,7 +30,7 @@ use dear_imgui as imgui;
 use dear_implot::*;
 
 fn main() {
-    let mut ctx = imgui::Context::create_or_panic();
+    let mut ctx = imgui::Context::create();
     let plot_ctx = PlotContext::create(&ctx);
 
     // frame loop
@@ -84,7 +84,7 @@ use dear_imgui::*;
 use dear_implot::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut ctx = Context::create_or_panic();
+    let mut ctx = Context::create();
     let plot_ctx = PlotContext::create(&ctx);
 
     // In your main loop:

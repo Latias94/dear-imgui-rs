@@ -11,11 +11,11 @@ pub struct PlotContext {
 }
 
 impl PlotContext {
-    /// Create a new ImPlot context
+    /// Try to create a new ImPlot context
     ///
     /// This should be called after creating the Dear ImGui context.
     /// The ImPlot context will use the same Dear ImGui context internally.
-    pub fn create(_imgui_ctx: &ImGuiContext) -> Self {
+    pub fn try_create(_imgui_ctx: &ImGuiContext) -> dear_imgui::ImGuiResult<Self> {
         // Bind ImPlot to the current Dear ImGui context before creating.
         // On some toolchains/platforms, not setting this can lead to crashes
         // if ImPlot initialization queries ImGui state during CreateContext.
@@ -25,7 +25,9 @@ impl PlotContext {
 
         let raw = unsafe { sys::ImPlot_CreateContext() };
         if raw.is_null() {
-            panic!("Failed to create ImPlot context");
+            return Err(dear_imgui::ImGuiError::context_creation(
+                "ImPlot_CreateContext returned null",
+            ));
         }
 
         // Ensure the newly created context is current (defensive, CreateContext should do this).
@@ -33,7 +35,12 @@ impl PlotContext {
             sys::ImPlot_SetCurrentContext(raw);
         }
 
-        Self { raw }
+        Ok(Self { raw })
+    }
+
+    /// Create a new ImPlot context (panics on error)
+    pub fn create(imgui_ctx: &ImGuiContext) -> Self {
+        Self::try_create(imgui_ctx).expect("Failed to create ImPlot context")
     }
 
     /// Get the current ImPlot context

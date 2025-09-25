@@ -100,8 +100,8 @@ impl AppWindow {
         surface.configure(&device, &surface_desc);
 
         // Setup ImGui
-        let mut context = Context::create_or_panic();
-        context.set_ini_filename_or_panic(None::<String>);
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
 
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);

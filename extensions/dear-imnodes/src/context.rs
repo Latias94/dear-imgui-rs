@@ -9,17 +9,24 @@ pub struct Context {
 }
 
 impl Context {
-    /// Create a new ImNodes context bound to the current Dear ImGui context
-    pub fn create(_imgui: &ImGuiContext) -> Self {
+    /// Try to create a new ImNodes context bound to the current Dear ImGui context
+    pub fn try_create(_imgui: &ImGuiContext) -> dear_imgui::ImGuiResult<Self> {
         unsafe {
             sys::imnodes_SetImGuiContext(imgui_sys::igGetCurrentContext());
         }
         let raw = unsafe { sys::imnodes_CreateContext() };
         if raw.is_null() {
-            panic!("Failed to create ImNodes context");
+            return Err(dear_imgui::ImGuiError::context_creation(
+                "imnodes_CreateContext returned null",
+            ));
         }
         unsafe { sys::imnodes_SetCurrentContext(raw) };
-        Self { raw }
+        Ok(Self { raw })
+    }
+
+    /// Create a new ImNodes context (panics on error)
+    pub fn create(imgui: &ImGuiContext) -> Self {
+        Self::try_create(imgui).expect("Failed to create ImNodes context")
     }
 
     /// Set as current ImNodes context
@@ -45,12 +52,18 @@ pub struct EditorContext {
 }
 
 impl EditorContext {
-    pub fn create() -> Self {
+    pub fn try_create() -> dear_imgui::ImGuiResult<Self> {
         let raw = unsafe { sys::imnodes_EditorContextCreate() };
         if raw.is_null() {
-            panic!("Failed to create ImNodes editor context");
+            return Err(dear_imgui::ImGuiError::context_creation(
+                "imnodes_EditorContextCreate returned null",
+            ));
         }
-        Self { raw }
+        Ok(Self { raw })
+    }
+
+    pub fn create() -> Self {
+        Self::try_create().expect("Failed to create ImNodes editor context")
     }
 
     pub fn set_current(&self) {

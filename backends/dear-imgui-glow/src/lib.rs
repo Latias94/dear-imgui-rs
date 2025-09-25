@@ -22,7 +22,7 @@
 //!     // Your OpenGL loader function
 //!     std::ptr::null()
 //! });
-//! let mut imgui = Context::create_or_panic();
+//! let mut imgui = Context::create();
 //!
 //! // Create the renderer (simple usage)
 //! let mut renderer = GlowRenderer::new(gl, &mut imgui).unwrap();

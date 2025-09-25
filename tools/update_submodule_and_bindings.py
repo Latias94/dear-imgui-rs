@@ -67,7 +67,7 @@ def find_bindings(target_dir: Path, profile: str, crate: str) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Update third-party submodules and pregenerate bindings for sys crates")
+    parser = argparse.ArgumentParser(description="Update third-party submodules and pregenerate bindings for sys crates (incl. wasm)")
     parser.add_argument("--crates", default="dear-imgui-sys", help="Comma-separated list of crates to process (or 'all')")
     parser.add_argument("--profile", default="debug", choices=["debug", "release"], help="Cargo profile when generating bindings")
     parser.add_argument("--submodules", default="auto", choices=["auto", "update", "skip"], help="Whether to update submodules: auto=update only for selected crates; update=update all known submodules; skip=don't touch submodules")
@@ -77,6 +77,8 @@ def main() -> int:
     parser.add_argument("--cimnodes-branch", default="master", help="Branch for cimnodes submodule (dear-imnodes-sys)")
     parser.add_argument("--cimguizmo-branch", default="master", help="Branch for cimguizmo submodule (dear-imguizmo-sys)")
     parser.add_argument("--remote", default="origin", help="Remote name for submodules")
+    parser.add_argument("--wasm", action="store_true", help="Additionally generate wasm pregenerated bindings for dear-imgui-sys")
+    parser.add_argument("--wasm-import", default="imgui-sys-v0", help="WASM import module name for generated bindings")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing")
     args = parser.parse_args()
 
@@ -155,6 +157,32 @@ def main() -> int:
             content = bindings.read_text(encoding="utf-8", errors="ignore")
             dest.write_text(header + content, encoding="utf-8")
         print(f"Updated pregenerated bindings: {dest}")
+
+    # Optionally generate wasm pregenerated bindings for dear-imgui-sys
+    if args.wasm:
+        xtask = repo_root / "xtask"
+        if not xtask.exists():
+            print("xtask workspace member not found; cannot generate wasm bindings", file=sys.stderr)
+            return 4
+        print(f"Generating wasm pregenerated bindings (import='{args.wasm_import}') via xtask...")
+        rc = run(["cargo", "run", "-p", "xtask", "--", "wasm-bindgen", args.wasm_import], cwd=str(repo_root), dry=args.dry_run)
+        if rc != 0:
+            return rc
+        wasm_preg = crate_roots["dear-imgui-sys"] / "src" / "wasm_bindings_pregenerated.rs"
+        if not wasm_preg.exists():
+            print(f"WASM pregenerated bindings not found: {wasm_preg}", file=sys.stderr)
+            return 5
+        print(f"WASM pregenerated bindings ready: {wasm_preg}")
+
+        # Quick compile-check under wasm target (skip native C/C++)
+        print("Running cargo check for wasm32-unknown-unknown (skip native cc)...")
+        env = os.environ.copy()
+        env["IMGUI_SYS_SKIP_CC"] = "1"
+        rc = run([
+            "cargo", "check", "-p", "dear-imgui", "-F", "wasm", "--target", "wasm32-unknown-unknown"
+        ], cwd=str(repo_root), env=env, dry=args.dry_run)
+        if rc != 0:
+            return rc
 
     print("Done.")
     return 0

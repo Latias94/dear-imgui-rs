@@ -17,7 +17,7 @@
 //! ```no_run
 //! use dear_imgui::*;
 //!
-//! let mut ctx = Context::create_or_panic();
+//! let mut ctx = Context::create();
 //! let ui = ctx.frame();
 //!
 //! ui.window("Hello World")
@@ -152,6 +152,12 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Check if docking features are available
 pub const HAS_DOCKING: bool = sys::HAS_DOCKING;
+
+/// Check if FreeType font rasterizer support is compiled in
+pub const HAS_FREETYPE: bool = sys::HAS_FREETYPE;
+
+/// Check if WASM support is compiled in (sys layer)
+pub const HAS_WASM: bool = sys::HAS_WASM;
 
 /// Returns the underlying Dear ImGui library version
 #[doc(alias = "GetVersion")]

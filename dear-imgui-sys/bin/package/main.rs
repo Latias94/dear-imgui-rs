@@ -98,20 +98,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let link_type = "static"; // we package static lib
 
+    // Package features (comma-separated), e.g. "freetype"
+    // Prefer explicit env override, otherwise infer from cargo feature env.
+    let mut features = env::var("IMGUI_SYS_PKG_FEATURES").unwrap_or_default();
+    if features.is_empty() {
+        let mut v = Vec::new();
+        if env::var("CARGO_FEATURE_FREETYPE").is_ok() {
+            v.push("freetype");
+        }
+        features = v.join(",");
+    }
+
     let pkg_dir = PathBuf::from(
         env::var("IMGUI_SYS_PACKAGE_DIR").unwrap_or_else(|_| env::var("OUT_DIR").unwrap()),
     );
     fs::create_dir_all(&pkg_dir)?;
 
+    let ft_suffix = if features.split(',').any(|f| f.trim() == "freetype") {
+        "-freetype"
+    } else {
+        ""
+    };
     let ar_name = if crt.is_empty() {
         format!(
-            "dear-imgui-prebuilt-{}-{}-{}.tar.gz",
-            crate_version, target, link_type
+            "dear-imgui-prebuilt-{}-{}-{}{}.tar.gz",
+            crate_version, target, link_type, ft_suffix
         )
     } else {
         format!(
-            "dear-imgui-prebuilt-{}-{}-{}-{}.tar.gz",
-            crate_version, target, link_type, crt
+            "dear-imgui-prebuilt-{}-{}-{}{}-{}.tar.gz",
+            crate_version, target, link_type, ft_suffix, crt
         )
     };
 
@@ -202,6 +218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "dear-imgui prebuilt\nversion={}\ntarget={}\nlink={}\ncrt={}",
         crate_version, target, link_type, crt
     )?;
+    writeln!(&mut manifest_txt, "features={}", features)?;
     let mut hdr = tar::Header::new_gnu();
     hdr.set_size(manifest_txt.len() as u64);
     hdr.set_mode(0o644);

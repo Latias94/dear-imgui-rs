@@ -35,7 +35,7 @@ use dear_imgui::Context;
 use dear_imguizmo::{Operation, Mode, GuizmoExt};
 use glam::Mat4;
 
-let mut ctx = Context::create_or_panic();
+let mut ctx = Context::create();
 let ui = ctx.frame();
 
 // Begin ImGuizmo for this frame via Ui extension

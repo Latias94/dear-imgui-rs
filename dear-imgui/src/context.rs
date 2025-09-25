@@ -24,7 +24,7 @@ use crate::sys;
 ///
 /// Creating a new active context:
 /// ```
-/// let ctx = dear_imgui::Context::create_or_panic();
+/// let ctx = dear_imgui::Context::create();
 /// // ctx is dropped naturally when it goes out of scope, which deactivates and destroys the
 /// // context
 /// ```
@@ -32,9 +32,9 @@ use crate::sys;
 /// Never try to create an active context when another one is active:
 ///
 /// ```should_panic
-/// let ctx1 = dear_imgui::Context::create_or_panic();
+/// let ctx1 = dear_imgui::Context::create();
 ///
-/// let ctx2 = dear_imgui::Context::create_or_panic(); // PANIC
+/// let ctx2 = dear_imgui::Context::create(); // PANIC
 /// ```
 #[derive(Debug)]
 pub struct Context {
@@ -68,56 +68,36 @@ fn no_current_context() -> bool {
 }
 
 impl Context {
-    /// Creates a new active Dear ImGui context.
+    /// Tries to create a new active Dear ImGui context.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Another context is already active
-    /// - Failed to create the underlying ImGui context
-    pub fn create() -> crate::error::ImGuiResult<Context> {
-        Self::create_internal(None)
+    /// Returns an error if another context is already active or creation fails.
+    pub fn try_create() -> crate::error::ImGuiResult<Context> {
+        Self::try_create_internal(None)
     }
 
-    /// Creates a new active Dear ImGui context with a shared font atlas.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Another context is already active
-    /// - Failed to create the underlying ImGui context
-    pub fn create_with_shared_font_atlas(
+    /// Tries to create a new active Dear ImGui context with a shared font atlas.
+    pub fn try_create_with_shared_font_atlas(
         shared_font_atlas: SharedFontAtlas,
     ) -> crate::error::ImGuiResult<Context> {
-        Self::create_internal(Some(shared_font_atlas))
+        Self::try_create_internal(Some(shared_font_atlas))
     }
 
     /// Creates a new active Dear ImGui context (panics on error).
     ///
-    /// This is a convenience method that panics if context creation fails.
-    /// Use `create()` for proper error handling.
-    ///
-    /// # Panics
-    ///
-    /// Panics if another context is already active or context creation fails.
-    pub fn create_or_panic() -> Context {
-        Self::create().expect("Failed to create Dear ImGui context")
+    /// This aligns with imgui-rs behavior. For fallible creation use `try_create()`.
+    pub fn create() -> Context {
+        Self::try_create().expect("Failed to create Dear ImGui context")
     }
 
     /// Creates a new active Dear ImGui context with a shared font atlas (panics on error).
-    ///
-    /// This is a convenience method that panics if context creation fails.
-    /// Use `create_with_shared_font_atlas()` for proper error handling.
-    ///
-    /// # Panics
-    ///
-    /// Panics if another context is already active or context creation fails.
-    pub fn create_with_shared_font_atlas_or_panic(shared_font_atlas: SharedFontAtlas) -> Context {
-        Self::create_with_shared_font_atlas(shared_font_atlas)
+    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> Context {
+        Self::try_create_with_shared_font_atlas(shared_font_atlas)
             .expect("Failed to create Dear ImGui context")
     }
 
-    fn create_internal(
+    // removed legacy create_or_panic variants (use create()/try_create())
+
+    fn try_create_internal(
         mut shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Context> {
         let _guard = CTX_MUTEX.lock();
@@ -287,17 +267,7 @@ impl Context {
         Ok(())
     }
 
-    /// Sets the INI filename for settings persistence (panics on error)
-    ///
-    /// This is a convenience method that panics if the filename contains null bytes.
-    /// Use `set_ini_filename()` for proper error handling.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the filename contains null bytes.
-    pub fn set_ini_filename_or_panic<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
-        self.set_ini_filename(filename).expect("Invalid filename")
-    }
+    // removed legacy set_ini_filename_or_panic (use set_ini_filename())
 
     /// Sets the log filename
     ///
@@ -328,17 +298,7 @@ impl Context {
         Ok(())
     }
 
-    /// Sets the log filename (panics on error)
-    ///
-    /// This is a convenience method that panics if the filename contains null bytes.
-    /// Use `set_log_filename()` for proper error handling.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the filename contains null bytes.
-    pub fn set_log_filename_or_panic<P: Into<PathBuf>>(&mut self, filename: Option<P>) {
-        self.set_log_filename(filename).expect("Invalid filename")
-    }
+    // removed legacy set_log_filename_or_panic (use set_log_filename())
 
     /// Sets the platform name
     ///
@@ -369,17 +329,7 @@ impl Context {
         Ok(())
     }
 
-    /// Sets the platform name (panics on error)
-    ///
-    /// This is a convenience method that panics if the name contains null bytes.
-    /// Use `set_platform_name()` for proper error handling.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the name contains null bytes.
-    pub fn set_platform_name_or_panic<S: Into<String>>(&mut self, name: Option<S>) {
-        self.set_platform_name(name).expect("Invalid platform name")
-    }
+    // removed legacy set_platform_name_or_panic (use set_platform_name())
 
     /// Sets the renderer name
     ///
@@ -410,17 +360,7 @@ impl Context {
         Ok(())
     }
 
-    /// Sets the renderer name (panics on error)
-    ///
-    /// This is a convenience method that panics if the name contains null bytes.
-    /// Use `set_renderer_name()` for proper error handling.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the name contains null bytes.
-    pub fn set_renderer_name_or_panic<S: Into<String>>(&mut self, name: Option<S>) {
-        self.set_renderer_name(name).expect("Invalid renderer name")
-    }
+    // removed legacy set_renderer_name_or_panic (use set_renderer_name())
 
     /// Get mutable access to the platform IO
     #[cfg(feature = "multi-viewport")]
@@ -624,52 +564,32 @@ impl Drop for Context {
 pub struct SuspendedContext(Context);
 
 impl SuspendedContext {
-    /// Creates a new suspended Dear ImGui context
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if failed to create the underlying ImGui context
-    pub fn create() -> crate::error::ImGuiResult<Self> {
-        Self::create_internal(None)
+    /// Tries to create a new suspended Dear ImGui context
+    pub fn try_create() -> crate::error::ImGuiResult<Self> {
+        Self::try_create_internal(None)
     }
 
-    /// Creates a new suspended Dear ImGui context with a shared font atlas
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if failed to create the underlying ImGui context
-    pub fn create_with_shared_font_atlas(
+    /// Tries to create a new suspended Dear ImGui context with a shared font atlas
+    pub fn try_create_with_shared_font_atlas(
         shared_font_atlas: SharedFontAtlas,
     ) -> crate::error::ImGuiResult<Self> {
-        Self::create_internal(Some(shared_font_atlas))
+        Self::try_create_internal(Some(shared_font_atlas))
     }
 
     /// Creates a new suspended Dear ImGui context (panics on error)
-    ///
-    /// This is a convenience method that panics if context creation fails.
-    /// Use `create()` for proper error handling.
-    ///
-    /// # Panics
-    ///
-    /// Panics if context creation fails.
-    pub fn create_or_panic() -> Self {
-        Self::create().expect("Failed to create Dear ImGui context")
+    pub fn create() -> Self {
+        Self::try_create().expect("Failed to create Dear ImGui context")
     }
 
     /// Creates a new suspended Dear ImGui context with a shared font atlas (panics on error)
-    ///
-    /// This is a convenience method that panics if context creation fails.
-    /// Use `create_with_shared_font_atlas()` for proper error handling.
-    ///
-    /// # Panics
-    ///
-    /// Panics if context creation fails.
-    pub fn create_with_shared_font_atlas_or_panic(shared_font_atlas: SharedFontAtlas) -> Self {
-        Self::create_with_shared_font_atlas(shared_font_atlas)
+    pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> Self {
+        Self::try_create_with_shared_font_atlas(shared_font_atlas)
             .expect("Failed to create Dear ImGui context")
     }
 
-    fn create_internal(
+    // removed legacy create_or_panic variants (use create()/try_create())
+
+    fn try_create_internal(
         mut shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Self> {
         let _guard = CTX_MUTEX.lock();

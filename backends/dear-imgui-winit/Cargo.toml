@@ -15,6 +15,7 @@ dear-imgui = { path = "../../dear-imgui", version = "0.2" }
 winit.workspace = true
 #raw-window-handle = "0.6"
 #cfg-if.workspace = true
+instant = { version = "0.1", features = ["wasm-bindgen"] }
 
 # WASM-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

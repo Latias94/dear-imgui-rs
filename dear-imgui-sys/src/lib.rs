@@ -70,6 +70,8 @@ pub const HAS_WASM: bool = true;
 #[cfg(not(feature = "wasm"))]
 pub const HAS_WASM: bool = false;
 
+// (No wasm-specific shims are required when using shared memory import style.)
+
 impl ImVec2 {
     #[inline]
     pub const fn new(x: f32, y: f32) -> ImVec2 {

@@ -1,0 +1,37 @@
+[package]
+name = "dear-imgui-web-demo"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+# Enable both backends so wgpu decides at runtime (webgl2 or webgpu)
+default = ["web-backends"]
+web-backends = ["wgpu/webgl", "wgpu/webgpu", "dear-imgui-wgpu/webgl", "dear-imgui-wgpu/webgpu"]
+
+[dependencies]
+dear-imgui = { path = "../dear-imgui", features = ["wasm"] }
+dear-imgui-winit = { path = "../backends/dear-imgui-winit" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu" }
+wgpu = { workspace = true }
+winit = { workspace = true }
+instant = { version = "0.1", features = ["wasm-bindgen"] }
+
+# wasm/web runtime helpers
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true, features = [
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Window",
+] }
+console_error_panic_hook = { workspace = true }
+console_log = { workspace = true }
+log = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+pollster = { workspace = true }

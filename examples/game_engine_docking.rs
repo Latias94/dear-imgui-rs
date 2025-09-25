@@ -189,8 +189,10 @@ impl AppWindow {
     }
 
     fn setup_imgui(&mut self) {
-        let mut context = Context::create_or_panic();
-        context.set_ini_filename_or_panic(Some("game_engine_docking.ini"));
+        let mut context = Context::create();
+        context
+            .set_ini_filename(Some("game_engine_docking.ini"))
+            .unwrap();
 
         // Enable docking
         let io = context.io_mut();

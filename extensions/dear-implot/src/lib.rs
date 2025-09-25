@@ -18,7 +18,7 @@
 //! use dear_imgui::*;
 //! use dear_implot::*;
 //!
-//! let mut ctx = Context::create_or_panic();
+//! let mut ctx = Context::create();
 //! let mut plot_ctx = PlotContext::create(&ctx);
 //!
 //! let ui = ctx.frame();

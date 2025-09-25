@@ -12,7 +12,7 @@ keywords.workspace = true
 readme = "../README.md"
 
 [package.metadata.docs.rs]
-features = ["freetype", "tables-api"]
+features = ["freetype"]
 
 [dependencies]
 bitflags.workspace = true
@@ -34,9 +34,7 @@ tracing = ["dep:tracing", "dep:tracing-subscriber"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
 # Enable for WASM targets
-# wasm = ["dear-imgui-sys/wasm"]
-# Enable tables API (stable in upstream)
-tables-api = []
+wasm = ["dear-imgui-sys/wasm"]
 
 [dev-dependencies]
 approx = "0.5"

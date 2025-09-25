@@ -315,7 +315,6 @@ impl WgpuRenderer {
         _queue: &Queue,
     ) -> RendererResult<()> {
         let mut fonts = imgui_ctx.font_atlas_mut();
-
         // Build the font atlas if not already built
         // This prepares the font data but doesn't create GPU textures yet
         if !fonts.is_built() {
