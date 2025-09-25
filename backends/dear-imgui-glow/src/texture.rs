@@ -89,7 +89,6 @@ impl TextureMap for SimpleTextureMap {
         boxed.set_tex_id(texture_id);
         boxed.set_status(TextureStatus::OK);
 
-        // 将 Box<TextureData> 转换为 TextureData 进行存储
         let texture_data = *boxed;
 
         self.textures.insert(texture_id, gl_texture);

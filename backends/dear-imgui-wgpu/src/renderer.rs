@@ -438,7 +438,7 @@ impl WgpuRenderer {
             let bpp = 4u32;
             let unpadded = width * bpp;
             let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-            let padded = ((unpadded + align - 1) / align) * align;
+            let padded = unpadded.div_ceil(align) * align;
             if padded == unpadded {
                 queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
@@ -599,11 +599,6 @@ impl WgpuRenderer {
             return Ok(());
         }
 
-        // Handle texture updates
-        if cfg!(debug_assertions) {
-            let tex_count = draw_data.textures_count();
-            eprintln!("[dear-imgui-wgpu][debug] DrawData: textures_count={}", tex_count);
-        }
         self.texture_manager.handle_texture_updates(
             draw_data,
             &backend_data.device,

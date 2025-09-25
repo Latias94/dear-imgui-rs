@@ -198,50 +198,120 @@ impl GlowRenderer {
     /// we don't need to manually create font textures. The textures will be created
     /// automatically when needed through the ImTextureData system.
     fn prepare_font_atlas(
-        _gl: &Context,
+        gl: &Context,
         imgui_context: &mut ImGuiContext,
-        _texture_map: &mut dyn TextureMap,
+        texture_map: &mut dyn TextureMap,
     ) -> InitResult<GlTexture> {
         let mut fonts = imgui_context.fonts();
 
-        // Build the font atlas - this will trigger texture creation through the new system
+        // Build the font atlas CPU data
         fonts.build();
 
-        // With ImGuiBackendFlags_RendererHasTextures, we don't need to manually create textures.
-        // The texture will be created automatically when the first frame is rendered.
-        // We return a dummy texture here since the actual texture creation happens in render().
+        // Try to upload the font atlas immediately (legacy path / fallback),
+        // mirroring dear imgui's OpenGL3 backend and our WGPU backend behavior.
+        // This ensures the font texture is available even if draw_data-based
+        // texture updates are not triggered on the first frame.
+        let mut created_font_tex: Option<GlTexture> = None;
+        unsafe {
+            let tex = fonts.get_tex_data();
+            if !tex.is_null() {
+                let width = (*tex).Width as u32;
+                let height = (*tex).Height as u32;
+                let bpp = (*tex).BytesPerPixel;
+                let px_ptr = (*tex).Pixels as *const u8;
 
-        // Create a dummy 1x1 white texture as a placeholder
+                if !px_ptr.is_null() && width > 0 && height > 0 {
+                    // Prepare pixel buffer as RGBA8
+                    let rgba_pixels: Option<Vec<u8>> = match bpp {
+                        4 => {
+                            let size = (width as usize) * (height as usize) * 4;
+                            Some(std::slice::from_raw_parts(px_ptr, size).to_vec())
+                        }
+                        1 => {
+                            let size = (width as usize) * (height as usize);
+                            let src = std::slice::from_raw_parts(px_ptr, size);
+                            let mut out = Vec::with_capacity(size * 4);
+                            for &a in src.iter() {
+                                out.extend_from_slice(&[255, 255, 255, a]);
+                            }
+                            Some(out)
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(pixels) = rgba_pixels {
+                        // Create GL texture and upload
+                        let gl_texture = gl
+                            .create_texture()
+                            .map_err(InitError::CreateTexture)?;
+
+                        gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+                        // Pixel store alignment for tightly packed RGBA8
+                        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+                        gl.tex_image_2d(
+                            glow::TEXTURE_2D,
+                            0,
+                            glow::RGBA as i32,
+                            width as i32,
+                            height as i32,
+                            0,
+                            glow::RGBA,
+                            glow::UNSIGNED_BYTE,
+                            glow::PixelUnpackData::Slice(Some(&pixels)),
+                        );
+                        // Set texture params
+                        gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MIN_FILTER,
+                            glow::LINEAR as i32,
+                        );
+                        gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_MAG_FILTER,
+                            glow::LINEAR as i32,
+                        );
+                        gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_S,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        gl.tex_parameter_i32(
+                            glow::TEXTURE_2D,
+                            glow::TEXTURE_WRAP_T,
+                            glow::CLAMP_TO_EDGE as i32,
+                        );
+                        gl.bind_texture(glow::TEXTURE_2D, None);
+
+                        // Register in our texture map and push TexID back to Dear ImGui
+                        let tex_id = texture_map.register_texture(
+                            gl_texture,
+                            width as i32,
+                            height as i32,
+                            TextureFormat::RGBA32,
+                        );
+                        fonts.set_texture_id(tex_id);
+
+                        created_font_tex = Some(gl_texture);
+                    }
+                }
+            }
+        }
+
+        if let Some(tex) = created_font_tex {
+            return Ok(tex);
+        }
+
+        // Fallback: create a 1x1 white texture as a last resort
         let dummy_texture = unsafe {
-            let gl_texture = _gl.create_texture().map_err(InitError::CreateTexture)?;
-
-            _gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
-
-            // Set texture parameters
-            _gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MIN_FILTER,
-                glow::LINEAR as i32,
-            );
-            _gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MAG_FILTER,
-                glow::LINEAR as i32,
-            );
-            _gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_S,
-                glow::CLAMP_TO_EDGE as i32,
-            );
-            _gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_T,
-                glow::CLAMP_TO_EDGE as i32,
-            );
-
-            // Upload 1x1 white pixel
+            let gl_texture = gl.create_texture().map_err(InitError::CreateTexture)?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
             let white_pixel = [255u8, 255u8, 255u8, 255u8];
-            _gl.tex_image_2d(
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+            gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
                 glow::RGBA as i32,
@@ -252,9 +322,7 @@ impl GlowRenderer {
                 glow::UNSIGNED_BYTE,
                 glow::PixelUnpackData::Slice(Some(&white_pixel)),
             );
-
-            _gl.bind_texture(glow::TEXTURE_2D, None);
-
+            gl.bind_texture(glow::TEXTURE_2D, None);
             gl_texture
         };
 
