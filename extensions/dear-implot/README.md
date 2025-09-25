@@ -4,6 +4,17 @@ High-level Rust bindings for ImPlot, the immediate mode plotting library. This c
 
 For native build/link options (source, system/prebuilt, remote prebuilt), see `extensions/dear-implot-sys/README.md`.
 
+## Compatibility
+
+| Item              | Version |
+|-------------------|---------|
+| Crate             | 0.2.x   |
+| dear-imgui        | 0.2.x   |
+| dear-implot-sys   | 0.2.x   |
+
+See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+
+
 ## Integration Quickstart
 
 This crate integrates with `dear-imgui` directly — add both crates, then build plots inside an ImGui window using a `PlotContext` bound to the current ImGui context.

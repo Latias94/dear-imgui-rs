@@ -75,6 +75,39 @@ dear-imgui-wgpu = "0.2"   # or dear-imgui-glow
 dear-imgui-winit = "0.2"
 ```
 
+## Compatibility (Latest)
+
+The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for full history and upgrade notes.
+
+Core
+
+| Crate           | Version | Notes                                     |
+|-----------------|---------|-------------------------------------------|
+| dear-imgui      | 0.2.x   | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.2.x   | Binds Dear ImGui v1.92.3 (docking branch) |
+
+Backends
+
+| Crate            | Version | External deps         | Notes |
+|------------------|---------|-----------------------|-------|
+| dear-imgui-wgpu  | 0.2.x   | wgpu = 26             |       |
+| dear-imgui-glow  | 0.2.x   | glow = 0.16           |       |
+| dear-imgui-winit | 0.2.x   | winit = 0.30.12       |       |
+
+Extensions
+
+| Crate         | Version | Requires dear-imgui | Sys crate         | Notes |
+|---------------|---------|---------------------|-------------------|-------|
+| dear-implot   | 0.2.x   | 0.2.x               | dear-implot-sys 0.2.x |     |
+| dear-imnodes  | 0.1.x   | 0.2.x               | dear-imnodes-sys 0.1.x |     |
+| dear-imguizmo | 0.1.x   | 0.2.x               | dear-imguizmo-sys 0.1.x |    |
+
+Maintenance rules
+
+- Upgrade dear-imgui-sys together with all -sys extensions to avoid C ABI/API drift.
+- dear-imgui upgrades may require minor changes in backends/extensions if public APIs changed.
+- Backend external deps (wgpu/winit/glow) have their own breaking cycles and may drive backend bumps independently.
+
 ## Prebuilt vs Build-From-Source
 
 - Default strategy: prebuilt (with fallback). All `-sys` crates default to feature `prebuilt`.

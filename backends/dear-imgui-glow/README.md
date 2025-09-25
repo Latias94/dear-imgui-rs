@@ -4,6 +4,16 @@ Glow (OpenGL) renderer for Dear ImGui.
 
 This crate provides a Glow-based renderer for Dear ImGui, allowing you to render Dear ImGui interfaces using the Glow OpenGL abstraction.
 
+## Compatibility
+
+| Item       | Version |
+|------------|---------|
+| Crate      | 0.2.x   |
+| dear-imgui | 0.2.x   |
+| glow       | 0.16    |
+
+See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+
 ## Features
 
 - **Basic rendering**: Render Dear ImGui draw data using OpenGL
@@ -18,7 +28,8 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-glow = "0.1"
+dear-imgui = "0.2"
+dear-imgui-glow = "0.2"
 ```
 
 ### Basic Example

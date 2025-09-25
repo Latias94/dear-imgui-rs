@@ -95,6 +95,21 @@ cargo publish -p dear-imnodes-sys
 cargo publish -p dear-imguizmo-sys
 ```
 
+## Pre-release checklist
+
+Before tagging and publishing, verify the following:
+
+- Versions bumped correctly in all `Cargo.toml` (workspace and crates), and `CHANGELOG.md` updated.
+- Compatibility docs are in sync:
+  - Root `README.md` “Compatibility (Latest)” table updated.
+  - `docs/COMPATIBILITY.md` updated with the new release train and notes.
+- `docs.rs` offline builds validated locally for all `-sys` crates (see Pre-publish checks above).
+- CI green on Linux/Windows/macOS; examples build with extensions enabled.
+- If external deps changed (e.g., `wgpu`, `winit`, `glow`), backends’ readmes compatibility tables updated.
+- If interfaces changed, examples and crate-level docs updated accordingly.
+- Optional: Run `.github/workflows/prebuilt-binaries.yml` (workflow_dispatch) to produce prebuilt archives for the new tag.
+- Ensure GitHub secrets are set for automated release (e.g., `CARGO_REGISTRY_TOKEN` for release-plz).
+
 ## Notes
 - Docking is always enabled; the `multi-viewport` feature is currently commented out (WIP).
 - docs.rs offline builds rely solely on `bindings_pregenerated.rs` (no submodules or network). Source builds still require submodules or prebuilt artifacts.

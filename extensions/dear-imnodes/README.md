@@ -8,7 +8,17 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 - Strongly-typed enums/bitflags for style and attributes
 - Helpers: links, selection, node positions, minimap, IO setup
 
-Example
+## Compatibility
+
+| Item              | Version |
+|-------------------|---------|
+| Crate             | 0.1.x   |
+| dear-imgui        | 0.2.x   |
+| dear-imnodes-sys  | 0.1.x   |
+
+See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+
+## Example
 
 ```rust
 use dear_imgui::Ui;

@@ -2,6 +2,16 @@
 
 High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on top of the C API (`cimguizmo`) and integrated with `dear-imgui`.
 
+## Compatibility
+
+| Item              | Version |
+|-------------------|---------|
+| Crate             | 0.1.x   |
+| dear-imgui        | 0.2.x   |
+| dear-imguizmo-sys | 0.1.x   |
+
+See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+
 ## Features
 
 - `glam` (default): Use `glam::Mat4` seamlessly in the high-level API.
@@ -14,8 +24,8 @@ All matrix arguments in the API are generic over a `Mat4Like` trait, implemented
 
 ```
 [dependencies]
-dear-imgui = "0.1"
-dear-imguizmo = { path = "../../extensions/dear-imguizmo" }
+dear-imgui = "0.2"
+dear-imguizmo = "0.1"
 ```
 
 Minimal usage (dear-imgui-style API):
