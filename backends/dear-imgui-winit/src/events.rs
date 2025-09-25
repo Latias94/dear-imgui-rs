@@ -6,6 +6,7 @@
 use dear_imgui::Context;
 use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseScrollDelta, TouchPhase};
 
+use std::cell::RefCell;
 use winit::window::Window;
 
 use crate::input::{to_imgui_mouse_button, winit_key_to_imgui_key};
@@ -126,21 +127,50 @@ pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) {
 
 /// Handle touch events by converting them to mouse events
 pub fn handle_touch_event(touch: &winit::event::Touch, _window: &Window, _imgui_ctx: &mut Context) {
-    // Convert touch events to mouse events for basic touch support
-    match touch.phase {
-        TouchPhase::Started => {
-            // Treat touch start as left mouse button press
-            // We could add this to imgui_ctx if needed
-        }
-        TouchPhase::Moved => {
-            // Treat touch move as mouse move
-            // We could update mouse position here
-        }
-        TouchPhase::Ended | TouchPhase::Cancelled => {
-            // Treat touch end as left mouse button release
-            // We could add this to imgui_ctx if needed
-        }
+    thread_local! {
+        static ACTIVE_TOUCH: RefCell<Option<u64>> = const { RefCell::new(None) };
     }
+
+    // Convert touch events to mouse events for basic touch support
+    ACTIVE_TOUCH.with(|active| {
+        let mut active_id = active.borrow().clone();
+        let id = touch.id;
+        match touch.phase {
+            TouchPhase::Started => {
+                if active_id.is_none() {
+                    // Capture this touch as the active pointer
+                    *active.borrow_mut() = Some(id);
+                    let pos = touch.location.to_logical::<f64>(_window.scale_factor());
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_pos_event([pos.x as f32, pos.y as f32]);
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_button_event(dear_imgui::input::MouseButton::Left, true);
+                }
+            }
+            TouchPhase::Moved => {
+                if active_id == Some(id) {
+                    let pos = touch.location.to_logical::<f64>(_window.scale_factor());
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_pos_event([pos.x as f32, pos.y as f32]);
+                }
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if active_id == Some(id) {
+                    let pos = touch.location.to_logical::<f64>(_window.scale_factor());
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_pos_event([pos.x as f32, pos.y as f32]);
+                    _imgui_ctx
+                        .io_mut()
+                        .add_mouse_button_event(dear_imgui::input::MouseButton::Left, false);
+                    *active.borrow_mut() = None;
+                }
+            }
+        }
+    });
 }
 
 /// Handle device events (raw input events)

@@ -31,6 +31,7 @@ struct ImguiState {
     renderer: GlowRenderer,
     clear_color: [f32; 4],
     demo_open: bool,
+    software_cursor: bool,
     last_frame: Instant,
 }
 
@@ -110,6 +111,7 @@ impl AppWindow {
             renderer,
             clear_color: [0.1, 0.2, 0.3, 1.0],
             demo_open: true,
+            software_cursor: false,
             last_frame: Instant::now(),
         };
 
@@ -140,6 +142,14 @@ impl AppWindow {
             .set_delta_time(delta_time.as_secs_f32());
         self.imgui.last_frame = now;
 
+        // Apply pending software cursor change before starting the frame
+        let want_sw = self.imgui.software_cursor;
+        if self.imgui.context.io().mouse_draw_cursor() != want_sw {
+            self.imgui
+                .platform
+                .set_software_cursor_enabled(&mut self.imgui.context, want_sw);
+        }
+
         self.imgui
             .platform
             .prepare_frame(&self.window, &mut self.imgui.context);
@@ -164,6 +174,13 @@ impl AppWindow {
 
                 if ui.button("Show Demo Window") {
                     self.imgui.demo_open = true;
+                }
+
+                // Toggle software cursor (ImGui-drawn cursor)
+                let mut sw = self.imgui.software_cursor;
+                if ui.checkbox("Software cursor (drawn by ImGui)", &mut sw) {
+                    // Defer IO change to next frame start to avoid borrow conflicts
+                    self.imgui.software_cursor = sw;
                 }
 
                 ui.text("Modern texture management features:");

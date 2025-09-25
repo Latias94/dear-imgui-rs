@@ -84,12 +84,20 @@ coordinates ImGui uses:
 
 ## Input & IME
 
-- Keyboard: key press/release is mapped to `dear-imgui::Key`. When `event.text`
+- Keyboard: press/release is mapped to `dear-imgui::Key`. When `event.text`
   is present on key press, characters are injected via `io.add_input_character`.
+  Coverage includes letters/digits, punctuation (',.-/;=[]\\`), function and lock keys,
+  and numpad (0-9, decimal/divide/multiply/subtract/add/equal/enter).
 - Mouse: buttons, position, wheel. `PixelDelta` wheel is mapped to ±1.0 steps
   (consistent with most ImGui backends); `LineDelta` uses the provided values.
 - Modifiers: tracked via `ModifiersChanged` and mirrored into left/right variants.
 - IME: preedit is ignored (no transient injection); committed text is appended.
+
+### Touch
+
+Basic touch-to-mouse translation is provided:
+- First active finger controls the pointer and Left mouse button.
+- Started -> set position + press LMB; Moved -> update position; End/Cancelled -> release LMB.
 
 ## Cursor Handling
 
@@ -100,6 +108,22 @@ exposed via our `Io` wrapper (defaults to OS cursor).
 
 If Dear ImGui requests repositioning (`io.want_set_mouse_pos()`), `prepare_frame`
 will set the OS cursor position accordingly.
+
+### Software Cursor
+
+You can force Dear ImGui to draw the cursor by enabling the software cursor:
+
+```rust
+// Option 1: via Io directly
+imgui_ctx.io_mut().set_mouse_draw_cursor(true);
+
+// Option 2: helper on the platform
+platform.set_software_cursor_enabled(&mut imgui_ctx, true);
+```
+
+When software cursor is enabled:
+- The platform hides the OS cursor.
+- Dear ImGui emits cursor geometry in draw data; ensure your renderer renders the draw lists every frame.
 
 ## Backend Flags
 

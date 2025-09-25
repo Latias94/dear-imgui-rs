@@ -11,6 +11,10 @@ pub enum MouseButton {
     Right = sys::ImGuiMouseButton_Right as i32,
     /// Middle mouse button
     Middle = sys::ImGuiMouseButton_Middle as i32,
+    /// Extra mouse button 1 (typically Back)
+    Extra1 = 3,
+    /// Extra mouse button 2 (typically Forward)
+    Extra2 = 4,
 }
 
 /// Mouse cursor types
@@ -189,6 +193,79 @@ pub enum Key {
     F11 = sys::ImGuiKey_F11 as i32,
     /// F12 key
     F12 = sys::ImGuiKey_F12 as i32,
+
+    // --- Punctuation and extra named keys ---
+    /// Apostrophe (') key
+    Apostrophe = sys::ImGuiKey_Apostrophe as i32,
+    /// Comma (,) key
+    Comma = sys::ImGuiKey_Comma as i32,
+    /// Minus (-) key
+    Minus = sys::ImGuiKey_Minus as i32,
+    /// Period (.) key
+    Period = sys::ImGuiKey_Period as i32,
+    /// Slash (/) key
+    Slash = sys::ImGuiKey_Slash as i32,
+    /// Semicolon (;) key
+    Semicolon = sys::ImGuiKey_Semicolon as i32,
+    /// Equal (=) key
+    Equal = sys::ImGuiKey_Equal as i32,
+    /// Left bracket ([) key
+    LeftBracket = sys::ImGuiKey_LeftBracket as i32,
+    /// Backslash (\) key
+    Backslash = sys::ImGuiKey_Backslash as i32,
+    /// Right bracket (]) key
+    RightBracket = sys::ImGuiKey_RightBracket as i32,
+    /// Grave accent (`) key
+    GraveAccent = sys::ImGuiKey_GraveAccent as i32,
+    /// CapsLock key
+    CapsLock = sys::ImGuiKey_CapsLock as i32,
+    /// ScrollLock key
+    ScrollLock = sys::ImGuiKey_ScrollLock as i32,
+    /// NumLock key
+    NumLock = sys::ImGuiKey_NumLock as i32,
+    /// PrintScreen key
+    PrintScreen = sys::ImGuiKey_PrintScreen as i32,
+    /// Pause key
+    Pause = sys::ImGuiKey_Pause as i32,
+
+    // --- Keypad ---
+    /// Numpad 0
+    Keypad0 = sys::ImGuiKey_Keypad0 as i32,
+    /// Numpad 1
+    Keypad1 = sys::ImGuiKey_Keypad1 as i32,
+    /// Numpad 2
+    Keypad2 = sys::ImGuiKey_Keypad2 as i32,
+    /// Numpad 3
+    Keypad3 = sys::ImGuiKey_Keypad3 as i32,
+    /// Numpad 4
+    Keypad4 = sys::ImGuiKey_Keypad4 as i32,
+    /// Numpad 5
+    Keypad5 = sys::ImGuiKey_Keypad5 as i32,
+    /// Numpad 6
+    Keypad6 = sys::ImGuiKey_Keypad6 as i32,
+    /// Numpad 7
+    Keypad7 = sys::ImGuiKey_Keypad7 as i32,
+    /// Numpad 8
+    Keypad8 = sys::ImGuiKey_Keypad8 as i32,
+    /// Numpad 9
+    Keypad9 = sys::ImGuiKey_Keypad9 as i32,
+    /// Numpad decimal
+    KeypadDecimal = sys::ImGuiKey_KeypadDecimal as i32,
+    /// Numpad divide
+    KeypadDivide = sys::ImGuiKey_KeypadDivide as i32,
+    /// Numpad multiply
+    KeypadMultiply = sys::ImGuiKey_KeypadMultiply as i32,
+    /// Numpad subtract
+    KeypadSubtract = sys::ImGuiKey_KeypadSubtract as i32,
+    /// Numpad add
+    KeypadAdd = sys::ImGuiKey_KeypadAdd as i32,
+    /// Numpad enter
+    KeypadEnter = sys::ImGuiKey_KeypadEnter as i32,
+    /// Numpad equal
+    KeypadEqual = sys::ImGuiKey_KeypadEqual as i32,
+
+    /// OEM 102 key (ISO < > |)
+    Oem102 = sys::ImGuiKey_Oem102 as i32,
 }
 
 impl From<MouseButton> for sys::ImGuiMouseButton {

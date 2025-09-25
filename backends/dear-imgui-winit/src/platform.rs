@@ -104,9 +104,7 @@ impl WinitPlatform {
         };
 
         // Convert via winit scale then adapt to our active HiDPI mode
-        let logical_size = window
-            .inner_size()
-            .to_logical(window.scale_factor());
+        let logical_size = window.inner_size().to_logical(window.scale_factor());
         let logical_size = self.scale_size_from_winit(window, logical_size);
         let io = imgui_ctx.io_mut();
 
@@ -164,9 +162,7 @@ impl WinitPlatform {
                 }
                 self.hidpi_factor = new_hidpi;
 
-                let logical_size = window
-                    .inner_size()
-                    .to_logical(window.scale_factor());
+                let logical_size = window.inner_size().to_logical(window.scale_factor());
                 let logical_size = self.scale_size_from_winit(window, logical_size);
                 let io = imgui_ctx.io_mut();
                 io.set_display_size([logical_size.width as f32, logical_size.height as f32]);
@@ -189,6 +185,14 @@ impl WinitPlatform {
                 events::handle_mouse_button(*button, *state, imgui_ctx)
             }
             WindowEvent::MouseWheel { delta, .. } => events::handle_mouse_wheel(*delta, imgui_ctx),
+            // When cursor leaves the window, tell ImGui the mouse is unavailable so
+            // software cursor (if enabled) won’t be drawn at the last position.
+            WindowEvent::CursorLeft { .. } => {
+                imgui_ctx
+                    .io_mut()
+                    .add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                false
+            }
             WindowEvent::ModifiersChanged(modifiers) => {
                 events::handle_modifiers_changed(modifiers, imgui_ctx);
                 false
@@ -218,10 +222,8 @@ impl WinitPlatform {
         // If backend supports setting mouse pos and ImGui requests it, honor it
         if imgui_ctx.io().want_set_mouse_pos() {
             let pos = imgui_ctx.io().mouse_pos();
-            let logical_pos = self.scale_pos_for_winit(
-                window,
-                LogicalPosition::new(pos[0] as f64, pos[1] as f64),
-            );
+            let logical_pos = self
+                .scale_pos_for_winit(window, LogicalPosition::new(pos[0] as f64, pos[1] as f64));
             let _ = window.set_cursor_position(logical_pos);
         }
         // Note: cursor shape update is exposed via prepare_render_with_ui()
@@ -230,6 +232,14 @@ impl WinitPlatform {
     /// Prepare frame - alias for prepare_render for compatibility
     pub fn prepare_frame(&mut self, window: &Window, imgui_ctx: &mut Context) {
         self.prepare_render(imgui_ctx, window);
+    }
+
+    /// Toggle Dear ImGui software-drawn cursor.
+    /// When enabled, the OS cursor is hidden and ImGui draws the cursor in draw data.
+    pub fn set_software_cursor_enabled(&mut self, imgui_ctx: &mut Context, enabled: bool) {
+        imgui_ctx.io_mut().set_mouse_draw_cursor(enabled);
+        // Invalidate cursor cache so next prepare_render_with_ui applies visibility change
+        self.cursor_cache = None;
     }
 
     /// Update cursor given a Ui reference (preferred, matches upstream)
@@ -241,7 +251,10 @@ impl WinitPlatform {
             .contains(ConfigFlags::NO_MOUSE_CURSOR_CHANGE)
         {
             // Our Io wrapper does not currently expose MouseDrawCursor, assume false (OS cursor)
-            let cursor = CursorSettings { cursor: ui.mouse_cursor(), draw_cursor: ui.io().mouse_draw_cursor() };
+            let cursor = CursorSettings {
+                cursor: ui.mouse_cursor(),
+                draw_cursor: ui.io().mouse_draw_cursor(),
+            };
             if self.cursor_cache != Some(cursor) {
                 cursor.apply(window);
                 self.cursor_cache = Some(cursor);
