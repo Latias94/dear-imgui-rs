@@ -96,6 +96,8 @@ impl Io {
     /// Creates a new Io instance from the current context
     pub(crate) fn from_raw() -> &'static mut Self {
         unsafe {
+            // Note: our bindings expose igGetIO_Nil which resolves against the
+            // current context. Keep using _Nil variant until regular symbol is exported.
             let io_ptr = sys::igGetIO_Nil();
             &mut *(io_ptr as *mut Self)
         }

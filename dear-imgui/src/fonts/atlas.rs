@@ -29,7 +29,7 @@ pub struct FontAtlas {
 
 /// A font identifier
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct FontId(pub(crate) *const Font);
+pub struct FontId(pub(crate) *const sys::ImFont);
 
 /// Font loader interface for custom font backends
 ///
@@ -168,7 +168,7 @@ impl FontAtlas {
     ///
     /// # Safety
     /// The caller must ensure that the pointer is valid and points to a valid ImFontAtlas
-    pub unsafe fn from_raw(raw: *mut sys::ImFontAtlas) -> Self {
+    pub(crate) unsafe fn from_raw(raw: *mut sys::ImFontAtlas) -> Self {
         Self {
             raw,
             owned: false,
@@ -274,7 +274,7 @@ impl FontAtlas {
     pub fn add_font_with_config(&mut self, font_cfg: &FontConfig) -> &mut Font {
         unsafe {
             let font_ptr = sys::ImFontAtlas_AddFont(self.raw, font_cfg.raw());
-            &mut *(font_ptr as *mut Font)
+            Font::from_raw_mut(font_ptr)
         }
     }
 
@@ -284,7 +284,7 @@ impl FontAtlas {
         unsafe {
             let cfg_ptr = font_cfg.map_or(ptr::null(), |cfg| cfg.raw());
             let font_ptr = sys::ImFontAtlas_AddFontDefault(self.raw, cfg_ptr);
-            &mut *(font_ptr as *mut Font)
+            Font::from_raw_mut(font_ptr)
         }
     }
 
@@ -313,7 +313,7 @@ impl FontAtlas {
             if font_ptr.is_null() {
                 None
             } else {
-                Some(&mut *(font_ptr as *mut Font))
+                Some(Font::from_raw_mut(font_ptr))
             }
         }
     }
@@ -343,7 +343,7 @@ impl FontAtlas {
             if font_ptr.is_null() {
                 None
             } else {
-                Some(&mut *(font_ptr as *mut Font))
+                Some(Font::from_raw_mut(font_ptr))
             }
         }
     }
@@ -484,6 +484,33 @@ impl FontAtlas {
         }
     }
 
+    /// Get a mutable view of the atlas texture data, if available
+    pub fn tex_data_mut(&mut self) -> Option<&mut crate::texture::TextureData> {
+        let ptr = unsafe { (*self.raw).TexData };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(unsafe { crate::texture::TextureData::from_raw(ptr) })
+        }
+    }
+
+    /// Convenience: set atlas texture id and mark status OK
+    /// Also updates TexRef so draw commands use this texture id.
+    pub fn set_texture_id(&mut self, tex_id: crate::texture::TextureId) {
+        // Update TexRef used by draw commands
+        let tex_ref = sys::ImTextureRef {
+            _TexData: std::ptr::null_mut(),
+            _TexID: tex_id.id() as sys::ImTextureID,
+        };
+        self.set_tex_ref(tex_ref);
+
+        // Update ImTextureData (if present)
+        if let Some(td) = self.tex_data_mut() {
+            td.set_tex_id(tex_id);
+            td.set_status(crate::texture::TextureStatus::OK);
+        }
+    }
+
     /// Get texture data pointer
     ///
     /// Returns the current texture data used by the atlas
@@ -524,10 +551,8 @@ impl Drop for FontAtlas {
     }
 }
 
-// FontAtlas is safe to send between threads as long as the ImGui context is not being used
-unsafe impl Send for FontAtlas {}
-// FontAtlas is safe to share between threads as long as access is synchronized
-unsafe impl Sync for FontAtlas {}
+// NOTE: Do not mark FontAtlas as Send/Sync. It wraps pointers owned by the
+// ImGui context and is not thread-safe to move/share across threads.
 
 /// Font configuration for loading fonts with v1.92+ features
 #[derive(Debug, Clone)]

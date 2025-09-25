@@ -91,10 +91,7 @@ impl Drop for PlotContext {
     }
 }
 
-// PlotContext is Send + Sync because ImPlot contexts can be used across threads
-// (though not concurrently - you need proper synchronization)
-unsafe impl Send for PlotContext {}
-unsafe impl Sync for PlotContext {}
+// ImPlot context is tied to Dear ImGui and not thread-safe to send/share.
 
 /// A temporary reference for building plots
 ///

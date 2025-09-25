@@ -39,3 +39,5 @@ wasm = ["dear-imgui-sys/wasm"]
 [dev-dependencies]
 approx = "0.5"
 pretty_assertions = "1.4"
+static_assertions = "1.1"
+once_cell = "1.19"

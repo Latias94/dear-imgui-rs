@@ -43,8 +43,7 @@ impl Drop for Context {
     }
 }
 
-unsafe impl Send for Context {}
-unsafe impl Sync for Context {}
+// ImNodes context interacts with Dear ImGui state and is not thread-safe.
 
 /// An editor context allows multiple independent editors
 pub struct EditorContext {
@@ -137,8 +136,7 @@ impl Drop for EditorContext {
     }
 }
 
-unsafe impl Send for EditorContext {}
-unsafe impl Sync for EditorContext {}
+// EditorContext is also not thread-safe to move/share across threads.
 
 /// Per-frame Ui extension entry point
 pub struct NodesUi<'ui> {

@@ -235,6 +235,12 @@ impl WgpuTextureManager {
         };
 
         // Create WGPU texture (matches the descriptor setup in imgui_impl_wgpu.cpp)
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[dear-imgui-wgpu][debug] Create texture: {}x{} format={:?}",
+                width, height, format
+            );
+        }
         let texture = device.create_texture(&TextureDescriptor {
             label: Some("Dear ImGui Texture"),
             size: Extent3d {
@@ -261,25 +267,59 @@ impl WgpuTextureManager {
         }
 
         // Upload texture data (matches the upload logic in imgui_impl_wgpu.cpp)
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &converted_data,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4), // Always 4 bytes per pixel (RGBA)
-                rows_per_image: Some(height),
-            },
-            Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
+        // WebGPU requires bytes_per_row to be 256-byte aligned. Pad rows if needed.
+        let bpp = 4u32;
+        let unpadded_bytes_per_row = width * bpp;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // 256
+        let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
+        if padded_bytes_per_row == unpadded_bytes_per_row {
+            // Aligned: direct upload
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &converted_data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(unpadded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+                Extent3d { width, height, depth_or_array_layers: 1 },
+            );
+        } else {
+            // Pad each row to the required alignment
+            let mut padded: Vec<u8> = vec![0; (padded_bytes_per_row * height) as usize];
+            for row in 0..height as usize {
+                let src_off = row * (unpadded_bytes_per_row as usize);
+                let dst_off = row * (padded_bytes_per_row as usize);
+                padded[dst_off..dst_off + (unpadded_bytes_per_row as usize)]
+                    .copy_from_slice(&converted_data[src_off..src_off + (unpadded_bytes_per_row as usize)]);
+            }
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &padded,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+                Extent3d { width, height, depth_or_array_layers: 1 },
+            );
+            if cfg!(debug_assertions) {
+                eprintln!(
+                    "[dear-imgui-wgpu][debug] Upload texture with padded row pitch: unpadded={} padded={}",
+                    unpadded_bytes_per_row, padded_bytes_per_row
+                );
+            }
+        }
 
         // Create texture view
         let texture_view = texture.create_view(&TextureViewDescriptor::default());
@@ -289,6 +329,9 @@ impl WgpuTextureManager {
 
         // Register and return ID
         let texture_id = self.register_texture(wgpu_texture);
+        if cfg!(debug_assertions) {
+            eprintln!("[dear-imgui-wgpu][debug] Texture registered: id={}", texture_id);
+        }
         Ok(texture_id)
     }
 
@@ -388,10 +431,27 @@ impl WgpuTextureManager {
                     }
                 }
                 TextureStatus::WantDestroy => {
-                    let imgui_tex_id = texture_data.tex_id();
-                    let internal_id = imgui_tex_id.id();
-                    self.destroy_texture_by_id(internal_id);
-                    texture_data.set_status(TextureStatus::Destroyed);
+                    // Only destroy when unused frames > 0 (align with official backend behavior)
+                    let mut can_destroy = true;
+                    unsafe {
+                        let raw = texture_data.as_raw();
+                        if !raw.is_null() {
+                            // If field not present in bindings on some versions, default true
+                            #[allow(unused_unsafe)]
+                            {
+                                // Access UnusedFrames if available
+                                // SAFETY: reading a plain field from raw C struct
+                                can_destroy = (*raw).UnusedFrames > 0;
+                            }
+                        }
+                    }
+                    if can_destroy {
+                        let imgui_tex_id = texture_data.tex_id();
+                        let internal_id = imgui_tex_id.id();
+                        // Remove from cache
+                        self.remove_texture(internal_id);
+                        texture_data.set_status(TextureStatus::Destroyed);
+                    }
                 }
                 TextureStatus::OK | TextureStatus::Destroyed => {
                     // No action needed

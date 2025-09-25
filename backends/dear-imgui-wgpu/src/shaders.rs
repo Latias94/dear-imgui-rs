@@ -59,8 +59,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = in.color * textureSample(u_texture, u_sampler, in.uv);
-    let corrected_color = pow(color.rgb, vec3<f32>(uniforms.gamma));
-    return vec4<f32>(corrected_color, color.a);
+    return color;
 }
 "#;
 

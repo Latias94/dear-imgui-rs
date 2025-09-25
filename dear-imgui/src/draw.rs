@@ -207,11 +207,10 @@ bitflags! {
 pub struct DrawList(*mut sys::ImDrawList);
 
 impl DrawList {
-    /// Create DrawList from raw pointer
+    /// Create DrawList from raw pointer (crate-internal)
     ///
-    /// # Safety
-    /// The pointer must be valid and point to a valid ImDrawList
-    pub unsafe fn from_raw(ptr: *mut sys::ImDrawList) -> Self {
+    /// Safety: caller must ensure pointer validity for returned lifetime.
+    pub(crate) unsafe fn from_raw(ptr: *mut sys::ImDrawList) -> Self {
         Self(ptr)
     }
 

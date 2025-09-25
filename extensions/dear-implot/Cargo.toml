@@ -39,3 +39,4 @@ freetype = ["dear-imgui/freetype", "dear-implot-sys/freetype"]
 [dev-dependencies]
 approx = "0.5"
 pretty_assertions = "1.4"
+static_assertions = "1.1"

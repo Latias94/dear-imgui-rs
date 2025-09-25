@@ -835,13 +835,13 @@ impl GlowRenderer {
     /// Following the original Dear ImGui OpenGL3 implementation
     fn update_texture_from_data(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &mut dear_imgui::TextureData,
     ) -> RenderResult<()> {
         use dear_imgui::TextureStatus;
 
         match texture_data.status() {
             TextureStatus::WantCreate => {
-                // Create new texture
+                // Create new texture and assign ID back to Dear ImGui
                 self.create_texture_from_data(texture_data)?;
             }
             TextureStatus::WantUpdates => {
@@ -863,7 +863,7 @@ impl GlowRenderer {
     /// Create a new texture from ImTextureData
     fn create_texture_from_data(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &mut dear_imgui::TextureData,
     ) -> RenderResult<()> {
         let gl = self.get_gl_context()?;
         let width = texture_data.width() as u32;
@@ -942,13 +942,12 @@ impl GlowRenderer {
                 gl.bind_texture(glow::TEXTURE_2D, None);
                 gl_texture
             };
-
-            // Store the texture in our map
-            let texture_id = texture_data.tex_id();
-            self.texture_map.set(texture_id, gl_texture);
-
-            // TODO: Set the texture ID back to ImGui
-            // This would require calling texture_data.set_tex_id() but that needs mutable access
+            // Register texture and set ID back to Dear ImGui
+            let tex_id = self
+                .texture_map
+                .register_texture(gl_texture, width as i32, height as i32, format);
+            texture_data.set_tex_id(tex_id);
+            texture_data.set_status(dear_imgui::TextureStatus::OK);
         }
 
         Ok(())
@@ -957,17 +956,93 @@ impl GlowRenderer {
     /// Update an existing texture from ImTextureData
     fn update_existing_texture_from_data(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &mut dear_imgui::TextureData,
     ) -> RenderResult<()> {
-        // For now, we recreate the texture. A more efficient implementation would
-        // use glTexSubImage2D for partial updates.
-        self.create_texture_from_data(texture_data)
+        let gl = self.get_gl_context()?;
+        let tex_id = texture_data.tex_id();
+        let gl_texture = match self.texture_map.get(tex_id) {
+            Some(t) => t,
+            None => {
+                // If texture doesn't exist, create it fully
+                return self.create_texture_from_data(texture_data);
+            }
+        };
+
+        let width = texture_data.width() as u32;
+        let height = texture_data.height() as u32;
+        let bpp = texture_data.bytes_per_pixel() as usize;
+
+        let pixels = match texture_data.pixels() {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        unsafe {
+            gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        }
+
+        // Iterate update rects and upload each sub-region
+        // Reuse a single staging buffer to avoid repeated allocations
+        let mut sub_rgba: Vec<u8> = Vec::new();
+        for rect in texture_data.updates() {
+            let rx = rect.x as u32;
+            let ry = rect.y as u32;
+            let rw = rect.w as u32;
+            let rh = rect.h as u32;
+
+            if rw == 0 || rh == 0 { continue; }
+            if rx >= width || ry >= height { continue; }
+
+            let row_stride = (width as usize) * bpp;
+            let needed = (rw * rh * 4) as usize;
+            if sub_rgba.capacity() < needed { sub_rgba.reserve(needed - sub_rgba.capacity()); }
+            sub_rgba.clear();
+
+            for row in 0..(rh as usize) {
+                let src_row_start = ((ry as usize + row) * row_stride) + (rx as usize) * bpp;
+                let src = &pixels[src_row_start .. src_row_start + (rw as usize) * bpp];
+
+                match texture_data.format() {
+                    dear_imgui::TextureFormat::RGBA32 => {
+                        // Already RGBA, just append
+                        sub_rgba.extend_from_slice(src);
+                    }
+                    dear_imgui::TextureFormat::Alpha8 => {
+                        // Convert A8 -> RGBA8 with white RGB
+                        for &a in src.iter() {
+                            sub_rgba.extend_from_slice(&[255, 255, 255, a]);
+                        }
+                    }
+                }
+            }
+
+            unsafe {
+                gl.tex_sub_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    rx as i32,
+                    ry as i32,
+                    rw as i32,
+                    rh as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(Some(&sub_rgba)),
+                );
+            }
+        }
+
+        unsafe { gl.bind_texture(glow::TEXTURE_2D, None); }
+
+        // Mark status OK after updates
+        texture_data.set_status(dear_imgui::TextureStatus::OK);
+        Ok(())
     }
 
     /// Destroy a texture from ImTextureData
     fn destroy_texture_from_data(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &mut dear_imgui::TextureData,
     ) -> RenderResult<()> {
         let gl = self.get_gl_context()?;
         let texture_id = texture_data.tex_id();
@@ -978,6 +1053,8 @@ impl GlowRenderer {
             }
             self.texture_map.remove(texture_id);
         }
+
+        texture_data.set_status(dear_imgui::TextureStatus::Destroyed);
 
         Ok(())
     }

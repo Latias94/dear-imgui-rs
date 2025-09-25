@@ -674,8 +674,10 @@ dependencies = [
  "cfg-if",
  "dear-imgui-sys",
  "mint",
+ "once_cell",
  "parking_lot",
  "pretty_assertions",
+ "static_assertions",
  "thiserror 2.0.16",
  "tracing",
  "tracing-subscriber",
@@ -812,6 +814,7 @@ dependencies = [
  "bitflags 2.9.4",
  "dear-imgui",
  "dear-imnodes-sys",
+ "static_assertions",
  "thiserror 2.0.16",
 ]
 
@@ -840,6 +843,7 @@ dependencies = [
  "dear-imgui-sys",
  "dear-implot-sys",
  "pretty_assertions",
+ "static_assertions",
 ]
 
 [[package]]

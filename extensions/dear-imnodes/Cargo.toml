@@ -21,3 +21,6 @@ default = []
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = ["dear-imgui/multi-viewport", "dear-imnodes-sys/multi-viewport"]
 freetype = ["dear-imgui/freetype", "dear-imnodes-sys/freetype"]
+
+[dev-dependencies]
+static_assertions = "1.1"
