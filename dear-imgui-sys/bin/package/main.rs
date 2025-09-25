@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use build_support::{compose_archive_name, compose_manifest_bytes};
 use flate2::{Compression, write::GzEncoder};
 
 fn expected_lib_name() -> &'static str {
@@ -115,21 +116,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&pkg_dir)?;
 
     let ft_suffix = if features.split(',').any(|f| f.trim() == "freetype") {
-        "-freetype"
+        Some("-freetype")
     } else {
-        ""
+        None
     };
-    let ar_name = if crt.is_empty() {
-        format!(
-            "dear-imgui-prebuilt-{}-{}-{}{}.tar.gz",
-            crate_version, target, link_type, ft_suffix
-        )
-    } else {
-        format!(
-            "dear-imgui-prebuilt-{}-{}-{}{}-{}.tar.gz",
-            crate_version, target, link_type, ft_suffix, crt
-        )
-    };
+    let ar_name = compose_archive_name(
+        "dear-imgui",
+        &crate_version,
+        &target,
+        link_type,
+        ft_suffix,
+        crt,
+    );
 
     println!("Packaging dear-imgui prebuilt:");
     println!("  Target: {}", target);
@@ -212,13 +210,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Added lib: {}", lib_path.display());
 
     // Add simple manifest txt
-    let mut manifest_txt = vec![];
-    writeln!(
-        &mut manifest_txt,
-        "dear-imgui prebuilt\nversion={}\ntarget={}\nlink={}\ncrt={}",
-        crate_version, target, link_type, crt
-    )?;
-    writeln!(&mut manifest_txt, "features={}", features)?;
+    let manifest_txt = compose_manifest_bytes(
+        "dear-imgui",
+        &crate_version,
+        &target,
+        link_type,
+        crt,
+        Some(&features),
+    );
     let mut hdr = tar::Header::new_gnu();
     hdr.set_size(manifest_txt.len() as u64);
     hdr.set_mode(0o644);

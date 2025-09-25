@@ -255,7 +255,13 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
                 linked = true;
             }
         }
+        // Only attempt automatic release download when explicitly enabled.
+        let allow_auto_prebuilt = matches!(
+            env::var("IMGUI_SYS_USE_PREBUILT").ok().as_deref(),
+            Some("1") | Some("true") | Some("yes")
+        );
         if !linked
+            && allow_auto_prebuilt
             && let Some(lib_dir) = try_download_prebuilt_from_release(cfg)
             && try_link_prebuilt(&lib_dir, &cfg.target_env)
         {
@@ -458,113 +464,72 @@ fn try_download_prebuilt(
     target_env: &str,
 ) -> Result<PathBuf, String> {
     let lib_name = expected_lib_name(target_env);
-    let dl_dir = cache_root.join("download");
-    let _ = fs::create_dir_all(&dl_dir);
-
-    // If URL looks like an archive, download and extract
-    if url.ends_with(".tar.gz") || url.ends_with(".tgz") {
-        let fname = url.split('/').next_back().unwrap_or("prebuilt.tar.gz");
-        let archive_path = dl_dir.join(fname);
-        if !archive_path.exists() {
-            println!("cargo:warning=Downloading prebuilt archive from {}", url);
-            let client = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(300))
-                .build()
-                .map_err(|e| format!("create http client: {}", e))?;
-            let resp = client
-                .get(url)
-                .send()
-                .map_err(|e| format!("http get: {}", e))?;
-            if !resp.status().is_success() {
-                return Err(format!("http status {}", resp.status()));
-            }
-            let bytes = resp.bytes().map_err(|e| format!("read body: {}", e))?;
-            fs::write(&archive_path, &bytes)
-                .map_err(|e| format!("write {}: {}", archive_path.display(), e))?;
-        }
-        let extract_dir = prebuilt_extract_dir_env(cache_root, target_env);
-        if extract_dir.exists() {
-            let _ = std::fs::remove_dir_all(&extract_dir);
-        }
-        fs::create_dir_all(&extract_dir)
-            .map_err(|e| format!("create dir {}: {}", extract_dir.display(), e))?;
-        let file = fs::File::open(&archive_path)
-            .map_err(|e| format!("open {}: {}", archive_path.display(), e))?;
-        let mut archive = tar::Archive::new(GzDecoder::new(file));
-        archive
-            .unpack(&extract_dir)
-            .map_err(|e| format!("unpack {}: {}", archive_path.display(), e))?;
-        let lib_dir = extract_dir.join("lib");
-        if lib_dir.join(lib_name).exists() {
-            return Ok(lib_dir);
-        }
-        // Fallback: maybe extracted root contains the lib directly
-        if extract_dir.join(lib_name).exists() {
-            return Ok(extract_dir);
-        }
-        return Err("extracted archive did not contain expected library".into());
-    }
-
-    // Otherwise, expect URL to point directly to the static library
-    let dst = dl_dir.join(lib_name);
-    if dst.exists() {
-        return Ok(dl_dir);
-    }
     println!("cargo:warning=Downloading prebuilt dear_imgui from {}", url);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| format!("create http client: {}", e))?;
-    let resp = client
-        .get(url)
-        .send()
-        .map_err(|e| format!("http get: {}", e))?;
-    if !resp.status().is_success() {
-        return Err(format!("http status {}", resp.status()));
-    }
-    let bytes = resp.bytes().map_err(|e| format!("read body: {}", e))?;
-    fs::write(&dst, &bytes).map_err(|e| format!("write {}: {}", dst.display(), e))?;
-    Ok(dl_dir)
+    build_support::download_prebuilt(cache_root, url, lib_name, target_env)
 }
 
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
-    // Respect offline mode
-    let offline = matches!(
-        env::var("CARGO_NET_OFFLINE").ok().as_deref(),
-        Some("true") | Some("1") | Some("yes")
-    );
-    if offline {
+    if build_support::is_offline() {
         return None;
     }
 
-    // Compose archive name following our CI packaging
     let version = env::var("CARGO_PKG_VERSION").unwrap_or_default();
     let link_type = "static";
-    let crt_suffix = if cfg.is_windows() && cfg.is_msvc() {
-        if cfg.use_static_crt() { "-mt" } else { "-md" }
+    let crt = if cfg.is_windows() && cfg.is_msvc() {
+        if cfg.use_static_crt() { "mt" } else { "md" }
     } else {
         ""
     };
-    let archive_name = format!(
-        "dear-imgui-prebuilt-{}-{}-{}{}.tar.gz",
-        version, cfg.target_triple, link_type, crt_suffix
-    );
-    let archive_name_no_crt = format!(
-        "dear-imgui-prebuilt-{}-{}-{}.tar.gz",
-        version, cfg.target_triple, link_type
-    );
-    let tags = [
-        format!("dear-imgui-sys-v{}", version),
-        format!("v{}", version),
-    ];
-    // If user provided local package dir, try extracting from there first
+
+    // Candidate archive names: prefer freetype variant when feature is enabled
+    let mut candidates: Vec<String> = Vec::new();
+    let target = &cfg.target_triple;
+    #[cfg(feature = "freetype")]
+    {
+        candidates.push(build_support::compose_archive_name(
+            "dear-imgui",
+            &version,
+            target,
+            link_type,
+            Some("-freetype"),
+            crt,
+        ));
+        candidates.push(build_support::compose_archive_name(
+            "dear-imgui",
+            &version,
+            target,
+            link_type,
+            Some("-freetype"),
+            "",
+        ));
+    }
+    candidates.push(build_support::compose_archive_name(
+        "dear-imgui",
+        &version,
+        target,
+        link_type,
+        None,
+        crt,
+    ));
+    candidates.push(build_support::compose_archive_name(
+        "dear-imgui",
+        &version,
+        target,
+        link_type,
+        None,
+        "",
+    ));
+
+    let tags = build_support::release_tags("dear-imgui-sys", &version);
+
+    // Try local package dir first
     if let Ok(pkg_dir) = env::var("IMGUI_SYS_PACKAGE_DIR") {
         let pkg_dir = PathBuf::from(pkg_dir);
-        for cand in [archive_name.clone(), archive_name_no_crt.clone()] {
-            let archive_path = pkg_dir.join(&cand);
+        for name in &candidates {
+            let archive_path = pkg_dir.join(name);
             if archive_path.exists() {
                 let cache_root = prebuilt_cache_root(cfg);
-                if let Ok(lib_dir) = extract_archive_to_cache(
+                if let Ok(lib_dir) = build_support::extract_archive_to_cache(
                     &archive_path,
                     &cache_root,
                     expected_lib_name(&cfg.target_env),
@@ -574,16 +539,12 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
             }
         }
     }
+
     let cache_root = prebuilt_cache_root(cfg);
-    for tag in &tags {
-        for name in [&archive_name, &archive_name_no_crt] {
-            let url = format!(
-                "https://github.com/Latias94/dear-imgui/releases/download/{}/{}",
-                tag, name
-            );
-            if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
-                return Some(lib_dir);
-            }
+    let urls = build_support::release_candidate_urls_default(&tags, &candidates);
+    for url in urls {
+        if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
+            return Some(lib_dir);
         }
     }
     None

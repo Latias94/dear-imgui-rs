@@ -164,9 +164,21 @@ impl AppWindow {
         .expect("Failed to create device");
 
         let size = LogicalSize::new(1600.0, 900.0); // Larger window for game engine UI
+        // Pick an sRGB surface format when available for consistent visuals
+        let caps = surface.get_capabilities(&adapter);
+        let preferred_srgb = [
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ];
+        let format = preferred_srgb
+            .iter()
+            .cloned()
+            .find(|f| caps.formats.contains(f))
+            .unwrap_or(caps.formats[0]);
+
         let surface_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_capabilities(&adapter).formats[0],
+            format,
             width: size.width as u32,
             height: size.height as u32,
             present_mode: wgpu::PresentMode::Fifo,
@@ -213,6 +225,8 @@ impl AppWindow {
         );
         let mut renderer =
             WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
+        // Unify visuals (sRGB): auto gamma by format
+        renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
         let clear_color = wgpu::Color {
             r: 0.1,

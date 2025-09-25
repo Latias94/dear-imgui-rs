@@ -349,6 +349,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-support"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "reqwest 0.12.23",
+ "tar",
+]
+
+[[package]]
 name = "built"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -726,6 +735,7 @@ name = "dear-imgui-sys"
 version = "0.2.0"
 dependencies = [
  "bindgen",
+ "build-support",
  "cc",
  "cfg-if",
  "cmake",
@@ -796,6 +806,7 @@ name = "dear-imguizmo-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "build-support",
  "cc",
  "cfg-if",
  "dear-imgui-sys",
@@ -823,6 +834,7 @@ name = "dear-imnodes-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "build-support",
  "cc",
  "cfg-if",
  "dear-imgui-sys",
@@ -851,6 +863,7 @@ name = "dear-implot-sys"
 version = "0.2.0"
 dependencies = [
  "bindgen",
+ "build-support",
  "cc",
  "cmake",
  "dear-imgui-sys",

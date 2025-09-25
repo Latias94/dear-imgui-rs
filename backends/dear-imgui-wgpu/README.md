@@ -2,6 +2,34 @@
 
 WGPU renderer for Dear ImGui.
 
+## Quick Start
+
+```rust
+use dear_imgui::Context;
+use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, GammaMode};
+
+// device, queue, surface_format prepared ahead
+let mut renderer = WgpuRenderer::new(WgpuInitInfo::new(device, queue, surface_format), &mut imgui)?;
+
+// Optional: unify gamma policy across backends
+renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
+
+// per-frame
+renderer.render_draw_data(&imgui.render(), &mut render_pass)?;
+```
+
+## What You Get
+
+- ImGui v1.92 texture system integration (create/update/destroy)
+- Multi-frame buffering and device-object management
+- Format-aware or user-controlled gamma (see below)
+
+## sRGB / Gamma
+
+- Default `GammaMode::Auto`: picks `gamma=2.2` for sRGB targets and `1.0` for linear targets.
+- You can force `Linear` (1.0) or `Gamma22` (2.2).
+- Pair this with your swapchain format to avoid double correction.
+
 ## Compatibility
 
 | Item            | Version |

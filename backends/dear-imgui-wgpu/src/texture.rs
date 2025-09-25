@@ -287,7 +287,11 @@ impl WgpuTextureManager {
                     bytes_per_row: Some(unpadded_bytes_per_row),
                     rows_per_image: Some(height),
                 },
-                Extent3d { width, height, depth_or_array_layers: 1 },
+                Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
             );
         } else {
             // Pad each row to the required alignment
@@ -295,8 +299,9 @@ impl WgpuTextureManager {
             for row in 0..height as usize {
                 let src_off = row * (unpadded_bytes_per_row as usize);
                 let dst_off = row * (padded_bytes_per_row as usize);
-                padded[dst_off..dst_off + (unpadded_bytes_per_row as usize)]
-                    .copy_from_slice(&converted_data[src_off..src_off + (unpadded_bytes_per_row as usize)]);
+                padded[dst_off..dst_off + (unpadded_bytes_per_row as usize)].copy_from_slice(
+                    &converted_data[src_off..src_off + (unpadded_bytes_per_row as usize)],
+                );
             }
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
@@ -311,7 +316,11 @@ impl WgpuTextureManager {
                     bytes_per_row: Some(padded_bytes_per_row),
                     rows_per_image: Some(height),
                 },
-                Extent3d { width, height, depth_or_array_layers: 1 },
+                Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
             );
             if cfg!(debug_assertions) {
                 eprintln!(
@@ -330,7 +339,10 @@ impl WgpuTextureManager {
         // Register and return ID
         let texture_id = self.register_texture(wgpu_texture);
         if cfg!(debug_assertions) {
-            eprintln!("[dear-imgui-wgpu][debug] Texture registered: id={}", texture_id);
+            eprintln!(
+                "[dear-imgui-wgpu][debug] Texture registered: id={}",
+                texture_id
+            );
         }
         Ok(texture_id)
     }

@@ -77,6 +77,25 @@ dear-imgui-wgpu = "0.2"   # or dear-imgui-glow
 dear-imgui-winit = "0.2"
 ```
 
+## Build Strategy
+
+- Default: build from source on all platforms. Prebuilt binaries are optional and off by default.
+- Windows: we publish prebuilt packages (MD/MT, with/without `freetype`). Linux/macOS may have CI artifacts but are not used automatically.
+- Opt-in prebuilt download from Release: set `<CRATE>_SYS_USE_PREBUILT=1` per crate. Otherwise builds only use prebuilt when you explicitly point to them (e.g., `<CRATE>_SYS_LIB_DIR` or `<CRATE>_SYS_PREBUILT_URL`).
+
+Env vars per -sys crate:
+- `<CRATE>_SYS_LIB_DIR` — link from a dir containing the static lib
+- `<CRATE>_SYS_PREBUILT_URL` — explicit URL to `.a/.lib` or `.tar.gz` (always honored)
+- `<CRATE>_SYS_USE_PREBUILT=1` — allow auto download from GitHub Releases
+- `<CRATE>_SYS_PACKAGE_DIR` — local dir with `.tar.gz` packages
+- `<CRATE>_SYS_CACHE_DIR` — cache root for downloads/extraction
+- `<CRATE>_SYS_SKIP_CC` — skip C/C++ compilation
+- `<CRATE>_SYS_FORCE_BUILD` — force source build
+- `IMGUI_SYS_USE_CMAKE` / `IMPLOT_SYS_USE_CMAKE` — prefer CMake when available; otherwise cc
+- `CARGO_NET_OFFLINE=true` — forbid network; use only local packages or repo prebuilt
+
+Freetype: enable once anywhere. Turning on `freetype` in any extension (imnodes/imguizmo/implot) propagates to `dear-imgui-sys`. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).
+
 ## Compatibility (Latest)
 
 The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for full history and upgrade notes.

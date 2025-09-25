@@ -15,8 +15,8 @@ pub const FS_ENTRY_POINT: &str = "fs_main";
 
 /// WGSL shader source
 ///
-/// This includes both vertex and fragment shaders with gamma correction support,
-/// similar to the embedded shaders in imgui_impl_wgpu.cpp
+/// This includes both vertex and fragment shaders with optional gamma correction,
+/// similar in spirit to imgui_impl_wgpu.cpp
 pub const SHADER_SOURCE: &str = r#"
 // Dear ImGui WGSL Shader
 // Vertex and fragment shaders for rendering Dear ImGui draw data
@@ -59,7 +59,9 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = in.color * textureSample(u_texture, u_sampler, in.uv);
-    return color;
+    // Apply gamma curve if uniforms.gamma != 1.0. With gamma=1.0 this is a no-op.
+    let corrected = pow(color.rgb, vec3<f32>(uniforms.gamma));
+    return vec4<f32>(corrected, color.a);
 }
 "#;
 

@@ -34,6 +34,7 @@ dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
 #cfg-if.workspace = true
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
+build-support = { path = "../../tools/build-support" }
 
 [build-dependencies]
 bindgen.workspace = true
@@ -44,6 +45,7 @@ reqwest = { version = "0.11", features = ["blocking", "rustls-tls"], default-fea
 flate2 = "1"
 tar = "0.4"
 cmake = "0.1"
+build-support = { path = "../../tools/build-support" }
 
 [[bin]]
 name = "package"

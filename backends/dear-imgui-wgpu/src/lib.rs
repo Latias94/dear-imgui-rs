@@ -62,3 +62,14 @@ pub use renderer::*;
 pub use shaders::*;
 pub use texture::*;
 pub use uniforms::*;
+
+/// Gamma correction mode for the WGPU renderer
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GammaMode {
+    /// Automatically pick gamma based on render target format (default)
+    Auto,
+    /// Force linear output (gamma = 1.0)
+    Linear,
+    /// Force gamma 2.2 curve (gamma = 2.2)
+    Gamma22,
+}

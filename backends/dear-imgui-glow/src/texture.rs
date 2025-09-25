@@ -374,4 +374,3 @@ pub fn update_imgui_texture(
         Ok(gl_texture)
     }
 }
-

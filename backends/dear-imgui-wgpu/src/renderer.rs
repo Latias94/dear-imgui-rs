@@ -3,6 +3,7 @@
 //! This module contains the main WgpuRenderer struct and its implementation,
 //! following the pattern from imgui_impl_wgpu.cpp
 
+use crate::GammaMode;
 use crate::{
     FrameResources, RenderResources, RendererError, RendererResult, ShaderManager, Uniforms,
     WgpuBackendData, WgpuInitInfo, WgpuTextureManager,
@@ -24,6 +25,8 @@ pub struct WgpuRenderer {
     default_texture: Option<TextureView>,
     /// Registered font atlas texture id (if created via legacy path)
     font_texture_id: Option<u64>,
+    /// Gamma mode: automatic (by format), force linear (1.0), or force 2.2
+    gamma_mode: GammaMode,
 }
 
 impl WgpuRenderer {
@@ -69,6 +72,7 @@ impl WgpuRenderer {
             texture_manager: WgpuTextureManager::new(),
             default_texture: None,
             font_texture_id: None,
+            gamma_mode: GammaMode::Auto,
         }
     }
 
@@ -143,6 +147,11 @@ impl WgpuRenderer {
         Ok(())
     }
 
+    /// Set gamma mode
+    pub fn set_gamma_mode(&mut self, mode: GammaMode) {
+        self.gamma_mode = mode;
+    }
+
     /// Configure Dear ImGui context with WGPU backend capabilities
     pub fn configure_imgui_context(&self, imgui_context: &mut Context) {
         let io = imgui_context.io_mut();
@@ -167,14 +176,22 @@ impl WgpuRenderer {
             // Fallback: if draw_data-based texture updates are not triggered for the font atlas
             // on this Dear ImGui version/config, upload the font atlas now and assign a TexID.
             if self.font_texture_id.is_none() {
-                if let Some(tex_id) = self.try_upload_font_atlas_legacy(imgui_ctx, &device, &queue)? {
+                if let Some(tex_id) =
+                    self.try_upload_font_atlas_legacy(imgui_ctx, &device, &queue)?
+                {
                     if cfg!(debug_assertions) {
-                        eprintln!("[dear-imgui-wgpu][debug] Font atlas uploaded via legacy path: tex_id={}", tex_id);
+                        eprintln!(
+                            "[dear-imgui-wgpu][debug] Font atlas uploaded via legacy path: tex_id={}",
+                            tex_id
+                        );
                     }
                     self.font_texture_id = Some(tex_id);
                 }
             } else if cfg!(debug_assertions) {
-                eprintln!("[dear-imgui-wgpu][debug] Font atlas tex_id already set: {:?}", self.font_texture_id);
+                eprintln!(
+                    "[dear-imgui-wgpu][debug] Font atlas tex_id already set: {:?}",
+                    self.font_texture_id
+                );
             }
         }
         Ok(())
@@ -379,7 +396,9 @@ impl WgpuRenderer {
         let raw_tex = fonts.get_tex_data();
         if raw_tex.is_null() {
             if cfg!(debug_assertions) {
-                eprintln!("[dear-imgui-wgpu][debug] Font atlas TexData is null; skip legacy upload");
+                eprintln!(
+                    "[dear-imgui-wgpu][debug] Font atlas TexData is null; skip legacy upload"
+                );
             }
             return Ok(None);
         }
@@ -417,7 +436,10 @@ impl WgpuRenderer {
             } else {
                 // Unexpected format; don't proceed
                 if cfg!(debug_assertions) {
-                    eprintln!("[dear-imgui-wgpu][debug] Unexpected font atlas bpp={} — skip", bpp);
+                    eprintln!(
+                        "[dear-imgui-wgpu][debug] Unexpected font atlas bpp={} — skip",
+                        bpp
+                    );
                 }
                 return Ok(None);
             };
@@ -425,7 +447,11 @@ impl WgpuRenderer {
             // Create WGPU texture
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Dear ImGui Font Atlas"),
-                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -453,7 +479,11 @@ impl WgpuRenderer {
                         bytes_per_row: Some(unpadded),
                         rows_per_image: Some(height),
                     },
-                    wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
                 );
             } else {
                 let mut padded_buf = vec![0u8; (padded * height) as usize];
@@ -476,7 +506,11 @@ impl WgpuRenderer {
                         bytes_per_row: Some(padded),
                         rows_per_image: Some(height),
                     },
-                    wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
                 );
                 if cfg!(debug_assertions) {
                     eprintln!(
@@ -497,13 +531,18 @@ impl WgpuRenderer {
                 fonts_mut.set_texture_id(dear_imgui::TextureId::from(tex_id));
             }
             if cfg!(debug_assertions) {
-                eprintln!("[dear-imgui-wgpu][debug] Legacy font atlas upload complete: tex_id={}", tex_id);
+                eprintln!(
+                    "[dear-imgui-wgpu][debug] Legacy font atlas upload complete: tex_id={}",
+                    tex_id
+                );
             }
 
             return Ok(Some(tex_id));
         }
         if cfg!(debug_assertions) {
-            eprintln!("[dear-imgui-wgpu][debug] Font atlas has no pixel buffer; skip legacy upload");
+            eprintln!(
+                "[dear-imgui-wgpu][debug] Font atlas has no pixel buffer; skip legacy upload"
+            );
         }
         Ok(None)
     }
@@ -611,8 +650,15 @@ impl WgpuRenderer {
         // Prepare frame resources
         Self::prepare_frame_resources_static(draw_data, backend_data)?;
 
+        // Compute gamma based on renderer mode
+        let gamma = match self.gamma_mode {
+            GammaMode::Auto => Uniforms::gamma_for_format(backend_data.render_target_format),
+            GammaMode::Linear => 1.0,
+            GammaMode::Gamma22 => 2.2,
+        };
+
         // Setup render state
-        Self::setup_render_state_static(draw_data, render_pass, backend_data)?;
+        Self::setup_render_state_static(draw_data, render_pass, backend_data, gamma)?;
 
         // Setup render state structure (for callbacks and custom texture bindings)
         // Note: We need to be careful with lifetimes here, so we'll set it just before rendering
@@ -635,6 +681,7 @@ impl WgpuRenderer {
                 draw_data,
                 render_pass,
                 backend_data,
+                gamma,
             );
 
             // Clear the render state pointer
@@ -701,6 +748,7 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         render_pass: &mut RenderPass,
         backend_data: &WgpuBackendData,
+        gamma: f32,
     ) -> RendererResult<()> {
         let pipeline = backend_data
             .pipeline_state
@@ -718,7 +766,6 @@ impl WgpuRenderer {
         // Update uniforms
         let mvp =
             Uniforms::create_orthographic_matrix(draw_data.display_pos, draw_data.display_size);
-        let gamma = Uniforms::gamma_for_format(backend_data.render_target_format);
         let mut uniforms = Uniforms::new();
         uniforms.update(mvp, gamma);
 
@@ -749,6 +796,7 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         render_pass: &mut RenderPass,
         backend_data: &mut WgpuBackendData,
+        gamma: f32,
     ) -> RendererResult<()> {
         let mut global_vtx_offset = 0i32;
         let mut global_idx_offset = 0u32;
@@ -842,7 +890,13 @@ impl WgpuRenderer {
                         render_pass.draw_indexed(start_index..end_index, vertex_offset, 0..1);
                     }
                     dear_imgui::render::DrawCmd::ResetRenderState => {
-                        Self::setup_render_state_static(draw_data, render_pass, backend_data)?;
+                        // Re-apply render state using the same gamma
+                        Self::setup_render_state_static(
+                            draw_data,
+                            render_pass,
+                            backend_data,
+                            gamma,
+                        )?;
                     }
                     dear_imgui::render::DrawCmd::RawCallback { .. } => {
                         // Raw callbacks are not supported in this implementation

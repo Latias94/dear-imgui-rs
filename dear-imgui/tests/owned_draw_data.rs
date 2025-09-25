@@ -31,7 +31,9 @@ fn owned_draw_data_survives_context_drop() {
     // Destroy original context; owned data must remain valid
     drop(ctx);
 
-    let dd = owned.draw_data().expect("owned draw data should be present");
+    let dd = owned
+        .draw_data()
+        .expect("owned draw data should be present");
     // Access a couple of fields to ensure memory is still valid
     let _ = dd.draw_lists_count();
 }
@@ -62,7 +64,9 @@ fn owned_draw_data_can_move_to_thread() {
     drop(ctx);
 
     std::thread::spawn(move || {
-        let dd = owned.draw_data().expect("owned draw data should be present");
+        let dd = owned
+            .draw_data()
+            .expect("owned draw data should be present");
         let _ = dd.draw_lists_count();
     })
     .join()
