@@ -1,12 +1,16 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 use crate::texture::TextureId;
 use bitflags::bitflags;
 use std::marker::PhantomData;
 
-use crate::color::Color;
+use crate::colors::Color;
 use crate::sys;
 
-/// Math types compatible with imgui-rs
-pub type MintVec2 = [f32; 2];
+// (MintVec2 legacy alias removed; draw APIs now accept Into<sys::ImVec2>)
 
 /// Packed RGBA color compatible with imgui-rs
 #[repr(transparent)]
@@ -92,76 +96,7 @@ impl From<u32> for ImColor32 {
     }
 }
 
-/// 2D vector
-#[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Vec2 {
-    pub x: f32,
-    pub y: f32,
-}
-
-impl Vec2 {
-    /// Creates a new Vec2
-    pub const fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
-
-    /// Zero vector
-    pub const ZERO: Vec2 = Vec2::new(0.0, 0.0);
-    /// Unit vector in X direction
-    pub const UNIT_X: Vec2 = Vec2::new(1.0, 0.0);
-    /// Unit vector in Y direction
-    pub const UNIT_Y: Vec2 = Vec2::new(0.0, 1.0);
-
-    /// Returns the length of the vector
-    pub fn length(self) -> f32 {
-        (self.x * self.x + self.y * self.y).sqrt()
-    }
-
-    /// Returns the squared length of the vector
-    pub fn length_squared(self) -> f32 {
-        self.x * self.x + self.y * self.y
-    }
-
-    /// Normalizes the vector
-    pub fn normalize(self) -> Self {
-        let len = self.length();
-        if len > 0.0 {
-            Self::new(self.x / len, self.y / len)
-        } else {
-            Self::ZERO
-        }
-    }
-
-    /// Dot product with another vector
-    pub fn dot(self, other: Self) -> f32 {
-        self.x * other.x + self.y * other.y
-    }
-}
-
-impl From<[f32; 2]> for Vec2 {
-    fn from(arr: [f32; 2]) -> Self {
-        Self::new(arr[0], arr[1])
-    }
-}
-
-impl From<Vec2> for [f32; 2] {
-    fn from(vec: Vec2) -> Self {
-        [vec.x, vec.y]
-    }
-}
-
-impl From<(f32, f32)> for Vec2 {
-    fn from((x, y): (f32, f32)) -> Self {
-        Self::new(x, y)
-    }
-}
-
-impl From<Vec2> for (f32, f32) {
-    fn from(vec: Vec2) -> Self {
-        (vec.x, vec.y)
-    }
-}
+// Removed legacy local Vec2 in favor of passing `impl Into<sys::ImVec2>` and using arrays/tuples.
 
 bitflags! {
     /// Draw list flags
@@ -182,20 +117,21 @@ bitflags! {
 
 bitflags! {
     /// Options for some DrawList operations
+    /// Values mirror ImGui's `ImDrawFlags_*` (v1.92+).
     #[repr(transparent)]
     pub struct DrawFlags: u32 {
-        const NONE = 0;
-        const CLOSED = 1 << 0;
-        const ROUND_CORNERS_TOP_LEFT = 1 << 4;
-        const ROUND_CORNERS_TOP_RIGHT = 1 << 5;
-        const ROUND_CORNERS_BOT_LEFT = 1 << 6;
-        const ROUND_CORNERS_BOT_RIGHT = 1 << 7;
-        const ROUND_CORNERS_TOP = (1 << 4) | (1 << 5);
-        const ROUND_CORNERS_BOT = (1 << 6) | (1 << 7);
-        const ROUND_CORNERS_LEFT = (1 << 4) | (1 << 6);
-        const ROUND_CORNERS_RIGHT = (1 << 5) | (1 << 7);
-        const ROUND_CORNERS_ALL = (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7);
-        const ROUND_CORNERS_NONE = 0;
+        const NONE = sys::ImDrawFlags_None as u32;
+        const CLOSED = sys::ImDrawFlags_Closed as u32;
+        const ROUND_CORNERS_TOP_LEFT = sys::ImDrawFlags_RoundCornersTopLeft as u32;
+        const ROUND_CORNERS_TOP_RIGHT = sys::ImDrawFlags_RoundCornersTopRight as u32;
+        const ROUND_CORNERS_BOT_LEFT = sys::ImDrawFlags_RoundCornersBottomLeft as u32;
+        const ROUND_CORNERS_BOT_RIGHT = sys::ImDrawFlags_RoundCornersBottomRight as u32;
+        const ROUND_CORNERS_TOP = sys::ImDrawFlags_RoundCornersTop as u32;
+        const ROUND_CORNERS_BOT = sys::ImDrawFlags_RoundCornersBottom as u32;
+        const ROUND_CORNERS_LEFT = sys::ImDrawFlags_RoundCornersLeft as u32;
+        const ROUND_CORNERS_RIGHT = sys::ImDrawFlags_RoundCornersRight as u32;
+        const ROUND_CORNERS_ALL = sys::ImDrawFlags_RoundCornersAll as u32;
+        const ROUND_CORNERS_NONE = sys::ImDrawFlags_RoundCornersNone as u32;
     }
 }
 
@@ -425,8 +361,8 @@ impl<'ui> DrawListMut<'ui> {
     /// Returns a line from point `p1` to `p2` with color `c`.
     pub fn add_line<C>(
         &'ui self,
-        p1: impl Into<MintVec2>,
-        p2: impl Into<MintVec2>,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
         c: C,
     ) -> Line<'ui>
     where
@@ -439,8 +375,8 @@ impl<'ui> DrawListMut<'ui> {
     /// and lower-right corner is at point `p2`, with color `c`.
     pub fn add_rect<C>(
         &'ui self,
-        p1: impl Into<MintVec2>,
-        p2: impl Into<MintVec2>,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
         c: C,
     ) -> Rect<'ui>
     where
@@ -452,7 +388,7 @@ impl<'ui> DrawListMut<'ui> {
     /// Returns a circle with the given `center`, `radius` and `color`.
     pub fn add_circle<C>(
         &'ui self,
-        center: impl Into<MintVec2>,
+        center: impl Into<sys::ImVec2>,
         radius: f32,
         color: C,
     ) -> Circle<'ui>
@@ -467,10 +403,10 @@ impl<'ui> DrawListMut<'ui> {
     #[doc(alias = "AddBezier", alias = "AddBezierCubic")]
     pub fn add_bezier_curve(
         &'ui self,
-        pos0: impl Into<MintVec2>,
-        cp0: impl Into<MintVec2>,
-        cp1: impl Into<MintVec2>,
-        pos1: impl Into<MintVec2>,
+        pos0: impl Into<sys::ImVec2>,
+        cp0: impl Into<sys::ImVec2>,
+        cp1: impl Into<sys::ImVec2>,
+        pos1: impl Into<sys::ImVec2>,
         color: impl Into<ImColor32>,
     ) -> BezierCurve<'ui> {
         BezierCurve::new(self, pos0, cp0, cp1, pos1, color)
@@ -480,9 +416,9 @@ impl<'ui> DrawListMut<'ui> {
     #[doc(alias = "AddTriangleFilled", alias = "AddTriangle")]
     pub fn add_triangle<C>(
         &'ui self,
-        p1: impl Into<MintVec2>,
-        p2: impl Into<MintVec2>,
-        p3: impl Into<MintVec2>,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
+        p3: impl Into<sys::ImVec2>,
         c: C,
     ) -> Triangle<'ui>
     where
@@ -498,7 +434,7 @@ impl<'ui> DrawListMut<'ui> {
     pub fn add_polyline<C, P>(&'ui self, points: Vec<P>, c: C) -> Polyline<'ui>
     where
         C: Into<ImColor32>,
-        P: Into<MintVec2>,
+        P: Into<sys::ImVec2>,
     {
         Polyline::new(self, points, c)
     }
@@ -517,13 +453,9 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Add a point to the current path.
     #[doc(alias = "PathLineTo")]
-    pub fn path_line_to(&self, pos: impl Into<MintVec2>) {
+    pub fn path_line_to(&self, pos: impl Into<sys::ImVec2>) {
         unsafe {
-            let pos = pos.into();
-            let vec2 = sys::ImVec2 {
-                x: pos[0],
-                y: pos[1],
-            };
+            let vec2: sys::ImVec2 = pos.into();
 
             // PathLineTo is inline: _Path.push_back(pos);
             // We need to manually push to the ImVector
@@ -558,18 +490,14 @@ impl<'ui> DrawListMut<'ui> {
     #[doc(alias = "PathArcTo")]
     pub fn path_arc_to(
         &self,
-        center: impl Into<MintVec2>,
+        center: impl Into<sys::ImVec2>,
         radius: f32,
         a_min: f32,
         a_max: f32,
         num_segments: i32,
     ) {
         unsafe {
-            let center = center.into();
-            let center_vec = sys::ImVec2 {
-                x: center[0],
-                y: center[1],
-            };
+            let center_vec: sys::ImVec2 = center.into();
             sys::ImDrawList_PathArcTo(
                 self.draw_list,
                 center_vec,
@@ -585,17 +513,13 @@ impl<'ui> DrawListMut<'ui> {
     #[doc(alias = "PathArcToFast")]
     pub fn path_arc_to_fast(
         &self,
-        center: impl Into<MintVec2>,
+        center: impl Into<sys::ImVec2>,
         radius: f32,
         a_min_of_12: i32,
         a_max_of_12: i32,
     ) {
         unsafe {
-            let center = center.into();
-            let center_vec = sys::ImVec2 {
-                x: center[0],
-                y: center[1],
-            };
+            let center_vec: sys::ImVec2 = center.into();
             sys::ImDrawList_PathArcToFast(
                 self.draw_list,
                 center_vec,
@@ -610,22 +534,14 @@ impl<'ui> DrawListMut<'ui> {
     #[doc(alias = "PathRect")]
     pub fn path_rect(
         &self,
-        rect_min: impl Into<MintVec2>,
-        rect_max: impl Into<MintVec2>,
+        rect_min: impl Into<sys::ImVec2>,
+        rect_max: impl Into<sys::ImVec2>,
         rounding: f32,
         flags: DrawFlags,
     ) {
         unsafe {
-            let rect_min = rect_min.into();
-            let rect_max = rect_max.into();
-            let min_vec = sys::ImVec2 {
-                x: rect_min[0],
-                y: rect_min[1],
-            };
-            let max_vec = sys::ImVec2 {
-                x: rect_max[0],
-                y: rect_max[1],
-            };
+            let min_vec: sys::ImVec2 = rect_min.into();
+            let max_vec: sys::ImVec2 = rect_max.into();
             sys::ImDrawList_PathRect(
                 self.draw_list,
                 min_vec,
@@ -681,24 +597,168 @@ impl<'ui> DrawListMut<'ui> {
     /// Draw a text whose upper-left corner is at point `pos`.
     pub fn add_text(
         &self,
-        pos: impl Into<MintVec2>,
+        pos: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
         text: impl AsRef<str>,
     ) {
         use std::os::raw::c_char;
 
         let text = text.as_ref();
-        let pos = pos.into();
+        let pos: sys::ImVec2 = pos.into();
         let col = col.into();
 
         unsafe {
             let start = text.as_ptr() as *const c_char;
             let end = (start as usize + text.len()) as *const c_char;
-            let pos_vec = sys::ImVec2 {
-                x: pos[0],
-                y: pos[1],
-            };
-            sys::ImDrawList_AddText_Vec2(self.draw_list, pos_vec, col.into(), start, end);
+            sys::ImDrawList_AddText_Vec2(self.draw_list, pos, col.into(), start, end);
+        }
+    }
+
+    /// Push a texture on the drawlist texture stack (ImGui 1.92+)
+    ///
+    /// While pushed, image and primitives will use this texture unless otherwise specified.
+    ///
+    /// Example:
+    /// ```no_run
+    /// # use dear_imgui::*;
+    /// # fn demo(ui: &Ui) {
+    /// let dl = ui.get_window_draw_list();
+    /// let tex = texture::TextureId::new(1);
+    /// dl.push_texture(tex);
+    /// dl.add_image(tex, [10.0,10.0], [110.0,110.0], [0.0,0.0], [1.0,1.0], Color::WHITE);
+    /// dl.pop_texture();
+    /// # }
+    /// ```
+    #[doc(alias = "PushTexture")]
+    pub fn push_texture(&self, texture: impl Into<crate::texture::TextureRef>) {
+        let tex_ref = texture.into().raw();
+        unsafe { sys::ImDrawList_PushTexture(self.draw_list, tex_ref) }
+    }
+
+    /// Pop the last texture from the drawlist texture stack (ImGui 1.92+)
+    #[doc(alias = "PopTexture")]
+    pub fn pop_texture(&self) {
+        unsafe {
+            sys::ImDrawList_PopTexture(self.draw_list);
+        }
+    }
+
+    /// Add an image quad (axis-aligned). Tint via `col`.
+    #[doc(alias = "AddImage")]
+    pub fn add_image(
+        &self,
+        texture: impl Into<crate::texture::TextureRef>,
+        p_min: impl Into<sys::ImVec2>,
+        p_max: impl Into<sys::ImVec2>,
+        uv_min: impl Into<sys::ImVec2>,
+        uv_max: impl Into<sys::ImVec2>,
+        col: impl Into<ImColor32>,
+    ) {
+        // Example:
+        // let tex = texture::TextureId::new(5);
+        // self.add_image(tex, [10.0,10.0], [110.0,110.0], [0.0,0.0], [1.0,1.0], Color::WHITE);
+        let p_min: sys::ImVec2 = p_min.into();
+        let p_max: sys::ImVec2 = p_max.into();
+        let uv_min: sys::ImVec2 = uv_min.into();
+        let uv_max: sys::ImVec2 = uv_max.into();
+        let col = col.into().to_bits();
+        let tex_ref = texture.into().raw();
+        unsafe {
+            sys::ImDrawList_AddImage(self.draw_list, tex_ref, p_min, p_max, uv_min, uv_max, col)
+        }
+    }
+
+    /// Add an image with 4 arbitrary corners.
+    #[doc(alias = "AddImageQuad")]
+    pub fn add_image_quad(
+        &self,
+        texture: impl Into<crate::texture::TextureRef>,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
+        p3: impl Into<sys::ImVec2>,
+        p4: impl Into<sys::ImVec2>,
+        uv1: impl Into<sys::ImVec2>,
+        uv2: impl Into<sys::ImVec2>,
+        uv3: impl Into<sys::ImVec2>,
+        uv4: impl Into<sys::ImVec2>,
+        col: impl Into<ImColor32>,
+    ) {
+        // Example:
+        // let tex = texture::TextureId::new(5);
+        // self.add_image_quad(
+        //     tex,
+        //     [10.0,10.0], [110.0,20.0], [120.0,120.0], [5.0,100.0],
+        //     [0.0,0.0], [1.0,0.0], [1.0,1.0], [0.0,1.0],
+        //     Color::WHITE,
+        // );
+        let p1: sys::ImVec2 = p1.into();
+        let p2: sys::ImVec2 = p2.into();
+        let p3: sys::ImVec2 = p3.into();
+        let p4: sys::ImVec2 = p4.into();
+        let uv1: sys::ImVec2 = uv1.into();
+        let uv2: sys::ImVec2 = uv2.into();
+        let uv3: sys::ImVec2 = uv3.into();
+        let uv4: sys::ImVec2 = uv4.into();
+        let col = col.into().to_bits();
+        let tex_ref = texture.into().raw();
+        unsafe {
+            sys::ImDrawList_AddImageQuad(
+                self.draw_list,
+                tex_ref,
+                p1,
+                p2,
+                p3,
+                p4,
+                uv1,
+                uv2,
+                uv3,
+                uv4,
+                col,
+            )
+        }
+    }
+
+    /// Add an axis-aligned rounded image.
+    #[doc(alias = "AddImageRounded")]
+    pub fn add_image_rounded(
+        &self,
+        texture: impl Into<crate::texture::TextureRef>,
+        p_min: impl Into<sys::ImVec2>,
+        p_max: impl Into<sys::ImVec2>,
+        uv_min: impl Into<sys::ImVec2>,
+        uv_max: impl Into<sys::ImVec2>,
+        col: impl Into<ImColor32>,
+        rounding: f32,
+        flags: DrawFlags,
+    ) {
+        // Example:
+        // let tex = texture::TextureId::new(5);
+        // self.add_image_rounded(
+        //     tex,
+        //     [10.0,10.0], [110.0,110.0],
+        //     [0.0,0.0], [1.0,1.0],
+        //     Color::WHITE,
+        //     8.0,
+        //     DrawFlags::ROUND_CORNERS_ALL,
+        // );
+        let p_min: sys::ImVec2 = p_min.into();
+        let p_max: sys::ImVec2 = p_max.into();
+        let uv_min: sys::ImVec2 = uv_min.into();
+        let uv_max: sys::ImVec2 = uv_max.into();
+        let col = col.into().to_bits();
+        let tex_ref = texture.into().raw();
+        unsafe {
+            sys::ImDrawList_AddImageRounded(
+                self.draw_list,
+                tex_ref,
+                p_min,
+                p_max,
+                uv_min,
+                uv_max,
+                col,
+                rounding,
+                flags.bits() as i32,
+            )
         }
     }
 }
@@ -716,16 +776,22 @@ pub struct Line<'ui> {
 impl<'ui> Line<'ui> {
     fn new<C>(
         draw_list: &'ui DrawListMut<'_>,
-        p1: impl Into<MintVec2>,
-        p2: impl Into<MintVec2>,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
         c: C,
     ) -> Self
     where
         C: Into<ImColor32>,
     {
         Self {
-            p1: p1.into(),
-            p2: p2.into(),
+            p1: {
+                let v: sys::ImVec2 = p1.into();
+                v.into()
+            },
+            p2: {
+                let v: sys::ImVec2 = p2.into();
+                v.into()
+            },
             color: c.into(),
             thickness: 1.0,
             draw_list,
@@ -776,16 +842,22 @@ pub struct Rect<'ui> {
 impl<'ui> Rect<'ui> {
     fn new<C>(
         draw_list: &'ui DrawListMut<'_>,
-        p1: impl Into<MintVec2>,
-        p2: impl Into<MintVec2>,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
         c: C,
     ) -> Self
     where
         C: Into<ImColor32>,
     {
         Self {
-            p1: p1.into(),
-            p2: p2.into(),
+            p1: {
+                let v: sys::ImVec2 = p1.into();
+                v.into()
+            },
+            p2: {
+                let v: sys::ImVec2 = p2.into();
+                v.into()
+            },
             color: c.into(),
             rounding: 0.0,
             flags: DrawFlags::ROUND_CORNERS_ALL,
@@ -872,7 +944,7 @@ pub struct Circle<'ui> {
 impl<'ui> Circle<'ui> {
     fn new<C>(
         draw_list: &'ui DrawListMut<'_>,
-        center: impl Into<MintVec2>,
+        center: impl Into<sys::ImVec2>,
         radius: f32,
         color: C,
     ) -> Self
@@ -880,7 +952,10 @@ impl<'ui> Circle<'ui> {
         C: Into<ImColor32>,
     {
         Self {
-            center: center.into(),
+            center: {
+                let v: sys::ImVec2 = center.into();
+                v.into()
+            },
             radius,
             color: color.into(),
             num_segments: 0, // 0 = auto
@@ -958,20 +1033,32 @@ impl<'ui> BezierCurve<'ui> {
     /// Typically constructed by [`DrawListMut::add_bezier_curve`]
     pub fn new<C>(
         draw_list: &'ui DrawListMut<'_>,
-        pos0: impl Into<MintVec2>,
-        cp0: impl Into<MintVec2>,
-        cp1: impl Into<MintVec2>,
-        pos1: impl Into<MintVec2>,
+        pos0: impl Into<sys::ImVec2>,
+        cp0: impl Into<sys::ImVec2>,
+        cp1: impl Into<sys::ImVec2>,
+        pos1: impl Into<sys::ImVec2>,
         c: C,
     ) -> Self
     where
         C: Into<ImColor32>,
     {
         Self {
-            pos0: pos0.into(),
-            cp0: cp0.into(),
-            cp1: cp1.into(),
-            pos1: pos1.into(),
+            pos0: {
+                let v: sys::ImVec2 = pos0.into();
+                v.into()
+            },
+            cp0: {
+                let v: sys::ImVec2 = cp0.into();
+                v.into()
+            },
+            cp1: {
+                let v: sys::ImVec2 = cp1.into();
+                v.into()
+            },
+            pos1: {
+                let v: sys::ImVec2 = pos1.into();
+                v.into()
+            },
             color: c.into(),
             thickness: 1.0,
             num_segments: None,
@@ -1028,10 +1115,16 @@ impl<'ui> Polyline<'ui> {
     fn new<C, P>(draw_list: &'ui DrawListMut<'_>, points: Vec<P>, c: C) -> Self
     where
         C: Into<ImColor32>,
-        P: Into<MintVec2>,
+        P: Into<sys::ImVec2>,
     {
         Self {
-            points: points.into_iter().map(|p| p.into()).collect(),
+            points: points
+                .into_iter()
+                .map(|p| {
+                    let v: sys::ImVec2 = p.into();
+                    v.into()
+                })
+                .collect(),
             color: c.into(),
             thickness: 1.0,
             filled: false,
@@ -1093,18 +1186,27 @@ pub struct Triangle<'ui> {
 impl<'ui> Triangle<'ui> {
     fn new<C>(
         draw_list: &'ui DrawListMut<'_>,
-        p1: impl Into<MintVec2>,
-        p2: impl Into<MintVec2>,
-        p3: impl Into<MintVec2>,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
+        p3: impl Into<sys::ImVec2>,
         c: C,
     ) -> Self
     where
         C: Into<ImColor32>,
     {
         Self {
-            p1: p1.into(),
-            p2: p2.into(),
-            p3: p3.into(),
+            p1: {
+                let v: sys::ImVec2 = p1.into();
+                v.into()
+            },
+            p2: {
+                let v: sys::ImVec2 = p2.into();
+                v.into()
+            },
+            p3: {
+                let v: sys::ImVec2 = p3.into();
+                v.into()
+            },
             color: c.into(),
             thickness: 1.0,
             filled: false,

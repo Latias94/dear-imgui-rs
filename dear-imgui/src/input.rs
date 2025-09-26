@@ -1,3 +1,8 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 use crate::sys;
 use bitflags::bitflags;
 
@@ -282,22 +287,7 @@ impl From<Key> for sys::ImGuiKey {
     }
 }
 
-bitflags! {
-    /// Key modifier flags
-    #[repr(transparent)]
-    pub struct KeyModFlags: i32 {
-        /// No modifiers
-        const NONE = 0;
-        /// Ctrl key modifier
-        const CTRL = 1 << 0;
-        /// Shift key modifier
-        const SHIFT = 1 << 1;
-        /// Alt key modifier
-        const ALT = 1 << 2;
-        /// Super key modifier
-        const SUPER = 1 << 3;
-    }
-}
+// Key modifier flags are available via io.KeyCtrl/KeyShift/KeyAlt/KeySuper.
 
 bitflags! {
     /// Input text flags for text input widgets

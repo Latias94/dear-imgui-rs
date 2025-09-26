@@ -27,8 +27,8 @@ tracing-subscriber = { workspace = true, optional = true }
 [features]
 default = ["tracing"]
 # Docking is always enabled; feature removed.
-# Enable multi-viewport support (commented out while WIP)
-# multi-viewport = ["dear-imgui-sys/multi-viewport"]
+# Enable multi-viewport support (define feature to satisfy cfg checks; opt-in)
+multi-viewport = []
 # Enable tracing support for better debugging
 tracing = ["dep:tracing", "dep:tracing-subscriber"]
 # Enable freetype font rasterizer

@@ -83,6 +83,11 @@ impl DrawData {
     /// Returns an iterator over the textures that need to be updated
     ///
     /// This is used by renderer backends to process texture creation, updates, and destruction.
+    /// Each item is an `ImTextureData*` carrying a `Status` which can be one of:
+    /// - `OK`: nothing to do.
+    /// - `WantCreate`: create a GPU texture and upload all pixels.
+    /// - `WantUpdates`: upload specified `UpdateRect` regions.
+    /// - `WantDestroy`: destroy the GPU texture (may be delayed until unused).
     /// Most of the time this list has only 1 texture and it doesn't need any update.
     pub fn textures(&self) -> TextureIterator<'_> {
         unsafe {

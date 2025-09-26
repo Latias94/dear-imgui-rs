@@ -27,9 +27,89 @@
 //!         ui.text("This is Dear ImGui with docking support!");
 //!     });
 //! ```
+//!
+//! ## Math Interop (mint/glam)
+//!
+//! Many drawing and coordinate-taking APIs accept `impl Into<sys::ImVec2>` so you can pass:
+//! - `[f32; 2]` or `(f32, f32)`
+//! - `dear_imgui_sys::ImVec2`
+//! - `mint::Vector2<f32>` (via `dear-imgui-sys` conversions)
+//! - With optional integrations, `glam::Vec2` via your own `Into<ImVec2>`
+//!
+//! Example:
+//! ```no_run
+//! # use dear_imgui::*;
+//! # fn demo(ui: &Ui) {
+//! let dl = ui.get_window_draw_list();
+//! dl.add_line([0.0, 0.0], [100.0, 100.0], [1.0, 1.0, 1.0, 1.0]).build();
+//! // Also works with mint::Vector2<f32>
+//! let a = mint::Vector2 { x: 10.0, y: 20.0 };
+//! let b = mint::Vector2 { x: 30.0, y: 40.0 };
+//! dl.add_rect(a, b, [1.0, 0.0, 0.0, 1.0]).build();
+//! # }
+//! ```
+//!
+//! ## Textures (ImGui 1.92+)
+//!
+//! You can pass either a legacy `TextureId` or an ImGui-managed `TextureData` (preferred):
+//!
+//! ```no_run
+//! # use dear_imgui::*;
+//! # fn demo(ui: &Ui) {
+//! // 1) Legacy handle
+//! let tex_id = texture::TextureId::new(0x1234);
+//! ui.image(tex_id, [64.0, 64.0]);
+//!
+//! // 2) Managed texture (created/updated/destroyed via DrawData::textures())
+//! let mut tex = texture::TextureData::new();
+//! tex.create(texture::TextureFormat::RGBA32, 256, 256);
+//! // fill pixels / request updates ...
+//! ui.image(&mut tex, [256.0, 256.0]);
+//! # }
+//! ```
+//!
+//! Lifetime note: when using `&TextureData`, ensure it remains alive through rendering of the frame.
+//!
+//! ### Texture Management Guide
+//!
+//! - Concepts:
+//!   - `TextureId`: legacy plain handle (e.g., GL texture name, Vk descriptor).
+//!   - `TextureData`: managed CPU-side description with status flags and pixel buffer.
+//!   - `TextureRef`: a small wrapper used by widgets/drawlist, constructed from either of the above.
+//! - Basic flow:
+//!   1. Create `TextureData` and call `create(format, w, h)` to allocate pixels.
+//!   2. Fill/modify pixels; call `set_status(WantCreate)` for initial upload, or `WantUpdates` with
+//!      `UpdateRect` for sub-updates. `TextureData::set_data()` is a convenience which copies data and
+//!      marks an update.
+//!   3. Use the texture in UI via `ui.image(&mut tex, size)` or drawlist APIs.
+//!   4. In your renderer, during `render()`, iterate `DrawData::textures()` and honor the requests
+//!      (Create/Update/Destroy), then set status back to `OK`/`Destroyed`.
+//! - Alternatives: when you already have a GPU handle, pass `TextureId` directly.
+//!
+//! ## Colors (ImU32 ABGR)
+//!
+//! Dear ImGui uses a packed 32-bit color in ABGR order for low-level APIs (aka `ImU32`).
+//! When you need a packed color (e.g. `TableSetBgColor`), use `colors::Color::to_imgui_u32()`:
+//!
+//! ```no_run
+//! # use dear_imgui::*;
+//! # fn demo(ui: &Ui) {
+//! // Pack RGBA floats to ImGui ABGR (ImU32)
+//! let abgr = colors::Color::rgb(1.0, 0.0, 0.0).to_imgui_u32();
+//! ui.table_set_bg_color_u32(widget::TableBgTarget::CellBg, abgr, -1);
+//! # }
+//! ```
+//!
+//! For draw-list helpers you can continue to pass `[f32;4]` or use `draw::ImColor32` which
+//! represents the same ABGR packed value in a convenient wrapper.
 
 #![deny(rust_2018_idioms)]
 #![cfg_attr(test, allow(clippy::float_cmp))]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 
 // Re-export the sys crate for advanced users
 pub extern crate dear_imgui_sys as sys;
@@ -92,7 +172,7 @@ pub use self::columns::*;
 
 // Internal modules
 mod clipboard;
-mod color;
+mod colors;
 mod context;
 mod dock_builder;
 mod dock_space;
@@ -139,7 +219,7 @@ mod columns;
 pub mod logging;
 
 // Re-export public API
-pub use color::*;
+pub use colors::*;
 pub use dock_builder::*;
 pub use dock_space::*;
 // Export DrawListMut for extensions

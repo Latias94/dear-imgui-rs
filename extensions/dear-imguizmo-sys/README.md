@@ -2,6 +2,13 @@
 
 Low-level FFI bindings for ImGuizmo via the cimguizmo C API. This crate pairs with `dear-imgui-sys` (cimgui C API) and exposes `ImGuizmo_*` functions/types for higher-level crates (`dear-imguizmo`).
 
+## Features
+
+- `prebuilt`: allow the build script to auto-download a release archive when available (or when `IMGUIZMO_SYS_USE_PREBUILT=1`).
+- `build-from-source`: force building native sources with `cc` even if a prebuilt could be linked.
+- `freetype`: passthrough to `dear-imgui-sys/freetype` to enable FreeType in the workspace.
+- `package-bin`: enable an internal `bin/package` helper to produce release artifacts.
+
 ## Build Modes
 
 This crate supports three ways to obtain the native `dear_imguizmo` static library:

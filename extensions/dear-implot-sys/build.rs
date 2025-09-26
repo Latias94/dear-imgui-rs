@@ -228,6 +228,13 @@ fn main() {
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimplot_root = cfg.manifest_dir.join("third-party/cimplot");
+
+    // docs.rs: generate or use pregenerated bindings, skip native/source checks
+    if cfg.docs_rs {
+        docsrs_build(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+        return;
+    }
+
     if !imgui_src.exists() {
         panic!(
             "ImGui source not found at {:?}. Did you forget to initialize git submodules?",
@@ -241,7 +248,7 @@ fn main() {
         );
     }
 
-    // Generate bindings
+    // Generate bindings (native/source build path)
     generate_bindings(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
 
     // Features: build-from-source forces source build; prebuilt is opt-in
@@ -260,8 +267,6 @@ fn main() {
         } else {
             build_with_cc(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
         }
-    } else if cfg.docs_rs {
-        docsrs_build(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
     }
 }
 
@@ -402,7 +407,7 @@ fn expected_lib_name(target_env: &str) -> &'static str {
 
 fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
-    let lib_path = dir.join(lib_name.as_str());
+    let lib_path = dir.join(lib_name);
     if !lib_path.exists() {
         println!(
             "cargo:warning=prebuilt dear_implot not found at {}",

@@ -1,107 +1,517 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 use crate::internal::RawWrapper;
 use crate::sys;
+use crate::utils::HoveredFlags;
+use crate::widget::TreeNodeFlags;
 use bitflags::bitflags;
 
 /// User interface style/colors
-#[repr(C)]
+///
+/// Note: This is a transparent wrapper over `sys::ImGuiStyle` (v1.92+ layout).
+/// Do not assume field layout here; use accessors or `raw()/raw_mut()` if needed.
+#[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Style {
-    /// Global alpha applies to everything
-    pub alpha: f32,
-    /// Additional alpha multiplier applied to disabled elements. Multiplies over current value of [`Style::alpha`].
-    pub disabled_alpha: f32,
-    /// Padding within a window
-    pub window_padding: [f32; 2],
-    /// Rounding radius of window corners.
-    ///
-    /// Set to 0.0 to have rectangular windows.
-    /// Large values tend to lead to a variety of artifacts and are not recommended.
-    pub window_rounding: f32,
-    /// Thickness of border around windows.
-    ///
-    /// Generally set to 0.0 or 1.0 (other values are not well tested and cost more CPU/GPU).
-    pub window_border_size: f32,
-    /// Minimum window size
-    pub window_min_size: [f32; 2],
-    /// Alignment for title bar text
-    pub window_title_align: [f32; 2],
-    /// Side of the collapsing/docking button in the title bar (None/Left/Right)
-    pub window_menu_button_position: Direction,
-    /// Radius of child window corners rounding
-    pub child_rounding: f32,
-    /// Thickness of border around child windows
-    pub child_border_size: f32,
-    /// Radius of popup window corners rounding
-    pub popup_rounding: f32,
-    /// Thickness of border around popup/tooltip windows
-    pub popup_border_size: f32,
-    /// Padding within a framed rectangle (used by most widgets)
-    pub frame_padding: [f32; 2],
-    /// Radius of frame corners rounding
-    pub frame_rounding: f32,
-    /// Thickness of border around frames
-    pub frame_border_size: f32,
-    /// Horizontal and vertical spacing between widgets/lines
-    pub item_spacing: [f32; 2],
-    /// Horizontal and vertical spacing between within elements of a composed widget
-    pub item_inner_spacing: [f32; 2],
-    /// Padding within a table cell
-    pub cell_padding: [f32; 2],
-    /// Expand reactive bounding box for touch-based system where touch position is not accurate enough
-    pub touch_extra_padding: [f32; 2],
-    /// Horizontal indentation when e.g. entering a tree node
-    pub indent_spacing: f32,
-    /// Minimum horizontal spacing between two columns
-    pub columns_min_spacing: f32,
-    /// Width of the vertical scrollbar, height of the horizontal scrollbar
-    pub scrollbar_size: f32,
-    /// Radius of scrollbar corners rounding
-    pub scrollbar_rounding: f32,
-    /// Minimum width/height of a grab box for slider/scrollbar
-    pub grab_min_size: f32,
-    /// Radius of grabs corners rounding
-    pub grab_rounding: f32,
-    /// The size in pixels of the dead-zone around zero on logarithmic sliders that cross zero
-    pub log_slider_deadzone: f32,
-    /// Radius of upper corners of a tab
-    pub tab_rounding: f32,
-    /// Thickness of border around tabs
-    pub tab_border_size: f32,
-    /// Minimum width for close button to appears on an unselected tab when hovered
-    pub tab_min_width_for_close_button: f32,
-    /// Side of the color button in the ColorEdit4 widget (left/right)
-    pub color_button_position: Direction,
-    /// Alignment of button text when button is larger than text
-    pub button_text_align: [f32; 2],
-    /// Alignment of selectable text when selectable is larger than text
-    pub selectable_text_align: [f32; 2],
-    /// Window position are clamped to be visible within the display area or monitors by at least this amount
-    pub display_window_padding: [f32; 2],
-    /// If you cannot see the edges of your screen (e.g. on a TV) increase the safe area padding
-    pub display_safe_area_padding: [f32; 2],
-    /// Scale software rendered mouse cursor (when io.MouseDrawCursor is enabled)
-    pub mouse_cursor_scale: f32,
-    /// Enable anti-aliased lines/borders
-    pub anti_aliased_lines: bool,
-    /// Enable anti-aliased lines/borders using textures where possible
-    pub anti_aliased_lines_use_tex: bool,
-    /// Enable anti-aliased edges around filled shapes
-    pub anti_aliased_fill: bool,
-    /// Tessellation tolerance when using PathBezierCurveTo()
-    pub curve_tessellation_tol: f32,
-    /// Maximum error (in pixels) allowed when using AddCircle()/AddCircleFilled() or drawing rounded corner rectangles
-    pub circle_tessellation_max_error: f32,
-    /// Colors for various UI elements
-    pub colors: [[f32; 4]; StyleColor::COUNT],
-}
+pub struct Style(pub(crate) sys::ImGuiStyle);
 
 impl Style {
-    /// Creates a new Style instance from the current context
-    pub(crate) fn from_raw() -> Self {
-        unsafe {
-            let style_ptr = sys::igGetStyle();
-            *(style_ptr as *const Style)
-        }
+    /// Get a color by style color identifier
+    pub fn color(&self, color: StyleColor) -> [f32; 4] {
+        let c = self.0.Colors[color as usize];
+        [c.x, c.y, c.z, c.w]
+    }
+
+    /// Set a color by style color identifier
+    pub fn set_color(&mut self, color: StyleColor, value: [f32; 4]) {
+        self.0.Colors[color as usize] = sys::ImVec4 {
+            x: value[0],
+            y: value[1],
+            z: value[2],
+            w: value[3],
+        };
+    }
+
+    /// Get main font scale (formerly io.FontGlobalScale)
+    pub fn font_scale_main(&self) -> f32 {
+        self.0.FontScaleMain
+    }
+
+    /// Set main font scale (formerly io.FontGlobalScale)
+    pub fn set_font_scale_main(&mut self, scale: f32) {
+        self.0.FontScaleMain = scale;
+    }
+
+    /// Get DPI font scale (auto-overwritten if ConfigDpiScaleFonts=true)
+    pub fn font_scale_dpi(&self) -> f32 {
+        self.0.FontScaleDpi
+    }
+
+    /// Set DPI font scale
+    pub fn set_font_scale_dpi(&mut self, scale: f32) {
+        self.0.FontScaleDpi = scale;
+    }
+
+    /// Base size used by style for font sizing
+    pub fn font_size_base(&self) -> f32 {
+        self.0.FontSizeBase
+    }
+
+    pub fn set_font_size_base(&mut self, sz: f32) {
+        self.0.FontSizeBase = sz;
+    }
+
+    // Common style accessors (typed, convenient)
+
+    pub fn alpha(&self) -> f32 {
+        self.0.Alpha
+    }
+    pub fn set_alpha(&mut self, v: f32) {
+        self.0.Alpha = v;
+    }
+
+    pub fn disabled_alpha(&self) -> f32 {
+        self.0.DisabledAlpha
+    }
+    pub fn set_disabled_alpha(&mut self, v: f32) {
+        self.0.DisabledAlpha = v;
+    }
+
+    pub fn window_padding(&self) -> [f32; 2] {
+        [self.0.WindowPadding.x, self.0.WindowPadding.y]
+    }
+    pub fn set_window_padding(&mut self, v: [f32; 2]) {
+        self.0.WindowPadding = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn window_rounding(&self) -> f32 {
+        self.0.WindowRounding
+    }
+    pub fn set_window_rounding(&mut self, v: f32) {
+        self.0.WindowRounding = v;
+    }
+
+    pub fn window_border_size(&self) -> f32 {
+        self.0.WindowBorderSize
+    }
+    pub fn set_window_border_size(&mut self, v: f32) {
+        self.0.WindowBorderSize = v;
+    }
+
+    pub fn window_min_size(&self) -> [f32; 2] {
+        [self.0.WindowMinSize.x, self.0.WindowMinSize.y]
+    }
+    pub fn set_window_min_size(&mut self, v: [f32; 2]) {
+        self.0.WindowMinSize = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn window_title_align(&self) -> [f32; 2] {
+        [self.0.WindowTitleAlign.x, self.0.WindowTitleAlign.y]
+    }
+    pub fn set_window_title_align(&mut self, v: [f32; 2]) {
+        self.0.WindowTitleAlign = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn window_menu_button_position(&self) -> Direction {
+        Direction::from(self.0.WindowMenuButtonPosition)
+    }
+    pub fn set_window_menu_button_position(&mut self, d: Direction) {
+        self.0.WindowMenuButtonPosition = d.into();
+    }
+
+    pub fn child_rounding(&self) -> f32 {
+        self.0.ChildRounding
+    }
+    pub fn set_child_rounding(&mut self, v: f32) {
+        self.0.ChildRounding = v;
+    }
+
+    pub fn child_border_size(&self) -> f32 {
+        self.0.ChildBorderSize
+    }
+    pub fn set_child_border_size(&mut self, v: f32) {
+        self.0.ChildBorderSize = v;
+    }
+
+    pub fn popup_rounding(&self) -> f32 {
+        self.0.PopupRounding
+    }
+    pub fn set_popup_rounding(&mut self, v: f32) {
+        self.0.PopupRounding = v;
+    }
+
+    pub fn popup_border_size(&self) -> f32 {
+        self.0.PopupBorderSize
+    }
+    pub fn set_popup_border_size(&mut self, v: f32) {
+        self.0.PopupBorderSize = v;
+    }
+
+    pub fn frame_padding(&self) -> [f32; 2] {
+        [self.0.FramePadding.x, self.0.FramePadding.y]
+    }
+    pub fn set_frame_padding(&mut self, v: [f32; 2]) {
+        self.0.FramePadding = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn frame_rounding(&self) -> f32 {
+        self.0.FrameRounding
+    }
+    pub fn set_frame_rounding(&mut self, v: f32) {
+        self.0.FrameRounding = v;
+    }
+
+    pub fn frame_border_size(&self) -> f32 {
+        self.0.FrameBorderSize
+    }
+    pub fn set_frame_border_size(&mut self, v: f32) {
+        self.0.FrameBorderSize = v;
+    }
+
+    pub fn item_spacing(&self) -> [f32; 2] {
+        [self.0.ItemSpacing.x, self.0.ItemSpacing.y]
+    }
+    pub fn set_item_spacing(&mut self, v: [f32; 2]) {
+        self.0.ItemSpacing = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn item_inner_spacing(&self) -> [f32; 2] {
+        [self.0.ItemInnerSpacing.x, self.0.ItemInnerSpacing.y]
+    }
+    pub fn set_item_inner_spacing(&mut self, v: [f32; 2]) {
+        self.0.ItemInnerSpacing = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn cell_padding(&self) -> [f32; 2] {
+        [self.0.CellPadding.x, self.0.CellPadding.y]
+    }
+    pub fn set_cell_padding(&mut self, v: [f32; 2]) {
+        self.0.CellPadding = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn touch_extra_padding(&self) -> [f32; 2] {
+        [self.0.TouchExtraPadding.x, self.0.TouchExtraPadding.y]
+    }
+    pub fn set_touch_extra_padding(&mut self, v: [f32; 2]) {
+        self.0.TouchExtraPadding = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn indent_spacing(&self) -> f32 {
+        self.0.IndentSpacing
+    }
+    pub fn set_indent_spacing(&mut self, v: f32) {
+        self.0.IndentSpacing = v;
+    }
+
+    pub fn columns_min_spacing(&self) -> f32 {
+        self.0.ColumnsMinSpacing
+    }
+    pub fn set_columns_min_spacing(&mut self, v: f32) {
+        self.0.ColumnsMinSpacing = v;
+    }
+
+    pub fn scrollbar_size(&self) -> f32 {
+        self.0.ScrollbarSize
+    }
+    pub fn set_scrollbar_size(&mut self, v: f32) {
+        self.0.ScrollbarSize = v;
+    }
+
+    pub fn scrollbar_rounding(&self) -> f32 {
+        self.0.ScrollbarRounding
+    }
+    pub fn set_scrollbar_rounding(&mut self, v: f32) {
+        self.0.ScrollbarRounding = v;
+    }
+
+    pub fn grab_min_size(&self) -> f32 {
+        self.0.GrabMinSize
+    }
+    pub fn set_grab_min_size(&mut self, v: f32) {
+        self.0.GrabMinSize = v;
+    }
+
+    pub fn grab_rounding(&self) -> f32 {
+        self.0.GrabRounding
+    }
+    pub fn set_grab_rounding(&mut self, v: f32) {
+        self.0.GrabRounding = v;
+    }
+
+    pub fn log_slider_deadzone(&self) -> f32 {
+        self.0.LogSliderDeadzone
+    }
+    pub fn set_log_slider_deadzone(&mut self, v: f32) {
+        self.0.LogSliderDeadzone = v;
+    }
+
+    pub fn tab_rounding(&self) -> f32 {
+        self.0.TabRounding
+    }
+    pub fn set_tab_rounding(&mut self, v: f32) {
+        self.0.TabRounding = v;
+    }
+
+    pub fn tab_border_size(&self) -> f32 {
+        self.0.TabBorderSize
+    }
+    pub fn set_tab_border_size(&mut self, v: f32) {
+        self.0.TabBorderSize = v;
+    }
+
+    pub fn color_button_position(&self) -> Direction {
+        Direction::from(self.0.ColorButtonPosition)
+    }
+    pub fn set_color_button_position(&mut self, d: Direction) {
+        self.0.ColorButtonPosition = d.into();
+    }
+
+    pub fn button_text_align(&self) -> [f32; 2] {
+        [self.0.ButtonTextAlign.x, self.0.ButtonTextAlign.y]
+    }
+    pub fn set_button_text_align(&mut self, v: [f32; 2]) {
+        self.0.ButtonTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn selectable_text_align(&self) -> [f32; 2] {
+        [self.0.SelectableTextAlign.x, self.0.SelectableTextAlign.y]
+    }
+    pub fn set_selectable_text_align(&mut self, v: [f32; 2]) {
+        self.0.SelectableTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn display_window_padding(&self) -> [f32; 2] {
+        [self.0.DisplayWindowPadding.x, self.0.DisplayWindowPadding.y]
+    }
+    pub fn set_display_window_padding(&mut self, v: [f32; 2]) {
+        self.0.DisplayWindowPadding = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn display_safe_area_padding(&self) -> [f32; 2] {
+        [
+            self.0.DisplaySafeAreaPadding.x,
+            self.0.DisplaySafeAreaPadding.y,
+        ]
+    }
+    pub fn set_display_safe_area_padding(&mut self, v: [f32; 2]) {
+        self.0.DisplaySafeAreaPadding = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn mouse_cursor_scale(&self) -> f32 {
+        self.0.MouseCursorScale
+    }
+    pub fn set_mouse_cursor_scale(&mut self, v: f32) {
+        self.0.MouseCursorScale = v;
+    }
+
+    pub fn anti_aliased_lines(&self) -> bool {
+        self.0.AntiAliasedLines
+    }
+    pub fn set_anti_aliased_lines(&mut self, v: bool) {
+        self.0.AntiAliasedLines = v;
+    }
+
+    pub fn anti_aliased_lines_use_tex(&self) -> bool {
+        self.0.AntiAliasedLinesUseTex
+    }
+    pub fn set_anti_aliased_lines_use_tex(&mut self, v: bool) {
+        self.0.AntiAliasedLinesUseTex = v;
+    }
+
+    pub fn anti_aliased_fill(&self) -> bool {
+        self.0.AntiAliasedFill
+    }
+    pub fn set_anti_aliased_fill(&mut self, v: bool) {
+        self.0.AntiAliasedFill = v;
+    }
+
+    pub fn curve_tessellation_tol(&self) -> f32 {
+        self.0.CurveTessellationTol
+    }
+    pub fn set_curve_tessellation_tol(&mut self, v: f32) {
+        self.0.CurveTessellationTol = v;
+    }
+
+    pub fn circle_tessellation_max_error(&self) -> f32 {
+        self.0.CircleTessellationMaxError
+    }
+    pub fn set_circle_tessellation_max_error(&mut self, v: f32) {
+        self.0.CircleTessellationMaxError = v;
+    }
+
+    // Newly exposed 1.92+ or less-common fields
+
+    pub fn window_border_hover_padding(&self) -> f32 {
+        self.0.WindowBorderHoverPadding
+    }
+    pub fn set_window_border_hover_padding(&mut self, v: f32) {
+        self.0.WindowBorderHoverPadding = v;
+    }
+
+    pub fn scrollbar_padding(&self) -> f32 {
+        self.0.ScrollbarPadding
+    }
+    pub fn set_scrollbar_padding(&mut self, v: f32) {
+        self.0.ScrollbarPadding = v;
+    }
+
+    pub fn image_border_size(&self) -> f32 {
+        self.0.ImageBorderSize
+    }
+    pub fn set_image_border_size(&mut self, v: f32) {
+        self.0.ImageBorderSize = v;
+    }
+
+    pub fn tab_min_width_base(&self) -> f32 {
+        self.0.TabMinWidthBase
+    }
+    pub fn set_tab_min_width_base(&mut self, v: f32) {
+        self.0.TabMinWidthBase = v;
+    }
+
+    pub fn tab_min_width_shrink(&self) -> f32 {
+        self.0.TabMinWidthShrink
+    }
+    pub fn set_tab_min_width_shrink(&mut self, v: f32) {
+        self.0.TabMinWidthShrink = v;
+    }
+
+    pub fn tab_close_button_min_width_selected(&self) -> f32 {
+        self.0.TabCloseButtonMinWidthSelected
+    }
+    pub fn set_tab_close_button_min_width_selected(&mut self, v: f32) {
+        self.0.TabCloseButtonMinWidthSelected = v;
+    }
+
+    pub fn tab_close_button_min_width_unselected(&self) -> f32 {
+        self.0.TabCloseButtonMinWidthUnselected
+    }
+    pub fn set_tab_close_button_min_width_unselected(&mut self, v: f32) {
+        self.0.TabCloseButtonMinWidthUnselected = v;
+    }
+
+    pub fn tab_bar_border_size(&self) -> f32 {
+        self.0.TabBarBorderSize
+    }
+    pub fn set_tab_bar_border_size(&mut self, v: f32) {
+        self.0.TabBarBorderSize = v;
+    }
+
+    pub fn tab_bar_overline_size(&self) -> f32 {
+        self.0.TabBarOverlineSize
+    }
+    pub fn set_tab_bar_overline_size(&mut self, v: f32) {
+        self.0.TabBarOverlineSize = v;
+    }
+
+    pub fn table_angled_headers_angle(&self) -> f32 {
+        self.0.TableAngledHeadersAngle
+    }
+    pub fn set_table_angled_headers_angle(&mut self, v: f32) {
+        self.0.TableAngledHeadersAngle = v;
+    }
+
+    pub fn table_angled_headers_text_align(&self) -> [f32; 2] {
+        [
+            self.0.TableAngledHeadersTextAlign.x,
+            self.0.TableAngledHeadersTextAlign.y,
+        ]
+    }
+    pub fn set_table_angled_headers_text_align(&mut self, v: [f32; 2]) {
+        self.0.TableAngledHeadersTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn tree_lines_flags(&self) -> TreeNodeFlags {
+        TreeNodeFlags::from_bits_truncate(self.0.TreeLinesFlags as i32)
+    }
+    pub fn set_tree_lines_flags(&mut self, flags: TreeNodeFlags) {
+        self.0.TreeLinesFlags = flags.bits() as sys::ImGuiTreeNodeFlags;
+    }
+
+    pub fn tree_lines_size(&self) -> f32 {
+        self.0.TreeLinesSize
+    }
+    pub fn set_tree_lines_size(&mut self, v: f32) {
+        self.0.TreeLinesSize = v;
+    }
+
+    pub fn tree_lines_rounding(&self) -> f32 {
+        self.0.TreeLinesRounding
+    }
+    pub fn set_tree_lines_rounding(&mut self, v: f32) {
+        self.0.TreeLinesRounding = v;
+    }
+
+    pub fn separator_text_border_size(&self) -> f32 {
+        self.0.SeparatorTextBorderSize
+    }
+    pub fn set_separator_text_border_size(&mut self, v: f32) {
+        self.0.SeparatorTextBorderSize = v;
+    }
+
+    pub fn separator_text_align(&self) -> [f32; 2] {
+        [self.0.SeparatorTextAlign.x, self.0.SeparatorTextAlign.y]
+    }
+    pub fn set_separator_text_align(&mut self, v: [f32; 2]) {
+        self.0.SeparatorTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn separator_text_padding(&self) -> [f32; 2] {
+        [self.0.SeparatorTextPadding.x, self.0.SeparatorTextPadding.y]
+    }
+    pub fn set_separator_text_padding(&mut self, v: [f32; 2]) {
+        self.0.SeparatorTextPadding = sys::ImVec2 { x: v[0], y: v[1] };
+    }
+
+    pub fn docking_node_has_close_button(&self) -> bool {
+        self.0.DockingNodeHasCloseButton
+    }
+    pub fn set_docking_node_has_close_button(&mut self, v: bool) {
+        self.0.DockingNodeHasCloseButton = v;
+    }
+
+    pub fn docking_separator_size(&self) -> f32 {
+        self.0.DockingSeparatorSize
+    }
+    pub fn set_docking_separator_size(&mut self, v: f32) {
+        self.0.DockingSeparatorSize = v;
+    }
+
+    pub fn hover_stationary_delay(&self) -> f32 {
+        self.0.HoverStationaryDelay
+    }
+    pub fn set_hover_stationary_delay(&mut self, v: f32) {
+        self.0.HoverStationaryDelay = v;
+    }
+
+    pub fn hover_delay_short(&self) -> f32 {
+        self.0.HoverDelayShort
+    }
+    pub fn set_hover_delay_short(&mut self, v: f32) {
+        self.0.HoverDelayShort = v;
+    }
+
+    pub fn hover_delay_normal(&self) -> f32 {
+        self.0.HoverDelayNormal
+    }
+    pub fn set_hover_delay_normal(&mut self, v: f32) {
+        self.0.HoverDelayNormal = v;
+    }
+
+    pub fn hover_flags_for_tooltip_mouse(&self) -> HoveredFlags {
+        HoveredFlags::from_bits_truncate(self.0.HoverFlagsForTooltipMouse as i32)
+    }
+    pub fn set_hover_flags_for_tooltip_mouse(&mut self, flags: HoveredFlags) {
+        self.0.HoverFlagsForTooltipMouse = flags.bits() as sys::ImGuiHoveredFlags;
+    }
+
+    pub fn hover_flags_for_tooltip_nav(&self) -> HoveredFlags {
+        HoveredFlags::from_bits_truncate(self.0.HoverFlagsForTooltipNav as i32)
+    }
+    pub fn set_hover_flags_for_tooltip_nav(&mut self, flags: HoveredFlags) {
+        self.0.HoverFlagsForTooltipNav = flags.bits() as sys::ImGuiHoveredFlags;
     }
 }
 
@@ -116,6 +526,30 @@ pub enum Direction {
     Right = sys::ImGuiDir_Right as i32,
     Up = sys::ImGuiDir_Up as i32,
     Down = sys::ImGuiDir_Down as i32,
+}
+
+impl From<sys::ImGuiDir> for Direction {
+    fn from(d: sys::ImGuiDir) -> Self {
+        match d as i32 {
+            x if x == sys::ImGuiDir_Left as i32 => Direction::Left,
+            x if x == sys::ImGuiDir_Right as i32 => Direction::Right,
+            x if x == sys::ImGuiDir_Up as i32 => Direction::Up,
+            x if x == sys::ImGuiDir_Down as i32 => Direction::Down,
+            _ => Direction::None,
+        }
+    }
+}
+
+impl From<Direction> for sys::ImGuiDir {
+    fn from(d: Direction) -> Self {
+        match d {
+            Direction::None => sys::ImGuiDir_None,
+            Direction::Left => sys::ImGuiDir_Left,
+            Direction::Right => sys::ImGuiDir_Right,
+            Direction::Up => sys::ImGuiDir_Up,
+            Direction::Down => sys::ImGuiDir_Down,
+        }
+    }
 }
 
 /// Style color identifier
@@ -189,75 +623,15 @@ impl StyleColor {
     pub const COUNT: usize = sys::ImGuiCol_COUNT as usize;
 }
 
-impl Default for Style {
-    fn default() -> Self {
-        Self {
-            alpha: 1.0,
-            disabled_alpha: 0.6,
-            window_padding: [8.0, 8.0],
-            window_rounding: 0.0,
-            window_border_size: 1.0,
-            window_min_size: [32.0, 32.0],
-            window_title_align: [0.0, 0.5],
-            window_menu_button_position: Direction::Left,
-            child_rounding: 0.0,
-            child_border_size: 1.0,
-            popup_rounding: 0.0,
-            popup_border_size: 1.0,
-            frame_padding: [4.0, 3.0],
-            frame_rounding: 0.0,
-            frame_border_size: 0.0,
-            item_spacing: [8.0, 4.0],
-            item_inner_spacing: [4.0, 4.0],
-            cell_padding: [4.0, 2.0],
-            touch_extra_padding: [0.0, 0.0],
-            indent_spacing: 21.0,
-            columns_min_spacing: 6.0,
-            scrollbar_size: 14.0,
-            scrollbar_rounding: 9.0,
-            grab_min_size: 12.0,
-            grab_rounding: 0.0,
-            log_slider_deadzone: 4.0,
-            tab_rounding: 4.0,
-            tab_border_size: 0.0,
-            tab_min_width_for_close_button: 0.0,
-            color_button_position: Direction::Right,
-            button_text_align: [0.5, 0.5],
-            selectable_text_align: [0.0, 0.0],
-            display_window_padding: [19.0, 19.0],
-            display_safe_area_padding: [3.0, 3.0],
-            mouse_cursor_scale: 1.0,
-            anti_aliased_lines: true,
-            anti_aliased_lines_use_tex: true,
-            anti_aliased_fill: true,
-            curve_tessellation_tol: 1.25,
-            circle_tessellation_max_error: 0.30,
-            colors: [[1.00, 1.00, 1.00, 1.00]; StyleColor::COUNT],
-        }
-    }
-}
-
-impl Style {
-    /// Get a color by style color identifier
-    pub fn color(&self, color: StyleColor) -> [f32; 4] {
-        self.colors[color as usize]
-    }
-
-    /// Set a color by style color identifier
-    pub fn set_color(&mut self, color: StyleColor, value: [f32; 4]) {
-        self.colors[color as usize] = value;
-    }
-}
-
 impl RawWrapper for Style {
     type Raw = sys::ImGuiStyle;
 
     unsafe fn raw(&self) -> &Self::Raw {
-        unsafe { &*(self as *const _ as *const Self::Raw) }
+        &self.0
     }
 
     unsafe fn raw_mut(&mut self) -> &mut Self::Raw {
-        unsafe { &mut *(self as *mut _ as *mut Self::Raw) }
+        &mut self.0
     }
 }
 

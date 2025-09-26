@@ -1,3 +1,9 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
+use crate::draw::ImColor32;
 use crate::sys;
 use crate::ui::Ui;
 use crate::widget::{TableColumnFlags, TableFlags};
@@ -44,6 +50,29 @@ impl<Name: AsRef<str>> TableColumnSetup<Name> {
 
 /// # Table Widgets
 impl Ui {
+    /// Start a Table builder for ergonomic setup + headers + options.
+    ///
+    /// Example
+    /// ```no_run
+    /// # use dear_imgui::*;
+    /// # fn demo(ui: &Ui) {
+    /// ui.table("perf")
+    ///     .flags(widget::TableFlags::RESIZABLE | widget::TableFlags::SORTABLE)
+    ///     .outer_size([600.0, 240.0])
+    ///     .freeze(1, 1)
+    ///     .column("Name").width(140.0).done()
+    ///     .column("Value").weight(1.0).done()
+    ///     .headers(true)
+    ///     .build(|ui| {
+    ///         ui.table_next_row();
+    ///         ui.table_next_column(); ui.text("CPU");
+    ///         ui.table_next_column(); ui.text("Intel");
+    ///     });
+    /// # }
+    /// ```
+    pub fn table(&self, str_id: impl AsRef<str>) -> TableBuilder<'_> {
+        TableBuilder::new(self, str_id)
+    }
     /// Begins a table with no flags and with standard sizing constraints.
     ///
     /// This does no work on styling the headers (the top row) -- see either
@@ -254,10 +283,18 @@ impl Ui {
 
     /// Set a table background color target.
     ///
-    /// Color is provided as `ImU32` (e.g. from `u32` RGBA).
+    /// Color must be an ImGui-packed ImU32 in ABGR order (IM_COL32).
+    /// Use `crate::colors::Color::to_imgui_u32()` to convert RGBA floats.
     #[doc(alias = "TableSetBgColor")]
     pub fn table_set_bg_color_u32(&self, target: TableBgTarget, color: u32, column_n: i32) {
         unsafe { sys::igTableSetBgColor(target as i32, color, column_n) }
+    }
+
+    /// Set a table background color target using RGBA color (0..=1 floats).
+    pub fn table_set_bg_color(&self, target: TableBgTarget, rgba: [f32; 4], column_n: i32) {
+        // Pack to ImGui's ABGR layout.
+        let col = crate::colors::Color::from_array(rgba).to_imgui_u32();
+        unsafe { sys::igTableSetBgColor(target as i32, col, column_n) }
     }
 
     /// Return hovered row index, or -1 when none.
@@ -466,11 +503,80 @@ impl<'ui> Drop for TableToken<'ui> {
 // Additional table convenience APIs
 // ============================================================================
 
+/// Safe description of a single angled header cell.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct TableHeaderData {
+    pub index: i16,
+    pub text_color: ImColor32,
+    pub bg_color0: ImColor32,
+    pub bg_color1: ImColor32,
+}
+
+impl TableHeaderData {
+    pub fn new(
+        index: i16,
+        text_color: ImColor32,
+        bg_color0: ImColor32,
+        bg_color1: ImColor32,
+    ) -> Self {
+        Self {
+            index,
+            text_color,
+            bg_color0,
+            bg_color1,
+        }
+    }
+}
 impl Ui {
     /// Maximum label width used for angled headers (when enabled in style/options).
     #[doc(alias = "TableGetHeaderAngledMaxLabelWidth")]
     pub fn table_get_header_angled_max_label_width(&self) -> f32 {
         unsafe { sys::igTableGetHeaderAngledMaxLabelWidth() }
+    }
+
+    /// Submit angled headers row (requires style/flags enabling angled headers).
+    #[doc(alias = "TableAngledHeadersRow")]
+    pub fn table_angled_headers_row(&self) {
+        unsafe { sys::igTableAngledHeadersRow() }
+    }
+
+    // Removed legacy TableAngledHeadersRowEx(flags) wrapper; use `table_angled_headers_row_ex_with_data`.
+
+    /// Submit angled headers row with explicit data (Ex variant).
+    ///
+    /// - `row_id`: ImGuiID for the row. Use 0 for automatic if not needed.
+    /// - `angle`: Angle in radians for headers.
+    /// - `max_label_width`: Maximum label width for angled headers.
+    /// - `headers`: Per-column header data.
+    pub fn table_angled_headers_row_ex_with_data(
+        &self,
+        row_id: u32,
+        angle: f32,
+        max_label_width: f32,
+        headers: &[TableHeaderData],
+    ) {
+        if headers.is_empty() {
+            unsafe { sys::igTableAngledHeadersRow() }
+            return;
+        }
+        let mut data: Vec<sys::ImGuiTableHeaderData> = Vec::with_capacity(headers.len());
+        for h in headers {
+            data.push(sys::ImGuiTableHeaderData {
+                Index: h.index as sys::ImGuiTableColumnIdx,
+                TextColor: u32::from(h.text_color),
+                BgColor0: u32::from(h.bg_color0),
+                BgColor1: u32::from(h.bg_color1),
+            });
+        }
+        unsafe {
+            sys::igTableAngledHeadersRowEx(
+                row_id,
+                angle,
+                max_label_width,
+                data.as_ptr(),
+                data.len() as i32,
+            );
+        }
     }
 
     /// Push background draw channel for the current table and return a token to pop it.
@@ -512,6 +618,211 @@ impl Ui {
         self.table_pop_column_channel();
         result
     }
+
+    /// Open the table context menu for a given column (use -1 for current/default).
+    #[doc(alias = "TableOpenContextMenu")]
+    pub fn table_open_context_menu(&self, column_n: Option<i32>) {
+        unsafe { sys::igTableOpenContextMenu(column_n.unwrap_or(-1)) }
+    }
 }
 
 // (Optional) RAII versions could be added later if desirable
+
+// ============================================================================
+// TableBuilder: ergonomic table construction
+// ============================================================================
+
+/// Builder for ImGui tables with columns + headers + sizing/freeze options.
+#[derive(Debug)]
+pub struct TableBuilder<'ui> {
+    ui: &'ui Ui,
+    id: String,
+    flags: TableFlags,
+    outer_size: [f32; 2],
+    inner_width: f32,
+    columns: Vec<TableColumnSetup<String>>, // owned names
+    use_headers: bool,
+    freeze: Option<(i32, i32)>,
+}
+
+impl<'ui> TableBuilder<'ui> {
+    /// Create a new TableBuilder. Prefer using `Ui::table("id")`.
+    pub fn new(ui: &'ui Ui, str_id: impl AsRef<str>) -> Self {
+        Self {
+            ui,
+            id: str_id.as_ref().to_string(),
+            flags: TableFlags::NONE,
+            outer_size: [0.0, 0.0],
+            inner_width: 0.0,
+            columns: Vec::new(),
+            use_headers: false,
+            freeze: None,
+        }
+    }
+
+    /// Set table flags
+    pub fn flags(mut self, flags: TableFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Set outer size (width, height). Default [0,0]
+    pub fn outer_size(mut self, size: [f32; 2]) -> Self {
+        self.outer_size = size;
+        self
+    }
+
+    /// Set inner width. Default 0.0
+    pub fn inner_width(mut self, width: f32) -> Self {
+        self.inner_width = width;
+        self
+    }
+
+    /// Freeze columns/rows so they stay visible when scrolling
+    pub fn freeze(mut self, frozen_cols: i32, frozen_rows: i32) -> Self {
+        self.freeze = Some((frozen_cols, frozen_rows));
+        self
+    }
+
+    /// Begin defining a column using a chainable ColumnBuilder.
+    /// Call `.done()` to return to the TableBuilder.
+    pub fn column(self, name: impl AsRef<str>) -> ColumnBuilder<'ui> {
+        ColumnBuilder::new(self, name)
+    }
+
+    /// Replace columns with provided list
+    pub fn columns<Name: AsRef<str>>(
+        mut self,
+        cols: impl IntoIterator<Item = TableColumnSetup<Name>>,
+    ) -> Self {
+        self.columns.clear();
+        for c in cols {
+            self.columns.push(TableColumnSetup {
+                name: c.name.as_ref().to_string(),
+                flags: c.flags,
+                init_width_or_weight: c.init_width_or_weight,
+                user_id: c.user_id,
+            });
+        }
+        self
+    }
+
+    /// Add a single column setup
+    pub fn add_column<Name: AsRef<str>>(mut self, col: TableColumnSetup<Name>) -> Self {
+        self.columns.push(TableColumnSetup {
+            name: col.name.as_ref().to_string(),
+            flags: col.flags,
+            init_width_or_weight: col.init_width_or_weight,
+            user_id: col.user_id,
+        });
+        self
+    }
+
+    /// Auto submit headers row from `TableSetupColumn()` entries
+    pub fn headers(mut self, enabled: bool) -> Self {
+        self.use_headers = enabled;
+        self
+    }
+
+    /// Build the table and run a closure to emit rows/cells
+    pub fn build(self, f: impl FnOnce(&Ui)) {
+        let Some(token) = self.ui.begin_table_with_sizing(
+            &self.id,
+            self.columns.len(),
+            self.flags,
+            self.outer_size,
+            self.inner_width,
+        ) else {
+            return;
+        };
+
+        if let Some((fc, fr)) = self.freeze {
+            self.ui.table_setup_scroll_freeze(fc, fr);
+        }
+
+        if !self.columns.is_empty() {
+            for col in &self.columns {
+                self.ui.table_setup_column(
+                    &col.name,
+                    col.flags,
+                    col.init_width_or_weight,
+                    col.user_id,
+                );
+            }
+            if self.use_headers {
+                self.ui.table_headers_row();
+            }
+        }
+
+        f(self.ui);
+
+        // drop token to end table
+        token.end();
+    }
+}
+
+/// Chainable builder for a single column. Use `.done()` to return to the table builder.
+#[derive(Debug)]
+pub struct ColumnBuilder<'ui> {
+    parent: TableBuilder<'ui>,
+    name: String,
+    flags: TableColumnFlags,
+    init_width_or_weight: f32,
+    user_id: u32,
+}
+
+impl<'ui> ColumnBuilder<'ui> {
+    fn new(parent: TableBuilder<'ui>, name: impl AsRef<str>) -> Self {
+        Self {
+            parent,
+            name: name.as_ref().to_string(),
+            flags: TableColumnFlags::NONE,
+            init_width_or_weight: 0.0,
+            user_id: 0,
+        }
+    }
+
+    /// Set column flags.
+    pub fn flags(mut self, flags: TableColumnFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Set fixed width or stretch weight (ImGui uses same field for both).
+    pub fn width(mut self, width: f32) -> Self {
+        self.init_width_or_weight = width;
+        self
+    }
+
+    /// Alias of `width()` to express stretch weights.
+    pub fn weight(self, weight: f32) -> Self {
+        self.width(weight)
+    }
+
+    /// Toggle angled header flag.
+    pub fn angled_header(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags.insert(TableColumnFlags::ANGLED_HEADER);
+        } else {
+            self.flags.remove(TableColumnFlags::ANGLED_HEADER);
+        }
+        self
+    }
+
+    /// Set user id for this column.
+    pub fn user_id(mut self, id: u32) -> Self {
+        self.user_id = id;
+        self
+    }
+
+    /// Finish this column and return to the table builder.
+    pub fn done(mut self) -> TableBuilder<'ui> {
+        self.parent.columns.push(TableColumnSetup {
+            name: self.name,
+            flags: self.flags,
+            init_width_or_weight: self.init_width_or_weight,
+            user_id: self.user_id,
+        });
+        self.parent
+    }
+}

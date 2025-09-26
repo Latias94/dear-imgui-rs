@@ -41,14 +41,12 @@ mint.workspace = true
 cfg-if.workspace = true
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
-build-support = { path = "../tools/build-support" }
 
 [build-dependencies]
 bindgen.workspace = true
 cc.workspace = true
 pkg-config = { workspace = true, optional = true }
 xshell = "0.2"
-reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
 cmake = "0.1"
 flate2 = "1"
 tar = "0.4"

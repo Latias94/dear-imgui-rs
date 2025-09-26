@@ -1,3 +1,8 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 use bitflags::bitflags;
 use std::f32;
 
@@ -9,39 +14,7 @@ pub(crate) mod content_region;
 pub(crate) mod scroll;
 
 // Window-focused/hovered helpers are available via utils.rs variants.
-bitflags! {
-    /// Window hover check option flags
-    #[repr(transparent)]
-    pub struct WindowHoveredFlags: i32 {
-        /// Return true if any child of the window is hovered
-        const CHILD_WINDOWS = sys::ImGuiHoveredFlags_ChildWindows as i32;
-        /// Test from root window (top-most parent of the current hierarchy)
-        const ROOT_WINDOW = sys::ImGuiHoveredFlags_RootWindow as i32;
-        /// Return true if any window is hovered
-        const ANY_WINDOW = sys::ImGuiHoveredFlags_AnyWindow as i32;
-        /// Return true even if a popup window is blocking access to this window
-        const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup as i32;
-        /// Return true even if an active item is blocking access to this window
-        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
-        /// Test from root window, and return true if any child is hovered
-        const ROOT_AND_CHILD_WINDOWS = Self::ROOT_WINDOW.bits() | Self::CHILD_WINDOWS.bits();
-    }
-}
-
-bitflags! {
-    /// Window focus check option flags
-    #[repr(transparent)]
-    pub struct WindowFocusedFlags: i32 {
-        /// Return true if any child of the window is focused
-        const CHILD_WINDOWS = sys::ImGuiFocusedFlags_ChildWindows as i32;
-        /// Test from root window (top-most parent of the current hierarchy)
-        const ROOT_WINDOW = sys::ImGuiFocusedFlags_RootWindow as i32;
-        /// Return true if any window is focused
-        const ANY_WINDOW = sys::ImGuiFocusedFlags_AnyWindow as i32;
-        /// Test from root window, and return true if any child is focused
-        const ROOT_AND_CHILD_WINDOWS = Self::ROOT_WINDOW.bits() | Self::CHILD_WINDOWS.bits();
-    }
-}
+// Window hovered/focused flag helpers are provided by crate::utils::HoveredFlags.
 
 bitflags! {
     /// Configuration flags for windows

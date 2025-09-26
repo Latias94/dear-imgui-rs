@@ -202,8 +202,9 @@ impl AppWindow {
 
     fn setup_imgui(&mut self) {
         let mut context = Context::create();
+        // Disable INI load/save to test DockBuilder-only layout reliably
         context
-            .set_ini_filename(Some("game_engine_docking.ini"))
+            .set_ini_filename::<std::path::PathBuf>(None)
             .unwrap();
 
         // Enable docking
@@ -269,19 +270,22 @@ impl AppWindow {
 
         let ui = imgui.context.frame();
 
-        // Create dockspace over main viewport
-        imgui.dockspace_id = ui.dockspace_over_main_viewport();
+        // Create dockspace over main viewport (call every frame)
+        let dock_id = ui.dockspace_over_main_viewport_with_flags(
+            0,
+            dear_imgui::DockNodeFlags::PASSTHRU_CENTRAL_NODE
+                | dear_imgui::DockNodeFlags::AUTO_HIDE_TAB_BAR,
+        );
+        // Use returned dockspace id as root
+        imgui.dockspace_id = dock_id;
 
-        // Only setup initial layout on first frame to avoid conflicts with saved layout
+        // Only setup initial layout on first frame (DockBuilder-only, no INI)
         if imgui.first_frame {
-            // Check if we have a saved layout, if not, setup default
-            if !std::path::Path::new("game_engine_docking.ini").exists() {
-                setup_initial_docking_layout(imgui.dockspace_id);
-            }
+            setup_initial_docking_layout(imgui.dockspace_id);
             imgui.first_frame = false;
         }
 
-        render_main_menu_bar(&ui, &mut imgui.game_state);
+        let actions = render_main_menu_bar(&ui, &mut imgui.game_state);
         render_hierarchy(&ui, &mut imgui.game_state);
         render_project(&ui, &mut imgui.game_state);
         render_inspector(&ui, &mut imgui.game_state);
@@ -290,6 +294,11 @@ impl AppWindow {
         render_console(&ui, &mut imgui.game_state);
         render_asset_browser(&ui, &mut imgui.game_state);
         render_performance(&ui, &mut imgui.game_state);
+
+        // Let the platform backend finalize per-frame data (required for viewports)
+        imgui
+            .platform
+            .prepare_render(&mut imgui.context, &*self.window);
 
         let draw_data = imgui.context.render();
 
@@ -325,6 +334,40 @@ impl AppWindow {
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
 
+        // Handle deferred actions (safe after frame is rendered)
+        if actions.reset_layout {
+            setup_initial_docking_layout(imgui.dockspace_id);
+        }
+        if actions.load_ini {
+            if let Ok(s) = std::fs::read_to_string("examples/game_engine_docking.ini") {
+                imgui.context.load_ini_settings(&s);
+                imgui
+                    .game_state
+                    .console_logs
+                    .push("[INFO] Layout loaded from INI".to_string());
+            } else {
+                imgui
+                    .game_state
+                    .console_logs
+                    .push("[WARNING] Failed to read examples/game_engine_docking.ini".to_string());
+            }
+        }
+        if actions.save_ini {
+            let mut buf = String::new();
+            imgui.context.save_ini_settings(&mut buf);
+            if std::fs::write("examples/game_engine_docking.ini", buf).is_ok() {
+                imgui
+                    .game_state
+                    .console_logs
+                    .push("[INFO] Layout saved to INI".to_string());
+            } else {
+                imgui
+                    .game_state
+                    .console_logs
+                    .push("[WARNING] Failed to write examples/game_engine_docking.ini".to_string());
+            }
+        }
+
         Ok(())
     }
 }
@@ -335,10 +378,16 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
 
     println!("Setting up initial docking layout...");
 
-    // Clear any existing layout and create fresh dockspace
+    // Clear any existing layout and create fresh dockspace (size comes from main viewport)
+    DockBuilder::remove_node_docked_windows(dockspace_id, true);
     DockBuilder::remove_node(dockspace_id);
     DockBuilder::add_node(dockspace_id, dear_imgui::DockNodeFlags::NONE);
-    DockBuilder::set_node_size(dockspace_id, [1600.0, 881.0]);
+    // Match node pos/size to main viewport work area (exclude menu bars) before splitting
+    {
+        let vp = dear_imgui::Viewport::main();
+        DockBuilder::set_node_pos(dockspace_id, vp.work_pos());
+        DockBuilder::set_node_size(dockspace_id, vp.work_size());
+    }
 
     // Unity-style Professional Layout:
     // +-------------------+---------------------------+-------------------+
@@ -349,19 +398,10 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
     // |      Project      |         Console           |   Performance     |
     // +-------------------+---------------------------+-------------------+
 
-    // Create main vertical split: Top area (75%) + Bottom area (25%)
-    let mut bottom_area_id = 0u32;
-    let top_area_id = DockBuilder::split_node(
-        dockspace_id,
-        SplitDirection::Down,
-        0.25,
-        Some(&mut bottom_area_id),
-    );
-
-    // Split top area horizontally: Left (24%) + Center (52%) + Right (24%)
+    // Split horizontally: Left panel (~24%) | Center (~52%) | Right panel (~24%)
     let mut left_panel_id = 0u32;
     let remaining_after_left = DockBuilder::split_node(
-        top_area_id,
+        dockspace_id,
         SplitDirection::Left,
         0.24,
         Some(&mut left_panel_id),
@@ -371,11 +411,11 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
     let center_area_id = DockBuilder::split_node(
         remaining_after_left,
         SplitDirection::Right,
-        0.32, // 24% of remaining 76%
+        0.24,
         Some(&mut right_panel_id),
     );
 
-    // Split left panel vertically: Hierarchy (70%) + Project (30%)
+    // Split left panel vertically: Project/Asset Browser (~30%) bottom, Hierarchy (~70%) top
     let mut project_id = 0u32;
     let hierarchy_id = DockBuilder::split_node(
         left_panel_id,
@@ -384,7 +424,7 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
         Some(&mut project_id),
     );
 
-    // Split right panel vertically: Inspector (80%) + Performance (20%)
+    // Split right panel vertically: Performance (~20%) bottom, Inspector (~80%) top
     let mut performance_id = 0u32;
     let inspector_id = DockBuilder::split_node(
         right_panel_id,
@@ -393,12 +433,22 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
         Some(&mut performance_id),
     );
 
+    // Split center vertically: Console (~27%) bottom, Scene/Game (~73%) top
+    let mut console_id = 0u32;
+    let scene_game_id = DockBuilder::split_node(
+        center_area_id,
+        SplitDirection::Down,
+        0.27,
+        Some(&mut console_id),
+    );
+
     // Dock all windows to their designated areas
     DockBuilder::dock_window("Hierarchy", hierarchy_id);
     DockBuilder::dock_window("Project", project_id);
-    DockBuilder::dock_window("Scene View", center_area_id);
-    DockBuilder::dock_window("Game View", center_area_id); // Same area as Scene View (tabbed)
-    DockBuilder::dock_window("Console", bottom_area_id);
+    DockBuilder::dock_window("Asset Browser", project_id); // Tabbed with Project
+    DockBuilder::dock_window("Scene View", scene_game_id);
+    DockBuilder::dock_window("Game View", scene_game_id); // Tabbed with Scene View
+    DockBuilder::dock_window("Console", console_id); // Bottom center
     DockBuilder::dock_window("Inspector", inspector_id);
     DockBuilder::dock_window("Performance", performance_id);
 
@@ -408,8 +458,107 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
     println!("Docking layout setup complete");
 }
 
+#[derive(Default, Clone, Copy)]
+struct MenuActions {
+    reset_layout: bool,
+    load_ini: bool,
+    save_ini: bool,
+}
+
+/// Detect the base reference size from an ImGui .ini docking block.
+/// Prefer the DockSpace Size=WxH line; fallback to WindowOverViewport size if present.
+fn detect_base_size_from_ini(ini: &str) -> Option<(f32, f32)> {
+    for line in ini.lines() {
+        if line.trim_start().starts_with("DockSpace") {
+            if let Some(sz) = extract_pair_after_key(line, "Size=") {
+                return Some(sz);
+            }
+        }
+    }
+    // Fallback: search any WindowOverViewport_ section next, then Size=
+    let mut in_viewport = false;
+    for line in ini.lines() {
+        if line.contains("[Window][WindowOverViewport_") {
+            in_viewport = true;
+            continue;
+        }
+        if in_viewport {
+            if let Some(sz) = extract_pair_after_key(line, "Size=") {
+                return Some(sz);
+            }
+            if line.starts_with('[') {
+                break;
+            }
+        }
+    }
+    None
+}
+
+/// Scale all Pos=, Size= and SizeRef= pairs within the INI to target size ratios.
+fn scale_ini_for_target(ini: &str, base: (f32, f32), target: (f32, f32)) -> String {
+    let (bw, bh) = base;
+    let (tw, th) = target;
+    let sx = if bw > 0.0 { tw / bw } else { 1.0 };
+    let sy = if bh > 0.0 { th / bh } else { 1.0 };
+
+    let mut out = String::with_capacity(ini.len());
+    for mut line in ini.lines().map(|l| l.to_string()) {
+        for key in ["Pos=", "Size=", "SizeRef="] {
+            if let Some((x, y, start, end)) = extract_pair_with_span(&line, key) {
+                let nx = (x as f32 * sx).round() as i32;
+                let ny = (y as f32 * sy).round() as i32;
+                let mut new_line = String::with_capacity(line.len() + 8);
+                new_line.push_str(&line[..start]);
+                new_line.push_str(key);
+                new_line.push_str(&format!("{},{}", nx, ny));
+                new_line.push_str(&line[end..]);
+                line = new_line;
+            }
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
+fn extract_pair_after_key(line: &str, key: &str) -> Option<(f32, f32)> {
+    if let Some(idx) = line.find(key) {
+        let rest = &line[idx + key.len()..];
+        let mut it = rest.split(|c| c == ',' || c == ' ' || c == '\t' || c == '\r');
+        let a = it.next()?.trim();
+        let b = it.next()?.trim();
+        if let (Ok(ax), Ok(by)) = (a.parse::<f32>(), b.parse::<f32>()) {
+            return Some((ax, by));
+        }
+    }
+    None
+}
+
+fn extract_pair_with_span(line: &str, key: &str) -> Option<(i32, i32, usize, usize)> {
+    let kpos = line.find(key)?;
+    let start = kpos + key.len();
+    let bytes = line.as_bytes();
+    let mut i = start;
+    while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
+        i += 1;
+    }
+    if i >= bytes.len() || bytes[i] as char != ',' {
+        return None;
+    }
+    let x_str = &line[start..i];
+    let mut j = i + 1;
+    while j < bytes.len() && (bytes[j] as char).is_ascii_digit() {
+        j += 1;
+    }
+    let y_str = &line[i + 1..j];
+    let x = x_str.parse::<i32>().ok()?;
+    let y = y_str.parse::<i32>().ok()?;
+    Some((x, y, kpos, j))
+}
+
 /// Render the main menu bar
-fn render_main_menu_bar(ui: &Ui, game_state: &mut GameEngineState) {
+fn render_main_menu_bar(ui: &Ui, game_state: &mut GameEngineState) -> MenuActions {
+    let mut actions = MenuActions::default();
     if let Some(_main_menu_bar) = ui.begin_main_menu_bar() {
         ui.menu("File", || {
             if ui.menu_item("New Scene") {
@@ -470,11 +619,25 @@ fn render_main_menu_bar(ui: &Ui, game_state: &mut GameEngineState) {
             ui.menu_item("Performance Stats");
         });
 
+        ui.menu("Layout", || {
+            if ui.menu_item("Reset to Unity Layout") {
+                actions.reset_layout = true;
+            }
+            ui.separator();
+            if ui.menu_item("Load Layout (INI)") {
+                actions.load_ini = true;
+            }
+            if ui.menu_item("Save Layout (INI)") {
+                actions.save_ini = true;
+            }
+        });
+
         ui.menu("Help", || {
             ui.menu_item("About");
             ui.menu_item("Documentation");
         });
     }
+    actions
 }
 
 /// Render the Hierarchy panel (Unity-style)

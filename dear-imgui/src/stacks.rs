@@ -1,3 +1,8 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 use crate::Ui;
 use crate::fonts::FontId;
 use crate::style::{StyleColor, StyleVar};

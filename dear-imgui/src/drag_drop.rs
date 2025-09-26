@@ -1,3 +1,8 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 //! Drag and Drop functionality for Dear ImGui
 //!
 //! This module provides a complete drag and drop system that allows users to transfer

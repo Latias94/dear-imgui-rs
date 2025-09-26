@@ -2,6 +2,16 @@
 //!
 //! This module contains the main WgpuRenderer struct and its implementation,
 //! following the pattern from imgui_impl_wgpu.cpp
+//!
+//! Texture Updates Flow (ImGui 1.92+)
+//! - During `Context::render()`, Dear ImGui emits a list of textures to be processed in
+//!   `DrawData::textures()` (see `dear_imgui::render::DrawData::textures`). Each item is an
+//!   `ImTextureData*` with a `Status` field:
+//!   - `WantCreate`: create a GPU texture, upload all pixels, set `TexID`, then set status `OK`.
+//!   - `WantUpdates`: upload `UpdateRect` (and any queued rects) then set `OK`.
+//!   - `WantDestroy`: schedule/destroy GPU texture; if unused for some frames, set `Destroyed`.
+//! - This backend honors these transitions in its texture module; users can simply pass
+//!   `&mut TextureData` to UI/draw calls and let the backend handle the rest.
 
 use crate::GammaMode;
 use crate::{

@@ -32,6 +32,9 @@
 #![allow(dead_code)]
 #![allow(unnecessary_transmutes)]
 #![allow(clippy::all)]
+// Bindgen may derive Eq/Hash for structs containing function pointers (e.g. ImFontLoader),
+// which triggers the `fn_address_comparisons` lint. This is harmless for raw FFI types.
+#![allow(fn_address_comparisons)]
 
 // Bindings are generated into OUT_DIR and included via a submodule so that
 // possible inner attributes in the generated file are accepted at module root.

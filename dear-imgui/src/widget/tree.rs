@@ -1,3 +1,8 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 use crate::Condition;
 use crate::sys;
 use crate::ui::Ui;

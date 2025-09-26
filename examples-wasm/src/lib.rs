@@ -105,7 +105,7 @@ impl AppWindow {
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
         // Skip font atlas preparation for WASM to avoid pointer issues
-        let renderer = WgpuRenderer::new_without_font_atlas(init_info, &mut context)
+        let renderer = WgpuRenderer::new(init_info, &mut context)
             .map_err(|e| JsValue::from_str(&format!("init renderer: {e}")))?;
 
         let imgui = ImguiState {

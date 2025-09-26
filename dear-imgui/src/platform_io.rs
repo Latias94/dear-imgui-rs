@@ -835,6 +835,17 @@ pub struct Viewport {
 }
 
 impl Viewport {
+    /// Returns a reference to the main Dear ImGui viewport (safe wrapper)
+    ///
+    /// This is the same viewport used by `Ui::dockspace_over_main_viewport()`.
+    /// Requires an active ImGui context.
+    #[doc(alias = "GetMainViewport")]
+    pub fn main() -> &'static Self {
+        // SAFETY: With an active ImGui context, `igGetMainViewport()` returns
+        // a valid pointer to the global main viewport that lives for the
+        // duration of the context. We expose it as a shared reference.
+        unsafe { Self::from_raw(sys::igGetMainViewport() as *const sys::ImGuiViewport) }
+    }
     /// Get a reference to the viewport from a raw pointer
     ///
     /// # Safety

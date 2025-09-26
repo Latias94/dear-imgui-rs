@@ -1,3 +1,8 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 use crate::Ui;
 use crate::sys;
 
@@ -151,18 +156,9 @@ impl Ui {
     #[doc(alias = "GetCursorPos")]
     pub fn cursor_pos(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetCursorPos(&mut pos);
-                [pos.x, pos.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetCursorPos(&mut pos);
-                [pos.x, pos.y]
-            }
+            let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetCursorPos(&mut pos);
+            [pos.x, pos.y]
         }
     }
 
@@ -170,18 +166,9 @@ impl Ui {
     #[doc(alias = "GetCursorScreenPos")]
     pub fn cursor_screen_pos(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetCursorScreenPos(&mut pos);
-                [pos.x, pos.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetCursorScreenPos(&mut pos);
-                [pos.x, pos.y]
-            }
+            let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetCursorScreenPos(&mut pos);
+            [pos.x, pos.y]
         }
     }
 

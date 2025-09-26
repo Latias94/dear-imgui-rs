@@ -146,18 +146,9 @@ impl crate::ui::Ui {
     #[doc(alias = "GetMousePos")]
     pub fn get_mouse_pos(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetMousePos(&mut pos);
-                [pos.x, pos.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetMousePos(&mut pos);
-                [pos.x, pos.y]
-            }
+            let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetMousePos(&mut pos);
+            [pos.x, pos.y]
         }
     }
 
@@ -165,18 +156,9 @@ impl crate::ui::Ui {
     #[doc(alias = "GetMousePosOnOpeningCurrentPopup")]
     pub fn get_mouse_pos_on_opening_current_popup(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetMousePosOnOpeningCurrentPopup(&mut pos);
-                [pos.x, pos.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetMousePosOnOpeningCurrentPopup(&mut pos);
-                [pos.x, pos.y]
-            }
+            let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetMousePosOnOpeningCurrentPopup(&mut pos);
+            [pos.x, pos.y]
         }
     }
 
@@ -184,18 +166,9 @@ impl crate::ui::Ui {
     #[doc(alias = "GetMouseDragDelta")]
     pub fn get_mouse_drag_delta(&self, button: MouseButton, lock_threshold: f32) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetMouseDragDelta(&mut delta, button.into(), lock_threshold);
-                [delta.x, delta.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetMouseDragDelta(&mut delta, button.into(), lock_threshold);
-                [delta.x, delta.y]
-            }
+            let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetMouseDragDelta(&mut delta, button.into(), lock_threshold);
+            [delta.x, delta.y]
         }
     }
 
@@ -295,18 +268,9 @@ impl crate::ui::Ui {
     #[doc(alias = "GetCursorScreenPos")]
     pub fn get_cursor_screen_pos(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetCursorScreenPos(&mut pos);
-                [pos.x, pos.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetCursorScreenPos(&mut pos);
-                [pos.x, pos.y]
-            }
+            let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetCursorScreenPos(&mut pos);
+            [pos.x, pos.y]
         }
     }
 
@@ -314,18 +278,9 @@ impl crate::ui::Ui {
     #[doc(alias = "GetContentRegionAvail")]
     pub fn get_content_region_avail(&self) -> [f32; 2] {
         unsafe {
-            #[cfg(target_env = "msvc")]
-            {
-                let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetContentRegionAvail(&mut size);
-                [size.x, size.y]
-            }
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
-                sys::igGetContentRegionAvail(&mut size);
-                [size.x, size.y]
-            }
+            let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
+            sys::igGetContentRegionAvail(&mut size);
+            [size.x, size.y]
         }
     }
 

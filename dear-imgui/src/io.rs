@@ -1,3 +1,8 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions
+)]
 use bitflags::bitflags;
 
 use crate::sys;
@@ -293,15 +298,17 @@ impl Io {
     }
 
     /// Get the global font scale (not available in current Dear ImGui version)
-    /// This is a placeholder for compatibility with imgui-rs
+    /// Compatibility shim: maps to style.FontScaleMain (Dear ImGui 1.92+)
     pub fn font_global_scale(&self) -> f32 {
-        1.0 // Default scale
+        unsafe { (*sys::igGetStyle()).FontScaleMain }
     }
 
     /// Set the global font scale (not available in current Dear ImGui version)
-    /// This is a placeholder for compatibility with imgui-rs
+    /// Compatibility shim: maps to style.FontScaleMain (Dear ImGui 1.92+)
     pub fn set_font_global_scale(&mut self, _scale: f32) {
-        // No-op for now, as FontGlobalScale field is not available
+        unsafe {
+            (*sys::igGetStyle()).FontScaleMain = _scale;
+        }
     }
 
     /// Get the display framebuffer scale

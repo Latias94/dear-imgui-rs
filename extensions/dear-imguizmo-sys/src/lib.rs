@@ -10,6 +10,7 @@
 #![allow(dead_code)]
 #![allow(unnecessary_transmutes)]
 #![allow(clippy::all)]
+#![allow(fn_address_comparisons)]
 
 // Re-export Dear ImGui types for compatibility
 pub use dear_imgui_sys::{ImDrawList, ImGuiContext, ImGuiID, ImVec2, ImVec4};

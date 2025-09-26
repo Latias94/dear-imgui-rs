@@ -10,10 +10,10 @@ This guide documents how to build and design extensions that integrate well with
 
 ## API Style (align with dear-imgui)
 
-Follow the `dear-imgui` crate’s style for a uniform developer experience:
+Follow the `dear-imgui` crate's style for a uniform developer experience:
 
 - Entry via `Ui` extensions
-  - Provide `Ui` extension methods to access your extension’s per-frame UI (e.g., `ui.guizmo()` returning a `GizmoUi`).
+  - Provide `Ui` extension methods to access your extension's per-frame UI (e.g., `ui.guizmo()` returning a `GizmoUi`).
 - RAII tokens
   - For push/pop stacks and begin/end scopes, return tokens that pop/end on `Drop`. Offer an explicit `.pop()`/`.end()` as convenience.
 - Builder pattern
@@ -53,16 +53,42 @@ fn draw(ui: &Ui) {
 
 Prefer this style for new features to remain consistent with the `dear-imgui` crate. See `dear_imguizmo::graph` (pure-Rust GraphEditor) for a concrete example of a Ui extension plus builder API.
 
+Naming convention for Ui extensions and entry points:
+
+- `GuizmoExt::guizmo` -> returns `GizmoUi`
+- `ImPlotExt::implot` -> returns `PlotUi<'_>` and takes a `PlotContext`
+- `ImNodesExt::imnodes` -> returns `NodesUi<'_>` and takes a `Context`
+
+## Context Binding to Dear ImGui
+
+Extensions that keep their own global/context state must explicitly bind to the current Dear ImGui context before creating or using that state. Do this at the moment you create/use the extension context or begin its frame:
+
+```rust
+// ImPlot context creation
+unsafe { dear_implot_sys::ImPlot_SetImGuiContext(dear_imgui_sys::igGetCurrentContext()) }
+let implot = dear_implot::PlotContext::create(&imgui_ctx);
+
+// ImGuizmo per-frame setup
+unsafe { dear_imguizmo_sys::ImGuizmo_SetImGuiContext(dear_imgui_sys::igGetCurrentContext()) }
+dear_imguizmo::GuizmoContext::new().begin_frame(&ui);
+
+// ImNodes context creation
+unsafe { dear_imnodes_sys::imnodes_SetImGuiContext(dear_imgui_sys::igGetCurrentContext()) }
+let imnodes = dear_imnodes::Context::create(&imgui_ctx);
+```
+
+Rationale: it prevents undefined behavior from querying ImGui state through a stale or null context inside the extension.
+
 ## Layering
 
 ```
 your-extension/
-├── your-extension-sys/      # Low-level FFI (C binding + bindgen)
-│   ├── build.rs             # cc + bindgen, inherits DEP_DEAR_IMGUI_* paths/defines
-│   ├── src/lib.rs           # include!(concat!(OUT_DIR, "/bindings.rs"))
-│   └── third-party/…        # upstream C API (git submodule)
-└── your-extension/          # High-level safe API
-    └── src/lib.rs           # RAII tokens, builders, bitflags
+  your-extension-sys/      # Low-level FFI (C binding + bindgen)
+    build.rs             # cc + bindgen, inherits DEP_DEAR_IMGUI_* paths/defines
+    src/lib.rs           # include!(concat!(OUT_DIR, "/bindings.rs"))
+    third-party/           # upstream C API (git submodule)
+  your-extension/          # High-level safe API
+    src/lib.rs           # RAII tokens, builders, bitflags
 ```
 
 ## Build Scripts (`-sys`)
@@ -76,21 +102,30 @@ Use C bindings (cimgui family) + bindgen when available:
   - `DEP_DEAR_IMGUI_DEFINE_*` (propagate as `build.define(key, val)`)
 - Sources: compile upstream C/C++ sources with `cc` (e.g., `cimplot.cpp`, `implot/*.cpp`)
 - Base linking: do not duplicate linking of the base ImGui library; rely on `dear-imgui-sys` to emit the correct `cargo:rustc-link-lib` for `dear_imgui`/`cimgui`. Your `-sys` crate should only emit its own static lib.
-- Blocklist ImGui types in bindgen (re-use `dear-imgui-sys`): `ImVec2`, `ImVec4`, `ImGuiContext`, `ImDrawList`, …
+- Blocklist ImGui types in bindgen (re-use dear-imgui-sys): ImVec2, ImVec4, ImGuiContext, ImDrawList, etc.
 - WASM: generally exclude native build; emit bindings only if you need docs.rs builds
+- Docs.rs/offline builds: commit a full `src/bindings_pregenerated.rs` and have `build.rs` copy/sanitize it to `OUT_DIR/bindings.rs` when headers or toolchains are not available
 
 ### Build Modes
 
 Provide three modes (opt-in via env):
 
 - Source build (default)
-- System/prebuilt: `*_SYS_LIB_DIR` → add `cargo:rustc-link-search` and `-l static=<name>`
-- Remote prebuilt: `*_SYS_PREBUILT_URL` → download to `OUT_DIR/prebuilt/`
+- System/prebuilt: `*_SYS_LIB_DIR` -> add `cargo:rustc-link-search` and `-l static=<name>`
+- Remote prebuilt: `*_SYS_PREBUILT_URL` -> download to `OUT_DIR/prebuilt/`
 
 Naming convention for static libs:
 
 - Windows/MSVC: `<name>.lib` (e.g., `dear_implot.lib`)
 - Unix: `lib<name>.a` (e.g., `libdear_implot.a`)
+
+## Crate and Env Var Conventions
+
+- Crate names: `dear-<ext>-sys` (FFI) and `dear-<ext>` (safe)
+- Cargo `links`: `dear_<ext>`; native static library name follows the same
+- Env vars: `<EXT>_SYS_LIB_DIR`, `<EXT>_SYS_PREBUILT_URL`, `<EXT>_SYS_SKIP_CC`, optional `<EXT>_SYS_USE_PREBUILT`, `<EXT>_SYS_FORCE_BUILD`
+- Features: `prebuilt`, `build-from-source` (opt-in toggles) and passthroughs like `freetype` to `dear-imgui-sys`
+- Optional: `bin/package` helper for producing release archives consistent with `tools/build-support`
 
 ## High-Level API Design
 
@@ -117,7 +152,7 @@ let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 // Resolve include paths from dear-imgui-sys
 let imgui_src = PathBuf::from(env::var("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH").unwrap());
 let cimgui_root = PathBuf::from(env::var("DEP_DEAR_IMGUI_CIMGUI_INCLUDE_PATH").unwrap());
-let third_party = manifest_dir.join("third-party/your-upstream");
+let third_party = manifest_dir.join("third-party/           # upstream C API (git submodule)our-upstream");
 
 // Generate bindings
 let bindings = bindgen::Builder::default()
@@ -167,6 +202,8 @@ if target_env == "msvc" && target_os == "windows" {
 - [ ] High-level uses bitflags for masks, enums for discrete choices
 - [ ] Conversions for common math types (mint, optional glam)
 - [ ] Examples are feature-gated in the root `examples/` crate
+- [ ] Context binding calls to ImGui are in place (`*_SetImGuiContext`)
+- [ ] Basic thread-safety assertions for context types (e.g., `assert_not_impl_any!(Context: Send, Sync)`) via `static_assertions`
 
 ## When C API Is Missing but C++ Exists
 
@@ -196,7 +233,12 @@ Sometimes upstream provides functionality only in the C++ API (e.g., ImGuizmo Gr
 
 Decision guideline:
 
-- If feature is UI-composable and not too complex → choose (1) Rust.
-- If behavior is intricate and parity is required quickly → choose (2) C wrapper, with a clear minimal C API and tests.
+- If feature is UI-composable and not too complex -> choose (1) Rust.
+- If behavior is intricate and parity is required quickly -> choose (2) C wrapper, with a clear minimal C API and tests.
 
 Document in your crate README which approach is used and why, and provide a migration path if switching strategies in future.
+
+
+
+
+

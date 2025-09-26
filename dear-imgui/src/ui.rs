@@ -3,6 +3,7 @@ use crate::input::MouseCursor;
 use crate::internal::RawWrapper;
 use crate::string::UiBuffer;
 use crate::sys;
+use crate::texture::TextureRef;
 use std::cell::UnsafeCell;
 
 /// Represents the Dear ImGui user interface for one frame
@@ -13,6 +14,13 @@ pub struct Ui {
 }
 
 impl Ui {
+    /// Returns a reference to the main Dear ImGui viewport (safe wrapper)
+    ///
+    /// Same viewport used by `dockspace_over_main_viewport()`.
+    #[doc(alias = "GetMainViewport")]
+    pub fn main_viewport(&self) -> &'static crate::platform_io::Viewport {
+        crate::platform_io::Viewport::main()
+    }
     /// Creates a new Ui instance
     ///
     /// This should only be called by Context::create()
@@ -120,6 +128,20 @@ impl Ui {
         unsafe {
             crate::sys::igShowDemoWindow(opened);
         }
+    }
+
+    /// Convenience: draw an image with background and tint (ImGui 1.92+)
+    ///
+    /// Equivalent to using `image_config(...).build_with_bg(bg, tint)` but in one call.
+    #[doc(alias = "ImageWithBg")]
+    pub fn image_with_bg(
+        &self,
+        texture: impl Into<TextureRef>,
+        size: [f32; 2],
+        bg_color: [f32; 4],
+        tint_color: [f32; 4],
+    ) {
+        crate::widget::image::Image::new(self, texture, size).build_with_bg(bg_color, tint_color)
     }
 
     /// Renders an about window.

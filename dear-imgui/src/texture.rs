@@ -105,6 +105,87 @@ impl Default for TextureId {
 /// Raw texture ID type for compatibility with Dear ImGui
 pub type RawTextureId = *const c_void;
 
+/// A convenient, typed wrapper around ImGui's ImTextureRef (v1.92+)
+///
+/// Can reference either a plain `TextureId` (legacy path) or a managed `TextureData`.
+///
+/// Examples
+/// - With a plain GPU handle (legacy path):
+/// ```no_run
+/// # use dear_imgui::{Ui, TextureId};
+/// # fn demo(ui: &Ui) {
+/// let tex_id = TextureId::new(12345);
+/// ui.image(tex_id, [64.0, 64.0]);
+/// # }
+/// ```
+/// - With a managed texture (ImGui 1.92 texture system):
+/// ```no_run
+/// # use dear_imgui::{Ui, texture::{TextureData, TextureFormat}};
+/// # fn demo(ui: &Ui) {
+/// let mut tex = TextureData::new();
+/// tex.create(TextureFormat::RGBA32, 256, 256);
+/// // Fill pixels or schedule updates...
+/// ui.image(&mut tex, [256.0, 256.0]);
+/// // The renderer backend will honor WantCreate/WantUpdates/WantDestroy
+/// // via DrawData::textures() when rendering this frame.
+/// # }
+/// ```
+#[derive(Copy, Clone, Debug)]
+#[repr(transparent)]
+pub struct TextureRef(sys::ImTextureRef);
+
+impl TextureRef {
+    /// Create a texture reference from a raw ImGui texture ref
+    #[inline]
+    pub fn from_raw(raw: sys::ImTextureRef) -> Self {
+        Self(raw)
+    }
+
+    /// Get the underlying ImGui texture ref (by value)
+    #[inline]
+    pub fn raw(self) -> sys::ImTextureRef {
+        self.0
+    }
+}
+
+impl From<TextureId> for TextureRef {
+    #[inline]
+    fn from(id: TextureId) -> Self {
+        TextureRef(sys::ImTextureRef {
+            _TexData: std::ptr::null_mut(),
+            _TexID: id.id() as sys::ImTextureID,
+        })
+    }
+}
+
+impl From<u64> for TextureRef {
+    #[inline]
+    fn from(id: u64) -> Self {
+        TextureRef::from(TextureId::from(id))
+    }
+}
+
+impl From<&TextureData> for TextureRef {
+    #[inline]
+    fn from(td: &TextureData) -> Self {
+        // Safe for immediate use during the frame; the caller must uphold lifetime.
+        TextureRef(sys::ImTextureRef {
+            _TexData: td.as_raw() as *mut sys::ImTextureData,
+            _TexID: 0,
+        })
+    }
+}
+
+impl From<&mut TextureData> for TextureRef {
+    #[inline]
+    fn from(td: &mut TextureData) -> Self {
+        TextureRef(sys::ImTextureRef {
+            _TexData: td.as_raw_mut(),
+            _TexID: 0,
+        })
+    }
+}
+
 /// Texture format supported by Dear ImGui
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(i32)]
@@ -206,6 +287,19 @@ impl From<TextureRect> for sys::ImTextureRect {
 /// This is a wrapper around ImTextureData that provides safe access to
 /// texture information and pixel data. It's used by renderer backends
 /// to create, update, and destroy textures.
+///
+/// Lifecycle & Backend Flow (ImGui 1.92+)
+/// - Create an instance (e.g. via `TextureData::new()` + `create()`)
+/// - Mutate pixels, set flags/rects (e.g. call `set_data()` or directly write `Pixels` then
+///   set `UpdateRect`), and set status to `WantCreate`/`WantUpdates`.
+/// - When you pass `&mut TextureData` to any widget/draw call, Dear ImGui will place this
+///   texture into `DrawData::textures()` for the current frame.
+/// - Your renderer backend iterates `DrawData::textures()` and performs the requested
+///   create/update/destroy operations, then updates status to `OK`/`Destroyed`.
+/// - You can also set/get a `TexID` (e.g., GPU handle) via `set_tex_id()/tex_id()` after creation.
+///
+/// Lifetime Note: If using the managed path, you must keep `TextureData` alive at least until the
+/// end of the frame where it is referenced by UI calls. Prefer owning containers like `Box`/`Arc`.
 #[repr(transparent)]
 pub struct TextureData {
     raw: sys::ImTextureData,
@@ -404,19 +498,43 @@ impl TextureData {
     /// Set the pixel data for the texture
     ///
     /// This copies the provided data into the texture's pixel buffer.
-    /// Note: This is a simplified implementation. In practice, you should
-    /// use the Dear ImGui texture management system properly.
     pub fn set_data(&mut self, data: &[u8]) {
         unsafe {
             let raw = self.as_raw_mut();
-            if !(*raw).Pixels.is_null() {
-                // Free existing data
-                sys::ImTextureData_DestroyPixels(self.as_raw_mut());
+            let needed = (*raw)
+                .Width
+                .saturating_mul((*raw).Height)
+                .saturating_mul((*raw).BytesPerPixel);
+            if needed <= 0 {
+                // Nothing to do without valid dimensions/format.
+                return;
             }
 
-            // For now, we'll just set the pointer to the data
-            // In a real implementation, you'd want to allocate and copy
-            (*raw).Pixels = data.as_ptr() as *mut u8;
+            // Ensure pixel buffer exists and has correct size
+            if (*raw).Pixels.is_null() {
+                sys::ImTextureData_Create(
+                    self.as_raw_mut(),
+                    (*raw).Format,
+                    (*raw).Width,
+                    (*raw).Height,
+                );
+            }
+
+            let copy_bytes = std::cmp::min(needed as usize, data.len());
+            if copy_bytes == 0 {
+                return;
+            }
+
+            std::ptr::copy_nonoverlapping(data.as_ptr(), (*raw).Pixels as *mut u8, copy_bytes);
+
+            // Mark entire texture as updated
+            (*raw).UpdateRect = sys::ImTextureRect {
+                x: 0u16,
+                y: 0u16,
+                w: (*raw).Width.clamp(0, u16::MAX as i32) as u16,
+                h: (*raw).Height.clamp(0, u16::MAX as i32) as u16,
+            };
+            (*raw).Status = sys::ImTextureStatus_WantUpdates;
         }
     }
 

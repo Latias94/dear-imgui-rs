@@ -22,7 +22,7 @@ pub mod tree;
 
 // Re-export important types
 pub use popup::PopupFlags;
-pub use table::{TableBgTarget, TableColumnSetup};
+pub use table::{TableBgTarget, TableBuilder, TableColumnSetup};
 
 // Widget implementations
 pub use self::button::*;
@@ -229,6 +229,8 @@ bitflags::bitflags! {
         const INDENT_ENABLE = sys::ImGuiTableColumnFlags_IndentEnable as i32;
         /// Disable indenting for this column
         const INDENT_DISABLE = sys::ImGuiTableColumnFlags_IndentDisable as i32;
+        /// Display an angled header for this column (when angled headers feature is enabled)
+        const ANGLED_HEADER = sys::ImGuiTableColumnFlags_AngledHeader as i32;
         /// Status: is enabled == not hidden
         const IS_ENABLED = sys::ImGuiTableColumnFlags_IsEnabled as i32;
         /// Status: is visible == is enabled AND not clipped by scrolling
