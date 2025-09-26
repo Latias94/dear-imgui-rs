@@ -7,6 +7,7 @@ header = """
 """
 # release-plz renders a single release entry and provides `commits` in the template context.
 # Avoid using `releases`/`release.*` here to prevent template errors.
+# Avoid author/committer fields to prevent NO_COMMIT_ID lookups.
 body = """
 {% if commits | length == 0 %}
 - No significant changes.
@@ -14,7 +15,7 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | upper_first }}
 {% for commit in commits %}
-- {{ commit.message | trim }}{% if commit.breaking %} (BREAKING){% endif %}{% if commit.scope %} [{{ commit.scope }}]{% endif %} ({{ commit.id | truncate(length=7) }}){% if commit.author.name %} by @{{ commit.author.name }}{% endif %}
+- {{ commit.message | trim }}{% if commit.breaking %} (BREAKING){% endif %}{% if commit.scope %} [{{ commit.scope }}]{% endif %} ({{ commit.id | truncate(length=7) }})
 {% endfor %}
 {% endfor %}
 {% endif %}

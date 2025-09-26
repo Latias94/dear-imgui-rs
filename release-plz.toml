@@ -8,6 +8,11 @@ release_always = false # only release when PR is merged
 changelog_config = ".github/changelog.toml" # use git-cliff conventional commit config
 pr_labels = ["release"]
 
+# Optional: only create git tags for packages we explicitly enable below.
+# This avoids tagging tools/examples accidentally.
+# Comment out if you prefer the default (tag every released package).
+# git_tag_enable = false
+
 git_release_body = """
 {{ changelog }}
 {% if remote.contributors %}
@@ -29,6 +34,9 @@ git_release_enable = true # create GitHub release
 name = "dear-imgui-sys"
 git_release_enable = false # don't create separate releases for sys crate
 changelog_update = false # don't require changelog for sys crate
+# Let release-plz create tags for sys crate to trigger prebuilt workflow
+# (default tag pattern is "{{ package }}-v{{ version }}")
+git_tag_enable = true
 
 # Backend packages
 [[package]]
@@ -51,6 +59,7 @@ changelog_path = "./backends/dear-imgui-glow/CHANGELOG.md"
 name = "dear-imguizmo-sys"
 git_release_enable = false
 changelog_update = false
+git_tag_enable = true
 
 [[package]]
 name = "dear-imguizmo"
@@ -61,6 +70,7 @@ git_release_enable = true
 name = "dear-implot-sys"
 git_release_enable = false
 changelog_update = false
+git_tag_enable = true
 
 [[package]]
 name = "dear-implot"
@@ -71,8 +81,16 @@ changelog_path = "./extensions/dear-implot/CHANGELOG.md"
 name = "dear-imnodes-sys"
 git_release_enable = false
 changelog_update = false
+git_tag_enable = true
 
 [[package]]
 name = "dear-imnodes"
 changelog_path = "./extensions/dear-imnodes/CHANGELOG.md"
 git_release_enable = true
+
+# Examples are not meant for crates.io publishing or releases.
+[[package]]
+name = "dear-imgui-examples"
+publish = false
+git_release_enable = false
+changelog_update = false
