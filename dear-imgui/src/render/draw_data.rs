@@ -352,6 +352,11 @@ pub enum DrawCmd {
         count: usize,
         cmd_params: DrawCmdParams,
         /// Raw command pointer for backends
+        ///
+        /// Backend note: when using the modern texture system, resolve the effective
+        /// texture id at bind time via `ImDrawCmd_GetTexID(raw_cmd)` together with your
+        /// renderer state. This pointer is only valid during the `render_draw_data()`
+        /// call that produced it; do not store it.
         raw_cmd: *const sys::ImDrawCmd,
     },
     /// Reset render state

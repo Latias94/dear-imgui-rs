@@ -33,7 +33,7 @@ pub struct WgpuRenderer {
     texture_manager: WgpuTextureManager,
     /// Default texture for fallback
     default_texture: Option<TextureView>,
-    /// Registered font atlas texture id (if created via legacy path)
+    /// Registered font atlas texture id (if created via font-atlas fallback)
     font_texture_id: Option<u64>,
     /// Gamma mode: automatic (by format), force linear (1.0), or force 2.2
     gamma_mode: GammaMode,
@@ -191,7 +191,7 @@ impl WgpuRenderer {
                 {
                     if cfg!(debug_assertions) {
                         eprintln!(
-                            "[dear-imgui-wgpu][debug] Font atlas uploaded via legacy path: tex_id={}",
+                            "[dear-imgui-wgpu][debug] Font atlas uploaded via fallback (legacy-only) path; user textures use modern ImTextureData. tex_id={}",
                             tex_id
                         );
                     }
@@ -429,7 +429,7 @@ impl WgpuRenderer {
         if let Some(src) = pixels_slice {
             if cfg!(debug_assertions) {
                 eprintln!(
-                    "[dear-imgui-wgpu][debug] Font atlas texdata: {}x{} bpp={} (legacy upload)",
+                    "[dear-imgui-wgpu][debug] Font atlas texdata: {}x{} bpp={} (fallback upload for font atlas)",
                     width, height, bpp
                 );
             }
@@ -447,7 +447,7 @@ impl WgpuRenderer {
                 // Unexpected format; don't proceed
                 if cfg!(debug_assertions) {
                     eprintln!(
-                        "[dear-imgui-wgpu][debug] Unexpected font atlas bpp={} — skip",
+                        "[dear-imgui-wgpu][debug] Unexpected font atlas bpp={} -> skip",
                         bpp
                     );
                 }
@@ -542,7 +542,7 @@ impl WgpuRenderer {
             }
             if cfg!(debug_assertions) {
                 eprintln!(
-                    "[dear-imgui-wgpu][debug] Legacy font atlas upload complete: tex_id={}",
+                    "[dear-imgui-wgpu][debug] Font atlas fallback upload complete: tex_id={}",
                     tex_id
                 );
             }
@@ -551,7 +551,7 @@ impl WgpuRenderer {
         }
         if cfg!(debug_assertions) {
             eprintln!(
-                "[dear-imgui-wgpu][debug] Font atlas has no pixel buffer; skip legacy upload"
+                "[dear-imgui-wgpu][debug] Font atlas has no CPU pixel buffer; skipping fallback upload (renderer will use modern texture updates)"
             );
         }
         Ok(None)

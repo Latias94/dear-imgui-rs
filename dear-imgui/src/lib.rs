@@ -86,6 +86,49 @@
 //!      (Create/Update/Destroy), then set status back to `OK`/`Destroyed`.
 //! - Alternatives: when you already have a GPU handle, pass `TextureId` directly.
 //!
+//! ## Renderer Integration (Modern Textures)
+//!
+//! When integrating a renderer backend (WGPU, OpenGL, etc.) with ImGui 1.92+:
+//! - Set `BackendFlags::RENDERER_HAS_TEXTURES` on the ImGui `Io` before building the font atlas.
+//! - Each frame, iterate `DrawData::textures()` and honor all requests:
+//!   - `WantCreate`: create a GPU texture, upload pixels, assign a non-zero TexID back to ImGui, then set status to `OK`.
+//!   - `WantUpdates`: upload pending `UpdateRect`s, then set status to `OK`.
+//!   - `WantDestroy`: delete/free the GPU texture and set status to `Destroyed`.
+//! - When binding textures for draw commands, do not rely only on `DrawCmdParams.texture_id`.
+//!   With the modern system it may be `0`. Resolve the effective id at bind time using
+//!   `ImDrawCmd_GetTexID(raw_cmd)` along with your renderer state.
+//! - Optional: some backends perform a font-atlas fallback upload on initialization.
+//!   This affects only the font texture for the first frame; user textures go through
+//!   the modern `ImTextureData` path.
+//!
+//! Pseudocode outline:
+//! ```ignore
+//! // 1) Configure context
+//! io.backend_flags |= BackendFlags::RENDERER_HAS_TEXTURES;
+//!
+//! // 2) Per-frame: handle texture requests
+//! for tex in draw_data.textures() {
+//!     match tex.status() {
+//!         WantCreate => { create_gpu_tex(tex); tex.set_tex_id(id); tex.set_ok(); }
+//!         WantUpdates => { upload_rects(tex); tex.set_ok(); }
+//!         WantDestroy => { destroy_gpu_tex(tex); tex.set_destroyed(); }
+//!         _ => {}
+//!     }
+//! }
+//!
+//! // 3) Rendering: resolve texture at bind-time
+//! for cmd in draw_list.commands() {
+//!     match cmd {
+//!         Elements { cmd_params, raw_cmd, .. } => {
+//!             let effective = unsafe { sys::ImDrawCmd_GetTexID(raw_cmd) };
+//!             bind_texture(effective);
+//!             draw(cmd_params);
+//!         }
+//!         _ => { /* ... */ }
+//!     }
+//! }
+//! ```
+//!
 //! ## Colors (ImU32 ABGR)
 //!
 //! Dear ImGui uses a packed 32-bit color in ABGR order for low-level APIs (aka `ImU32`).

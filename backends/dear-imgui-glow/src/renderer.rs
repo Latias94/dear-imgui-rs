@@ -213,9 +213,11 @@ impl GlowRenderer {
         // Build the font atlas CPU data
         fonts.build();
 
-        // Try to upload the font atlas immediately (legacy path / fallback),
+        // Try to upload the font atlas immediately (font-atlas fallback, legacy-style),
         // mirroring dear imgui's OpenGL3 backend and our WGPU backend behavior.
-        // This ensures the font texture is available even if draw_data-based
+        // This only applies to the font atlas. User textures use the modern
+        // ImTextureData flow handled during DrawData::textures() processing.
+        // Doing this ensures the font texture is available even if draw_data-based
         // texture updates are not triggered on the first frame.
         let mut created_font_tex: Option<GlTexture> = None;
         unsafe {
@@ -760,10 +762,12 @@ impl GlowRenderer {
             gl_debug_message(gl, "start loop over commands");
             for command in draw_list.commands() {
                 match command {
-                    DrawCmd::Elements {
-                        count, cmd_params, ..
-                    } => {
-                        self.render_elements(gl, texture_map, count, &cmd_params, draw_data)?;
+                    DrawCmd::Elements { count, cmd_params, raw_cmd } => {
+                        let tex_id_u64 = unsafe {
+                            dear_imgui::sys::ImDrawCmd_GetTexID(raw_cmd as *mut dear_imgui::sys::ImDrawCmd)
+                        } as u64;
+                        let tex_id = dear_imgui::TextureId::from(tex_id_u64);
+                        self.render_elements(gl, texture_map, count, tex_id, &cmd_params, draw_data)?;
                     }
                     DrawCmd::ResetRenderState => {
                         self.set_up_render_state(
@@ -835,18 +839,19 @@ impl GlowRenderer {
         gl: &Context,
         texture_map: &dyn TextureMap,
         count: usize,
+        effective_tex_id: dear_imgui::TextureId,
         cmd_params: &DrawCmdParams,
         draw_data: &DrawData,
     ) -> RenderResult<()> {
         // Get texture
-        let texture = if let Some(tex) = texture_map.get(cmd_params.texture_id) {
+        let texture = if let Some(tex) = texture_map.get(effective_tex_id) {
             tex
         } else {
             // Use font atlas texture as fallback
             self.font_atlas_texture.ok_or_else(|| {
                 RenderError::InvalidTexture(format!(
                     "Texture ID {:?} not found",
-                    cmd_params.texture_id
+                    effective_tex_id
                 ))
             })?
         };
