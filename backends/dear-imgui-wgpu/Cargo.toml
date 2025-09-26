@@ -16,6 +16,7 @@ wgpu.workspace = true
 bytemuck = { version = "1.0", features = ["derive"] }
 #smallvec = "1.0"
 thiserror.workspace = true
+tracing.workspace = true
 
 [features]
 default = []

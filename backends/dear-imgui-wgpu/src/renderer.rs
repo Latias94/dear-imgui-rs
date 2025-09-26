@@ -190,7 +190,8 @@ impl WgpuRenderer {
                     self.try_upload_font_atlas_legacy(imgui_ctx, &device, &queue)?
                 {
                     if cfg!(debug_assertions) {
-                        eprintln!(
+                        tracing::debug!(
+                            target: "dear-imgui-wgpu",
                             "[dear-imgui-wgpu][debug] Font atlas uploaded via fallback (legacy-only) path; user textures use modern ImTextureData. tex_id={}",
                             tex_id
                         );
@@ -198,7 +199,8 @@ impl WgpuRenderer {
                     self.font_texture_id = Some(tex_id);
                 }
             } else if cfg!(debug_assertions) {
-                eprintln!(
+                tracing::debug!(
+                    target: "dear-imgui-wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas tex_id already set: {:?}",
                     self.font_texture_id
                 );
@@ -406,7 +408,8 @@ impl WgpuRenderer {
         let raw_tex = fonts.get_tex_data();
         if raw_tex.is_null() {
             if cfg!(debug_assertions) {
-                eprintln!(
+                tracing::debug!(
+                    target: "dear-imgui-wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas TexData is null; skip legacy upload"
                 );
             }
@@ -428,7 +431,8 @@ impl WgpuRenderer {
 
         if let Some(src) = pixels_slice {
             if cfg!(debug_assertions) {
-                eprintln!(
+                tracing::debug!(
+                    target: "dear-imgui-wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas texdata: {}x{} bpp={} (fallback upload for font atlas)",
                     width, height, bpp
                 );
@@ -446,7 +450,8 @@ impl WgpuRenderer {
             } else {
                 // Unexpected format; don't proceed
                 if cfg!(debug_assertions) {
-                    eprintln!(
+                    tracing::debug!(
+                        target: "dear-imgui-wgpu",
                         "[dear-imgui-wgpu][debug] Unexpected font atlas bpp={} -> skip",
                         bpp
                     );
@@ -523,7 +528,8 @@ impl WgpuRenderer {
                     },
                 );
                 if cfg!(debug_assertions) {
-                    eprintln!(
+                    tracing::debug!(
+                        target: "dear-imgui-wgpu",
                         "[dear-imgui-wgpu][debug] Upload font atlas with padded row pitch: unpadded={} padded={}",
                         unpadded, padded
                     );
@@ -541,7 +547,8 @@ impl WgpuRenderer {
                 fonts_mut.set_texture_id(dear_imgui::TextureId::from(tex_id));
             }
             if cfg!(debug_assertions) {
-                eprintln!(
+                tracing::debug!(
+                    target: "dear-imgui-wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas fallback upload complete: tex_id={}",
                     tex_id
                 );
@@ -550,7 +557,8 @@ impl WgpuRenderer {
             return Ok(Some(tex_id));
         }
         if cfg!(debug_assertions) {
-            eprintln!(
+            tracing::debug!(
+                target: "dear-imgui-wgpu",
                 "[dear-imgui-wgpu][debug] Font atlas has no CPU pixel buffer; skipping fallback upload (renderer will use modern texture updates)"
             );
         }
@@ -926,7 +934,10 @@ impl WgpuRenderer {
                     dear_imgui::render::DrawCmd::RawCallback { .. } => {
                         // Raw callbacks are not supported in this implementation
                         // They would require access to the raw Dear ImGui draw list
-                        eprintln!("Warning: Raw callbacks are not supported in WGPU renderer");
+                        tracing::warn!(
+                            target: "dear-imgui-wgpu",
+                            "Warning: Raw callbacks are not supported in WGPU renderer"
+                        );
                     }
                 }
             }

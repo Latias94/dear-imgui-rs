@@ -27,8 +27,7 @@ jobs:
   build-prebuilt:
     name: Build ${{ matrix.target }}${{ matrix.crt && format(' ({0})', matrix.crt) || '' }}
     runs-on: ${{ matrix.os }}
-    # runner context is unavailable at job-level 'if'; use matrix.os instead
-    if: ${{ github.event_name != 'release' || matrix.os == 'windows-latest' }}
+    # Build on all platforms for both release and manual runs.
     permissions:
       contents: write
     strategy:
@@ -196,9 +195,9 @@ jobs:
           IMGUIZMO_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
-      - name: Upload to release (Windows only)
+      - name: Upload to release
         uses: softprops/action-gh-release@v2
-        if: (inputs.tag || github.event_name == 'release') && runner.os == 'Windows'
+        if: inputs.tag || github.event_name == 'release'
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: ${{ github.workspace }}/packages/*.tar.gz

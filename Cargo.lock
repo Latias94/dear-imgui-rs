@@ -768,6 +768,7 @@ dependencies = [
  "bytemuck",
  "dear-imgui",
  "thiserror 2.0.16",
+ "tracing",
  "wgpu",
 ]
 

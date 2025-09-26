@@ -1,4 +1,4 @@
-use static_assertions::{assert_impl_all, assert_not_impl_any};
+use static_assertions::assert_not_impl_any;
 
 // Compile-time checks for Send/Sync markers
 #[test]
