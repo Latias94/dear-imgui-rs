@@ -15,7 +15,7 @@
 #![allow(unnecessary_transmutes)]
 #![allow(clippy::all)]
 // Bindgen can derive Eq/Hash for structs with function pointers; silence related warnings.
-#![allow(fn_address_comparisons)]
+#![allow(unpredictable_function_pointer_comparisons)]
 
 // Re-export ImGui types from dear-imgui-sys to ensure compatibility
 pub use dear_imgui_sys::{ImDrawList, ImGuiContext, ImVec2, ImVec4};

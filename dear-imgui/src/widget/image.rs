@@ -1,5 +1,5 @@
 use crate::sys;
-use crate::texture::{TextureId, TextureRef};
+use crate::texture::TextureRef;
 use crate::ui::Ui;
 
 /// # Image Widgets

@@ -1,7 +1,9 @@
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::as_conversions
+    clippy::as_conversions,
+    // We intentionally keep explicit casts for FFI clarity; avoid auto-fix churn.
+    clippy::unnecessary_cast
 )]
 //! Drag and Drop functionality for Dear ImGui
 //!

@@ -27,7 +27,7 @@
 #![allow(dead_code)]
 #![allow(unnecessary_transmutes)]
 #![allow(clippy::all)]
-#![allow(fn_address_comparisons)]
+#![allow(unpredictable_function_pointer_comparisons)]
 
 // Re-export ImGui types from dear-imgui-sys to ensure compatibility
 pub use dear_imgui_sys::{

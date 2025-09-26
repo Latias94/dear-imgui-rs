@@ -7,7 +7,6 @@ use crate::internal::RawWrapper;
 use crate::sys;
 use crate::utils::HoveredFlags;
 use crate::widget::TreeNodeFlags;
-use bitflags::bitflags;
 
 /// User interface style/colors
 ///

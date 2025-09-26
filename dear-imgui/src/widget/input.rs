@@ -5,6 +5,7 @@
 )]
 use crate::InputTextFlags;
 use crate::internal::DataTypeKind;
+use crate::string::ImString;
 use crate::sys;
 use crate::ui::Ui;
 use std::ffi::{c_int, c_void};
@@ -35,6 +36,15 @@ impl Ui {
         InputText::new(self, label, buf)
     }
 
+    /// Creates a single-line text input backed by ImString (zero-copy)
+    pub fn input_text_imstr<'p>(
+        &self,
+        label: impl AsRef<str>,
+        buf: &'p mut ImString,
+    ) -> InputTextImStr<'_, 'p, String, String, PassthroughCallback> {
+        InputTextImStr::new(self, label, buf)
+    }
+
     /// Creates a multi-line text input widget builder.
     ///
     /// # Examples
@@ -56,6 +66,16 @@ impl Ui {
         size: impl Into<[f32; 2]>,
     ) -> InputTextMultiline<'_, 'p> {
         InputTextMultiline::new(self, label, buf, size)
+    }
+
+    /// Creates a multi-line text input backed by ImString (zero-copy)
+    pub fn input_text_multiline_imstr<'p>(
+        &self,
+        label: impl AsRef<str>,
+        buf: &'p mut ImString,
+        size: impl Into<[f32; 2]>,
+    ) -> InputTextMultilineImStr<'_, 'p> {
+        InputTextMultilineImStr::new(self, label, buf, size)
     }
 
     /// Creates an integer input widget.
@@ -186,11 +206,122 @@ pub struct InputText<'ui, 'p, L = String, H = String, T = PassthroughCallback> {
     label: L,
     buf: &'p mut String,
     flags: InputTextFlags,
+    capacity_hint: Option<usize>,
     hint: Option<H>,
     callback_handler: T,
     _phantom: PhantomData<&'ui ()>,
 }
 
+/// Builder for a text input backed by ImString (zero-copy)
+#[must_use]
+pub struct InputTextImStr<'ui, 'p, L = String, H = String, T = PassthroughCallback> {
+    ui: &'ui Ui,
+    label: L,
+    buf: &'p mut ImString,
+    flags: InputTextFlags,
+    hint: Option<H>,
+    callback_handler: T,
+    _phantom: PhantomData<&'ui ()>,
+}
+
+impl<'ui, 'p> InputTextImStr<'ui, 'p, String, String, PassthroughCallback> {
+    pub fn new(ui: &'ui Ui, label: impl AsRef<str>, buf: &'p mut ImString) -> Self {
+        Self {
+            ui,
+            label: label.as_ref().to_string(),
+            buf,
+            flags: InputTextFlags::empty(),
+            hint: None,
+            callback_handler: PassthroughCallback,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> {
+    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+    pub fn hint<H2: AsRef<str>>(self, hint: H2) -> InputTextImStr<'ui, 'p, L, H2, T> {
+        InputTextImStr {
+            ui: self.ui,
+            label: self.label,
+            buf: self.buf,
+            flags: self.flags,
+            hint: Some(hint),
+            callback_handler: self.callback_handler,
+            _phantom: PhantomData,
+        }
+    }
+    pub fn read_only(mut self, ro: bool) -> Self {
+        self.flags.set(InputTextFlags::READ_ONLY, ro);
+        self
+    }
+    pub fn password(mut self, pw: bool) -> Self {
+        self.flags.set(InputTextFlags::PASSWORD, pw);
+        self
+    }
+    pub fn auto_select_all(mut self, v: bool) -> Self {
+        self.flags.set(InputTextFlags::AUTO_SELECT_ALL, v);
+        self
+    }
+    pub fn enter_returns_true(mut self, v: bool) -> Self {
+        self.flags.set(InputTextFlags::ENTER_RETURNS_TRUE, v);
+        self
+    }
+
+    pub fn build(self) -> bool {
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
+        let hint_ptr = if let Some(ref hint) = self.hint {
+            self.ui.scratch_txt(hint.as_ref())
+        } else {
+            std::ptr::null()
+        };
+        let buf_ptr = self.buf.as_mut_ptr();
+        let buf_size = self.buf.capacity_with_nul();
+        let user_ptr = self.buf as *mut ImString as *mut c_void;
+
+        extern "C" fn resize_cb_imstr(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
+            unsafe {
+                if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
+                    let im = &mut *((*data).UserData as *mut ImString);
+                    let requested = (*data).BufSize as usize;
+                    if im.0.len() < requested {
+                        im.0.resize(requested, 0);
+                    }
+                    (*data).Buf = im.as_mut_ptr();
+                    (*data).BufDirty = true;
+                }
+            }
+            0
+        }
+
+        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
+        unsafe {
+            if hint_ptr.is_null() {
+                sys::igInputText(
+                    label_ptr,
+                    buf_ptr,
+                    buf_size,
+                    flags.bits(),
+                    Some(resize_cb_imstr),
+                    user_ptr,
+                )
+            } else {
+                sys::igInputTextWithHint(
+                    label_ptr,
+                    hint_ptr,
+                    buf_ptr,
+                    buf_size,
+                    flags.bits(),
+                    Some(resize_cb_imstr),
+                    user_ptr,
+                )
+            }
+        }
+    }
+}
 impl<'ui, 'p> InputText<'ui, 'p, String, String, PassthroughCallback> {
     /// Creates a new text input builder
     pub fn new(ui: &'ui Ui, label: impl AsRef<str>, buf: &'p mut String) -> Self {
@@ -198,7 +329,8 @@ impl<'ui, 'p> InputText<'ui, 'p, String, String, PassthroughCallback> {
             ui,
             label: label.as_ref().to_string(),
             buf,
-            flags: InputTextFlags::CALLBACK_RESIZE,
+            flags: InputTextFlags::NONE,
+            capacity_hint: None,
             hint: None,
             callback_handler: PassthroughCallback,
             _phantom: PhantomData,
@@ -209,7 +341,13 @@ impl<'ui, 'p> InputText<'ui, 'p, String, String, PassthroughCallback> {
 impl<'ui, 'p, L, H, T> InputText<'ui, 'p, L, H, T> {
     /// Sets the flags for the input
     pub fn flags(mut self, flags: InputTextFlags) -> Self {
-        self.flags = flags | InputTextFlags::CALLBACK_RESIZE;
+        self.flags = flags;
+        self
+    }
+
+    /// Hint a minimum buffer capacity to reduce reallocations for large fields
+    pub fn capacity_hint(mut self, cap: usize) -> Self {
+        self.capacity_hint = Some(cap);
         self
     }
 
@@ -220,6 +358,7 @@ impl<'ui, 'p, L, H, T> InputText<'ui, 'p, L, H, T> {
             label: self.label,
             buf: self.buf,
             flags: self.flags,
+            capacity_hint: self.capacity_hint,
             hint: Some(hint),
             callback_handler: self.callback_handler,
             _phantom: PhantomData,
@@ -236,6 +375,7 @@ impl<'ui, 'p, L, H, T> InputText<'ui, 'p, L, H, T> {
             label: self.label,
             buf: self.buf,
             flags: self.flags,
+            capacity_hint: self.capacity_hint,
             hint: self.hint,
             callback_handler,
             _phantom: PhantomData,
@@ -314,39 +454,69 @@ where
             std::ptr::null()
         };
 
-        // Prepare buffer for ImGui
-        let mut buffer = self.buf.clone().into_bytes();
-        buffer.resize(256, 0); // Reserve space for input
+        // Prepare an owned, growable buffer with trailing NUL and capacity headroom
+        let mut init = self.buf.as_bytes().to_vec();
+        if !init.ends_with(&[0]) {
+            init.push(0);
+        }
+        let user_cap = self.capacity_hint.unwrap_or(0);
+        let min_cap = (init.len() + 64).max(256).max(user_cap);
+        if init.len() < min_cap {
+            init.resize(min_cap, 0);
+        }
+        let mut owned = Box::new(init);
+        let buf_ptr = owned.as_mut_ptr() as *mut std::os::raw::c_char;
+        let buf_size = owned.len();
+        let user_ptr = (&mut *owned) as *mut Vec<u8> as *mut c_void;
+
+        extern "C" fn resize_callback_vec(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
+            unsafe {
+                if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
+                    let vec_ptr = (*data).UserData as *mut Vec<u8>;
+                    if !vec_ptr.is_null() {
+                        let buf = &mut *vec_ptr;
+                        let requested = (*data).BufSize as usize;
+                        if buf.len() < requested {
+                            buf.resize(requested, 0);
+                        }
+                        (*data).Buf = buf.as_mut_ptr() as *mut _;
+                        (*data).BufDirty = true;
+                    }
+                }
+            }
+            0
+        }
+
+        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
 
         let result = unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,
-                    buffer.as_mut_ptr() as *mut std::os::raw::c_char,
-                    buffer.len(),
-                    self.flags.bits(),
-                    Some(callback),
-                    self.buf as *mut String as *mut std::ffi::c_void,
+                    buf_ptr,
+                    buf_size,
+                    flags.bits(),
+                    Some(resize_callback_vec),
+                    user_ptr,
                 )
             } else {
                 sys::igInputTextWithHint(
                     label_ptr,
                     hint_ptr,
-                    buffer.as_mut_ptr() as *mut std::os::raw::c_char,
-                    buffer.len(),
-                    self.flags.bits(),
-                    Some(callback),
-                    self.buf as *mut String as *mut std::ffi::c_void,
+                    buf_ptr,
+                    buf_size,
+                    flags.bits(),
+                    Some(resize_callback_vec),
+                    user_ptr,
                 )
             }
         };
 
         // Update the string if changed
         if result {
-            if let Some(null_pos) = buffer.iter().position(|&b| b == 0) {
-                buffer.truncate(null_pos);
-            }
-            if let Ok(new_string) = String::from_utf8(buffer) {
+            let slice: &[u8] = &owned;
+            let end = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
+            if let Ok(new_string) = String::from_utf8(slice[..end].to_vec()) {
                 *self.buf = new_string;
             }
         }
@@ -364,8 +534,79 @@ pub struct InputTextMultiline<'ui, 'p> {
     buf: &'p mut String,
     size: [f32; 2],
     flags: InputTextFlags,
+    capacity_hint: Option<usize>,
 }
 
+/// Builder for multiline text input backed by ImString (zero-copy)
+#[derive(Debug)]
+#[must_use]
+pub struct InputTextMultilineImStr<'ui, 'p> {
+    ui: &'ui Ui,
+    label: String,
+    buf: &'p mut ImString,
+    size: [f32; 2],
+    flags: InputTextFlags,
+}
+
+impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
+    pub fn new(
+        ui: &'ui Ui,
+        label: impl AsRef<str>,
+        buf: &'p mut ImString,
+        size: impl Into<[f32; 2]>,
+    ) -> Self {
+        Self {
+            ui,
+            label: label.as_ref().to_string(),
+            buf,
+            size: size.into(),
+            flags: InputTextFlags::NONE,
+        }
+    }
+    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+    pub fn read_only(mut self, v: bool) -> Self {
+        self.flags.set(InputTextFlags::READ_ONLY, v);
+        self
+    }
+    pub fn build(self) -> bool {
+        let label_ptr = self.ui.scratch_txt(&self.label);
+        let buf_ptr = self.buf.as_mut_ptr();
+        let buf_size = self.buf.capacity_with_nul();
+        let user_ptr = self.buf as *mut ImString as *mut c_void;
+        let size_vec: sys::ImVec2 = self.size.into();
+
+        extern "C" fn resize_cb_imstr(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
+            unsafe {
+                if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
+                    let im = &mut *((*data).UserData as *mut ImString);
+                    let requested = (*data).BufSize as usize;
+                    if im.0.len() < requested {
+                        im.0.resize(requested, 0);
+                    }
+                    (*data).Buf = im.as_mut_ptr();
+                    (*data).BufDirty = true;
+                }
+            }
+            0
+        }
+
+        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
+        unsafe {
+            sys::igInputTextMultiline(
+                label_ptr,
+                buf_ptr,
+                buf_size,
+                size_vec,
+                flags.bits(),
+                Some(resize_cb_imstr),
+                user_ptr,
+            )
+        }
+    }
+}
 impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
     /// Creates a new multiline text input builder
     pub fn new(
@@ -380,12 +621,19 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
             buf,
             size: size.into(),
             flags: InputTextFlags::NONE,
+            capacity_hint: None,
         }
     }
 
     /// Sets the flags for the input
     pub fn flags(mut self, flags: InputTextFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Hint a minimum buffer capacity to reduce reallocations for large fields
+    pub fn capacity_hint(mut self, cap: usize) -> Self {
+        self.capacity_hint = Some(cap);
         self
     }
 
@@ -399,33 +647,60 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
     pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(&self.label);
 
-        // Prepare buffer for ImGui
-        let mut buffer = self.buf.clone().into_bytes();
-        buffer.resize(1024, 0); // Reserve more space for multiline
+        // Prepare an owned, growable buffer with trailing NUL and capacity headroom
+        let mut init = self.buf.as_bytes().to_vec();
+        if !init.ends_with(&[0]) {
+            init.push(0);
+        }
+        let user_cap = self.capacity_hint.unwrap_or(0);
+        let min_cap = (init.len() + 128).max(1024).max(user_cap);
+        if init.len() < min_cap {
+            init.resize(min_cap, 0);
+        }
+        let mut owned = Box::new(init);
+        let buf_ptr = owned.as_mut_ptr() as *mut std::os::raw::c_char;
+        let buf_size = owned.len();
+        let user_ptr = (&mut *owned) as *mut Vec<u8> as *mut c_void;
+
+        extern "C" fn resize_callback_vec(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
+            unsafe {
+                if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
+                    let vec_ptr = (*data).UserData as *mut Vec<u8>;
+                    if !vec_ptr.is_null() {
+                        let buf = &mut *vec_ptr;
+                        let requested = (*data).BufSize as usize;
+                        if buf.len() < requested {
+                            buf.resize(requested, 0);
+                        }
+                        (*data).Buf = buf.as_mut_ptr() as *mut _;
+                        (*data).BufDirty = true;
+                    }
+                }
+            }
+            0
+        }
 
         let size_vec: sys::ImVec2 = self.size.into();
+        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
         let result = unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
-                buffer.as_mut_ptr() as *mut std::os::raw::c_char,
-                buffer.len(),
+                buf_ptr,
+                buf_size,
                 size_vec,
-                self.flags.bits(),
-                None,
-                std::ptr::null_mut(),
+                flags.bits(),
+                Some(resize_callback_vec),
+                user_ptr,
             )
         };
 
-        // Update the string if changed
         if result {
-            if let Some(null_pos) = buffer.iter().position(|&b| b == 0) {
-                buffer.truncate(null_pos);
-            }
-            if let Ok(new_string) = String::from_utf8(buffer) {
-                *self.buf = new_string;
+            let slice: &[u8] = &owned;
+            let end = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
+            if let Ok(s) = String::from_utf8(slice[..end].to_vec()) {
+                *self.buf = s;
             }
         }
-
         result
     }
 }

@@ -509,10 +509,10 @@ fn build_cimgui_provider() -> Result<()> {
     let mut js = String::new();
     js.push_str("// Auto-generated wrapper for imgui-sys-v0 provider\n");
     js.push_str("import createModule from './imgui-sys-v0.js';\n");
-    js.push_str("\n");
+    js.push('\n');
     js.push_str("// Use shared memory if available\n");
     js.push_str("const memory = globalThis.__imgui_shared_memory || new WebAssembly.Memory({initial:256, maximum:4096});\n");
-    js.push_str("\n");
+    js.push('\n');
     js.push_str("// Initialize the module with shared memory\n");
     js.push_str("const Module = await createModule({\n");
     js.push_str("  wasmMemory: memory,\n");
@@ -525,7 +525,7 @@ fn build_cimgui_provider() -> Result<()> {
     js.push_str(
         "console.log('[imgui-sys-v0] Module.wasmMemory===memory', Module.wasmMemory===memory);\n",
     );
-    js.push_str("\n");
+    js.push('\n');
     js.push_str("// Export all the functions\n");
     for n in &names {
         js.push_str(&format!(

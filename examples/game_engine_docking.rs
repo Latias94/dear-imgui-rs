@@ -25,11 +25,16 @@ struct GameEngineState {
 
     // Console logs
     console_logs: Vec<String>,
-    console_input: String,
+    console_input: dear_imgui::ImString,
 
     // Asset browser
     current_folder: String,
     assets: Vec<String>,
+    asset_search: dear_imgui::ImString,
+
+    // Demo: zero-copy text buffers (ImString)
+    title_imstr: dear_imgui::ImString,
+    notes_imstr: dear_imgui::ImString,
 
     // Viewport settings
     viewport_size: [f32; 2],
@@ -45,6 +50,9 @@ struct GameEngineState {
     frame_time: f32,
     draw_calls: u32,
     vertices: u32,
+
+    // UI search/filter state
+    hierarchy_search: dear_imgui::ImString,
 }
 
 impl Default for GameEngineState {
@@ -70,7 +78,7 @@ impl Default for GameEngineState {
                 "[INFO] Scene loaded: MainScene".to_string(),
                 "[WARNING] Texture quality reduced for performance".to_string(),
             ],
-            console_input: String::new(),
+            console_input: dear_imgui::ImString::new(""),
             current_folder: "Assets/".to_string(),
             assets: vec![
                 "Textures/".to_string(),
@@ -82,6 +90,9 @@ impl Default for GameEngineState {
                 "wood_material.mat".to_string(),
                 "player_controller.cs".to_string(),
             ],
+            asset_search: dear_imgui::ImString::new(""),
+            title_imstr: dear_imgui::ImString::new("Untitled"),
+            notes_imstr: dear_imgui::ImString::new(""),
             viewport_size: [800.0, 600.0],
             show_wireframe: false,
             show_grid: true,
@@ -91,6 +102,7 @@ impl Default for GameEngineState {
             frame_time: 16.67,
             draw_calls: 45,
             vertices: 12543,
+            hierarchy_search: dear_imgui::ImString::new(""),
         }
     }
 }
@@ -294,6 +306,7 @@ impl AppWindow {
         render_console(&ui, &mut imgui.game_state);
         render_asset_browser(&ui, &mut imgui.game_state);
         render_performance(&ui, &mut imgui.game_state);
+        render_notes_imstr(&ui, &mut imgui.game_state);
 
         // Let the platform backend finalize per-frame data (required for viewports)
         imgui
@@ -576,6 +589,12 @@ fn render_main_menu_bar(ui: &Ui, game_state: &mut GameEngineState) -> MenuAction
                     .console_logs
                     .push("[INFO] Scene saved".to_string());
             }
+            ui.same_line();
+            ui.text("Search:");
+            ui.same_line();
+            ui.input_text_imstr("##asset_search", &mut game_state.asset_search)
+                .build();
+
             ui.separator();
             if ui.menu_item("Exit") {
                 // Handle exit
@@ -655,16 +674,21 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
             // Search filter with icon
             ui.text("🔍");
             ui.same_line();
-            ui.input_text("##search", &mut String::new()).build();
+            ui.input_text_imstr("##search", &mut game_state.hierarchy_search)
+                .build();
 
             ui.separator();
 
-            // Entity list with hierarchy
+            // Entity list with hierarchy (filter by search query)
             let mut selected_entity = None;
             let entity_to_duplicate: Option<String> = None;
             let entity_to_delete: Option<String> = None;
 
+            let query = game_state.hierarchy_search.to_str().to_lowercase();
             for (_i, entity) in game_state.entities.iter().enumerate() {
+                if !query.is_empty() && !entity.to_lowercase().contains(&query) {
+                    continue;
+                }
                 let is_selected = game_state.selected_entity.as_ref() == Some(entity);
 
                 // Add hierarchy indentation and icons
@@ -782,11 +806,20 @@ fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
             if ui.button("Grid View") {
                 columns = 4;
             }
+            ui.same_line();
+            ui.text("Search:");
+            ui.same_line();
+            ui.input_text_imstr("##project_asset_search", &mut game_state.asset_search)
+                .build();
 
             ui.separator();
 
             // Assets display
+            let aquery = game_state.asset_search.to_str().to_lowercase();
             for (i, asset) in game_state.assets.iter().enumerate() {
+                if !aquery.is_empty() && !asset.to_lowercase().contains(&aquery) {
+                    continue;
+                }
                 if i % columns != 0 {
                     ui.same_line();
                 }
@@ -1190,15 +1223,15 @@ fn render_console(ui: &Ui, game_state: &mut GameEngineState) {
             let mut input_changed = false;
             let _token = ui.push_item_width(-1.0);
             if ui
-                .input_text("##console_input", &mut game_state.console_input)
+                .input_text_imstr("##console_input", &mut game_state.console_input)
                 .enter_returns_true(true)
                 .build()
             {
                 input_changed = true;
             }
 
-            if input_changed && !game_state.console_input.trim().is_empty() {
-                let command = game_state.console_input.trim().to_string();
+            if input_changed && !game_state.console_input.to_str().trim().is_empty() {
+                let command = game_state.console_input.to_str().trim().to_string();
                 game_state.console_logs.push(format!("> {}", command));
 
                 // Process simple commands
@@ -1265,7 +1298,11 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
                 items_per_row = 1;
             }
 
+            let aquery = game_state.asset_search.to_lowercase();
             for (i, asset) in game_state.assets.iter().enumerate() {
+                if !aquery.is_empty() && !asset.to_lowercase().contains(&aquery) {
+                    continue;
+                }
                 if i > 0 && (i as i32) % items_per_row != 0 {
                     ui.same_line();
                 }
@@ -1340,6 +1377,28 @@ fn render_performance(ui: &Ui, game_state: &mut GameEngineState) {
 
             // Note: plot_lines might not be available in current API
             ui.text("(Graph visualization would go here)");
+        });
+}
+
+/// Demo panel using zero-copy ImString-backed inputs
+fn render_notes_imstr(ui: &Ui, game_state: &mut GameEngineState) {
+    ui.window("Notes (ImString)")
+        .size([360.0, 260.0], Condition::FirstUseEver)
+        .build(|| {
+            ui.text("Title:");
+            ui.same_line();
+            ui.input_text_imstr("##title_im", &mut game_state.title_imstr)
+                .build();
+
+            ui.separator();
+            ui.text("Notes:");
+            let avail = ui.content_region_avail();
+            ui.input_text_multiline_imstr(
+                "##notes_im",
+                &mut game_state.notes_imstr,
+                [avail[0], avail[1]],
+            )
+            .build();
         });
 }
 

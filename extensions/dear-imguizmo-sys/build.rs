@@ -1,5 +1,4 @@
-use flate2::read::GzDecoder;
-use std::{env, fs, path::Path, path::PathBuf};
+use std::{env, path::Path, path::PathBuf};
 
 #[derive(Clone, Debug)]
 struct BuildConfig {
@@ -384,53 +383,6 @@ fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
     )
 }
 
-fn prebuilt_extract_dir_env(cache_root: &Path, target_env: &str) -> PathBuf {
-    let target = env::var("TARGET").unwrap_or_default();
-    let crt_suffix = if target_env == "msvc" {
-        let tf = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-        if tf.split(',').any(|f| f == "crt-static") {
-            "-mt"
-        } else {
-            "-md"
-        }
-    } else {
-        ""
-    };
-    cache_root
-        .join(target)
-        .join(format!("static{}", crt_suffix))
-}
-
-fn extract_archive_to_cache(
-    archive_path: &Path,
-    cache_root: &Path,
-    lib_name: &str,
-) -> Result<PathBuf, String> {
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    let extract_dir = prebuilt_extract_dir_env(cache_root, &target_env);
-    if extract_dir.exists() {
-        let lib_dir = extract_dir.join("lib");
-        if lib_dir.join(lib_name).exists() || extract_dir.join(lib_name).exists() {
-            return Ok(lib_dir);
-        }
-        let _ = std::fs::remove_dir_all(&extract_dir);
-    }
-    fs::create_dir_all(&extract_dir)
-        .map_err(|e| format!("create dir {}: {}", extract_dir.display(), e))?;
-    let file = fs::File::open(archive_path)
-        .map_err(|e| format!("open {}: {}", archive_path.display(), e))?;
-    let mut archive = tar::Archive::new(GzDecoder::new(file));
-    archive
-        .unpack(&extract_dir)
-        .map_err(|e| format!("unpack {}: {}", archive_path.display(), e))?;
-    let lib_dir = extract_dir.join("lib");
-    if lib_dir.join(lib_name).exists() {
-        return Ok(lib_dir);
-    }
-    if extract_dir.join(lib_name).exists() {
-        return Ok(extract_dir);
-    }
-    Err("extracted archive did not contain expected library".into())
-}
+// (removed duplicate prebuilt_extract_dir_env/extract_archive_to_cache; using build_support equivalents)
 
 // keep the existing expected_lib_name returning &'static str defined above

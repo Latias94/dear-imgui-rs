@@ -59,18 +59,16 @@ pub fn compose_archive_name(
                 crate_short, version, target, link_type, extra
             )
         }
+    } else if extra.is_empty() {
+        format!(
+            "{}-prebuilt-{}-{}-{}-{}.tar.gz",
+            crate_short, version, target, link_type, crt
+        )
     } else {
-        if extra.is_empty() {
-            format!(
-                "{}-prebuilt-{}-{}-{}-{}.tar.gz",
-                crate_short, version, target, link_type, crt
-            )
-        } else {
-            format!(
-                "{}-prebuilt-{}-{}-{}{}-{}.tar.gz",
-                crate_short, version, target, link_type, extra, crt
-            )
-        }
+        format!(
+            "{}-prebuilt-{}-{}-{}{}-{}.tar.gz",
+            crate_short, version, target, link_type, extra, crt
+        )
     }
 }
 
@@ -96,10 +94,10 @@ pub fn compose_manifest_bytes(
         "{} prebuilt\nversion={}\ntarget={}\nlink={}\ncrt={}",
         crate_short, version, target, link_type, crt
     );
-    if let Some(f) = features {
-        if !f.is_empty() {
-            let _ = writeln!(&mut buf, "features={}", f);
-        }
+    if let Some(f) = features
+        && !f.is_empty()
+    {
+        let _ = writeln!(&mut buf, "features={}", f);
     }
     buf
 }

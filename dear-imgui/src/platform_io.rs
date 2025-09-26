@@ -3,8 +3,9 @@
 //! This module provides access to Dear ImGui's platform IO system, which handles
 //! multi-viewport and platform-specific functionality.
 
+use crate::internal::ImVector;
 use crate::sys;
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 #[cfg(feature = "multi-viewport")]
 use std::sync::Mutex;
 

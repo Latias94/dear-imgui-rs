@@ -34,6 +34,7 @@ dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
 cfg-if.workspace = true
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
+build-support = { path = "../../tools/build-support", optional = true }
 
 [build-dependencies]
 bindgen.workspace = true
@@ -50,7 +51,7 @@ path = "bin/package/main.rs"
 required-features = ["package-bin"]
 
 [features]
-package-bin = ["dep:flate2", "dep:tar"]
+package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
 default = []
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (commented out while WIP)
