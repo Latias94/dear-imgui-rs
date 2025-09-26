@@ -15,6 +15,6 @@ path = "src/lib.rs"
 
 [dependencies]
 reqwest = { version = "0.12", features = ["blocking", "http2", "rustls-tls"], default-features = false }
-flate2 = "1"
-tar = "0.4"
+flate2.workspace = true
+tar.workspace = true
 

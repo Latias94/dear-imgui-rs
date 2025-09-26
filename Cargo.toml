@@ -74,3 +74,8 @@ wasm-bindgen = "0.2.104"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 js-sys = "0.3"
+
+flate2 = "1"
+tar = "0.4"
+bytemuck = "1.0"
+memoffset = "0.9"
