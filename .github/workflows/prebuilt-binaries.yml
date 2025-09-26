@@ -27,7 +27,8 @@ jobs:
   build-prebuilt:
     name: Build ${{ matrix.target }}${{ matrix.crt && format(' ({0})', matrix.crt) || '' }}
     runs-on: ${{ matrix.os }}
-    if: ${{ github.event_name != 'release' || runner.os == 'Windows' }}
+    # runner context is unavailable at job-level 'if'; use matrix.os instead
+    if: ${{ github.event_name != 'release' || matrix.os == 'windows-latest' }}
     permissions:
       contents: write
     strategy:
