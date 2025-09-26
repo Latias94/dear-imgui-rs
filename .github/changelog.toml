@@ -1,26 +1,23 @@
 [changelog]
+# Header is typically ignored by release-plz when generating a single-entry changelog,
+# but keep it minimal for standalone git-cliff runs.
 header = """
 # Changelog
 
-All notable changes to this project are documented here.
-
 """
+# release-plz renders a single release entry and provides `commits` in the template context.
+# Avoid using `releases`/`release.*` here to prevent template errors.
 body = """
-{% for release in releases %}
-## {{ release.version | default(value="Unreleased") }}{% if release.timestamp %} ({{ release.timestamp | date(format="%Y-%m-%d") }}){% endif %}
-
-{% if release.commits | length == 0 %}
+{% if commits | length == 0 %}
 - No significant changes.
-{% endif %}
-
-{% for group, commits in release.commits | group_by(attribute="group") %}
+{% else %}
+{% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | upper_first }}
 {% for commit in commits %}
 - {{ commit.message | trim }}{% if commit.breaking %} (BREAKING){% endif %}{% if commit.scope %} [{{ commit.scope }}]{% endif %} ({{ commit.id | truncate(length=7) }}){% if commit.author.name %} by @{{ commit.author.name }}{% endif %}
 {% endfor %}
 {% endfor %}
-
-{% endfor %}
+{% endif %}
 """
 trim = true
 
@@ -43,4 +40,3 @@ commit_parsers = [
   { message = "^build|^deps|^ci", group = "Build" },
   { message = "^chore|^style|^test", group = "Chore" }
 ]
-
