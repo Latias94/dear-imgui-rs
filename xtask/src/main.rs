@@ -248,7 +248,9 @@ fn build_web_demo() -> Result<()> {
                             );
                         }
                     } else {
-                        eprintln!("Warning: failed to locate (module ...) header; skipping memory import patch");
+                        eprintln!(
+                            "Warning: failed to locate (module ...) header; skipping memory import patch"
+                        );
                     }
                 } else {
                     eprintln!("Warning: failed to find a (memory ...) declaration to patch");
@@ -358,7 +360,9 @@ fn find_emsdk_tools() -> Result<(std::path::PathBuf, std::path::PathBuf, std::pa
         }
     }
 
-    anyhow::bail!("Failed to locate emsdk tools (em++/emcc). On Windows, run emsdk_env.bat (or emsdk_env.ps1) to add them to PATH, or set EMSDK env var to your emsdk root.")
+    anyhow::bail!(
+        "Failed to locate emsdk tools (em++/emcc). On Windows, run emsdk_env.bat (or emsdk_env.ps1) to add them to PATH, or set EMSDK env var to your emsdk root."
+    )
 }
 
 fn build_cimgui_provider() -> Result<()> {

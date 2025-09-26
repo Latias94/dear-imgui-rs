@@ -94,3 +94,12 @@ name = "dear-imgui-examples"
 publish = false
 git_release_enable = false
 changelog_update = false
+
+# Internal utility crate: exclude from release-plz processing entirely
+[[package]]
+name = "xtask"
+release = false
+publish = false
+git_tag_enable = false
+git_release_enable = false
+changelog_update = false

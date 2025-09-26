@@ -71,7 +71,8 @@ impl AppWindow {
 
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
 
-        let size = LogicalSize::new(1280.0, 720.0);
+        // Use the window's actual physical size for the surface, not a fixed logical size.
+        let physical_size = window.inner_size();
         // Pick an sRGB surface format when available for consistent visuals
         let caps = surface.get_capabilities(&adapter);
         let preferred_srgb = [
@@ -87,8 +88,8 @@ impl AppWindow {
         let surface_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
-            width: size.width as u32,
-            height: size.height as u32,
+            width: physical_size.width,
+            height: physical_size.height,
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
@@ -171,7 +172,19 @@ impl AppWindow {
         self.imgui.context.io_mut().set_delta_time(delta_secs);
         self.imgui.last_frame = now;
 
-        let frame = self.surface.get_current_texture()?;
+        let frame = match self.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                // Surface changed (e.g., moved between monitors / DPI change); reconfigure
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            Err(wgpu::SurfaceError::Timeout) => {
+                // Non-fatal; skip this frame
+                return Ok(());
+            }
+            Err(e) => return Err(Box::new(e)),
+        };
 
         self.imgui
             .platform
@@ -358,6 +371,12 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::Resized(physical_size) => {
                 window.resize(physical_size);
+                window.window.request_redraw();
+            }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                // DPI changed: update surface to new physical size
+                let new_size = window.window.inner_size();
+                window.resize(new_size);
                 window.window.request_redraw();
             }
             WindowEvent::CloseRequested => {
