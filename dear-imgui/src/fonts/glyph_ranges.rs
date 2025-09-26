@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Glyph ranges for font loading
 //!
 //! **⚠️ DEPRECATED with Dear ImGui 1.92+**: With Dear ImGui 1.92+, glyph ranges are no longer needed

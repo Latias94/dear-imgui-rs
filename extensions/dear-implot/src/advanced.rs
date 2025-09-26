@@ -3,7 +3,7 @@
 //! This module provides high-level functionality for creating complex plots
 //! with multiple subplots, legends, and advanced layout management.
 
-use crate::{plots::PlotError, sys};
+use crate::{AxisFlags, plots::PlotError, sys};
 use std::ffi::CString;
 use std::marker::PhantomData;
 
@@ -153,24 +153,6 @@ pub struct YAxisConfig<'a> {
     pub label: Option<&'a str>,
     pub flags: AxisFlags,
     pub range: Option<(f64, f64)>,
-}
-
-bitflags::bitflags! {
-    /// Flags for axis configuration
-    pub struct AxisFlags: u32 {
-        const NONE = 0;
-        const NO_LABEL = 1 << 0;
-        const NO_GRID_LINES = 1 << 1;
-        const NO_TICK_MARKS = 1 << 2;
-        const NO_TICK_LABELS = 1 << 3;
-        const LOG_SCALE = 1 << 4;
-        const TIME = 1 << 5;
-        const INVERT = 1 << 6;
-        const AUTO_FIT = 1 << 7;
-        const RANGE_FIT = 1 << 8;
-        const LOCK_MIN = 1 << 9;
-        const LOCK_MAX = 1 << 10;
-    }
 }
 
 impl<'a> MultiAxisPlot<'a> {

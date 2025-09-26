@@ -760,7 +760,9 @@ impl GlowRenderer {
             gl_debug_message(gl, "start loop over commands");
             for command in draw_list.commands() {
                 match command {
-                    DrawCmd::Elements { count, cmd_params } => {
+                    DrawCmd::Elements {
+                        count, cmd_params, ..
+                    } => {
                         self.render_elements(gl, texture_map, count, &cmd_params, draw_data)?;
                     }
                     DrawCmd::ResetRenderState => {

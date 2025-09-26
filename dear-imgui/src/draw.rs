@@ -1,7 +1,8 @@
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::as_conversions
+    clippy::as_conversions,
+    clippy::unnecessary_cast
 )]
 use crate::texture::TextureId;
 use bitflags::bitflags;
@@ -97,7 +98,6 @@ impl From<u32> for ImColor32 {
 }
 
 // Removed legacy local Vec2 in favor of passing `impl Into<sys::ImVec2>` and using arrays/tuples.
-
 bitflags! {
     /// Draw list flags
     #[repr(transparent)]
@@ -196,6 +196,41 @@ impl DrawList {
     }
 }
 
+/// Owned draw list returned by `CloneOutput`.
+///
+/// This owns an independent copy of a draw list and will free it on drop.
+pub struct OwnedDrawList(*mut sys::ImDrawList);
+
+impl Drop for OwnedDrawList {
+    fn drop(&mut self) {
+        unsafe { sys::ImDrawList_destroy(self.0) }
+    }
+}
+
+impl OwnedDrawList {
+    /// Create from raw pointer.
+    ///
+    /// Safety: `ptr` must be a valid pointer returned by `ImDrawList_CloneOutput` or `ImDrawList_ImDrawList`.
+    pub(crate) unsafe fn from_raw(ptr: *mut sys::ImDrawList) -> Self {
+        Self(ptr)
+    }
+
+    /// Borrow as a read-only draw list view.
+    pub fn as_view(&self) -> DrawList {
+        DrawList(self.0)
+    }
+
+    /// Clear free memory held by the draw list (release heap allocations).
+    pub fn clear_free_memory(&mut self) {
+        unsafe { sys::ImDrawList__ClearFreeMemory(self.0) }
+    }
+
+    /// Reset for new frame (not commonly needed for cloned lists).
+    pub fn reset_for_new_frame(&mut self) {
+        unsafe { sys::ImDrawList__ResetForNewFrame(self.0) }
+    }
+}
+
 /// Iterator over draw commands
 pub struct DrawCmdIterator<'a> {
     iter: std::slice::Iter<'a, sys::ImDrawCmd>,
@@ -213,7 +248,9 @@ impl Iterator for DrawCmdIterator<'_> {
                     cmd.ClipRect.z,
                     cmd.ClipRect.w,
                 ],
-                texture_id: TextureId::from(cmd.TexRef._TexID),
+                texture_id: TextureId::from(unsafe {
+                    sys::ImDrawCmd_GetTexID(cmd as *const _ as *mut sys::ImDrawCmd)
+                }),
                 vtx_offset: cmd.VtxOffset as usize,
                 idx_offset: cmd.IdxOffset as usize,
             };
@@ -358,6 +395,16 @@ impl DrawListMut<'_> {
 
 /// Drawing functions
 impl<'ui> DrawListMut<'ui> {
+    /// Split draw into multiple channels and merge automatically at the end of the closure.
+    #[doc(alias = "ChannelsSplit")]
+    pub fn channels_split<F: FnOnce(&ChannelsSplit<'ui>)>(&'ui self, channels_count: u32, f: F) {
+        unsafe { sys::ImDrawList_ChannelsSplit(self.draw_list, channels_count as i32) };
+        f(&ChannelsSplit {
+            draw_list: self,
+            channels_count,
+        });
+        unsafe { sys::ImDrawList_ChannelsMerge(self.draw_list) };
+    }
     /// Returns a line from point `p1` to `p2` with color `c`.
     pub fn add_line<C>(
         &'ui self,
@@ -383,6 +430,41 @@ impl<'ui> DrawListMut<'ui> {
         C: Into<ImColor32>,
     {
         Rect::new(self, p1, p2, c)
+    }
+
+    /// Draw a filled rectangle with per-corner colors (counter-clockwise from upper-left).
+    #[doc(alias = "AddRectFilledMultiColor")]
+    pub fn add_rect_filled_multicolor<C1, C2, C3, C4>(
+        &self,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
+        col_upr_left: C1,
+        col_upr_right: C2,
+        col_bot_right: C3,
+        col_bot_left: C4,
+    ) where
+        C1: Into<ImColor32>,
+        C2: Into<ImColor32>,
+        C3: Into<ImColor32>,
+        C4: Into<ImColor32>,
+    {
+        let p_min: sys::ImVec2 = p1.into();
+        let p_max: sys::ImVec2 = p2.into();
+        let c_ul: u32 = col_upr_left.into().into();
+        let c_ur: u32 = col_upr_right.into().into();
+        let c_br: u32 = col_bot_right.into().into();
+        let c_bl: u32 = col_bot_left.into().into();
+        unsafe {
+            sys::ImDrawList_AddRectFilledMultiColor(
+                self.draw_list,
+                p_min,
+                p_max,
+                c_ul,
+                c_ur,
+                c_br,
+                c_bl,
+            );
+        }
     }
 
     /// Returns a circle with the given `center`, `radius` and `color`.
@@ -454,36 +536,13 @@ impl<'ui> DrawListMut<'ui> {
     /// Add a point to the current path.
     #[doc(alias = "PathLineTo")]
     pub fn path_line_to(&self, pos: impl Into<sys::ImVec2>) {
-        unsafe {
-            let vec2: sys::ImVec2 = pos.into();
+        unsafe { sys::ImDrawList_PathLineTo(self.draw_list, pos.into()) }
+    }
 
-            // PathLineTo is inline: _Path.push_back(pos);
-            // We need to manually push to the ImVector
-            let draw_list = self.draw_list;
-            let path = &mut (*draw_list)._Path;
-
-            // Check if we have capacity
-            if path.Size < path.Capacity {
-                // Add the point directly
-                *path.Data.add(path.Size as usize) = vec2;
-                path.Size += 1;
-            } else {
-                // If no capacity, we'll use a workaround by drawing a line to the point
-                // This isn't perfect but avoids memory management issues
-                let _current_pos = if path.Size > 0 {
-                    *path.Data.add((path.Size - 1) as usize)
-                } else {
-                    vec2
-                };
-
-                // Clear path and start fresh with just this point
-                path.Size = 0;
-                if path.Capacity > 0 {
-                    *path.Data.add(0) = vec2;
-                    path.Size = 1;
-                }
-            }
-        }
+    /// Add a point to the current path, merging duplicate points.
+    #[doc(alias = "PathLineToMergeDuplicate")]
+    pub fn path_line_to_merge_duplicate(&self, pos: impl Into<sys::ImVec2>) {
+        unsafe { sys::ImDrawList_PathLineToMergeDuplicate(self.draw_list, pos.into()) }
     }
 
     /// Add an arc to the current path.
@@ -547,8 +606,70 @@ impl<'ui> DrawListMut<'ui> {
                 min_vec,
                 max_vec,
                 rounding,
-                flags.bits() as i32,
+                flags.bits() as sys::ImDrawFlags,
             );
+        }
+    }
+
+    /// Add an elliptical arc to the current path.
+    #[doc(alias = "PathEllipticalArcTo")]
+    pub fn path_elliptical_arc_to(
+        &self,
+        center: impl Into<sys::ImVec2>,
+        radius: impl Into<sys::ImVec2>,
+        rot: f32,
+        a_min: f32,
+        a_max: f32,
+        num_segments: i32,
+    ) {
+        unsafe {
+            sys::ImDrawList_PathEllipticalArcTo(
+                self.draw_list,
+                center.into(),
+                radius.into(),
+                rot,
+                a_min,
+                a_max,
+                num_segments,
+            )
+        }
+    }
+
+    /// Add a quadratic bezier curve to the current path.
+    #[doc(alias = "PathBezierQuadraticCurveTo")]
+    pub fn path_bezier_quadratic_curve_to(
+        &self,
+        p2: impl Into<sys::ImVec2>,
+        p3: impl Into<sys::ImVec2>,
+        num_segments: i32,
+    ) {
+        unsafe {
+            sys::ImDrawList_PathBezierQuadraticCurveTo(
+                self.draw_list,
+                p2.into(),
+                p3.into(),
+                num_segments,
+            )
+        }
+    }
+
+    /// Add a cubic bezier curve to the current path.
+    #[doc(alias = "PathBezierCubicCurveTo")]
+    pub fn path_bezier_cubic_curve_to(
+        &self,
+        p2: impl Into<sys::ImVec2>,
+        p3: impl Into<sys::ImVec2>,
+        p4: impl Into<sys::ImVec2>,
+        num_segments: i32,
+    ) {
+        unsafe {
+            sys::ImDrawList_PathBezierCubicCurveTo(
+                self.draw_list,
+                p2.into(),
+                p3.into(),
+                p4.into(),
+                num_segments,
+            )
         }
     }
 
@@ -566,7 +687,7 @@ impl<'ui> DrawListMut<'ui> {
                     path.Data,
                     path.Size,
                     color.into().into(),
-                    flags.bits() as i32,
+                    flags.bits() as sys::ImDrawFlags,
                     thickness,
                 );
                 path.Size = 0; // Clear path after stroking
@@ -614,6 +735,56 @@ impl<'ui> DrawListMut<'ui> {
         }
     }
 
+    /// Draw text with an explicit font and optional fine CPU clip rectangle.
+    ///
+    /// This mirrors Dear ImGui's `ImDrawList::AddText(ImFont*, ...)` overload.
+    #[doc(alias = "AddText")]
+    pub fn add_text_with_font(
+        &self,
+        font: &crate::fonts::Font,
+        font_size: f32,
+        pos: impl Into<sys::ImVec2>,
+        col: impl Into<ImColor32>,
+        text: impl AsRef<str>,
+        wrap_width: f32,
+        cpu_fine_clip_rect: Option<[f32; 4]>,
+    ) {
+        use std::os::raw::c_char;
+        let text = text.as_ref();
+        let pos: sys::ImVec2 = pos.into();
+        let col = col.into();
+        let font_ptr = font.raw();
+
+        let clip_vec4 = cpu_fine_clip_rect.map(|r| sys::ImVec4 {
+            x: r[0],
+            y: r[1],
+            z: r[2],
+            w: r[3],
+        });
+        let clip_ptr = match clip_vec4.as_ref() {
+            Some(v) => v as *const sys::ImVec4,
+            None => std::ptr::null(),
+        };
+
+        unsafe {
+            let start = text.as_ptr() as *const c_char;
+            let end = (start as usize + text.len()) as *const c_char;
+            sys::ImDrawList_AddText_FontPtr(
+                self.draw_list,
+                font_ptr,
+                font_size,
+                pos,
+                col.into(),
+                start,
+                end,
+                wrap_width,
+                clip_ptr,
+            );
+        }
+    }
+
+    // channels_split is provided on DrawListMut
+
     /// Push a texture on the drawlist texture stack (ImGui 1.92+)
     ///
     /// While pushed, image and primitives will use this texture unless otherwise specified.
@@ -641,6 +812,64 @@ impl<'ui> DrawListMut<'ui> {
         unsafe {
             sys::ImDrawList_PopTexture(self.draw_list);
         }
+    }
+
+    /// Push a clip rectangle, optionally intersecting with the current clip rect.
+    #[doc(alias = "PushClipRect")]
+    pub fn push_clip_rect(
+        &self,
+        clip_rect_min: impl Into<sys::ImVec2>,
+        clip_rect_max: impl Into<sys::ImVec2>,
+        intersect_with_current: bool,
+    ) {
+        unsafe {
+            sys::ImDrawList_PushClipRect(
+                self.draw_list,
+                clip_rect_min.into(),
+                clip_rect_max.into(),
+                intersect_with_current,
+            )
+        }
+    }
+
+    /// Push a full-screen clip rectangle.
+    #[doc(alias = "PushClipRectFullScreen")]
+    pub fn push_clip_rect_full_screen(&self) {
+        unsafe { sys::ImDrawList_PushClipRectFullScreen(self.draw_list) }
+    }
+
+    /// Pop the last clip rectangle.
+    #[doc(alias = "PopClipRect")]
+    pub fn pop_clip_rect(&self) {
+        unsafe { sys::ImDrawList_PopClipRect(self.draw_list) }
+    }
+
+    /// Get current minimum clip rectangle point.
+    pub fn clip_rect_min(&self) -> [f32; 2] {
+        let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
+        unsafe { sys::ImDrawList_GetClipRectMin(&mut out as *mut sys::ImVec2, self.draw_list) };
+        out.into()
+    }
+
+    /// Get current maximum clip rectangle point.
+    pub fn clip_rect_max(&self) -> [f32; 2] {
+        let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
+        unsafe { sys::ImDrawList_GetClipRectMax(&mut out as *mut sys::ImVec2, self.draw_list) };
+        out.into()
+    }
+
+    /// Convenience: push a clip rect, run f, pop.
+    pub fn with_clip_rect<F>(
+        &self,
+        clip_rect_min: impl Into<sys::ImVec2>,
+        clip_rect_max: impl Into<sys::ImVec2>,
+        f: F,
+    ) where
+        F: FnOnce(),
+    {
+        self.push_clip_rect(clip_rect_min, clip_rect_max, false);
+        f();
+        self.pop_clip_rect();
     }
 
     /// Add an image quad (axis-aligned). Tint via `col`.
@@ -757,9 +986,430 @@ impl<'ui> DrawListMut<'ui> {
                 uv_max,
                 col,
                 rounding,
-                flags.bits() as i32,
+                flags.bits() as sys::ImDrawFlags,
             )
         }
+    }
+
+    /// Draw a quadrilateral outline given four points.
+    #[doc(alias = "AddQuad")]
+    pub fn add_quad<C>(
+        &self,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
+        p3: impl Into<sys::ImVec2>,
+        p4: impl Into<sys::ImVec2>,
+        col: C,
+        thickness: f32,
+    ) where
+        C: Into<ImColor32>,
+    {
+        unsafe {
+            sys::ImDrawList_AddQuad(
+                self.draw_list,
+                p1.into(),
+                p2.into(),
+                p3.into(),
+                p4.into(),
+                col.into().into(),
+                thickness,
+            )
+        }
+    }
+
+    /// Draw a filled quadrilateral given four points.
+    #[doc(alias = "AddQuadFilled")]
+    pub fn add_quad_filled<C>(
+        &self,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
+        p3: impl Into<sys::ImVec2>,
+        p4: impl Into<sys::ImVec2>,
+        col: C,
+    ) where
+        C: Into<ImColor32>,
+    {
+        unsafe {
+            sys::ImDrawList_AddQuadFilled(
+                self.draw_list,
+                p1.into(),
+                p2.into(),
+                p3.into(),
+                p4.into(),
+                col.into().into(),
+            )
+        }
+    }
+
+    /// Draw a regular n-gon outline.
+    #[doc(alias = "AddNgon")]
+    pub fn add_ngon<C>(
+        &self,
+        center: impl Into<sys::ImVec2>,
+        radius: f32,
+        col: C,
+        num_segments: i32,
+        thickness: f32,
+    ) where
+        C: Into<ImColor32>,
+    {
+        unsafe {
+            sys::ImDrawList_AddNgon(
+                self.draw_list,
+                center.into(),
+                radius,
+                col.into().into(),
+                num_segments,
+                thickness,
+            )
+        }
+    }
+
+    /// Draw a filled regular n-gon.
+    #[doc(alias = "AddNgonFilled")]
+    pub fn add_ngon_filled<C>(
+        &self,
+        center: impl Into<sys::ImVec2>,
+        radius: f32,
+        col: C,
+        num_segments: i32,
+    ) where
+        C: Into<ImColor32>,
+    {
+        unsafe {
+            sys::ImDrawList_AddNgonFilled(
+                self.draw_list,
+                center.into(),
+                radius,
+                col.into().into(),
+                num_segments,
+            )
+        }
+    }
+
+    /// Draw an ellipse outline.
+    #[doc(alias = "AddEllipse")]
+    pub fn add_ellipse<C>(
+        &self,
+        center: impl Into<sys::ImVec2>,
+        radius: impl Into<sys::ImVec2>,
+        col: C,
+        rot: f32,
+        num_segments: i32,
+        thickness: f32,
+    ) where
+        C: Into<ImColor32>,
+    {
+        unsafe {
+            sys::ImDrawList_AddEllipse(
+                self.draw_list,
+                center.into(),
+                radius.into(),
+                col.into().into(),
+                rot,
+                num_segments,
+                thickness,
+            )
+        }
+    }
+
+    /// Draw a filled ellipse.
+    #[doc(alias = "AddEllipseFilled")]
+    pub fn add_ellipse_filled<C>(
+        &self,
+        center: impl Into<sys::ImVec2>,
+        radius: impl Into<sys::ImVec2>,
+        col: C,
+        rot: f32,
+        num_segments: i32,
+    ) where
+        C: Into<ImColor32>,
+    {
+        unsafe {
+            sys::ImDrawList_AddEllipseFilled(
+                self.draw_list,
+                center.into(),
+                radius.into(),
+                col.into().into(),
+                rot,
+                num_segments,
+            )
+        }
+    }
+
+    /// Draw a quadratic Bezier curve directly.
+    #[doc(alias = "AddBezierQuadratic")]
+    pub fn add_bezier_quadratic<C>(
+        &self,
+        p1: impl Into<sys::ImVec2>,
+        p2: impl Into<sys::ImVec2>,
+        p3: impl Into<sys::ImVec2>,
+        col: C,
+        thickness: f32,
+        num_segments: i32,
+    ) where
+        C: Into<ImColor32>,
+    {
+        unsafe {
+            sys::ImDrawList_AddBezierQuadratic(
+                self.draw_list,
+                p1.into(),
+                p2.into(),
+                p3.into(),
+                col.into().into(),
+                thickness,
+                num_segments,
+            )
+        }
+    }
+
+    /// Fill a concave polygon (Dear ImGui 1.92+).
+    #[doc(alias = "AddConcavePolyFilled")]
+    pub fn add_concave_poly_filled<C, P>(&self, points: &[P], col: C)
+    where
+        C: Into<ImColor32>,
+        P: Copy + Into<sys::ImVec2>,
+    {
+        let mut buf: Vec<sys::ImVec2> = Vec::with_capacity(points.len());
+        for p in points.iter().copied() {
+            buf.push(p.into());
+        }
+        unsafe {
+            sys::ImDrawList_AddConcavePolyFilled(
+                self.draw_list,
+                buf.as_ptr(),
+                buf.len() as i32,
+                col.into().into(),
+            )
+        }
+    }
+
+    /// Fill the current path as a concave polygon (Dear ImGui 1.92+).
+    #[doc(alias = "PathFillConcave")]
+    pub fn path_fill_concave(&self, color: impl Into<ImColor32>) {
+        unsafe { sys::ImDrawList_PathFillConcave(self.draw_list, color.into().into()) }
+    }
+
+    /// Insert a raw draw callback.
+    ///
+    /// Safety: The callback must be an `extern "C"` function compatible with `ImDrawCallback`.
+    /// The provided `userdata` must remain valid until the draw list is executed by the renderer.
+    /// If you allocate memory and store its pointer in `userdata`, you are responsible for reclaiming it
+    /// from within the callback or otherwise ensuring no leaks occur. Note that callbacks are only invoked
+    /// if the draw list is actually rendered.
+    #[doc(alias = "AddCallback")]
+    pub unsafe fn add_callback(
+        &self,
+        callback: sys::ImDrawCallback,
+        userdata: *mut std::os::raw::c_void,
+        userdata_size: usize,
+    ) {
+        unsafe { sys::ImDrawList_AddCallback(self.draw_list, callback, userdata, userdata_size) }
+    }
+
+    /// Insert a new draw command (forces a new draw call boundary).
+    #[doc(alias = "AddDrawCmd")]
+    pub fn add_draw_cmd(&self) {
+        unsafe { sys::ImDrawList_AddDrawCmd(self.draw_list) }
+    }
+
+    /// Clone the current draw list output into an owned, independent copy.
+    ///
+    /// The returned draw list is heap-allocated by Dear ImGui and will be destroyed on drop.
+    #[doc(alias = "CloneOutput")]
+    pub fn clone_output(&self) -> OwnedDrawList {
+        unsafe { OwnedDrawList::from_raw(sys::ImDrawList_CloneOutput(self.draw_list)) }
+    }
+}
+
+/// Represent the drawing interface within a call to `channels_split`.
+pub struct ChannelsSplit<'ui> {
+    draw_list: &'ui DrawListMut<'ui>,
+    channels_count: u32,
+}
+
+impl ChannelsSplit<'_> {
+    /// Change current channel. Panics if `channel_index >= channels_count`.
+    #[doc(alias = "ChannelsSetCurrent")]
+    pub fn set_current(&self, channel_index: u32) {
+        assert!(
+            channel_index < self.channels_count,
+            "Channel index {} out of range {}",
+            channel_index,
+            self.channels_count
+        );
+        unsafe {
+            sys::ImDrawList_ChannelsSetCurrent(self.draw_list.draw_list, channel_index as i32)
+        };
+    }
+}
+
+/// A safe builder for registering a Rust callback to be executed during draw.
+#[must_use = "call .build() to register the callback"]
+pub struct Callback<'ui, F> {
+    draw_list: &'ui DrawListMut<'ui>,
+    callback: F,
+}
+
+impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
+    /// Construct a new callback builder. Typically created via `DrawListMut::add_callback_safe`.
+    pub fn new(draw_list: &'ui DrawListMut<'_>, callback: F) -> Self {
+        Self {
+            draw_list,
+            callback,
+        }
+    }
+
+    /// Register the callback with the draw list.
+    pub fn build(self) {
+        use std::os::raw::c_void;
+        // Box the closure so we can pass an owning pointer to C.
+        let ptr: *mut F = Box::into_raw(Box::new(self.callback));
+        unsafe {
+            sys::ImDrawList_AddCallback(
+                self.draw_list.draw_list,
+                Some(Self::run_callback),
+                ptr as *mut c_void,
+                std::mem::size_of::<F>(),
+            );
+        }
+    }
+
+    unsafe extern "C" fn run_callback(
+        _parent_list: *const sys::ImDrawList,
+        cmd: *const sys::ImDrawCmd,
+    ) {
+        // Access mutable ImDrawCmd to retrieve and clear user data
+        let cmd = &mut *(cmd as *mut sys::ImDrawCmd);
+        // Compute pointer to our boxed closure (respect offset if ever used)
+        let data_ptr =
+            (cmd.UserCallbackData as *mut u8).add(cmd.UserCallbackDataOffset as usize) as *mut F;
+        if data_ptr.is_null() {
+            return;
+        }
+        // Take ownership and clear the pointer/size to avoid double-free or re-entry
+        cmd.UserCallbackData = std::ptr::null_mut();
+        cmd.UserCallbackDataSize = 0;
+        cmd.UserCallbackDataOffset = 0;
+        let cb = Box::from_raw(data_ptr);
+        cb();
+    }
+}
+
+impl<'ui> DrawListMut<'ui> {
+    /// Safe variant: add a Rust callback (executed when the draw list is rendered).
+    /// Note: if the draw list is never rendered, the callback will not run and its resources won't be reclaimed.
+    pub fn add_callback_safe<F: FnOnce() + 'static>(&'ui self, callback: F) -> Callback<'ui, F> {
+        Callback::new(self, callback)
+    }
+}
+
+impl<'ui> DrawListMut<'ui> {
+    /// Unsafe low-level geometry API: reserve index and vertex space.
+    ///
+    /// Safety: Caller must write exactly the reserved amount using PrimWrite* and ensure valid topology.
+    pub unsafe fn prim_reserve(&self, idx_count: i32, vtx_count: i32) {
+        sys::ImDrawList_PrimReserve(self.draw_list, idx_count, vtx_count)
+    }
+
+    /// Unsafe low-level geometry API: unreserve previously reserved space.
+    ///
+    /// Safety: Must match a prior call to `prim_reserve` which hasn't been fully written.
+    pub unsafe fn prim_unreserve(&self, idx_count: i32, vtx_count: i32) {
+        sys::ImDrawList_PrimUnreserve(self.draw_list, idx_count, vtx_count)
+    }
+
+    /// Unsafe low-level geometry API: append a rectangle primitive with a single color.
+    ///
+    /// Safety: Only use between `prim_reserve` and completing the reserved writes.
+    pub unsafe fn prim_rect(
+        &self,
+        a: impl Into<sys::ImVec2>,
+        b: impl Into<sys::ImVec2>,
+        col: impl Into<ImColor32>,
+    ) {
+        sys::ImDrawList_PrimRect(self.draw_list, a.into(), b.into(), col.into().into())
+    }
+
+    /// Unsafe low-level geometry API: append a rectangle primitive with UVs and color.
+    ///
+    /// Safety: Only use between `prim_reserve` and completing the reserved writes.
+    pub unsafe fn prim_rect_uv(
+        &self,
+        a: impl Into<sys::ImVec2>,
+        b: impl Into<sys::ImVec2>,
+        uv_a: impl Into<sys::ImVec2>,
+        uv_b: impl Into<sys::ImVec2>,
+        col: impl Into<ImColor32>,
+    ) {
+        sys::ImDrawList_PrimRectUV(
+            self.draw_list,
+            a.into(),
+            b.into(),
+            uv_a.into(),
+            uv_b.into(),
+            col.into().into(),
+        )
+    }
+
+    /// Unsafe low-level geometry API: append a quad primitive with UVs and color.
+    ///
+    /// Safety: Only use between `prim_reserve` and completing the reserved writes.
+    pub unsafe fn prim_quad_uv(
+        &self,
+        a: impl Into<sys::ImVec2>,
+        b: impl Into<sys::ImVec2>,
+        c: impl Into<sys::ImVec2>,
+        d: impl Into<sys::ImVec2>,
+        uv_a: impl Into<sys::ImVec2>,
+        uv_b: impl Into<sys::ImVec2>,
+        uv_c: impl Into<sys::ImVec2>,
+        uv_d: impl Into<sys::ImVec2>,
+        col: impl Into<ImColor32>,
+    ) {
+        sys::ImDrawList_PrimQuadUV(
+            self.draw_list,
+            a.into(),
+            b.into(),
+            c.into(),
+            d.into(),
+            uv_a.into(),
+            uv_b.into(),
+            uv_c.into(),
+            uv_d.into(),
+            col.into().into(),
+        )
+    }
+
+    /// Unsafe low-level geometry API: write a vertex.
+    ///
+    /// Safety: Only use to fill space reserved by `prim_reserve`.
+    pub unsafe fn prim_write_vtx(
+        &self,
+        pos: impl Into<sys::ImVec2>,
+        uv: impl Into<sys::ImVec2>,
+        col: impl Into<ImColor32>,
+    ) {
+        sys::ImDrawList_PrimWriteVtx(self.draw_list, pos.into(), uv.into(), col.into().into())
+    }
+
+    /// Unsafe low-level geometry API: write an index.
+    ///
+    /// Safety: Only use to fill space reserved by `prim_reserve`.
+    pub unsafe fn prim_write_idx(&self, idx: sys::ImDrawIdx) {
+        sys::ImDrawList_PrimWriteIdx(self.draw_list, idx)
+    }
+
+    /// Unsafe low-level geometry API: convenience to append one vertex (pos+uv+col).
+    ///
+    /// Safety: Only use between `prim_reserve` and completing the reserved writes.
+    pub unsafe fn prim_vtx(
+        &self,
+        pos: impl Into<sys::ImVec2>,
+        uv: impl Into<sys::ImVec2>,
+        col: impl Into<ImColor32>,
+    ) {
+        sys::ImDrawList_PrimVtx(self.draw_list, pos.into(), uv.into(), col.into().into())
     }
 }
 
@@ -910,7 +1560,7 @@ impl<'ui> Rect<'ui> {
                     p2,
                     self.color.into(),
                     self.rounding,
-                    self.flags.bits() as i32,
+                    self.flags.bits() as sys::ImDrawFlags,
                 )
             }
         } else {
@@ -921,7 +1571,7 @@ impl<'ui> Rect<'ui> {
                     p2,
                     self.color.into(),
                     self.rounding,
-                    self.flags.bits() as i32,
+                    self.flags.bits() as sys::ImDrawFlags,
                     self.thickness,
                 )
             }

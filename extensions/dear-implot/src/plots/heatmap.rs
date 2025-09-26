@@ -1,7 +1,7 @@
 //! Heatmap plot implementation
 
 use super::{Plot, PlotError, safe_cstring};
-use crate::sys;
+use crate::{HeatmapFlags, sys};
 
 /// Builder for heatmap plots with extensive customization options
 pub struct HeatmapPlot<'a> {
@@ -14,7 +14,7 @@ pub struct HeatmapPlot<'a> {
     label_fmt: Option<&'a str>,
     bounds_min: sys::ImPlotPoint,
     bounds_max: sys::ImPlotPoint,
-    flags: sys::ImPlotHeatmapFlags,
+    flags: HeatmapFlags,
 }
 
 impl<'a> HeatmapPlot<'a> {
@@ -36,7 +36,7 @@ impl<'a> HeatmapPlot<'a> {
             label_fmt: Some("%.1f"),
             bounds_min: sys::ImPlotPoint { x: 0.0, y: 0.0 },
             bounds_max: sys::ImPlotPoint { x: 1.0, y: 1.0 },
-            flags: 0 as sys::ImPlotHeatmapFlags,
+            flags: HeatmapFlags::NONE,
         }
     }
 
@@ -70,14 +70,14 @@ impl<'a> HeatmapPlot<'a> {
     }
 
     /// Set heatmap flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotHeatmapFlags) -> Self {
+    pub fn with_flags(mut self, flags: HeatmapFlags) -> Self {
         self.flags = flags;
         self
     }
 
     /// Use column-major data ordering instead of row-major
     pub fn column_major(mut self) -> Self {
-        self.flags |= sys::ImPlotHeatmapFlags_ColMajor as sys::ImPlotHeatmapFlags;
+        self.flags |= HeatmapFlags::COL_MAJOR;
         self
     }
 
@@ -130,7 +130,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
                 label_fmt_ptr,
                 self.bounds_min,
                 self.bounds_max,
-                self.flags,
+                self.flags.bits() as i32,
             );
         }
     }
@@ -151,7 +151,7 @@ pub struct HeatmapPlotF32<'a> {
     label_fmt: Option<&'a str>,
     bounds_min: sys::ImPlotPoint,
     bounds_max: sys::ImPlotPoint,
-    flags: sys::ImPlotHeatmapFlags,
+    flags: HeatmapFlags,
 }
 
 impl<'a> HeatmapPlotF32<'a> {
@@ -167,7 +167,7 @@ impl<'a> HeatmapPlotF32<'a> {
             label_fmt: Some("%.1f"),
             bounds_min: sys::ImPlotPoint { x: 0.0, y: 0.0 },
             bounds_max: sys::ImPlotPoint { x: 1.0, y: 1.0 },
-            flags: 0 as sys::ImPlotHeatmapFlags,
+            flags: HeatmapFlags::NONE,
         }
     }
 
@@ -192,14 +192,14 @@ impl<'a> HeatmapPlotF32<'a> {
     }
 
     /// Set heatmap flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotHeatmapFlags) -> Self {
+    pub fn with_flags(mut self, flags: HeatmapFlags) -> Self {
         self.flags = flags;
         self
     }
 
     /// Use column-major data ordering
     pub fn column_major(mut self) -> Self {
-        self.flags |= sys::ImPlotHeatmapFlags_ColMajor as sys::ImPlotHeatmapFlags;
+        self.flags |= HeatmapFlags::COL_MAJOR;
         self
     }
 
@@ -252,7 +252,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                 label_fmt_ptr,
                 self.bounds_min,
                 self.bounds_max,
-                self.flags,
+                self.flags.bits() as i32,
             );
         }
     }

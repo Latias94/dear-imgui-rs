@@ -177,7 +177,14 @@ impl<'ui> NodeEditor<'ui> {
 
     /// Draw a minimap in the editor
     pub fn minimap(&self, size_fraction: f32, location: crate::MiniMapLocation) {
-        unsafe { sys::imnodes_MiniMap(size_fraction, location as i32, None, std::ptr::null_mut()) }
+        unsafe {
+            sys::imnodes_MiniMap(
+                size_fraction,
+                location as sys::ImNodesMiniMapLocation,
+                None,
+                std::ptr::null_mut(),
+            )
+        }
     }
 
     /// Draw a minimap with a node-hover callback (invoked during this call)
@@ -196,7 +203,12 @@ impl<'ui> NodeEditor<'ui> {
         let mut cb_obj: &mut dyn FnMut(i32) = callback;
         let user_ptr = &mut cb_obj as *mut _ as *mut c_void;
         unsafe {
-            sys::imnodes_MiniMap(size_fraction, location as i32, Some(trampoline), user_ptr);
+            sys::imnodes_MiniMap(
+                size_fraction,
+                location as sys::ImNodesMiniMapLocation,
+                Some(trampoline),
+                user_ptr,
+            )
         }
     }
 
@@ -210,7 +222,7 @@ impl<'ui> NodeEditor<'ui> {
 
     /// Begin an input attribute pin
     pub fn input_attr(&self, id: i32, shape: crate::PinShape) -> AttributeToken<'_> {
-        unsafe { sys::imnodes_BeginInputAttribute(id, shape as i32) };
+        unsafe { sys::imnodes_BeginInputAttribute(id, shape as sys::ImNodesPinShape) };
         AttributeToken {
             kind: AttrKind::Input,
             _phantom: std::marker::PhantomData,
@@ -553,14 +565,28 @@ impl<'ui> NodeEditor<'ui> {
     }
 
     pub fn set_color(&self, elem: crate::style::ColorElement, color: [f32; 4]) {
-        let r = (color[0].clamp(0.0, 1.0) * 255.0) as u32;
-        let g = (color[1].clamp(0.0, 1.0) * 255.0) as u32;
-        let b = (color[2].clamp(0.0, 1.0) * 255.0) as u32;
-        let a = (color[3].clamp(0.0, 1.0) * 255.0) as u32;
-        let abgr = (a << 24) | (b << 16) | (g << 8) | r;
-        unsafe {
-            (*sys::imnodes_GetStyle()).Colors[elem as u32 as usize] = abgr;
-        }
+        let abgr = unsafe {
+            imgui_sys::igColorConvertFloat4ToU32(imgui_sys::ImVec4 {
+                x: color[0],
+                y: color[1],
+                z: color[2],
+                w: color[3],
+            })
+        };
+        unsafe { (*sys::imnodes_GetStyle()).Colors[elem as u32 as usize] = abgr };
+    }
+
+    /// Get a style color as RGBA floats [0,1]
+    pub fn get_color(&self, elem: crate::style::ColorElement) -> [f32; 4] {
+        let col = unsafe { (*sys::imnodes_GetStyle()).Colors[elem as u32 as usize] };
+        let mut out = imgui_sys::ImVec4 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
+        };
+        unsafe { imgui_sys::igColorConvertU32ToFloat4(&mut out as *mut _, col) };
+        [out.x, out.y, out.z, out.w]
     }
 
     /// Node positions in screen/editor space

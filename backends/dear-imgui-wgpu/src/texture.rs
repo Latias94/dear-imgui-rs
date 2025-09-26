@@ -271,7 +271,7 @@ impl WgpuTextureManager {
         let bpp = 4u32;
         let unpadded_bytes_per_row = width * bpp;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // 256
-        let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
+        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
         if padded_bytes_per_row == unpadded_bytes_per_row {
             // Aligned: direct upload
             queue.write_texture(
@@ -392,6 +392,12 @@ impl WgpuTextureManager {
     }
 
     /// Handle texture updates from Dear ImGui draw data
+    ///
+    /// This iterates `DrawData::textures()` and applies create/update/destroy requests.
+    /// For `WantCreate`, we create the GPU texture, then write the generated id back into
+    /// the `ImTextureData` via `set_tex_id()` and mark status `OK` (matching C++ backend).
+    /// For `WantUpdates`, if a valid id is not yet assigned (first use), we create now and
+    /// assign the id; otherwise we update in place.
     pub fn handle_texture_updates(
         &mut self,
         draw_data: &dear_imgui::render::DrawData,
@@ -432,7 +438,21 @@ impl WgpuTextureManager {
                     let imgui_tex_id = texture_data.tex_id();
                     let internal_id = imgui_tex_id.id();
 
-                    if self
+                    // If we don't have a valid texture id yet (first update) or the
+                    // id isn't registered, create it now and write back the TexID,
+                    // so this frame (or the next) can bind the correct texture.
+                    if internal_id == 0 || !self.contains_texture(internal_id) {
+                        match self.create_texture_from_data(device, queue, texture_data) {
+                            Ok(new_id) => {
+                                texture_data.set_tex_id(dear_imgui::TextureId::from(new_id));
+                                texture_data.set_status(TextureStatus::OK);
+                            }
+                            Err(_e) => {
+                                // Leave it destroyed to avoid retry storm; user can request create again
+                                texture_data.set_status(TextureStatus::Destroyed);
+                            }
+                        }
+                    } else if self
                         .update_texture_from_data_with_id(device, queue, texture_data, internal_id)
                         .is_err()
                     {
@@ -512,9 +532,25 @@ impl WgpuTextureManager {
                 }
             }
             TextureStatus::WantUpdates => {
-                match self.update_texture_from_data(device, queue, texture_data) {
-                    Ok(_) => Ok(TextureUpdateResult::Updated),
-                    Err(_e) => Ok(TextureUpdateResult::Failed),
+                let internal_id = texture_data.tex_id().id();
+                if internal_id == 0 || !self.contains_texture(internal_id) {
+                    // No valid ID yet: create now and return Created so caller can set TexID
+                    match self.create_texture_from_data(device, queue, texture_data) {
+                        Ok(texture_id) => Ok(TextureUpdateResult::Created {
+                            texture_id: TextureId::from(texture_id),
+                        }),
+                        Err(e) => Err(format!("Failed to create texture: {}", e)),
+                    }
+                } else {
+                    match self.update_texture_from_data_with_id(
+                        device,
+                        queue,
+                        texture_data,
+                        internal_id,
+                    ) {
+                        Ok(_) => Ok(TextureUpdateResult::Updated),
+                        Err(_e) => Ok(TextureUpdateResult::Failed),
+                    }
                 }
             }
             TextureStatus::WantDestroy => {

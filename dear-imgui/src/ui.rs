@@ -272,11 +272,10 @@ impl Ui {
     #[doc(alias = "SetMouseCursor")]
     pub fn set_mouse_cursor(&self, cursor_type: Option<MouseCursor>) {
         unsafe {
-            sys::igSetMouseCursor(
-                cursor_type
-                    .map(|x| x as i32)
-                    .unwrap_or(sys::ImGuiMouseCursor_None),
-            );
+            let val: sys::ImGuiMouseCursor = cursor_type
+                .map(|x| x as sys::ImGuiMouseCursor)
+                .unwrap_or(sys::ImGuiMouseCursor_None);
+            sys::igSetMouseCursor(val);
         }
     }
 
@@ -316,9 +315,7 @@ impl Ui {
     /// Set next item to be open by default with condition.
     #[doc(alias = "SetNextItemOpen")]
     pub fn set_next_item_open_with_cond(&self, is_open: bool, cond: crate::Condition) {
-        unsafe {
-            sys::igSetNextItemOpen(is_open, cond as i32);
-        }
+        unsafe { sys::igSetNextItemOpen(is_open, cond as sys::ImGuiCond) }
     }
 
     /// Set next item width.

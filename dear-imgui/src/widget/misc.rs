@@ -147,3 +147,28 @@ impl Ui {
         unsafe { sys::igPopItemFlag() }
     }
 }
+
+// ============================================================================
+// Item key ownership
+// ============================================================================
+
+impl Ui {
+    /// Set the key owner for the last item, without flags.
+    #[doc(alias = "SetItemKeyOwner")]
+    pub fn set_item_key_owner(&self, key: crate::input::Key) {
+        let k: sys::ImGuiKey = key as sys::ImGuiKey;
+        unsafe { sys::igSetItemKeyOwner_Nil(k) }
+    }
+
+    /// Set the key owner for the last item with input flags.
+    /// Pass a combination of `ImGuiInputFlags_*` from `dear_imgui_sys`.
+    #[doc(alias = "SetItemKeyOwner")]
+    pub fn set_item_key_owner_with_flags(
+        &self,
+        key: crate::input::Key,
+        flags: sys::ImGuiInputFlags,
+    ) {
+        let k: sys::ImGuiKey = key as sys::ImGuiKey;
+        unsafe { sys::igSetItemKeyOwner_InputFlags(k, flags) }
+    }
+}

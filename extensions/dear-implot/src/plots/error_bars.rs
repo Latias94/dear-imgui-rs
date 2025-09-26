@@ -1,7 +1,7 @@
 //! Error bars plot implementation
 
 use super::{Plot, PlotError, safe_cstring, validate_data_lengths};
-use crate::sys;
+use crate::{ErrorBarsFlags, sys};
 
 /// Builder for error bars plots
 pub struct ErrorBarsPlot<'a> {
@@ -9,7 +9,7 @@ pub struct ErrorBarsPlot<'a> {
     x_data: &'a [f64],
     y_data: &'a [f64],
     err_data: &'a [f64],
-    flags: sys::ImPlotErrorBarsFlags,
+    flags: ErrorBarsFlags,
     offset: i32,
     stride: i32,
 }
@@ -28,14 +28,14 @@ impl<'a> ErrorBarsPlot<'a> {
             x_data,
             y_data,
             err_data,
-            flags: 0,
+            flags: ErrorBarsFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
     }
 
     /// Set error bar flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotErrorBarsFlags) -> Self {
+    pub fn with_flags(mut self, flags: ErrorBarsFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -90,7 +90,7 @@ impl<'a> Plot for ErrorBarsPlot<'a> {
                 self.y_data.as_ptr(),
                 self.err_data.as_ptr(),
                 self.x_data.len() as i32,
-                self.flags,
+                self.flags.bits() as i32,
                 self.offset,
                 self.stride,
             );
@@ -109,7 +109,7 @@ pub struct AsymmetricErrorBarsPlot<'a> {
     y_data: &'a [f64],
     err_neg: &'a [f64],
     err_pos: &'a [f64],
-    flags: sys::ImPlotErrorBarsFlags,
+    flags: ErrorBarsFlags,
 }
 
 impl<'a> AsymmetricErrorBarsPlot<'a> {
@@ -134,12 +134,12 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
             y_data,
             err_neg,
             err_pos,
-            flags: 0,
+            flags: ErrorBarsFlags::NONE,
         }
     }
 
     /// Set error bar flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotErrorBarsFlags) -> Self {
+    pub fn with_flags(mut self, flags: ErrorBarsFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -177,7 +177,7 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
                 self.err_neg.as_ptr(),
                 self.err_pos.as_ptr(),
                 self.x_data.len() as i32,
-                self.flags,
+                self.flags.bits() as i32,
                 0,
                 std::mem::size_of::<f64>() as i32,
             );

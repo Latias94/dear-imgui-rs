@@ -34,7 +34,7 @@ dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
 cfg-if.workspace = true
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
-build-support = { path = "../../tools/build-support", optional = true }
+build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../../tools/build-support", optional = true }
 
 [build-dependencies]
 bindgen.workspace = true
@@ -43,7 +43,7 @@ xshell = "0.2"
 pkg-config = "0.3"
 flate2 = "1"
 tar = "0.4"
-build-support = { path = "../../tools/build-support" }
+build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../../tools/build-support" }
 
 [[bin]]
 name = "package"

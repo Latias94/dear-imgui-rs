@@ -1,10 +1,21 @@
 // Utility functions for ImPlot
 
-use crate::sys;
+use crate::{XAxis, YAxis, sys};
 
 /// Check if the plot area is hovered
 pub fn is_plot_hovered() -> bool {
     unsafe { sys::ImPlot_IsPlotHovered() }
+}
+
+/// Check if any subplots area is hovered
+pub fn is_subplots_hovered() -> bool {
+    unsafe { sys::ImPlot_IsSubplotsHovered() }
+}
+
+/// Check if a legend entry is hovered
+pub fn is_legend_entry_hovered(label: &str) -> bool {
+    let c = std::ffi::CString::new(label).unwrap_or_default();
+    unsafe { sys::ImPlot_IsLegendEntryHovered(c.as_ptr()) }
 }
 
 /// Get the mouse position in plot coordinates
@@ -18,8 +29,25 @@ pub fn get_plot_mouse_position(y_axis_choice: Option<crate::YAxisChoice>) -> sys
     };
     let mut out = sys::ImPlotPoint { x: 0.0, y: 0.0 };
     unsafe {
-        sys::ImPlot_GetPlotMousePos(&mut out as *mut sys::ImPlotPoint, x_axis, y_axis);
+        sys::ImPlot_GetPlotMousePos(
+            &mut out as *mut sys::ImPlotPoint,
+            x_axis as sys::ImAxis,
+            y_axis as sys::ImAxis,
+        )
     }
+    out
+}
+
+/// Get the mouse position in plot coordinates for specific axes
+pub fn get_plot_mouse_position_axes(x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotPoint {
+    let mut out = sys::ImPlotPoint { x: 0.0, y: 0.0 };
+    unsafe {
+        sys::ImPlot_GetPlotMousePos(
+            &mut out as *mut sys::ImPlotPoint,
+            x_axis as sys::ImAxis,
+            y_axis as sys::ImAxis,
+        )
+    };
     out
 }
 
@@ -42,6 +70,25 @@ pub fn pixels_to_plot(
         }
         let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, 0);
         let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_index);
+        let x = sys::ImPlotAxis_PixelsToPlot(x_axis_ptr, pixel_position[0]);
+        let y = sys::ImPlotAxis_PixelsToPlot(y_axis_ptr, pixel_position[1]);
+        sys::ImPlotPoint { x, y }
+    }
+}
+
+/// Convert pixels to plot coordinates for specific axes
+pub fn pixels_to_plot_axes(
+    pixel_position: [f32; 2],
+    x_axis: XAxis,
+    y_axis: YAxis,
+) -> sys::ImPlotPoint {
+    unsafe {
+        let plot = sys::ImPlot_GetCurrentPlot();
+        if plot.is_null() {
+            return sys::ImPlotPoint { x: 0.0, y: 0.0 };
+        }
+        let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, x_axis as i32);
+        let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_axis.to_index());
         let x = sys::ImPlotAxis_PixelsToPlot(x_axis_ptr, pixel_position[0]);
         let y = sys::ImPlotAxis_PixelsToPlot(y_axis_ptr, pixel_position[1]);
         sys::ImPlotPoint { x, y }
@@ -72,6 +119,25 @@ pub fn plot_to_pixels(
     }
 }
 
+/// Convert plot coordinates to pixels for specific axes
+pub fn plot_to_pixels_axes(
+    plot_position: sys::ImPlotPoint,
+    x_axis: XAxis,
+    y_axis: YAxis,
+) -> [f32; 2] {
+    unsafe {
+        let plot = sys::ImPlot_GetCurrentPlot();
+        if plot.is_null() {
+            return [0.0, 0.0];
+        }
+        let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, x_axis as i32);
+        let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_axis.to_index());
+        let px = sys::ImPlotAxis_PlotToPixels(x_axis_ptr, plot_position.x);
+        let py = sys::ImPlotAxis_PlotToPixels(y_axis_ptr, plot_position.y);
+        [px, py]
+    }
+}
+
 /// Get the current plot limits
 pub fn get_plot_limits(
     _x_axis_choice: Option<crate::YAxisChoice>,
@@ -89,6 +155,84 @@ pub fn get_plot_limits(
     rect
 }
 
+/// Whether a plot has an active selection region
+pub fn is_plot_selected() -> bool {
+    unsafe { sys::ImPlot_IsPlotSelected() }
+}
+
+/// Get the current plot selection rectangle for specific axes
+pub fn get_plot_selection_axes(x_axis: XAxis, y_axis: YAxis) -> Option<sys::ImPlotRect> {
+    if !is_plot_selected() {
+        return None;
+    }
+    let mut rect: sys::ImPlotRect = unsafe { std::mem::zeroed() };
+    unsafe {
+        sys::ImPlot_GetPlotSelection(
+            &mut rect as *mut sys::ImPlotRect,
+            x_axis as i32,
+            y_axis as i32,
+        )
+    };
+    Some(rect)
+}
+
+/// Draw a simple round annotation marker at (x,y)
+pub fn annotation_point(
+    x: f64,
+    y: f64,
+    color: [f32; 4],
+    pixel_offset: [f32; 2],
+    clamp: bool,
+    round: bool,
+) {
+    let col = sys::ImVec4 {
+        x: color[0],
+        y: color[1],
+        z: color[2],
+        w: color[3],
+    };
+    let off = sys::ImVec2 {
+        x: pixel_offset[0],
+        y: pixel_offset[1],
+    };
+    unsafe { sys::ImPlot_Annotation_Bool(x, y, col, off, clamp, round) }
+}
+
+/// Tag the X axis at position x with a tick-like mark
+pub fn tag_x(x: f64, color: [f32; 4], round: bool) {
+    let col = sys::ImVec4 {
+        x: color[0],
+        y: color[1],
+        z: color[2],
+        w: color[3],
+    };
+    unsafe { sys::ImPlot_TagX_Bool(x, col, round) }
+}
+
+/// Tag the Y axis at position y with a tick-like mark
+pub fn tag_y(y: f64, color: [f32; 4], round: bool) {
+    let col = sys::ImVec4 {
+        x: color[0],
+        y: color[1],
+        z: color[2],
+        w: color[3],
+    };
+    unsafe { sys::ImPlot_TagY_Bool(y, col, round) }
+}
+
+/// Get the current plot limits for specific axes
+pub fn get_plot_limits_axes(x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotRect {
+    let mut rect: sys::ImPlotRect = unsafe { std::mem::zeroed() };
+    unsafe {
+        sys::ImPlot_GetPlotLimits(
+            &mut rect as *mut sys::ImPlotRect,
+            x_axis as i32,
+            y_axis as i32,
+        )
+    };
+    rect
+}
+
 /// Check if an axis is hovered
 pub fn is_axis_hovered(axis: i32) -> bool {
     unsafe { sys::ImPlot_IsAxisHovered(axis) }
@@ -96,7 +240,12 @@ pub fn is_axis_hovered(axis: i32) -> bool {
 
 /// Check if the X axis is hovered
 pub fn is_plot_x_axis_hovered() -> bool {
-    is_axis_hovered(0) // ImAxis_X1
+    is_axis_hovered(XAxis::X1 as i32)
+}
+
+/// Check if a specific X axis is hovered
+pub fn is_plot_x_axis_hovered_axis(x_axis: XAxis) -> bool {
+    is_axis_hovered(x_axis as i32)
 }
 
 /// Check if a Y axis is hovered
@@ -110,6 +259,11 @@ pub fn is_plot_y_axis_hovered(y_axis_choice: Option<crate::YAxisChoice>) -> bool
     is_axis_hovered(y_axis)
 }
 
+/// Check if a specific Y axis is hovered
+pub fn is_plot_y_axis_hovered_axis(y_axis: YAxis) -> bool {
+    is_axis_hovered(y_axis as i32)
+}
+
 /// Show the ImPlot demo window (requires sys demo symbols to be linked)
 #[cfg(feature = "demo")]
 pub fn show_demo_window(show: &mut bool) {
@@ -119,3 +273,159 @@ pub fn show_demo_window(show: &mut bool) {
 /// Stub when demo feature is disabled
 #[cfg(not(feature = "demo"))]
 pub fn show_demo_window(_show: &mut bool) {}
+
+/// Show the built-in user guide for ImPlot
+pub fn show_user_guide() {
+    unsafe { sys::ImPlot_ShowUserGuide() }
+}
+
+/// Show the metrics window (pass &mut bool for open state)
+pub fn show_metrics_window(open: &mut bool) {
+    unsafe { sys::ImPlot_ShowMetricsWindow(open as *mut bool) }
+}
+
+/// Get current plot position (top-left) in pixels
+pub fn get_plot_pos() -> [f32; 2] {
+    let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
+    unsafe { sys::ImPlot_GetPlotPos(&mut out as *mut _) };
+    [out.x, out.y]
+}
+
+/// Get current plot size in pixels
+pub fn get_plot_size() -> [f32; 2] {
+    let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
+    unsafe { sys::ImPlot_GetPlotSize(&mut out as *mut _) };
+    [out.x, out.y]
+}
+
+/// Get the underlying ImDrawList for the current plot (unsafe pointer)
+pub fn get_plot_draw_list() -> *mut sys::ImDrawList {
+    unsafe { sys::ImPlot_GetPlotDrawList() }
+}
+
+/// Push plot clip rect
+pub fn push_plot_clip_rect(expand: f32) {
+    unsafe { sys::ImPlot_PushPlotClipRect(expand) }
+}
+
+/// Pop plot clip rect
+pub fn pop_plot_clip_rect() {
+    unsafe { sys::ImPlot_PopPlotClipRect() }
+}
+
+/// Result of a drag interaction
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DragResult {
+    /// True if the underlying value changed this frame
+    pub changed: bool,
+    /// True if it was clicked this frame
+    pub clicked: bool,
+    /// True if hovered this frame
+    pub hovered: bool,
+    /// True if held/active this frame
+    pub held: bool,
+}
+
+fn color4(rgba: [f32; 4]) -> sys::ImVec4 {
+    sys::ImVec4 {
+        x: rgba[0],
+        y: rgba[1],
+        z: rgba[2],
+        w: rgba[3],
+    }
+}
+
+/// Draggable point with result flags
+pub fn drag_point(
+    id: i32,
+    x: &mut f64,
+    y: &mut f64,
+    color: [f32; 4],
+    size: f32,
+    flags: crate::DragToolFlags,
+) -> DragResult {
+    let mut clicked = false;
+    let mut hovered = false;
+    let mut held = false;
+    let changed = unsafe {
+        sys::ImPlot_DragPoint(
+            id,
+            x as *mut f64,
+            y as *mut f64,
+            color4(color),
+            size,
+            flags.bits() as i32,
+            &mut clicked as *mut bool,
+            &mut hovered as *mut bool,
+            &mut held as *mut bool,
+        )
+    };
+    DragResult {
+        changed,
+        clicked,
+        hovered,
+        held,
+    }
+}
+
+/// Draggable vertical line at x
+pub fn drag_line_x(
+    id: i32,
+    x: &mut f64,
+    color: [f32; 4],
+    thickness: f32,
+    flags: crate::DragToolFlags,
+) -> DragResult {
+    let mut clicked = false;
+    let mut hovered = false;
+    let mut held = false;
+    let changed = unsafe {
+        sys::ImPlot_DragLineX(
+            id,
+            x as *mut f64,
+            color4(color),
+            thickness,
+            flags.bits() as i32,
+            &mut clicked as *mut bool,
+            &mut hovered as *mut bool,
+            &mut held as *mut bool,
+        )
+    };
+    DragResult {
+        changed,
+        clicked,
+        hovered,
+        held,
+    }
+}
+
+/// Draggable horizontal line at y
+pub fn drag_line_y(
+    id: i32,
+    y: &mut f64,
+    color: [f32; 4],
+    thickness: f32,
+    flags: crate::DragToolFlags,
+) -> DragResult {
+    let mut clicked = false;
+    let mut hovered = false;
+    let mut held = false;
+    let changed = unsafe {
+        sys::ImPlot_DragLineY(
+            id,
+            y as *mut f64,
+            color4(color),
+            thickness,
+            flags.bits() as i32,
+            &mut clicked as *mut bool,
+            &mut hovered as *mut bool,
+            &mut held as *mut bool,
+        )
+    };
+    DragResult {
+        changed,
+        clicked,
+        hovered,
+        held,
+    }
+}

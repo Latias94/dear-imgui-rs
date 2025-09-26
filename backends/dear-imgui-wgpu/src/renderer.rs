@@ -818,10 +818,25 @@ impl WgpuRenderer {
         for draw_list in draw_data.draw_lists() {
             for cmd in draw_list.commands() {
                 match cmd {
-                    dear_imgui::render::DrawCmd::Elements { count, cmd_params } => {
+                    dear_imgui::render::DrawCmd::Elements {
+                        count,
+                        cmd_params,
+                        raw_cmd,
+                    } => {
                         // Get texture bind group
+                        //
+                        // Dear ImGui 1.92+ (modern texture system): draw commands may carry
+                        // an ImTextureRef whose `TexID` is 0 in the raw field, and the effective
+                        // id must be resolved via ImDrawCmd_GetTexID using the backend's
+                        // Renderer_RenderState. We call it here, after texture updates have been
+                        // handled for this frame, so it returns a valid non-zero id.
                         let texture_bind_group = {
-                            let tex_id = cmd_params.texture_id.id();
+                            // Resolve effective ImTextureID now (after texture updates)
+                            let tex_id = unsafe {
+                                dear_imgui::sys::ImDrawCmd_GetTexID(
+                                    raw_cmd as *mut dear_imgui::sys::ImDrawCmd,
+                                )
+                            } as u64;
                             if tex_id == 0 {
                                 // Use default texture for null/invalid texture ID
                                 if let Some(default_tex) = default_texture {

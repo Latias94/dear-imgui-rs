@@ -68,7 +68,7 @@ impl AppWindow {
             Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
-                        .with_title(&format!("Dear ImGui + ImPlot Example - {version}"))
+                        .with_title(format!("Dear ImGui + ImPlot Example - {version}"))
                         .with_inner_size(size),
                 )?,
             )
@@ -544,7 +544,7 @@ impl AppWindow {
             let draw_data = self.imgui.context.render();
             self.imgui
                 .renderer
-                .render_draw_data(&draw_data, &mut render_pass)?;
+                .render_draw_data(draw_data, &mut render_pass)?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

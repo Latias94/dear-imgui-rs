@@ -10,6 +10,13 @@ fn context_and_fonts_thread_markers() {
     assert_not_impl_any!(dear_imgui::Font: Send, Sync);
     assert_not_impl_any!(dear_imgui::FontAtlas: Send, Sync);
 
-    // OwnedDrawData SHOULD be Send + Sync (deep-copied and owned)
-    assert_impl_all!(dear_imgui::render::draw_data::OwnedDrawData: Send, Sync);
+    // OwnedDrawData must NOT be Send/Sync (retains shared textures list pointer)
+    assert_not_impl_any!(dear_imgui::render::draw_data::OwnedDrawData: Send, Sync);
+
+    // DrawData/DrawList views (render module) are frame-bound, not thread-safe
+    assert_not_impl_any!(dear_imgui::render::draw_data::DrawData: Send, Sync);
+    assert_not_impl_any!(dear_imgui::render::draw_data::DrawList: Send, Sync);
+
+    // Immediate draw list handle is UI-thread bound
+    assert_not_impl_any!(dear_imgui::DrawListMut<'static>: Send, Sync);
 }

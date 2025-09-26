@@ -1,7 +1,7 @@
 //! Bar plot implementation
 
 use super::{Plot, PlotError, safe_cstring};
-use crate::sys;
+use crate::{BarsFlags, sys};
 
 /// Builder for bar plots with customization options
 pub struct BarPlot<'a> {
@@ -9,7 +9,7 @@ pub struct BarPlot<'a> {
     values: &'a [f64],
     bar_size: f64,
     shift: f64,
-    flags: sys::ImPlotBarsFlags,
+    flags: BarsFlags,
     offset: i32,
     stride: i32,
 }
@@ -22,7 +22,7 @@ impl<'a> BarPlot<'a> {
             values,
             bar_size: 0.67, // Default bar width
             shift: 0.0,
-            flags: 0,
+            flags: BarsFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -41,7 +41,7 @@ impl<'a> BarPlot<'a> {
     }
 
     /// Set bar flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotBarsFlags) -> Self {
+    pub fn with_flags(mut self, flags: BarsFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -83,7 +83,7 @@ impl<'a> Plot for BarPlot<'a> {
                 self.values.len() as i32,
                 self.bar_size,
                 self.shift,
-                self.flags,
+                self.flags.bits() as i32,
                 self.offset,
                 self.stride,
             );
@@ -101,7 +101,7 @@ pub struct PositionalBarPlot<'a> {
     x_data: &'a [f64],
     y_data: &'a [f64],
     bar_size: f64,
-    flags: sys::ImPlotBarsFlags,
+    flags: BarsFlags,
 }
 
 impl<'a> PositionalBarPlot<'a> {
@@ -112,7 +112,7 @@ impl<'a> PositionalBarPlot<'a> {
             x_data,
             y_data,
             bar_size: 0.67,
-            flags: 0,
+            flags: BarsFlags::NONE,
         }
     }
 
@@ -123,7 +123,7 @@ impl<'a> PositionalBarPlot<'a> {
     }
 
     /// Set bar flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotBarsFlags) -> Self {
+    pub fn with_flags(mut self, flags: BarsFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -149,7 +149,7 @@ impl<'a> Plot for PositionalBarPlot<'a> {
                 self.y_data.as_ptr(),
                 self.y_data.len() as i32,
                 self.bar_size,
-                self.flags,
+                self.flags.bits() as i32,
                 0,
                 std::mem::size_of::<f64>() as i32,
             );

@@ -42,7 +42,7 @@ use dear_implot_sys as sys;
 // Re-export essential types
 pub use dear_imgui::{Context, Ui};
 pub use sys::{ImPlotPoint, ImPlotRange, ImPlotRect};
-pub use sys::{ImVec2, ImVec4};
+pub use sys::{ImTextureID, ImVec2, ImVec4};
 
 mod advanced;
 mod context;
@@ -90,6 +90,31 @@ fn y_axis_choice_option_to_i32(y_axis_choice: Option<YAxisChoice>) -> i32 {
     match y_axis_choice {
         Some(choice) => choice as i32,
         None => IMPLOT_AUTO,
+    }
+}
+
+/// X axis selector matching ImPlot's ImAxis values
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
+pub enum XAxis {
+    X1 = 0,
+    X2 = 1,
+    X3 = 2,
+}
+
+/// Y axis selector matching ImPlot's ImAxis values
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
+pub enum YAxis {
+    Y1 = 3,
+    Y2 = 4,
+    Y3 = 5,
+}
+
+impl YAxis {
+    /// Convert a Y axis (Y1..Y3) to the 0-based index used by ImPlotPlot_YAxis_Nil
+    pub(crate) fn to_index(self) -> i32 {
+        (self as i32) - 3
     }
 }
 
@@ -325,6 +350,68 @@ bitflags::bitflags! {
     pub struct DummyFlags: u32 {
         const NONE = 0;
     }
+}
+
+bitflags::bitflags! {
+    /// Flags for drag tools (points/lines)
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct DragToolFlags: u32 {
+        const NONE = 0;
+        const NO_CURSORS = 1 << 0;
+        const NO_FIT = 1 << 1;
+        const NO_INPUTS = 1 << 2;
+        const DELAYED = 1 << 3;
+    }
+}
+
+bitflags::bitflags! {
+    /// Flags for infinite lines plots
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct InfLinesFlags: u32 {
+        const NONE = 0;
+        const HORIZONTAL = 1 << 10;
+    }
+}
+
+bitflags::bitflags! {
+    /// Flags for image plots
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ImageFlags: u32 {
+        const NONE = 0;
+    }
+}
+
+bitflags::bitflags! {
+    /// Axis flags matching ImPlotAxisFlags_ (see cimplot.h)
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct AxisFlags: u32 {
+        const NONE           = 0;
+        const NO_LABEL       = 1 << 0;
+        const NO_GRID_LINES  = 1 << 1;
+        const NO_TICK_MARKS  = 1 << 2;
+        const NO_TICK_LABELS = 1 << 3;
+        const NO_INITIAL_FIT = 1 << 4;
+        const NO_MENUS       = 1 << 5;
+        const NO_SIDE_SWITCH = 1 << 6;
+        const NO_HIGHLIGHT   = 1 << 7;
+        const OPPOSITE       = 1 << 8;
+        const FOREGROUND     = 1 << 9;
+        const INVERT         = 1 << 10;
+        const AUTO_FIT       = 1 << 11;
+        const RANGE_FIT      = 1 << 12;
+        const PAN_STRETCH    = 1 << 13;
+        const LOCK_MIN       = 1 << 14;
+        const LOCK_MAX       = 1 << 15;
+    }
+}
+
+/// Plot condition (setup/next) matching ImPlotCond (ImGuiCond)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
+pub enum PlotCond {
+    None = 0,
+    Always = 1,
+    Once = 2,
 }
 
 // Re-export all plot types for convenience

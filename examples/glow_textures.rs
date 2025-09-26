@@ -4,7 +4,8 @@
 //! with the dear-imgui-glow backend, including texture registration, updates, and
 //! accessing texture data.
 
-use std::{num::NonZeroU32, sync::Arc, time::Instant};
+use ::image::ImageReader;
+use std::{num::NonZeroU32, path::PathBuf, sync::Arc, time::Instant};
 
 use dear_imgui::*;
 use dear_imgui_glow::GlowRenderer;
@@ -30,6 +31,8 @@ struct TextureDemo {
     generated_texture: Option<TextureId>,
     checkerboard_texture: Option<TextureId>,
     animated_texture: Option<TextureId>,
+    user_image_texture: Option<TextureId>,
+    user_image_size: Option<(u32, u32)>,
     frame_count: u32,
 }
 
@@ -39,6 +42,8 @@ impl TextureDemo {
             generated_texture: None,
             checkerboard_texture: None,
             animated_texture: None,
+            user_image_texture: None,
+            user_image_size: None,
             frame_count: 0,
         }
     }
@@ -55,6 +60,15 @@ impl TextureDemo {
 
         // Create an animated texture (will be updated each frame)
         self.animated_texture = Some(self.create_animated_texture(renderer)?);
+
+        // Try to load a user image from disk (optional)
+        if let Some(tex) = self.try_load_image_texture(renderer) {
+            self.user_image_texture = Some(tex);
+            // We can infer size from the registered texture using the backend's inspection API
+            if let Some(t) = renderer.get_texture_data(tex) {
+                self.user_image_size = Some((t.width() as u32, t.height() as u32));
+            }
+        }
 
         Ok(())
     }
@@ -89,6 +103,54 @@ impl TextureDemo {
         }
 
         Ok(texture_id)
+    }
+
+    fn try_load_image_texture(&self, renderer: &mut GlowRenderer) -> Option<TextureId> {
+        // Fixed asset path under the examples crate (robust to CWD)
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("texture.jpg");
+        if !path.exists() {
+            eprintln!(
+                "Image not found at {:?}. Current dir: {:?}",
+                path,
+                std::env::current_dir().ok()
+            );
+            return None;
+        }
+
+        match ImageReader::open(&path)
+            .and_then(|r| r.with_guessed_format())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        {
+            Ok(mut r) => match r.decode() {
+                Ok(img) => {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let data = rgba.into_raw();
+                    match renderer.register_texture(w, h, TextureFormat::RGBA32, &data) {
+                        Ok(id) => {
+                            println!("Loaded image texture from {:?} ({}x{})", path, w, h);
+                            // store size via caller
+                            // caller will set user_image_size
+                            Some(id)
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to register image texture: {e}");
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to decode image {:?}: {e}", path);
+                    None
+                }
+            },
+            Err(e) => {
+                eprintln!("Failed to open image {:?}: {e}", path);
+                None
+            }
+        }
     }
 
     fn create_checkerboard_texture(
@@ -205,6 +267,26 @@ impl TextureDemo {
                     Image::new(ui, texture_id, [128.0, 128.0]).build();
 
                     ui.text(&format!("Frame: {}", self.frame_count));
+                }
+
+                if let Some(texture_id) = self.user_image_texture {
+                    ui.separator();
+                    ui.text("Loaded Image:");
+                    // Display at a reasonable size while preserving aspect ratio
+                    if let Some((w_u, h_u)) = self.user_image_size {
+                        let w = w_u as f32;
+                        let h = h_u as f32;
+                        let max_dim = 256.0;
+                        let scale = if w > h { max_dim / w } else { max_dim / h };
+                        Image::new(ui, texture_id, [w * scale, h * scale]).build();
+                    } else {
+                        Image::new(ui, texture_id, [256.0, 256.0]).build();
+                    }
+                } else {
+                    ui.separator();
+                    ui.text_wrapped(
+                        "Tip: set DEAR_IMGUI_EXAMPLE_IMAGE to a file path or place examples/resources/statue.jpg to preview a real image.",
+                    );
                 }
 
                 ui.separator();

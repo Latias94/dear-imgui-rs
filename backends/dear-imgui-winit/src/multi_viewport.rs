@@ -48,7 +48,7 @@ impl ViewportData {
 pub fn init_multi_viewport_support(_ctx: &mut Context, main_window: &Window) {
     // Set up platform callbacks using direct C API
     unsafe {
-        let pio = dear_imgui::sys::ImGui_GetPlatformIO();
+        let pio = dear_imgui::sys::igGetPlatformIO_Nil();
 
         (*pio).Platform_CreateWindow = Some(winit_create_window);
         (*pio).Platform_DestroyWindow = Some(winit_destroy_window);
@@ -84,7 +84,7 @@ unsafe fn setup_monitors() {
 /// Initialize the main viewport with proper ViewportData
 fn init_main_viewport(main_window: &Window) {
     unsafe {
-        let main_viewport = dear_imgui::sys::ImGui_GetMainViewport();
+        let main_viewport = dear_imgui::sys::igGetMainViewport();
 
         // Create ViewportData for main window
         let vd = Box::into_raw(Box::new(ViewportData::new()));
@@ -100,7 +100,7 @@ fn init_main_viewport(main_window: &Window) {
 pub fn shutdown_multi_viewport_support() {
     // Clean up any remaining viewports
     unsafe {
-        dear_imgui::sys::ImGui_DestroyPlatformWindows();
+        dear_imgui::sys::igDestroyPlatformWindows();
     }
 }
 
@@ -144,12 +144,12 @@ unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui::sys::ImGuiViewport
         .with_visible(false); // Start hidden, will be shown by show_window callback
 
     // Handle decorations
-    if viewport_flags & dear_imgui::sys::ImGuiViewportFlags_NoDecoration != 0 {
+    if viewport_flags & (dear_imgui::sys::ImGuiViewportFlags_NoDecoration as i32) != 0 {
         window_attrs = window_attrs.with_decorations(false);
     }
 
     // Handle always on top
-    if viewport_flags & dear_imgui::sys::ImGuiViewportFlags_TopMost != 0 {
+    if viewport_flags & (dear_imgui::sys::ImGuiViewportFlags_TopMost as i32) != 0 {
         window_attrs = window_attrs.with_window_level(WindowLevel::AlwaysOnTop);
     }
 
@@ -157,8 +157,10 @@ unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui::sys::ImGuiViewport
     match event_loop.create_window(window_attrs) {
         Ok(window) => {
             let window_ptr = Box::into_raw(Box::new(window));
-            (*vd).window = window_ptr;
-            (*vd).window_owned = true;
+            unsafe {
+                (*vd).window = window_ptr;
+                (*vd).window_owned = true;
+            }
             vp_ref.PlatformHandle = window_ptr as *mut c_void;
 
             // TODO: Set up event callbacks for this window
@@ -183,7 +185,8 @@ unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui::sys::ImGuiViewpor
     }
 
     let vp_ref = unsafe { &mut *vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_mut() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_mut() } {
         if vd.window_owned && !vd.window.is_null() {
             // Clean up the window
             unsafe {
@@ -208,8 +211,9 @@ unsafe extern "C" fn winit_show_window(vp: *mut dear_imgui::sys::ImGuiViewport) 
     }
 
     let vp_ref = unsafe { &*vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_ref() {
-        if let Some(window) = vd.window.as_ref() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(window) = unsafe { vd.window.as_ref() } {
             window.set_visible(true);
         }
     }
@@ -231,8 +235,9 @@ unsafe extern "C" fn winit_get_window_pos(
         return dear_imgui::sys::ImVec2 { x: 0.0, y: 0.0 };
     }
 
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_ref() {
-        if let Some(window) = vd.window.as_ref() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(window) = unsafe { vd.window.as_ref() } {
             if let Ok(pos) = window.outer_position() {
                 return dear_imgui::sys::ImVec2 {
                     x: pos.x as f32,
@@ -255,11 +260,12 @@ unsafe extern "C" fn winit_set_window_pos(
     }
 
     let vp_ref = unsafe { &*vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_mut() {
-        if let Some(window) = vd.window.as_mut() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_mut() } {
+        if let Some(window) = unsafe { vd.window.as_mut() } {
             let position = LogicalPosition::new(pos.x as f64, pos.y as f64);
             window.set_outer_position(position);
-            vd.ignore_window_pos_event_frame = dear_imgui::sys::ImGui_GetFrameCount();
+            vd.ignore_window_pos_event_frame = dear_imgui::sys::igGetFrameCount();
         }
     }
 }
@@ -273,8 +279,9 @@ unsafe extern "C" fn winit_get_window_size(
     }
 
     let vp_ref = unsafe { &*vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_ref() {
-        if let Some(window) = vd.window.as_ref() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(window) = unsafe { vd.window.as_ref() } {
             let size = window.inner_size();
             return dear_imgui::sys::ImVec2 {
                 x: size.width as f32,
@@ -296,11 +303,12 @@ unsafe extern "C" fn winit_set_window_size(
     }
 
     let vp_ref = unsafe { &*vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_mut() {
-        if let Some(window) = vd.window.as_mut() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_mut() } {
+        if let Some(window) = unsafe { vd.window.as_mut() } {
             let new_size = LogicalSize::new(size.x as f64, size.y as f64);
             let _ = window.request_inner_size(new_size);
-            vd.ignore_window_size_event_frame = dear_imgui::sys::ImGui_GetFrameCount();
+            vd.ignore_window_size_event_frame = dear_imgui::sys::igGetFrameCount();
         }
     }
 }
@@ -312,8 +320,9 @@ unsafe extern "C" fn winit_set_window_focus(vp: *mut dear_imgui::sys::ImGuiViewp
     }
 
     let vp_ref = unsafe { &*vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_ref() {
-        if let Some(window) = vd.window.as_ref() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(window) = unsafe { vd.window.as_ref() } {
             window.focus_window();
         }
     }
@@ -326,8 +335,9 @@ unsafe extern "C" fn winit_get_window_focus(vp: *mut dear_imgui::sys::ImGuiViewp
     }
 
     let vp_ref = unsafe { &*vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_ref() {
-        if let Some(window) = vd.window.as_ref() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(window) = unsafe { vd.window.as_ref() } {
             return window.has_focus();
         }
     }
@@ -342,8 +352,9 @@ unsafe extern "C" fn winit_get_window_minimized(vp: *mut dear_imgui::sys::ImGuiV
     }
 
     let vp_ref = unsafe { &*vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_ref() {
-        if let Some(window) = vd.window.as_ref() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(window) = unsafe { vd.window.as_ref() } {
             return window.is_minimized().unwrap_or(false);
         }
     }
@@ -361,8 +372,9 @@ unsafe extern "C" fn winit_set_window_title(
     }
 
     let vp_ref = unsafe { &*vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_ref() {
-        if let Some(window) = vd.window.as_ref() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(window) = unsafe { vd.window.as_ref() } {
             if let Ok(title_str) = unsafe { CStr::from_ptr(title) }.to_str() {
                 window.set_title(title_str);
             }
@@ -379,8 +391,9 @@ unsafe extern "C" fn winit_get_window_framebuffer_scale(
     }
 
     let vp_ref = unsafe { &*vp };
-    if let Some(vd) = (vp_ref.PlatformUserData as *mut ViewportData).as_ref() {
-        if let Some(window) = vd.window.as_ref() {
+    let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(window) = unsafe { vd.window.as_ref() } {
             let scale = window.scale_factor() as f32;
             return dear_imgui::sys::ImVec2 { x: scale, y: scale };
         }

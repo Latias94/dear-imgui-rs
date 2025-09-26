@@ -1,9 +1,12 @@
+//! WGPU texture demo (single file): generate and update a texture on the CPU,
+//! register it with the dear-imgui-wgpu backend, and show it via `Image`.
+
+use ::image::ImageReader;
 use dear_imgui::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
-use std::{sync::Arc, time::Instant};
-use tracing::{debug, error, info, trace, warn};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -17,13 +20,7 @@ struct ImguiState {
     context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
-    clear_color: wgpu::Color,
-    demo_open: bool,
     last_frame: Instant,
-    // Logging demo state
-    log_counter: i32,
-    frame_count: u64,
-    total_frame_time: f32,
 }
 
 struct AppWindow {
@@ -33,6 +30,11 @@ struct AppWindow {
     surface_desc: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
     imgui: ImguiState,
+    // Texture demo state (managed by ImGui modern texture system)
+    img_tex: Box<dear_imgui::texture::TextureData>,
+    photo_tex: Option<Box<dear_imgui::texture::TextureData>>,
+    tex_size: (u32, u32),
+    frame: u32,
 }
 
 #[derive(Default)]
@@ -42,37 +44,30 @@ struct App {
 
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
-            ..Default::default()
-        });
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
 
         let window = {
-            let version = env!("CARGO_PKG_VERSION");
             let size = LogicalSize::new(1280.0, 720.0);
-
             Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
-                        .with_title(format!("Dear ImGui Hello World - {version}"))
+                        .with_title("Dear ImGui WGPU - Texture Demo")
                         .with_inner_size(size),
                 )?,
             )
         };
 
         let surface = instance.create_surface(window.clone())?;
-
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
         }))
-        .expect("Failed to find an appropriate adapter");
+        .expect("No suitable GPU adapters found on the system!");
 
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
 
         let size = LogicalSize::new(1280.0, 720.0);
-        // Pick an sRGB surface format when available for consistent visuals
         let caps = surface.get_capabilities(&adapter);
         let preferred_srgb = [
             wgpu::TextureFormat::Bgra8UnormSrgb,
@@ -94,44 +89,51 @@ impl AppWindow {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-
         surface.configure(&device, &surface_desc);
 
-        // Setup ImGui immediately
+        // ImGui context
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
-
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
 
-        // Method 1: One-step initialization (recommended)
+        // Renderer
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
-        let mut renderer =
-            WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
-        // Unify visuals (sRGB): auto gamma by format, matches official practice
+        let mut renderer = WgpuRenderer::new(init_info, &mut context)?;
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
-        // Log successful initialization
-        dear_imgui::logging::log_context_created();
-        dear_imgui::logging::log_platform_init("Winit");
-        dear_imgui::logging::log_renderer_init("WGPU");
+        // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture)
+        let tex_w: u32 = 128;
+        let tex_h: u32 = 128;
+        let mut img_tex = dear_imgui::texture::TextureData::new();
+        img_tex.create(
+            dear_imgui::texture::TextureFormat::RGBA32,
+            tex_w as i32,
+            tex_h as i32,
+        );
+
+        // Seed pixels (gradient)
+        let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
+        for y in 0..tex_h {
+            for x in 0..tex_w {
+                let i = ((y * tex_w + x) * 4) as usize;
+                pixels[i + 0] = (x as f32 / tex_w as f32 * 255.0) as u8;
+                pixels[i + 1] = (y as f32 / tex_h as f32 * 255.0) as u8;
+                pixels[i + 2] = 128;
+                pixels[i + 3] = 255;
+            }
+        }
+        img_tex.set_data(&pixels);
+
+        // Optionally, create a second managed texture from a user image
+        let photo_tex = Self::maybe_load_photo_texture();
 
         let imgui = ImguiState {
             context,
             platform,
             renderer,
-            clear_color: wgpu::Color {
-                r: 0.1,
-                g: 0.2,
-                b: 0.3,
-                a: 1.0,
-            },
-            demo_open: true,
             last_frame: Instant::now(),
-            log_counter: 0,
-            frame_count: 0,
-            total_frame_time: 0.0,
         };
 
         Ok(Self {
@@ -141,7 +143,55 @@ impl AppWindow {
             surface_desc,
             surface,
             imgui,
+            img_tex,
+            photo_tex,
+            tex_size: (tex_w, tex_h),
+            frame: 0,
         })
+    }
+
+    fn maybe_load_photo_texture() -> Option<Box<dear_imgui::texture::TextureData>> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("texture.jpg");
+        if !path.exists() {
+            eprintln!(
+                "Image not found at {:?}. Current dir: {:?}",
+                path,
+                std::env::current_dir().ok()
+            );
+            return None;
+        }
+
+        match ImageReader::open(&path)
+            .and_then(|r| r.with_guessed_format())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        {
+            Ok(mut r) => match r.decode() {
+                Ok(img) => {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let data = rgba.into_raw();
+                    let mut t = dear_imgui::texture::TextureData::new();
+                    t.create(
+                        dear_imgui::texture::TextureFormat::RGBA32,
+                        w as i32,
+                        h as i32,
+                    );
+                    t.set_data(&data);
+                    println!("Loaded image for WGPU demo from {:?} ({}x{})", path, w, h);
+                    Some(t)
+                }
+                Err(e) => {
+                    eprintln!("Failed to decode WGPU demo image {:?}: {e}", path);
+                    None
+                }
+            },
+            Err(e) => {
+                eprintln!("Failed to open WGPU demo image {:?}: {e}", path);
+                None
+            }
+        }
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -152,125 +202,80 @@ impl AppWindow {
         }
     }
 
+    fn update_texture(&mut self) {
+        // Create a simple animated pattern
+        let (w, h) = self.tex_size;
+        let mut pixels = vec![0u8; (w * h * 4) as usize];
+        let t = self.frame as f32 * 0.08;
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                let fx = x as f32 / w as f32;
+                let fy = y as f32 / h as f32;
+                pixels[i + 0] = ((fx * 255.0 + t.sin() * 128.0).clamp(0.0, 255.0)) as u8;
+                pixels[i + 1] = ((fy * 255.0 + (t * 1.7).cos() * 128.0).clamp(0.0, 255.0)) as u8;
+                pixels[i + 2] = (((fx + fy + t * 0.1).sin().abs()) * 255.0) as u8;
+                pixels[i + 3] = 255;
+            }
+        }
+
+        self.img_tex.set_data(&pixels);
+
+        self.frame = self.frame.wrapping_add(1);
+    }
+
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
         let delta_time = now - self.imgui.last_frame;
         let delta_secs = delta_time.as_secs_f32();
-
-        // Update frame statistics
-        self.imgui.frame_count += 1;
-        self.imgui.total_frame_time += delta_secs;
-
-        // Log frame statistics every 60 frames
-        if self.imgui.frame_count % 60 == 0 {
-            let avg_frame_time = self.imgui.total_frame_time / 60.0;
-            dear_imgui::logging::log_frame_stats(avg_frame_time, 1.0 / avg_frame_time);
-            self.imgui.total_frame_time = 0.0;
-        }
-
         self.imgui.context.io_mut().set_delta_time(delta_secs);
         self.imgui.last_frame = now;
 
-        let frame = self.surface.get_current_texture()?;
+        // Pre-warm ImGui-managed textures so TexID is available before draw lists iterate.
+        // This avoids a white frame on first use and prevents assertions inside
+        // ImDrawCmd_GetTexID when the raw field is still 0.
+        if let Ok(res) = self.imgui.renderer.update_texture(&self.img_tex) {
+            res.apply_to(&mut *self.img_tex);
+        }
+        if let Some(photo) = self.photo_tex.as_mut() {
+            if let Ok(res) = self.imgui.renderer.update_texture(&*photo) {
+                res.apply_to(&mut **photo);
+            }
+        }
 
+        // Update animated texture (marks WantUpdates)
+        self.update_texture();
+
+        let frame = self.surface.get_current_texture()?;
         self.imgui
             .platform
             .prepare_frame(&self.window, &mut self.imgui.context);
         let ui = self.imgui.context.frame();
 
-        // Main window content
-        ui.window("Hello, Dear ImGui!")
-            .size([400.0, 300.0], Condition::FirstUseEver)
+        ui.window("WGPU Texture Demo (ImGui-managed)")
+            .size([520.0, 420.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("Welcome to Dear ImGui Rust bindings!");
+                ui.text("This texture is updated every frame (CPU → backend → GPU)");
                 ui.separator();
+                // Pass &mut TextureData. Backend will create/update/destroy GPU texture as needed.
+                Image::new(ui, &mut *self.img_tex, [256.0, 256.0]).build();
 
-                ui.text(format!(
-                    "Application average {:.3} ms/frame ({:.1} FPS)",
-                    1000.0 / ui.io().framerate(),
-                    ui.io().framerate()
-                ));
-
-                let mut color = [
-                    self.imgui.clear_color.r as f32,
-                    self.imgui.clear_color.g as f32,
-                    self.imgui.clear_color.b as f32,
-                    self.imgui.clear_color.a as f32,
-                ];
-
-                if ui.color_edit4("Clear color", &mut color) {
-                    self.imgui.clear_color.r = color[0] as f64;
-                    self.imgui.clear_color.g = color[1] as f64;
-                    self.imgui.clear_color.b = color[2] as f64;
-                    self.imgui.clear_color.a = color[3] as f64;
-                }
-
-                if ui.button("Show Demo Window") {
-                    self.imgui.demo_open = true;
+                if let Some(photo) = self.photo_tex.as_mut() {
+                    ui.separator();
+                    ui.text("Loaded Image:");
+                    // Fit within 256 while preserving aspect
+                    let w = photo.width() as f32;
+                    let h = photo.height() as f32;
+                    let max_dim = 256.0;
+                    let scale = if w > h { max_dim / w } else { max_dim / h };
+                    Image::new(ui, &mut **photo, [w * scale, h * scale]).build();
+                } else {
+                    ui.separator();
+                    ui.text_wrapped(
+                        "Tip: set DEAR_IMGUI_EXAMPLE_IMAGE or place examples/resources/statue.jpg to preview an actual image.",
+                    );
                 }
             });
-
-        // Logging Demo Window
-        ui.window("Logging Demo")
-            .size([350.0, 250.0], Condition::FirstUseEver)
-            .build(|| {
-                ui.text("Dear ImGui Logging Features");
-                ui.separator();
-
-                // Counter with logging
-                if ui.button("Increment Counter") {
-                    self.imgui.log_counter += 1;
-                    info!("Counter incremented to: {}", self.imgui.log_counter);
-                }
-                ui.same_line();
-                ui.text(format!("Count: {}", self.imgui.log_counter));
-
-                ui.separator();
-
-                // Log level buttons
-                ui.text("Generate log messages:");
-
-                if ui.button("Trace") {
-                    trace!("This is a trace message - very detailed debugging info");
-                }
-                ui.same_line();
-                if ui.button("Debug") {
-                    debug!("This is a debug message - general debugging info");
-                }
-                ui.same_line();
-                if ui.button("Info") {
-                    info!("This is an info message - general information");
-                }
-
-                if ui.button("Warn") {
-                    warn!("This is a warning message - something might be wrong");
-                }
-                ui.same_line();
-                if ui.button("Error") {
-                    error!("This is an error message - something went wrong!");
-                }
-
-                ui.separator();
-
-                // Error handling demo
-                if ui.button("Test Error Handling") {
-                    let result: Result<(), ImGuiError> =
-                        Err(ImGuiError::resource_allocation("Demo texture"));
-                    if let Err(e) = result {
-                        error!("Simulated error: {}", e);
-                    }
-                }
-
-                ui.separator();
-                ui.text_wrapped("Check your console/terminal for log output!");
-                ui.text_wrapped("Set RUST_LOG environment variable to control verbosity:");
-                ui.text("  RUST_LOG=debug cargo run --example wgpu_basic");
-            });
-
-        // Show demo window if requested
-        if self.imgui.demo_open {
-            ui.show_demo_window(&mut self.imgui.demo_open);
-        }
 
         let view = frame
             .texture
@@ -281,8 +286,11 @@ impl AppWindow {
                 label: Some("Render Encoder"),
             });
 
+        // Finalize inputs on platform and build draw data
+        self.imgui
+            .platform
+            .prepare_render_with_ui(&ui, &self.window);
         let draw_data = self.imgui.context.render();
-
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -290,7 +298,12 @@ impl AppWindow {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.imgui.clear_color),
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.2,
+                            b: 0.3,
+                            a: 1.0,
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -300,12 +313,7 @@ impl AppWindow {
                 occlusion_query_set: None,
             });
 
-            // Call new_frame before rendering
-            self.imgui
-                .renderer
-                .new_frame()
-                .expect("Failed to prepare new frame");
-
+            self.imgui.renderer.new_frame()?;
             self.imgui
                 .renderer
                 .render_draw_data(draw_data, &mut rpass)?;
@@ -319,15 +327,13 @@ impl AppWindow {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        // For compatibility with older winit versions and mobile platforms
         if self.window.is_none() {
             match AppWindow::new(event_loop) {
                 Ok(window) => {
                     self.window = Some(window);
-                    info!("Window created successfully in resumed");
                 }
                 Err(e) => {
-                    error!("Failed to create window in resumed: {e}");
+                    eprintln!("Failed to create window: {e}");
                     event_loop.exit();
                 }
             }
@@ -345,7 +351,6 @@ impl ApplicationHandler for App {
             None => return,
         };
 
-        // Handle the event with ImGui first
         let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
             window_id,
             event: event.clone(),
@@ -361,7 +366,6 @@ impl ApplicationHandler for App {
                 window.window.request_redraw();
             }
             WindowEvent::CloseRequested => {
-                info!("Close requested");
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -371,7 +375,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 if let Err(e) = window.render() {
-                    error!("Render error: {e}");
+                    eprintln!("Render error: {e}");
                 }
                 window.window.request_redraw();
             }
@@ -380,7 +384,6 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Request redraw if we have a window
         if let Some(window) = &self.window {
             window.window.request_redraw();
         }
@@ -388,23 +391,9 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
-    // Initialize tracing with custom filter for demo
-    dear_imgui::logging::init_tracing_with_filter("dear_imgui=debug,wgpu_basic=info,wgpu=warn");
-
-    info!("Starting Dear ImGui WGPU Basic Example with Logging Demo");
-    info!("This example demonstrates:");
-    info!("  - Basic Dear ImGui usage with WGPU backend");
-    info!("  - Integrated tracing/logging support");
-    info!("  - Error handling with thiserror");
-    info!("  - Frame statistics logging");
-
+    env_logger::init();
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
-
     let mut app = App::default();
-
-    info!("Starting event loop...");
     event_loop.run_app(&mut app).unwrap();
-
-    info!("Dear ImGui WGPU Basic Example finished");
 }

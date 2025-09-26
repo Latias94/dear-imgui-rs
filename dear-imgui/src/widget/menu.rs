@@ -111,6 +111,42 @@ impl Ui {
         let shortcut_ptr = self.scratch_txt(shortcut);
         unsafe { sys::igMenuItemEx(label_ptr, std::ptr::null(), shortcut_ptr, false, true) }
     }
+
+    /// Creates a menu item with explicit enabled/selected state.
+    /// Returns true if the menu item is activated.
+    #[doc(alias = "MenuItem")]
+    pub fn menu_item_enabled_selected(
+        &self,
+        label: impl AsRef<str>,
+        shortcut: Option<impl AsRef<str>>,
+        selected: bool,
+        enabled: bool,
+    ) -> bool {
+        let label_ptr = self.scratch_txt(label);
+        let shortcut_ptr = shortcut
+            .as_ref()
+            .map(|s| self.scratch_txt(s.as_ref()))
+            .unwrap_or(std::ptr::null());
+        unsafe { sys::igMenuItem_Bool(label_ptr, shortcut_ptr, selected, enabled) }
+    }
+
+    /// Creates a toggleable menu item bound to `selected` (updated in place).
+    /// Returns true if the menu item is activated.
+    #[doc(alias = "MenuItem")]
+    pub fn menu_item_toggle(
+        &self,
+        label: impl AsRef<str>,
+        shortcut: Option<impl AsRef<str>>,
+        selected: &mut bool,
+        enabled: bool,
+    ) -> bool {
+        let label_ptr = self.scratch_txt(label);
+        let shortcut_ptr = shortcut
+            .as_ref()
+            .map(|s| self.scratch_txt(s.as_ref()))
+            .unwrap_or(std::ptr::null());
+        unsafe { sys::igMenuItem_BoolPtr(label_ptr, shortcut_ptr, selected, enabled) }
+    }
 }
 
 /// Tracks a main menu bar that can be ended by calling `.end()` or by dropping

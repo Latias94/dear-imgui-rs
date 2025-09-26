@@ -1,14 +1,14 @@
 //! Scatter plot implementation
 
 use super::{Plot, PlotError, safe_cstring, validate_data_lengths};
-use crate::sys;
+use crate::{ScatterFlags, sys};
 
 /// Builder for scatter plots with customization options
 pub struct ScatterPlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [f64],
-    flags: sys::ImPlotScatterFlags,
+    flags: ScatterFlags,
     offset: i32,
     stride: i32,
 }
@@ -20,14 +20,14 @@ impl<'a> ScatterPlot<'a> {
             label,
             x_data,
             y_data,
-            flags: 0,
+            flags: ScatterFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
     }
 
     /// Set scatter flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotScatterFlags) -> Self {
+    pub fn with_flags(mut self, flags: ScatterFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -64,7 +64,7 @@ impl<'a> Plot for ScatterPlot<'a> {
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
-                self.flags,
+                self.flags.bits() as i32,
                 self.offset,
                 self.stride,
             );

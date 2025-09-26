@@ -1,11 +1,9 @@
-use std::{
-    env, fs,
-    io::Write,
-    path::{Path, PathBuf},
-};
-
 use build_support::{compose_archive_name, compose_manifest_bytes};
 use flate2::{Compression, write::GzEncoder};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 fn expected_lib_name() -> &'static str {
     if cfg!(target_env = "msvc") {
@@ -91,10 +89,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         ""
     };
-    if let Ok(v) = env::var("IMGUI_SYS_PKG_CRT") {
-        if !v.is_empty() {
-            crt = Box::leak(v.into_boxed_str());
-        }
+    if let Ok(v) = env::var("IMGUI_SYS_PKG_CRT")
+        && !v.is_empty()
+    {
+        crt = Box::leak(v.into_boxed_str());
     }
 
     let link_type = "static"; // we package static lib
@@ -237,19 +235,18 @@ fn append_headers_only(
 ) -> Result<(), Box<dyn std::error::Error>> {
     fn excluded(path: &Path, exclude_dirs: &[&str]) -> bool {
         for comp in path.components() {
-            if let std::path::Component::Normal(os) = comp {
-                if let Some(name) = os.to_str() {
-                    if exclude_dirs.iter().any(|e| e == &name) {
-                        return true;
-                    }
-                }
+            if let std::path::Component::Normal(os) = comp
+                && let Some(name) = os.to_str()
+                && exclude_dirs.iter().any(|e| e == &name)
+            {
+                return true;
             }
         }
         false
     }
     let mut stack = vec![src_dir.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        if excluded(&dir.strip_prefix(src_dir).unwrap_or(&dir), exclude_dirs) && dir != *src_dir {
+        if excluded(dir.strip_prefix(src_dir).unwrap_or(&dir), exclude_dirs) && dir != *src_dir {
             continue;
         }
         for entry in fs::read_dir(&dir)? {

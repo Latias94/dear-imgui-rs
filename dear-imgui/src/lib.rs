@@ -129,6 +129,38 @@
 //! Choose String for convenience (especially for small/medium inputs). Prefer
 //! ImString when you want to avoid copies for large or frequently edited text.
 
+//! ## Low-level Draw APIs
+//!
+//! Draw list wrappers expose both high-level primitives and some low-level building blocks:
+//!
+//! - Concave polygons (ImGui 1.92+):
+//!   - `DrawListMut::add_concave_poly_filled(&[P], color)` fills an arbitrary concave polygon.
+//!   - `DrawListMut::path_fill_concave(color)` fills the current path using the concave tessellator.
+//!   - Note: requires Dear ImGui 1.92 or newer in `dear-imgui-sys`.
+//!
+//! - Channels splitting:
+//!   - `DrawListMut::channels_split(count, |channels| { ... })` splits draw into multiple channels
+//!     and automatically merges on scope exit. Call `channels.set_current(i)` to select a channel.
+//!
+//! - Clipping helpers:
+//!   - `push_clip_rect`, `push_clip_rect_full_screen`, `pop_clip_rect`, `with_clip_rect`,
+//!     `clip_rect_min`, `clip_rect_max`.
+//!
+//! - Unsafe prim API (for custom geometry):
+//!   - `prim_reserve`, `prim_unreserve`, `prim_rect`, `prim_rect_uv`, `prim_quad_uv`,
+//!     `prim_write_vtx`, `prim_write_idx`, `prim_vtx`.
+//!   - Safety: these mirror ImGui's low-level geometry functions. Callers must respect vertex/index
+//!     counts, write exactly the reserved amounts, and ensure valid topology. Prefer high-level
+//!     helpers unless you need exact control.
+//!
+//! - Callbacks during draw:
+//!   - Safe builder: `DrawListMut::add_callback_safe(|| { ... }).build()` registers an `FnOnce()`
+//!     that runs when the draw list is rendered. Resources captured by the closure are freed when
+//!     the callback runs. If the draw list is never rendered, the callback will not run and its
+//!     resources won't be reclaimed.
+//!   - Raw: `unsafe DrawListMut::add_callback` allows passing a C callback and raw userdata; see
+//!     method docs for safety requirements.
+
 #![deny(rust_2018_idioms)]
 #![cfg_attr(test, allow(clippy::float_cmp))]
 #![allow(

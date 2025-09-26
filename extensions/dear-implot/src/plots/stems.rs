@@ -1,7 +1,7 @@
 //! Stem plot implementation
 
 use super::{Plot, PlotError, safe_cstring, validate_data_lengths};
-use crate::sys;
+use crate::{StemsFlags, sys};
 
 /// Builder for stem plots (lollipop charts)
 pub struct StemPlot<'a> {
@@ -9,7 +9,7 @@ pub struct StemPlot<'a> {
     x_data: &'a [f64],
     y_data: &'a [f64],
     y_ref: f64,
-    flags: sys::ImPlotStemsFlags,
+    flags: StemsFlags,
     offset: i32,
     stride: i32,
 }
@@ -22,7 +22,7 @@ impl<'a> StemPlot<'a> {
             x_data,
             y_data,
             y_ref: 0.0, // Default reference line at Y=0
-            flags: 0,
+            flags: StemsFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -36,7 +36,7 @@ impl<'a> StemPlot<'a> {
     }
 
     /// Set stem flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotStemsFlags) -> Self {
+    pub fn with_flags(mut self, flags: StemsFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -74,7 +74,7 @@ impl<'a> Plot for StemPlot<'a> {
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.y_ref,
-                self.flags,
+                self.flags.bits() as i32,
                 self.offset,
                 self.stride,
             );

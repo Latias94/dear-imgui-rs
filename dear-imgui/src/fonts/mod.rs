@@ -6,11 +6,22 @@
 pub mod atlas;
 pub mod font;
 pub mod glyph;
+/// Deprecated glyph ranges helpers.
+///
+/// With Dear ImGui 1.92+, fonts are dynamically sized and glyphs are loaded on demand.
+/// In most cases you no longer need to specify glyph ranges. Keep using this module
+/// only for legacy code or very constrained environments where you explicitly want to
+/// limit the character set.
+#[deprecated(
+    since = "0.2.0",
+    note = "ImGui 1.92+ recommends dynamic fonts with on-demand glyph loading; glyph ranges are kept for legacy compatibility"
+)]
 pub mod glyph_ranges;
 
 pub use atlas::*;
 pub use font::*;
 pub use glyph::*;
+#[allow(deprecated)]
 pub use glyph_ranges::*;
 
 use crate::Ui;

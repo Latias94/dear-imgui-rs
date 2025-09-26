@@ -1,7 +1,7 @@
 //! Shaded area plot implementation
 
 use super::{Plot, PlotError, safe_cstring, validate_data_lengths};
-use crate::sys;
+use crate::{ShadedFlags, sys};
 
 /// Builder for shaded area plots
 pub struct ShadedPlot<'a> {
@@ -9,7 +9,7 @@ pub struct ShadedPlot<'a> {
     x_data: &'a [f64],
     y_data: &'a [f64],
     y_ref: f64,
-    flags: sys::ImPlotShadedFlags,
+    flags: ShadedFlags,
     offset: i32,
     stride: i32,
 }
@@ -22,7 +22,7 @@ impl<'a> ShadedPlot<'a> {
             x_data,
             y_data,
             y_ref: 0.0, // Default reference line at Y=0
-            flags: 0,
+            flags: ShadedFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -36,7 +36,7 @@ impl<'a> ShadedPlot<'a> {
     }
 
     /// Set shaded flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotShadedFlags) -> Self {
+    pub fn with_flags(mut self, flags: ShadedFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -74,7 +74,7 @@ impl<'a> Plot for ShadedPlot<'a> {
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
                 self.y_ref,
-                self.flags,
+                self.flags.bits() as sys::ImPlotShadedFlags,
                 self.offset,
                 self.stride,
             );
@@ -92,7 +92,7 @@ pub struct ShadedBetweenPlot<'a> {
     x_data: &'a [f64],
     y1_data: &'a [f64],
     y2_data: &'a [f64],
-    flags: sys::ImPlotShadedFlags,
+    flags: ShadedFlags,
 }
 
 impl<'a> ShadedBetweenPlot<'a> {
@@ -103,12 +103,12 @@ impl<'a> ShadedBetweenPlot<'a> {
             x_data,
             y1_data,
             y2_data,
-            flags: 0,
+            flags: ShadedFlags::NONE,
         }
     }
 
     /// Set shaded flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotShadedFlags) -> Self {
+    pub fn with_flags(mut self, flags: ShadedFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -138,7 +138,7 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
                 self.y1_data.as_ptr(),
                 self.y2_data.as_ptr(),
                 self.x_data.len() as i32,
-                self.flags,
+                self.flags.bits() as sys::ImPlotShadedFlags,
                 0,
                 std::mem::size_of::<f64>() as i32,
             );

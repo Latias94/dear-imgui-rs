@@ -297,21 +297,21 @@ impl AppWindow {
             imgui.first_frame = false;
         }
 
-        let actions = render_main_menu_bar(&ui, &mut imgui.game_state);
-        render_hierarchy(&ui, &mut imgui.game_state);
-        render_project(&ui, &mut imgui.game_state);
-        render_inspector(&ui, &mut imgui.game_state);
-        render_scene_view(&ui, &mut imgui.game_state);
-        render_game_view(&ui, &mut imgui.game_state);
-        render_console(&ui, &mut imgui.game_state);
-        render_asset_browser(&ui, &mut imgui.game_state);
-        render_performance(&ui, &mut imgui.game_state);
-        render_notes_imstr(&ui, &mut imgui.game_state);
+        let actions = render_main_menu_bar(ui, &mut imgui.game_state);
+        render_hierarchy(ui, &mut imgui.game_state);
+        render_project(ui, &mut imgui.game_state);
+        render_inspector(ui, &mut imgui.game_state);
+        render_scene_view(ui, &mut imgui.game_state);
+        render_game_view(ui, &mut imgui.game_state);
+        render_console(ui, &mut imgui.game_state);
+        render_asset_browser(ui, &mut imgui.game_state);
+        render_performance(ui, &mut imgui.game_state);
+        render_notes_imstr(ui, &mut imgui.game_state);
 
         // Let the platform backend finalize per-frame data (required for viewports)
         imgui
             .platform
-            .prepare_render(&mut imgui.context, &*self.window);
+            .prepare_render(&mut imgui.context, &self.window);
 
         let draw_data = imgui.context.render();
 
@@ -340,7 +340,7 @@ impl AppWindow {
 
             imgui
                 .renderer
-                .render_draw_data(&draw_data, &mut render_pass)
+                .render_draw_data(draw_data, &mut render_pass)
                 .expect("Rendering failed");
         }
 
@@ -482,10 +482,10 @@ struct MenuActions {
 /// Prefer the DockSpace Size=WxH line; fallback to WindowOverViewport size if present.
 fn detect_base_size_from_ini(ini: &str) -> Option<(f32, f32)> {
     for line in ini.lines() {
-        if line.trim_start().starts_with("DockSpace") {
-            if let Some(sz) = extract_pair_after_key(line, "Size=") {
-                return Some(sz);
-            }
+        if line.trim_start().starts_with("DockSpace")
+            && let Some(sz) = extract_pair_after_key(line, "Size=")
+        {
+            return Some(sz);
         }
     }
     // Fallback: search any WindowOverViewport_ section next, then Size=
@@ -537,7 +537,7 @@ fn scale_ini_for_target(ini: &str, base: (f32, f32), target: (f32, f32)) -> Stri
 fn extract_pair_after_key(line: &str, key: &str) -> Option<(f32, f32)> {
     if let Some(idx) = line.find(key) {
         let rest = &line[idx + key.len()..];
-        let mut it = rest.split(|c| c == ',' || c == ' ' || c == '\t' || c == '\r');
+        let mut it = rest.split([',', ' ', '\t', '\r']);
         let a = it.next()?.trim();
         let b = it.next()?.trim();
         if let (Ok(ax), Ok(by)) = (a.parse::<f32>(), b.parse::<f32>()) {
@@ -685,7 +685,7 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
             let entity_to_delete: Option<String> = None;
 
             let query = game_state.hierarchy_search.to_str().to_lowercase();
-            for (_i, entity) in game_state.entities.iter().enumerate() {
+            for entity in game_state.entities.iter() {
                 if !query.is_empty() && !entity.to_lowercase().contains(&query) {
                     continue;
                 }
@@ -912,18 +912,18 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
                 }
 
                 // Collider component (example)
-                if selected == "Player" {
-                    if ui.collapsing_header("Box Collider", TreeNodeFlags::empty()) {
-                        let mut is_trigger = false;
-                        ui.checkbox("Is Trigger", &mut is_trigger);
-                        ui.text("Size");
-                        let mut size = [1.0, 1.0, 1.0];
-                        ui.drag_float("X##size", &mut size[0]);
-                        ui.same_line();
-                        ui.drag_float("Y##size", &mut size[1]);
-                        ui.same_line();
-                        ui.drag_float("Z##size", &mut size[2]);
-                    }
+                if selected == "Player"
+                    && ui.collapsing_header("Box Collider", TreeNodeFlags::empty())
+                {
+                    let mut is_trigger = false;
+                    ui.checkbox("Is Trigger", &mut is_trigger);
+                    ui.text("Size");
+                    let mut size = [1.0, 1.0, 1.0];
+                    ui.drag_float("X##size", &mut size[0]);
+                    ui.same_line();
+                    ui.drag_float("Y##size", &mut size[1]);
+                    ui.same_line();
+                    ui.drag_float("Z##size", &mut size[2]);
                 }
 
                 ui.separator();

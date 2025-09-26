@@ -1,4 +1,5 @@
 use crate::sys;
+use dear_imgui::sys as imgui_sys;
 
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -77,14 +78,16 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_color(&self, elem: ColorElement, color: [f32; 4]) -> ColorToken {
-        // ImNodes expects packed ABGR u32 (same convention as ImGui ColorConvertFloat4ToU32)
-        let rgba = color;
-        let r = (rgba[0].clamp(0.0, 1.0) * 255.0) as u32;
-        let g = (rgba[1].clamp(0.0, 1.0) * 255.0) as u32;
-        let b = (rgba[2].clamp(0.0, 1.0) * 255.0) as u32;
-        let a = (rgba[3].clamp(0.0, 1.0) * 255.0) as u32;
-        let abgr = (a << 24) | (b << 16) | (g << 8) | r;
-        unsafe { sys::imnodes_PushColorStyle(elem as i32, abgr) };
+        // Use Dear ImGui's helper for packing RGBA -> ABGR (u32)
+        let col = unsafe {
+            imgui_sys::igColorConvertFloat4ToU32(imgui_sys::ImVec4 {
+                x: color[0],
+                y: color[1],
+                z: color[2],
+                w: color[3],
+            })
+        };
+        unsafe { sys::imnodes_PushColorStyle(elem as i32, col) };
         ColorToken
     }
 
@@ -115,4 +118,28 @@ impl<'ui> crate::NodeEditor<'ui> {
         };
         StyleVarToken
     }
+}
+
+/// Convert RGBA floats [0,1] to ImGui-packed ABGR (u32)
+pub fn rgba_to_abgr_u32(rgba: [f32; 4]) -> u32 {
+    unsafe {
+        imgui_sys::igColorConvertFloat4ToU32(imgui_sys::ImVec4 {
+            x: rgba[0],
+            y: rgba[1],
+            z: rgba[2],
+            w: rgba[3],
+        }) as u32
+    }
+}
+
+/// Convert ImGui-packed ABGR (u32) to RGBA floats [0,1]
+pub fn abgr_u32_to_rgba(col: u32) -> [f32; 4] {
+    let mut out = imgui_sys::ImVec4 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        w: 0.0,
+    };
+    unsafe { imgui_sys::igColorConvertU32ToFloat4(&mut out as *mut _, col) };
+    [out.x, out.y, out.z, out.w]
 }

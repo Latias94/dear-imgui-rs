@@ -343,15 +343,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "build-support"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "reqwest",
- "tar",
-]
-
-[[package]]
 name = "built"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -687,6 +678,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dear-imgui-build-support"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "reqwest",
+ "tar",
+]
+
+[[package]]
 name = "dear-imgui-examples"
 version = "0.1.0"
 dependencies = [
@@ -698,7 +698,7 @@ dependencies = [
  "dear-imnodes",
  "dear-implot",
  "env_logger",
- "glam",
+ "glam 0.30.8",
  "glow",
  "glutin",
  "glutin-winit",
@@ -729,10 +729,10 @@ name = "dear-imgui-sys"
 version = "0.2.0"
 dependencies = [
  "bindgen",
- "build-support",
  "cc",
  "cfg-if",
  "cmake",
+ "dear-imgui-build-support",
  "flate2",
  "mint",
  "pkg-config",
@@ -789,7 +789,7 @@ dependencies = [
  "dear-imgui",
  "dear-imgui-sys",
  "dear-imguizmo-sys",
- "glam",
+ "glam 0.27.0",
  "mint",
  "thiserror 2.0.16",
 ]
@@ -799,9 +799,9 @@ name = "dear-imguizmo-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
- "build-support",
  "cc",
  "cfg-if",
+ "dear-imgui-build-support",
  "dear-imgui-sys",
  "flate2",
  "mint",
@@ -826,9 +826,9 @@ name = "dear-imnodes-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
- "build-support",
  "cc",
  "cfg-if",
+ "dear-imgui-build-support",
  "dear-imgui-sys",
  "flate2",
  "pkg-config",
@@ -854,9 +854,9 @@ name = "dear-implot-sys"
 version = "0.2.0"
 dependencies = [
  "bindgen",
- "build-support",
  "cc",
  "cmake",
+ "dear-imgui-build-support",
  "dear-imgui-sys",
  "flate2",
  "pkg-config",
@@ -1231,6 +1231,12 @@ name = "glam"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
+
+[[package]]
+name = "glam"
+version = "0.30.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e12d847aeb25f41be4c0ec9587d624e9cd631bc007a8fd7ce3f5851e064c6460"
 
 [[package]]
 name = "glob"

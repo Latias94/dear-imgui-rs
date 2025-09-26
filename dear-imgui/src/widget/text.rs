@@ -43,4 +43,18 @@ impl Ui {
             sys::igLabelText(label_ptr, text_ptr);
         }
     }
+
+    /// Render a hyperlink-style text button. Returns true when clicked.
+    #[doc(alias = "TextLink")]
+    pub fn text_link(&self, label: impl AsRef<str>) -> bool {
+        unsafe { sys::igTextLink(self.scratch_txt(label)) }
+    }
+
+    /// Render a hyperlink-style text button, and open the given URL when clicked.
+    /// Returns true when clicked.
+    #[doc(alias = "TextLinkOpenURL")]
+    pub fn text_link_open_url(&self, label: impl AsRef<str>, url: impl AsRef<str>) -> bool {
+        let (label_ptr, url_ptr) = self.scratch_txt_two(label, url);
+        unsafe { sys::igTextLinkOpenURL(label_ptr, url_ptr) }
+    }
 }

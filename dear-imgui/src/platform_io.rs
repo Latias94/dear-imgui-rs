@@ -3,9 +3,10 @@
 //! This module provides access to Dear ImGui's platform IO system, which handles
 //! multi-viewport and platform-specific functionality.
 
-use crate::internal::ImVector;
 use crate::sys;
-use std::ffi::{c_char, c_void};
+#[cfg(feature = "multi-viewport")]
+use core::ffi::c_char;
+use std::ffi::c_void;
 #[cfg(feature = "multi-viewport")]
 use std::sync::Mutex;
 
@@ -22,6 +23,7 @@ pub struct PlatformIo {
 #[cfg(feature = "multi-viewport")]
 mod trampolines {
     use super::*;
+    use core::ffi::c_char;
 
     // Platform callbacks
     pub static PLATFORM_CREATE_WINDOW_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
@@ -678,7 +680,7 @@ impl PlatformIo {
 
     /// Get access to the monitors vector
     #[cfg(feature = "multi-viewport")]
-    pub fn monitors(&self) -> &ImVector<sys::ImGuiPlatformMonitor> {
+    pub fn monitors(&self) -> &crate::internal::ImVector<sys::ImGuiPlatformMonitor> {
         unsafe {
             crate::internal::imvector_cast_ref::<
                 sys::ImGuiPlatformMonitor,
@@ -689,7 +691,7 @@ impl PlatformIo {
 
     /// Get mutable access to the monitors vector
     #[cfg(feature = "multi-viewport")]
-    pub fn monitors_mut(&mut self) -> &mut ImVector<sys::ImGuiPlatformMonitor> {
+    pub fn monitors_mut(&mut self) -> &mut crate::internal::ImVector<sys::ImGuiPlatformMonitor> {
         unsafe {
             crate::internal::imvector_cast_mut::<
                 sys::ImGuiPlatformMonitor,
@@ -700,7 +702,7 @@ impl PlatformIo {
 
     /// Get access to the viewports vector
     #[cfg(feature = "multi-viewport")]
-    pub fn viewports(&self) -> &ImVector<*mut sys::ImGuiViewport> {
+    pub fn viewports(&self) -> &crate::internal::ImVector<*mut sys::ImGuiViewport> {
         unsafe {
             crate::internal::imvector_cast_ref::<
                 *mut sys::ImGuiViewport,
@@ -711,7 +713,7 @@ impl PlatformIo {
 
     /// Get mutable access to the viewports vector
     #[cfg(feature = "multi-viewport")]
-    pub fn viewports_mut(&mut self) -> &mut ImVector<*mut sys::ImGuiViewport> {
+    pub fn viewports_mut(&mut self) -> &mut crate::internal::ImVector<*mut sys::ImGuiViewport> {
         unsafe {
             crate::internal::imvector_cast_mut::<
                 *mut sys::ImGuiViewport,

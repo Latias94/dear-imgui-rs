@@ -4,7 +4,6 @@
 //! This crate follows the same patterns as our `dear-implot` and `dear-imguizmo`
 //! crates: Ui extensions, RAII tokens, and strongly-typed flags/enums.
 
-use dear_imgui::Ui;
 use dear_imnodes_sys as sys;
 
 mod context;

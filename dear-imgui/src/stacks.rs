@@ -156,7 +156,7 @@ unsafe fn push_style_var(style_var: StyleVar) {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DisabledAlpha as i32, v)
         },
         WindowPadding(v) => {
-            let p: [f32; 2] = v.into();
+            let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowPadding as i32, vec) }
         }
@@ -167,12 +167,12 @@ unsafe fn push_style_var(style_var: StyleVar) {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_WindowBorderSize as i32, v)
         },
         WindowMinSize(v) => {
-            let p: [f32; 2] = v.into();
+            let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowMinSize as i32, vec) }
         }
         WindowTitleAlign(v) => {
-            let p: [f32; 2] = v.into();
+            let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_WindowTitleAlign as i32, vec) }
         }
@@ -189,7 +189,7 @@ unsafe fn push_style_var(style_var: StyleVar) {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_PopupBorderSize as i32, v)
         },
         FramePadding(v) => {
-            let p: [f32; 2] = v.into();
+            let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_FramePadding as i32, vec) }
         }
@@ -200,12 +200,12 @@ unsafe fn push_style_var(style_var: StyleVar) {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameBorderSize as i32, v)
         },
         ItemSpacing(v) => {
-            let p: [f32; 2] = v.into();
+            let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemSpacing as i32, vec) }
         }
         ItemInnerSpacing(v) => {
-            let p: [f32; 2] = v.into();
+            let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ItemInnerSpacing as i32, vec) }
         }
@@ -213,7 +213,7 @@ unsafe fn push_style_var(style_var: StyleVar) {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_IndentSpacing as i32, v)
         },
         CellPadding(v) => {
-            let p: [f32; 2] = v.into();
+            let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_CellPadding as i32, vec) }
         }
@@ -233,12 +233,12 @@ unsafe fn push_style_var(style_var: StyleVar) {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabRounding as i32, v)
         },
         ButtonTextAlign(v) => {
-            let p: [f32; 2] = v.into();
+            let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_ButtonTextAlign as i32, vec) }
         }
         SelectableTextAlign(v) => {
-            let p: [f32; 2] = v.into();
+            let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_SelectableTextAlign as i32, vec) }
         }
@@ -374,6 +374,30 @@ impl IdStackToken<'_> {
     /// Pops a change from the ID stack.
     pub fn pop(self) {
         self.end()
+    }
+}
+
+// ============================================================================
+// Focus scope stack
+// ============================================================================
+
+create_token!(
+    /// Tracks a pushed focus scope, popped on drop.
+    pub struct FocusScopeToken<'ui>;
+
+    /// Pops a focus scope.
+    #[doc(alias = "PopFocusScope")]
+    drop { unsafe { sys::igPopFocusScope() } }
+);
+
+impl Ui {
+    /// Push a focus scope (affects e.g. navigation focus allocation).
+    ///
+    /// Returns a `FocusScopeToken` which will pop the focus scope when dropped.
+    #[doc(alias = "PushFocusScope")]
+    pub fn push_focus_scope(&self, id: sys::ImGuiID) -> FocusScopeToken<'_> {
+        unsafe { sys::igPushFocusScope(id) };
+        FocusScopeToken::new(self)
     }
 }
 

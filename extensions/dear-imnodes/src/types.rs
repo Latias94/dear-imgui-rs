@@ -1,3 +1,4 @@
+#![allow(clippy::unnecessary_cast)]
 use crate::sys;
 
 #[repr(i32)]

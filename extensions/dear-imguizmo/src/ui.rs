@@ -5,7 +5,7 @@ use std::ffi::CString;
 
 use crate::mat::Mat4Like;
 use crate::style::Style;
-use crate::types::{AxisMask, DrawListTarget, GuizmoId, Mode, Operation};
+use crate::types::{AxisMask, DrawListTarget, GuizmoId, Mode, Operation, Vec3Like};
 
 /// Context handle; lightweight wrapper to bind ImGui context and build a GizmoUi
 #[derive(Default, Clone, Copy)]
@@ -113,6 +113,15 @@ impl<'ui> GizmoUi<'ui> {
             DrawListTarget::Background => self.set_drawlist_background(),
             DrawListTarget::Foreground => self.set_drawlist_foreground(),
         }
+    }
+
+    /// Unsafe: set a raw ImGui drawlist pointer for ImGuizmo to render into.
+    ///
+    /// Prefer using `set_drawlist_*` safe variants. Only use this when you
+    /// have a valid `*mut ImDrawList` whose lifetime is at least the duration
+    /// of the current frame.
+    pub unsafe fn set_drawlist_raw(&self, drawlist: *mut imgui_sys::ImDrawList) {
+        sys::ImGuizmo_SetDrawlist(drawlist)
     }
 
     /// Manipulate using the currently bound draw list.
@@ -254,6 +263,18 @@ impl<'ui> GizmoUi<'ui> {
         unsafe { sys::ImGuizmo_IsOver_OPERATION(operation.into()) }
     }
 
+    /// Test if the mouse is within `pixel_radius` of a world position once
+    /// ImGuizmo has a valid view/projection context for the current frame.
+    ///
+    /// Notes:
+    /// - This uses ImGuizmo internal `ViewProjection` from the last compute
+    ///   (e.g. after calling `manipulate`, `draw_grid`, etc.).
+    /// - `position` is a world-space 3D point.
+    pub fn is_over_at<V: Vec3Like>(&self, position: V, pixel_radius: f32) -> bool {
+        let mut p = position.to_array();
+        unsafe { sys::ImGuizmo_IsOver_FloatPtr(p.as_mut_ptr(), pixel_radius) }
+    }
+
     /// Push an ID for ImGuizmo's own ID stack and return a guard that pops on drop.
     pub fn push_id<'a, I>(&self, id: I) -> IdToken<'ui>
     where
@@ -280,6 +301,11 @@ impl<'ui> GizmoUi<'ui> {
     pub fn get_id_str(&self, id: &str) -> imgui_sys::ImGuiID {
         let c = CString::new(id).expect("string contained NUL");
         unsafe { sys::ImGuizmo_GetID_Str(c.as_ptr()) }
+    }
+
+    /// Obtain a hashed ID from a pointer following ImGuizmo's ID scheme.
+    pub fn get_id_ptr<T>(&self, ptr: *const T) -> imgui_sys::ImGuiID {
+        unsafe { sys::ImGuizmo_GetID_Ptr(ptr as *const std::ffi::c_void) }
     }
 
     /// Access ImGuizmo global style through a safe wrapper bound to this UI lifetime.

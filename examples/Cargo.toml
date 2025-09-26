@@ -13,6 +13,10 @@ name = "wgpu_basic"
 path = "wgpu_basic.rs"
 
 [[bin]]
+name = "hello_world"
+path = "hello_world.rs"
+
+[[bin]]
 name = "game_engine_docking"
 path = "game_engine_docking.rs"
 
@@ -24,6 +28,14 @@ path = "glow_basic.rs"
 [[bin]]
 name = "glow_textures"
 path = "glow_textures.rs"
+
+[[bin]]
+name = "dockspace_minimal"
+path = "dockspace_minimal.rs"
+
+[[bin]]
+name = "wgpu_textures"
+path = "wgpu_textures.rs"
 
 [[bin]]
 name = "implot_basic"
@@ -51,7 +63,7 @@ dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
 dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
 wgpu = "26.0"
 winit = "0.30.12"
-glam = "0.27"
+glam = "0.30"
 tracing.workspace = true
 tracing-subscriber.workspace = true
 env_logger = "0.11"

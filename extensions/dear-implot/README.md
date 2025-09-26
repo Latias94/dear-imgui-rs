@@ -258,6 +258,45 @@ if let Ok(token) = multi_plot.begin() {
 
 ### Universal Plot Builder
 
+### Axis Setup & Selection
+
+```rust
+// Inside an active plot (between begin_plot/end)
+// Configure axes labels/flags
+plot_ui.setup_axes(Some("Time (s)"), Some("Value"), AxisFlags::NO_GRID_LINES, AxisFlags::NONE);
+
+// Set explicit ticks on X1
+let tick_pos = [0.0, 1.0, 2.0, 3.0];
+let tick_lbl = ["0s", "1s", "2s", "3s"];
+plot_ui.setup_x_axis_ticks_positions(XAxis::X1, &tick_pos, Some(&tick_lbl), true);
+
+// Format Y1 ticks
+plot_ui.setup_y_axis_format(YAxis::Y1, "%.2f");
+
+// Apply limits
+plot_ui.setup_axes_limits(0.0, 3.0, -1.0, 1.0, PlotCond::Once);
+
+// Selection query
+if dear_implot::utils::is_plot_selected() {
+    if let Some(rect) = dear_implot::utils::get_plot_selection_axes(XAxis::X1, YAxis::Y1) {
+        // rect.X.Min/Max, rect.Y.Min/Max
+    }
+}
+```
+
+### Infinite Lines & Image
+
+```rust
+// Infinite lines
+plot_ui.inf_lines_vertical("vlines", &[1.0, 2.0, 3.0])?;
+plot_ui.inf_lines_horizontal("hlines", &[0.0])?;
+
+// Image plot (using ImTextureID)
+let bounds_min = ImPlotPoint { x: 0.0, y: 0.0 };
+let bounds_max = ImPlotPoint { x: 1.0, y: 1.0 };
+plot_ui.plot_image("image", my_tex_id, bounds_min, bounds_max)?;
+```
+
 For a more unified API, you can use the `PlotBuilder`:
 
 ```rust

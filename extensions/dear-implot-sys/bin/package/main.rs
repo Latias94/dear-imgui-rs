@@ -1,6 +1,5 @@
 use std::{
     env, fs,
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -86,10 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         ""
     };
-    if let Ok(v) = env::var("IMPLOT_SYS_PKG_CRT") {
-        if !v.is_empty() {
-            crt = Box::leak(v.into_boxed_str());
-        }
+    if let Ok(v) = env::var("IMPLOT_SYS_PKG_CRT")
+        && !v.is_empty()
+    {
+        crt = Box::leak(v.into_boxed_str());
     }
 
     let link_type = "static";
@@ -210,10 +209,10 @@ fn append_headers_only(
     fn excluded(path: &Path, exclude_dirs: &[&str]) -> bool {
         for comp in path.components() {
             if let std::path::Component::Normal(os) = comp {
-                if let Some(name) = os.to_str() {
-                    if exclude_dirs.iter().any(|e| e == &name) {
-                        return true;
-                    }
+                if let Some(name) = os.to_str()
+                    && exclude_dirs.iter().any(|e| e == &name)
+                {
+                    return true;
                 }
             }
         }
@@ -221,7 +220,7 @@ fn append_headers_only(
     }
     let mut stack = vec![src_dir.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        if excluded(&dir.strip_prefix(src_dir).unwrap_or(&dir), exclude_dirs) && dir != *src_dir {
+        if excluded(dir.strip_prefix(src_dir).unwrap_or(&dir), exclude_dirs) && dir != *src_dir {
             continue;
         }
         for entry in fs::read_dir(&dir)? {

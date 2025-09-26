@@ -115,7 +115,7 @@ impl AppWindow {
             Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
-                        .with_title(&format!("Dear ImGui + ImNodes Example - {version}"))
+                        .with_title(format!("Dear ImGui + ImNodes Example - {version}"))
                         .with_inner_size(size),
                 )?,
             )
@@ -562,16 +562,16 @@ impl AppWindow {
                             self.imgui.saved_ini = Some(post.save_state_to_ini_string());
                         }
                         ui.same_line();
-                        if ui.button("Load A (string)") {
-                            if let Some(ref s) = self.imgui.saved_ini {
-                                let post = ui
-                                    .imnodes_editor(
-                                        &self.imgui.nodes_context,
-                                        Some(&self.imgui.editor_context),
-                                    )
-                                    .end();
-                                post.load_state_from_ini_string(s);
-                            }
+                        if ui.button("Load A (string)")
+                            && let Some(ref s) = self.imgui.saved_ini
+                        {
+                            let post = ui
+                                .imnodes_editor(
+                                    &self.imgui.nodes_context,
+                                    Some(&self.imgui.editor_context),
+                                )
+                                .end();
+                            post.load_state_from_ini_string(s);
                         }
                         ui.separator();
                         ui.text("INI File path");
@@ -1008,14 +1008,12 @@ impl AppWindow {
                             self.graph.added_nodes.retain(|(id, _)| *id != nid);
                             ui.close_current_popup();
                         }
-                    } else {
-                        if ui.selectable_config("Add Node Here").build() {
-                            let pos = ui.get_mouse_pos_on_opening_current_popup();
-                            let nid = self.graph.next_node_id;
-                            self.graph.next_node_id += 1;
-                            self.graph.added_nodes.push((nid, Some(pos)));
-                            ui.close_current_popup();
-                        }
+                    } else if ui.selectable_config("Add Node Here").build() {
+                        let pos = ui.get_mouse_pos_on_opening_current_popup();
+                        let nid = self.graph.next_node_id;
+                        self.graph.next_node_id += 1;
+                        self.graph.added_nodes.push((nid, Some(pos)));
+                        ui.close_current_popup();
                     }
                 });
             });
@@ -1052,7 +1050,7 @@ impl AppWindow {
             let draw_data = self.imgui.context.render();
             self.imgui
                 .renderer
-                .render_draw_data(&draw_data, &mut render_pass)?;
+                .render_draw_data(draw_data, &mut render_pass)?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

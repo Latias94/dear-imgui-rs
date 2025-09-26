@@ -6,6 +6,8 @@
 use crate::internal::{RawCast, RawWrapper};
 use crate::sys;
 use crate::texture::TextureId;
+use std::marker::PhantomData;
+use std::rc::Rc;
 use std::slice;
 
 /// All draw data to render a Dear ImGui frame.
@@ -297,6 +299,7 @@ impl<'a> Iterator for DrawCmdIterator<'a> {
                     cmd.ClipRect.z,
                     cmd.ClipRect.w,
                 ],
+                // Use raw field; backends may resolve effective TexID later
                 texture_id: TextureId::from(cmd.TexRef._TexID),
                 vtx_offset: cmd.VtxOffset as usize,
                 idx_offset: cmd.IdxOffset as usize,
@@ -314,6 +317,7 @@ impl<'a> Iterator for DrawCmdIterator<'a> {
                 None => DrawCmd::Elements {
                     count: cmd.ElemCount as usize,
                     cmd_params,
+                    raw_cmd: cmd as *const sys::ImDrawCmd,
                 },
             }
         })
@@ -326,6 +330,12 @@ pub struct DrawCmdParams {
     /// Clipping rectangle [left, top, right, bottom]
     pub clip_rect: [f32; 4],
     /// Texture ID to use for rendering
+    ///
+    /// Notes:
+    /// - For legacy paths (plain `TextureId`), this is the effective id.
+    /// - With the modern texture system (ImTextureRef/ImTextureData), this may be 0.
+    ///   Renderer backends should resolve the effective id at bind time using
+    ///   `ImDrawCmd_GetTexID` with the `raw_cmd` pointer and the backend render state.
     pub texture_id: TextureId,
     /// Vertex buffer offset
     pub vtx_offset: usize,
@@ -341,6 +351,8 @@ pub enum DrawCmd {
         /// The number of indices used for this draw command
         count: usize,
         cmd_params: DrawCmdParams,
+        /// Raw command pointer for backends
+        raw_cmd: *const sys::ImDrawCmd,
     },
     /// Reset render state
     ResetRenderState,
@@ -394,15 +406,19 @@ pub type DrawIdx = u16;
 
 /// A container for a heap-allocated deep copy of a `DrawData` struct.
 ///
-/// Can be used to retain draw data for rendering on a different thread.
+/// Notes on thread-safety:
+/// - This type intentionally does NOT implement `Send`/`Sync` because it currently retains
+///   a pointer to the engine-managed textures list (`ImVector<ImTextureData*>`) instead of
+///   deep-copying it. That list can be mutated by the UI thread across frames.
+/// - You may move vertices/indices to another thread by extracting them into your own buffers
+///   or by implementing a custom deep copy which snapshots the textures list as well.
+///
 /// The underlying copy is released when this struct is dropped.
 pub struct OwnedDrawData {
     draw_data: *mut sys::ImDrawData,
+    // Prevent Send/Sync: this struct retains a pointer to a shared textures list.
+    _no_send_sync: PhantomData<Rc<()>>,
 }
-
-// SAFETY: OwnedDrawData owns its data and manages it properly
-unsafe impl Send for OwnedDrawData {}
-unsafe impl Sync for OwnedDrawData {}
 
 impl OwnedDrawData {
     /// If this struct contains a `DrawData` object, then this function returns a reference to it.
@@ -424,6 +440,7 @@ impl Default for OwnedDrawData {
     fn default() -> Self {
         Self {
             draw_data: std::ptr::null_mut(),
+            _no_send_sync: PhantomData,
         }
     }
 }
@@ -466,7 +483,10 @@ impl From<&DrawData> for OwnedDrawData {
             // Textures list is shared, do not duplicate (renderer treats it as read-only)
             (*result).Textures = source_ptr.Textures;
 
-            OwnedDrawData { draw_data: result }
+            OwnedDrawData {
+                draw_data: result,
+                _no_send_sync: PhantomData,
+            }
         }
     }
 }

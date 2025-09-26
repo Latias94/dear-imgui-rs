@@ -162,3 +162,100 @@ pub fn add_colormap(name: &str, colors: &[sys::ImVec4], qualitative: bool) -> sy
         ) as sys::ImPlotColormap
     }
 }
+
+// Style editor / selectors and input-map helpers
+
+/// Show the ImPlot style editor window
+pub fn show_style_editor() {
+    unsafe { sys::ImPlot_ShowStyleEditor(std::ptr::null_mut()) }
+}
+
+/// Show the ImPlot style selector combo; returns true if selection changed
+pub fn show_style_selector(label: &str) -> bool {
+    let c = std::ffi::CString::new(label).unwrap_or_default();
+    unsafe { sys::ImPlot_ShowStyleSelector(c.as_ptr()) }
+}
+
+/// Show the ImPlot colormap selector combo; returns true if selection changed
+pub fn show_colormap_selector(label: &str) -> bool {
+    let c = std::ffi::CString::new(label).unwrap_or_default();
+    unsafe { sys::ImPlot_ShowColormapSelector(c.as_ptr()) }
+}
+
+/// Show the ImPlot input-map selector combo; returns true if selection changed
+pub fn show_input_map_selector(label: &str) -> bool {
+    let c = std::ffi::CString::new(label).unwrap_or_default();
+    unsafe { sys::ImPlot_ShowInputMapSelector(c.as_ptr()) }
+}
+
+/// Map input to defaults
+pub fn map_input_default() {
+    unsafe { sys::ImPlot_MapInputDefault(sys::ImPlot_GetInputMap()) }
+}
+
+/// Map input to reversed scheme
+pub fn map_input_reverse() {
+    unsafe { sys::ImPlot_MapInputReverse(sys::ImPlot_GetInputMap()) }
+}
+
+// Colormap widgets
+
+/// Draw a colormap scale widget
+pub fn colormap_scale(
+    label: &str,
+    scale_min: f64,
+    scale_max: f64,
+    height: f32,
+    cmap: Option<sys::ImPlotColormap>,
+) {
+    let c = std::ffi::CString::new(label).unwrap_or_default();
+    let size = sys::ImVec2 { x: 0.0, y: height };
+    let fmt_ptr: *const i8 = std::ptr::null();
+    let flags: i32 = 0; // ImPlotColormapScaleFlags_None
+    unsafe {
+        sys::ImPlot_ColormapScale(
+            c.as_ptr(),
+            scale_min,
+            scale_max,
+            size,
+            fmt_ptr,
+            flags,
+            cmap.unwrap_or(0),
+        )
+    }
+}
+
+/// Draw a colormap slider; returns true if selection changed
+pub fn colormap_slider(
+    label: &str,
+    t: &mut f32,
+    out_color: &mut sys::ImVec4,
+    format: Option<&str>,
+    cmap: sys::ImPlotColormap,
+) -> bool {
+    let c = std::ffi::CString::new(label).unwrap_or_default();
+    let fmt_c = format.and_then(|s| std::ffi::CString::new(s).ok());
+    let fmt_ptr = fmt_c
+        .as_ref()
+        .map(|cs| cs.as_ptr())
+        .unwrap_or(std::ptr::null());
+    unsafe {
+        sys::ImPlot_ColormapSlider(
+            c.as_ptr(),
+            t as *mut f32,
+            out_color as *mut sys::ImVec4,
+            fmt_ptr,
+            cmap,
+        )
+    }
+}
+
+/// Draw a colormap picker button; returns true if clicked
+pub fn colormap_button(label: &str, size: [f32; 2], cmap: sys::ImPlotColormap) -> bool {
+    let c = std::ffi::CString::new(label).unwrap_or_default();
+    let sz = sys::ImVec2 {
+        x: size[0],
+        y: size[1],
+    };
+    unsafe { sys::ImPlot_ColormapButton(c.as_ptr(), sz, cmap) }
+}

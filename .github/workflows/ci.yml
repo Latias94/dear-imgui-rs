@@ -85,8 +85,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Before first publish, only package -sys crates that don't require
-          # unpublished internal deps from crates.io. 'dear-imgui-sys' is the root.
+          # Package the helper crate first so downstream manifests referencing it by
+          # version can pass `cargo package` checks.
+          echo "::group::package dear-imgui-build-support"
+          cargo package -p dear-imgui-build-support
+          echo "::endgroup::"
+
+          # Then package the root -sys crate. Note: `cargo package` only verifies that
+          # dependencies have version requirements; it doesn't require that those versions
+          # already exist on crates.io. Actual publish will enforce existence.
           echo "::group::package dear-imgui-sys"
           cargo package -p dear-imgui-sys
           echo "::endgroup::"

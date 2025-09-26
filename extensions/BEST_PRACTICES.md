@@ -106,6 +106,32 @@ Use C bindings (cimgui family) + bindgen when available:
 - WASM: generally exclude native build; emit bindings only if you need docs.rs builds
 - Docs.rs/offline builds: commit a full `src/bindings_pregenerated.rs` and have `build.rs` copy/sanitize it to `OUT_DIR/bindings.rs` when headers or toolchains are not available
 
+### Prebuilt Helper Crate
+
+Centralize all prebuilt download/extract/naming logic via the shared helper crate:
+
+- Depend on `dear-imgui-build-support` in your `-sys` crate as a build-dependency:
+  ```toml
+  [build-dependencies]
+  build-support = { package = "dear-imgui-build-support", version = "0.1" }
+  ```
+
+- In `build.rs`, prefer the helpers instead of duplicating logic:
+  ```rust
+  let lib_name = build_support::expected_lib_name(&cfg.target_env, "dear_your_ext");
+  let cache_root = build_support::prebuilt_cache_root_from_env_or_target(
+      &cfg.manifest_dir, "YOUR_EXT_SYS_CACHE_DIR", "dear-your-ext-prebuilt",
+  );
+  if let Ok(dir) = build_support::download_prebuilt(&cache_root, &url, &lib_name, &cfg.target_env) {
+      // link from prebuilt dir
+  }
+  ```
+
+Benefits:
+- No direct `reqwest` in each extension crate
+- Unified archive naming & manifest format
+- Simpler CI packaging
+
 ### Build Modes
 
 Provide three modes (opt-in via env):
@@ -113,6 +139,9 @@ Provide three modes (opt-in via env):
 - Source build (default)
 - System/prebuilt: `*_SYS_LIB_DIR` -> add `cargo:rustc-link-search` and `-l static=<name>`
 - Remote prebuilt: `*_SYS_PREBUILT_URL` -> download to `OUT_DIR/prebuilt/`
+
+Tip: allow automated downloads from GitHub Releases by generating candidate URLs via
+`build_support::release_candidate_urls_env()` and trying them in order.
 
 Naming convention for static libs:
 
@@ -142,6 +171,54 @@ Naming convention for static libs:
 - Conversions:
   - Provide `From<mint::Vector2<f32>> for ImVec2` / `From<mint::Vector4<f32>> for ImVec4` (already in `dear-imgui-sys`)
   - Optionally support popular math crates in the high-level layer (e.g., `glam::Mat4`) without leaking them into FFI
+
+## FFI Casting: Prefer sys typedefs over raw i32/u32
+
+When calling into your `-sys` crate, always cast enums/flags/axes to the exact typedefs emitted by bindgen (from your `sys` crate), not to raw `i32`/`u32`. This avoids cross‑platform mismatches when cbindgen/bindgen chooses signed vs unsigned types or different widths.
+
+Examples (ImPlot):
+
+```rust
+// Do this:
+unsafe {
+    // Axis is sys::ImAxis (c_int); flags are sys::ImPlotAxisFlags (c_int)
+    sys::ImPlot_SetupAxis(axis as sys::ImAxis, label_ptr, flags.bits() as sys::ImPlotAxisFlags);
+
+    // Conditions are sys::ImPlotCond
+    sys::ImPlot_SetupAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond);
+
+    // Drag tool flags are sys::ImPlotDragToolFlags
+    sys::ImPlot_DragLineX(id, x, color4, thickness, flags.bits() as sys::ImPlotDragToolFlags, &mut clicked, &mut hovered, &mut held);
+}
+
+// Avoid this:
+// sys::ImPlot_SetupAxis(axis as i32, label_ptr, flags.bits() as i32)
+// sys::ImPlot_SetupAxisLimits(axis as i32, min, max, cond as i32)
+```
+
+Examples (Dear ImGui):
+
+```rust
+// Mouse cursor: use sys::ImGuiMouseCursor
+unsafe {
+    let c: sys::ImGuiMouseCursor = cursor.map(|m| m as sys::ImGuiMouseCursor).unwrap_or(sys::ImGuiMouseCursor_None);
+    sys::igSetMouseCursor(c);
+}
+
+// Item key owner: use sys::ImGuiKey
+unsafe {
+    let k: sys::ImGuiKey = key as sys::ImGuiKey;
+    sys::igSetItemKeyOwner_Nil(k);
+}
+```
+
+Guideline:
+
+- For each FFI function, consult your `-sys` crate’s `bindings_pregenerated.rs` (or `OUT_DIR/bindings.rs`) to find the expected typedefs.
+- Cast your high‑level flags/enums via `.bits()` or `as` to that typedef (e.g., `as sys::ImPlotAxisFlags`) instead of raw `i32`/`u32`.
+- For counts (lengths), casting to `i32` is acceptable when the binding expects `c_int`; prefer using the exact alias if it exists.
+
+This keeps your extension portable across compilers/targets where C typedefs differ.
 
 ## Example: Minimal `build.rs` Sketch
 
@@ -173,6 +250,10 @@ for (k, v) in env::vars() { if let Some(s) = k.strip_prefix("DEP_DEAR_IMGUI_DEFI
 build.include(&imgui_src).include(&cimgui_root).include(&third_party);
 build.file(third_party.join("your_c_api.cpp"));
 build.compile("dear_your_ext");
+
+// Try prebuilt if requested (optional)
+// let cache_root = build_support::prebuilt_cache_root_from_env_or_target(&manifest_dir, "YOUR_EXT_SYS_CACHE_DIR", "dear-your-ext-prebuilt");
+// let _ = build_support::download_prebuilt(&cache_root, url, build_support::expected_lib_name(&target_env, "dear_your_ext"), &target_env);
 ```
 
 ### MSVC (Windows) parity

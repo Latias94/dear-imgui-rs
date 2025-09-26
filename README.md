@@ -67,6 +67,8 @@ cargo run -p dear-imgui-examples --bin implot_basic     --features dear-implot
 
 Tip: The ImNodes example includes multiple tabs (Hello, Multi-Editor, Style, Advanced Style, Save/Load, Color Editor, Shader Graph, MiniMap Callback).
 
+See `examples/README.md` for a curated index and the planned from‑easy‑to‑advanced layout.
+
 ## Installation
 
 ```toml

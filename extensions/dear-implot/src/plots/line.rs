@@ -1,14 +1,14 @@
 //! Line plot implementation
 
 use super::{Plot, PlotError, safe_cstring, validate_data_lengths};
-use crate::sys;
+use crate::{LineFlags, sys};
 
 /// Builder for line plots with extensive customization options
 pub struct LinePlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [f64],
-    flags: sys::ImPlotLineFlags,
+    flags: LineFlags,
     offset: i32,
     stride: i32,
 }
@@ -20,14 +20,14 @@ impl<'a> LinePlot<'a> {
             label,
             x_data,
             y_data,
-            flags: 0,
+            flags: LineFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
     }
 
     /// Set line flags for customization
-    pub fn with_flags(mut self, flags: sys::ImPlotLineFlags) -> Self {
+    pub fn with_flags(mut self, flags: LineFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -64,7 +64,7 @@ impl<'a> Plot for LinePlot<'a> {
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
-                self.flags,
+                self.flags.bits() as i32,
                 self.offset,
                 self.stride,
             );
