@@ -11,13 +11,6 @@ keywords.workspace = true
 build = "build.rs"
 links = "dear_imguizmo"
 
-# docs.rs configuration for offline builds
-[package.metadata.docs.rs]
-no-default-features = true
-all-features = false
-features = []
-rustdoc-args = ["--cfg", "docsrs"]
-
 # Exclude heavy upstream folders from package tarball
 exclude = [
     "third-party/cimguizmo/ImGuizmo/example/**",
@@ -25,6 +18,13 @@ exclude = [
     "third-party/cimguizmo/ImGuizmo/docs/**",
     "third-party/cimguizmo/ImGuizmo/generator/**",
 ]
+
+# docs.rs configuration for offline builds
+[package.metadata.docs.rs]
+no-default-features = true
+all-features = false
+features = []
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
