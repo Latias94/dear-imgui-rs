@@ -37,8 +37,8 @@ build-support = { package = "dear-imgui-build-support", version = "0.1", path = 
 [build-dependencies]
 bindgen.workspace = true
 cc.workspace = true
-xshell = "0.2"
-pkg-config = "0.3"
+xshell = { workspace = true }
+pkg-config = { workspace = true }
 flate2 = "1"
 tar = "0.4"
 build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../../tools/build-support" }

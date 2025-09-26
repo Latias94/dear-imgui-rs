@@ -36,10 +36,16 @@ keywords = ["imgui", "ui", "graphics", "docking", "multiview"]
 bitflags = "2.9"
 parking_lot = "0.12"
 cfg-if = "1.0"
+glam = "0.30"
 
 # Graphics and windowing
 wgpu = "26.0"
 winit = "0.30.12"
+glow = "0.16"
+glutin = "0.32"
+glutin-winit = "0.5"
+raw-window-handle = "0.6"
+image = "0.25"
 
 # Build dependencies
 bindgen = "0.72"

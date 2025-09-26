@@ -61,15 +61,15 @@ dear-imgui-glow = { path = "../backends/dear-imgui-glow" }
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
 dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
-wgpu = "26.0"
-winit = "0.30.12"
-glam = "0.30"
+wgpu = { workspace = true }
+winit = { workspace = true }
+glam = { workspace = true }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-env_logger = "0.11"
-pollster = "0.4"
-glow = "0.16"
-glutin = "0.32"
-glutin-winit = "0.5"
-raw-window-handle = "0.6"
-image = "0.25"
+env_logger = { workspace = true }
+pollster = { workspace = true }
+glow = { workspace = true }
+glutin = { workspace = true }
+glutin-winit = { workspace = true }
+raw-window-handle = { workspace = true }
+image = { workspace = true }

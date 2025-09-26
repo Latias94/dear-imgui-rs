@@ -12,7 +12,7 @@ keywords.workspace = true
 
 [dependencies]
 dear-imgui = { path = "../../dear-imgui", version = "0.2" }
-glow = "0.16"
+glow = { workspace = true }
 memoffset = "0.9"
 #smallvec = "1.0"
 thiserror.workspace = true

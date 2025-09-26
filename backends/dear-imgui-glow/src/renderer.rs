@@ -762,12 +762,25 @@ impl GlowRenderer {
             gl_debug_message(gl, "start loop over commands");
             for command in draw_list.commands() {
                 match command {
-                    DrawCmd::Elements { count, cmd_params, raw_cmd } => {
+                    DrawCmd::Elements {
+                        count,
+                        cmd_params,
+                        raw_cmd,
+                    } => {
                         let tex_id_u64 = unsafe {
-                            dear_imgui::sys::ImDrawCmd_GetTexID(raw_cmd as *mut dear_imgui::sys::ImDrawCmd)
+                            dear_imgui::sys::ImDrawCmd_GetTexID(
+                                raw_cmd as *mut dear_imgui::sys::ImDrawCmd,
+                            )
                         } as u64;
                         let tex_id = dear_imgui::TextureId::from(tex_id_u64);
-                        self.render_elements(gl, texture_map, count, tex_id, &cmd_params, draw_data)?;
+                        self.render_elements(
+                            gl,
+                            texture_map,
+                            count,
+                            tex_id,
+                            &cmd_params,
+                            draw_data,
+                        )?;
                     }
                     DrawCmd::ResetRenderState => {
                         self.set_up_render_state(
@@ -849,10 +862,7 @@ impl GlowRenderer {
         } else {
             // Use font atlas texture as fallback
             self.font_atlas_texture.ok_or_else(|| {
-                RenderError::InvalidTexture(format!(
-                    "Texture ID {:?} not found",
-                    effective_tex_id
-                ))
+                RenderError::InvalidTexture(format!("Texture ID {:?} not found", effective_tex_id))
             })?
         };
 
