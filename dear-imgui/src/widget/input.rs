@@ -298,7 +298,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
         }
 
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
-        unsafe {
+        let result = unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,
@@ -319,7 +319,10 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     user_ptr,
                 )
             }
-        }
+        };
+        // Ensure ImString logical length reflects actual text (scan to NUL)
+        unsafe { self.buf.refresh_len() };
+        result
     }
 }
 impl<'ui, 'p> InputText<'ui, 'p, String, String, PassthroughCallback> {
@@ -454,49 +457,93 @@ where
             std::ptr::null()
         };
 
-        // Prepare an owned, growable buffer with trailing NUL and capacity headroom
-        let mut init = self.buf.as_bytes().to_vec();
-        if !init.ends_with(&[0]) {
-            init.push(0);
+        if let Some(extra) = self.capacity_hint {
+            let needed = extra.saturating_sub(self.buf.capacity().saturating_sub(self.buf.len()));
+            if needed > 0 {
+                self.buf.reserve(needed);
+            }
         }
-        let user_cap = self.capacity_hint.unwrap_or(0);
-        let min_cap = (init.len() + 64).max(256).max(user_cap);
-        if init.len() < min_cap {
-            init.resize(min_cap, 0);
-        }
-        let mut owned = Box::new(init);
-        let buf_ptr = owned.as_mut_ptr() as *mut std::os::raw::c_char;
-        let buf_size = owned.len();
-        let user_ptr = (&mut *owned) as *mut Vec<u8> as *mut c_void;
 
-        extern "C" fn resize_callback_vec(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-            unsafe {
-                if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
-                    let vec_ptr = (*data).UserData as *mut Vec<u8>;
-                    if !vec_ptr.is_null() {
-                        let buf = &mut *vec_ptr;
-                        let requested = (*data).BufSize as usize;
-                        if buf.len() < requested {
-                            buf.resize(requested, 0);
-                        }
-                        (*data).Buf = buf.as_mut_ptr() as *mut _;
+        // Ensure temporary NUL terminator
+        self.buf.push('\0');
+        let capacity = self.buf.capacity();
+        let buf_ptr = self.buf.as_mut_ptr() as *mut std::os::raw::c_char;
+
+        #[repr(C)]
+        struct UserData<T> {
+            container: *mut String,
+            handler: T,
+        }
+
+        extern "C" fn callback_router<T: InputTextCallbackHandler>(
+            data: *mut sys::ImGuiInputTextCallbackData,
+        ) -> c_int {
+            let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
+            let user = unsafe { &mut *((*data).UserData as *mut UserData<T>) };
+            match event_flag {
+                InputTextFlags::CALLBACK_RESIZE => unsafe {
+                    let requested = (*data).BufSize as usize;
+                    let s = &mut *user.container;
+                    debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
+                    if requested > s.capacity() {
+                        let additional = requested.saturating_sub(s.len());
+                        s.reserve(additional);
+                        (*data).Buf = s.as_mut_ptr() as *mut _;
                         (*data).BufDirty = true;
                     }
+                    0
+                },
+                InputTextFlags::CALLBACK_COMPLETION => {
+                    let info = unsafe { TextCallbackData::new(data) };
+                    user.handler.on_completion(info);
+                    0
                 }
+                InputTextFlags::CALLBACK_HISTORY => {
+                    let key = unsafe { (*data).EventKey };
+                    let dir = if key == sys::ImGuiKey_UpArrow {
+                        HistoryDirection::Up
+                    } else {
+                        HistoryDirection::Down
+                    };
+                    let info = unsafe { TextCallbackData::new(data) };
+                    user.handler.on_history(dir, info);
+                    0
+                }
+                InputTextFlags::CALLBACK_ALWAYS => {
+                    let info = unsafe { TextCallbackData::new(data) };
+                    user.handler.on_always(info);
+                    0
+                }
+                InputTextFlags::CALLBACK_EDIT => {
+                    let info = unsafe { TextCallbackData::new(data) };
+                    user.handler.on_edit(info);
+                    0
+                }
+                InputTextFlags::CALLBACK_CHAR_FILTER => {
+                    let ch = unsafe { std::char::from_u32((*data).EventChar as u32).unwrap_or('\0') };
+                    let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
+                    unsafe { (*data).EventChar = new_ch as u16; }
+                    0
+                }
+                _ => 0,
             }
-            0
         }
 
-        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
+        let mut user_data = UserData {
+            container: self.buf as *mut String,
+            handler: self.callback_handler,
+        };
+        let user_ptr = &mut user_data as *mut _ as *mut c_void;
 
+        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
         let result = unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,
                     buf_ptr,
-                    buf_size,
+                    capacity,
                     flags.bits(),
-                    Some(resize_callback_vec),
+                    Some(callback_router::<T>),
                     user_ptr,
                 )
             } else {
@@ -504,23 +551,20 @@ where
                     label_ptr,
                     hint_ptr,
                     buf_ptr,
-                    buf_size,
+                    capacity,
                     flags.bits(),
-                    Some(resize_callback_vec),
+                    Some(callback_router::<T>),
                     user_ptr,
                 )
             }
         };
 
-        // Update the string if changed
-        if result {
-            let slice: &[u8] = &owned;
-            let end = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
-            if let Ok(new_string) = String::from_utf8(slice[..end].to_vec()) {
-                *self.buf = new_string;
-            }
+        // Trim to first NUL (remove pushed terminator)
+        let cap = unsafe { (&*user_data.container).capacity() };
+        let slice = unsafe { std::slice::from_raw_parts((&*user_data.container).as_ptr(), cap) };
+        if let Some(len) = slice.iter().position(|&b| b == 0) {
+            unsafe { (&mut *user_data.container).as_mut_vec().set_len(len) };
         }
-
         result
     }
 }
@@ -594,7 +638,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
         }
 
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
-        unsafe {
+        let result = unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
@@ -604,7 +648,10 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
                 Some(resize_cb_imstr),
                 user_ptr,
             )
-        }
+        };
+        // Ensure ImString logical length reflects actual text (scan to NUL)
+        unsafe { self.buf.refresh_len() };
+        result
     }
 }
 impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
@@ -647,38 +694,49 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
     pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(&self.label);
 
-        // Prepare an owned, growable buffer with trailing NUL and capacity headroom
-        let mut init = self.buf.as_bytes().to_vec();
-        if !init.ends_with(&[0]) {
-            init.push(0);
+        // Optional pre-reserve
+        if let Some(extra) = self.capacity_hint {
+            let needed = extra.saturating_sub(self.buf.capacity().saturating_sub(self.buf.len()));
+            if needed > 0 {
+                self.buf.reserve(needed);
+            }
         }
-        let user_cap = self.capacity_hint.unwrap_or(0);
-        let min_cap = (init.len() + 128).max(1024).max(user_cap);
-        if init.len() < min_cap {
-            init.resize(min_cap, 0);
-        }
-        let mut owned = Box::new(init);
-        let buf_ptr = owned.as_mut_ptr() as *mut std::os::raw::c_char;
-        let buf_size = owned.len();
-        let user_ptr = (&mut *owned) as *mut Vec<u8> as *mut c_void;
 
-        extern "C" fn resize_callback_vec(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-            unsafe {
-                if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
-                    let vec_ptr = (*data).UserData as *mut Vec<u8>;
-                    if !vec_ptr.is_null() {
-                        let buf = &mut *vec_ptr;
-                        let requested = (*data).BufSize as usize;
-                        if buf.len() < requested {
-                            buf.resize(requested, 0);
-                        }
-                        (*data).Buf = buf.as_mut_ptr() as *mut _;
+        // Ensure a NUL terminator and use String's capacity directly
+        self.buf.push('\0');
+        let capacity = self.buf.capacity();
+        let buf_ptr = self.buf.as_mut_ptr() as *mut std::os::raw::c_char;
+
+        #[repr(C)]
+        struct UserData {
+            container: *mut String,
+        }
+
+        extern "C" fn callback_router(
+            data: *mut sys::ImGuiInputTextCallbackData,
+        ) -> c_int {
+            let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
+            match event_flag {
+                InputTextFlags::CALLBACK_RESIZE => unsafe {
+                    let requested = (*data).BufSize as usize;
+                    let s = &mut *(&mut *((*data).UserData as *mut UserData)).container;
+                    debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
+                    if requested > s.capacity() {
+                        let additional = requested.saturating_sub(s.len());
+                        s.reserve(additional);
+                        (*data).Buf = s.as_mut_ptr() as *mut _;
                         (*data).BufDirty = true;
                     }
-                }
+                    0
+                },
+                _ => 0,
             }
-            0
         }
+
+        let mut user_data = UserData {
+            container: self.buf as *mut String,
+        };
+        let user_ptr = &mut user_data as *mut _ as *mut c_void;
 
         let size_vec: sys::ImVec2 = self.size.into();
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
@@ -686,20 +744,162 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
-                buf_size,
+                capacity,
                 size_vec,
                 flags.bits(),
-                Some(resize_callback_vec),
+                Some(callback_router),
                 user_ptr,
             )
         };
 
-        if result {
-            let slice: &[u8] = &owned;
-            let end = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
-            if let Ok(s) = String::from_utf8(slice[..end].to_vec()) {
-                *self.buf = s;
+        // Trim at NUL to restore real length
+        let cap = unsafe { (&*user_data.container).capacity() };
+        let slice = unsafe { std::slice::from_raw_parts((&*user_data.container).as_ptr(), cap) };
+        if let Some(len) = slice.iter().position(|&b| b == 0) {
+            unsafe { (&mut *user_data.container).as_mut_vec().set_len(len) };
+        }
+        result
+    }
+
+    /// Enable ImGui callbacks for this multiline input and attach a handler.
+    pub fn callback<T2: InputTextCallbackHandler>(
+        mut self,
+        callbacks: InputTextCallback,
+        handler: T2,
+    ) -> InputTextMultilineWithCb<'ui, 'p, T2> {
+        // Note: ImGui forbids CallbackHistory/Completion with Multiline.
+        // We intentionally do NOT enable them here to avoid assertions.
+        if callbacks.contains(InputTextCallback::ALWAYS) {
+            self.flags.insert(InputTextFlags::CALLBACK_ALWAYS);
+        }
+        if callbacks.contains(InputTextCallback::CHAR_FILTER) {
+            self.flags.insert(InputTextFlags::CALLBACK_CHAR_FILTER);
+        }
+        if callbacks.contains(InputTextCallback::EDIT) {
+            self.flags.insert(InputTextFlags::CALLBACK_EDIT);
+        }
+
+        InputTextMultilineWithCb {
+            ui: self.ui,
+            label: self.label,
+            buf: self.buf,
+            size: self.size,
+            flags: self.flags,
+            capacity_hint: self.capacity_hint,
+            handler,
+        }
+    }
+}
+
+/// Multiline InputText with attached callback handler
+pub struct InputTextMultilineWithCb<'ui, 'p, T> {
+    ui: &'ui Ui,
+    label: String,
+    buf: &'p mut String,
+    size: [f32; 2],
+    flags: InputTextFlags,
+    capacity_hint: Option<usize>,
+    handler: T,
+}
+
+impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> {
+    pub fn build(self) -> bool {
+        let label_ptr = self.ui.scratch_txt(&self.label);
+
+        if let Some(extra) = self.capacity_hint {
+            let needed = extra.saturating_sub(self.buf.capacity().saturating_sub(self.buf.len()));
+            if needed > 0 {
+                self.buf.reserve(needed);
             }
+        }
+
+        // Ensure NUL terminator
+        self.buf.push('\0');
+        let capacity = self.buf.capacity();
+        let buf_ptr = self.buf.as_mut_ptr() as *mut std::os::raw::c_char;
+
+        #[repr(C)]
+        struct UserData<T> {
+            container: *mut String,
+            handler: T,
+        }
+
+        extern "C" fn callback_router<T: InputTextCallbackHandler>(
+            data: *mut sys::ImGuiInputTextCallbackData,
+        ) -> c_int {
+            let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
+            let user = unsafe { &mut *((*data).UserData as *mut UserData<T>) };
+            match event_flag {
+                InputTextFlags::CALLBACK_RESIZE => unsafe {
+                    let requested = (*data).BufSize as usize;
+                    let s = &mut *user.container;
+                    debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
+                    if requested > s.capacity() {
+                        let additional = requested.saturating_sub(s.len());
+                        s.reserve(additional);
+                        (*data).Buf = s.as_mut_ptr() as *mut _;
+                        (*data).BufDirty = true;
+                    }
+                    0
+                },
+                InputTextFlags::CALLBACK_COMPLETION => {
+                    let info = unsafe { TextCallbackData::new(data) };
+                    user.handler.on_completion(info);
+                    0
+                }
+                InputTextFlags::CALLBACK_HISTORY => {
+                    let key = unsafe { (*data).EventKey };
+                    let dir = if key == sys::ImGuiKey_UpArrow {
+                        HistoryDirection::Up
+                    } else {
+                        HistoryDirection::Down
+                    };
+                    let info = unsafe { TextCallbackData::new(data) };
+                    user.handler.on_history(dir, info);
+                    0
+                }
+                InputTextFlags::CALLBACK_ALWAYS => {
+                    let info = unsafe { TextCallbackData::new(data) };
+                    user.handler.on_always(info);
+                    0
+                }
+                InputTextFlags::CALLBACK_EDIT => {
+                    let info = unsafe { TextCallbackData::new(data) };
+                    user.handler.on_edit(info);
+                    0
+                }
+                InputTextFlags::CALLBACK_CHAR_FILTER => {
+                    let ch = unsafe { std::char::from_u32((*data).EventChar as u32).unwrap_or('\0') };
+                    let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
+                    unsafe { (*data).EventChar = new_ch as u16; }
+                    0
+                }
+                _ => 0,
+            }
+        }
+
+        let mut user_data = UserData { container: self.buf as *mut String, handler: self.handler };
+        let user_ptr = &mut user_data as *mut _ as *mut c_void;
+
+        let size_vec: sys::ImVec2 = self.size.into();
+        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
+        let result = unsafe {
+            sys::igInputTextMultiline(
+                label_ptr,
+                buf_ptr,
+                capacity,
+                size_vec,
+                flags.bits(),
+                Some(callback_router::<T>),
+                user_ptr,
+            )
+        };
+
+        // Trim at NUL
+        let cap = unsafe { (&*user_data.container).capacity() };
+        let slice = unsafe { std::slice::from_raw_parts((&*user_data.container).as_ptr(), cap) };
+        if let Some(len) = slice.iter().position(|&b| b == 0) {
+            unsafe { (&mut *user_data.container).as_mut_vec().set_len(len) };
         }
         result
     }
