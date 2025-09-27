@@ -44,7 +44,13 @@ impl FontLoader {
     /// Creates a new font loader with the given name
     pub fn new(name: &str) -> Result<Self, std::ffi::NulError> {
         let name_cstring = CString::new(name)?;
-        let mut raw = sys::ImFontLoader::default();
+        // Initialize via ImGui constructor to future-proof defaults
+        let mut raw = unsafe {
+            let p = sys::ImFontLoader_ImFontLoader();
+            let v = *p;
+            sys::ImFontLoader_destroy(p);
+            v
+        };
         raw.Name = name_cstring.as_ptr();
 
         Ok(Self {
@@ -190,6 +196,12 @@ impl FontAtlas {
             sys::ImFontAtlas_SetFontLoader(self.raw, loader.as_ptr());
         }
     }
+
+    // Note: switching to the FreeType loader at runtime requires access to the
+    // C++ symbol ImGuiFreeType_GetFontLoader(), which may not be available in
+    // prebuilt dear-imgui-sys distributions. If needed, prefer configuring the
+    // loader from the sys layer or ensure the symbol is exported, then add a
+    // thin wrapper here.
 
     /// Sets global font loader flags
     ///
@@ -563,8 +575,13 @@ pub struct FontConfig {
 impl FontConfig {
     /// Creates a new font configuration with default settings
     pub fn new() -> Self {
-        Self {
-            raw: Default::default(),
+        // Use ImGui's constructor to ensure all defaults are initialized
+        // (e.g., RasterizerDensity defaults to 1.0f which avoids assertions).
+        unsafe {
+            let cfg = sys::ImFontConfig_ImFontConfig();
+            let raw = *cfg;
+            sys::ImFontConfig_destroy(cfg);
+            Self { raw }
         }
     }
 

@@ -311,14 +311,14 @@ impl TextureData {
     /// This creates a new TextureData instance with default values.
     /// The texture will be in Destroyed status and needs to be created with `create()`.
     pub fn new() -> Box<Self> {
-        let raw_data = Box::new(unsafe {
-            let mut data: sys::ImTextureData = std::mem::zeroed();
-            data.Status = sys::ImTextureStatus_Destroyed;
-            data.TexID = 0; // ImTextureID_Invalid is defined as 0
-            data
-        });
-
-        // Convert to TextureData
+        // Initialize via ImGui constructor to inherit default changes safely
+        let raw = unsafe {
+            let p = sys::ImTextureData_ImTextureData();
+            let v = *p;
+            sys::ImTextureData_destroy(p);
+            v
+        };
+        let raw_data = Box::new(raw);
         unsafe { Box::from_raw(Box::into_raw(raw_data) as *mut Self) }
     }
 
