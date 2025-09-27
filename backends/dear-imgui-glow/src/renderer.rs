@@ -1142,7 +1142,12 @@ impl GlowRenderer {
 
         let pixels = match texture_data.pixels() {
             Some(p) => p,
-            None => return Ok(()),
+            None => {
+                // No CPU pixels available this frame; nothing to upload.
+                // Mark as OK to avoid retry storm and proceed with existing GPU texture.
+                texture_data.set_status(dear_imgui::TextureStatus::OK);
+                return Ok(());
+            }
         };
 
         // Backup texture binding / active texture / unpack alignment
@@ -1155,10 +1160,36 @@ impl GlowRenderer {
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
         }
 
+        // Collect update rects; prefer explicit Updates[] then fallback to single UpdateRect
+        let mut rects: Vec<dear_imgui::texture::TextureRect> = texture_data.updates().collect();
+        if rects.is_empty() {
+            let r = texture_data.update_rect();
+            if r.w > 0 && r.h > 0 {
+                rects.push(r);
+            }
+        }
+
+        if rects.is_empty() {
+            // Nothing to update; mark OK and return
+            texture_data.set_status(dear_imgui::TextureStatus::OK);
+            // Restore previous binding and pixel store
+            unsafe {
+                gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
+                if last_texture != 0 {
+                    let restore = glow::NativeTexture(std::num::NonZeroU32::new(last_texture).unwrap());
+                    gl.bind_texture(glow::TEXTURE_2D, Some(restore));
+                } else {
+                    gl.bind_texture(glow::TEXTURE_2D, None);
+                }
+                gl.active_texture(last_active);
+            }
+            return Ok(());
+        }
+
         // Iterate update rects and upload each sub-region
         // Reuse a single staging buffer to avoid repeated allocations
         let mut sub_rgba: Vec<u8> = Vec::new();
-        for rect in texture_data.updates() {
+        for rect in rects.into_iter() {
             let rx = rect.x as u32;
             let ry = rect.y as u32;
             let rw = rect.w as u32;
