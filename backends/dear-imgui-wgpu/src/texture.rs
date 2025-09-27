@@ -98,6 +98,176 @@ pub struct WgpuTextureManager {
 }
 
 impl WgpuTextureManager {
+    /// Convert a sub-rectangle of ImGui texture pixels into a tightly packed RGBA8 buffer
+    fn convert_subrect_to_rgba(
+        texture_data: &TextureData,
+        rect: dear_imgui::texture::TextureRect,
+    ) -> Option<Vec<u8>> {
+        let pixels = texture_data.pixels()?;
+        let tex_w = texture_data.width() as usize;
+        let tex_h = texture_data.height() as usize;
+        if tex_w == 0 || tex_h == 0 {
+            return None;
+        }
+
+        let bpp = texture_data.bytes_per_pixel() as usize;
+        let (rx, ry, rw, rh) = (
+            rect.x as usize,
+            rect.y as usize,
+            rect.w as usize,
+            rect.h as usize,
+        );
+        if rw == 0 || rh == 0 || rx >= tex_w || ry >= tex_h {
+            return None;
+        }
+
+        // Clamp to texture bounds defensively
+        let rw = rw.min(tex_w.saturating_sub(rx));
+        let rh = rh.min(tex_h.saturating_sub(ry));
+
+        let mut out = vec![0u8; rw * rh * 4];
+        match texture_data.format() {
+            ImGuiTextureFormat::RGBA32 => {
+                for row in 0..rh {
+                    let src_off = ((ry + row) * tex_w + rx) * bpp;
+                    let dst_off = row * rw * 4;
+                    // Copy only the row slice and convert layout if needed (it is already RGBA)
+                    out[dst_off..dst_off + rw * 4]
+                        .copy_from_slice(&pixels[src_off..src_off + rw * 4]);
+                }
+            }
+            ImGuiTextureFormat::Alpha8 => {
+                for row in 0..rh {
+                    let src_off = ((ry + row) * tex_w + rx) * bpp; // bpp = 1
+                    let dst_off = row * rw * 4;
+                    for i in 0..rw {
+                        let a = pixels[src_off + i];
+                        let dst = &mut out[dst_off + i * 4..dst_off + i * 4 + 4];
+                        dst.copy_from_slice(&[255, 255, 255, a]);
+                    }
+                }
+            }
+        }
+        Some(out)
+    }
+
+    /// Apply queued sub-rectangle updates to an existing WGPU texture.
+    /// Returns true if any update was applied.
+    fn apply_subrect_updates(
+        &mut self,
+        queue: &Queue,
+        texture_data: &TextureData,
+        texture_id: u64,
+    ) -> RendererResult<bool> {
+        let wgpu_tex = match self.textures.get(&texture_id) {
+            Some(t) => t,
+            None => return Ok(false),
+        };
+
+        // Collect update rectangles; prefer explicit Updates[] if present,
+        // otherwise fallback to single UpdateRect.
+        let mut rects: Vec<dear_imgui::texture::TextureRect> = texture_data.updates().collect();
+        if rects.is_empty() {
+            let r = texture_data.update_rect();
+            if r.w > 0 && r.h > 0 {
+                rects.push(r);
+            }
+        }
+        if rects.is_empty() {
+            return Ok(false);
+        }
+
+        // Upload each rect
+        for rect in rects {
+            if let Some(tight_rgba) = Self::convert_subrect_to_rgba(texture_data, rect) {
+                let width = rect.w as u32;
+                let height = rect.h as u32;
+                let bpp = 4u32;
+                let unpadded_bytes_per_row = width * bpp;
+                let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // 256
+                let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
+
+                if padded_bytes_per_row == unpadded_bytes_per_row {
+                    // Aligned: direct upload
+                    queue.write_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            texture: wgpu_tex.texture(),
+                            mip_level: 0,
+                            origin: wgpu::Origin3d {
+                                x: rect.x as u32,
+                                y: rect.y as u32,
+                                z: 0,
+                            },
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        &tight_rgba,
+                        wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(unpadded_bytes_per_row),
+                            rows_per_image: Some(height),
+                        },
+                        wgpu::Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                } else {
+                    // Pad each row to the required alignment
+                    let mut padded = vec![0u8; (padded_bytes_per_row * height) as usize];
+                    for row in 0..height as usize {
+                        let src_off = row * (unpadded_bytes_per_row as usize);
+                        let dst_off = row * (padded_bytes_per_row as usize);
+                        padded[dst_off..dst_off + (unpadded_bytes_per_row as usize)]
+                            .copy_from_slice(
+                                &tight_rgba[src_off..src_off + (unpadded_bytes_per_row as usize)],
+                            );
+                    }
+                    queue.write_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            texture: wgpu_tex.texture(),
+                            mip_level: 0,
+                            origin: wgpu::Origin3d {
+                                x: rect.x as u32,
+                                y: rect.y as u32,
+                                z: 0,
+                            },
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        &padded,
+                        wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(padded_bytes_per_row),
+                            rows_per_image: Some(height),
+                        },
+                        wgpu::Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                }
+                if cfg!(debug_assertions) {
+                    tracing::debug!(
+                        target: "dear-imgui-wgpu",
+                        "[dear-imgui-wgpu][debug] Updated texture id={} subrect x={} y={} w={} h={}",
+                        texture_id, rect.x, rect.y, rect.w, rect.h
+                    );
+                }
+            } else {
+                // No pixels available, cannot update this rect
+                if cfg!(debug_assertions) {
+                    tracing::debug!(
+                        target: "dear-imgui-wgpu",
+                        "[dear-imgui-wgpu][debug] Skipped subrect update: no pixels available"
+                    );
+                }
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
     /// Create a new texture manager
     pub fn new() -> Self {
         Self {
@@ -359,16 +529,18 @@ impl WgpuTextureManager {
     ) -> RendererResult<()> {
         let texture_id = texture_data.tex_id().id();
 
-        // For WGPU, we recreate the texture instead of updating in place
-        // This is simpler and more reliable than trying to update existing textures
+        // If the texture already exists and the TextureData only requests sub-rectangle
+        // updates, honor them in-place to match Dear ImGui 1.92 semantics.
+        // Fallback to full re-create when there is no pixel data available.
         if self.contains_texture(texture_id) {
-            // Remove old texture
+            // Attempt sub-rect updates first (preferred path)
+            if self.apply_subrect_updates(queue, texture_data, texture_id)? {
+                return Ok(());
+            }
+
+            // Otherwise, recreate from full data
             self.remove_texture(texture_id);
-
-            // Create new texture
             let new_texture_id = self.create_texture_from_data(device, queue, texture_data)?;
-
-            // Move the texture to the correct ID slot if needed
             if new_texture_id != texture_id
                 && let Some(texture) = self.remove_texture(new_texture_id)
             {
@@ -455,14 +627,27 @@ impl WgpuTextureManager {
                                 texture_data.set_status(TextureStatus::Destroyed);
                             }
                         }
-                    } else if self
-                        .update_texture_from_data_with_id(device, queue, texture_data, internal_id)
-                        .is_err()
-                    {
-                        // If update fails, mark as destroyed
-                        texture_data.set_status(TextureStatus::Destroyed);
                     } else {
-                        texture_data.set_status(TextureStatus::OK);
+                        // Try in-place sub-rect updates first
+                        if self
+                            .apply_subrect_updates(queue, texture_data, internal_id)
+                            .unwrap_or(false)
+                        {
+                            texture_data.set_status(TextureStatus::OK);
+                        } else if self
+                            .update_texture_from_data_with_id(
+                                device,
+                                queue,
+                                texture_data,
+                                internal_id,
+                            )
+                            .is_err()
+                        {
+                            // If update fails, mark as destroyed
+                            texture_data.set_status(TextureStatus::Destroyed);
+                        } else {
+                            texture_data.set_status(TextureStatus::OK);
+                        }
                     }
                 }
                 TextureStatus::WantDestroy => {

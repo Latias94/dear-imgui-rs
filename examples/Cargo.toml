@@ -2,6 +2,7 @@
 name = "dear-imgui-examples"
 version = "0.1.0"
 edition.workspace = true
+publish = false
 
 [features]
 dear-implot = ["dep:dear-implot"]
@@ -20,7 +21,6 @@ path = "00-quickstart/hello_world.rs"
 [[bin]]
 name = "game_engine_docking"
 path = "02-docking/game_engine_docking.rs"
-
 
 [[bin]]
 name = "glow_basic"
