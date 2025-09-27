@@ -1,3 +1,18 @@
+//! Color utilities
+//!
+//! Lightweight RGBA color type and helpers for converting to/from Dear ImGui
+//! packed colors. Useful for configuring styles and draw-list primitives.
+//!
+//! Quick example:
+//! ```no_run
+//! # use dear_imgui::*;
+//! let white = Color::rgb(1.0, 1.0, 1.0);
+//! let abgr = white.to_imgui_u32();
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! ui.text(format!("0x{:08x}", abgr));
+//! ```
+//!
 use std::fmt;
 
 /// RGBA color with 32-bit floating point components

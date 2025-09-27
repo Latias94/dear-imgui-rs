@@ -1,3 +1,8 @@
+//! Basic plots
+//!
+//! Simple line/histogram plot helpers built on top of Dear ImGui. For more
+//! advanced charts, consider using the optional implot bindings.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

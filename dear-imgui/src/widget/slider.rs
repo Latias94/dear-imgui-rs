@@ -1,3 +1,8 @@
+//! Sliders
+//!
+//! Scalar and range sliders for numeric input with builder-based configuration
+//! of speed, format and clamping.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

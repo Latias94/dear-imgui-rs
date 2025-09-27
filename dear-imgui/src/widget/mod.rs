@@ -1,3 +1,30 @@
+//! Standard widgets
+//!
+//! Collection of common Dear ImGui widgets exposed with an idiomatic Rust
+//! API. Most widgets follow a small builder pattern for configuration, and
+//! also provide convenience methods on [`Ui`].
+//!
+//! Examples:
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! // Buttons
+//! if ui.button("Click me") { /* ... */ }
+//!
+//! // Sliders
+//! let mut value = 0.5f32;
+//! ui.slider_f32("Value", &mut value, 0.0, 1.0);
+//!
+//! // Inputs
+//! let mut text = String::new();
+//! ui.input_text("Name", &mut text).build();
+//! ```
+//!
+//! Submodules group related widgets: `button`, `color`, `combo`, `drag`,
+//! `image`, `input`, `list_box`, `menu`, `misc`, `plot`, `popup`, `progress`,
+//! `selectable`, `slider`, `tab`, `table`, `text`, `tooltip`, `tree`.
+//!
 use crate::sys;
 
 pub mod button;

@@ -1,3 +1,9 @@
+//! Legacy columns API
+//!
+//! Thin wrappers for the old Columns layout system. New code should prefer
+//! the `table` API (`widget::table`) which supersedes Columns with more
+//! features and better user experience.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

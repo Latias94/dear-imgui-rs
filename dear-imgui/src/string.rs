@@ -1,3 +1,25 @@
+//! String helpers (ImString and scratch buffers)
+//!
+//! Utilities for working with strings across the Rust <-> Dear ImGui FFI
+//! boundary.
+//!
+//! - `ImString`: an owned, growable UTF-8 string that maintains a trailing
+//!   NUL byte as required by C APIs. Useful for zero-copy text editing via
+//!   ImGui callbacks.
+//! - `UiBuffer`: an internal scratch buffer used by [`Ui`] methods to stage
+//!   temporary C strings for widget labels and hints.
+//!
+//! Example (zero-copy text input with `ImString`):
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! let mut s = ImString::with_capacity(256);
+//! if ui.input_text_imstr("Edit", &mut s).build() {
+//!     // edited in-place, no extra copies
+//! }
+//! ```
+//!
 use std::borrow::Cow;
 use std::fmt;
 use std::ops::{Deref, Index, RangeFull};

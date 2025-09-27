@@ -1,3 +1,9 @@
+//! Clipboard integration
+//!
+//! Provides the `ClipboardBackend` trait and a small glue layer used by the
+//! crate to hook Dear ImGui's clipboard callbacks. You can implement your own
+//! backend and pass it to the context so copy/paste works in input widgets.
+//!
 use std::ffi::{CStr, CString};
 use std::fmt;
 use std::os::raw::c_char;

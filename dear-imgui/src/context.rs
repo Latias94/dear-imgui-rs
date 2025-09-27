@@ -1,3 +1,10 @@
+//! ImGui context lifecycle
+//!
+//! Creates, manages and destroys the single active Dear ImGui context used by
+//! the crate. Obtain a `Ui` each frame via `Context::frame()` and render using
+//! your chosen backend. See struct-level docs for details and caveats about one
+//! active context at a time.
+//!
 use parking_lot::ReentrantMutex;
 use std::cell::UnsafeCell;
 use std::ffi::CString;

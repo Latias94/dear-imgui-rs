@@ -1,3 +1,8 @@
+//! Window scrolling
+//!
+//! Read and control the current window scroll offsets as well as their maxima
+//! to implement custom scrolling behaviors.
+//!
 use crate::Ui;
 use crate::sys;
 

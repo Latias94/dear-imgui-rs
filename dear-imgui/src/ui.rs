@@ -1,3 +1,17 @@
+//! Per-frame UI entry point
+//!
+//! The `Ui` type exposes most user-facing Dear ImGui APIs for a single frame:
+//! creating windows, drawing widgets, accessing draw lists, showing built-in
+//! tools and more. Obtain it from [`Context::frame`].
+//!
+//! Example:
+//! ```no_run
+//! # use dear_imgui::*;
+//! let mut ctx = Context::create();
+//! let ui = ctx.frame();
+//! ui.text("Hello, world!");
+//! ```
+//!
 use crate::draw::DrawListMut;
 use crate::input::MouseCursor;
 use crate::internal::RawWrapper;

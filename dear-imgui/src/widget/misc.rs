@@ -1,3 +1,8 @@
+//! Miscellaneous widgets
+//!
+//! Small convenience widgets that don’t fit elsewhere (e.g. bullets, help
+//! markers). See functions on `Ui` for details.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

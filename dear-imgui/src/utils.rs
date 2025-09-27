@@ -1,3 +1,9 @@
+//! Miscellaneous utilities
+//!
+//! Helper flags and `Ui` extension methods for common queries (hovered/focused
+//! checks, item rectangles, etc.). These are thin wrappers around Dear ImGui
+//! functions for convenience and type safety.
+//!
 use crate::input::{Key, MouseButton};
 use crate::{StyleColor, sys};
 use bitflags::bitflags;

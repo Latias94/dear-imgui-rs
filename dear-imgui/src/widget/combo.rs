@@ -1,3 +1,8 @@
+//! Combo boxes
+//!
+//! Single-selection dropdowns with optional height and popup alignment flags.
+//! Builders provide both string and custom item sources.
+//!
 use std::borrow::Cow;
 
 use crate::sys;

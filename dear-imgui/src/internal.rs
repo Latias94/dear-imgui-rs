@@ -1,3 +1,8 @@
+//! Internal low-level types
+//!
+//! Exposes helpers mirroring Dear ImGui internals (e.g. `ImVector`, data type
+//! markers). These are primarily for advanced integrations; APIs may change.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

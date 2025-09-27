@@ -1,3 +1,11 @@
+//! Input types (mouse, keyboard, cursors)
+//!
+//! Strongly-typed identifiers for mouse buttons, mouse cursors and keyboard
+//! keys used by Dear ImGui. Backends typically translate platform events into
+//! these enums when feeding input into `Io`.
+//!
+//! See [`io`] for the per-frame input state and configuration.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

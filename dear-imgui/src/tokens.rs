@@ -1,3 +1,30 @@
+//! RAII tokens for scoped ImGui state
+//!
+//! Many Dear ImGui operations push/pop state (style, fonts, groups, clip rects,
+//! etc.). In this crate, these are modeled as small RAII tokens that pop the
+//! state when dropped, helping you write exception-safe, early-return friendly
+//! code.
+//!
+//! Example:
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! let _group = ui.begin_group();
+//! ui.text("Inside a group");
+//! // Group ends automatically when `_group` is dropped
+//! ```
+//!
+//! Quick example (manual end):
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! let token = ui.begin_group();
+//! ui.text("Manual end");
+//! token.end(); // explicit end instead of relying on Drop
+//! ```
+//!
 #[macro_export]
 /// This is a macro used internally by dear-imgui to create StackTokens
 /// representing various global state in Dear ImGui.

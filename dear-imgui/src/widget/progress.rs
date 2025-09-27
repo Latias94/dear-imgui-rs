@@ -1,3 +1,7 @@
+//! Progress bars
+//!
+//! Simple progress indicators with size and overlay text customization.
+//!
 use crate::sys;
 use crate::ui::Ui;
 

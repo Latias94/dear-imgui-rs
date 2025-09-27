@@ -1,3 +1,37 @@
+//! Tables
+//!
+//! Modern multi-column layout and data table API with rich configuration.
+//! Use `TableBuilder` to declare columns and build rows/cells ergonomically.
+//!
+//! Quick example (builder):
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! ui.table("perf")
+//!     .flags(TableFlags::RESIZABLE)
+//!     .column("Name").width(120.0).done()
+//!     .column("Value").weight(1.0).done()
+//!     .headers(true)
+//!     .build(|ui| {
+//!         ui.table_next_row();
+//!         ui.table_next_column(); ui.text("CPU");
+//!         ui.table_next_column(); ui.text("Intel");
+//!     });
+//! ```
+//!
+//! Quick example (manual API):
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! if let Some(_t) = ui.begin_table("t", 2) {
+//!     ui.table_next_row();
+//!     ui.table_next_column(); ui.text("A");
+//!     ui.table_next_column(); ui.text("B");
+//! }
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -57,7 +91,7 @@ impl Ui {
     /// # use dear_imgui::*;
     /// # fn demo(ui: &Ui) {
     /// ui.table("perf")
-    ///     .flags(widget::TableFlags::RESIZABLE | widget::TableFlags::SORTABLE)
+    ///     .flags(TableFlags::RESIZABLE | TableFlags::SORTABLE)
     ///     .outer_size([600.0, 240.0])
     ///     .freeze(1, 1)
     ///     .column("Name").width(140.0).done()

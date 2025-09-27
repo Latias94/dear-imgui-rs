@@ -1,3 +1,7 @@
+//! Buttons
+//!
+//! Push-button widgets with optional sizing and configuration helpers.
+//!
 use crate::Ui;
 use crate::sys;
 

@@ -1,3 +1,8 @@
+//! Selectable items
+//!
+//! Clickable items that can be selected, typically used in lists. Supports
+//! span-full-width behavior and selection flags.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

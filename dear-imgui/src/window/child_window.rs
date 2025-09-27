@@ -1,3 +1,23 @@
+//! Child windows
+//!
+//! Tools for building scrollable, optionally framed child regions within a
+//! parent window. Useful for panels, property views or nested layouts.
+//!
+//! Example:
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! ui.window("Parent").build(|| {
+//!     ui.child_window("pane")
+//!         .size([200.0, 120.0])
+//!         .border(true)
+//!         .build(&ui, || {
+//!             ui.text("Inside child window");
+//!         });
+//! });
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

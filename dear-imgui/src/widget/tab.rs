@@ -1,3 +1,8 @@
+//! Tabs
+//!
+//! Tab bars and tab items for organizing content. Builders manage begin/end
+//! lifetimes to help keep API usage balanced.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

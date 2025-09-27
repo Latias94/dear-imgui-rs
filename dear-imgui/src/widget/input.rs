@@ -1,3 +1,29 @@
+//! Text and scalar inputs
+//!
+//! Single-line and multi-line text inputs backed by `String` or `ImString`
+//! (zero-copy), plus number input helpers. Builders provide flags and
+//! callback hooks for validation and behavior tweaks.
+//!
+//! Quick examples:
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! // Text (String)
+//! let mut s = String::from("hello");
+//! ui.input_text("Name", &mut s).build();
+//!
+//! // Text (ImString, zero-copy)
+//! let mut im = ImString::with_capacity(64);
+//! ui.input_text_imstr("ImStr", &mut im).build();
+//!
+//! // Numbers
+//! let mut i = 0i32;
+//! let mut f = 1.0f32;
+//! ui.input_int("Count", &mut i);
+//! ui.input_float("Scale", &mut f);
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -520,9 +546,12 @@ where
                     0
                 }
                 InputTextFlags::CALLBACK_CHAR_FILTER => {
-                    let ch = unsafe { std::char::from_u32((*data).EventChar as u32).unwrap_or('\0') };
+                    let ch =
+                        unsafe { std::char::from_u32((*data).EventChar as u32).unwrap_or('\0') };
                     let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
-                    unsafe { (*data).EventChar = new_ch as u16; }
+                    unsafe {
+                        (*data).EventChar = new_ch as u16;
+                    }
                     0
                 }
                 _ => 0,
@@ -712,9 +741,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
             container: *mut String,
         }
 
-        extern "C" fn callback_router(
-            data: *mut sys::ImGuiInputTextCallbackData,
-        ) -> c_int {
+        extern "C" fn callback_router(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
             let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
             match event_flag {
                 InputTextFlags::CALLBACK_RESIZE => unsafe {
@@ -869,16 +896,22 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                     0
                 }
                 InputTextFlags::CALLBACK_CHAR_FILTER => {
-                    let ch = unsafe { std::char::from_u32((*data).EventChar as u32).unwrap_or('\0') };
+                    let ch =
+                        unsafe { std::char::from_u32((*data).EventChar as u32).unwrap_or('\0') };
                     let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
-                    unsafe { (*data).EventChar = new_ch as u16; }
+                    unsafe {
+                        (*data).EventChar = new_ch as u16;
+                    }
                     0
                 }
                 _ => 0,
             }
         }
 
-        let mut user_data = UserData { container: self.buf as *mut String, handler: self.handler };
+        let mut user_data = UserData {
+            container: self.buf as *mut String,
+            handler: self.handler,
+        };
         let user_ptr = &mut user_data as *mut _ as *mut c_void;
 
         let size_vec: sys::ImVec2 = self.size.into();

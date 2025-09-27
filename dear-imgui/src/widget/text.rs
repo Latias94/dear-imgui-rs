@@ -1,3 +1,19 @@
+//! Text helpers
+//!
+//! Convenience functions for colored text, wrapped text, disabled text and
+//! label helpers.
+//!
+//! Quick examples:
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! ui.text("normal");
+//! ui.text_colored([1.0, 0.5, 0.0, 1.0], "warning");
+//! ui.text_disabled("disabled");
+//! ui.text_wrapped("very long text that will wrap when needed...");
+//! ```
+//!
 use crate::Ui;
 use crate::sys;
 

@@ -1,3 +1,8 @@
+//! Content region helpers
+//!
+//! Query the available region inside the current window, excluding decorations
+//! such as title bars and scrollbars. Handy for adaptive sizing.
+//!
 use crate::Ui;
 use crate::sys;
 

@@ -1,3 +1,42 @@
+//! Windows and window utilities
+//!
+//! This module exposes the `Window` builder and related flags for creating
+//! top-level Dear ImGui windows. It also houses helpers for child windows,
+//! querying content-region size, and controlling window scrolling.
+//!
+//! Basic usage:
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! ui.window("Hello")
+//!     .size([320.0, 240.0], Condition::FirstUseEver)
+//!     .position([60.0, 60.0], Condition::FirstUseEver)
+//!     .build(|| {
+//!         ui.text("Window contents go here");
+//!     });
+//! ```
+//!
+//! See also:
+//! - `child_window` for scoped child areas
+//! - `content_region` for available size queries
+//! - `scroll` for reading and setting scroll positions
+//!
+//! Quick example (flags + size/pos conditions):
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! use dear_imgui::WindowFlags;
+//! ui.window("Tools")
+//!     .flags(WindowFlags::NO_RESIZE | WindowFlags::NO_COLLAPSE)
+//!     .size([300.0, 200.0], Condition::FirstUseEver)
+//!     .position([50.0, 60.0], Condition::FirstUseEver)
+//!     .build(|| {
+//!         ui.text("Toolbox contents...");
+//!     });
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

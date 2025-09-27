@@ -1,3 +1,8 @@
+//! Popups and modals
+//!
+//! Popup windows (context menus, modals) with builders and token helpers to
+//! ensure balanced begin/end calls.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

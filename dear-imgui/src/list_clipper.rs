@@ -1,3 +1,8 @@
+//! List clipper (virtualized lists)
+//!
+//! Wrapper around Dear ImGui's list clipper to efficiently display large
+//! lists by only processing visible items.
+//!
 use std::marker::PhantomData;
 
 use crate::Ui;

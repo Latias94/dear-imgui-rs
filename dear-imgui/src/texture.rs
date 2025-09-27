@@ -125,7 +125,7 @@ pub type RawTextureId = *const c_void;
 /// let mut tex = TextureData::new();
 /// tex.create(TextureFormat::RGBA32, 256, 256);
 /// // Fill pixels or schedule updates...
-/// ui.image(&mut tex, [256.0, 256.0]);
+/// ui.image(&mut *tex, [256.0, 256.0]);
 /// // The renderer backend will honor WantCreate/WantUpdates/WantDestroy
 /// // via DrawData::textures() when rendering this frame.
 /// # }

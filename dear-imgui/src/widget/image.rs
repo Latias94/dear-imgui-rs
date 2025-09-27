@@ -1,3 +1,19 @@
+//! Image widgets
+//!
+//! Draw images from a legacy `TextureId` or from modern `TextureData` handled
+//! via `DrawData::textures()`. See crate-level docs for texture management.
+//!
+//! Quick example (image button):
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! let tex_id = texture::TextureId::new(42);
+//! if ui.image_button("btn", tex_id, [32.0, 32.0]) {
+//!     // clicked
+//! }
+//! ```
+//!
 use crate::sys;
 use crate::texture::TextureRef;
 use crate::ui::Ui;
@@ -19,7 +35,7 @@ use crate::ui::Ui;
 /// # fn demo(ui: &Ui) {
 /// let mut tex = texture::TextureData::new();
 /// tex.create(texture::TextureFormat::RGBA32, 64, 64);
-/// ui.image(&mut tex, [64.0, 64.0]);
+/// ui.image(&mut *tex, [64.0, 64.0]);
 /// # }
 /// ```
 impl Ui {

@@ -1,3 +1,21 @@
+//! Immediate drawing helpers (DrawList)
+//!
+//! Safe wrappers over Dear ImGui draw lists plus optional low-level primitives
+//! for custom geometry. Prefer high-level builders; resort to `prim_*` only
+//! when you need exact control and understand the safety requirements.
+//!
+//! Example (basic drawing):
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! let dl = ui.get_window_draw_list();
+//! dl.add_line([10.0, 10.0], [100.0, 100.0], [1.0, 1.0, 1.0, 1.0])
+//!     .thickness(2.0)
+//!     .build();
+//! dl.add_text([12.0, 12.0], [1.0, 0.8, 0.2, 1.0], "Hello DrawList");
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -1280,10 +1298,11 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
         cmd: *const sys::ImDrawCmd,
     ) {
         // Access mutable ImDrawCmd to retrieve and clear user data
-        let cmd = &mut *(cmd as *mut sys::ImDrawCmd);
+        let cmd = unsafe { &mut *(cmd as *mut sys::ImDrawCmd) };
         // Compute pointer to our boxed closure (respect offset if ever used)
-        let data_ptr =
-            (cmd.UserCallbackData as *mut u8).add(cmd.UserCallbackDataOffset as usize) as *mut F;
+        let data_ptr = unsafe {
+            (cmd.UserCallbackData as *mut u8).add(cmd.UserCallbackDataOffset as usize) as *mut F
+        };
         if data_ptr.is_null() {
             return;
         }
@@ -1291,7 +1310,7 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
         cmd.UserCallbackData = std::ptr::null_mut();
         cmd.UserCallbackDataSize = 0;
         cmd.UserCallbackDataOffset = 0;
-        let cb = Box::from_raw(data_ptr);
+        let cb = unsafe { Box::from_raw(data_ptr) };
         cb();
     }
 }
@@ -1309,14 +1328,14 @@ impl<'ui> DrawListMut<'ui> {
     ///
     /// Safety: Caller must write exactly the reserved amount using PrimWrite* and ensure valid topology.
     pub unsafe fn prim_reserve(&self, idx_count: i32, vtx_count: i32) {
-        sys::ImDrawList_PrimReserve(self.draw_list, idx_count, vtx_count)
+        unsafe { sys::ImDrawList_PrimReserve(self.draw_list, idx_count, vtx_count) }
     }
 
     /// Unsafe low-level geometry API: unreserve previously reserved space.
     ///
     /// Safety: Must match a prior call to `prim_reserve` which hasn't been fully written.
     pub unsafe fn prim_unreserve(&self, idx_count: i32, vtx_count: i32) {
-        sys::ImDrawList_PrimUnreserve(self.draw_list, idx_count, vtx_count)
+        unsafe { sys::ImDrawList_PrimUnreserve(self.draw_list, idx_count, vtx_count) }
     }
 
     /// Unsafe low-level geometry API: append a rectangle primitive with a single color.
@@ -1328,7 +1347,7 @@ impl<'ui> DrawListMut<'ui> {
         b: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
-        sys::ImDrawList_PrimRect(self.draw_list, a.into(), b.into(), col.into().into())
+        unsafe { sys::ImDrawList_PrimRect(self.draw_list, a.into(), b.into(), col.into().into()) }
     }
 
     /// Unsafe low-level geometry API: append a rectangle primitive with UVs and color.
@@ -1342,14 +1361,16 @@ impl<'ui> DrawListMut<'ui> {
         uv_b: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
-        sys::ImDrawList_PrimRectUV(
-            self.draw_list,
-            a.into(),
-            b.into(),
-            uv_a.into(),
-            uv_b.into(),
-            col.into().into(),
-        )
+        unsafe {
+            sys::ImDrawList_PrimRectUV(
+                self.draw_list,
+                a.into(),
+                b.into(),
+                uv_a.into(),
+                uv_b.into(),
+                col.into().into(),
+            )
+        }
     }
 
     /// Unsafe low-level geometry API: append a quad primitive with UVs and color.
@@ -1367,18 +1388,20 @@ impl<'ui> DrawListMut<'ui> {
         uv_d: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
-        sys::ImDrawList_PrimQuadUV(
-            self.draw_list,
-            a.into(),
-            b.into(),
-            c.into(),
-            d.into(),
-            uv_a.into(),
-            uv_b.into(),
-            uv_c.into(),
-            uv_d.into(),
-            col.into().into(),
-        )
+        unsafe {
+            sys::ImDrawList_PrimQuadUV(
+                self.draw_list,
+                a.into(),
+                b.into(),
+                c.into(),
+                d.into(),
+                uv_a.into(),
+                uv_b.into(),
+                uv_c.into(),
+                uv_d.into(),
+                col.into().into(),
+            )
+        }
     }
 
     /// Unsafe low-level geometry API: write a vertex.
@@ -1390,14 +1413,16 @@ impl<'ui> DrawListMut<'ui> {
         uv: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
-        sys::ImDrawList_PrimWriteVtx(self.draw_list, pos.into(), uv.into(), col.into().into())
+        unsafe {
+            sys::ImDrawList_PrimWriteVtx(self.draw_list, pos.into(), uv.into(), col.into().into())
+        }
     }
 
     /// Unsafe low-level geometry API: write an index.
     ///
     /// Safety: Only use to fill space reserved by `prim_reserve`.
     pub unsafe fn prim_write_idx(&self, idx: sys::ImDrawIdx) {
-        sys::ImDrawList_PrimWriteIdx(self.draw_list, idx)
+        unsafe { sys::ImDrawList_PrimWriteIdx(self.draw_list, idx) }
     }
 
     /// Unsafe low-level geometry API: convenience to append one vertex (pos+uv+col).
@@ -1409,7 +1434,7 @@ impl<'ui> DrawListMut<'ui> {
         uv: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
-        sys::ImDrawList_PrimVtx(self.draw_list, pos.into(), uv.into(), col.into().into())
+        unsafe { sys::ImDrawList_PrimVtx(self.draw_list, pos.into(), uv.into(), col.into().into()) }
     }
 }
 

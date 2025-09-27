@@ -1,3 +1,8 @@
+//! Trees and collapsing headers
+//!
+//! Tree nodes and collapsing headers for hierarchical content. See
+//! `TreeNodeFlags` for customization options.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

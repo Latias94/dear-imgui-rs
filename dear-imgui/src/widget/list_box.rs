@@ -1,3 +1,7 @@
+//! List boxes
+//!
+//! Classic list-box widget and builder for fixed-height item selection.
+//!
 use std::borrow::Cow;
 
 use crate::Ui;

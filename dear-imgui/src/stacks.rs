@@ -1,3 +1,8 @@
+//! Push/pop stacks (fonts, style, etc.)
+//!
+//! RAII-style wrappers for ImGui parameter stacks: fonts, style colors/vars and
+//! more. Tokens returned by `Ui::push_*` pop automatically when dropped.
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

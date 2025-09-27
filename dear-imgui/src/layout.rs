@@ -1,3 +1,19 @@
+//! Layout and cursor helpers
+//!
+//! Spacing, separators, horizontal layout (`same_line`), grouping, cursor
+//! positioning and clipping helpers. These functions help arrange widgets and
+//! content within windows.
+//!
+//! Example:
+//! ```no_run
+//! # use dear_imgui::*;
+//! # let mut ctx = Context::create();
+//! # let ui = ctx.frame();
+//! ui.text("Left");
+//! ui.same_line();
+//! ui.text("Right");
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

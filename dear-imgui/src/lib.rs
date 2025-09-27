@@ -64,7 +64,7 @@
 //! let mut tex = texture::TextureData::new();
 //! tex.create(texture::TextureFormat::RGBA32, 256, 256);
 //! // fill pixels / request updates ...
-//! ui.image(&mut tex, [256.0, 256.0]);
+//! ui.image(&mut *tex, [256.0, 256.0]);
 //! # }
 //! ```
 //!
@@ -138,8 +138,8 @@
 //! # use dear_imgui::*;
 //! # fn demo(ui: &Ui) {
 //! // Pack RGBA floats to ImGui ABGR (ImU32)
-//! let abgr = colors::Color::rgb(1.0, 0.0, 0.0).to_imgui_u32();
-//! ui.table_set_bg_color_u32(widget::TableBgTarget::CellBg, abgr, -1);
+//! let abgr = Color::rgb(1.0, 0.0, 0.0).to_imgui_u32();
+//! ui.table_set_bg_color_u32(TableBgTarget::CellBg, abgr, -1);
 //! # }
 //! ```
 //!

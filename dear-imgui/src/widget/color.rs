@@ -1,3 +1,8 @@
+//! Color widgets
+//!
+//! Color edit/picker/button widgets and their option flags. Useful for editing
+//! RGBA values with different display/input modes.
+//!
 use crate::sys;
 use crate::ui::Ui;
 
