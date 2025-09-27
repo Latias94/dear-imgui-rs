@@ -243,8 +243,8 @@ impl AppWindow {
 
         let clear_color = wgpu::Color {
             r: 0.1,
-            g: 0.1,
-            b: 0.1,
+            g: 0.2,
+            b: 0.3,
             a: 1.0,
         };
 
@@ -352,32 +352,32 @@ impl AppWindow {
             setup_initial_docking_layout(imgui.dockspace_id);
         }
         if actions.load_ini {
-            if let Ok(s) = std::fs::read_to_string("examples/game_engine_docking.ini") {
+            if let Ok(s) = std::fs::read_to_string("examples/02-docking/game_engine_docking.ini") {
                 imgui.context.load_ini_settings(&s);
                 imgui
                     .game_state
                     .console_logs
                     .push("[INFO] Layout loaded from INI".to_string());
             } else {
-                imgui
-                    .game_state
-                    .console_logs
-                    .push("[WARNING] Failed to read examples/game_engine_docking.ini".to_string());
+                imgui.game_state.console_logs.push(
+                    "[WARNING] Failed to read examples/02-docking/game_engine_docking.ini"
+                        .to_string(),
+                );
             }
         }
         if actions.save_ini {
             let mut buf = String::new();
             imgui.context.save_ini_settings(&mut buf);
-            if std::fs::write("examples/game_engine_docking.ini", buf).is_ok() {
+            if std::fs::write("examples/02-docking/game_engine_docking.ini", buf).is_ok() {
                 imgui
                     .game_state
                     .console_logs
                     .push("[INFO] Layout saved to INI".to_string());
             } else {
-                imgui
-                    .game_state
-                    .console_logs
-                    .push("[WARNING] Failed to write examples/game_engine_docking.ini".to_string());
+                imgui.game_state.console_logs.push(
+                    "[WARNING] Failed to write examples/02-docking/game_engine_docking.ini"
+                        .to_string(),
+                );
             }
         }
 

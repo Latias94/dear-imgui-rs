@@ -439,7 +439,6 @@ impl AppWindow {
         // Render
         if let Some(gl) = self.imgui.renderer.gl_context() {
             unsafe {
-                // Unified clear color with glow_basic: [0.1, 0.2, 0.3]
                 gl.clear_color(0.1, 0.2, 0.3, 1.0);
                 gl.clear(glow::COLOR_BUFFER_BIT);
             }

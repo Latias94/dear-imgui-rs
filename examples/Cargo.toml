@@ -7,35 +7,64 @@ edition.workspace = true
 dear-implot = ["dep:dear-implot"]
 dear-imguizmo = ["dep:dear-imguizmo"]
 dear-imnodes = ["dep:dear-imnodes"]
+freetype = ["dear-imgui/freetype"]
 
 [[bin]]
 name = "wgpu_basic"
-path = "wgpu_basic.rs"
+path = "00-quickstart/wgpu_basic.rs"
 
 [[bin]]
 name = "hello_world"
-path = "hello_world.rs"
+path = "00-quickstart/hello_world.rs"
 
 [[bin]]
 name = "game_engine_docking"
-path = "game_engine_docking.rs"
+path = "02-docking/game_engine_docking.rs"
 
 
 [[bin]]
 name = "glow_basic"
-path = "glow_basic.rs"
+path = "00-quickstart/glow_basic.rs"
+
+[[bin]]
+name = "input_text_minimal"
+path = "00-quickstart/input_text_minimal.rs"
+
+[[bin]]
+name = "tables_minimal"
+path = "00-quickstart/tables_minimal.rs"
+
+[[bin]]
+name = "drawlist_minimal"
+path = "00-quickstart/drawlist_minimal.rs"
+
+[[bin]]
+name = "menus_and_popups"
+path = "00-quickstart/menus_and_popups.rs"
+
+[[bin]]
+name = "tables_property_grid"
+path = "00-quickstart/tables_property_grid.rs"
+
+[[bin]]
+name = "list_clipper_log"
+path = "00-quickstart/list_clipper_log.rs"
+
+[[bin]]
+name = "style_and_fonts"
+path = "00-quickstart/style_and_fonts.rs"
 
 [[bin]]
 name = "glow_textures"
-path = "glow_textures.rs"
+path = "01-renderers/glow_textures.rs"
 
 [[bin]]
 name = "dockspace_minimal"
-path = "dockspace_minimal.rs"
+path = "02-docking/dockspace_minimal.rs"
 
 [[bin]]
 name = "wgpu_textures"
-path = "wgpu_textures.rs"
+path = "01-renderers/wgpu_textures.rs"
 
 [[bin]]
 name = "implot_basic"
@@ -52,12 +81,25 @@ name = "imnodes_basic"
 path = "imnodes_basic.rs"
 required-features = ["dear-imnodes"]
 
+[[bin]]
+name = "wgpu_rtt_gameview"
+path = "04-integration/wgpu_rtt_gameview.rs"
+
+[[bin]]
+name = "console_log"
+path = "04-integration/console_log.rs"
+
+[[bin]]
+name = "asset_browser_grid"
+path = "04-integration/asset_browser_grid.rs"
+
 
 [dependencies]
 dear-imgui = { path = "../dear-imgui" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow" }
+arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
 dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
