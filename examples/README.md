@@ -7,6 +7,8 @@ This workspace ships a single `dear-imgui-examples` crate with multiple example 
 - Cover common real-world patterns: docking, textures, plotting, nodes, gizmos.
 - Demonstrate multiple backend stacks: `winit` + `wgpu`, and `glow` + `glutin`.
 
+Also see `examples-wasm/` for WebAssembly (WASM) examples.
+
 Run any example with:
 
 - `cargo run -p dear-imgui-examples --bin <name>`
@@ -30,6 +32,8 @@ Quick picks:
 
 Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
 - Extensions (e.g., ImPlot): `cargo run -p dear-imgui-examples --bin implot_basic --features dear-implot`
+  - ImNodes: `cargo run -p dear-imgui-examples --bin imnodes_basic --features dear-imnodes`
+  - ImGuizmo: `cargo run -p dear-imgui-examples --bin imguizmo_basic --features dear-imguizmo`
 
 ## Structure (from easy to advanced)
 
@@ -75,8 +79,8 @@ This is the intended organization.
 ## Mapping current examples
 
 - Quickstart/backends: `wgpu_basic.rs`, `glow_basic.rs`, `input_text_minimal.rs`, `tables_minimal.rs`, `drawlist_minimal.rs`, `glow_textures.rs`, `menus_and_popups.rs`, `tables_property_grid.rs`, `list_clipper_log.rs`, `style_and_fonts.rs`
-- Docking: `02-docking/game_engine_docking.rs` (+ `examples/02-docking/game_engine_docking.ini`)
-- Integration: `04-integration/wgpu_rtt_gameview.rs`
+- Docking: `02-docking/dockspace_minimal.rs`, `02-docking/game_engine_docking.rs` (+ `examples/02-docking/game_engine_docking.ini`)
+- Integration: `04-integration/wgpu_rtt_gameview.rs`, `04-integration/console_log.rs`, `04-integration/asset_browser_grid.rs`
 - Extensions: `implot_basic.rs`, `imnodes_basic.rs`, `imguizmo_basic.rs`
 
 These will remain runnable as-is; future additions may live in subfolders with explicit `[[bin]]` paths.

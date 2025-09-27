@@ -1176,7 +1176,8 @@ impl GlowRenderer {
             unsafe {
                 gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
                 if last_texture != 0 {
-                    let restore = glow::NativeTexture(std::num::NonZeroU32::new(last_texture).unwrap());
+                    let restore =
+                        glow::NativeTexture(std::num::NonZeroU32::new(last_texture).unwrap());
                     gl.bind_texture(glow::TEXTURE_2D, Some(restore));
                 } else {
                     gl.bind_texture(glow::TEXTURE_2D, None);
