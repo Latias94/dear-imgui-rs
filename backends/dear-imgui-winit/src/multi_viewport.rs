@@ -9,6 +9,7 @@ use std::ffi::{CStr, c_char, c_void};
 
 use dear_imgui::Context;
 use dear_imgui::platform_io::Viewport as IoViewport;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{
     ElementState, Event, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
@@ -16,22 +17,22 @@ use winit::event::{
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowAttributes, WindowLevel};
 
-// Debug trampolines defined in C++ (imgui.cpp) to avoid MSVC aggregate return ABI issues
-// when callbacks return ImVec2/ImVec4 by value. Keep declarations once at module scope.
-// Note: To avoid link-time dependencies on C++ debug stubs, only declare the ones we actually use here.
-unsafe extern "C" {
-    fn ImGui_DebugTest_ReturnZero_GetWindowPos(
-        vp: *mut dear_imgui::sys::ImGuiViewport,
-    ) -> dear_imgui::sys::ImVec2;
-    fn ImGui_DebugTest_ReturnZero_GetWindowSize(
-        vp: *mut dear_imgui::sys::ImGuiViewport,
-    ) -> dear_imgui::sys::ImVec2;
-    fn ImGui_DebugTest_False_GetWindowBool(vp: *mut dear_imgui::sys::ImGuiViewport) -> bool;
-}
+// Note: We previously experimented with external C++ debug stubs to validate MSVC ABI when
+// returning aggregates by value. These are no longer used; we register our Rust implementations
+// directly to PlatformIO below.
 
 // Thread-local storage for winit multi-viewport support
 thread_local! {
     static EVENT_LOOP: RefCell<Option<*const ActiveEventLoop>> = const { RefCell::new(None) };
+}
+
+// Debug logging helper (off by default). Enable by building this crate with
+// `--features mv-log`.
+#[allow(unused_macros)]
+macro_rules! mvlog {
+    ($($arg:tt)*) => {
+        if cfg!(feature = "mv-log") { eprintln!($($arg)*); }
+    }
 }
 
 /// Helper structure stored in the void* PlatformUserData field of each ImGuiViewport
@@ -61,6 +62,42 @@ impl ViewportData {
     }
 }
 
+// Convert client-area logical coordinates to screen coordinates (physical), per-window
+pub(crate) fn client_to_screen_pos(window: &Window, logical: [f64; 2]) -> Option<[f32; 2]> {
+    #[cfg(target_os = "windows")]
+    {
+        #[repr(C)]
+        struct POINT {
+            x: i32,
+            y: i32,
+        }
+        #[link(name = "User32")]
+        unsafe extern "system" {
+            fn ClientToScreen(hWnd: isize, lpPoint: *mut POINT) -> i32;
+        }
+        let scale = window.scale_factor();
+        let mut p = POINT {
+            x: (logical[0] * scale) as i32,
+            y: (logical[1] * scale) as i32,
+        };
+        let hwnd = match window.window_handle().ok()?.as_raw() {
+            RawWindowHandle::Win32(h) => h.hwnd.get() as isize,
+            _ => return None,
+        };
+        let ok = unsafe { ClientToScreen(hwnd, &mut p as *mut POINT) };
+        if ok == 0 {
+            None
+        } else {
+            Some([p.x as f32, p.y as f32])
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Fallback: approximate
+        Some([logical[0] as f32, logical[1] as f32])
+    }
+}
+
 /// Initialize multi-viewport support following official ImGui backend pattern
 pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
     // Set up platform callbacks using direct C API
@@ -71,20 +108,30 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
         pio.set_platform_destroy_window_raw(Some(winit_destroy_window));
         pio.set_platform_show_window_raw(Some(winit_show_window));
         pio.set_platform_set_window_pos_raw(Some(winit_set_window_pos));
-        // DEBUG: test C++-side stub to validate FFI return ABI
-        pio.set_platform_get_window_pos_raw(Some(ImGui_DebugTest_ReturnZero_GetWindowPos));
+        // Avoid direct ImVec2 return on MSVC; use cimgui setters with out-params below
+        pio.set_platform_get_window_pos_raw(None);
         pio.set_platform_set_window_size_raw(Some(winit_set_window_size));
-        pio.set_platform_get_window_size_raw(Some(ImGui_DebugTest_ReturnZero_GetWindowSize));
+        pio.set_platform_get_window_size_raw(None);
         pio.set_platform_set_window_focus_raw(Some(winit_set_window_focus));
         pio.set_platform_get_window_focus_raw(Some(winit_get_window_focus));
         pio.set_platform_get_window_minimized_raw(Some(winit_get_window_minimized));
         pio.set_platform_set_window_title_raw(Some(winit_set_window_title));
         pio.set_platform_update_window_raw(Some(winit_update_window));
 
-        // Note: no typed setter for framebuffer scale in PlatformIo wrapper. Rely on defaults set in imgui.cpp.
+        // Also register framebuffer/DPI scale and work area insets callbacks
         let pio_sys = dear_imgui::sys::igGetPlatformIO_Nil();
+        // Install out-parameter getters via cimgui helpers (avoid struct-return ABI)
+        dear_imgui::sys::ImGuiPlatformIO_Set_Platform_GetWindowPos(
+            pio_sys,
+            Some(winit_get_window_pos_out_v2),
+        );
+        dear_imgui::sys::ImGuiPlatformIO_Set_Platform_GetWindowSize(
+            pio_sys,
+            Some(winit_get_window_size_out_v2),
+        );
+        // Avoid returning ImVec2 by value across MSVC ABI for now
         (*pio_sys).Platform_GetWindowFramebufferScale = None;
-        (*pio_sys).Platform_GetWindowDpiScale = None;
+        (*pio_sys).Platform_GetWindowDpiScale = Some(winit_get_window_dpi_scale);
         (*pio_sys).Platform_GetWindowWorkAreaInsets = None;
         (*pio_sys).Platform_OnChangedViewport = Some(winit_on_changed_viewport);
         // Provide no-op implementations to avoid null-calls
@@ -233,8 +280,39 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                             continue;
                         }
                         if let Some(vd) = vd_ptr.as_ref() {
+                            // Skip main viewport: its events are handled by the primary platform path
+                            if !vd.window_owned {
+                                continue;
+                            }
                             if let Some(window) = vd.window.as_ref() {
                                 if &window.id() == window_id {
+                                    // Handle OS-move/resize/DPI change/close notifications → set flags and scales
+                                    match event {
+                                        WindowEvent::Moved(_) => {
+                                            let cur = dear_imgui::sys::igGetFrameCount();
+                                            if vd.ignore_window_pos_event_frame != cur {
+                                                (*vp).PlatformRequestMove = true;
+                                            }
+                                        }
+                                        WindowEvent::Resized(_) => {
+                                            let cur = dear_imgui::sys::igGetFrameCount();
+                                            if vd.ignore_window_size_event_frame != cur {
+                                                (*vp).PlatformRequestResize = true;
+                                            }
+                                        }
+                                        WindowEvent::ScaleFactorChanged {
+                                            scale_factor, ..
+                                        } => {
+                                            let s = *scale_factor as f32;
+                                            (*vp).DpiScale = s;
+                                            (*vp).FramebufferScale.x = s;
+                                            (*vp).FramebufferScale.y = s;
+                                        }
+                                        WindowEvent::CloseRequested => {
+                                            (*vp).PlatformRequestClose = true;
+                                        }
+                                        _ => {}
+                                    }
                                     // Route specific events using existing handlers
                                     match event {
                                         WindowEvent::KeyboardInput { event, .. } => {
@@ -259,12 +337,25 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                                             );
                                         }
                                         WindowEvent::CursorMoved { position, .. } => {
-                                            // Convert from winit logical to ImGui logical using this window's scale factor
-                                            let pos = position.to_logical(window.scale_factor());
-                                            return crate::events::handle_cursor_moved(
-                                                [pos.x, pos.y],
-                                                imgui_ctx,
-                                            );
+                                            // With multi-viewports, feed absolute/screen coordinates
+                                            let pos_logical =
+                                                position.to_logical(window.scale_factor());
+                                            let logical = [pos_logical.x, pos_logical.y];
+                                            if let Some(screen) =
+                                                client_to_screen_pos(window, logical)
+                                            {
+                                                return crate::events::handle_cursor_moved(
+                                                    [screen[0] as f64, screen[1] as f64],
+                                                    imgui_ctx,
+                                                );
+                                            } else {
+                                                let pos =
+                                                    position.to_logical(window.scale_factor());
+                                                return crate::events::handle_cursor_moved(
+                                                    [pos.x, pos.y],
+                                                    imgui_ctx,
+                                                );
+                                            }
                                         }
                                         WindowEvent::Focused(focused) => {
                                             return crate::events::handle_focused(
@@ -368,9 +459,11 @@ unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui::sys::ImGuiViewport
     // Create the window
     match event_loop.create_window(window_attrs) {
         Ok(window) => {
-            eprintln!(
+            mvlog!(
                 "[winit-mv] Platform_CreateWindow id={} size=({}, {})",
-                vp_ref.ID, vp_ref.Size.x, vp_ref.Size.y
+                vp_ref.ID,
+                vp_ref.Size.x,
+                vp_ref.Size.y
             );
             let window_ptr = Box::into_raw(Box::new(window));
             unsafe {
@@ -438,9 +531,9 @@ unsafe extern "C" fn winit_show_window(vp: *mut dear_imgui::sys::ImGuiViewport) 
 unsafe extern "C" fn winit_get_window_pos(
     vp: *mut dear_imgui::sys::ImGuiViewport,
 ) -> dear_imgui::sys::ImVec2 {
-    eprintln!("[winit-mv] ENTER winit_get_window_pos vp={:?}", vp);
+    mvlog!("[winit-mv] ENTER winit_get_window_pos vp={:?}", vp);
     if vp.is_null() {
-        eprintln!("[winit-mv] LEAVE winit_get_window_pos (null vp) -> (0,0)");
+        mvlog!("[winit-mv] LEAVE winit_get_window_pos (null vp) -> (0,0)");
         return dear_imgui::sys::ImVec2 { x: 0.0, y: 0.0 };
     }
 
@@ -462,9 +555,10 @@ unsafe extern "C" fn winit_get_window_pos(
             x: vp_ref.Pos.x,
             y: vp_ref.Pos.y,
         };
-        eprintln!(
+        mvlog!(
             "[winit-mv] LEAVE winit_get_window_pos (main) -> ({:.1}, {:.1})",
-            result.x, result.y
+            result.x,
+            result.y
         );
         return result;
     }
@@ -474,20 +568,32 @@ unsafe extern "C" fn winit_get_window_pos(
         // Only query window position for windows we own
         if vd.window_owned && !vd.window.is_null() {
             if let Some(window) = vd.window.as_ref() {
+                // Prefer client-area top-left in screen space on Windows
+                if let Some([sx, sy]) = client_to_screen_pos(window, [0.0, 0.0]) {
+                    let result = dear_imgui::sys::ImVec2 { x: sx, y: sy };
+                    mvlog!(
+                        "[winit-mv] LEAVE winit_get_window_pos (client->screen) -> ({:.1}, {:.1})",
+                        result.x,
+                        result.y
+                    );
+                    return result;
+                }
+                // Fallback
                 match window.outer_position() {
                     Ok(pos) => {
                         let result = dear_imgui::sys::ImVec2 {
                             x: pos.x as f32,
                             y: pos.y as f32,
                         };
-                        eprintln!(
-                            "[winit-mv] LEAVE winit_get_window_pos (owned) -> ({:.1}, {:.1})",
-                            result.x, result.y
+                        mvlog!(
+                            "[winit-mv] LEAVE winit_get_window_pos (outer) -> ({:.1}, {:.1})",
+                            result.x,
+                            result.y
                         );
                         return result;
                     }
                     Err(e) => {
-                        eprintln!("[winit-mv] outer_position error: {:?}", e);
+                        mvlog!("[winit-mv] outer_position error: {:?}", e);
                     }
                 }
             }
@@ -499,11 +605,92 @@ unsafe extern "C" fn winit_get_window_pos(
         x: vp_ref.Pos.x,
         y: vp_ref.Pos.y,
     };
-    eprintln!(
+    mvlog!(
         "[winit-mv] LEAVE winit_get_window_pos (fallback) -> ({:.1}, {:.1})",
-        result.x, result.y
+        result.x,
+        result.y
     );
     result
+}
+
+/// Get window position (out-parameter version to avoid MSVC small-aggregate return)
+unsafe extern "C" fn winit_get_window_pos_out(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+    out_pos: *mut dear_imgui::sys::ImVec2,
+) {
+    let mut r = dear_imgui::sys::ImVec2 { x: 0.0, y: 0.0 };
+    if !vp.is_null() {
+        let vp_ref = &*vp;
+        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+        // Heuristic: main viewport or missing data → use cached Pos
+        let is_main = vd_ptr.is_null()
+            || (|| {
+                if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+                    !vd.window_owned
+                } else {
+                    true
+                }
+            })();
+        if is_main {
+            r.x = vp_ref.Pos.x;
+            r.y = vp_ref.Pos.y;
+        } else if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+            if !vd.window.is_null() {
+                if let Some(window) = unsafe { vd.window.as_ref() } {
+                    if let Some([sx, sy]) = client_to_screen_pos(window, [0.0, 0.0]) {
+                        r.x = sx;
+                        r.y = sy;
+                    } else if let Ok(pos) = window.outer_position() {
+                        r.x = pos.x as f32;
+                        r.y = pos.y as f32;
+                    } else {
+                        r.x = vp_ref.Pos.x;
+                        r.y = vp_ref.Pos.y;
+                    }
+                }
+            }
+        }
+    }
+    if !out_pos.is_null() {
+        unsafe {
+            *out_pos = r;
+        }
+    }
+}
+
+/// Get window position (v2: always prefer OS window position when available)
+unsafe extern "C" fn winit_get_window_pos_out_v2(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+    out_pos: *mut dear_imgui::sys::ImVec2,
+) {
+    let mut r = dear_imgui::sys::ImVec2 { x: 0.0, y: 0.0 };
+    if !vp.is_null() {
+        let vp_ref = &*vp;
+        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+        if let Some(vd) = vd_ptr.as_ref() {
+            if let Some(window) = vd.window.as_ref() {
+                if let Some([sx, sy]) = client_to_screen_pos(window, [0.0, 0.0]) {
+                    r.x = sx;
+                    r.y = sy;
+                } else if let Ok(pos) = window.outer_position() {
+                    r.x = pos.x as f32;
+                    r.y = pos.y as f32;
+                } else {
+                    r.x = vp_ref.Pos.x;
+                    r.y = vp_ref.Pos.y;
+                }
+            } else {
+                r.x = vp_ref.Pos.x;
+                r.y = vp_ref.Pos.y;
+            }
+        } else {
+            r.x = vp_ref.Pos.x;
+            r.y = vp_ref.Pos.y;
+        }
+    }
+    if !out_pos.is_null() {
+        *out_pos = r;
+    }
 }
 
 /// Set window position
@@ -519,8 +706,10 @@ unsafe extern "C" fn winit_set_window_pos(
     let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
     if let Some(vd) = unsafe { vd_ptr.as_mut() } {
         if let Some(window) = unsafe { vd.window.as_mut() } {
-            let position = LogicalPosition::new(pos.x as f64, pos.y as f64);
-            window.set_outer_position(position);
+            // ImGui provides screen-space physical pixels; convert to logical for winit
+            let phys = winit::dpi::PhysicalPosition::new(pos.x as f64, pos.y as f64);
+            let logical: winit::dpi::LogicalPosition<f64> = phys.to_logical(window.scale_factor());
+            window.set_outer_position(winit::dpi::Position::Logical(logical));
             vd.ignore_window_pos_event_frame = unsafe { dear_imgui::sys::igGetFrameCount() };
         }
     }
@@ -571,6 +760,68 @@ unsafe extern "C" fn winit_get_window_size(
     result
 }
 
+/// Get window size (out-parameter version to avoid MSVC small-aggregate return)
+unsafe extern "C" fn winit_get_window_size_out(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+    out_size: *mut dear_imgui::sys::ImVec2,
+) {
+    let mut r = dear_imgui::sys::ImVec2 { x: 0.0, y: 0.0 };
+    if !vp.is_null() {
+        let vp_ref = &*vp;
+        if vp_ref.ID == 0 || vp_ref.PlatformUserData.is_null() {
+            r.x = vp_ref.Size.x;
+            r.y = vp_ref.Size.y;
+        } else {
+            let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+            if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+                if vd.window_owned && !vd.window.is_null() {
+                    if let Some(window) = unsafe { vd.window.as_ref() } {
+                        let size = window.inner_size();
+                        r.x = size.width as f32;
+                        r.y = size.height as f32;
+                    }
+                } else {
+                    r.x = vp_ref.Size.x;
+                    r.y = vp_ref.Size.y;
+                }
+            }
+        }
+    }
+    if !out_size.is_null() {
+        unsafe {
+            *out_size = r;
+        }
+    }
+}
+
+/// Get window size (v2: always prefer OS inner size when available)
+unsafe extern "C" fn winit_get_window_size_out_v2(
+    vp: *mut dear_imgui::sys::ImGuiViewport,
+    out_size: *mut dear_imgui::sys::ImVec2,
+) {
+    let mut r = dear_imgui::sys::ImVec2 { x: 0.0, y: 0.0 };
+    if !vp.is_null() {
+        let vp_ref = &*vp;
+        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+        if let Some(vd) = vd_ptr.as_ref() {
+            if let Some(window) = vd.window.as_ref() {
+                let size = window.inner_size();
+                r.x = size.width as f32;
+                r.y = size.height as f32;
+            } else {
+                r.x = vp_ref.Size.x;
+                r.y = vp_ref.Size.y;
+            }
+        } else {
+            r.x = vp_ref.Size.x;
+            r.y = vp_ref.Size.y;
+        }
+    }
+    if !out_size.is_null() {
+        *out_size = r;
+    }
+}
+
 /// Set window size
 unsafe extern "C" fn winit_set_window_size(
     vp: *mut dear_imgui::sys::ImGuiViewport,
@@ -584,8 +835,11 @@ unsafe extern "C" fn winit_set_window_size(
     let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
     if let Some(vd) = unsafe { vd_ptr.as_mut() } {
         if let Some(window) = unsafe { vd.window.as_mut() } {
-            let new_size = LogicalSize::new(size.x as f64, size.y as f64);
-            let _ = window.request_inner_size(new_size);
+            // ImGui provides inner size in physical pixels; convert to logical for winit
+            let scale = window.scale_factor();
+            let logical: winit::dpi::LogicalSize<f64> =
+                LogicalSize::new((size.x as f64) / scale, (size.y as f64) / scale);
+            let _ = window.request_inner_size(winit::dpi::Size::Logical(logical));
             vd.ignore_window_size_event_frame = unsafe { dear_imgui::sys::igGetFrameCount() };
         }
     }
@@ -690,38 +944,39 @@ unsafe extern "C" fn winit_set_window_title(
 unsafe extern "C" fn winit_get_window_framebuffer_scale(
     vp: *mut dear_imgui::sys::ImGuiViewport,
 ) -> dear_imgui::sys::ImVec2 {
-    eprintln!(
+    mvlog!(
         "[winit-mv] ENTER winit_get_window_framebuffer_scale vp={:?}",
         vp
     );
     if vp.is_null() {
-        eprintln!("[winit-mv] LEAVE winit_get_window_framebuffer_scale (null) -> (1,1)");
+        mvlog!("[winit-mv] LEAVE winit_get_window_framebuffer_scale (null) -> (1,1)");
         return dear_imgui::sys::ImVec2 { x: 1.0, y: 1.0 };
     }
 
     let vp_ref = unsafe { &*vp };
     let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
     if vd_ptr.is_null() {
-        eprintln!(
+        mvlog!(
             "[winit-mv] LEAVE winit_get_window_framebuffer_scale (no PlatformUserData) -> (1,1)"
         );
         return dear_imgui::sys::ImVec2 { x: 1.0, y: 1.0 };
     }
     if let Some(vd) = unsafe { vd_ptr.as_ref() } {
         if vd.window.is_null() {
-            eprintln!("[winit-mv] LEAVE winit_get_window_framebuffer_scale (no window) -> (1,1)");
+            mvlog!("[winit-mv] LEAVE winit_get_window_framebuffer_scale (no window) -> (1,1)");
             return dear_imgui::sys::ImVec2 { x: 1.0, y: 1.0 };
         }
         if let Some(window) = unsafe { vd.window.as_ref() } {
             let scale = window.scale_factor() as f32;
-            eprintln!(
+            mvlog!(
                 "[winit-mv] LEAVE winit_get_window_framebuffer_scale -> ({:.2}, {:.2})",
-                scale, scale
+                scale,
+                scale
             );
             return dear_imgui::sys::ImVec2 { x: scale, y: scale };
         }
     }
-    eprintln!("[winit-mv] LEAVE winit_get_window_framebuffer_scale (fallback) -> (1,1)");
+    mvlog!("[winit-mv] LEAVE winit_get_window_framebuffer_scale (fallback) -> (1,1)");
     dear_imgui::sys::ImVec2 { x: 1.0, y: 1.0 }
 }
 

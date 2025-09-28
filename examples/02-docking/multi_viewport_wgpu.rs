@@ -190,15 +190,21 @@ impl AppWindow {
             });
 
             self.renderer.new_frame()?;
-            self.renderer.render_draw_data(draw_data, &mut rpass)?;
+            self.renderer.render_draw_data_with_fb_size(
+                draw_data,
+                &mut rpass,
+                self.surface_config.width,
+                self.surface_config.height,
+            )?;
         }
+
+        // Submit and present main frame first to avoid cross-surface validation hazards
+        self.queue.submit(Some(encoder.finish()));
+        frame.present();
 
         // Update + render all platform windows (secondary viewports)
         self.imgui.update_platform_windows();
         self.imgui.render_platform_windows_default();
-
-        self.queue.submit(Some(encoder.finish()));
-        frame.present();
         Ok(())
     }
 

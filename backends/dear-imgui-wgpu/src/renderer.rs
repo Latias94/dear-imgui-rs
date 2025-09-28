@@ -21,6 +21,15 @@ use crate::{
 use dear_imgui::{BackendFlags, Context, render::DrawData};
 use wgpu::*;
 
+// Debug logging helper (off by default). Enable by building this crate with
+// `--features mv-log` to see multi-viewport renderer traces.
+#[allow(unused_macros)]
+macro_rules! mvlog {
+    ($($arg:tt)*) => {
+        if cfg!(feature = "mv-log") { eprintln!($($arg)*); }
+    }
+}
+
 /// Main WGPU renderer for Dear ImGui
 ///
 /// This corresponds to the main renderer functionality in imgui_impl_wgpu.cpp
@@ -651,17 +660,15 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
-        if cfg!(debug_assertions) {
-            eprintln!(
-                "[wgpu-mv] render_draw_data: valid={} lists={} fb_scale=({:.2},{:.2}) disp=({:.1},{:.1})",
-                draw_data.valid(),
-                draw_data.draw_lists_count(),
-                draw_data.framebuffer_scale()[0],
-                draw_data.framebuffer_scale()[1],
-                draw_data.display_size()[0],
-                draw_data.display_size()[1]
-            );
-        }
+        mvlog!(
+            "[wgpu-mv] render_draw_data: valid={} lists={} fb_scale=({:.2},{:.2}) disp=({:.1},{:.1})",
+            draw_data.valid(),
+            draw_data.draw_lists_count(),
+            draw_data.framebuffer_scale()[0],
+            draw_data.framebuffer_scale()[1],
+            draw_data.display_size()[0],
+            draw_data.display_size()[1]
+        );
         // Early out if nothing to draw (avoid binding/drawing without buffers)
         let mut total_vtx_count = 0usize;
         let mut total_idx_count = 0usize;
@@ -670,9 +677,7 @@ impl WgpuRenderer {
             total_idx_count += dl.idx_buffer().len();
         }
         if total_vtx_count == 0 || total_idx_count == 0 {
-            if cfg!(debug_assertions) {
-                eprintln!("[wgpu-mv] no vertices/indices; skipping render");
-            }
+            mvlog!("[wgpu-mv] no vertices/indices; skipping render");
             return Ok(());
         }
 
@@ -687,9 +692,7 @@ impl WgpuRenderer {
             return Ok(());
         }
 
-        if cfg!(debug_assertions) {
-            eprintln!("[wgpu-mv] handle_texture_updates");
-        }
+        mvlog!("[wgpu-mv] handle_texture_updates");
         self.texture_manager.handle_texture_updates(
             draw_data,
             &backend_data.device,
@@ -697,18 +700,12 @@ impl WgpuRenderer {
         );
 
         // Advance to next frame
-        if cfg!(debug_assertions) {
-            eprintln!("[wgpu-mv] next_frame before: {}", backend_data.frame_index);
-        }
+        mvlog!("[wgpu-mv] next_frame before: {}", backend_data.frame_index);
         backend_data.next_frame();
-        if cfg!(debug_assertions) {
-            eprintln!("[wgpu-mv] next_frame after: {}", backend_data.frame_index);
-        }
+        mvlog!("[wgpu-mv] next_frame after: {}", backend_data.frame_index);
 
         // Prepare frame resources
-        if cfg!(debug_assertions) {
-            eprintln!("[wgpu-mv] prepare_frame_resources");
-        }
+        mvlog!("[wgpu-mv] prepare_frame_resources");
         Self::prepare_frame_resources_static(draw_data, backend_data)?;
 
         // Compute gamma based on renderer mode
@@ -719,9 +716,7 @@ impl WgpuRenderer {
         };
 
         // Setup render state
-        if cfg!(debug_assertions) {
-            eprintln!("[wgpu-mv] setup_render_state");
-        }
+        mvlog!("[wgpu-mv] setup_render_state");
         Self::setup_render_state_static(draw_data, render_pass, backend_data, gamma)?;
 
         // Setup render state structure (for callbacks and custom texture bindings)
@@ -732,9 +727,7 @@ impl WgpuRenderer {
             let platform_io = dear_imgui::sys::igGetPlatformIO_Nil();
 
             // Create a temporary render state structure
-            if cfg!(debug_assertions) {
-                eprintln!("[wgpu-mv] create render_state");
-            }
+            mvlog!("[wgpu-mv] create render_state");
             let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
 
             // Set the render state pointer
@@ -763,14 +756,192 @@ impl WgpuRenderer {
         Ok(())
     }
 
+    /// Render Dear ImGui draw data with explicit framebuffer size override
+    ///
+    /// This clones the logic of `render_draw_data` but clamps scissor to the provided
+    /// `fb_width`/`fb_height` instead of deriving it from `DrawData`.
+    pub fn render_draw_data_with_fb_size(
+        &mut self,
+        draw_data: &DrawData,
+        render_pass: &mut RenderPass,
+        fb_width: u32,
+        fb_height: u32,
+    ) -> RendererResult<()> {
+        mvlog!(
+            "[wgpu-mv] render_draw_data(with_fb) lists={} override_fb=({}, {}) disp=({:.1},{:.1})",
+            draw_data.draw_lists_count(),
+            fb_width,
+            fb_height,
+            draw_data.display_size()[0],
+            draw_data.display_size()[1]
+        );
+        let total_vtx_count: usize = draw_data.draw_lists().map(|dl| dl.vtx_buffer().len()).sum();
+        let total_idx_count: usize = draw_data.draw_lists().map(|dl| dl.idx_buffer().len()).sum();
+        if total_vtx_count == 0 || total_idx_count == 0 {
+            return Ok(());
+        }
+        let backend_data = self.backend_data.as_mut().ok_or_else(|| {
+            RendererError::InvalidRenderState("Renderer not initialized".to_string())
+        })?;
+
+        // Skip if invalid/minimized
+        if fb_width == 0 || fb_height == 0 || !draw_data.valid() {
+            return Ok(());
+        }
+
+        self.texture_manager.handle_texture_updates(
+            draw_data,
+            &backend_data.device,
+            &backend_data.queue,
+        );
+
+        backend_data.next_frame();
+        Self::prepare_frame_resources_static(draw_data, backend_data)?;
+
+        let gamma = match self.gamma_mode {
+            GammaMode::Auto => Uniforms::gamma_for_format(backend_data.render_target_format),
+            GammaMode::Linear => 1.0,
+            GammaMode::Gamma22 => 2.2,
+        };
+
+        Self::setup_render_state_static(draw_data, render_pass, backend_data, gamma)?;
+
+        unsafe {
+            let platform_io = dear_imgui::sys::igGetPlatformIO_Nil();
+            let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
+            (*platform_io).Renderer_RenderState =
+                &mut render_state as *mut _ as *mut std::ffi::c_void;
+
+            // Reuse core routine but clamp scissor by overriding framebuffer bounds.
+            let mut global_idx_offset: u32 = 0;
+            let mut global_vtx_offset: i32 = 0;
+            let clip_off = draw_data.display_pos();
+            let clip_scale = draw_data.framebuffer_scale();
+            let fbw = fb_width as f32;
+            let fbh = fb_height as f32;
+
+            for draw_list in draw_data.draw_lists() {
+                let vtx_buffer = draw_list.vtx_buffer();
+                let idx_buffer = draw_list.idx_buffer();
+                let mut cmd_i = 0;
+                for cmd in draw_list.commands() {
+                    match cmd {
+                        dear_imgui::render::DrawCmd::Elements {
+                            count,
+                            cmd_params,
+                            raw_cmd,
+                        } => {
+                            // Texture bind group resolution mirrors render_draw_lists_static
+                            let texture_bind_group = {
+                                // Resolve effective ImTextureID using raw_cmd (modern texture path)
+                                let tex_id = unsafe {
+                                    dear_imgui::sys::ImDrawCmd_GetTexID(
+                                        raw_cmd as *mut dear_imgui::sys::ImDrawCmd,
+                                    )
+                                } as u64;
+                                if tex_id == 0 {
+                                    if let Some(default_tex) = &self.default_texture {
+                                        backend_data
+                                            .render_resources
+                                            .get_or_create_image_bind_group(
+                                                &backend_data.device,
+                                                0,
+                                                default_tex,
+                                            )?
+                                            .clone()
+                                    } else {
+                                        return Err(RendererError::InvalidRenderState(
+                                            "Default texture not available".to_string(),
+                                        ));
+                                    }
+                                } else if let Some(wgpu_texture) =
+                                    self.texture_manager.get_texture(tex_id)
+                                {
+                                    backend_data
+                                        .render_resources
+                                        .get_or_create_image_bind_group(
+                                            &backend_data.device,
+                                            tex_id,
+                                            &wgpu_texture.texture_view,
+                                        )?
+                                        .clone()
+                                } else if let Some(default_tex) = &self.default_texture {
+                                    backend_data
+                                        .render_resources
+                                        .get_or_create_image_bind_group(
+                                            &backend_data.device,
+                                            0,
+                                            default_tex,
+                                        )?
+                                        .clone()
+                                } else {
+                                    return Err(RendererError::InvalidRenderState(
+                                        "Texture not found and no default texture".to_string(),
+                                    ));
+                                }
+                            };
+                            render_pass.set_bind_group(1, &texture_bind_group, &[]);
+
+                            // Compute clip rect in framebuffer space
+                            let mut clip_min_x =
+                                (cmd_params.clip_rect[0] - clip_off[0]) * clip_scale[0];
+                            let mut clip_min_y =
+                                (cmd_params.clip_rect[1] - clip_off[1]) * clip_scale[1];
+                            let mut clip_max_x =
+                                (cmd_params.clip_rect[2] - clip_off[0]) * clip_scale[0];
+                            let mut clip_max_y =
+                                (cmd_params.clip_rect[3] - clip_off[1]) * clip_scale[1];
+                            // Clamp to override framebuffer bounds
+                            clip_min_x = clip_min_x.max(0.0);
+                            clip_min_y = clip_min_y.max(0.0);
+                            clip_max_x = clip_max_x.min(fbw);
+                            clip_max_y = clip_max_y.min(fbh);
+                            if clip_max_x <= clip_min_x || clip_max_y <= clip_min_y {
+                                cmd_i += 1;
+                                continue;
+                            }
+                            render_pass.set_scissor_rect(
+                                clip_min_x as u32,
+                                clip_min_y as u32,
+                                (clip_max_x - clip_min_x) as u32,
+                                (clip_max_y - clip_min_y) as u32,
+                            );
+                            let start_index = cmd_params.idx_offset as u32 + global_idx_offset;
+                            let end_index = start_index + count as u32;
+                            let vertex_offset = (cmd_params.vtx_offset as i32) + global_vtx_offset;
+                            render_pass.draw_indexed(start_index..end_index, vertex_offset, 0..1);
+                        }
+                        dear_imgui::render::DrawCmd::ResetRenderState => {
+                            Self::setup_render_state_static(
+                                draw_data,
+                                render_pass,
+                                backend_data,
+                                gamma,
+                            )?;
+                        }
+                        dear_imgui::render::DrawCmd::RawCallback { .. } => {
+                            // Unsupported raw callbacks; skip.
+                        }
+                    }
+                    cmd_i += 1;
+                }
+
+                global_idx_offset += idx_buffer.len() as u32;
+                global_vtx_offset += vtx_buffer.len() as i32;
+            }
+
+            (*platform_io).Renderer_RenderState = std::ptr::null_mut();
+        }
+
+        Ok(())
+    }
+
     /// Prepare frame resources (buffers)
     fn prepare_frame_resources_static(
         draw_data: &DrawData,
         backend_data: &mut WgpuBackendData,
     ) -> RendererResult<()> {
-        if cfg!(debug_assertions) {
-            eprintln!("[wgpu-mv] totals start");
-        }
+        mvlog!("[wgpu-mv] totals start");
         // Calculate total vertex and index counts
         let mut total_vtx_count = 0;
         let mut total_idx_count = 0;
@@ -778,12 +949,11 @@ impl WgpuRenderer {
             total_vtx_count += draw_list.vtx_buffer().len();
             total_idx_count += draw_list.idx_buffer().len();
         }
-        if cfg!(debug_assertions) {
-            eprintln!(
-                "[wgpu-mv] totals vtx={} idx={}",
-                total_vtx_count, total_idx_count
-            );
-        }
+        mvlog!(
+            "[wgpu-mv] totals vtx={} idx={}",
+            total_vtx_count,
+            total_idx_count
+        );
 
         if total_vtx_count == 0 || total_idx_count == 0 {
             return Ok(());
@@ -886,14 +1056,12 @@ impl WgpuRenderer {
 
         let mut list_i = 0usize;
         for draw_list in draw_data.draw_lists() {
-            if cfg!(debug_assertions) {
-                eprintln!(
-                    "[wgpu-mv] list[{}]: vtx={} idx={} cmds~?",
-                    list_i,
-                    draw_list.vtx_buffer().len(),
-                    draw_list.idx_buffer().len()
-                );
-            }
+            mvlog!(
+                "[wgpu-mv] list[{}]: vtx={} idx={} cmds~?",
+                list_i,
+                draw_list.vtx_buffer().len(),
+                draw_list.idx_buffer().len()
+            );
             let mut cmd_i = 0usize;
             for cmd in draw_list.commands() {
                 match cmd {
@@ -902,12 +1070,12 @@ impl WgpuRenderer {
                         cmd_params,
                         raw_cmd,
                     } => {
-                        if cfg!(debug_assertions) {
-                            eprintln!(
-                                "[wgpu-mv] list[{}] cmd[{}]: count={} tex=?",
-                                list_i, cmd_i, count
-                            );
-                        }
+                        mvlog!(
+                            "[wgpu-mv] list[{}] cmd[{}]: count={} tex=?",
+                            list_i,
+                            cmd_i,
+                            count
+                        );
                         // Get texture bind group
                         //
                         // Dear ImGui 1.92+ (modern texture system): draw commands may carry
@@ -1150,7 +1318,7 @@ pub mod multi_viewport {
         if vp.is_null() {
             return;
         }
-        eprintln!("[wgpu-mv] Renderer_CreateWindow");
+        mvlog!("[wgpu-mv] Renderer_CreateWindow");
 
         let global = match GLOBAL.get() {
             Some(g) => g,
@@ -1270,7 +1438,7 @@ pub mod multi_viewport {
         if vp.is_null() {
             return;
         }
-        eprintln!("[wgpu-mv] Renderer_DestroyWindow");
+        mvlog!("[wgpu-mv] Renderer_DestroyWindow");
         if let Some(data) = viewport_user_data_mut(vp) {
             // Drop pending frame if any
             data.pending_frame.take();
@@ -1289,17 +1457,21 @@ pub mod multi_viewport {
         if vp.is_null() {
             return;
         }
-        eprintln!(
+        mvlog!(
             "[wgpu-mv] Renderer_SetWindowSize to ({}, {})",
-            size.x, size.y
+            size.x,
+            size.y
         );
         let global = match GLOBAL.get() {
             Some(g) => g,
             None => return,
         };
         if let Some(data) = viewport_user_data_mut(vp) {
-            let new_w = size.x.max(1.0) as u32;
-            let new_h = size.y.max(1.0) as u32;
+            // Convert ImGui logical size to physical pixels using framebuffer scale
+            let vpm_ref = &*vp;
+            let scale = vpm_ref.framebuffer_scale();
+            let new_w = (size.x * scale[0]).max(1.0) as u32;
+            let new_h = (size.y * scale[1]).max(1.0) as u32;
             if data.config.width != new_w || data.config.height != new_h {
                 data.config.width = new_w;
                 data.config.height = new_h;
@@ -1313,7 +1485,7 @@ pub mod multi_viewport {
         if vp.is_null() {
             return;
         }
-        eprintln!("[wgpu-mv] Renderer_RenderWindow");
+        mvlog!("[wgpu-mv] Renderer_RenderWindow");
         let renderer = match (get_renderer() as *mut WgpuRenderer).as_mut() {
             Some(r) => r,
             None => return,
@@ -1330,7 +1502,7 @@ pub mod multi_viewport {
         }
         // SAFETY: Dear ImGui provides a valid ImDrawData during RenderPlatformWindowsDefault
         let draw_data: &dear_imgui::render::DrawData = std::mem::transmute(&*raw_dd);
-        eprintln!(
+        mvlog!(
             "[wgpu-mv] draw_data: valid={} lists={} fb_scale=({:.2},{:.2}) disp=({:.1},{:.1})",
             draw_data.valid(),
             draw_data.draw_lists_count(),
@@ -1340,9 +1512,9 @@ pub mod multi_viewport {
             draw_data.display_size()[1]
         );
 
-        eprintln!("[wgpu-mv] retrieving viewport user data");
+        mvlog!("[wgpu-mv] retrieving viewport user data");
         if let Some(data) = unsafe { viewport_user_data_mut(vp) } {
-            eprintln!("[wgpu-mv] have viewport user data; acquiring surface frame");
+            mvlog!("[wgpu-mv] have viewport user data; acquiring surface frame");
             // Acquire frame
             let frame = match data.surface.get_current_texture() {
                 Ok(f) => f,
@@ -1351,17 +1523,17 @@ pub mod multi_viewport {
                     return;
                 }
             };
-            eprintln!("[wgpu-mv] acquired frame; creating view");
+            mvlog!("[wgpu-mv] acquired frame; creating view");
             let view = frame
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
             // Encode commands and render (catch panics to avoid crashing the whole app)
-            eprintln!("[wgpu-mv] creating command encoder");
+            mvlog!("[wgpu-mv] creating command encoder");
             let render_block = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("dear-imgui-wgpu::viewport-encoder"),
                 });
-                eprintln!("[wgpu-mv] begin_render_pass start");
+                mvlog!("[wgpu-mv] begin_render_pass start");
                 {
                     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("dear-imgui-wgpu::viewport-pass"),
@@ -1378,11 +1550,22 @@ pub mod multi_viewport {
                         occlusion_query_set: None,
                         timestamp_writes: None,
                     });
-                    eprintln!("[wgpu-mv] begin_render_pass ok");
-                    eprintln!("[wgpu-mv] about to render_draw_data for viewport");
-                    // Reuse existing draw path but keep frame index stable within the same ImGui frame
+                    mvlog!("[wgpu-mv] begin_render_pass ok");
+                    mvlog!("[wgpu-mv] about to render_draw_data for viewport");
+                    // Reuse existing draw path with explicit framebuffer size to avoid scissor mismatch
                     let saved_index_opt = renderer.backend_data.as_ref().map(|b| b.frame_index);
-                    if let Err(e) = renderer.render_draw_data(&draw_data, &mut render_pass) {
+                    if let Some(vd) = viewport_user_data_mut(vp) {
+                        let fb_w = vd.config.width;
+                        let fb_h = vd.config.height;
+                        if let Err(e) = renderer.render_draw_data_with_fb_size(
+                            &draw_data,
+                            &mut render_pass,
+                            fb_w,
+                            fb_h,
+                        ) {
+                            eprintln!("[wgpu-mv] render_draw_data(with_fb) error: {:?}", e);
+                        }
+                    } else if let Err(e) = renderer.render_draw_data(&draw_data, &mut render_pass) {
                         eprintln!("[wgpu-mv] render_draw_data error: {:?}", e);
                     }
                     if let Some(saved_index) = saved_index_opt {
@@ -1393,11 +1576,11 @@ pub mod multi_viewport {
                             }
                         }
                     }
-                    eprintln!("[wgpu-mv] finished render_draw_data");
+                    mvlog!("[wgpu-mv] finished render_draw_data");
                 }
-                eprintln!("[wgpu-mv] submitting queue");
+                mvlog!("[wgpu-mv] submitting queue");
                 queue.submit(std::iter::once(encoder.finish()));
-                eprintln!("[wgpu-mv] submit ok");
+                mvlog!("[wgpu-mv] submit ok");
             }));
             if render_block.is_err() {
                 eprintln!(
@@ -1406,7 +1589,7 @@ pub mod multi_viewport {
                 return;
             }
             data.pending_frame = Some(frame);
-            eprintln!("[wgpu-mv] submitted and stored pending frame");
+            mvlog!("[wgpu-mv] submitted and stored pending frame");
         }
     }
 
@@ -1415,7 +1598,7 @@ pub mod multi_viewport {
         if vp.is_null() {
             return;
         }
-        eprintln!("[wgpu-mv] Renderer_SwapBuffers");
+        mvlog!("[wgpu-mv] Renderer_SwapBuffers");
         if let Some(data) = viewport_user_data_mut(vp) {
             if let Some(frame) = data.pending_frame.take() {
                 frame.present();

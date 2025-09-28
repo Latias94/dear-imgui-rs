@@ -176,7 +176,28 @@ impl WinitPlatform {
                 events::handle_keyboard_input(event, imgui_ctx)
             }
             WindowEvent::CursorMoved { position, .. } => {
-                // Convert from winit logical to our active DPI logical
+                // With multi-viewports enabled, feed absolute/screen coordinates like upstream backends
+                #[cfg(feature = "multi-viewport")]
+                {
+                    if imgui_ctx
+                        .io()
+                        .config_flags()
+                        .contains(dear_imgui::ConfigFlags::VIEWPORTS_ENABLE)
+                    {
+                        // Reuse helper from multi_viewport module
+                        let pos_logical = position.to_logical(window.scale_factor());
+                        let logical = [pos_logical.x, pos_logical.y];
+                        if let Some(screen) =
+                            crate::multi_viewport::client_to_screen_pos(window, logical)
+                        {
+                            return events::handle_cursor_moved(
+                                [screen[0] as f64, screen[1] as f64],
+                                imgui_ctx,
+                            );
+                        }
+                    }
+                }
+                // Fallback: local logical coordinates
                 let position = position.to_logical(window.scale_factor());
                 let position = self.scale_pos_from_winit(window, position);
                 events::handle_cursor_moved([position.x, position.y], imgui_ctx)
