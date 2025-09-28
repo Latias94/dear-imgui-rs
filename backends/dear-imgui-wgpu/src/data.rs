@@ -70,6 +70,10 @@ impl WgpuRenderState {
 /// This corresponds to ImGui_ImplWGPU_InitInfo in the C++ implementation
 #[derive(Debug, Clone)]
 pub struct WgpuInitInfo {
+    /// WGPU instance (required for multi-viewport to create per-window surfaces)
+    pub instance: Option<Instance>,
+    /// WGPU adapter (optional, but recommended for multi-viewport to query surface capabilities)
+    pub adapter: Option<Adapter>,
     /// WGPU device
     pub device: Device,
     /// WGPU queue
@@ -88,6 +92,8 @@ impl WgpuInitInfo {
     /// Create new initialization info with required parameters
     pub fn new(device: Device, queue: Queue, render_target_format: TextureFormat) -> Self {
         Self {
+            instance: None,
+            adapter: None,
             device,
             queue,
             num_frames_in_flight: 3,
@@ -118,6 +124,18 @@ impl WgpuInitInfo {
         self.pipeline_multisample_state = state;
         self
     }
+
+    /// Provide an instance for creating per-window surfaces (multi-viewport)
+    pub fn with_instance(mut self, instance: Instance) -> Self {
+        self.instance = Some(instance);
+        self
+    }
+
+    /// Provide an adapter for querying per-surface capabilities (recommended for multi-viewport)
+    pub fn with_adapter(mut self, adapter: Adapter) -> Self {
+        self.adapter = Some(adapter);
+        self
+    }
 }
 
 /// Main backend data structure
@@ -126,6 +144,10 @@ impl WgpuInitInfo {
 pub struct WgpuBackendData {
     /// Initialization info
     pub init_info: WgpuInitInfo,
+    /// WGPU instance (if provided)
+    pub instance: Option<Instance>,
+    /// WGPU adapter (if provided)
+    pub adapter: Option<Adapter>,
     /// WGPU device
     pub device: Device,
     /// Default queue
@@ -156,6 +178,8 @@ impl WgpuBackendData {
         let frame_resources = (0..num_frames).map(|_| FrameResources::new()).collect();
 
         Self {
+            instance: init_info.instance.clone(),
+            adapter: init_info.adapter.clone(),
             device: init_info.device.clone(),
             queue,
             render_target_format: init_info.render_target_format,

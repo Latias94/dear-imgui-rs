@@ -63,6 +63,10 @@ name = "dockspace_minimal"
 path = "02-docking/dockspace_minimal.rs"
 
 [[bin]]
+name = "multi_viewport_wgpu"
+path = "02-docking/multi_viewport_wgpu.rs"
+
+[[bin]]
 name = "wgpu_textures"
 path = "01-renderers/wgpu_textures.rs"
 

@@ -173,6 +173,12 @@ impl WgpuRenderer {
         // We can honor ImGuiPlatformIO::Textures[] requests during render.
         flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
 
+        #[cfg(feature = "multi-viewport")]
+        {
+            // We can render additional platform windows
+            flags.insert(BackendFlags::RENDERER_HAS_VIEWPORTS);
+        }
+
         io.set_backend_flags(flags);
         // Note: Dear ImGui doesn't expose set_backend_renderer_name in the Rust bindings yet
     }
@@ -645,6 +651,31 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[wgpu-mv] render_draw_data: valid={} lists={} fb_scale=({:.2},{:.2}) disp=({:.1},{:.1})",
+                draw_data.valid(),
+                draw_data.draw_lists_count(),
+                draw_data.framebuffer_scale()[0],
+                draw_data.framebuffer_scale()[1],
+                draw_data.display_size()[0],
+                draw_data.display_size()[1]
+            );
+        }
+        // Early out if nothing to draw (avoid binding/drawing without buffers)
+        let mut total_vtx_count = 0usize;
+        let mut total_idx_count = 0usize;
+        for dl in draw_data.draw_lists() {
+            total_vtx_count += dl.vtx_buffer().len();
+            total_idx_count += dl.idx_buffer().len();
+        }
+        if total_vtx_count == 0 || total_idx_count == 0 {
+            if cfg!(debug_assertions) {
+                eprintln!("[wgpu-mv] no vertices/indices; skipping render");
+            }
+            return Ok(());
+        }
+
         let backend_data = self.backend_data.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("Renderer not initialized".to_string())
         })?;
@@ -656,6 +687,9 @@ impl WgpuRenderer {
             return Ok(());
         }
 
+        if cfg!(debug_assertions) {
+            eprintln!("[wgpu-mv] handle_texture_updates");
+        }
         self.texture_manager.handle_texture_updates(
             draw_data,
             &backend_data.device,
@@ -663,9 +697,18 @@ impl WgpuRenderer {
         );
 
         // Advance to next frame
+        if cfg!(debug_assertions) {
+            eprintln!("[wgpu-mv] next_frame before: {}", backend_data.frame_index);
+        }
         backend_data.next_frame();
+        if cfg!(debug_assertions) {
+            eprintln!("[wgpu-mv] next_frame after: {}", backend_data.frame_index);
+        }
 
         // Prepare frame resources
+        if cfg!(debug_assertions) {
+            eprintln!("[wgpu-mv] prepare_frame_resources");
+        }
         Self::prepare_frame_resources_static(draw_data, backend_data)?;
 
         // Compute gamma based on renderer mode
@@ -676,6 +719,9 @@ impl WgpuRenderer {
         };
 
         // Setup render state
+        if cfg!(debug_assertions) {
+            eprintln!("[wgpu-mv] setup_render_state");
+        }
         Self::setup_render_state_static(draw_data, render_pass, backend_data, gamma)?;
 
         // Setup render state structure (for callbacks and custom texture bindings)
@@ -686,6 +732,9 @@ impl WgpuRenderer {
             let platform_io = dear_imgui::sys::igGetPlatformIO_Nil();
 
             // Create a temporary render state structure
+            if cfg!(debug_assertions) {
+                eprintln!("[wgpu-mv] create render_state");
+            }
             let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
 
             // Set the render state pointer
@@ -705,7 +754,10 @@ impl WgpuRenderer {
             // Clear the render state pointer
             (*platform_io).Renderer_RenderState = std::ptr::null_mut();
 
-            result?;
+            if let Err(e) = result {
+                eprintln!("[wgpu-mv] render_draw_lists_static error: {:?}", e);
+                return Err(e);
+            }
         }
 
         Ok(())
@@ -716,12 +768,21 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         backend_data: &mut WgpuBackendData,
     ) -> RendererResult<()> {
+        if cfg!(debug_assertions) {
+            eprintln!("[wgpu-mv] totals start");
+        }
         // Calculate total vertex and index counts
         let mut total_vtx_count = 0;
         let mut total_idx_count = 0;
         for draw_list in draw_data.draw_lists() {
             total_vtx_count += draw_list.vtx_buffer().len();
             total_idx_count += draw_list.idx_buffer().len();
+        }
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[wgpu-mv] totals vtx={} idx={}",
+                total_vtx_count, total_idx_count
+            );
         }
 
         if total_vtx_count == 0 || total_idx_count == 0 {
@@ -823,7 +884,17 @@ impl WgpuRenderer {
         let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
         let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
 
+        let mut list_i = 0usize;
         for draw_list in draw_data.draw_lists() {
+            if cfg!(debug_assertions) {
+                eprintln!(
+                    "[wgpu-mv] list[{}]: vtx={} idx={} cmds~?",
+                    list_i,
+                    draw_list.vtx_buffer().len(),
+                    draw_list.idx_buffer().len()
+                );
+            }
+            let mut cmd_i = 0usize;
             for cmd in draw_list.commands() {
                 match cmd {
                     dear_imgui::render::DrawCmd::Elements {
@@ -831,6 +902,12 @@ impl WgpuRenderer {
                         cmd_params,
                         raw_cmd,
                     } => {
+                        if cfg!(debug_assertions) {
+                            eprintln!(
+                                "[wgpu-mv] list[{}] cmd[{}]: count={} tex=?",
+                                list_i, cmd_i, count
+                            );
+                        }
                         // Get texture bind group
                         //
                         // Dear ImGui 1.92+ (modern texture system): draw commands may carry
@@ -940,10 +1017,12 @@ impl WgpuRenderer {
                         );
                     }
                 }
+                cmd_i += 1;
             }
 
             global_idx_offset += draw_list.idx_buffer().len() as u32;
             global_vtx_offset += draw_list.vtx_buffer().len() as i32;
+            list_i += 1;
         }
 
         Ok(())
@@ -983,5 +1062,385 @@ impl WgpuRenderer {
 impl Default for WgpuRenderer {
     fn default() -> Self {
         Self::empty()
+    }
+}
+
+/// Multi-viewport support (Renderer_* callbacks and helpers)
+#[cfg(feature = "multi-viewport")]
+pub mod multi_viewport {
+    use super::*;
+    use dear_imgui::platform_io::Viewport;
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[cfg(not(target_arch = "wasm32"))]
+    use winit::window::Window;
+
+    /// Per-viewport WGPU data stored in ImGuiViewport::RendererUserData
+    pub struct ViewportWgpuData {
+        pub surface: wgpu::Surface<'static>,
+        pub config: wgpu::SurfaceConfiguration,
+        pub pending_frame: Option<wgpu::SurfaceTexture>,
+    }
+
+    static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
+    static GLOBAL: OnceLock<GlobalHandles> = OnceLock::new();
+
+    struct GlobalHandles {
+        instance: Option<wgpu::Instance>,
+        adapter: Option<wgpu::Adapter>,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        render_target_format: wgpu::TextureFormat,
+    }
+
+    /// Enable WGPU multi-viewport: set per-viewport callbacks and capture renderer pointer
+    pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
+        // Expose callbacks through PlatformIO
+        unsafe {
+            let platform_io = imgui_context.platform_io_mut();
+            platform_io.set_renderer_create_window(Some(
+                renderer_create_window as unsafe extern "C" fn(*mut Viewport),
+            ));
+            platform_io.set_renderer_destroy_window(Some(
+                renderer_destroy_window as unsafe extern "C" fn(*mut Viewport),
+            ));
+            platform_io.set_renderer_set_window_size(Some(
+                renderer_set_window_size
+                    as unsafe extern "C" fn(*mut Viewport, dear_imgui::sys::ImVec2),
+            ));
+            // Route rendering via platform raw callbacks to avoid typed trampolines
+            platform_io.set_platform_render_window_raw(Some(platform_render_window_sys));
+            platform_io.set_platform_swap_buffers_raw(Some(platform_swap_buffers_sys));
+        }
+
+        // Store self pointer for callbacks
+        RENDERER_PTR.store(renderer as *mut _ as usize, Ordering::SeqCst);
+
+        // Also store global handles so creation/resizing callbacks don't rely on renderer pointer stability
+        if let Some(backend) = renderer.backend_data.as_ref() {
+            let _ = GLOBAL.set(GlobalHandles {
+                instance: backend.instance.clone(),
+                adapter: backend.adapter.clone(),
+                device: backend.device.clone(),
+                queue: backend.queue.clone(),
+                render_target_format: backend.render_target_format,
+            });
+        }
+    }
+
+    unsafe fn get_renderer<'a>() -> &'a mut WgpuRenderer {
+        let ptr = RENDERER_PTR.load(Ordering::SeqCst) as *mut WgpuRenderer;
+        &mut *ptr
+    }
+
+    /// Helper to get or create per-viewport user data
+    unsafe fn viewport_user_data_mut<'a>(vp: *mut Viewport) -> Option<&'a mut ViewportWgpuData> {
+        let vpm = &mut *vp;
+        let data = vpm.renderer_user_data();
+        if data.is_null() {
+            None
+        } else {
+            Some(&mut *(data as *mut ViewportWgpuData))
+        }
+    }
+
+    /// Renderer: create per-viewport resources (surface + config)
+    pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
+        if vp.is_null() {
+            return;
+        }
+        eprintln!("[wgpu-mv] Renderer_CreateWindow");
+
+        let global = match GLOBAL.get() {
+            Some(g) => g,
+            None => return,
+        };
+
+        // Obtain window from platform handle
+        let vpm = &mut *vp;
+        let window_ptr = vpm.platform_handle();
+        if window_ptr.is_null() {
+            return;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let window: &Window = &*(window_ptr as *const Window);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let instance = match &global.instance {
+            Some(i) => i.clone(),
+            None => return, // cannot create surfaces without instance
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let surface = match instance.create_surface(window) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[wgpu-mv] create_surface error: {:?}", e);
+                return;
+            }
+        };
+        // Extend surface lifetime to 'static by tying it to backend-owned instance
+        let surface: wgpu::Surface<'static> = std::mem::transmute(surface);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let size = window.inner_size();
+        #[cfg(not(target_arch = "wasm32"))]
+        let width = size.width.max(1);
+        #[cfg(not(target_arch = "wasm32"))]
+        let height = size.height.max(1);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut config = {
+            // Prefer the renderer's main format if the surface supports it; otherwise, bail out gracefully
+            if let Some(adapter) = &global.adapter {
+                let caps = surface.get_capabilities(adapter);
+                let format = if caps.formats.contains(&global.render_target_format) {
+                    global.render_target_format
+                } else {
+                    // If the main pipeline format isn't supported, we cannot render safely with this pipeline.
+                    eprintln!(
+                        "[wgpu-mv] Surface doesn't support pipeline format {:?}; supported: {:?}. Skipping configure.",
+                        global.render_target_format, caps.formats
+                    );
+                    return;
+                };
+                let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Fifo) {
+                    wgpu::PresentMode::Fifo
+                } else {
+                    // Fallback to first supported present mode
+                    caps.present_modes
+                        .get(0)
+                        .cloned()
+                        .unwrap_or(wgpu::PresentMode::Fifo)
+                };
+                let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Auto) {
+                    wgpu::CompositeAlphaMode::Auto
+                } else {
+                    caps.alpha_modes
+                        .get(0)
+                        .cloned()
+                        .unwrap_or(wgpu::CompositeAlphaMode::Opaque)
+                };
+                wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format,
+                    width,
+                    height,
+                    present_mode,
+                    alpha_mode,
+                    view_formats: vec![format],
+                    desired_maximum_frame_latency: 1,
+                }
+            } else {
+                // No adapter available: assume the same format as main and attempt configure (best-effort)
+                wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format: global.render_target_format,
+                    width,
+                    height,
+                    present_mode: wgpu::PresentMode::Fifo,
+                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    view_formats: vec![global.render_target_format],
+                    desired_maximum_frame_latency: 1,
+                }
+            }
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Configure with validated config
+            surface.configure(&global.device, &config);
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let data = ViewportWgpuData {
+                surface,
+                config,
+                pending_frame: None,
+            };
+            vpm.set_renderer_user_data(Box::into_raw(Box::new(data)) as *mut c_void);
+        }
+    }
+
+    /// Renderer: destroy per-viewport resources
+    pub unsafe extern "C" fn renderer_destroy_window(vp: *mut Viewport) {
+        if vp.is_null() {
+            return;
+        }
+        eprintln!("[wgpu-mv] Renderer_DestroyWindow");
+        if let Some(data) = viewport_user_data_mut(vp) {
+            // Drop pending frame if any
+            data.pending_frame.take();
+            // Free user data box
+            let _ = Box::from_raw(data as *mut ViewportWgpuData);
+            let vpm = &mut *vp;
+            vpm.set_renderer_user_data(std::ptr::null_mut());
+        }
+    }
+
+    /// Renderer: notify new size
+    pub unsafe extern "C" fn renderer_set_window_size(
+        vp: *mut Viewport,
+        size: dear_imgui::sys::ImVec2,
+    ) {
+        if vp.is_null() {
+            return;
+        }
+        eprintln!(
+            "[wgpu-mv] Renderer_SetWindowSize to ({}, {})",
+            size.x, size.y
+        );
+        let global = match GLOBAL.get() {
+            Some(g) => g,
+            None => return,
+        };
+        if let Some(data) = viewport_user_data_mut(vp) {
+            let new_w = size.x.max(1.0) as u32;
+            let new_h = size.y.max(1.0) as u32;
+            if data.config.width != new_w || data.config.height != new_h {
+                data.config.width = new_w;
+                data.config.height = new_h;
+                data.surface.configure(&global.device, &data.config);
+            }
+        }
+    }
+
+    /// Renderer: render viewport draw data into its surface
+    pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: *mut c_void) {
+        if vp.is_null() {
+            return;
+        }
+        eprintln!("[wgpu-mv] Renderer_RenderWindow");
+        let renderer = match (get_renderer() as *mut WgpuRenderer).as_mut() {
+            Some(r) => r,
+            None => return,
+        };
+        // Clone device/queue to avoid borrowing renderer during render
+        let (device, queue) = match renderer.backend_data.as_ref() {
+            Some(b) => (b.device.clone(), b.queue.clone()),
+            None => return,
+        };
+        let vpm = &mut *vp;
+        let raw_dd = vpm.draw_data();
+        if raw_dd.is_null() {
+            return;
+        }
+        // SAFETY: Dear ImGui provides a valid ImDrawData during RenderPlatformWindowsDefault
+        let draw_data: &dear_imgui::render::DrawData = std::mem::transmute(&*raw_dd);
+        eprintln!(
+            "[wgpu-mv] draw_data: valid={} lists={} fb_scale=({:.2},{:.2}) disp=({:.1},{:.1})",
+            draw_data.valid(),
+            draw_data.draw_lists_count(),
+            draw_data.framebuffer_scale()[0],
+            draw_data.framebuffer_scale()[1],
+            draw_data.display_size()[0],
+            draw_data.display_size()[1]
+        );
+
+        eprintln!("[wgpu-mv] retrieving viewport user data");
+        if let Some(data) = unsafe { viewport_user_data_mut(vp) } {
+            eprintln!("[wgpu-mv] have viewport user data; acquiring surface frame");
+            // Acquire frame
+            let frame = match data.surface.get_current_texture() {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("[wgpu-mv] get_current_texture error: {:?}", e);
+                    return;
+                }
+            };
+            eprintln!("[wgpu-mv] acquired frame; creating view");
+            let view = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            // Encode commands and render (catch panics to avoid crashing the whole app)
+            eprintln!("[wgpu-mv] creating command encoder");
+            let render_block = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("dear-imgui-wgpu::viewport-encoder"),
+                });
+                eprintln!("[wgpu-mv] begin_render_pass start");
+                {
+                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("dear-imgui-wgpu::viewport-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                    });
+                    eprintln!("[wgpu-mv] begin_render_pass ok");
+                    eprintln!("[wgpu-mv] about to render_draw_data for viewport");
+                    // Reuse existing draw path but keep frame index stable within the same ImGui frame
+                    let saved_index_opt = renderer.backend_data.as_ref().map(|b| b.frame_index);
+                    if let Err(e) = renderer.render_draw_data(&draw_data, &mut render_pass) {
+                        eprintln!("[wgpu-mv] render_draw_data error: {:?}", e);
+                    }
+                    if let Some(saved_index) = saved_index_opt {
+                        if let Some(backend) = renderer.backend_data.as_mut() {
+                            // Only restore to a meaningful value; avoid resetting to u32::MAX
+                            if saved_index != u32::MAX {
+                                backend.frame_index = saved_index;
+                            }
+                        }
+                    }
+                    eprintln!("[wgpu-mv] finished render_draw_data");
+                }
+                eprintln!("[wgpu-mv] submitting queue");
+                queue.submit(std::iter::once(encoder.finish()));
+                eprintln!("[wgpu-mv] submit ok");
+            }));
+            if render_block.is_err() {
+                eprintln!(
+                    "[wgpu-mv] panic during viewport render block; skipping present for this viewport"
+                );
+                return;
+            }
+            data.pending_frame = Some(frame);
+            eprintln!("[wgpu-mv] submitted and stored pending frame");
+        }
+    }
+
+    /// Renderer: present frame for viewport surface
+    pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *mut c_void) {
+        if vp.is_null() {
+            return;
+        }
+        eprintln!("[wgpu-mv] Renderer_SwapBuffers");
+        if let Some(data) = viewport_user_data_mut(vp) {
+            if let Some(frame) = data.pending_frame.take() {
+                frame.present();
+            }
+        }
+    }
+
+    // Raw sys-platform wrappers to avoid typed trampolines
+    pub unsafe extern "C" fn platform_render_window_sys(
+        vp: *mut dear_imgui::sys::ImGuiViewport,
+        arg: *mut c_void,
+    ) {
+        if vp.is_null() {
+            return;
+        }
+        renderer_render_window(vp as *mut Viewport, arg);
+    }
+
+    pub unsafe extern "C" fn platform_swap_buffers_sys(
+        vp: *mut dear_imgui::sys::ImGuiViewport,
+        arg: *mut c_void,
+    ) {
+        if vp.is_null() {
+            return;
+        }
+        renderer_swap_buffers(vp as *mut Viewport, arg);
     }
 }

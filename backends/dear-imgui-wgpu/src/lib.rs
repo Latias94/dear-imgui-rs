@@ -63,6 +63,10 @@ pub use shaders::*;
 pub use texture::*;
 pub use uniforms::*;
 
+// Re-export multi-viewport helpers when enabled
+#[cfg(feature = "multi-viewport")]
+pub use renderer::multi_viewport;
+
 /// Gamma correction mode for the WGPU renderer
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GammaMode {
