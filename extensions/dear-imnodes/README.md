@@ -8,6 +8,11 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 - Strongly-typed enums/bitflags for style and attributes
 - Helpers: links, selection, node positions, minimap, IO setup
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/imnodes-basic.png" alt="ImNodes" width="75%"/>
+  <br/>
+</p>
+
 ## Compatibility
 
 | Item              | Version |
@@ -16,7 +21,7 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 | dear-imgui        | 0.2.x   |
 | dear-imnodes-sys  | 0.1.x   |
 
-See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Quick Start
 

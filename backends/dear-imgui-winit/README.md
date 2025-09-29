@@ -4,6 +4,11 @@ Winit platform backend for the `dear-imgui` Rust crate. It wires winit input/eve
 cursor handling and DPI awareness into Dear ImGui. Inspired by
 `imgui-rs/imgui-winit-support`.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/game-engine-docking.png" alt="Docking (winit)" width="75%"/>
+  <br/>
+</p>
+
 ## Compatibility
 
 | Item       | Version |
@@ -12,7 +17,7 @@ cursor handling and DPI awareness into Dear ImGui. Inspired by
 | dear-imgui | 0.2.x   |
 | winit      | 0.30.12 |
 
-See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Quick Start
 

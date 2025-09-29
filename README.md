@@ -11,11 +11,11 @@
 Rust bindings and ecosystem around Dear ImGui, with docking, WGPU/GL backends, and popular extensions (ImGuizmo, ImNodes, ImPlot).
 
 <p align="center">
-  <img src="screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
-  <img src="screenshots/imguizmo-basic.png" alt="ImGuizmo" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/imguizmo-basic.png" alt="ImGuizmo" width="49%"/>
   <br/>
-  <img src="screenshots/implot-basic.png" alt="ImPlot" width="49%"/>
-  <img src="screenshots/imnodes-basic.png" alt="ImNodes Shader Graph" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/implot-basic.png" alt="ImPlot" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/imnodes-basic.png" alt="ImNodes Shader Graph" width="49%"/>
 </p>
 
 ## What’s in this repo
@@ -106,7 +106,7 @@ Quick examples (enable auto prebuilt download):
 
 ## Compatibility (Latest)
 
-The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for full history and upgrade notes.
+The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for full history and upgrade notes.
 
 Core
 
@@ -179,6 +179,7 @@ extensions/
 If you're working with graphics applications in Rust, you might also be interested in:
 
 - **[asset-importer](https://github.com/Latias94/asset-importer)** - A comprehensive Rust binding for the latest [Assimp](https://github.com/assimp/assimp) 3D asset import library, providing robust 3D model loading capabilities for graphics applications
+- **[boxdd](https://github.com/Latias94/boxdd)** - Safe, ergonomic Rust bindings for Box2D v3.
 
 ## Acknowledgments
 

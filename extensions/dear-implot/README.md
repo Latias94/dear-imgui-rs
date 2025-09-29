@@ -4,6 +4,11 @@ High-level Rust bindings for ImPlot, the immediate mode plotting library. This c
 
 For native build/link options (source, system/prebuilt, remote prebuilt), see `extensions/dear-implot-sys/README.md`.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/implot-basic.png" alt="ImPlot" width="75%"/>
+  <br/>
+</p>
+
 ## Compatibility
 
 | Item              | Version |
@@ -12,7 +17,7 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 | dear-imgui        | 0.2.x   |
 | dear-implot-sys   | 0.2.x   |
 
-See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 
 ## Integration Quickstart

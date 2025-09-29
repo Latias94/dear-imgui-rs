@@ -2,6 +2,11 @@
 
 Glow (OpenGL) renderer for Dear ImGui.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/game-engine-docking.png" alt="Docking (OpenGL/Glow)" width="75%"/>
+  <br/>
+</p>
+
 ## Quick Start
 
 ```rust
@@ -64,7 +69,7 @@ renderer.render(&draw_data)?;
 | dear-imgui | 0.2.x   |
 | glow       | 0.16    |
 
-See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Features
 

@@ -4,6 +4,11 @@ High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGui
 
 This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ binding.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/imguizmo-basic.png" alt="ImGuizmo" width="75%"/>
+  <br/>
+</p>
+
 ## Links
 
 - Upstream: https://github.com/CedricGuillemet/ImGuizmo
@@ -22,7 +27,7 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 | dear-imgui        | 0.2.x   |
 | dear-imguizmo-sys | 0.1.x   |
 
-See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Features
 
