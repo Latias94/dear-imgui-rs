@@ -13,13 +13,6 @@ keywords.workspace = true
 [dependencies]
 dear-imgui = { path = "../../dear-imgui", version = "0.2" }
 winit.workspace = true
-# For translating client-area coordinates to screen coords on Windows (ClientToScreen)
-# and to access native HWND via raw window handle.
-raw-window-handle = "0.6"
-windows-sys = { version = "0.52", features = [
-    "Win32_Foundation",
-    "Win32_UI_WindowsAndMessaging"
-], optional = true }
 #cfg-if.workspace = true
 instant = { version = "0.1", features = ["wasm-bindgen"] }
 
@@ -37,8 +30,4 @@ default = []
 # Enable multi-viewport support (WIP). Declared to silence cfg warnings; kept off by default.
 multi-viewport = ["dear-imgui/multi-viewport"]
 
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.52", features = [
-    "Win32_Foundation",
-    "Win32_UI_WindowsAndMessaging"
-] }
+ 

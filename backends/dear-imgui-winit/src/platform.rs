@@ -66,6 +66,8 @@ impl WinitPlatform {
             config_flags.insert(dear_imgui::ConfigFlags::VIEWPORTS_ENABLE);
             io.set_config_flags(config_flags);
             backend_flags.insert(BackendFlags::PLATFORM_HAS_VIEWPORTS);
+            // When viewports are enabled, avoid moving OS cursor from ImGui (no global set in winit)
+            backend_flags.remove(BackendFlags::HAS_SET_MOUSE_POS);
         }
 
         io.set_backend_flags(backend_flags);
@@ -184,16 +186,11 @@ impl WinitPlatform {
                         .config_flags()
                         .contains(dear_imgui::ConfigFlags::VIEWPORTS_ENABLE)
                     {
-                        // Reuse helper from multi_viewport module
-                        let pos_logical = position.to_logical(window.scale_factor());
-                        let logical = [pos_logical.x, pos_logical.y];
-                        if let Some(screen) =
-                            crate::multi_viewport::client_to_screen_pos(window, logical)
-                        {
-                            return events::handle_cursor_moved(
-                                [screen[0] as f64, screen[1] as f64],
-                                imgui_ctx,
-                            );
+                        // Feed absolute/screen coordinates using window's client-area origin (inner_position)
+                        if let Ok(base) = window.inner_position() {
+                            let sx = base.x as f64 + position.x;
+                            let sy = base.y as f64 + position.y;
+                            return events::handle_cursor_moved([sx, sy], imgui_ctx);
                         }
                     }
                 }
@@ -241,7 +238,13 @@ impl WinitPlatform {
         imgui_ctx.io_mut().set_delta_time(delta_s);
 
         // If backend supports setting mouse pos and ImGui requests it, honor it
-        if imgui_ctx.io().want_set_mouse_pos() {
+        // Skip when multi-viewports are enabled (no global cursor set in winit)
+        if imgui_ctx.io().want_set_mouse_pos()
+            && !imgui_ctx
+                .io()
+                .config_flags()
+                .contains(ConfigFlags::VIEWPORTS_ENABLE)
+        {
             let pos = imgui_ctx.io().mouse_pos();
             let logical_pos = self
                 .scale_pos_for_winit(window, LogicalPosition::new(pos[0] as f64, pos[1] as f64));

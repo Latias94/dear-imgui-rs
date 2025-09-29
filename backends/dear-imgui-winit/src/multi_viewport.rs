@@ -9,7 +9,6 @@ use std::ffi::{CStr, c_char, c_void};
 
 use dear_imgui::Context;
 use dear_imgui::platform_io::Viewport as IoViewport;
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{
     ElementState, Event, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
@@ -64,36 +63,18 @@ impl ViewportData {
 
 // Convert client-area logical coordinates to screen coordinates (physical), per-window
 pub(crate) fn client_to_screen_pos(window: &Window, logical: [f64; 2]) -> Option<[f32; 2]> {
-    #[cfg(target_os = "windows")]
-    {
-        #[repr(C)]
-        struct POINT {
-            x: i32,
-            y: i32,
-        }
-        #[link(name = "User32")]
-        unsafe extern "system" {
-            fn ClientToScreen(hWnd: isize, lpPoint: *mut POINT) -> i32;
-        }
-        let scale = window.scale_factor();
-        let mut p = POINT {
-            x: (logical[0] * scale) as i32,
-            y: (logical[1] * scale) as i32,
-        };
-        let hwnd = match window.window_handle().ok()?.as_raw() {
-            RawWindowHandle::Win32(h) => h.hwnd.get() as isize,
-            _ => return None,
-        };
-        let ok = unsafe { ClientToScreen(hwnd, &mut p as *mut POINT) };
-        if ok == 0 {
-            None
-        } else {
-            Some([p.x as f32, p.y as f32])
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        // Fallback: approximate
+    // Cross-platform: absolute screen = client top-left (physical) + client offset (physical)
+    let scale = window.scale_factor();
+    let offset_px_x = (logical[0] * scale) as f32;
+    let offset_px_y = (logical[1] * scale) as f32;
+    let base = window
+        .inner_position()
+        .ok()
+        .map(|p| [p.x as f32, p.y as f32])
+        .or_else(|| window.outer_position().ok().map(|p| [p.x as f32, p.y as f32]));
+    if let Some([bx, by]) = base {
+        Some([bx + offset_px_x, by + offset_px_y])
+    } else {
         Some([logical[0] as f32, logical[1] as f32])
     }
 }
@@ -129,7 +110,7 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
             pio_sys,
             Some(winit_get_window_size_out_v2),
         );
-        // Avoid returning ImVec2 by value across MSVC ABI for now
+        // Avoid returning ImVec2 by value across MSVC ABI: keep this unset
         (*pio_sys).Platform_GetWindowFramebufferScale = None;
         (*pio_sys).Platform_GetWindowDpiScale = Some(winit_get_window_dpi_scale);
         (*pio_sys).Platform_GetWindowWorkAreaInsets = None;
@@ -357,6 +338,12 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                                                 );
                                             }
                                         }
+                                        WindowEvent::CursorLeft { .. } => {
+                                            imgui_ctx
+                                                .io_mut()
+                                                .add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                                            return false;
+                                        }
                                         WindowEvent::Focused(focused) => {
                                             return crate::events::handle_focused(
                                                 *focused, imgui_ctx,
@@ -404,6 +391,20 @@ pub fn shutdown_multi_viewport_support() {
     // Clean up any remaining viewports
     unsafe {
         dear_imgui::sys::igDestroyPlatformWindows();
+        // Also clean up main viewport's PlatformUserData allocated by us
+        let main_viewport = dear_imgui::sys::igGetMainViewport();
+        if !main_viewport.is_null() {
+            let vp = &mut *main_viewport;
+            let vd_ptr = vp.PlatformUserData as *mut ViewportData;
+            if !vd_ptr.is_null() {
+                // Main window not owned by us: do not free the window itself
+                (*vd_ptr).window = std::ptr::null_mut();
+                let _ = Box::from_raw(vd_ptr);
+                vp.PlatformUserData = std::ptr::null_mut();
+            }
+            // Clear handle to avoid dangling pointer
+            vp.PlatformHandle = std::ptr::null_mut();
+        }
     }
 }
 
@@ -472,6 +473,13 @@ unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui::sys::ImGuiViewport
             }
             vp_ref.PlatformHandle = window_ptr as *mut c_void;
 
+            // Initialize DPI/framebuffer scale immediately
+            let window_ref: &Window = unsafe { &*window_ptr };
+            let scale = window_ref.scale_factor() as f32;
+            vp_ref.DpiScale = scale;
+            vp_ref.FramebufferScale.x = scale;
+            vp_ref.FramebufferScale.y = scale;
+
             // TODO: Set up event callbacks for this window
             // This is a critical missing piece - we need to route events from this window
             // back to ImGui. For now, this is a known limitation.
@@ -503,9 +511,9 @@ unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui::sys::ImGuiViewpor
         }
         vd.window = std::ptr::null_mut();
 
-        // Clean up ViewportData
+        // Clean up ViewportData using the original raw pointer
         unsafe {
-            let _ = Box::from_raw(vd);
+            let _ = Box::from_raw(vd_ptr);
         }
     }
     vp_ref.PlatformUserData = std::ptr::null_mut();
@@ -568,7 +576,7 @@ unsafe extern "C" fn winit_get_window_pos(
         // Only query window position for windows we own
         if vd.window_owned && !vd.window.is_null() {
             if let Some(window) = vd.window.as_ref() {
-                // Prefer client-area top-left in screen space on Windows
+                // Prefer client-area top-left in screen space
                 if let Some([sx, sy]) = client_to_screen_pos(window, [0.0, 0.0]) {
                     let result = dear_imgui::sys::ImVec2 { x: sx, y: sy };
                     mvlog!(
@@ -867,27 +875,14 @@ unsafe extern "C" fn winit_get_window_focus(vp: *mut dear_imgui::sys::ImGuiViewp
     }
 
     let vp_ref = unsafe { &*vp };
-
-    // For main viewport, return true (we assume it has focus when running)
-    if vp_ref.ID == 0 || vp_ref.PlatformUserData.is_null() {
-        return true;
-    }
-
+    // Query from actual OS window if available (main or secondary)
     let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
     if let Some(vd) = unsafe { vd_ptr.as_ref() } {
-        // Only query window focus for windows we own
-        if vd.window_owned && !vd.window.is_null() {
-            if let Some(window) = unsafe { vd.window.as_ref() } {
-                let result = window.has_focus();
-
-                return result;
-            }
+        if let Some(window) = unsafe { vd.window.as_ref() } {
+            return window.has_focus();
         }
     }
-
-    let result = false;
-
-    result
+    false
 }
 
 /// Get window minimized state
@@ -897,27 +892,14 @@ unsafe extern "C" fn winit_get_window_minimized(vp: *mut dear_imgui::sys::ImGuiV
     }
 
     let vp_ref = unsafe { &*vp };
-
-    // For main viewport, return false (we assume it's not minimized when running)
-    if vp_ref.ID == 0 || vp_ref.PlatformUserData.is_null() {
-        return false;
-    }
-
+    // Query from actual OS window if available (main or secondary)
     let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
     if let Some(vd) = unsafe { vd_ptr.as_ref() } {
-        // Only query window state for windows we own
-        if vd.window_owned && !vd.window.is_null() {
-            if let Some(window) = unsafe { vd.window.as_ref() } {
-                let result = window.is_minimized().unwrap_or(false);
-
-                return result;
-            }
+        if let Some(window) = unsafe { vd.window.as_ref() } {
+            return window.is_minimized().unwrap_or(false);
         }
     }
-
-    let result = false;
-
-    result
+    false
 }
 
 /// Set window title

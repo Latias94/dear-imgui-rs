@@ -718,6 +718,8 @@ impl WgpuRenderer {
         // Setup render state
         mvlog!("[wgpu-mv] setup_render_state");
         Self::setup_render_state_static(draw_data, render_pass, backend_data, gamma)?;
+        // Override viewport to the provided framebuffer size to avoid partial viewport issues
+        render_pass.set_viewport(0.0, 0.0, fb_width as f32, fb_height as f32, 0.0, 1.0);
 
         // Setup render state structure (for callbacks and custom texture bindings)
         // Note: We need to be careful with lifetimes here, so we'll set it just before rendering
@@ -1383,7 +1385,9 @@ pub mod multi_viewport {
                         .cloned()
                         .unwrap_or(wgpu::PresentMode::Fifo)
                 };
-                let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Auto) {
+                let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque) {
+                    wgpu::CompositeAlphaMode::Opaque
+                } else if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Auto) {
                     wgpu::CompositeAlphaMode::Auto
                 } else {
                     caps.alpha_modes
@@ -1409,7 +1413,7 @@ pub mod multi_viewport {
                     width,
                     height,
                     present_mode: wgpu::PresentMode::Fifo,
-                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    alpha_mode: wgpu::CompositeAlphaMode::Opaque,
                     view_formats: vec![global.render_target_format],
                     desired_maximum_frame_latency: 1,
                 }
@@ -1515,9 +1519,31 @@ pub mod multi_viewport {
         mvlog!("[wgpu-mv] retrieving viewport user data");
         if let Some(data) = unsafe { viewport_user_data_mut(vp) } {
             mvlog!("[wgpu-mv] have viewport user data; acquiring surface frame");
-            // Acquire frame
+            // Acquire frame with basic recovery on Outdated/Lost/Timeout
             let frame = match data.surface.get_current_texture() {
                 Ok(f) => f,
+                Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Lost) => {
+                    // Reconfigure with current window size and retry next frame
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let vpm_ref = &*vp;
+                        let window_ptr = vpm_ref.platform_handle();
+                        if !window_ptr.is_null() {
+                            let window: &winit::window::Window = &*(window_ptr as *const _);
+                            let size = window.inner_size();
+                            if size.width > 0 && size.height > 0 {
+                                data.config.width = size.width;
+                                data.config.height = size.height;
+                                data.surface.configure(&device, &data.config);
+                            }
+                        }
+                    }
+                    return;
+                }
+                Err(wgpu::SurfaceError::Timeout) => {
+                    // Skip this frame silently
+                    return;
+                }
                 Err(e) => {
                     eprintln!("[wgpu-mv] get_current_texture error: {:?}", e);
                     return;
