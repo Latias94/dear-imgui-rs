@@ -146,7 +146,7 @@ The sys crate provides only the Dear ImGui API bindings. For actual rendering in
 
 ## Basic Usage
 
-This is a low-level sys crate providing unsafe FFI bindings. Most users should use the higher-level [`dear-imgui`](https://crates.io/crates/dear-imgui) crate instead, which provides safe Rust wrappers.
+This is a low-level sys crate providing unsafe FFI bindings. Most users should use the higher-level [`dear-imgui-rs`](https://crates.io/crates/dear-imgui-rs) crate instead, which provides safe Rust wrappers.
 
 ```toml
 [dependencies]
@@ -211,9 +211,9 @@ Control build behavior with these environment variables:
 
 ## Related Crates
 
-This crate is part of the `dear-imgui` ecosystem:
+This crate is part of the `dear-imgui-rs` ecosystem:
 
-- **[dear-imgui](https://crates.io/crates/dear-imgui)** - Safe, high-level Rust API
+- **[dear-imgui-rs](https://crates.io/crates/dear-imgui-rs)** - Safe, high-level Rust API
 - **[dear-imgui-wgpu](https://crates.io/crates/dear-imgui-wgpu)** - WGPU renderer backend
 - **[dear-imgui-glow](https://crates.io/crates/dear-imgui-glow)** - OpenGL renderer backend
 - **[dear-imgui-winit](https://crates.io/crates/dear-imgui-winit)** - Winit platform backend

@@ -32,7 +32,7 @@
 //!
 //! ## Integration with Dear ImGui
 //!
-//! This crate is designed to work with the `dear-imgui` ecosystem:
+//! This crate is designed to work with the `dear-imgui-rs` ecosystem:
 //! - Uses the same context management patterns
 //! - Compatible with dear-imgui's UI tokens and lifetime management
 //! - Shares the same underlying Dear ImGui context

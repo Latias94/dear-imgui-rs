@@ -329,7 +329,7 @@ impl Ui {
     ///
     /// [faq]: https://github.com/ocornut/imgui/blob/v1.84.2/docs/FAQ.md#q-why-is-my-widget-not-reacting-when-i-click-on-it
     ///
-    /// In `dear-imgui` the same applies, we can manually specify labels with the `##` syntax:
+    /// In `dear-imgui-rs` the same applies, we can manually specify labels with the `##` syntax:
     ///
     /// ```no_run
     /// # let mut imgui = dear_imgui_rs::Context::create();

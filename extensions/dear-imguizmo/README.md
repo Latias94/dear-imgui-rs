@@ -1,6 +1,6 @@
 # Dear ImGuizmo - Rust Bindings
 
-High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on the C API ([cimguizmo](https://github.com/cimgui/cimguizmo)) and integrated with `dear-imgui`.
+High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on the C API ([cimguizmo](https://github.com/cimgui/cimguizmo)) and integrated with `dear-imgui-rs`.
 
 This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ binding.
 
@@ -16,7 +16,7 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 
 ## Crate Layout
 
-- `dear-imguizmo` (this crate): safe, idiomatic wrapper integrated with `dear-imgui`.
+- `dear-imguizmo` (this crate): safe, idiomatic wrapper integrated with `dear-imgui-rs`.
 - `dear-imguizmo-sys`: low-level FFI generated from the C API (`cimguizmo`). Prefer not using it directly unless you need raw bindings.
 
 ## Compatibility

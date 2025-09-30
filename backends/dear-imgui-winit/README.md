@@ -1,6 +1,6 @@
 # dear-imgui-winit
 
-Winit platform backend for the `dear-imgui` Rust crate. It wires winit input/events,
+Winit platform backend for the `dear-imgui-rs` Rust crate. It wires winit input/events,
 cursor handling and DPI awareness into Dear ImGui. Inspired by
 `imgui-rs/imgui-winit-support`.
 
@@ -146,7 +146,7 @@ the feature stabilizes. Follow the examples and docs once it’s marked stable.
 
 ## Notes & Differences vs imgui-rs
 
-This crate targets the `dear-imgui` bindings in this repository and its API
+This crate targets the `dear-imgui-rs` bindings in this repository and its API
 surface. It’s intentionally separate from `imgui-rs/imgui-winit-support`, though
 many behaviors are aligned for familiarity.
 
