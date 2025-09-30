@@ -1,6 +1,6 @@
 [package]
 name = "dear-imguizmo-sys"
-version = "0.1.0"
+version = "0.3.0"
 edition.workspace = true
 description = "Low-level FFI bindings for ImGuizmo via cimguizmo (C API)"
 license.workspace = true
@@ -30,7 +30,7 @@ features = []
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.3" }
 mint.workspace = true
 cfg-if.workspace = true
 flate2 = { version = "1", optional = true }

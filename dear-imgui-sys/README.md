@@ -150,10 +150,10 @@ This is a low-level sys crate providing unsafe FFI bindings. Most users should u
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.2"
+dear-imgui-sys = "0.3"
 
 # Enable features as needed
-dear-imgui-sys = { version = "0.2", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "0.3", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)

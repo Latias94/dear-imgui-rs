@@ -113,7 +113,7 @@ Core
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
 | dear-imgui-rs   | 0.3.x   | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.2.x   | Binds Dear ImGui v1.92.3 (docking branch) |
+| dear-imgui-sys  | 0.3.x   | Binds Dear ImGui v1.92.3 (docking branch) |
 
 Backends
 
@@ -125,11 +125,11 @@ Backends
 
 Extensions
 
-| Crate         | Version | Requires dear-imgui-rs | Sys crate         | Notes |
-|---------------|---------|------------------------|-------------------|-------|
-| dear-implot   | 0.3.x   | 0.3.x                  | dear-implot-sys 0.2.x |     |
-| dear-imnodes  | 0.2.x   | 0.3.x                  | dear-imnodes-sys 0.1.x |     |
-| dear-imguizmo | 0.2.x   | 0.3.x                  | dear-imguizmo-sys 0.1.x |    |
+| Crate         | Version | Requires dear-imgui-rs | Sys crate            | Notes |
+|---------------|---------|------------------------|----------------------|-------|
+| dear-implot   | 0.3.x   | 0.3.x                  | dear-implot-sys 0.3.x |     |
+| dear-imnodes  | 0.3.x   | 0.3.x                  | dear-imnodes-sys 0.3.x |     |
+| dear-imguizmo | 0.3.x   | 0.3.x                  | dear-imguizmo-sys 0.3.x |    |
 
 Maintenance rules
 

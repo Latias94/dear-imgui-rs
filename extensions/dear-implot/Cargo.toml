@@ -17,8 +17,8 @@ features = ["freetype"]
 [dependencies]
 bitflags.workspace = true
 dear-imgui-rs = { path = "../../dear-imgui", version = "0.3" }
-dear-implot-sys = { path = "../dear-implot-sys", version = "0.2" }
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
+dear-implot-sys = { path = "../dear-implot-sys", version = "0.3" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.3" }
 #mint.workspace = true
 #parking_lot.workspace = true
 #cfg-if.workspace = true
