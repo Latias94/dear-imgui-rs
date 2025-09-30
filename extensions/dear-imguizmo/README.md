@@ -5,7 +5,7 @@ High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGui
 This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ binding.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/imguizmo-basic.png" alt="ImGuizmo" width="75%"/>
+  <img src="https://github.com/user-attachments/assets/6fee92e9-d77a-4c47-aca9-9992243f26de" alt="ImGuizmo" width="75%"/>
   <br/>
 </p>
 

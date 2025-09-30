@@ -9,7 +9,7 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 - Helpers: links, selection, node positions, minimap, IO setup
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/imnodes-basic.png" alt="ImNodes" width="75%"/>
+  <img src="https://github.com/user-attachments/assets/b1c56b58-7254-41f6-a97b-e97eac147a1e" alt="ImNodes" width="75%"/>
   <br/>
 </p>
 

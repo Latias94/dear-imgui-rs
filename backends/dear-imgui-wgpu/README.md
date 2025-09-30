@@ -3,7 +3,7 @@
 WGPU renderer for Dear ImGui.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/game-engine-docking.png" alt="Docking (WGPU)" width="75%"/>
+  <img src="https://github.com/user-attachments/assets/a9212184-d9c5-4e16-820a-cd98b471a6ea" alt="Docking (WGPU)" width="75%"/>
   <br/>
 </p>
 

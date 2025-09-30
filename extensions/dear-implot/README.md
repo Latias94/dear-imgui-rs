@@ -5,7 +5,7 @@ High-level Rust bindings for ImPlot, the immediate mode plotting library. This c
 For native build/link options (source, system/prebuilt, remote prebuilt), see `extensions/dear-implot-sys/README.md`.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/implot-basic.png" alt="ImPlot" width="75%"/>
+  <img src="https://github.com/user-attachments/assets/89ea8489-a12f-4246-9410-b6b8dea4b5ba" alt="ImPlot" width="75%"/>
   <br/>
 </p>
 
