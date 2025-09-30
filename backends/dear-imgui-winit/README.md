@@ -17,7 +17,7 @@ cursor handling and DPI awareness into Dear ImGui. Inspired by
 | dear-imgui-rs | 0.3.x   |
 | winit         | 0.30.12 |
 
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Quick Start
 

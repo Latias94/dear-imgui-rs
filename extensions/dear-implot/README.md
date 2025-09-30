@@ -17,7 +17,7 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 | dear-imgui-rs     | 0.3.x   |
 | dear-implot-sys   | 0.2.x   |
 
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 
 ## Integration Quickstart

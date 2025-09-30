@@ -53,7 +53,7 @@ ui.window("Hello")
 
 ```bash
 # Clone with submodules
-git clone https://github.com/Latias94/dear-imgui
+git clone https://github.com/Latias94/dear-imgui-rs
 git submodule update --init --recursive
 
 # Core & docking
@@ -106,7 +106,7 @@ Quick examples (enable auto prebuilt download):
 
 ## Compatibility (Latest)
 
-The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for full history and upgrade notes.
+The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for full history and upgrade notes.
 
 Core
 

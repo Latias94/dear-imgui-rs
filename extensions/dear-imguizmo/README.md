@@ -27,7 +27,7 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 | dear-imgui-rs     | 0.3.x   |
 | dear-imguizmo-sys | 0.1.x   |
 
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Features
 

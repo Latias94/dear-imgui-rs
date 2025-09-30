@@ -25,8 +25,8 @@ exclude = [
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Latias94/dear-imgui"
-homepage = "https://github.com/Latias94/dear-imgui"
+repository = "https://github.com/Latias94/dear-imgui-rs"
+homepage = "https://github.com/Latias94/dear-imgui-rs"
 documentation = "https://docs.rs/dear-imgui-rs"
 categories = ["gui", "api-bindings"]
 keywords = ["imgui", "ui", "graphics", "docking", "multiview"]

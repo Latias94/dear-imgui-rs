@@ -69,7 +69,7 @@ renderer.render(&draw_data)?;
 | dear-imgui-rs | 0.3.x   |
 | glow          | 0.16    |
 
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Features
 

@@ -4,9 +4,9 @@ Extensions in this workspace build on top of `dear-imgui-sys` (cimgui C API) to 
 
 | Extension | Description            | Status    | Rust Crate                       | Upstream C API                                      |
 |-----------|------------------------|-----------|----------------------------------|-----------------------------------------------------|
-| ImPlot    | Scientific plotting    | Complete  | [dear-implot](https://github.com/Latias94/dear-imgui/tree/main/extensions/dear-implot)     | [cimgui/cimplot](https://github.com/cimgui/cimplot) |
-| ImGuizmo  | 3D transform gizmos    | Complete  | [dear-imguizmo](https://github.com/Latias94/dear-imgui/tree/main/extensions/dear-imguizmo) | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo) |
-| ImNodes   | Node editor widgets    | Complete  | [dear-imnodes](https://github.com/Latias94/dear-imgui/tree/main/extensions/dear-imnodes)   | [cimgui/cimnodes](https://github.com/cimgui/cimnodes)  |
+| ImPlot    | Scientific plotting    | Complete  | [dear-implot](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-implot)     | [cimgui/cimplot](https://github.com/cimgui/cimplot) |
+| ImGuizmo  | 3D transform gizmos    | Complete  | [dear-imguizmo](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo) | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo) |
+| ImNodes   | Node editor widgets    | Complete  | [dear-imnodes](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imnodes)   | [cimgui/cimnodes](https://github.com/cimgui/cimnodes)  |
 
 ## Architecture
 
