@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-`dear-imgui-rs` is a rust bindings and ecosystem around Dear ImGui, with docking, WGPU/GL backends, and popular extensions (ImGuizmo, ImNodes, ImPlot).
+`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL backends, and popular extensions (ImGuizmo, ImNodes, ImPlot).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui/main/screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
