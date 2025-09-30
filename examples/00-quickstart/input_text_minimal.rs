@@ -3,8 +3,8 @@
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use dear_imgui::*;
 use dear_imgui_glow::GlowRenderer;
+use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
@@ -175,32 +175,32 @@ impl AppWindow {
                 // Define a simple callback handler demonstrating features
                 #[derive(Default)]
                 struct DemoHandler;
-                impl dear_imgui::InputTextCallbackHandler for DemoHandler {
+                impl dear_imgui_rs::InputTextCallbackHandler for DemoHandler {
                     fn char_filter(&mut self, c: char) -> Option<char> {
                         // Filter out 'x' or 'X'
                         if c == 'x' || c == 'X' { None } else { Some(c) }
                     }
-                    fn on_completion(&mut self, mut data: dear_imgui::TextCallbackData) {
+                    fn on_completion(&mut self, mut data: dear_imgui_rs::TextCallbackData) {
                         data.push_str(" [Tab]");
                     }
                     fn on_history(
                         &mut self,
-                        dir: dear_imgui::HistoryDirection,
-                        mut data: dear_imgui::TextCallbackData,
+                        dir: dear_imgui_rs::HistoryDirection,
+                        mut data: dear_imgui_rs::TextCallbackData,
                     ) {
                         match dir {
-                            dear_imgui::HistoryDirection::Up => data.push_str(" [Up]"),
-                            dear_imgui::HistoryDirection::Down => data.push_str(" [Down]"),
+                            dear_imgui_rs::HistoryDirection::Up => data.push_str(" [Up]"),
+                            dear_imgui_rs::HistoryDirection::Down => data.push_str(" [Down]"),
                         }
                     }
-                    fn on_edit(&mut self, _data: dear_imgui::TextCallbackData) {}
-                    fn on_always(&mut self, _data: dear_imgui::TextCallbackData) {}
+                    fn on_edit(&mut self, _data: dear_imgui_rs::TextCallbackData) {}
+                    fn on_always(&mut self, _data: dear_imgui_rs::TextCallbackData) {}
                 }
 
                 // For multiline, ImGui forbids HISTORY/COMPLETION callbacks.
-                let callbacks = dear_imgui::InputTextCallback::CHAR_FILTER
-                    | dear_imgui::InputTextCallback::EDIT
-                    | dear_imgui::InputTextCallback::ALWAYS;
+                let callbacks = dear_imgui_rs::InputTextCallback::CHAR_FILTER
+                    | dear_imgui_rs::InputTextCallback::EDIT
+                    | dear_imgui_rs::InputTextCallback::ALWAYS;
 
                 // Multiline String with callbacks (Tab/Up/Down/CharFilter)
                 ui.input_text_multiline(

@@ -10,7 +10,7 @@ WGPU renderer for Dear ImGui.
 ## Quick Start
 
 ```rust
-use dear_imgui::Context;
+use dear_imgui_rs::Context;
 use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, GammaMode};
 
 // device, queue, surface_format prepared ahead
@@ -39,8 +39,8 @@ renderer.render_draw_data(&imgui.render(), &mut render_pass)?;
 
 | Item            | Version |
 |-----------------|---------|
-| Crate           | 0.2.x   |
-| dear-imgui      | 0.2.x   |
+| Crate           | 0.3.x   |
+| dear-imgui-rs   | 0.3.x   |
 | wgpu            | 26      |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.

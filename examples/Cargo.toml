@@ -8,7 +8,7 @@ publish = false
 dear-implot = ["dep:dear-implot"]
 dear-imguizmo = ["dep:dear-imguizmo"]
 dear-imnodes = ["dep:dear-imnodes"]
-freetype = ["dear-imgui/freetype"]
+freetype = ["dear-imgui-rs/freetype"]
 
 [[bin]]
 name = "wgpu_basic"
@@ -95,10 +95,10 @@ path = "04-integration/asset_browser_grid.rs"
 
 
 [dependencies]
-dear-imgui = { path = "../dear-imgui" }
-dear-imgui-winit = { path = "../backends/dear-imgui-winit" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu" }
-dear-imgui-glow = { path = "../backends/dear-imgui-glow" }
+dear-imgui-rs = { path = "../dear-imgui", version = "0.3" }
+dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.3" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.3" }
+dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.3" }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }

@@ -112,7 +112,7 @@ pub type RawTextureId = *const c_void;
 /// Examples
 /// - With a plain GPU handle (legacy path):
 /// ```no_run
-/// # use dear_imgui::{Ui, TextureId};
+/// # use dear_imgui_rs::{Ui, TextureId};
 /// # fn demo(ui: &Ui) {
 /// let tex_id = TextureId::new(12345);
 /// ui.image(tex_id, [64.0, 64.0]);
@@ -120,7 +120,7 @@ pub type RawTextureId = *const c_void;
 /// ```
 /// - With a managed texture (ImGui 1.92 texture system):
 /// ```no_run
-/// # use dear_imgui::{Ui, texture::{TextureData, TextureFormat}};
+/// # use dear_imgui_rs::{Ui, texture::{TextureData, TextureFormat}};
 /// # fn demo(ui: &Ui) {
 /// let mut tex = TextureData::new();
 /// tex.create(TextureFormat::RGBA32, 256, 256);

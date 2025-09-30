@@ -3,7 +3,7 @@
 //! This module handles per-frame resources like vertex and index buffers,
 //! corresponding to the FrameResources struct in imgui_impl_wgpu.cpp
 
-use dear_imgui::render::{DrawIdx, DrawVert};
+use dear_imgui_rs::render::{DrawIdx, DrawVert};
 use wgpu::*;
 
 /// Memory alignment function (equivalent to MEMALIGN macro in C++)

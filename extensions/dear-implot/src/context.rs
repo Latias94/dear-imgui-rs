@@ -1,5 +1,5 @@
 use crate::{AxisFlags, PlotCond, XAxis, YAxis, sys};
-use dear_imgui::{Context as ImGuiContext, Ui};
+use dear_imgui_rs::{Context as ImGuiContext, Ui};
 use dear_imgui_sys as imgui_sys;
 
 /// ImPlot context that manages the plotting state
@@ -15,7 +15,7 @@ impl PlotContext {
     ///
     /// This should be called after creating the Dear ImGui context.
     /// The ImPlot context will use the same Dear ImGui context internally.
-    pub fn try_create(_imgui_ctx: &ImGuiContext) -> dear_imgui::ImGuiResult<Self> {
+    pub fn try_create(_imgui_ctx: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
         // Bind ImPlot to the current Dear ImGui context before creating.
         // On some toolchains/platforms, not setting this can lead to crashes
         // if ImPlot initialization queries ImGui state during CreateContext.
@@ -25,7 +25,7 @@ impl PlotContext {
 
         let raw = unsafe { sys::ImPlot_CreateContext() };
         if raw.is_null() {
-            return Err(dear_imgui::ImGuiError::context_creation(
+            return Err(dear_imgui_rs::ImGuiError::context_creation(
                 "ImPlot_CreateContext returned null",
             ));
         }

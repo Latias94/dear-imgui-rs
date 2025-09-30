@@ -14,7 +14,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use dear_imgui::Context;
+//! use dear_imgui_rs::Context;
 //! use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
 //! use wgpu::*;
 //!

@@ -1,4 +1,4 @@
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
@@ -114,9 +114,9 @@ impl AppWindow {
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
         // Log successful initialization
-        dear_imgui::logging::log_context_created();
-        dear_imgui::logging::log_platform_init("Winit");
-        dear_imgui::logging::log_renderer_init("WGPU");
+        dear_imgui_rs::logging::log_context_created();
+        dear_imgui_rs::logging::log_platform_init("Winit");
+        dear_imgui_rs::logging::log_renderer_init("WGPU");
 
         let imgui = ImguiState {
             context,
@@ -165,7 +165,7 @@ impl AppWindow {
         // Log frame statistics every 60 frames
         if self.imgui.frame_count % 60 == 0 {
             let avg_frame_time = self.imgui.total_frame_time / 60.0;
-            dear_imgui::logging::log_frame_stats(avg_frame_time, 1.0 / avg_frame_time);
+            dear_imgui_rs::logging::log_frame_stats(avg_frame_time, 1.0 / avg_frame_time);
             self.imgui.total_frame_time = 0.0;
         }
 
@@ -408,7 +408,7 @@ impl ApplicationHandler for App {
 
 fn main() {
     // Initialize tracing with custom filter for demo
-    dear_imgui::logging::init_tracing_with_filter("dear_imgui=debug,wgpu_basic=info,wgpu=warn");
+    dear_imgui_rs::logging::init_tracing_with_filter("dear_imgui=debug,wgpu_basic=info,wgpu=warn");
 
     info!("Starting Dear ImGui WGPU Basic Example with Logging Demo");
     info!("This example demonstrates:");

@@ -117,11 +117,11 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn plot_image_with_imgui_texture(
         &self,
         label: &str,
-        texture: dear_imgui::TextureId,
+        texture: dear_imgui_rs::TextureId,
         bounds_min: sys::ImPlotPoint,
         bounds_max: sys::ImPlotPoint,
     ) -> Result<(), PlotError> {
-        // dear_imgui::TextureId is a transparent wrapper; cast to sys::ImTextureID via `id()` then transmute
+        // dear_imgui_rs::TextureId is a transparent wrapper; cast to sys::ImTextureID via `id()` then transmute
         // This is a common interop pattern across imgui backends.
         let raw: sys::ImTextureID = unsafe { std::mem::transmute(texture.id()) };
         self.plot_image(label, raw, bounds_min, bounds_max)

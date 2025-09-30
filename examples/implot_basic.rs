@@ -17,7 +17,7 @@
 //! The example uses a tabbed interface to organize different plot types
 //! and demonstrates the builder pattern API for ergonomic plot creation.
 
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use dear_implot::*;

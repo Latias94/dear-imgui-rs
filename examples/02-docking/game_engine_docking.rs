@@ -1,4 +1,4 @@
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
@@ -25,16 +25,16 @@ struct GameEngineState {
 
     // Console logs
     console_logs: Vec<String>,
-    console_input: dear_imgui::ImString,
+    console_input: dear_imgui_rs::ImString,
 
     // Asset browser
     current_folder: String,
     assets: Vec<String>,
-    asset_search: dear_imgui::ImString,
+    asset_search: dear_imgui_rs::ImString,
 
     // Demo: zero-copy text buffers (ImString)
-    title_imstr: dear_imgui::ImString,
-    notes_imstr: dear_imgui::ImString,
+    title_imstr: dear_imgui_rs::ImString,
+    notes_imstr: dear_imgui_rs::ImString,
 
     // Viewport settings
     viewport_size: [f32; 2],
@@ -52,7 +52,7 @@ struct GameEngineState {
     vertices: u32,
 
     // UI search/filter state
-    hierarchy_search: dear_imgui::ImString,
+    hierarchy_search: dear_imgui_rs::ImString,
 }
 
 impl Default for GameEngineState {
@@ -78,7 +78,7 @@ impl Default for GameEngineState {
                 "[INFO] Scene loaded: MainScene".to_string(),
                 "[WARNING] Texture quality reduced for performance".to_string(),
             ],
-            console_input: dear_imgui::ImString::new(""),
+            console_input: dear_imgui_rs::ImString::new(""),
             current_folder: "Assets/".to_string(),
             assets: vec![
                 "Textures/".to_string(),
@@ -90,9 +90,9 @@ impl Default for GameEngineState {
                 "wood_material.mat".to_string(),
                 "player_controller.cs".to_string(),
             ],
-            asset_search: dear_imgui::ImString::new(""),
-            title_imstr: dear_imgui::ImString::new("Untitled"),
-            notes_imstr: dear_imgui::ImString::new(""),
+            asset_search: dear_imgui_rs::ImString::new(""),
+            title_imstr: dear_imgui_rs::ImString::new("Untitled"),
+            notes_imstr: dear_imgui_rs::ImString::new(""),
             viewport_size: [800.0, 600.0],
             show_wireframe: false,
             show_grid: true,
@@ -102,7 +102,7 @@ impl Default for GameEngineState {
             frame_time: 16.67,
             draw_calls: 45,
             vertices: 12543,
-            hierarchy_search: dear_imgui::ImString::new(""),
+            hierarchy_search: dear_imgui_rs::ImString::new(""),
         }
     }
 }
@@ -285,8 +285,8 @@ impl AppWindow {
         // Create dockspace over main viewport (call every frame)
         let dock_id = ui.dockspace_over_main_viewport_with_flags(
             0,
-            dear_imgui::DockNodeFlags::PASSTHRU_CENTRAL_NODE
-                | dear_imgui::DockNodeFlags::AUTO_HIDE_TAB_BAR,
+            dear_imgui_rs::DockNodeFlags::PASSTHRU_CENTRAL_NODE
+                | dear_imgui_rs::DockNodeFlags::AUTO_HIDE_TAB_BAR,
         );
         // Use returned dockspace id as root
         imgui.dockspace_id = dock_id;
@@ -387,17 +387,17 @@ impl AppWindow {
 
 /// Setup the initial docking layout - Unity-style game engine layout
 fn setup_initial_docking_layout(dockspace_id: u32) {
-    use dear_imgui::{DockBuilder, SplitDirection};
+    use dear_imgui_rs::{DockBuilder, SplitDirection};
 
     println!("Setting up initial docking layout...");
 
     // Clear any existing layout and create fresh dockspace (size comes from main viewport)
     DockBuilder::remove_node_docked_windows(dockspace_id, true);
     DockBuilder::remove_node(dockspace_id);
-    DockBuilder::add_node(dockspace_id, dear_imgui::DockNodeFlags::NONE);
+    DockBuilder::add_node(dockspace_id, dear_imgui_rs::DockNodeFlags::NONE);
     // Match node pos/size to main viewport work area (exclude menu bars) before splitting
     {
-        let vp = dear_imgui::Viewport::main();
+        let vp = dear_imgui_rs::Viewport::main();
         DockBuilder::set_node_pos(dockspace_id, vp.work_pos());
         DockBuilder::set_node_size(dockspace_id, vp.work_size());
     }

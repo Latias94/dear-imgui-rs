@@ -5,7 +5,7 @@
 //!
 //! Texture Updates Flow (ImGui 1.92+)
 //! - During `Context::render()`, Dear ImGui emits a list of textures to be processed in
-//!   `DrawData::textures()` (see `dear_imgui::render::DrawData::textures`). Each item is an
+//!   `DrawData::textures()` (see `dear_imgui_rs::render::DrawData::textures`). Each item is an
 //!   `ImTextureData*` with a `Status` field:
 //!   - `WantCreate`: create a GPU texture, upload all pixels, set `TexID`, then set status `OK`.
 //!   - `WantUpdates`: upload `UpdateRect` (and any queued rects) then set `OK`.
@@ -18,7 +18,7 @@ use crate::{
     FrameResources, RenderResources, RendererError, RendererResult, ShaderManager, Uniforms,
     WgpuBackendData, WgpuInitInfo, WgpuTextureManager,
 };
-use dear_imgui::{BackendFlags, Context, render::DrawData};
+use dear_imgui_rs::{BackendFlags, Context, render::DrawData};
 use wgpu::*;
 
 /// Main WGPU renderer for Dear ImGui
@@ -544,7 +544,7 @@ impl WgpuRenderer {
             // Set atlas texture id + status OK (updates TexRef and TexData)
             {
                 let mut fonts_mut = imgui_ctx.font_atlas_mut();
-                fonts_mut.set_texture_id(dear_imgui::TextureId::from(tex_id));
+                fonts_mut.set_texture_id(dear_imgui_rs::TextureId::from(tex_id));
             }
             if cfg!(debug_assertions) {
                 tracing::debug!(
@@ -597,7 +597,7 @@ impl WgpuRenderer {
     /// # use dear_imgui_wgpu::*;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut renderer = WgpuRenderer::new();
-    /// # let mut texture_data = dear_imgui::TextureData::new();
+    /// # let mut texture_data = dear_imgui_rs::TextureData::new();
     /// let result = renderer.update_texture(&texture_data)?;
     /// result.apply_to(&mut texture_data);
     /// # Ok(())
@@ -605,7 +605,7 @@ impl WgpuRenderer {
     /// ```
     pub fn update_texture(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &dear_imgui_rs::TextureData,
     ) -> RendererResult<crate::TextureUpdateResult> {
         if let Some(backend_data) = &self.backend_data {
             self.texture_manager
@@ -683,7 +683,7 @@ impl WgpuRenderer {
         // and clear it immediately after
         unsafe {
             // Use _Nil variant as our bindings export it
-            let platform_io = dear_imgui::sys::igGetPlatformIO_Nil();
+            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
 
             // Create a temporary render state structure
             let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
@@ -826,7 +826,7 @@ impl WgpuRenderer {
         for draw_list in draw_data.draw_lists() {
             for cmd in draw_list.commands() {
                 match cmd {
-                    dear_imgui::render::DrawCmd::Elements {
+                    dear_imgui_rs::render::DrawCmd::Elements {
                         count,
                         cmd_params,
                         raw_cmd,
@@ -841,8 +841,8 @@ impl WgpuRenderer {
                         let texture_bind_group = {
                             // Resolve effective ImTextureID now (after texture updates)
                             let tex_id = unsafe {
-                                dear_imgui::sys::ImDrawCmd_GetTexID(
-                                    raw_cmd as *mut dear_imgui::sys::ImDrawCmd,
+                                dear_imgui_rs::sys::ImDrawCmd_GetTexID(
+                                    raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
                                 )
                             } as u64;
                             if tex_id == 0 {
@@ -922,7 +922,7 @@ impl WgpuRenderer {
                         let vertex_offset = (cmd_params.vtx_offset as i32) + global_vtx_offset;
                         render_pass.draw_indexed(start_index..end_index, vertex_offset, 0..1);
                     }
-                    dear_imgui::render::DrawCmd::ResetRenderState => {
+                    dear_imgui_rs::render::DrawCmd::ResetRenderState => {
                         // Re-apply render state using the same gamma
                         Self::setup_render_state_static(
                             draw_data,
@@ -931,7 +931,7 @@ impl WgpuRenderer {
                             gamma,
                         )?;
                     }
-                    dear_imgui::render::DrawCmd::RawCallback { .. } => {
+                    dear_imgui_rs::render::DrawCmd::RawCallback { .. } => {
                         // Raw callbacks are not supported in this implementation
                         // They would require access to the raw Dear ImGui draw list
                         tracing::warn!(

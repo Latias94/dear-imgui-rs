@@ -14,7 +14,7 @@
 //! # Basic Usage
 //!
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! // Create a drag source
@@ -79,7 +79,7 @@ impl Ui {
     ///
     /// # Example
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// ui.button("Drag me!");
@@ -106,7 +106,7 @@ impl Ui {
     ///
     /// # Example
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// ui.button("Drop target");

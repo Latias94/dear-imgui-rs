@@ -5,7 +5,7 @@
 //!
 //! Quick examples:
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! ui.text("normal");
@@ -26,7 +26,7 @@ impl Ui {
     ///
     /// # Example
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// ui.text_colored([1.0, 0.0, 0.0, 1.0], "Red text");
@@ -54,7 +54,7 @@ impl Ui {
     ///
     /// # Example
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// ui.text_disabled("This option is not available");

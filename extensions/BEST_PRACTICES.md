@@ -28,7 +28,7 @@ Follow the `dear-imgui` crate's style for a uniform developer experience:
 Example (ImGuizmo):
 
 ```rust
-use dear_imgui::Ui;
+use dear_imgui_rs::Ui;
 use dear_imguizmo::{GuizmoExt, Operation, Mode, DrawListTarget};
 
 fn draw(ui: &Ui) {

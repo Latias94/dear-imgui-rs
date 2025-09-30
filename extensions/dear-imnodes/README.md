@@ -17,8 +17,8 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.1.x   |
-| dear-imgui        | 0.2.x   |
+| Crate             | 0.2.x   |
+| dear-imgui-rs     | 0.3.x   |
 | dear-imnodes-sys  | 0.1.x   |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
@@ -28,11 +28,11 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/ma
 Basic setup and per-frame usage:
 
 ```rust
-use dear_imgui::Ui;
+use dear_imgui_rs::Ui;
 use dear_imnodes as imnodes;
 
 // One-time setup (alongside your ImGui context)
-fn init(imgui_ctx: &dear_imgui::Context) -> (imnodes::Context, imnodes::EditorContext) {
+fn init(imgui_ctx: &dear_imgui_rs::Context) -> (imnodes::Context, imnodes::EditorContext) {
     let nodes_ctx = imnodes::Context::create(imgui_ctx);
     let editor_ctx = imnodes::EditorContext::create();
     (nodes_ctx, editor_ctx)

@@ -6,9 +6,9 @@
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use dear_imgui::WindowFlags;
-use dear_imgui::*;
 use dear_imgui_glow::GlowRenderer;
+use dear_imgui_rs::WindowFlags;
+use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{

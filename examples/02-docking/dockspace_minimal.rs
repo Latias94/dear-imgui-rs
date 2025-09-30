@@ -3,8 +3,8 @@
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use dear_imgui::*;
 use dear_imgui_glow::GlowRenderer;
+use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
@@ -152,19 +152,19 @@ impl AppWindow {
         if !self.first_layout_applied {
             self.first_layout_applied = true;
             // Remove any previous layout and make a split
-            dear_imgui::DockBuilder::remove_node(dockspace_id);
+            dear_imgui_rs::DockBuilder::remove_node(dockspace_id);
             // Recreate the root dock node before splitting; required after remove_node
-            dear_imgui::DockBuilder::add_node(dockspace_id, dear_imgui::DockNodeFlags::NONE);
-            let left_id = dear_imgui::DockBuilder::split_node(
+            dear_imgui_rs::DockBuilder::add_node(dockspace_id, dear_imgui_rs::DockNodeFlags::NONE);
+            let left_id = dear_imgui_rs::DockBuilder::split_node(
                 dockspace_id,
-                dear_imgui::SplitDirection::Left,
+                dear_imgui_rs::SplitDirection::Left,
                 0.25,
                 None,
             );
             let right_id = dockspace_id; // Remaining node
-            dear_imgui::DockBuilder::dock_window("Properties", left_id);
-            dear_imgui::DockBuilder::dock_window("Main View", right_id);
-            dear_imgui::DockBuilder::finish(dockspace_id);
+            dear_imgui_rs::DockBuilder::dock_window("Properties", left_id);
+            dear_imgui_rs::DockBuilder::dock_window("Main View", right_id);
+            dear_imgui_rs::DockBuilder::finish(dockspace_id);
         }
 
         // 3) Build docked windows

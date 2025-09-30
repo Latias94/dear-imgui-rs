@@ -1,6 +1,6 @@
 use crate::sys;
-use dear_imgui::sys as imgui_sys;
-use dear_imgui::{Context as ImGuiContext, Ui};
+use dear_imgui_rs::sys as imgui_sys;
+use dear_imgui_rs::{Context as ImGuiContext, Ui};
 use std::os::raw::c_void;
 
 /// Global ImNodes context
@@ -10,13 +10,13 @@ pub struct Context {
 
 impl Context {
     /// Try to create a new ImNodes context bound to the current Dear ImGui context
-    pub fn try_create(_imgui: &ImGuiContext) -> dear_imgui::ImGuiResult<Self> {
+    pub fn try_create(_imgui: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
         unsafe {
             sys::imnodes_SetImGuiContext(imgui_sys::igGetCurrentContext());
         }
         let raw = unsafe { sys::imnodes_CreateContext() };
         if raw.is_null() {
-            return Err(dear_imgui::ImGuiError::context_creation(
+            return Err(dear_imgui_rs::ImGuiError::context_creation(
                 "imnodes_CreateContext returned null",
             ));
         }
@@ -51,10 +51,10 @@ pub struct EditorContext {
 }
 
 impl EditorContext {
-    pub fn try_create() -> dear_imgui::ImGuiResult<Self> {
+    pub fn try_create() -> dear_imgui_rs::ImGuiResult<Self> {
         let raw = unsafe { sys::imnodes_EditorContextCreate() };
         if raw.is_null() {
-            return Err(dear_imgui::ImGuiError::context_creation(
+            return Err(dear_imgui_rs::ImGuiError::context_creation(
                 "imnodes_EditorContextCreate returned null",
             ));
         }

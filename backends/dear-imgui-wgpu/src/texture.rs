@@ -4,7 +4,7 @@
 //! integrating with Dear ImGui's modern texture system.
 
 use crate::{RendererError, RendererResult};
-use dear_imgui::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
+use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
 use std::collections::HashMap;
 use wgpu::*;
 
@@ -101,7 +101,7 @@ impl WgpuTextureManager {
     /// Convert a sub-rectangle of ImGui texture pixels into a tightly packed RGBA8 buffer
     fn convert_subrect_to_rgba(
         texture_data: &TextureData,
-        rect: dear_imgui::texture::TextureRect,
+        rect: dear_imgui_rs::texture::TextureRect,
     ) -> Option<Vec<u8>> {
         let pixels = texture_data.pixels()?;
         let tex_w = texture_data.width() as usize;
@@ -166,7 +166,7 @@ impl WgpuTextureManager {
 
         // Collect update rectangles; prefer explicit Updates[] if present,
         // otherwise fallback to single UpdateRect.
-        let mut rects: Vec<dear_imgui::texture::TextureRect> = texture_data.updates().collect();
+        let mut rects: Vec<dear_imgui_rs::texture::TextureRect> = texture_data.updates().collect();
         if rects.is_empty() {
             let r = texture_data.update_rect();
             if r.w > 0 && r.h > 0 {
@@ -575,7 +575,7 @@ impl WgpuTextureManager {
     /// assign the id; otherwise we update in place.
     pub fn handle_texture_updates(
         &mut self,
-        draw_data: &dear_imgui::render::DrawData,
+        draw_data: &dear_imgui_rs::render::DrawData,
         device: &Device,
         queue: &Queue,
     ) {
@@ -594,7 +594,7 @@ impl WgpuTextureManager {
                             // In the C++ implementation, they use the TextureView pointer as ImTextureID.
                             // In Rust, we can't get the raw pointer, so we use our internal texture ID.
                             // This works because our renderer will map the texture ID to the WGPU texture.
-                            let new_texture_id = dear_imgui::TextureId::from(wgpu_texture_id);
+                            let new_texture_id = dear_imgui_rs::TextureId::from(wgpu_texture_id);
 
                             texture_data.set_tex_id(new_texture_id);
 
@@ -619,7 +619,7 @@ impl WgpuTextureManager {
                     if internal_id == 0 || !self.contains_texture(internal_id) {
                         match self.create_texture_from_data(device, queue, texture_data) {
                             Ok(new_id) => {
-                                texture_data.set_tex_id(dear_imgui::TextureId::from(new_id));
+                                texture_data.set_tex_id(dear_imgui_rs::TextureId::from(new_id));
                                 texture_data.set_status(TextureStatus::OK);
                             }
                             Err(_e) => {
@@ -698,7 +698,7 @@ impl WgpuTextureManager {
     /// # let mut texture_manager = WgpuTextureManager::new();
     /// # let device = todo!();
     /// # let queue = todo!();
-    /// # let mut texture_data = dear_imgui::TextureData::new();
+    /// # let mut texture_data = dear_imgui_rs::TextureData::new();
     /// let result = texture_manager.update_single_texture(&texture_data, &device, &queue)?;
     /// result.apply_to(&mut texture_data);
     /// # Ok(())
@@ -706,7 +706,7 @@ impl WgpuTextureManager {
     /// ```
     pub fn update_single_texture(
         &mut self,
-        texture_data: &dear_imgui::TextureData,
+        texture_data: &dear_imgui_rs::TextureData,
         device: &Device,
         queue: &Queue,
     ) -> Result<TextureUpdateResult, String> {

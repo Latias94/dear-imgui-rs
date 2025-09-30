@@ -26,7 +26,7 @@ impl Ui {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let font_data_sources = [];
     /// // At initialization time
@@ -53,7 +53,7 @@ impl Ui {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
@@ -90,7 +90,7 @@ impl Ui {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let style = ui.push_style_var(StyleVar::Alpha(0.2));
@@ -332,7 +332,7 @@ impl Ui {
     /// In `dear-imgui` the same applies, we can manually specify labels with the `##` syntax:
     ///
     /// ```no_run
-    /// # let mut imgui = dear_imgui::Context::create();
+    /// # let mut imgui = dear_imgui_rs::Context::create();
     /// # let ui = imgui.frame();
     ///
     /// ui.button("Click##button1");
@@ -344,7 +344,7 @@ impl Ui {
     /// push an ID to the ID stack:
     ///
     /// ```no_run
-    /// # let mut imgui = dear_imgui::Context::create();
+    /// # let mut imgui = dear_imgui_rs::Context::create();
     /// # let ui = imgui.frame();
     ///
     /// for i in 0..10 {

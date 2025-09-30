@@ -6,7 +6,7 @@
 //!
 //! Example:
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! // Adjust style before building a frame
 //! {
@@ -21,7 +21,7 @@
 //!
 //! Quick example (temporary style color):
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! let c = ui.push_style_color(StyleColor::Text, [0.2, 1.0, 0.2, 1.0]);

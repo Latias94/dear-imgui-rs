@@ -3,7 +3,7 @@
 //! This module contains event processing logic for various winit events
 //! including keyboard, mouse, touch, and IME events.
 
-use dear_imgui::Context;
+use dear_imgui_rs::Context;
 use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseScrollDelta, TouchPhase};
 
 use std::cell::RefCell;
@@ -92,14 +92,14 @@ pub fn handle_modifiers_changed(modifiers: &winit::event::Modifiers, imgui_ctx: 
 
     // Update modifier key states - our Key enum has Left/Right variants instead of Mod variants
     // We'll update both left and right keys to the same state since winit doesn't distinguish
-    io.add_key_event(dear_imgui::Key::LeftShift, state.shift_key());
-    io.add_key_event(dear_imgui::Key::RightShift, state.shift_key());
-    io.add_key_event(dear_imgui::Key::LeftCtrl, state.control_key());
-    io.add_key_event(dear_imgui::Key::RightCtrl, state.control_key());
-    io.add_key_event(dear_imgui::Key::LeftAlt, state.alt_key());
-    io.add_key_event(dear_imgui::Key::RightAlt, state.alt_key());
-    io.add_key_event(dear_imgui::Key::LeftSuper, state.super_key());
-    io.add_key_event(dear_imgui::Key::RightSuper, state.super_key());
+    io.add_key_event(dear_imgui_rs::Key::LeftShift, state.shift_key());
+    io.add_key_event(dear_imgui_rs::Key::RightShift, state.shift_key());
+    io.add_key_event(dear_imgui_rs::Key::LeftCtrl, state.control_key());
+    io.add_key_event(dear_imgui_rs::Key::RightCtrl, state.control_key());
+    io.add_key_event(dear_imgui_rs::Key::LeftAlt, state.alt_key());
+    io.add_key_event(dear_imgui_rs::Key::RightAlt, state.alt_key());
+    io.add_key_event(dear_imgui_rs::Key::LeftSuper, state.super_key());
+    io.add_key_event(dear_imgui_rs::Key::RightSuper, state.super_key());
 }
 
 /// Handle IME (Input Method Editor) events for international text input
@@ -146,7 +146,7 @@ pub fn handle_touch_event(touch: &winit::event::Touch, _window: &Window, _imgui_
                         .add_mouse_pos_event([pos.x as f32, pos.y as f32]);
                     _imgui_ctx
                         .io_mut()
-                        .add_mouse_button_event(dear_imgui::input::MouseButton::Left, true);
+                        .add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, true);
                 }
             }
             TouchPhase::Moved => {
@@ -165,7 +165,7 @@ pub fn handle_touch_event(touch: &winit::event::Touch, _window: &Window, _imgui_
                         .add_mouse_pos_event([pos.x as f32, pos.y as f32]);
                     _imgui_ctx
                         .io_mut()
-                        .add_mouse_button_event(dear_imgui::input::MouseButton::Left, false);
+                        .add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, false);
                     *active.borrow_mut() = None;
                 }
             }
@@ -189,7 +189,7 @@ pub fn handle_focused(focused: bool, imgui_ctx: &mut Context) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dear_imgui::Context;
+    use dear_imgui_rs::Context;
     use winit::event::{ElementState, MouseButton};
 
     #[test]

@@ -12,8 +12,8 @@ use std::{
     time::Instant,
 };
 
-use dear_imgui::*;
 use dear_imgui_glow::GlowRenderer;
+use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{

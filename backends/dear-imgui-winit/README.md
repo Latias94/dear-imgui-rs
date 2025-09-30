@@ -11,11 +11,11 @@ cursor handling and DPI awareness into Dear ImGui. Inspired by
 
 ## Compatibility
 
-| Item       | Version |
-|------------|---------|
-| Crate      | 0.2.x   |
-| dear-imgui | 0.2.x   |
-| winit      | 0.30.12 |
+| Item          | Version |
+|---------------|---------|
+| Crate         | 0.3.x   |
+| dear-imgui-rs | 0.3.x   |
+| winit         | 0.30.12 |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -24,7 +24,7 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/ma
 Minimal flow with winit 0.30 ApplicationHandler-style loops:
 
 ```rust,no_run
-use dear_imgui::{Context, Condition};
+use dear_imgui_rs::{Context, Condition};
 use dear_imgui_winit::{WinitPlatform, HiDpiMode};
 use winit::{event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::WindowId};
 

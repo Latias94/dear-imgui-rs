@@ -55,7 +55,7 @@ where
     /// are valid values which the slider can be dragged to.
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// ui.slider_config("Example", i8::MIN, i8::MAX)
@@ -165,7 +165,7 @@ where
     /// Constructs a new vertical slider builder with the given size and range.
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// VerticalSlider::new("Example", [20.0, 20.0], i8::MIN, i8::MAX)
@@ -198,7 +198,7 @@ where
     /// Sets the range for the vertical slider.
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// VerticalSlider::new("Example", [20.0, 20.0], i8::MIN, i8::MAX)
@@ -297,7 +297,7 @@ where
 {
     /// Sets the range in degrees (inclusive)
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// AngleSlider::new("Example")

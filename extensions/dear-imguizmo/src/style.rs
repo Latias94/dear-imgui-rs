@@ -1,4 +1,4 @@
-use dear_imgui::Ui;
+use dear_imgui_rs::Ui;
 use dear_imguizmo_sys as sys;
 use std::marker::PhantomData;
 

@@ -5,7 +5,7 @@
 //!
 //! Quick example (image button):
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! let tex_id = texture::TextureId::new(42);
@@ -23,7 +23,7 @@ use crate::ui::Ui;
 /// Examples
 /// - Using a plain texture id:
 /// ```no_run
-/// # use dear_imgui::*;
+/// # use dear_imgui_rs::*;
 /// # fn demo(ui: &Ui) {
 /// let tex_id = texture::TextureId::new(0xDEAD_BEEF);
 /// ui.image(tex_id, [128.0, 128.0]);
@@ -31,7 +31,7 @@ use crate::ui::Ui;
 /// ```
 /// - Using an ImGui-managed texture:
 /// ```no_run
-/// # use dear_imgui::*;
+/// # use dear_imgui_rs::*;
 /// # fn demo(ui: &Ui) {
 /// let mut tex = texture::TextureData::new();
 /// tex.create(texture::TextureFormat::RGBA32, 64, 64);

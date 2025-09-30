@@ -23,8 +23,8 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.1.x   |
-| dear-imgui        | 0.2.x   |
+| Crate             | 0.2.x   |
+| dear-imgui-rs     | 0.3.x   |
 | dear-imguizmo-sys | 0.1.x   |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
@@ -39,16 +39,16 @@ All matrix arguments in the API are generic over a `Mat4Like` trait, implemented
 
 ## Quick Start
 
-```
+```toml
 [dependencies]
-dear-imgui = "0.2"
-dear-imguizmo = "0.1"
+dear-imgui-rs = "0.3"
+dear-imguizmo = "0.2"
 ```
 
 Minimal usage (dear-imgui-style API):
 
 ```rust
-use dear_imgui::Context;
+use dear_imgui_rs::Context;
 use dear_imguizmo::{Operation, Mode, GuizmoExt};
 use glam::Mat4;
 
@@ -161,7 +161,7 @@ let mut view = GraphView::default();
 // populate graph.nodes/links ...
 
 ui.window("Graph")
-  .size([600.0, 400.0], dear_imgui::Condition::FirstUseEver)
+  .size([600.0, 400.0], dear_imgui_rs::Condition::FirstUseEver)
   .build(|| {
       // Simple draw with defaults
       let _resp = ui.graph_editor().draw(&mut graph, &mut view);

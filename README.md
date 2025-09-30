@@ -1,8 +1,8 @@
 # Dear ImGui (Rust) Workspace
 
-[![Crates.io](https://img.shields.io/crates/v/dear-imgui.svg)](https://crates.io/crates/dear-imgui)
-[![Documentation](https://docs.rs/dear-imgui/badge.svg)](https://docs.rs/dear-imgui)
-[![Crates.io Downloads](https://img.shields.io/crates/d/dear-imgui.svg)](https://crates.io/crates/dear-imgui)
+[![Crates.io](https://img.shields.io/crates/v/dear-imgui-rs.svg)](https://crates.io/crates/dear-imgui-rs)
+[![Documentation](https://docs.rs/dear-imgui-rs/badge.svg)](https://docs.rs/dear-imgui-rs)
+[![Crates.io Downloads](https://img.shields.io/crates/d/dear-imgui-rs.svg)](https://crates.io/crates/dear-imgui-rs)
 [![Made with Rust](https://img.shields.io/badge/made%20with-Rust-orange.svg)](https://www.rust-lang.org)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -22,7 +22,7 @@ Rust bindings and ecosystem around Dear ImGui, with docking, WGPU/GL backends, a
 
 - Core
   - `dear-imgui-sys` — low‑level FFI via cimgui (docking branch), bindgen against Dear ImGui v1.92.3
-  - `dear-imgui` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
+  - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-winit`
 - Extensions
   - `dear-imguizmo` — 3D gizmo (cimguizmo C API) + a pure‑Rust GraphEditor
@@ -34,7 +34,7 @@ All crates are maintained together in this workspace.
 ## Hello, ImGui (Hello World)
 
 ```rust
-use dear_imgui::*;
+use dear_imgui_rs::*;
 
 let mut ctx = Context::create();
 let ui = ctx.frame();
@@ -73,10 +73,10 @@ See `examples/README.md` for a curated index and the planned from‑easy‑to‑
 
 ```toml
 [dependencies]
-dear-imgui = "0.2"
+dear-imgui-rs = "0.3"
 # choose a backend + platform integration
-dear-imgui-wgpu = "0.2"   # or dear-imgui-glow
-dear-imgui-winit = "0.2"
+dear-imgui-wgpu = "0.3"   # or dear-imgui-glow
+dear-imgui-winit = "0.3"
 ```
 
 ## Build Strategy
@@ -112,29 +112,29 @@ Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui      | 0.2.x   | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-rs   | 0.3.x   | Safe Rust API over dear-imgui-sys         |
 | dear-imgui-sys  | 0.2.x   | Binds Dear ImGui v1.92.3 (docking branch) |
 
 Backends
 
 | Crate            | Version | External deps         | Notes |
 |------------------|---------|-----------------------|-------|
-| dear-imgui-wgpu  | 0.2.x   | wgpu = 26             |       |
-| dear-imgui-glow  | 0.2.x   | glow = 0.16           |       |
-| dear-imgui-winit | 0.2.x   | winit = 0.30.12       |       |
+| dear-imgui-wgpu  | 0.3.x   | wgpu = 26             |       |
+| dear-imgui-glow  | 0.3.x   | glow = 0.16           |       |
+| dear-imgui-winit | 0.3.x   | winit = 0.30.12       |       |
 
 Extensions
 
-| Crate         | Version | Requires dear-imgui | Sys crate         | Notes |
-|---------------|---------|---------------------|-------------------|-------|
-| dear-implot   | 0.2.x   | 0.2.x               | dear-implot-sys 0.2.x |     |
-| dear-imnodes  | 0.1.x   | 0.2.x               | dear-imnodes-sys 0.1.x |     |
-| dear-imguizmo | 0.1.x   | 0.2.x               | dear-imguizmo-sys 0.1.x |    |
+| Crate         | Version | Requires dear-imgui-rs | Sys crate         | Notes |
+|---------------|---------|------------------------|-------------------|-------|
+| dear-implot   | 0.3.x   | 0.3.x                  | dear-implot-sys 0.2.x |     |
+| dear-imnodes  | 0.2.x   | 0.3.x                  | dear-imnodes-sys 0.1.x |     |
+| dear-imguizmo | 0.2.x   | 0.3.x                  | dear-imguizmo-sys 0.1.x |    |
 
 Maintenance rules
 
 - Upgrade dear-imgui-sys together with all -sys extensions to avoid C ABI/API drift.
-- dear-imgui upgrades may require minor changes in backends/extensions if public APIs changed.
+- dear-imgui-rs upgrades may require minor changes in backends/extensions if public APIs changed.
 - Backend external deps (wgpu/winit/glow) have their own breaking cycles and may drive backend bumps independently.
 
 ### CI (Prebuilt Binaries)
@@ -157,7 +157,7 @@ Maintenance rules
 ## Crates (workspace)
 
 ```text
-dear-imgui/            # Safe Rust bindings
+dear-imgui-rs/         # Safe Rust bindings (renamed from dear-imgui)
 dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.92.3)
 backends/
   dear-imgui-wgpu/     # WGPU renderer

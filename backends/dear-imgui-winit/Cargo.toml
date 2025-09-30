@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-winit"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 description = "Winit backend for Dear ImGui"
 license.workspace = true
@@ -11,7 +11,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui = { path = "../../dear-imgui", version = "0.2" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.3" }
 winit.workspace = true
 #raw-window-handle = "0.6"
 #cfg-if.workspace = true
@@ -29,4 +29,4 @@ web-sys = { workspace = true, features = [
 [features]
 default = []
 # Enable multi-viewport support (WIP). Declared to silence cfg warnings; kept off by default.
-multi-viewport = ["dear-imgui/multi-viewport"]
+multi-viewport = ["dear-imgui-rs/multi-viewport"]

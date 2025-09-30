@@ -1,7 +1,7 @@
 //! Texture management for Dear ImGui
 
 use crate::{GlTexture, InitError, InitResult};
-use dear_imgui::{TextureData, TextureFormat, TextureId, TextureStatus};
+use dear_imgui_rs::{TextureData, TextureFormat, TextureId, TextureStatus};
 use glow::{Context, HasContext};
 use std::collections::HashMap;
 

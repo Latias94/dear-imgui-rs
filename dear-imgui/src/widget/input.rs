@@ -6,7 +6,7 @@
 //!
 //! Quick examples:
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! // Text (String)
@@ -45,7 +45,7 @@ impl Ui {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let mut text = String::new();
@@ -76,7 +76,7 @@ impl Ui {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let mut text = String::new();

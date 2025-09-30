@@ -1,6 +1,6 @@
 [package]
 name = "dear-imnodes"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 description = "Safe, idiomatic Rust bindings for ImNodes (node editor for Dear ImGui)"
 license.workspace = true
@@ -10,7 +10,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui = { path = "../../dear-imgui", version = "0.2" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.3" }
 dear-imnodes-sys = { path = "../dear-imnodes-sys", version = "0.1" }
 bitflags.workspace = true
 thiserror.workspace = true
@@ -19,8 +19,8 @@ thiserror.workspace = true
 default = []
 # Docking is always enabled; remove feature.
 # Enable multi-viewport support (commented out while WIP)
-# multi-viewport = ["dear-imgui/multi-viewport", "dear-imnodes-sys/multi-viewport"]
-freetype = ["dear-imgui/freetype", "dear-imnodes-sys/freetype"]
+# multi-viewport = ["dear-imgui-rs/multi-viewport", "dear-imnodes-sys/multi-viewport"]
+freetype = ["dear-imgui-rs/freetype", "dear-imnodes-sys/freetype"]
 
 [dev-dependencies]
 static_assertions = "1.1"

@@ -3,7 +3,7 @@
 //! These tests verify that the docking API works correctly and can create
 //! dock layouts programmatically.
 
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use std::sync::Mutex;
 
 // Global mutex to prevent concurrent ImGui context creation

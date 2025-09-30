@@ -4,7 +4,7 @@
 //! and pipeline creation logic.
 
 use crate::{RendererError, RendererResult};
-use dear_imgui::render::DrawVert;
+use dear_imgui_rs::render::DrawVert;
 use std::mem::size_of;
 use wgpu::*;
 

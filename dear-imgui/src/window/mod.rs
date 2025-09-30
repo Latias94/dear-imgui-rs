@@ -6,7 +6,7 @@
 //!
 //! Basic usage:
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! ui.window("Hello")
@@ -24,10 +24,10 @@
 //!
 //! Quick example (flags + size/pos conditions):
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
-//! use dear_imgui::WindowFlags;
+//! use dear_imgui_rs::WindowFlags;
 //! ui.window("Tools")
 //!     .flags(WindowFlags::NO_RESIZE | WindowFlags::NO_COLLAPSE)
 //!     .size([300.0, 200.0], Condition::FirstUseEver)

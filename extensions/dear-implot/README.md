@@ -13,8 +13,8 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.2.x   |
-| dear-imgui        | 0.2.x   |
+| Crate             | 0.3.x   |
+| dear-imgui-rs     | 0.3.x   |
 | dear-implot-sys   | 0.2.x   |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
@@ -26,8 +26,8 @@ This crate integrates with `dear-imgui` directly — add both crates, then build
 
 ```toml
 [dependencies]
-dear-imgui = "0.1"
-dear-implot = { path = "../../extensions/dear-implot" }
+dear-imgui-rs = "0.3"
+dear-implot = "0.3"
 ```
 
 ```rust
@@ -78,14 +78,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui = "0.11"
-dear-implot = { path = "path/to/dear-implot" }
+dear-imgui-rs = "0.3"
+dear-implot = "0.3"
 ```
 
 Basic usage:
 
 ```rust
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use dear_implot::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

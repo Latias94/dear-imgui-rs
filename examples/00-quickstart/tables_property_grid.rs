@@ -5,9 +5,9 @@
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use dear_imgui::TableColumnSetup;
-use dear_imgui::*;
 use dear_imgui_glow::GlowRenderer;
+use dear_imgui_rs::TableColumnSetup;
+use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
@@ -164,7 +164,7 @@ impl AppWindow {
         ui.window("Property Grid")
             .size([760.0, 520.0], Condition::FirstUseEver)
             .build(|| {
-                use dear_imgui::{TableColumnFlags, TableFlags};
+                use dear_imgui_rs::{TableColumnFlags, TableFlags};
 
                 // Two columns: Label | Editor
                 let cols = [

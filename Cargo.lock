@@ -689,24 +689,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "dear-imgui"
-version = "0.2.0"
-dependencies = [
- "approx",
- "bitflags 2.9.4",
- "cfg-if",
- "dear-imgui-sys",
- "mint",
- "once_cell",
- "parking_lot",
- "pretty_assertions",
- "static_assertions",
- "thiserror 2.0.16",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "dear-imgui-build-support"
 version = "0.1.0"
 dependencies = [
@@ -720,8 +702,8 @@ name = "dear-imgui-examples"
 version = "0.1.0"
 dependencies = [
  "arboard",
- "dear-imgui",
  "dear-imgui-glow",
+ "dear-imgui-rs",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "dear-imguizmo",
@@ -743,15 +725,33 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-glow"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
- "dear-imgui",
+ "dear-imgui-rs",
  "env_logger",
  "glow",
  "memoffset",
  "pollster",
  "thiserror 2.0.16",
  "winit",
+]
+
+[[package]]
+name = "dear-imgui-rs"
+version = "0.3.0"
+dependencies = [
+ "approx",
+ "bitflags 2.9.4",
+ "cfg-if",
+ "dear-imgui-sys",
+ "mint",
+ "once_cell",
+ "parking_lot",
+ "pretty_assertions",
+ "static_assertions",
+ "thiserror 2.0.16",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -776,7 +776,7 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
- "dear-imgui",
+ "dear-imgui-rs",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "instant",
@@ -793,10 +793,10 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-wgpu"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytemuck",
- "dear-imgui",
+ "dear-imgui-rs",
  "thiserror 2.0.16",
  "tracing",
  "wgpu",
@@ -804,9 +804,9 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-winit"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
- "dear-imgui",
+ "dear-imgui-rs",
  "instant",
  "web-sys",
  "winit",
@@ -814,10 +814,10 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bitflags 2.9.4",
- "dear-imgui",
+ "dear-imgui-rs",
  "dear-imgui-sys",
  "dear-imguizmo-sys",
  "glam",
@@ -843,10 +843,10 @@ dependencies = [
 
 [[package]]
 name = "dear-imnodes"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bitflags 2.9.4",
- "dear-imgui",
+ "dear-imgui-rs",
  "dear-imnodes-sys",
  "static_assertions",
  "thiserror 2.0.16",
@@ -869,11 +869,11 @@ dependencies = [
 
 [[package]]
 name = "dear-implot"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "approx",
  "bitflags 2.9.4",
- "dear-imgui",
+ "dear-imgui-rs",
  "dear-imgui-sys",
  "dear-implot-sys",
  "pretty_assertions",
