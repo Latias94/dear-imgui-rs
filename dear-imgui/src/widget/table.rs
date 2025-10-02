@@ -5,7 +5,7 @@
 //!
 //! Quick example (builder):
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! ui.table("perf")
@@ -22,7 +22,7 @@
 //!
 //! Quick example (manual API):
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! if let Some(_t) = ui.begin_table("t", 2) {
@@ -88,7 +88,7 @@ impl Ui {
     ///
     /// Example
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # fn demo(ui: &Ui) {
     /// ui.table("perf")
     ///     .flags(TableFlags::RESIZABLE | TableFlags::SORTABLE)

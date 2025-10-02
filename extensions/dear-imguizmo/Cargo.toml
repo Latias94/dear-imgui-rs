@@ -1,6 +1,6 @@
 [package]
 name = "dear-imguizmo"
-version = "0.1.0"
+version = "0.3.0"
 edition.workspace = true
 description = "High-level Rust bindings for ImGuizmo (C API) with Dear ImGui integration"
 license.workspace = true
@@ -12,9 +12,9 @@ keywords.workspace = true
 readme = "README.md"
 
 [dependencies]
-dear-imgui = { path = "../../dear-imgui", version = "0.2" }
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.2" }
-dear-imguizmo-sys = { path = "../dear-imguizmo-sys", version = "0.1" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.3" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.3" }
+dear-imguizmo-sys = { path = "../dear-imguizmo-sys", version = "0.3" }
 thiserror.workspace = true
 bitflags = { workspace = true }
 glam = { workspace = true, optional = true }
@@ -24,7 +24,7 @@ mint = { workspace = true, optional = true }
 default = ["glam"]
 # Docking is always enabled; remove feature.
 # Enable multi-viewport support (commented out while WIP)
-# multi-viewport = ["dear-imgui/multi-viewport", "dear-imguizmo-sys/multi-viewport"]
-freetype = ["dear-imgui/freetype", "dear-imguizmo-sys/freetype"]
+# multi-viewport = ["dear-imgui-rs/multi-viewport", "dear-imguizmo-sys/multi-viewport"]
+freetype = ["dear-imgui-rs/freetype", "dear-imguizmo-sys/freetype"]
 glam = ["dep:glam"]
 mint = ["dep:mint"]

@@ -1,7 +1,7 @@
 //! WGPU Render-to-Texture integration example.
 //! Renders to an offscreen wgpu::Texture each frame and shows it in an ImGui window.
 
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
@@ -32,7 +32,7 @@ struct OffscreenRtt {
     size: (u32, u32),
     texture: wgpu::Texture,
     view: wgpu::TextureView,
-    texture_id: dear_imgui::TextureId,
+    texture_id: dear_imgui_rs::TextureId,
 }
 
 impl OffscreenRtt {
@@ -65,7 +65,7 @@ impl OffscreenRtt {
                     texture.clone(),
                     view.clone(),
                 ));
-        let texture_id = dear_imgui::TextureId::from(id64);
+        let texture_id = dear_imgui_rs::TextureId::from(id64);
 
         Self {
             size,

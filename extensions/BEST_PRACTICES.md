@@ -1,6 +1,6 @@
 # Extensions: Best Practices
 
-This guide documents how to build and design extensions that integrate well with our `dear-imgui` workspace. It covers API style guidelines, layering, build scripts, and how to proceed when upstream only provides a C++ API.
+This guide documents how to build and design extensions that integrate well with our `dear-imgui-rs` workspace. It covers API style guidelines, layering, build scripts, and how to proceed when upstream only provides a C++ API.
 
 ## Goals
 
@@ -10,7 +10,7 @@ This guide documents how to build and design extensions that integrate well with
 
 ## API Style (align with dear-imgui)
 
-Follow the `dear-imgui` crate's style for a uniform developer experience:
+Follow the `dear-imgui-rs` crate's style for a uniform developer experience:
 
 - Entry via `Ui` extensions
   - Provide `Ui` extension methods to access your extension's per-frame UI (e.g., `ui.guizmo()` returning a `GizmoUi`).
@@ -28,7 +28,7 @@ Follow the `dear-imgui` crate's style for a uniform developer experience:
 Example (ImGuizmo):
 
 ```rust
-use dear_imgui::Ui;
+use dear_imgui_rs::Ui;
 use dear_imguizmo::{GuizmoExt, Operation, Mode, DrawListTarget};
 
 fn draw(ui: &Ui) {
@@ -51,7 +51,7 @@ fn draw(ui: &Ui) {
 }
 ```
 
-Prefer this style for new features to remain consistent with the `dear-imgui` crate. See `dear_imguizmo::graph` (pure-Rust GraphEditor) for a concrete example of a Ui extension plus builder API.
+Prefer this style for new features to remain consistent with the `dear-imgui-rs` crate. See `dear_imguizmo::graph` (pure-Rust GraphEditor) for a concrete example of a Ui extension plus builder API.
 
 Naming convention for Ui extensions and entry points:
 
@@ -292,7 +292,7 @@ Sometimes upstream provides functionality only in the C++ API (e.g., ImGuizmo Gr
 
 1) Prefer a pure Rust reimplementation (recommended)
 
-- Design a Rust-idiomatic API aligned with `dear-imgui` (Ui extensions, RAII tokens, builders). Our `dear_imguizmo::graph` module follows this approach.
+- Design a Rust-idiomatic API aligned with `dear-imgui-rs` (Ui extensions, RAII tokens, builders). Our `dear_imguizmo::graph` module follows this approach.
 - Use Dear ImGui drawing/input to replicate behavior.
 - Pros: no extra toolchains or ABI issues; consistent style; easier maintenance and testing; better WASM/Android support.
 - Cons: initial implementation effort; behavior may diverge slightly from upstream until parity is reached.

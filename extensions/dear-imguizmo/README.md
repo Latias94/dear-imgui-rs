@@ -1,8 +1,13 @@
 # Dear ImGuizmo - Rust Bindings
 
-High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on the C API ([cimguizmo](https://github.com/cimgui/cimguizmo)) and integrated with `dear-imgui`.
+High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on the C API ([cimguizmo](https://github.com/cimgui/cimguizmo)) and integrated with `dear-imgui-rs`.
 
 This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ binding.
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/6fee92e9-d77a-4c47-aca9-9992243f26de" alt="ImGuizmo" width="75%"/>
+  <br/>
+</p>
 
 ## Links
 
@@ -11,18 +16,18 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 
 ## Crate Layout
 
-- `dear-imguizmo` (this crate): safe, idiomatic wrapper integrated with `dear-imgui`.
+- `dear-imguizmo` (this crate): safe, idiomatic wrapper integrated with `dear-imgui-rs`.
 - `dear-imguizmo-sys`: low-level FFI generated from the C API (`cimguizmo`). Prefer not using it directly unless you need raw bindings.
 
 ## Compatibility
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.1.x   |
-| dear-imgui        | 0.2.x   |
+| Crate             | 0.2.x   |
+| dear-imgui-rs     | 0.3.x   |
 | dear-imguizmo-sys | 0.1.x   |
 
-See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Features
 
@@ -34,16 +39,16 @@ All matrix arguments in the API are generic over a `Mat4Like` trait, implemented
 
 ## Quick Start
 
-```
+```toml
 [dependencies]
-dear-imgui = "0.2"
-dear-imguizmo = "0.1"
+dear-imgui-rs = "0.3"
+dear-imguizmo = "0.2"
 ```
 
 Minimal usage (dear-imgui-style API):
 
 ```rust
-use dear_imgui::Context;
+use dear_imgui_rs::Context;
 use dear_imguizmo::{Operation, Mode, GuizmoExt};
 use glam::Mat4;
 
@@ -156,7 +161,7 @@ let mut view = GraphView::default();
 // populate graph.nodes/links ...
 
 ui.window("Graph")
-  .size([600.0, 400.0], dear_imgui::Condition::FirstUseEver)
+  .size([600.0, 400.0], dear_imgui_rs::Condition::FirstUseEver)
   .build(|| {
       // Simple draw with defaults
       let _resp = ui.graph_editor().draw(&mut graph, &mut view);

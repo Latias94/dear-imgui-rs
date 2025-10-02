@@ -1,28 +1,33 @@
 # Dear ImPlot - Rust Bindings
 
-High-level Rust bindings for ImPlot, the immediate mode plotting library. This crate provides safe, idiomatic Rust bindings designed to work seamlessly with `dear-imgui` (which uses cimgui C API) and `dear-implot-sys` (which uses cimplot C API).
+High-level Rust bindings for ImPlot, the immediate mode plotting library. This crate provides safe, idiomatic Rust bindings designed to work seamlessly with `dear-imgui-rs` (which uses cimgui C API) and `dear-implot-sys` (which uses cimplot C API).
 
 For native build/link options (source, system/prebuilt, remote prebuilt), see `extensions/dear-implot-sys/README.md`.
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/89ea8489-a12f-4246-9410-b6b8dea4b5ba" alt="ImPlot" width="75%"/>
+  <br/>
+</p>
 
 ## Compatibility
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.2.x   |
-| dear-imgui        | 0.2.x   |
+| Crate             | 0.3.x   |
+| dear-imgui-rs     | 0.3.x   |
 | dear-implot-sys   | 0.2.x   |
 
-See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 
 ## Integration Quickstart
 
-This crate integrates with `dear-imgui` directly — add both crates, then build plots inside an ImGui window using a `PlotContext` bound to the current ImGui context.
+This crate integrates with `dear-imgui-rs` directly — add both crates, then build plots inside an ImGui window using a `PlotContext` bound to the current ImGui context.
 
 ```toml
 [dependencies]
-dear-imgui = "0.1"
-dear-implot = { path = "../../extensions/dear-implot" }
+dear-imgui-rs = "0.3"
+dear-implot = "0.3"
 ```
 
 ```rust
@@ -73,14 +78,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui = "0.11"
-dear-implot = { path = "path/to/dear-implot" }
+dear-imgui-rs = "0.3"
+dear-implot = "0.3"
 ```
 
 Basic usage:
 
 ```rust
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use dear_implot::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -368,7 +373,7 @@ The build process automatically handles:
 
 ## Architecture
 
-This crate follows the same architectural patterns as `dear-imgui`:
+This crate follows the same architectural patterns as `dear-imgui-rs`:
 
 - **Context Management**: Separate ImPlot context that works alongside Dear ImGui
 - **Lifetime Safety**: Plot tokens ensure proper begin/end pairing

@@ -1,28 +1,28 @@
-# Dear ImGui (Rust) Workspace
+# dear-imgui-rs
 
-[![Crates.io](https://img.shields.io/crates/v/dear-imgui.svg)](https://crates.io/crates/dear-imgui)
-[![Documentation](https://docs.rs/dear-imgui/badge.svg)](https://docs.rs/dear-imgui)
-[![Crates.io Downloads](https://img.shields.io/crates/d/dear-imgui.svg)](https://crates.io/crates/dear-imgui)
+[![Crates.io](https://img.shields.io/crates/v/dear-imgui-rs.svg)](https://crates.io/crates/dear-imgui-rs)
+[![Documentation](https://docs.rs/dear-imgui-rs/badge.svg)](https://docs.rs/dear-imgui-rs)
+[![Crates.io Downloads](https://img.shields.io/crates/d/dear-imgui-rs.svg)](https://crates.io/crates/dear-imgui-rs)
 [![Made with Rust](https://img.shields.io/badge/made%20with-Rust-orange.svg)](https://www.rust-lang.org)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-Rust bindings and ecosystem around Dear ImGui, with docking, WGPU/GL backends, and popular extensions (ImGuizmo, ImNodes, ImPlot).
+`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL backends, and popular extensions (ImGuizmo, ImNodes, ImPlot).
 
 <p align="center">
-  <img src="screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
-  <img src="screenshots/imguizmo-basic.png" alt="ImGuizmo" width="49%"/>
+  <img src="https://github.com/user-attachments/assets/a9212184-d9c5-4e16-820a-cd98b471a6ea" alt="Docking" width="49%"/>
+  <img src="https://github.com/user-attachments/assets/6fee92e9-d77a-4c47-aca9-9992243f26de" alt="ImGuizmo" width="49%"/>
   <br/>
-  <img src="screenshots/implot-basic.png" alt="ImPlot" width="49%"/>
-  <img src="screenshots/imnodes-basic.png" alt="ImNodes Shader Graph" width="49%"/>
+  <img src="https://github.com/user-attachments/assets/89ea8489-a12f-4246-9410-b6b8dea4b5ba" alt="ImPlot" width="49%"/>
+  <img src="https://github.com/user-attachments/assets/b1c56b58-7254-41f6-a97b-e97eac147a1e" alt="ImNodes Shader Graph" width="49%"/>
 </p>
 
 ## What’s in this repo
 
 - Core
   - `dear-imgui-sys` — low‑level FFI via cimgui (docking branch), bindgen against Dear ImGui v1.92.3
-  - `dear-imgui` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
+  - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-winit`
 - Extensions
   - `dear-imguizmo` — 3D gizmo (cimguizmo C API) + a pure‑Rust GraphEditor
@@ -34,7 +34,7 @@ All crates are maintained together in this workspace.
 ## Hello, ImGui (Hello World)
 
 ```rust
-use dear_imgui::*;
+use dear_imgui_rs::*;
 
 let mut ctx = Context::create();
 let ui = ctx.frame();
@@ -53,7 +53,7 @@ ui.window("Hello")
 
 ```bash
 # Clone with submodules
-git clone https://github.com/Latias94/dear-imgui
+git clone https://github.com/Latias94/dear-imgui-rs
 git submodule update --init --recursive
 
 # Core & docking
@@ -73,10 +73,10 @@ See `examples/README.md` for a curated index and the planned from‑easy‑to‑
 
 ```toml
 [dependencies]
-dear-imgui = "0.2"
+dear-imgui-rs = "0.3"
 # choose a backend + platform integration
-dear-imgui-wgpu = "0.2"   # or dear-imgui-glow
-dear-imgui-winit = "0.2"
+dear-imgui-wgpu = "0.3"   # or dear-imgui-glow
+dear-imgui-winit = "0.3"
 ```
 
 ## Build Strategy
@@ -106,35 +106,35 @@ Quick examples (enable auto prebuilt download):
 
 ## Compatibility (Latest)
 
-The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for full history and upgrade notes.
+The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for full history and upgrade notes.
 
 Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui      | 0.2.x   | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.2.x   | Binds Dear ImGui v1.92.3 (docking branch) |
+| dear-imgui-rs   | 0.3.x   | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.3.x   | Binds Dear ImGui v1.92.3 (docking branch) |
 
 Backends
 
 | Crate            | Version | External deps         | Notes |
 |------------------|---------|-----------------------|-------|
-| dear-imgui-wgpu  | 0.2.x   | wgpu = 26             |       |
-| dear-imgui-glow  | 0.2.x   | glow = 0.16           |       |
-| dear-imgui-winit | 0.2.x   | winit = 0.30.12       |       |
+| dear-imgui-wgpu  | 0.3.x   | wgpu = 26             |       |
+| dear-imgui-glow  | 0.3.x   | glow = 0.16           |       |
+| dear-imgui-winit | 0.3.x   | winit = 0.30.12       |       |
 
 Extensions
 
-| Crate         | Version | Requires dear-imgui | Sys crate         | Notes |
-|---------------|---------|---------------------|-------------------|-------|
-| dear-implot   | 0.2.x   | 0.2.x               | dear-implot-sys 0.2.x |     |
-| dear-imnodes  | 0.1.x   | 0.2.x               | dear-imnodes-sys 0.1.x |     |
-| dear-imguizmo | 0.1.x   | 0.2.x               | dear-imguizmo-sys 0.1.x |    |
+| Crate         | Version | Requires dear-imgui-rs | Sys crate            | Notes |
+|---------------|---------|------------------------|----------------------|-------|
+| dear-implot   | 0.3.x   | 0.3.x                  | dear-implot-sys 0.3.x |     |
+| dear-imnodes  | 0.3.x   | 0.3.x                  | dear-imnodes-sys 0.3.x |     |
+| dear-imguizmo | 0.3.x   | 0.3.x                  | dear-imguizmo-sys 0.3.x |    |
 
 Maintenance rules
 
 - Upgrade dear-imgui-sys together with all -sys extensions to avoid C ABI/API drift.
-- dear-imgui upgrades may require minor changes in backends/extensions if public APIs changed.
+- dear-imgui-rs upgrades may require minor changes in backends/extensions if public APIs changed.
 - Backend external deps (wgpu/winit/glow) have their own breaking cycles and may drive backend bumps independently.
 
 ### CI (Prebuilt Binaries)
@@ -157,7 +157,7 @@ Maintenance rules
 ## Crates (workspace)
 
 ```text
-dear-imgui/            # Safe Rust bindings
+dear-imgui-rs/         # Safe Rust bindings (renamed from dear-imgui)
 dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.92.3)
 backends/
   dear-imgui-wgpu/     # WGPU renderer
@@ -179,6 +179,7 @@ extensions/
 If you're working with graphics applications in Rust, you might also be interested in:
 
 - **[asset-importer](https://github.com/Latias94/asset-importer)** - A comprehensive Rust binding for the latest [Assimp](https://github.com/assimp/assimp) 3D asset import library, providing robust 3D model loading capabilities for graphics applications
+- **[boxdd](https://github.com/Latias94/boxdd)** - Safe, ergonomic Rust bindings for Box2D v3.
 
 ## Acknowledgments
 

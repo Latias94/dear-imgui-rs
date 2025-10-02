@@ -11,7 +11,7 @@
 //!
 //! Example (zero-copy text input with `ImString`):
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! let mut s = ImString::with_capacity(256);

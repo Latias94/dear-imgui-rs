@@ -1,6 +1,6 @@
 //! Main renderer implementation
 
-use dear_imgui::{
+use dear_imgui_rs::{
     Context as ImGuiContext, TextureData, TextureFormat, TextureId,
     internal::RawWrapper,
     render::{DrawCmd, DrawCmdParams, DrawData, DrawVert},
@@ -364,12 +364,12 @@ impl GlowRenderer {
 
         // Set backend capabilities
         let mut flags = io.backend_flags();
-        flags.insert(dear_imgui::BackendFlags::RENDERER_HAS_VTX_OFFSET);
-        flags.insert(dear_imgui::BackendFlags::RENDERER_HAS_TEXTURES);
+        flags.insert(dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET);
+        flags.insert(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES);
 
         #[cfg(feature = "multi-viewport")]
         {
-            flags.insert(dear_imgui::BackendFlags::RENDERER_HAS_VIEWPORTS);
+            flags.insert(dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS);
         }
 
         io.set_backend_flags(flags);
@@ -456,7 +456,7 @@ impl GlowRenderer {
     pub fn render(&mut self, draw_data: &DrawData) -> RenderResult<()> {
         // Handle texture updates first, following the original Dear ImGui OpenGL3 implementation
         for texture_data in draw_data.textures() {
-            if texture_data.status() != dear_imgui::TextureStatus::OK {
+            if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
                 self.update_texture_from_data(texture_data)?;
             }
         }
@@ -472,7 +472,7 @@ impl GlowRenderer {
     pub fn render_with_context(&mut self, gl: &Context, draw_data: &DrawData) -> RenderResult<()> {
         // Handle texture updates first
         for texture_data in draw_data.textures() {
-            if texture_data.status() != dear_imgui::TextureStatus::OK {
+            if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
                 self.update_texture_from_data(texture_data)?;
             }
         }
@@ -510,7 +510,7 @@ impl GlowRenderer {
         /*
         if let Some(textures) = draw_data.textures() {
             for texture_data in textures {
-                if texture_data.status() != dear_imgui::TextureStatus::OK {
+                if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
                     self.update_texture_from_data(gl, texture_map, texture_data)?;
                 }
             }
@@ -768,11 +768,11 @@ impl GlowRenderer {
                         raw_cmd,
                     } => {
                         let tex_id_u64 = unsafe {
-                            dear_imgui::sys::ImDrawCmd_GetTexID(
-                                raw_cmd as *mut dear_imgui::sys::ImDrawCmd,
+                            dear_imgui_rs::sys::ImDrawCmd_GetTexID(
+                                raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
                             )
                         } as u64;
-                        let tex_id = dear_imgui::TextureId::from(tex_id_u64);
+                        let tex_id = dear_imgui_rs::TextureId::from(tex_id_u64);
                         self.render_elements(
                             gl,
                             texture_map,
@@ -829,7 +829,7 @@ impl GlowRenderer {
     fn upload_index_buffer(
         &mut self,
         gl: &Context,
-        indices: &[dear_imgui::render::DrawIdx],
+        indices: &[dear_imgui_rs::render::DrawIdx],
     ) -> RenderResult<()> {
         unsafe {
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, self.ebo_handle);
@@ -852,7 +852,7 @@ impl GlowRenderer {
         gl: &Context,
         texture_map: &dyn TextureMap,
         count: usize,
-        effective_tex_id: dear_imgui::TextureId,
+        effective_tex_id: dear_imgui_rs::TextureId,
         cmd_params: &DrawCmdParams,
         draw_data: &DrawData,
     ) -> RenderResult<()> {
@@ -895,8 +895,8 @@ impl GlowRenderer {
             );
 
             // Draw - dynamically detect index type like the original implementation
-            let idx_offset = cmd_params.idx_offset * size_of::<dear_imgui::render::DrawIdx>();
-            let index_type = if size_of::<dear_imgui::render::DrawIdx>() == 2 {
+            let idx_offset = cmd_params.idx_offset * size_of::<dear_imgui_rs::render::DrawIdx>();
+            let index_type = if size_of::<dear_imgui_rs::render::DrawIdx>() == 2 {
                 glow::UNSIGNED_SHORT
             } else {
                 glow::UNSIGNED_INT
@@ -926,7 +926,7 @@ impl GlowRenderer {
 /// Multi-viewport support functions
 #[cfg(feature = "multi-viewport")]
 pub mod multi_viewport {
-    use dear_imgui::{ViewportFlags, sys};
+    use dear_imgui_rs::{ViewportFlags, sys};
     use std::ffi::c_void;
 
     /// Render a viewport (called by ImGui for multi-viewport support)
@@ -964,7 +964,7 @@ pub mod multi_viewport {
     }
 
     /// Initialize multi-viewport support
-    pub fn init_multi_viewport_support(imgui_context: &mut dear_imgui::Context) {
+    pub fn init_multi_viewport_support(imgui_context: &mut dear_imgui_rs::Context) {
         let platform_io = imgui_context.platform_io_mut();
 
         // Set the renderer callback
@@ -974,7 +974,7 @@ pub mod multi_viewport {
     }
 
     /// Shutdown multi-viewport support
-    pub fn shutdown_multi_viewport_support(context: &mut dear_imgui::Context) {
+    pub fn shutdown_multi_viewport_support(context: &mut dear_imgui_rs::Context) {
         // Destroy platform windows using the high-level interface
         context.destroy_platform_windows();
     }
@@ -985,9 +985,9 @@ impl GlowRenderer {
     /// Following the original Dear ImGui OpenGL3 implementation
     fn update_texture_from_data(
         &mut self,
-        texture_data: &mut dear_imgui::TextureData,
+        texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
-        use dear_imgui::TextureStatus;
+        use dear_imgui_rs::TextureStatus;
 
         match texture_data.status() {
             TextureStatus::WantCreate => {
@@ -1013,7 +1013,7 @@ impl GlowRenderer {
     /// Create a new texture from ImTextureData
     fn create_texture_from_data(
         &mut self,
-        texture_data: &mut dear_imgui::TextureData,
+        texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
         let gl = self.get_gl_context()?;
         let width = texture_data.width() as u32;
@@ -1059,7 +1059,7 @@ impl GlowRenderer {
 
                 // Upload texture data based on format
                 match format {
-                    dear_imgui::TextureFormat::RGBA32 => {
+                    dear_imgui_rs::TextureFormat::RGBA32 => {
                         gl.tex_image_2d(
                             glow::TEXTURE_2D,
                             0,
@@ -1072,7 +1072,7 @@ impl GlowRenderer {
                             glow::PixelUnpackData::Slice(Some(pixels)),
                         );
                     }
-                    dear_imgui::TextureFormat::Alpha8 => {
+                    dear_imgui_rs::TextureFormat::Alpha8 => {
                         // NOTE(opt): Could use GL RED + TEXTURE_SWIZZLE to avoid 4x expansion when
                         // GL 3.3+/GLES3.0+/ARB_texture_swizzle is available. See note in prepare_font_atlas().
                         // Convert Alpha8 to RGBA32 for OpenGL
@@ -1115,7 +1115,7 @@ impl GlowRenderer {
                 self.texture_map
                     .register_texture(gl_texture, width as i32, height as i32, format);
             texture_data.set_tex_id(tex_id);
-            texture_data.set_status(dear_imgui::TextureStatus::OK);
+            texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
         }
 
         Ok(())
@@ -1124,7 +1124,7 @@ impl GlowRenderer {
     /// Update an existing texture from ImTextureData
     fn update_existing_texture_from_data(
         &mut self,
-        texture_data: &mut dear_imgui::TextureData,
+        texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
         let gl = self.get_gl_context()?;
         let tex_id = texture_data.tex_id();
@@ -1145,7 +1145,7 @@ impl GlowRenderer {
             None => {
                 // No CPU pixels available this frame; nothing to upload.
                 // Mark as OK to avoid retry storm and proceed with existing GPU texture.
-                texture_data.set_status(dear_imgui::TextureStatus::OK);
+                texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
                 return Ok(());
             }
         };
@@ -1161,7 +1161,7 @@ impl GlowRenderer {
         }
 
         // Collect update rects; prefer explicit Updates[] then fallback to single UpdateRect
-        let mut rects: Vec<dear_imgui::texture::TextureRect> = texture_data.updates().collect();
+        let mut rects: Vec<dear_imgui_rs::texture::TextureRect> = texture_data.updates().collect();
         if rects.is_empty() {
             let r = texture_data.update_rect();
             if r.w > 0 && r.h > 0 {
@@ -1171,7 +1171,7 @@ impl GlowRenderer {
 
         if rects.is_empty() {
             // Nothing to update; mark OK and return
-            texture_data.set_status(dear_imgui::TextureStatus::OK);
+            texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
             // Restore previous binding and pixel store
             unsafe {
                 gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
@@ -1215,11 +1215,11 @@ impl GlowRenderer {
                 let src = &pixels[src_row_start..src_row_start + (rw as usize) * bpp];
 
                 match texture_data.format() {
-                    dear_imgui::TextureFormat::RGBA32 => {
+                    dear_imgui_rs::TextureFormat::RGBA32 => {
                         // Already RGBA, just append
                         sub_rgba.extend_from_slice(src);
                     }
-                    dear_imgui::TextureFormat::Alpha8 => {
+                    dear_imgui_rs::TextureFormat::Alpha8 => {
                         // NOTE(opt): Could use GL RED + TEXTURE_SWIZZLE (if available) to avoid expansion.
                         // Convert A8 -> RGBA8 with white RGB
                         for &a in src.iter() {
@@ -1257,14 +1257,14 @@ impl GlowRenderer {
         }
 
         // Mark status OK after updates
-        texture_data.set_status(dear_imgui::TextureStatus::OK);
+        texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
         Ok(())
     }
 
     /// Destroy a texture from ImTextureData
     fn destroy_texture_from_data(
         &mut self,
-        texture_data: &mut dear_imgui::TextureData,
+        texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
         let gl = self.get_gl_context()?;
         let texture_id = texture_data.tex_id();
@@ -1276,7 +1276,7 @@ impl GlowRenderer {
             self.texture_map.remove(texture_id);
         }
 
-        texture_data.set_status(dear_imgui::TextureStatus::Destroyed);
+        texture_data.set_status(dear_imgui_rs::TextureStatus::Destroyed);
 
         Ok(())
     }

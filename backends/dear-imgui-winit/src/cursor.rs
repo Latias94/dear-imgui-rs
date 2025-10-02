@@ -3,7 +3,7 @@
 //! This module handles mouse cursor type mapping and caching to avoid
 //! unnecessary system calls when changing cursor appearance.
 
-use dear_imgui::MouseCursor;
+use dear_imgui_rs::MouseCursor;
 use winit::window::{CursorIcon as WinitCursor, Window};
 
 /// Cursor settings cache to avoid unnecessary cursor changes

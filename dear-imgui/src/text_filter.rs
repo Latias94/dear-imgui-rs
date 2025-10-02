@@ -7,7 +7,7 @@
 //! # Basic Usage
 //!
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! let mut filter = TextFilter::new("Search".to_string());
@@ -40,7 +40,7 @@ use std::ptr;
 /// # Examples
 ///
 /// ```no_run
-/// # use dear_imgui::*;
+/// # use dear_imgui_rs::*;
 /// # let mut ctx = Context::create();
 /// # let ui = ctx.frame();
 /// // Create a filter with default empty pattern
@@ -68,7 +68,7 @@ impl TextFilter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// let filter = TextFilter::new("Search".to_string());
     /// ```
     pub fn new(label: String) -> Self {
@@ -84,7 +84,7 @@ impl TextFilter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// let filter = TextFilter::new_with_filter(
     ///     "Search".to_string(),
     ///     "include,-exclude".to_string()
@@ -108,7 +108,7 @@ impl TextFilter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// let mut filter = TextFilter::new_with_filter(
     ///     "Search".to_string(),
     ///     "test".to_string()
@@ -133,7 +133,7 @@ impl TextFilter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let mut filter = TextFilter::new("Search".to_string());
@@ -156,7 +156,7 @@ impl TextFilter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let mut filter = TextFilter::new("Search".to_string());
@@ -183,7 +183,7 @@ impl TextFilter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// let empty_filter = TextFilter::new("Search".to_string());
     /// assert!(!empty_filter.is_active());
     ///
@@ -209,7 +209,7 @@ impl TextFilter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// let mut filter = TextFilter::new_with_filter(
     ///     "Search".to_string(),
     ///     "test".to_string()
@@ -241,7 +241,7 @@ impl TextFilter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// let mut filter = TextFilter::new_with_filter(
     ///     "Search".to_string(),
     ///     "test".to_string()
@@ -269,7 +269,7 @@ impl TextFilter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// let mut filter = TextFilter::new_with_filter(
     ///     "Search".to_string(),
     ///     "test".to_string()
@@ -299,7 +299,7 @@ impl Ui {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let filter = ui.text_filter("Search".to_string());
@@ -319,7 +319,7 @@ impl Ui {
     /// # Examples
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let filter = ui.text_filter_with_filter(

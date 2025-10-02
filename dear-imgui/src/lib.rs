@@ -15,7 +15,7 @@
 //! ## Quick Start
 //!
 //! ```no_run
-//! use dear_imgui::*;
+//! use dear_imgui_rs::*;
 //!
 //! let mut ctx = Context::create();
 //! let ui = ctx.frame();
@@ -38,7 +38,7 @@
 //!
 //! Example:
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # fn demo(ui: &Ui) {
 //! let dl = ui.get_window_draw_list();
 //! dl.add_line([0.0, 0.0], [100.0, 100.0], [1.0, 1.0, 1.0, 1.0]).build();
@@ -54,7 +54,7 @@
 //! You can pass either a legacy `TextureId` or an ImGui-managed `TextureData` (preferred):
 //!
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # fn demo(ui: &Ui) {
 //! // 1) Legacy handle
 //! let tex_id = texture::TextureId::new(0x1234);
@@ -135,7 +135,7 @@
 //! When you need a packed color (e.g. `TableSetBgColor`), use `colors::Color::to_imgui_u32()`:
 //!
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # fn demo(ui: &Ui) {
 //! // Pack RGBA floats to ImGui ABGR (ImU32)
 //! let abgr = Color::rgb(1.0, 0.0, 0.0).to_imgui_u32();
@@ -156,7 +156,7 @@
 //!   - For very large fields, use `.capacity_hint(bytes)` on the builder to
 //!     reduce reallocations, e.g.:
 //!     ```no_run
-//!     # use dear_imgui::*;
+//!     # use dear_imgui_rs::*;
 //!     # fn demo(ui: &Ui, big: &mut String) {
 //!     ui.input_text("Big", big)
 //!         .capacity_hint(64 * 1024)

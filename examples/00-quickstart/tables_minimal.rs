@@ -3,8 +3,8 @@
 
 use std::{cmp::Ordering, num::NonZeroU32, sync::Arc, time::Instant};
 
-use dear_imgui::*;
 use dear_imgui_glow::GlowRenderer;
+use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
@@ -156,7 +156,7 @@ impl AppWindow {
     }
 
     fn apply_sort(ui: &Ui, rows: &mut [Row]) {
-        use dear_imgui::SortDirection;
+        use dear_imgui_rs::SortDirection;
 
         if let Some(mut specs) = ui.table_get_sort_specs() {
             if specs.is_dirty() {
@@ -202,7 +202,7 @@ impl AppWindow {
         ui.window("Tables Minimal")
             .size([640.0, 400.0], Condition::FirstUseEver)
             .build(|| {
-                use dear_imgui::{TableColumnFlags, TableFlags};
+                use dear_imgui_rs::{TableColumnFlags, TableFlags};
 
                 ui.text("Sortable, resizable 3-column table");
                 ui.separator();

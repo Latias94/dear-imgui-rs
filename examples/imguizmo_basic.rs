@@ -6,7 +6,7 @@
 //! - Optional snapping for translate/rotate/scale
 //! - Draw grid and multiple cubes, manipulate with gizmos
 
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use dear_imguizmo as guizmo;
@@ -732,7 +732,7 @@ impl AppWindow {
                 .size([300.0, 120.0], Condition::FirstUseEver)
                 .position([10.0, 680.0], Condition::FirstUseEver)
                 .build(|| {
-                    if ui.collapsing_header("Graph Editor", dear_imgui::TreeNodeFlags::empty()) {
+                    if ui.collapsing_header("Graph Editor", dear_imgui_rs::TreeNodeFlags::empty()) {
                         ui.checkbox("Show GraphEditor", &mut self.state.graph_show_editor);
                     }
                 });

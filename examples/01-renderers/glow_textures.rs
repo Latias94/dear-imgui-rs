@@ -7,8 +7,8 @@
 use ::image::ImageReader;
 use std::{num::NonZeroU32, path::PathBuf, sync::Arc, time::Instant};
 
-use dear_imgui::*;
 use dear_imgui_glow::GlowRenderer;
+use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
@@ -233,7 +233,7 @@ impl TextureDemo {
         Ok(())
     }
 
-    fn show_ui(&self, ui: &dear_imgui::Ui) {
+    fn show_ui(&self, ui: &dear_imgui_rs::Ui) {
         ui.window("Modern Texture Management Demo")
             .size([500.0, 600.0], Condition::FirstUseEver)
             .build(|| {

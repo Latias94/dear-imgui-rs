@@ -4,322 +4,229 @@ Low-level Rust bindings for Dear ImGui via cimgui (C API) + bindgen.
 
 ## Overview
 
-This crate provides unsafe Rust bindings to the Dear ImGui docking branch using the cimgui C API. Bindings are generated with bindgen from vendored headers, avoiding C++ ABI pitfalls and making cross-platform builds simpler.
+This crate provides unsafe Rust bindings to Dear ImGui v1.92.3 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. By using cimgui's C interface instead of directly binding to the C++ API, we completely avoid C++ ABI compatibility issues while maintaining full access to Dear ImGui's functionality.
 
 ## Key Features
 
-- **cimgui-based bindings**: Generate from C API headers (no C++ ABI/MSVC quirks)
-- **Docking Support**: Built against the docking branch
-- **Windows-friendly**: Native builds prefer CMake (auto-detects VS/SDK)
-- **Prebuilt Support**: Link a prebuilt static library instead of building locally
-- **Docs.rs Offline**: Use pregenerated or offline-generated bindings
+- **cimgui C API**: Clean C interface eliminates C++ ABI issues across platforms and compilers
+- **Docking Support**: Full support for docking and multi-viewport features (multi-viewport WIP)
+- **Modern Dear ImGui**: Based on Dear ImGui v1.92.3 docking branch
+- **Cross-platform**: Consistent builds on Windows (MSVC/MinGW), Linux, macOS, and WebAssembly
+- **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
+- **Offline-friendly**: Pregenerated bindings for docs.rs and offline environments
 
-## Build & Link Options
+## Build Strategies
 
-You can choose one of the following strategies:
+This crate supports multiple build strategies to fit different development workflows:
 
-1) Prebuilt static library（recommended）
-- Set `IMGUI_SYS_LIB_DIR=...` to the folder containing the static lib
-  - Windows: `dear_imgui.lib`
-  - Linux/macOS: `libdear_imgui.a`
-- Or set `IMGUI_SYS_PREBUILT_URL=...` to a direct URL of the static lib
-- Releases contain platform archives (include + static lib)
+### 1. Prebuilt Static Libraries (Recommended)
 
-2) Native build from source
-- Windows prefers CMake automatically; set `IMGUI_SYS_USE_CMAKE=1` to force CMake elsewhere
-- Otherwise falls back to cc crate
+The fastest way to get started. Use prebuilt static libraries instead of compiling from source:
 
-Build examples:
-- Windows (CMake auto):
-  - Requirements: Visual Studio (C++ build tools), CMake
-  - `cargo build -p dear-imgui-sys`
-- Linux:
-  - Requirements: build-essential, pkg-config, LLVM/Clang (for bindgen)
-  - `sudo apt-get install -y build-essential pkg-config llvm`
-  - `cargo build -p dear-imgui-sys`
-- macOS:
-  - Requirements: Xcode Command Line Tools
-  - `xcode-select --install` (if needed)
-  - `cargo build -p dear-imgui-sys`
+```bash
+# Option A: Point to a local directory containing the static library
+export IMGUI_SYS_LIB_DIR=/path/to/lib/dir  # Contains dear_imgui.lib (Windows) or libdear_imgui.a (Unix)
 
-3) Fast Rust-only iteration
-- Set `IMGUI_SYS_SKIP_CC=1` to skip native C/C++ compilation while iterating on Rust code
+# Option B: Download from a direct URL
+export IMGUI_SYS_PREBUILT_URL=https://example.com/dear_imgui.lib
 
-## Docs.rs / Offline
-
-When `DOCS_RS=1` is detected, the build script:
-- Tries to use `src/bindings_pregenerated.rs` (if present)
-- Else runs bindgen against vendored headers (offline, no network), and writes to `OUT_DIR/bindings.rs`
-- Skips native linking
-
-To refresh the pregenerated bindings locally:
+# Option C: Enable automatic download from GitHub releases
+cargo build --features prebuilt
+# or
+export IMGUI_SYS_USE_PREBUILT=1
 ```
+
+### 2. Build from Source
+
+Compile Dear ImGui and cimgui from the vendored source code:
+
+```bash
+# Windows (automatically uses CMake if available)
+cargo build -p dear-imgui-sys
+
+# Force CMake on other platforms
+export IMGUI_SYS_USE_CMAKE=1
+cargo build -p dear-imgui-sys
+
+# Use cc crate (default on non-Windows)
+cargo build -p dear-imgui-sys
+```
+
+**Requirements by platform:**
+
+- **Windows**: Visual Studio Build Tools or Visual Studio with C++ support
+- **Linux**: `build-essential`, `pkg-config`, `llvm-dev` (for bindgen)
+  ```bash
+  sudo apt-get install build-essential pkg-config llvm-dev clang
+  ```
+- **macOS**: Xcode Command Line Tools
+  ```bash
+  xcode-select --install
+  ```
+
+### 3. Development Mode
+
+Skip C/C++ compilation for faster Rust-only iteration:
+
+```bash
+export IMGUI_SYS_SKIP_CC=1
+cargo build -p dear-imgui-sys
+```
+
+This uses pregenerated bindings and skips native compilation, useful when working on higher-level Rust code.
+
+## Offline Builds & docs.rs
+
+This crate supports offline builds and docs.rs compilation through pregenerated bindings:
+
+### docs.rs Support
+
+When building on docs.rs (`DOCS_RS=1`), the build script:
+
+- Uses pregenerated bindings from `src/bindings_pregenerated.rs` if available
+- Falls back to generating bindings from vendored cimgui headers (no network required)
+- Skips native C/C++ compilation entirely
+
+### Updating Pregenerated Bindings
+
+To refresh the pregenerated bindings file:
+
+```bash
+# Generate new bindings without C++ compilation
 IMGUI_SYS_SKIP_CC=1 cargo build -p dear-imgui-sys
+
+# Copy generated bindings to source tree
 cp target/debug/build/dear-imgui-sys-*/out/bindings.rs dear-imgui-sys/src/bindings_pregenerated.rs
 ```
-或使用工具脚本：
-```
+
+Or use the provided update script:
+
+```bash
 python tools/update_submodule_and_bindings.py --branch docking_inter
 ```
 
 ## WebAssembly Support
 
-This crate provides comprehensive WebAssembly (WASM) support through the `wasm` feature flag. The implementation automatically handles the complexities of cross-compilation and provides a seamless experience for WASM development.
+This crate provides WebAssembly support through the `wasm` feature, enabling Dear ImGui to run in web browsers.
 
-### WASM Notes
+### Quick Start
 
-- Skips native C/C++ compilation for wasm targets
-- Uses offline-generated bindings for type-checking
-
-### Building for WASM
-
-1. **Install WASM target**:
 ```bash
+# Install WASM target
 rustup target add wasm32-unknown-unknown
-```
 
-2. **Build for WASM**:
-```bash
-# Basic WASM build
+# Build for WASM
 cargo build --target wasm32-unknown-unknown --features wasm
-
-# With additional features
-cargo build --target wasm32-unknown-unknown --features "wasm,docking"
-
-# Check compilation (faster)
-cargo check --target wasm32-unknown-unknown --features wasm
-
-# Build WASM example
-cargo check --target wasm32-unknown-unknown --features wasm --example wasm_test
 ```
 
-3. **Use the build script** (optional):
-```bash
-# Use the provided build script for automation
-./build-wasm.sh
-```
-
-### WASM Feature Flags
+### Usage
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.1.0", features = ["wasm"] }
-
-# Or with additional features
-dear-imgui-sys = { version = "0.1.0", features = ["wasm", "docking"] }
+dear-imgui-sys = { version = "0.2", features = ["wasm"] }
 ```
 
-### Integration with wasm-bindgen
+### WASM-Specific Behavior
 
-The generated WASM binaries are compatible with wasm-bindgen:
+When targeting WebAssembly, this crate automatically:
 
-```bash
-# Generate JavaScript bindings
-wasm-bindgen --out-dir wasm --web target/wasm32-unknown-unknown/debug/your_app.wasm
-```
+- Uses pregenerated bindings to avoid requiring a C compiler in the browser environment
+- Disables file system and OS-specific functions (`IMGUI_DISABLE_FILE_FUNCTIONS`, etc.)
+- Configures Dear ImGui for the WASM environment
 
-### WASM Usage Example
-`wasm` 目标依赖于你的渲染集成（WebGL/Canvas 等），本 crate 仅提供类型层面的可用性。
+### Rendering
 
-### Rendering in WASM
+The sys crate provides only the Dear ImGui API bindings. For actual rendering in WASM, you'll need:
 
-Since WASM doesn't have direct access to graphics APIs, you'll need to:
+- A WebGL-based renderer (see `dear-imgui-wgpu` for WASM support)
+- Integration with your web application framework
+- JavaScript interop for handling browser events
 
-1. **Canvas API**: Render ImGui draw data to HTML5 Canvas through JavaScript
-2. **WebGL Backend**: Implement a WebGL-based renderer for ImGui
-3. **Existing Solutions**: Use existing WASM ImGui renderers or JavaScript bindings
+**Note**: This crate focuses on providing type-safe bindings. Rendering integration depends on your chosen graphics backend.
 
-### WASM-Specific Considerations
+## Basic Usage
 
-1. **No File System**: File operations are disabled by default in WASM builds
-2. **No Threading**: Uses global context instead of thread-local storage
-3. **Memory Management**: Ensure proper cleanup of ImGui contexts in WASM environment
-4. **Performance**: WASM builds may have different performance characteristics
-5. **Consistent API**: Uses the same `ImGui_*` naming convention for both native and WASM targets
-
-## Usage
-
-This is a low-level sys crate. Most users should use the higher-level `dear-imgui` crate instead, which provides safe Rust wrappers around these bindings.
+This is a low-level sys crate providing unsafe FFI bindings. Most users should use the higher-level [`dear-imgui-rs`](https://crates.io/crates/dear-imgui-rs) crate instead, which provides safe Rust wrappers.
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.1.0"
+dear-imgui-sys = "0.3"
 
-# For WASM targets
-dear-imgui-sys = { version = "0.1.0", features = ["wasm"] }
+# Enable features as needed
+dear-imgui-sys = { version = "0.3", features = ["freetype", "wasm"] }
 ```
 
-## Potential Improvements
-
-While our current solution works well, there are several areas where we could enhance the approach:
-
-### 1. **Automated Detection**
+### Direct FFI Usage (Advanced)
 
 ```rust
-// Future: Automatically detect problematic functions
-fn needs_abi_fix(function: &Function) -> bool {
-    function.returns_small_cpp_class() &&
-    function.has_non_trivial_members() &&
-    target_env == "msvc"
+use dear_imgui_sys::*;
+
+unsafe {
+    let ctx = igCreateContext(std::ptr::null_mut());
+    igSetCurrentContext(ctx);
+
+    // Configure ImGui...
+    let io = igGetIO();
+    (*io).DisplaySize = ImVec2 { x: 800.0, y: 600.0 };
+
+    // Main loop
+    igNewFrame();
+    igText(b"Hello from Dear ImGui!\0".as_ptr() as *const i8);
+    igRender();
+
+    // Clean up
+    igDestroyContext(ctx);
 }
 ```
 
-### 2. **Better Error Messages**
+## Technical Details
 
-```rust
-// Future: Provide clear guidance when ABI issues are detected
-#[cfg(target_env = "msvc")]
-compile_error!(
-    "Function {} requires ABI fix. Add to msvc_blocklist.txt and create wrapper.",
-    function_name
-);
-```
+### cimgui Integration
 
-### 3. **Cross-Platform ABI Fixes**
+This crate uses [cimgui](https://github.com/cimgui/cimgui) as the C API layer:
 
-Currently we only handle MSVC, but Linux and other platforms have similar issues. A comprehensive solution would:
+- **No C++ ABI Issues**: cimgui provides a pure C interface, eliminating cross-platform ABI compatibility problems
+- **Complete API Coverage**: All Dear ImGui functions are available through the C API
+- **Consistent Naming**: Functions follow the `ig*` naming convention (e.g., `igText`, `igButton`)
+- **Automatic Generation**: Bindings are generated via bindgen from cimgui headers
 
-- Detect non-trivial C++ types on all platforms
-- Generate appropriate wrapper functions automatically
-- Provide consistent behavior across all targets
+### Version Information
 
-### 4. **Upstream Contributions**
+- **Dear ImGui Version**: v1.92.3 (docking branch)
+- **cimgui Version**: Latest compatible with Dear ImGui v1.92.3
+- **Supported Features**: Docking, multi-viewport (WIP), FreeType font rendering
 
-The ideal long-term solution would be improvements to `bindgen` itself:
+### Environment Variables
 
-- Better C++ ABI detection
-- Automatic wrapper generation for problematic functions
-- Platform-specific ABI handling
+Control build behavior with these environment variables:
 
-### 5. **Alternative Approaches**
+| Variable | Description |
+|----------|-------------|
+| `IMGUI_SYS_LIB_DIR` | Path to directory containing prebuilt static library |
+| `IMGUI_SYS_PREBUILT_URL` | Direct URL to download prebuilt library |
+| `IMGUI_SYS_USE_PREBUILT` | Enable automatic download from GitHub releases (`1`) |
+| `IMGUI_SYS_USE_CMAKE` | Force CMake build instead of cc crate (`1`) |
+| `IMGUI_SYS_SKIP_CC` | Skip C/C++ compilation, use pregenerated bindings only (`1`) |
+| `IMGUI_SYS_FORCE_BUILD` | Force build from source, ignore prebuilt options (`1`) |
 
-#### Option A: Full Opaque Types
+## Related Crates
 
-```rust
-// Make all ImVec2-returning functions opaque
-.opaque_type("ImVec2")
-.blocklist_function(".*GetContentRegionAvail.*")
-```
+This crate is part of the `dear-imgui-rs` ecosystem:
 
-#### Option B: Custom ABI Annotations
-
-```cpp
-// Hypothetical: Explicit ABI annotations
-extern "C" __attribute__((sysv_abi)) ImVec2_pod GetContentRegionAvail_pod();
-```
-
-#### Option C: Rust-Native Implementations
-
-```rust
-// Reimplement problematic functions in pure Rust
-pub fn get_content_region_avail() -> [f32; 2] {
-    // Direct implementation using ImGui internals
-}
-```
-
-## Comparison with Other Solutions
-
-| Approach | Pros | Cons | Maintenance |
-|----------|------|------|-------------|
-| **Our Solution** | ✅ Precise, Type-safe | ⚠️ Manual setup | 🟡 Medium |
-| **Full Opaque** | ✅ Simple, Universal | ❌ Loses type info | 🟢 Low |
-| **Phantom Data** | ✅ Forces stack return | ❌ Affects all types | 🟡 Medium |
-| **Pure Rust** | ✅ No ABI issues | ❌ Reimplementation work | 🔴 High |
-
-## Specific Improvements We Could Make
-
-### 1. **Automated Wrapper Generation**
-
-Instead of manually maintaining `hack_msvc.cpp`, we could generate it automatically:
-
-```rust
-// build.rs enhancement
-fn generate_msvc_wrappers(functions: &[&str]) -> String {
-    let mut code = String::new();
-    for func in functions {
-        if returns_imvec2(func) {
-            code.push_str(&format!(
-                "ImVec2_rr ImGui_{}() {{ return _rr(ImGui::{}()); }}\n",
-                func, func
-            ));
-        }
-    }
-    code
-}
-```
-
-### 2. **Better Function Detection**
-
-We could automatically detect which functions need fixes by parsing Dear ImGui headers:
-
-```rust
-// Automatically find ImVec2-returning functions
-fn find_problematic_functions() -> Vec<String> {
-    // Parse imgui.h and find all functions returning ImVec2
-    // This would eliminate the need for manual blocklist maintenance
-}
-```
-
-### 3. **Runtime ABI Validation**
-
-Add runtime checks to ensure our fixes work correctly:
-
-```rust
-#[cfg(all(test, target_env = "msvc"))]
-mod abi_tests {
-    #[test]
-    fn test_content_region_avail_abi() {
-        // Verify that our wrapper returns the same values as direct calls
-        // This would catch ABI regressions
-    }
-}
-```
-
-### 4. **Cross-Platform Extension**
-
-Extend the solution to handle Linux ABI issues:
-
-```cpp
-// Linux-specific wrappers for non-trivial types
-#ifdef __linux__
-extern "C" {
-    void ImGui_GetContentRegionAvail_linux(ImVec2* out) {
-        *out = ImGui::GetContentRegionAvail();
-    }
-}
-#endif
-```
-
-## Summary
-
-Our implementation represents a **best-practice solution** for handling C++ ABI compatibility issues in Rust FFI bindings:
-
-### ✅ **What We Do Well**
-
-- **Surgical Precision**: Only fixes problematic functions, leaving the rest of the API untouched
-- **Type Safety**: Maintains Rust's type system guarantees through proper conversions
-- **Platform Awareness**: Conditional compilation ensures fixes only apply where needed
-- **Proven Approach**: Based on the successful easy-imgui-rs implementation
-- **Clear Documentation**: Comprehensive explanation of the problem and solution
-
-### 🚀 **Future Enhancements**
-
-- **Automated Detection**: Generate wrapper functions automatically from header analysis
-- **Cross-Platform Support**: Extend fixes to Linux and other platforms with similar issues
-- **Runtime Validation**: Add tests to ensure ABI compatibility across different environments
-- **Upstream Integration**: Contribute improvements back to the bindgen project
-
-### 🎯 **Why This Matters**
-
-C++ ABI compatibility is a fundamental challenge when creating Rust bindings for C++ libraries. Our solution provides:
-
-- **Reliability**: Eliminates crashes and memory corruption
-- **Maintainability**: Clear structure that's easy to understand and extend
-- **Performance**: No runtime overhead, compile-time solution
-- **Compatibility**: Works across different MSVC versions and configurations
-
-This approach can serve as a template for other Rust projects facing similar C++ FFI challenges.
+- **[dear-imgui-rs](https://crates.io/crates/dear-imgui-rs)** - Safe, high-level Rust API
+- **[dear-imgui-wgpu](https://crates.io/crates/dear-imgui-wgpu)** - WGPU renderer backend
+- **[dear-imgui-glow](https://crates.io/crates/dear-imgui-glow)** - OpenGL renderer backend
+- **[dear-imgui-winit](https://crates.io/crates/dear-imgui-winit)** - Winit platform backend
 
 ## License
 
-This project follows the same license as Dear ImGui itself. See the Dear ImGui repository for license details.
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](../LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](../LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.

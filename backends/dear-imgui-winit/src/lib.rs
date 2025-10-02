@@ -13,7 +13,7 @@
 //! # Example - Basic Usage
 //!
 //! ```rust,no_run
-//! use dear_imgui::Context;
+//! use dear_imgui_rs::Context;
 //! use dear_imgui_winit::WinitPlatform;
 //! use winit::event_loop::EventLoop;
 //!
@@ -29,7 +29,7 @@
 //! ```rust,no_run
 //! # #[cfg(feature = "multi-viewport")]
 //! # {
-//! use dear_imgui::Context;
+//! use dear_imgui_rs::Context;
 //! use dear_imgui_winit::{WinitPlatform, multi_viewport};
 //! use winit::event_loop::EventLoop;
 //!

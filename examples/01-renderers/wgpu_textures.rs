@@ -2,7 +2,7 @@
 //! register it with the dear-imgui-wgpu backend, and show it via `Image`.
 
 use ::image::ImageReader;
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
@@ -31,8 +31,8 @@ struct AppWindow {
     surface: wgpu::Surface<'static>,
     imgui: ImguiState,
     // Texture demo state (managed by ImGui modern texture system)
-    img_tex: Box<dear_imgui::texture::TextureData>,
-    photo_tex: Option<Box<dear_imgui::texture::TextureData>>,
+    img_tex: Box<dear_imgui_rs::texture::TextureData>,
+    photo_tex: Option<Box<dear_imgui_rs::texture::TextureData>>,
     tex_size: (u32, u32),
     frame: u32,
 }
@@ -106,9 +106,9 @@ impl AppWindow {
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture)
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui::texture::TextureData::new();
+        let mut img_tex = dear_imgui_rs::texture::TextureData::new();
         img_tex.create(
-            dear_imgui::texture::TextureFormat::RGBA32,
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
             tex_w as i32,
             tex_h as i32,
         );
@@ -150,7 +150,7 @@ impl AppWindow {
         })
     }
 
-    fn maybe_load_photo_texture() -> Option<Box<dear_imgui::texture::TextureData>> {
+    fn maybe_load_photo_texture() -> Option<Box<dear_imgui_rs::texture::TextureData>> {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("assets")
             .join("texture.jpg");
@@ -172,9 +172,9 @@ impl AppWindow {
                     let rgba = img.to_rgba8();
                     let (w, h) = rgba.dimensions();
                     let data = rgba.into_raw();
-                    let mut t = dear_imgui::texture::TextureData::new();
+                    let mut t = dear_imgui_rs::texture::TextureData::new();
                     t.create(
-                        dear_imgui::texture::TextureFormat::RGBA32,
+                        dear_imgui_rs::texture::TextureFormat::RGBA32,
                         w as i32,
                         h as i32,
                     );

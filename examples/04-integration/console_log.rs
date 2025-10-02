@@ -10,9 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dear_imgui::*;
-use dear_imgui::{ClipboardBackend, DummyClipboardBackend};
 use dear_imgui_glow::GlowRenderer;
+use dear_imgui_rs::*;
+use dear_imgui_rs::{ClipboardBackend, DummyClipboardBackend};
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
@@ -311,7 +311,7 @@ impl AppWindow {
                     // Use ImGui clipboard path if available (calls our backend)
                     if !out.is_empty() {
                         if let Ok(cstr) = std::ffi::CString::new(out.clone()) {
-                            unsafe { dear_imgui::sys::igSetClipboardText(cstr.as_ptr()) };
+                            unsafe { dear_imgui_rs::sys::igSetClipboardText(cstr.as_ptr()) };
                             self.console.status =
                                 format!("Copied {} lines to clipboard", out.lines().count());
                         } else {
@@ -345,7 +345,7 @@ impl AppWindow {
                                 visible.push(i);
                             }
                         }
-                        let mut clipper = dear_imgui::ListClipper::new(visible.len() as i32)
+                        let mut clipper = dear_imgui_rs::ListClipper::new(visible.len() as i32)
                             .items_height(ui.text_line_height_with_spacing())
                             .begin(&ui);
                         while clipper.step() {

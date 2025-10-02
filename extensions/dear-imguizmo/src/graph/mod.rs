@@ -1,4 +1,4 @@
-use dear_imgui::{
+use dear_imgui_rs::{
     DrawListMut, Ui,
     input::{Key, MouseButton},
 };

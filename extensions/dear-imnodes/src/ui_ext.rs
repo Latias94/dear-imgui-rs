@@ -1,4 +1,4 @@
-use dear_imgui::Ui;
+use dear_imgui_rs::Ui;
 
 use crate::{Context, EditorContext, NodeEditor, NodesUi};
 

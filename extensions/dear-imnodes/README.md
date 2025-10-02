@@ -8,26 +8,31 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 - Strongly-typed enums/bitflags for style and attributes
 - Helpers: links, selection, node positions, minimap, IO setup
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/b1c56b58-7254-41f6-a97b-e97eac147a1e" alt="ImNodes" width="75%"/>
+  <br/>
+</p>
+
 ## Compatibility
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.1.x   |
-| dear-imgui        | 0.2.x   |
+| Crate             | 0.2.x   |
+| dear-imgui-rs     | 0.3.x   |
 | dear-imnodes-sys  | 0.1.x   |
 
-See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Quick Start
 
 Basic setup and per-frame usage:
 
 ```rust
-use dear_imgui::Ui;
+use dear_imgui_rs::Ui;
 use dear_imnodes as imnodes;
 
 // One-time setup (alongside your ImGui context)
-fn init(imgui_ctx: &dear_imgui::Context) -> (imnodes::Context, imnodes::EditorContext) {
+fn init(imgui_ctx: &dear_imgui_rs::Context) -> (imnodes::Context, imnodes::EditorContext) {
     let nodes_ctx = imnodes::Context::create(imgui_ctx);
     let editor_ctx = imnodes::EditorContext::create();
     (nodes_ctx, editor_ctx)

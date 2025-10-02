@@ -1,6 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
-use dear_imgui::*;
+use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use instant::Instant;

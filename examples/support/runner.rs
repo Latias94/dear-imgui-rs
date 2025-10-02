@@ -3,7 +3,7 @@
 
 #![allow(dead_code)]
 
-use dear_imgui::Context;
+use dear_imgui_rs::Context;
 use dear_imgui_winit::WinitPlatform;
 use winit::{
     application::ApplicationHandler,

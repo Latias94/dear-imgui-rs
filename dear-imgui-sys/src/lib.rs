@@ -19,11 +19,11 @@
 //! ## Safety
 //!
 //! This crate provides raw FFI bindings and is inherently unsafe. Users should
-//! prefer the high-level `dear-imgui` crate for safe Rust bindings.
+//! prefer the high-level `dear-imgui-rs` crate for safe Rust bindings.
 //!
 //! ## Usage
 //!
-//! This crate is typically not used directly. Instead, use the `dear-imgui` crate
+//! This crate is typically not used directly. Instead, use the `dear-imgui-rs` crate
 //! which provides safe, idiomatic Rust bindings built on top of these FFI bindings.
 
 #![allow(non_upper_case_globals)]

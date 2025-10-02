@@ -13,9 +13,9 @@ default = ["web-backends"]
 web-backends = ["wgpu/webgl", "wgpu/webgpu", "dear-imgui-wgpu/webgl", "dear-imgui-wgpu/webgpu"]
 
 [dependencies]
-dear-imgui = { path = "../dear-imgui", features = ["wasm"] }
-dear-imgui-winit = { path = "../backends/dear-imgui-winit" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu" }
+dear-imgui-rs = { path = "../dear-imgui", version = "0.3", features = ["wasm"] }
+dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.3" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.3" }
 wgpu = { workspace = true }
 winit = { workspace = true }
 instant = { version = "0.1", features = ["wasm-bindgen"] }

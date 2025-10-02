@@ -6,7 +6,7 @@
 //!
 //! Example: enable docking and multi-viewports, and set renderer flags.
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! // Configure IO before starting a frame
 //! let io = ctx.io_mut();

@@ -15,7 +15,7 @@
 //! ## Quick Start
 //!
 //! ```no_run
-//! use dear_imgui::*;
+//! use dear_imgui_rs::*;
 //! use dear_implot::*;
 //!
 //! let mut ctx = Context::create();
@@ -32,7 +32,7 @@
 //!
 //! ## Integration with Dear ImGui
 //!
-//! This crate is designed to work with the `dear-imgui` ecosystem:
+//! This crate is designed to work with the `dear-imgui-rs` ecosystem:
 //! - Uses the same context management patterns
 //! - Compatible with dear-imgui's UI tokens and lifetime management
 //! - Shares the same underlying Dear ImGui context
@@ -40,7 +40,7 @@
 use dear_implot_sys as sys;
 
 // Re-export essential types
-pub use dear_imgui::{Context, Ui};
+pub use dear_imgui_rs::{Context, Ui};
 pub use sys::{ImPlotPoint, ImPlotRange, ImPlotRect};
 pub use sys::{ImTextureID, ImVec2, ImVec4};
 

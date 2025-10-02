@@ -3,8 +3,8 @@
 //! Minimal demo showing how to integrate ImNodes via dear-imnodes
 //! following the same windowing/render pattern as other examples.
 
-use dear_imgui::input::MouseButton;
-use dear_imgui::*;
+use dear_imgui_rs::input::MouseButton;
+use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use dear_imnodes as imnodes;

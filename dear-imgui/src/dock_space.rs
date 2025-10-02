@@ -15,7 +15,7 @@
 //! # Basic Usage
 //!
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! // Create a dockspace over the main viewport
@@ -151,7 +151,7 @@ impl Ui {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dockspace_over_main_viewport_with_flags(
@@ -187,7 +187,7 @@ impl Ui {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dockspace_over_main_viewport();
@@ -213,7 +213,7 @@ impl Ui {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dock_space_with_class(
@@ -260,7 +260,7 @@ impl Ui {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dock_space(0, [800.0, 600.0]);
@@ -282,7 +282,7 @@ impl Ui {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dockspace_over_main_viewport();
@@ -310,7 +310,7 @@ impl Ui {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dockspace_over_main_viewport();
@@ -335,7 +335,7 @@ impl Ui {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let window_class = WindowClass::new(1).docking_always_tab_bar(true);
@@ -361,7 +361,7 @@ impl Ui {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// ui.window("My Window").build(|| {
@@ -387,7 +387,7 @@ impl Ui {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// ui.window("My Window").build(|| {

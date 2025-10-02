@@ -1,25 +1,30 @@
 # dear-imgui-winit
 
-Winit platform backend for the `dear-imgui` Rust crate. It wires winit input/events,
+Winit platform backend for the `dear-imgui-rs` Rust crate. It wires winit input/events,
 cursor handling and DPI awareness into Dear ImGui. Inspired by
 `imgui-rs/imgui-winit-support`.
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/a9212184-d9c5-4e16-820a-cd98b471a6ea" alt="Docking (winit)" width="75%"/>
+  <br/>
+</p>
+
 ## Compatibility
 
-| Item       | Version |
-|------------|---------|
-| Crate      | 0.2.x   |
-| dear-imgui | 0.2.x   |
-| winit      | 0.30.12 |
+| Item          | Version |
+|---------------|---------|
+| Crate         | 0.3.x   |
+| dear-imgui-rs | 0.3.x   |
+| winit         | 0.30.12 |
 
-See also: [docs/COMPATIBILITY.md](../../docs/COMPATIBILITY.md) for the full workspace matrix.
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 ## Quick Start
 
 Minimal flow with winit 0.30 ApplicationHandler-style loops:
 
 ```rust,no_run
-use dear_imgui::{Context, Condition};
+use dear_imgui_rs::{Context, Condition};
 use dear_imgui_winit::{WinitPlatform, HiDpiMode};
 use winit::{event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::WindowId};
 
@@ -141,7 +146,7 @@ the feature stabilizes. Follow the examples and docs once it’s marked stable.
 
 ## Notes & Differences vs imgui-rs
 
-This crate targets the `dear-imgui` bindings in this repository and its API
+This crate targets the `dear-imgui-rs` bindings in this repository and its API
 surface. It’s intentionally separate from `imgui-rs/imgui-winit-support`, though
 many behaviors are aligned for familiarity.
 

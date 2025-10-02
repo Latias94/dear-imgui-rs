@@ -1,6 +1,6 @@
-use dear_imgui::HoveredFlags;
-use dear_imgui::input::MouseButton;
-use dear_imgui::*;
+use dear_imgui_rs::HoveredFlags;
+use dear_imgui_rs::input::MouseButton;
+use dear_imgui_rs::*;
 
 #[test]
 fn test_second_priority_widgets_compile() {

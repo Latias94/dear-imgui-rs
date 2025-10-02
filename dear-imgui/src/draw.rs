@@ -6,7 +6,7 @@
 //!
 //! Example (basic drawing):
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! let dl = ui.get_window_draw_list();
@@ -809,7 +809,7 @@ impl<'ui> DrawListMut<'ui> {
     ///
     /// Example:
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// # fn demo(ui: &Ui) {
     /// let dl = ui.get_window_draw_list();
     /// let tex = texture::TextureId::new(1);

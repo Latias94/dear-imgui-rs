@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-wgpu"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 description = "WGPU renderer for Dear ImGui"
 license.workspace = true
@@ -11,7 +11,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui = { path = "../../dear-imgui", version = "0.2" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.3" }
 wgpu.workspace = true
 bytemuck = { workspace = true, features = ["derive"] }
 thiserror.workspace = true

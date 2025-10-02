@@ -5,7 +5,7 @@
 //!
 //! Quick example:
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! let white = Color::rgb(1.0, 1.0, 1.0);
 //! let abgr = white.to_imgui_u32();
 //! # let mut ctx = Context::create();

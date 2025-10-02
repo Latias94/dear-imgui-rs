@@ -31,7 +31,7 @@ use crate::sys;
 ///
 /// Creating a new active context:
 /// ```
-/// let ctx = dear_imgui::Context::create();
+/// let ctx = dear_imgui_rs::Context::create();
 /// // ctx is dropped naturally when it goes out of scope, which deactivates and destroys the
 /// // context
 /// ```
@@ -39,9 +39,9 @@ use crate::sys;
 /// Never try to create an active context when another one is active:
 ///
 /// ```should_panic
-/// let ctx1 = dear_imgui::Context::create();
+/// let ctx1 = dear_imgui_rs::Context::create();
 ///
-/// let ctx2 = dear_imgui::Context::create(); // PANIC
+/// let ctx2 = dear_imgui_rs::Context::create(); // PANIC
 /// ```
 #[derive(Debug)]
 pub struct Context {

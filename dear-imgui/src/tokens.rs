@@ -7,7 +7,7 @@
 //!
 //! Example:
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! let _group = ui.begin_group();
@@ -17,7 +17,7 @@
 //!
 //! Quick example (manual end):
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! let token = ui.begin_group();

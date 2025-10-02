@@ -1,5 +1,5 @@
 use crate::sys;
-use dear_imgui::sys as imgui_sys;
+use dear_imgui_rs::sys as imgui_sys;
 
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

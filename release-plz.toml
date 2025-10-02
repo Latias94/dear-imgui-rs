@@ -25,7 +25,7 @@ git_release_body = """
 
 # Main library package
 [[package]]
-name = "dear-imgui"
+name = "dear-imgui-rs"
 changelog_path = "./CHANGELOG.md"
 git_release_enable = true # create GitHub release
 

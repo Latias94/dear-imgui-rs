@@ -7,10 +7,10 @@
 use std::ffi::CStr;
 use std::{fs, num::NonZeroU32, path::PathBuf, sync::Arc, time::Instant};
 
-use dear_imgui::internal::RawWrapper;
-use dear_imgui::*;
-use dear_imgui::{FontConfig, FontLoaderFlags, FontSource};
 use dear_imgui_glow::GlowRenderer;
+use dear_imgui_rs::internal::RawWrapper;
+use dear_imgui_rs::*;
+use dear_imgui_rs::{FontConfig, FontLoaderFlags, FontSource};
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
@@ -69,7 +69,7 @@ struct App {
 impl AppWindow {
     fn freetype_active() -> bool {
         unsafe {
-            let io = dear_imgui::sys::igGetIO_Nil();
+            let io = dear_imgui_rs::sys::igGetIO_Nil();
             if io.is_null() {
                 return false;
             }
@@ -229,7 +229,7 @@ impl AppWindow {
     }
 
     fn apply_theme_now(&mut self, t: Theme) {
-        use dear_imgui::sys;
+        use dear_imgui_rs::sys;
         let st = self.imgui.context.style_mut();
         unsafe {
             let raw = st.raw_mut() as *mut _ as *mut sys::ImGuiStyle;

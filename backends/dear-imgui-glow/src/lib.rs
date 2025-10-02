@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use dear_imgui::Context;
+//! use dear_imgui_rs::Context;
 //! use dear_imgui_glow::GlowRenderer;
 //! use glow::HasContext;
 //!

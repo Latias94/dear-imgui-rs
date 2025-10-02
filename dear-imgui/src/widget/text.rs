@@ -5,7 +5,7 @@
 //!
 //! Quick examples:
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! ui.text("normal");
@@ -15,34 +15,74 @@
 //! ```
 //!
 use crate::Ui;
+use crate::style::StyleColor;
 use crate::sys;
 
 impl Ui {
     /// Display colored text
+    ///
+    /// This implementation uses zero-copy optimization with `igTextEx`,
+    /// avoiding string allocation and null-termination overhead.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use dear_imgui_rs::*;
+    /// # let mut ctx = Context::create();
+    /// # let ui = ctx.frame();
+    /// ui.text_colored([1.0, 0.0, 0.0, 1.0], "Red text");
+    /// ui.text_colored([0.0, 1.0, 0.0, 1.0], "Green text");
+    /// ```
     #[doc(alias = "TextColored")]
     pub fn text_colored(&self, color: [f32; 4], text: impl AsRef<str>) {
-        let text_ptr = self.scratch_txt(text);
+        let s = text.as_ref();
+
+        // Temporarily set the text color
+        let _token = self.push_style_color(StyleColor::Text, color);
+
+        // Use igTextEx with zero-copy (begin/end pointers)
         unsafe {
-            let color_vec = sys::ImVec4 {
-                x: color[0],
-                y: color[1],
-                z: color[2],
-                w: color[3],
-            };
-            sys::igTextColored(color_vec, text_ptr);
+            let begin = s.as_ptr() as *const std::os::raw::c_char;
+            let end = begin.add(s.len());
+            sys::igTextEx(begin, end, 0); // ImGuiTextFlags_None = 0
         }
     }
 
     /// Display disabled (grayed out) text
+    ///
+    /// This implementation uses zero-copy optimization with `igTextEx`,
+    /// avoiding string allocation and null-termination overhead.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use dear_imgui_rs::*;
+    /// # let mut ctx = Context::create();
+    /// # let ui = ctx.frame();
+    /// ui.text_disabled("This option is not available");
+    /// ```
     #[doc(alias = "TextDisabled")]
     pub fn text_disabled(&self, text: impl AsRef<str>) {
-        let text_ptr = self.scratch_txt(text);
+        let s = text.as_ref();
+
+        // Get the disabled color from the current style
+        let disabled_color = self.style_color(StyleColor::TextDisabled);
+
+        // Temporarily set the text color to disabled color
+        let _token = self.push_style_color(StyleColor::Text, disabled_color);
+
+        // Use igTextEx with zero-copy (begin/end pointers)
         unsafe {
-            sys::igTextDisabled(text_ptr);
+            let begin = s.as_ptr() as *const std::os::raw::c_char;
+            let end = begin.add(s.len());
+            sys::igTextEx(begin, end, 0); // ImGuiTextFlags_None = 0
         }
     }
 
     /// Display text wrapped to fit the current item width
+    ///
+    /// # Note
+    ///
+    /// This function currently uses the scratch buffer implementation.
+    /// Optimization for this function requires additional investigation.
     #[doc(alias = "TextWrapped")]
     pub fn text_wrapped(&self, text: impl AsRef<str>) {
         let text_ptr = self.scratch_txt(text);

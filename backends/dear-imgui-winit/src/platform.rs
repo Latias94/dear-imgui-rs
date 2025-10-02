@@ -5,7 +5,7 @@
 
 use instant::Instant;
 
-use dear_imgui::{BackendFlags, ConfigFlags, Context};
+use dear_imgui_rs::{BackendFlags, ConfigFlags, Context};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{Event, WindowEvent};
 use winit::window::{Window, WindowAttributes};
@@ -41,7 +41,7 @@ impl WinitPlatform {
     /// # Example
     ///
     /// ```
-    /// use dear_imgui::Context;
+    /// use dear_imgui_rs::Context;
     /// use dear_imgui_winit::WinitPlatform;
     ///
     /// let mut imgui_ctx = Context::create();
@@ -63,7 +63,7 @@ impl WinitPlatform {
         #[cfg(feature = "multi-viewport")]
         {
             let mut config_flags = io.config_flags();
-            config_flags.insert(dear_imgui::ConfigFlags::VIEWPORTS_ENABLE);
+            config_flags.insert(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE);
             io.set_config_flags(config_flags);
             backend_flags.insert(BackendFlags::PLATFORM_HAS_VIEWPORTS);
             // When viewports are enabled, avoid moving OS cursor from ImGui (no global set in winit)
@@ -267,7 +267,7 @@ impl WinitPlatform {
     }
 
     /// Update cursor given a Ui reference (preferred, matches upstream)
-    pub fn prepare_render_with_ui(&mut self, ui: &dear_imgui::Ui, window: &Window) {
+    pub fn prepare_render_with_ui(&mut self, ui: &dear_imgui_rs::Ui, window: &Window) {
         // Only change OS cursor if not disabled by config flags
         if !ui
             .io()

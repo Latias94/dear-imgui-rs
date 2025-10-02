@@ -11,7 +11,7 @@
 //! # Basic Usage
 //!
 //! ```no_run
-//! # use dear_imgui::*;
+//! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! // Create a dockspace
@@ -94,7 +94,7 @@ impl DockBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// let node_id = DockBuilder::add_node(0, DockNodeFlags::NO_RESIZE);
     /// ```
     #[doc(alias = "DockBuilderAddNode")]
@@ -111,7 +111,7 @@ impl DockBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// DockBuilder::remove_node(123);
     /// ```
     #[doc(alias = "DockBuilderRemoveNode")]
@@ -129,7 +129,7 @@ impl DockBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// DockBuilder::remove_node_docked_windows(123, true);
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeDockedWindows")]
@@ -146,7 +146,7 @@ impl DockBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// DockBuilder::remove_node_child_nodes(123);
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeChildNodes")]
@@ -164,7 +164,7 @@ impl DockBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// DockBuilder::set_node_pos(123, [100.0, 50.0]);
     /// ```
     #[doc(alias = "DockBuilderSetNodePos")]
@@ -188,7 +188,7 @@ impl DockBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// DockBuilder::set_node_size(123, [800.0, 600.0]);
     /// ```
     #[doc(alias = "DockBuilderSetNodeSize")]
@@ -218,7 +218,7 @@ impl DockBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// let dockspace_id = 1;
     /// let left_id = DockBuilder::split_node(dockspace_id, SplitDirection::Left, 0.3, None);
     /// ```
@@ -255,7 +255,7 @@ impl DockBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// DockBuilder::dock_window("My Tool", 123);
     /// ```
     #[doc(alias = "DockBuilderDockWindow")]
@@ -276,7 +276,7 @@ impl DockBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # use dear_imgui::*;
+    /// # use dear_imgui_rs::*;
     /// // ... create layout ...
     /// let dockspace_id = 1; // placeholder dockspace id for example
     /// DockBuilder::finish(dockspace_id);
