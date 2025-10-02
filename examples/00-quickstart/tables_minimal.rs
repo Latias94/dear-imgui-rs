@@ -158,27 +158,24 @@ impl AppWindow {
     fn apply_sort(ui: &Ui, rows: &mut [Row]) {
         use dear_imgui_rs::SortDirection;
 
-        if let Some(mut specs) = ui.table_get_sort_specs() {
-            if specs.is_dirty() {
-                for s in specs.iter() {
-                    // Sort by first spec only for minimal demo
-                    match (s.column_index, s.sort_direction) {
-                        (0, SortDirection::Ascending) => rows.sort_by(|a, b| a.name.cmp(&b.name)),
-                        (0, SortDirection::Descending) => rows.sort_by(|a, b| b.name.cmp(&a.name)),
-                        (1, SortDirection::Ascending) => rows.sort_by(|a, b| a.qty.cmp(&b.qty)),
-                        (1, SortDirection::Descending) => rows.sort_by(|a, b| b.qty.cmp(&a.qty)),
-                        (2, SortDirection::Ascending) => rows.sort_by(|a, b| {
-                            a.price.partial_cmp(&b.price).unwrap_or(Ordering::Equal)
-                        }),
-                        (2, SortDirection::Descending) => rows.sort_by(|a, b| {
-                            b.price.partial_cmp(&a.price).unwrap_or(Ordering::Equal)
-                        }),
-                        _ => {}
-                    }
-                    break;
+        if let Some(mut specs) = ui.table_get_sort_specs()
+            && specs.is_dirty()
+        {
+            if let Some(s) = specs.iter().next() {
+                // Sort by first spec only for minimal demo
+                match (s.column_index, s.sort_direction) {
+                    (0, SortDirection::Ascending) => rows.sort_by(|a, b| a.name.cmp(&b.name)),
+                    (0, SortDirection::Descending) => rows.sort_by(|a, b| b.name.cmp(&a.name)),
+                    (1, SortDirection::Ascending) => rows.sort_by(|a, b| a.qty.cmp(&b.qty)),
+                    (1, SortDirection::Descending) => rows.sort_by(|a, b| b.qty.cmp(&a.qty)),
+                    (2, SortDirection::Ascending) => rows
+                        .sort_by(|a, b| a.price.partial_cmp(&b.price).unwrap_or(Ordering::Equal)),
+                    (2, SortDirection::Descending) => rows
+                        .sort_by(|a, b| b.price.partial_cmp(&a.price).unwrap_or(Ordering::Equal)),
+                    _ => {}
                 }
-                specs.clear_dirty();
             }
+            specs.clear_dirty();
         }
 
         // Prevent unused warning if flags import gets optimized out in some builds
