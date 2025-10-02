@@ -809,7 +809,7 @@ impl WgpuRenderer {
         Self::setup_render_state_static(draw_data, render_pass, backend_data, gamma)?;
 
         unsafe {
-            let platform_io = dear_imgui::sys::igGetPlatformIO_Nil();
+            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
             let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
             (*platform_io).Renderer_RenderState =
                 &mut render_state as *mut _ as *mut std::ffi::c_void;
@@ -828,7 +828,7 @@ impl WgpuRenderer {
                 let mut cmd_i = 0;
                 for cmd in draw_list.commands() {
                     match cmd {
-                        dear_imgui::render::DrawCmd::Elements {
+                        dear_imgui_rs::render::DrawCmd::Elements {
                             count,
                             cmd_params,
                             raw_cmd,
@@ -837,8 +837,8 @@ impl WgpuRenderer {
                             let texture_bind_group = {
                                 // Resolve effective ImTextureID using raw_cmd (modern texture path)
                                 let tex_id = unsafe {
-                                    dear_imgui::sys::ImDrawCmd_GetTexID(
-                                        raw_cmd as *mut dear_imgui::sys::ImDrawCmd,
+                                    dear_imgui_rs::sys::ImDrawCmd_GetTexID(
+                                        raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
                                     )
                                 } as u64;
                                 if tex_id == 0 {
@@ -913,7 +913,7 @@ impl WgpuRenderer {
                             let vertex_offset = (cmd_params.vtx_offset as i32) + global_vtx_offset;
                             render_pass.draw_indexed(start_index..end_index, vertex_offset, 0..1);
                         }
-                        dear_imgui::render::DrawCmd::ResetRenderState => {
+                        dear_imgui_rs::render::DrawCmd::ResetRenderState => {
                             Self::setup_render_state_static(
                                 draw_data,
                                 render_pass,
@@ -921,7 +921,7 @@ impl WgpuRenderer {
                                 gamma,
                             )?;
                         }
-                        dear_imgui::render::DrawCmd::RawCallback { .. } => {
+                        dear_imgui_rs::render::DrawCmd::RawCallback { .. } => {
                             // Unsupported raw callbacks; skip.
                         }
                     }
@@ -1239,7 +1239,7 @@ impl Default for WgpuRenderer {
 #[cfg(feature = "multi-viewport")]
 pub mod multi_viewport {
     use super::*;
-    use dear_imgui::platform_io::Viewport;
+    use dear_imgui_rs::platform_io::Viewport;
     use std::ffi::c_void;
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1277,7 +1277,7 @@ pub mod multi_viewport {
             ));
             platform_io.set_renderer_set_window_size(Some(
                 renderer_set_window_size
-                    as unsafe extern "C" fn(*mut Viewport, dear_imgui::sys::ImVec2),
+                    as unsafe extern "C" fn(*mut Viewport, dear_imgui_rs::sys::ImVec2),
             ));
             // Route rendering via platform raw callbacks to avoid typed trampolines
             platform_io.set_platform_render_window_raw(Some(platform_render_window_sys));
@@ -1456,7 +1456,7 @@ pub mod multi_viewport {
     /// Renderer: notify new size
     pub unsafe extern "C" fn renderer_set_window_size(
         vp: *mut Viewport,
-        size: dear_imgui::sys::ImVec2,
+        size: dear_imgui_rs::sys::ImVec2,
     ) {
         if vp.is_null() {
             return;
@@ -1505,7 +1505,7 @@ pub mod multi_viewport {
             return;
         }
         // SAFETY: Dear ImGui provides a valid ImDrawData during RenderPlatformWindowsDefault
-        let draw_data: &dear_imgui::render::DrawData = std::mem::transmute(&*raw_dd);
+        let draw_data: &dear_imgui_rs::render::DrawData = std::mem::transmute(&*raw_dd);
         mvlog!(
             "[wgpu-mv] draw_data: valid={} lists={} fb_scale=({:.2},{:.2}) disp=({:.1},{:.1})",
             draw_data.valid(),
@@ -1634,7 +1634,7 @@ pub mod multi_viewport {
 
     // Raw sys-platform wrappers to avoid typed trampolines
     pub unsafe extern "C" fn platform_render_window_sys(
-        vp: *mut dear_imgui::sys::ImGuiViewport,
+        vp: *mut dear_imgui_rs::sys::ImGuiViewport,
         arg: *mut c_void,
     ) {
         if vp.is_null() {
@@ -1644,7 +1644,7 @@ pub mod multi_viewport {
     }
 
     pub unsafe extern "C" fn platform_swap_buffers_sys(
-        vp: *mut dear_imgui::sys::ImGuiViewport,
+        vp: *mut dear_imgui_rs::sys::ImGuiViewport,
         arg: *mut c_void,
     ) {
         if vp.is_null() {

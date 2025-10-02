@@ -184,7 +184,7 @@ impl WinitPlatform {
                     if imgui_ctx
                         .io()
                         .config_flags()
-                        .contains(dear_imgui::ConfigFlags::VIEWPORTS_ENABLE)
+                        .contains(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE)
                     {
                         // Feed absolute/screen coordinates using window's client-area origin (inner_position)
                         if let Ok(base) = window.inner_position() {

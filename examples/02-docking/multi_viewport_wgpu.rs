@@ -5,7 +5,7 @@
 //! - Routes input events for secondary windows
 //! - Lets Dear ImGui create/update/destroy platform windows and renders them
 
-use dear_imgui::{Condition, Context};
+use dear_imgui_rs::{Condition, Context};
 use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use pollster::block_on;
@@ -84,7 +84,7 @@ impl AppWindow {
         {
             let io = imgui.io_mut();
             let mut flags = io.config_flags();
-            flags.insert(dear_imgui::ConfigFlags::DOCKING_ENABLE);
+            flags.insert(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE);
             io.set_config_flags(flags);
         }
 
