@@ -168,10 +168,7 @@ impl AppWindow {
 
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: None,
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::default(),
-            trace: wgpu::Trace::default(),
+            ..Default::default()
         }))
         .expect("Failed to create device");
 
