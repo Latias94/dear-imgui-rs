@@ -314,7 +314,7 @@ impl FontAtlas {
             let cfg_ptr = font_cfg.map_or(ptr::null(), |cfg| cfg.raw());
             let ranges_ptr = glyph_ranges.map_or(ptr::null(), |ranges| ranges.as_ptr());
 
-            let font_ptr = sys::ImFontAtlas_AddFontFromFileTTF(
+            let font_ptr = sys::ImFontAtlas_AddFontFromFileTTF_Str(
                 self.raw,
                 filename_cstr.as_ptr(),
                 size_pixels,

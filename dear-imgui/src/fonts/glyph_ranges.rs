@@ -47,9 +47,8 @@ impl GlyphRangesBuilder {
     #[doc(alias = "AddText")]
     pub fn add_text(&mut self, text: &str) {
         unsafe {
-            let text_start = text.as_ptr() as *const std::os::raw::c_char;
-            let text_end = text_start.add(text.len());
-            sys::ImFontGlyphRangesBuilder_AddText(self.raw, text_start, text_end);
+            let text_cstr = std::ffi::CString::new(text).unwrap();
+            sys::ImFontGlyphRangesBuilder_AddText_Str(self.raw, text_cstr.as_ptr());
         }
     }
 

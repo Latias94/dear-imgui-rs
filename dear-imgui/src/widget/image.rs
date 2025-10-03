@@ -253,7 +253,7 @@ impl<'ui> ImageButton<'ui> {
         };
 
         unsafe {
-            sys::igImageButton(
+            sys::igImageButton_Str(
                 str_id_ptr,
                 self.texture.raw(),
                 size_vec,

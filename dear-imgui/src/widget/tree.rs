@@ -82,7 +82,7 @@ impl Ui {
     #[doc(alias = "CollapsingHeader")]
     pub fn collapsing_header(&self, label: impl AsRef<str>, flags: TreeNodeFlags) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::igCollapsingHeader_TreeNodeFlags(label_ptr, flags.bits()) }
+        unsafe { sys::igCollapsingHeader_StrTreeNodeFlags(label_ptr, flags.bits()) }
     }
 }
 

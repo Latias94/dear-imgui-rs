@@ -52,7 +52,7 @@ impl Ui {
     /// Renders a separator with text.
     #[doc(alias = "SeparatorText")]
     pub fn separator_with_text(&self, text: impl AsRef<str>) {
-        unsafe { sys::igSeparatorText(self.scratch_txt(text)) }
+        unsafe { sys::igSeparatorText_Str(self.scratch_txt(text)) }
     }
 
     /// Creates a vertical separator

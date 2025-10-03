@@ -147,7 +147,7 @@ impl Ui {
         let outer_size_vec: sys::ImVec2 = outer_size.into().into();
 
         let should_render = unsafe {
-            sys::igBeginTable(
+            sys::igBeginTable_Str(
                 str_id_ptr,
                 column_count as i32,
                 flags.bits(),
@@ -214,7 +214,7 @@ impl Ui {
     ) {
         let label_ptr = self.scratch_txt(label);
         unsafe {
-            sys::igTableSetupColumn(label_ptr, flags.bits(), init_width_or_weight, user_id);
+            sys::igTableSetupColumn_Str(label_ptr, flags.bits(), init_width_or_weight, user_id);
         }
     }
 
@@ -257,7 +257,7 @@ impl Ui {
     #[doc(alias = "TableHeader")]
     pub fn table_header(&self, label: impl AsRef<str>) {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::igTableHeader(label_ptr) }
+        unsafe { sys::igTableHeader_Str(label_ptr) }
     }
 
     /// Return columns count.

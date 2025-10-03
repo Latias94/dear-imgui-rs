@@ -276,7 +276,7 @@ impl Ui {
         let text_width = {
             let text_ptr = self.scratch_txt(text);
             let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-            unsafe { sys::igCalcTextSize(&mut out, text_ptr, std::ptr::null(), false, -1.0) };
+            unsafe { sys::igCalcTextSize_Str(&mut out, text_ptr, false, -1.0) };
             out.x
         };
         self.push_item_width(text_width)

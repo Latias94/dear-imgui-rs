@@ -16,6 +16,7 @@ members = [
     "examples-wasm",
     "xtask",
     "tools/build-support",
+    "benchmarks",
 ]
 
 exclude = [

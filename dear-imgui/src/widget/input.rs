@@ -326,7 +326,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
         let result = unsafe {
             if hint_ptr.is_null() {
-                sys::igInputText(
+                sys::igInputText_Str(
                     label_ptr,
                     buf_ptr,
                     buf_size,
@@ -335,7 +335,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     user_ptr,
                 )
             } else {
-                sys::igInputTextWithHint(
+                sys::igInputTextWithHint_Str(
                     label_ptr,
                     hint_ptr,
                     buf_ptr,
@@ -567,7 +567,7 @@ where
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
         let result = unsafe {
             if hint_ptr.is_null() {
-                sys::igInputText(
+                sys::igInputText_Str(
                     label_ptr,
                     buf_ptr,
                     capacity,
@@ -576,7 +576,7 @@ where
                     user_ptr,
                 )
             } else {
-                sys::igInputTextWithHint(
+                sys::igInputTextWithHint_Str(
                     label_ptr,
                     hint_ptr,
                     buf_ptr,
@@ -668,7 +668,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
 
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
         let result = unsafe {
-            sys::igInputTextMultiline(
+            sys::igInputTextMultiline_Str(
                 label_ptr,
                 buf_ptr,
                 buf_size,
@@ -768,7 +768,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
         let size_vec: sys::ImVec2 = self.size.into();
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
         let result = unsafe {
-            sys::igInputTextMultiline(
+            sys::igInputTextMultiline_Str(
                 label_ptr,
                 buf_ptr,
                 capacity,
@@ -917,7 +917,7 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
         let size_vec: sys::ImVec2 = self.size.into();
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
         let result = unsafe {
-            sys::igInputTextMultiline(
+            sys::igInputTextMultiline_Str(
                 label_ptr,
                 buf_ptr,
                 capacity,
@@ -983,7 +983,7 @@ impl<'ui> InputInt<'ui> {
     pub fn build(self, value: &mut i32) -> bool {
         let label_ptr = self.ui.scratch_txt(&self.label);
         unsafe {
-            sys::igInputInt(
+            sys::igInputInt_Str(
                 label_ptr,
                 value as *mut i32,
                 self.step,
@@ -1054,7 +1054,7 @@ impl<'ui> InputFloat<'ui> {
         };
 
         unsafe {
-            sys::igInputFloat(
+            sys::igInputFloat_Str(
                 label_ptr,
                 value as *mut f32,
                 self.step,
@@ -1126,7 +1126,7 @@ impl<'ui> InputDouble<'ui> {
         };
 
         unsafe {
-            sys::igInputDouble(
+            sys::igInputDouble_Str(
                 label_ptr,
                 value as *mut f64,
                 self.step,
@@ -1291,13 +1291,12 @@ impl TextCallbackData {
 
     /// Insert text at the given position
     pub fn insert_chars(&mut self, pos: usize, text: &str) {
-        let text_cstr = format!("{}\0", text);
         unsafe {
-            sys::ImGuiInputTextCallbackData_InsertChars(
+            let text_cstr = std::ffi::CString::new(text).unwrap();
+            sys::ImGuiInputTextCallbackData_InsertChars_Str(
                 self.0,
                 pos as i32,
-                text_cstr.as_ptr() as *const std::os::raw::c_char,
-                text_cstr.as_ptr().add(text.len()) as *const std::os::raw::c_char,
+                text_cstr.as_ptr(),
             );
         }
     }
@@ -1485,7 +1484,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igInputScalar(
+            sys::igInputScalar_Str(
                 one,
                 T::KIND as i32,
                 self.value as *mut T as *mut c_void,
@@ -1579,7 +1578,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igInputScalarN(
+            sys::igInputScalarN_Str(
                 one,
                 T::KIND as i32,
                 self.values.as_mut_ptr() as *mut c_void,
@@ -1651,7 +1650,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat2<'ui, 'p, L, F> {
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igInputFloat2(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
+            sys::igInputFloat2_Str(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
         }
     }
 }
@@ -1708,7 +1707,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat3<'ui, 'p, L, F> {
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igInputFloat3(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
+            sys::igInputFloat3_Str(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
         }
     }
 }
@@ -1765,7 +1764,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat4<'ui, 'p, L, F> {
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igInputFloat4(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
+            sys::igInputFloat4_Str(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
         }
     }
 }
@@ -1805,7 +1804,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt2<'ui, 'p, L> {
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
-            sys::igInputInt2(
+            sys::igInputInt2_Str(
                 label_cstr,
                 self.value.as_mut_ptr(),
                 self.flags.bits() as i32,
@@ -1849,7 +1848,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt3<'ui, 'p, L> {
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
-            sys::igInputInt3(
+            sys::igInputInt3_Str(
                 label_cstr,
                 self.value.as_mut_ptr(),
                 self.flags.bits() as i32,
@@ -1893,7 +1892,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt4<'ui, 'p, L> {
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
-            sys::igInputInt4(
+            sys::igInputInt4_Str(
                 label_cstr,
                 self.value.as_mut_ptr(),
                 self.flags.bits() as i32,

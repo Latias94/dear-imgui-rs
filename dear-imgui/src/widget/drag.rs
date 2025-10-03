@@ -27,7 +27,7 @@ impl Ui {
     pub fn drag_float2(&self, label: impl AsRef<str>, values: &mut [f32; 2]) -> bool {
         unsafe {
             let label_cstr = self.scratch_txt(label);
-            sys::igDragFloat2(
+            sys::igDragFloat2_Str(
                 label_cstr,
                 values.as_mut_ptr(),
                 1.0,
@@ -44,7 +44,7 @@ impl Ui {
     pub fn drag_float3(&self, label: impl AsRef<str>, values: &mut [f32; 3]) -> bool {
         unsafe {
             let label_cstr = self.scratch_txt(label);
-            sys::igDragFloat3(
+            sys::igDragFloat3_Str(
                 label_cstr,
                 values.as_mut_ptr(),
                 1.0,
@@ -61,7 +61,7 @@ impl Ui {
     pub fn drag_float4(&self, label: impl AsRef<str>, values: &mut [f32; 4]) -> bool {
         unsafe {
             let label_cstr = self.scratch_txt(label);
-            sys::igDragFloat4(
+            sys::igDragFloat4_Str(
                 label_cstr,
                 values.as_mut_ptr(),
                 1.0,
@@ -78,7 +78,7 @@ impl Ui {
     pub fn drag_int2(&self, label: impl AsRef<str>, values: &mut [i32; 2]) -> bool {
         unsafe {
             let label_cstr = self.scratch_txt(label);
-            sys::igDragInt2(label_cstr, values.as_mut_ptr(), 1.0, 0, 0, ptr::null(), 0)
+            sys::igDragInt2_Str(label_cstr, values.as_mut_ptr(), 1.0, 0, 0, ptr::null(), 0)
         }
     }
 
@@ -87,7 +87,7 @@ impl Ui {
     pub fn drag_int3(&self, label: impl AsRef<str>, values: &mut [i32; 3]) -> bool {
         unsafe {
             let label_cstr = self.scratch_txt(label);
-            sys::igDragInt3(label_cstr, values.as_mut_ptr(), 1.0, 0, 0, ptr::null(), 0)
+            sys::igDragInt3_Str(label_cstr, values.as_mut_ptr(), 1.0, 0, 0, ptr::null(), 0)
         }
     }
 
@@ -96,7 +96,7 @@ impl Ui {
     pub fn drag_int4(&self, label: impl AsRef<str>, values: &mut [i32; 4]) -> bool {
         unsafe {
             let label_cstr = self.scratch_txt(label);
-            sys::igDragInt4(label_cstr, values.as_mut_ptr(), 1.0, 0, 0, ptr::null(), 0)
+            sys::igDragInt4_Str(label_cstr, values.as_mut_ptr(), 1.0, 0, 0, ptr::null(), 0)
         }
     }
 }
@@ -169,7 +169,7 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
         unsafe {
             let (one, two) = ui.scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igDragScalar(
+            sys::igDragScalar_Str(
                 one,
                 T::KIND as i32,
                 value as *mut T as *mut c_void,
@@ -195,7 +195,7 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
         unsafe {
             let (one, two) = ui.scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igDragScalarN(
+            sys::igDragScalarN_Str(
                 one,
                 T::KIND as i32,
                 values.as_mut_ptr() as *mut c_void,
@@ -330,7 +330,7 @@ where
                 .map(|v| buffer.offset(v))
                 .unwrap_or_else(std::ptr::null);
 
-            sys::igDragFloatRange2(
+            sys::igDragFloatRange2_Str(
                 label,
                 min as *mut f32,
                 max as *mut f32,
@@ -372,7 +372,7 @@ where
                 .map(|v| buffer.offset(v))
                 .unwrap_or_else(std::ptr::null);
 
-            sys::igDragIntRange2(
+            sys::igDragIntRange2_Str(
                 label,
                 min as *mut i32,
                 max as *mut i32,

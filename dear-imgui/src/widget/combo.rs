@@ -44,7 +44,7 @@ impl Ui {
         let label_ptr = self.scratch_txt(label);
         let preview_ptr = self.scratch_txt(preview_value);
 
-        let should_render = unsafe { sys::igBeginCombo(label_ptr, preview_ptr, flags.bits()) };
+        let should_render = unsafe { sys::igBeginCombo_Str(label_ptr, preview_ptr, flags.bits()) };
 
         if should_render {
             Some(ComboBoxToken::new(self))
@@ -80,7 +80,7 @@ impl Ui {
     ) -> Option<ComboBoxToken<'_>> {
         let label_ptr = self.scratch_txt(label);
 
-        let should_render = unsafe { sys::igBeginCombo(label_ptr, std::ptr::null(), flags.bits()) };
+        let should_render = unsafe { sys::igBeginCombo_Str(label_ptr, std::ptr::null(), flags.bits()) };
 
         if should_render {
             Some(ComboBoxToken::new(self))
@@ -189,7 +189,7 @@ impl<'ui, Label: AsRef<str>> ComboBox<'ui, Label> {
             .map(|p| self.ui.scratch_txt(p))
             .unwrap_or(std::ptr::null());
 
-        let should_render = unsafe { sys::igBeginCombo(label_ptr, preview_ptr, self.flags.bits()) };
+        let should_render = unsafe { sys::igBeginCombo_Str(label_ptr, preview_ptr, self.flags.bits()) };
 
         if should_render {
             Some(ComboBoxToken::new(self.ui))

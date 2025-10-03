@@ -508,7 +508,8 @@ impl Context {
     pub fn load_ini_settings(&mut self, data: &str) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::igLoadIniSettingsFromMemory(data.as_ptr() as *const _, data.len());
+            let data_cstr = std::ffi::CString::new(data).unwrap();
+            sys::igLoadIniSettingsFromMemory_Str(data_cstr.as_ptr());
         }
     }
 

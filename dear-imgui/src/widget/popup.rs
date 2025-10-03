@@ -56,7 +56,7 @@ impl Ui {
         flags: WindowFlags,
     ) -> Option<PopupToken<'_>> {
         let str_id_ptr = self.scratch_txt(str_id);
-        let render = unsafe { sys::igBeginPopup(str_id_ptr, flags.bits()) };
+        let render = unsafe { sys::igBeginPopup_Str(str_id_ptr, flags.bits()) };
 
         if render {
             Some(PopupToken::new(self))
@@ -86,7 +86,7 @@ impl Ui {
     pub fn begin_modal_popup(&self, name: impl AsRef<str>) -> Option<ModalPopupToken<'_>> {
         let name_ptr = self.scratch_txt(name);
         let render = unsafe {
-            sys::igBeginPopupModal(name_ptr, std::ptr::null_mut(), WindowFlags::empty().bits())
+            sys::igBeginPopupModal_Str(name_ptr, std::ptr::null_mut(), WindowFlags::empty().bits())
         };
 
         if render {
@@ -156,7 +156,7 @@ impl Ui {
             .unwrap_or(std::ptr::null());
 
         let render = unsafe {
-            sys::igBeginPopupContextItem(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
+            sys::igBeginPopupContextItem_Str(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
         };
 
         if render {
@@ -183,7 +183,7 @@ impl Ui {
             .unwrap_or(std::ptr::null());
 
         let render = unsafe {
-            sys::igBeginPopupContextWindow(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
+            sys::igBeginPopupContextWindow_Str(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
         };
 
         if render {
@@ -210,7 +210,7 @@ impl Ui {
             .unwrap_or(std::ptr::null());
 
         let render = unsafe {
-            sys::igBeginPopupContextVoid(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
+            sys::igBeginPopupContextVoid_Str(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
         };
 
         if render {
@@ -278,7 +278,7 @@ impl<'ui> ModalPopup<'ui> {
             .map(|o| o as *mut bool)
             .unwrap_or(std::ptr::null_mut());
 
-        let render = unsafe { sys::igBeginPopupModal(name_ptr, opened_ptr, self.flags.bits()) };
+        let render = unsafe { sys::igBeginPopupModal_Str(name_ptr, opened_ptr, self.flags.bits()) };
 
         if render {
             Some(ModalPopupToken::new(self.ui))

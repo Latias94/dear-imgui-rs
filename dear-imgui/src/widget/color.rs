@@ -227,7 +227,7 @@ impl<'ui, 'p> ColorEdit3<'ui, 'p> {
     /// Builds the color edit widget
     pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(&self.label);
-        unsafe { sys::igColorEdit3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
+        unsafe { sys::igColorEdit3_Str(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
 }
 
@@ -261,7 +261,7 @@ impl<'ui, 'p> ColorEdit4<'ui, 'p> {
     /// Builds the color edit widget
     pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(&self.label);
-        unsafe { sys::igColorEdit4(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
+        unsafe { sys::igColorEdit4_Str(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
 }
 
@@ -295,7 +295,7 @@ impl<'ui, 'p> ColorPicker3<'ui, 'p> {
     /// Builds the color picker widget
     pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(&self.label);
-        unsafe { sys::igColorPicker3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
+        unsafe { sys::igColorPicker3_Str(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
 }
 
@@ -343,7 +343,7 @@ impl<'ui, 'p> ColorPicker4<'ui, 'p> {
             .map_or(std::ptr::null(), |c| c.as_ptr());
 
         unsafe {
-            sys::igColorPicker4(
+            sys::igColorPicker4_Str(
                 label_ptr,
                 self.color.as_mut_ptr(),
                 self.flags.bits() as i32,
@@ -394,7 +394,7 @@ impl<'ui> ColorButton<'ui> {
         let size_vec: sys::ImVec2 = self.size.into();
 
         unsafe {
-            sys::igColorButton(
+            sys::igColorButton_Str(
                 desc_id_ptr,
                 sys::ImVec4 {
                     x: self.color[0],

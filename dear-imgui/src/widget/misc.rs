@@ -54,7 +54,7 @@ impl Ui {
     #[doc(alias = "SmallButton")]
     pub fn small_button(&self, label: impl AsRef<str>) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::igSmallButton(label_ptr) }
+        unsafe { sys::igSmallButton_Str(label_ptr) }
     }
 
     /// Creates an invisible button
@@ -73,14 +73,14 @@ impl Ui {
     ) -> bool {
         let id_ptr = self.scratch_txt(str_id);
         let size_vec: sys::ImVec2 = size.into().into();
-        unsafe { sys::igInvisibleButton(id_ptr, size_vec, flags.bits()) }
+        unsafe { sys::igInvisibleButton_Str(id_ptr, size_vec, flags.bits()) }
     }
 
     /// Creates an arrow button
     #[doc(alias = "ArrowButton")]
     pub fn arrow_button(&self, str_id: impl AsRef<str>, dir: crate::Direction) -> bool {
         let id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::igArrowButton(id_ptr, dir as i32) }
+        unsafe { sys::igArrowButton_Str(id_ptr, dir as i32) }
     }
 }
 

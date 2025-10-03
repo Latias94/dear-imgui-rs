@@ -49,7 +49,7 @@ impl Ui {
     /// * `border` - Whether to draw borders between columns
     #[doc(alias = "Columns")]
     pub fn columns(&self, count: i32, id: impl AsRef<str>, border: bool) {
-        unsafe { sys::igColumns(count, self.scratch_txt(id), border) }
+        unsafe { sys::igColumns_Str(count, self.scratch_txt(id), border) }
     }
 
     /// Begin columns layout with advanced flags.
@@ -60,7 +60,7 @@ impl Ui {
     /// * `flags` - Column flags
     #[doc(alias = "BeginColumns")]
     pub fn begin_columns(&self, id: impl AsRef<str>, count: i32, flags: OldColumnFlags) {
-        unsafe { sys::igBeginColumns(self.scratch_txt(id), count, flags.bits()) }
+        unsafe { sys::igBeginColumns_Str(self.scratch_txt(id), count, flags.bits()) }
     }
 
     /// End columns layout.
@@ -163,7 +163,7 @@ impl Ui {
     /// Get columns ID for the given string ID and count.
     #[doc(alias = "GetColumnsID")]
     pub fn get_columns_id(&self, str_id: impl AsRef<str>, count: i32) -> u32 {
-        unsafe { sys::igGetColumnsID(self.scratch_txt(str_id), count) }
+        unsafe { sys::igGetColumnsID_Str(self.scratch_txt(str_id), count) }
     }
 
     // ============================================================================

@@ -103,12 +103,8 @@ impl Ui {
     pub fn text<T: AsRef<str>>(&self, text: T) {
         let s = text.as_ref();
         unsafe {
-            let start = s.as_ptr();
-            let end = start.add(s.len());
-            crate::sys::igTextUnformatted(
-                start as *const std::os::raw::c_char,
-                end as *const std::os::raw::c_char,
-            );
+            let text_cstr = std::ffi::CString::new(s).unwrap();
+            crate::sys::igTextUnformatted_Str(text_cstr.as_ptr());
         }
     }
 
@@ -418,7 +414,7 @@ impl Ui {
     /// Display a text label with a boolean value (for quick debug UIs).
     #[doc(alias = "Value")]
     pub fn value_bool(&self, prefix: impl AsRef<str>, v: bool) {
-        unsafe { sys::igValue_Bool(self.scratch_txt(prefix), v) }
+        unsafe { sys::igValue_StrBool(self.scratch_txt(prefix), v) }
     }
 
     /// Get current window width (shortcut for `GetWindowSize().x`).
@@ -482,14 +478,14 @@ impl Ui {
     /// Returns true when a different style was selected.
     #[doc(alias = "ShowStyleSelector")]
     pub fn show_style_selector(&self, label: impl AsRef<str>) -> bool {
-        unsafe { sys::igShowStyleSelector(self.scratch_txt(label)) }
+        unsafe { sys::igShowStyleSelector_Str(self.scratch_txt(label)) }
     }
 
     /// Renders a font selector combo box.
     #[doc(alias = "ShowFontSelector")]
     pub fn show_font_selector(&self, label: impl AsRef<str>) {
         unsafe {
-            sys::igShowFontSelector(self.scratch_txt(label));
+            sys::igShowFontSelector_Str(self.scratch_txt(label));
         }
     }
 

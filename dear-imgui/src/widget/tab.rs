@@ -247,7 +247,7 @@ impl Ui {
         flags: TabBarFlags,
     ) -> Option<TabBarToken<'_>> {
         let id_ptr = self.scratch_txt(id);
-        let should_render = unsafe { sys::igBeginTabBar(id_ptr, flags.bits()) };
+        let should_render = unsafe { sys::igBeginTabBar_Str(id_ptr, flags.bits()) };
 
         if should_render {
             Some(TabBarToken::new(self))
@@ -291,7 +291,7 @@ impl Ui {
         let label_ptr = self.scratch_txt(label);
         let opened_ptr = opened.map(|x| x as *mut bool).unwrap_or(ptr::null_mut());
 
-        let should_render = unsafe { sys::igBeginTabItem(label_ptr, opened_ptr, flags.bits()) };
+        let should_render = unsafe { sys::igBeginTabItem_Str(label_ptr, opened_ptr, flags.bits()) };
 
         if should_render {
             Some(TabItemToken::new(self))

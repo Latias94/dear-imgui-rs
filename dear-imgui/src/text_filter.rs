@@ -93,7 +93,7 @@ impl TextFilter {
     pub fn new_with_filter(label: String, filter: String) -> Self {
         let filter_cstr = format!("{}\0", filter);
         unsafe {
-            let raw = sys::ImGuiTextFilter_ImGuiTextFilter(
+            let raw = sys::ImGuiTextFilter_ImGuiTextFilter_Str(
                 filter_cstr.as_ptr() as *const std::os::raw::c_char
             );
             Self { id: label, raw }
@@ -168,7 +168,7 @@ impl TextFilter {
     pub fn draw_with_size(&mut self, width: f32) -> bool {
         let label_cstr = format!("{}\0", self.id);
         unsafe {
-            sys::ImGuiTextFilter_Draw(
+            sys::ImGuiTextFilter_Draw_Str(
                 self.raw,
                 label_cstr.as_ptr() as *const std::os::raw::c_char,
                 width,
@@ -220,12 +220,11 @@ impl TextFilter {
     /// assert!(!filter.pass_filter("example string"));
     /// ```
     pub fn pass_filter(&self, text: &str) -> bool {
-        let text_cstr = format!("{}\0", text);
         unsafe {
-            sys::ImGuiTextFilter_PassFilter(
+            let text_cstr = std::ffi::CString::new(text).unwrap();
+            sys::ImGuiTextFilter_PassFilter_Str(
                 self.raw,
-                text_cstr.as_ptr() as *const std::os::raw::c_char,
-                ptr::null(),
+                text_cstr.as_ptr(),
             )
         }
     }
@@ -251,13 +250,12 @@ impl TextFilter {
     /// assert!(filter.pass_filter_with_end("test", " string"));
     /// ```
     pub fn pass_filter_with_end(&self, start: &str, end: &str) -> bool {
-        let start_cstr = format!("{}\0", start);
-        let end_cstr = format!("{}\0", end);
         unsafe {
-            sys::ImGuiTextFilter_PassFilter(
+            let combined = format!("{}{}", start, end);
+            let text_cstr = std::ffi::CString::new(combined).unwrap();
+            sys::ImGuiTextFilter_PassFilter_Str(
                 self.raw,
-                start_cstr.as_ptr() as *const std::os::raw::c_char,
-                end_cstr.as_ptr() as *const std::os::raw::c_char,
+                text_cstr.as_ptr(),
             )
         }
     }

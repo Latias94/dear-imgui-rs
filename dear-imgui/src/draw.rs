@@ -740,16 +740,13 @@ impl<'ui> DrawListMut<'ui> {
         col: impl Into<ImColor32>,
         text: impl AsRef<str>,
     ) {
-        use std::os::raw::c_char;
-
         let text = text.as_ref();
         let pos: sys::ImVec2 = pos.into();
         let col = col.into();
 
         unsafe {
-            let start = text.as_ptr() as *const c_char;
-            let end = (start as usize + text.len()) as *const c_char;
-            sys::ImDrawList_AddText_Vec2(self.draw_list, pos, col.into(), start, end);
+            let text_cstr = std::ffi::CString::new(text).unwrap();
+            sys::ImDrawList_AddText_Vec2U32Str(self.draw_list, pos, col.into(), text_cstr.as_ptr());
         }
     }
 
@@ -785,16 +782,14 @@ impl<'ui> DrawListMut<'ui> {
         };
 
         unsafe {
-            let start = text.as_ptr() as *const c_char;
-            let end = (start as usize + text.len()) as *const c_char;
-            sys::ImDrawList_AddText_FontPtr(
+            let text_cstr = std::ffi::CString::new(text).unwrap();
+            sys::ImDrawList_AddText_FontPtrFloatVec2Str(
                 self.draw_list,
                 font_ptr,
                 font_size,
                 pos,
                 col.into(),
-                start,
-                end,
+                text_cstr.as_ptr(),
                 wrap_width,
                 clip_ptr,
             );

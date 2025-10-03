@@ -62,18 +62,16 @@ impl Font {
         text: &str,
     ) -> [f32; 2] {
         unsafe {
-            let text_start = text.as_ptr() as *const std::os::raw::c_char;
-            let text_end = text_start.add(text.len());
+            let text_cstr = std::ffi::CString::new(text).unwrap();
             let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
             let mut out_remaining: *const std::os::raw::c_char = std::ptr::null();
-            sys::ImFont_CalcTextSizeA(
+            sys::ImFont_CalcTextSizeA_Str(
                 &mut out,
                 self.raw(),
                 size,
                 max_width,
                 wrap_width,
-                text_start,
-                text_end,
+                text_cstr.as_ptr(),
                 &mut out_remaining,
             );
             [out.x, out.y]
@@ -84,13 +82,12 @@ impl Font {
     #[doc(alias = "CalcWordWrapPosition")]
     pub fn calc_word_wrap_position(&self, size: f32, text: &str, wrap_width: f32) -> usize {
         unsafe {
-            let text_start = text.as_ptr() as *const std::os::raw::c_char;
-            let text_end = text_start.add(text.len());
-            let wrap_pos = sys::ImFont_CalcWordWrapPosition(
+            let text_cstr = std::ffi::CString::new(text).unwrap();
+            let text_start = text_cstr.as_ptr();
+            let wrap_pos = sys::ImFont_CalcWordWrapPosition_Str(
                 self.raw(),
                 size,
                 text_start,
-                text_end,
                 wrap_width,
             );
             wrap_pos.offset_from(text_start) as usize

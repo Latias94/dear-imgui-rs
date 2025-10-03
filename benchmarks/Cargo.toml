@@ -1,0 +1,25 @@
+[package]
+name = "dear-imgui-benchmarks"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+dear-imgui-rs = { path = "../dear-imgui" }
+dear-imgui-sys = { path = "../dear-imgui-sys" }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "string_handling"
+harness = false
+path = "../benches/string_handling.rs"
+
+[[bench]]
+name = "simple_string_test"
+harness = false
+
+[[bench]]
+name = "string_methods_comparison"
+harness = false

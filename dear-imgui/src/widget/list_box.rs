@@ -48,7 +48,7 @@ impl<T: AsRef<str>> ListBox<T> {
             x: self.size[0],
             y: self.size[1],
         };
-        let should_render = unsafe { sys::igBeginListBox(ui.scratch_txt(self.label), size_vec) };
+        let should_render = unsafe { sys::igBeginListBox_Str(ui.scratch_txt(self.label), size_vec) };
         if should_render {
             Some(ListBoxToken::new(ui))
         } else {

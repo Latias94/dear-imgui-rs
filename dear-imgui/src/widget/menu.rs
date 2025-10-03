@@ -66,7 +66,7 @@ impl Ui {
         enabled: bool,
     ) -> Option<MenuToken<'_>> {
         let label_ptr = self.scratch_txt(label);
-        if unsafe { sys::igBeginMenu(label_ptr, enabled) } {
+        if unsafe { sys::igBeginMenu_Str(label_ptr, enabled) } {
             Some(MenuToken::new(self))
         } else {
             None
@@ -100,7 +100,7 @@ impl Ui {
     #[doc(alias = "MenuItem")]
     pub fn menu_item(&self, label: impl AsRef<str>) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::igMenuItemEx(label_ptr, std::ptr::null(), std::ptr::null(), false, true) }
+        unsafe { sys::igMenuItemEx_Str(label_ptr, std::ptr::null(), std::ptr::null(), false, true) }
     }
 
     /// Creates a menu item with a shortcut.
@@ -114,7 +114,7 @@ impl Ui {
     ) -> bool {
         let label_ptr = self.scratch_txt(label);
         let shortcut_ptr = self.scratch_txt(shortcut);
-        unsafe { sys::igMenuItemEx(label_ptr, std::ptr::null(), shortcut_ptr, false, true) }
+        unsafe { sys::igMenuItemEx_Str(label_ptr, std::ptr::null(), shortcut_ptr, false, true) }
     }
 
     /// Creates a menu item with explicit enabled/selected state.
@@ -132,7 +132,7 @@ impl Ui {
             .as_ref()
             .map(|s| self.scratch_txt(s.as_ref()))
             .unwrap_or(std::ptr::null());
-        unsafe { sys::igMenuItem_Bool(label_ptr, shortcut_ptr, selected, enabled) }
+        unsafe { sys::igMenuItem_StrStrBool(label_ptr, shortcut_ptr, selected, enabled) }
     }
 
     /// Creates a toggleable menu item bound to `selected` (updated in place).
@@ -150,7 +150,7 @@ impl Ui {
             .as_ref()
             .map(|s| self.scratch_txt(s.as_ref()))
             .unwrap_or(std::ptr::null());
-        unsafe { sys::igMenuItem_BoolPtr(label_ptr, shortcut_ptr, selected, enabled) }
+        unsafe { sys::igMenuItem_StrStrBoolPtr(label_ptr, shortcut_ptr, selected, enabled) }
     }
 }
 

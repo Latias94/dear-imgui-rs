@@ -146,7 +146,7 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
             y: self.size[1],
         };
         unsafe {
-            sys::igSelectable_Bool(
+            sys::igSelectable_StrBool(
                 self.ui.scratch_txt(self.label),
                 self.selected,
                 self.flags.bits(),

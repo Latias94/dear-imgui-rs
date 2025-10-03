@@ -43,7 +43,7 @@ impl Ui {
         unsafe {
             let begin = s.as_ptr() as *const std::os::raw::c_char;
             let end = begin.add(s.len());
-            sys::igTextEx(begin, end, 0); // ImGuiTextFlags_None = 0
+            sys::igTextEx_StrStr(begin, end, 0); // ImGuiTextFlags_None = 0
         }
     }
 
@@ -73,7 +73,7 @@ impl Ui {
         unsafe {
             let begin = s.as_ptr() as *const std::os::raw::c_char;
             let end = begin.add(s.len());
-            sys::igTextEx(begin, end, 0); // ImGuiTextFlags_None = 0
+            sys::igTextEx_StrStr(begin, end, 0); // ImGuiTextFlags_None = 0
         }
     }
 
@@ -96,14 +96,14 @@ impl Ui {
     pub fn label_text(&self, label: impl AsRef<str>, text: impl AsRef<str>) {
         let (label_ptr, text_ptr) = self.scratch_txt_two(label, text);
         unsafe {
-            sys::igLabelText(label_ptr, text_ptr);
+            sys::igLabelText_Str(label_ptr, text_ptr);
         }
     }
 
     /// Render a hyperlink-style text button. Returns true when clicked.
     #[doc(alias = "TextLink")]
     pub fn text_link(&self, label: impl AsRef<str>) -> bool {
-        unsafe { sys::igTextLink(self.scratch_txt(label)) }
+        unsafe { sys::igTextLink_Str(self.scratch_txt(label)) }
     }
 
     /// Render a hyperlink-style text button, and open the given URL when clicked.
@@ -111,6 +111,6 @@ impl Ui {
     #[doc(alias = "TextLinkOpenURL")]
     pub fn text_link_open_url(&self, label: impl AsRef<str>, url: impl AsRef<str>) -> bool {
         let (label_ptr, url_ptr) = self.scratch_txt_two(label, url);
-        unsafe { sys::igTextLinkOpenURL(label_ptr, url_ptr) }
+        unsafe { sys::igTextLinkOpenURL_Str(label_ptr, url_ptr) }
     }
 }

@@ -215,7 +215,7 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
             let should_begin = sys::igBeginDragDropSource(self.flags.bits() as i32);
 
             if should_begin {
-                sys::igSetDragDropPayload(
+                sys::igSetDragDropPayload_Str(
                     self.ui.scratch_txt(&self.name),
                     ptr,
                     size,
@@ -340,7 +340,7 @@ impl<'ui> DragDropTarget<'ui> {
         flags: DragDropFlags,
     ) -> Option<DragDropPayload> {
         let inner =
-            unsafe { sys::igAcceptDragDropPayload(self.0.scratch_txt(name), flags.bits() as i32) };
+            unsafe { sys::igAcceptDragDropPayload_Str(self.0.scratch_txt(name), flags.bits() as i32) };
 
         if inner.is_null() {
             None
