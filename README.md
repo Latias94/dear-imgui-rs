@@ -11,11 +11,11 @@
 `dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL backends, and popular extensions (ImGuizmo, ImNodes, ImPlot).
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/a9212184-d9c5-4e16-820a-cd98b471a6ea" alt="Docking" width="49%"/>
-  <img src="https://github.com/user-attachments/assets/6fee92e9-d77a-4c47-aca9-9992243f26de" alt="ImGuizmo" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/imguizmo-basic.png" alt="ImGuizmo" width="49%"/>
   <br/>
-  <img src="https://github.com/user-attachments/assets/89ea8489-a12f-4246-9410-b6b8dea4b5ba" alt="ImPlot" width="49%"/>
-  <img src="https://github.com/user-attachments/assets/b1c56b58-7254-41f6-a97b-e97eac147a1e" alt="ImNodes Shader Graph" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/implot-basic.png" alt="ImPlot" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/imnodes-basic.png" alt="ImNodes" width="49%"/>
 </p>
 
 ## What’s in this repo
@@ -28,6 +28,7 @@
   - `dear-imguizmo` — 3D gizmo (cimguizmo C API) + a pure‑Rust GraphEditor
   - `dear-imnodes` — node editor (cimnodes C API)
   - `dear-implot` — plotting (cimplot C API)
+  - `dear-file-browser` — native dialogs (rfd) + pure ImGui in-UI file browser
 
 All crates are maintained together in this workspace.
 

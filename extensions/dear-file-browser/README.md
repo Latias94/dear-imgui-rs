@@ -5,7 +5,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 - Native (`rfd`): OS dialogs on desktop, Web File Picker on WASM
 - ImGui UI: a pure Dear ImGui file browser/widget (configurable layout + UX)
 
-![ImGui File Browser](../../screenshots/file_browser_imgui.png)
+![ImGui File Browser](https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/file_browser_imgui.png)
 
 ## Features
 
