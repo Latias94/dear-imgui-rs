@@ -16,6 +16,7 @@ Run any example with:
   - `--features dear-implot` for ImPlot
   - `--features dear-imnodes` for ImNodes
   - `--features dear-imguizmo` for ImGuizmo
+  - `--features dear-file-browser` for File Browser / Dialogs
 
 Quick picks:
 
@@ -28,6 +29,8 @@ Quick picks:
 - WGPU RTT Game View: `cargo run -p dear-imgui-examples --bin wgpu_rtt_gameview`
 - Console (log): `cargo run -p dear-imgui-examples --bin console_log`
 - Asset browser: `cargo run -p dear-imgui-examples --bin asset_browser_grid`
+- File dialog (native): `cargo run -p dear-imgui-examples --features dear-file-browser --bin file_dialog_native`
+- File browser (ImGui): `cargo run -p dear-imgui-examples --features dear-file-browser --bin file_browser_imgui`
 - Style & Fonts + FreeType: `cargo run -p dear-imgui-examples --features freetype --bin style_and_fonts`
 
 Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
@@ -71,6 +74,8 @@ This is the intended organization.
   - `wgpu_rtt_gameview.rs`: Render-to-texture Game View drawn in an ImGui window.
   - `console_log.rs`: Logging console with filter, autoscroll, and history.
   - `asset_browser_grid.rs`: Asset browser grid with thumbnails and filter.
+  - `file_dialog_native.rs`: OS-native file dialog using `dear-file-browser` (non-blocking thread).
+  - `file_browser_imgui.rs`: Pure ImGui file browser widget.
 
 - support/
   - `wgpu_init.rs` (WGPU init + resize helpers)
@@ -81,6 +86,7 @@ This is the intended organization.
 - Quickstart/backends: `wgpu_basic.rs`, `glow_basic.rs`, `input_text_minimal.rs`, `tables_minimal.rs`, `drawlist_minimal.rs`, `glow_textures.rs`, `menus_and_popups.rs`, `tables_property_grid.rs`, `list_clipper_log.rs`, `style_and_fonts.rs`
 - Docking: `02-docking/dockspace_minimal.rs`, `02-docking/game_engine_docking.rs` (+ `examples/02-docking/game_engine_docking.ini`)
 - Integration: `04-integration/wgpu_rtt_gameview.rs`, `04-integration/console_log.rs`, `04-integration/asset_browser_grid.rs`
+  and `04-integration/file_dialog_native.rs`, `04-integration/file_browser_imgui.rs`
 - Extensions: `implot_basic.rs`, `imnodes_basic.rs`, `imguizmo_basic.rs`
 
 These will remain runnable as-is; future additions may live in subfolders with explicit `[[bin]]` paths.

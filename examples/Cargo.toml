@@ -9,6 +9,7 @@ dear-implot = ["dep:dear-implot"]
 dear-imguizmo = ["dep:dear-imguizmo"]
 dear-imnodes = ["dep:dear-imnodes"]
 freetype = ["dear-imgui-rs/freetype"]
+dear-file-browser = ["dep:dear-file-browser"]
 
 [[bin]]
 name = "wgpu_basic"
@@ -93,6 +94,16 @@ path = "04-integration/console_log.rs"
 name = "asset_browser_grid"
 path = "04-integration/asset_browser_grid.rs"
 
+[[bin]]
+name = "file_dialog_native"
+path = "04-integration/file_dialog_native.rs"
+required-features = ["dear-file-browser"]
+
+[[bin]]
+name = "file_browser_imgui"
+path = "04-integration/file_browser_imgui.rs"
+required-features = ["dear-file-browser"]
+
 
 [dependencies]
 dear-imgui-rs = { path = "../dear-imgui", version = "0.3" }
@@ -103,6 +114,7 @@ arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
 dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
+dear-file-browser = { path = "../extensions/dear-file-browser", optional = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 glam = { workspace = true }

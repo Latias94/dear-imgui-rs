@@ -7,6 +7,7 @@ Extensions in this workspace build on top of `dear-imgui-sys` (cimgui C API) to 
 | ImPlot    | Scientific plotting    | Complete  | [dear-implot](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-implot)     | [cimgui/cimplot](https://github.com/cimgui/cimplot) |
 | ImGuizmo  | 3D transform gizmos    | Complete  | [dear-imguizmo](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo) | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo) |
 | ImNodes   | Node editor widgets    | Complete  | [dear-imnodes](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imnodes)   | [cimgui/cimnodes](https://github.com/cimgui/cimnodes)  |
+| File Browser | File dialogs + in-UI browser | Preview   | [dear-file-browser](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-file-browser) | Pure ImGui UI + rfd (native) |
 
 ## Architecture
 
@@ -69,7 +70,7 @@ Examples are in the top-level `examples/` crate and are feature-gated per extens
 - `implot_basic` -> `--features dear-implot`
 - `imguizmo_basic` -> `--features dear-imguizmo`
 
- - `imnodes_basic` -> `--features dear-imnodes`
+- `imnodes_basic` -> `--features dear-imnodes`
 
 Run:
 
@@ -77,6 +78,17 @@ Run:
 cargo run --bin implot_basic --features dear-implot
 cargo run --bin imguizmo_basic --features dear-imguizmo
 cargo run --bin imnodes_basic --features dear-imnodes
+
+# File Browser (new)
+
+- Native dialog (rfd):
+```
+cargo run -p dear-imgui-examples --features dear-file-browser --bin file_dialog_native
+```
+- ImGui browser (pure UI):
+```
+cargo run -p dear-imgui-examples --features dear-file-browser --bin file_browser_imgui
+```
 ```
 
  

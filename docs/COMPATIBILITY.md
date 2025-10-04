@@ -26,6 +26,7 @@ Extensions
 | dear-implot   | 0.3.x   | 0.3.x                  | dear-implot-sys 0.3.x   |       |
 | dear-imnodes  | 0.3.x   | 0.3.x                  | dear-imnodes-sys 0.3.x  |       |
 | dear-imguizmo | 0.3.x   | 0.3.x                  | dear-imguizmo-sys 0.3.x |       |
+| dear-file-browser | 0.3.x | 0.3.x               | — (pure Rust + rfd)     | ImGui UI + native (rfd) backends |
 
 ## History
 
@@ -40,6 +41,7 @@ Release Train 0.3 (current)
 - dear-imgui-sys 0.3.x binds Dear ImGui v1.92.3 (docking) via cimgui.
 - dear-imgui-rs 0.3.x layers a safe API over the 0.3.x sys crate.
 - External dependencies: wgpu 26, winit 0.30.12, glow 0.16
+  - dear-file-browser (preview): optional features `imgui` (pure UI) and `native-rfd` (rfd backend) enabled by default. On wasm32, prefer `native-rfd` (Web File Picker). The ImGui UI enumerates the filesystem via `std::fs` and cannot list local files in the browser environment.
 
 Release Train 0.2 (deprecated, yanked)
 

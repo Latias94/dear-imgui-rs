@@ -69,6 +69,16 @@ Tip: The ImNodes example includes multiple tabs (Hello, Multi-Editor, Style, Adv
 
 See `examples/README.md` for a curated index and the planned from‑easy‑to‑advanced layout.
 
+### File Browser
+
+```
+# OS-native dialogs (rfd)
+cargo run -p dear-imgui-examples --features dear-file-browser --bin file_dialog_native
+
+# Pure ImGui in-UI file browser
+cargo run -p dear-imgui-examples --features dear-file-browser --bin file_browser_imgui
+```
+
 ## Installation
 
 ```toml
