@@ -12,3 +12,6 @@
 [submodule "extensions/dear-imnodes-sys/third-party/cimnodes"]
 	path = extensions/dear-imnodes-sys/third-party/cimnodes
 	url = https://github.com/cimgui/cimnodes
+[submodule "extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat"]
+	path = extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat
+	url = https://github.com/cimgui/cimguizmo_quat

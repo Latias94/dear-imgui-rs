@@ -89,12 +89,14 @@ def main() -> int:
         "dear-implot-sys": repo_root / "extensions/dear-implot-sys",
         "dear-imnodes-sys": repo_root / "extensions/dear-imnodes-sys",
         "dear-imguizmo-sys": repo_root / "extensions/dear-imguizmo-sys",
+        "dear-imguizmo-quat-sys": repo_root / "extensions/dear-imguizmo-quat-sys",
     }
     submodules = {
         "dear-imgui-sys": (crate_roots["dear-imgui-sys"] / "third-party/cimgui", args.cimgui_branch),
         "dear-implot-sys": (crate_roots["dear-implot-sys"] / "third-party/cimplot", args.cimplot_branch),
         "dear-imnodes-sys": (crate_roots["dear-imnodes-sys"] / "third-party/cimnodes", args.cimnodes_branch),
         "dear-imguizmo-sys": (crate_roots["dear-imguizmo-sys"] / "third-party/cimguizmo", args.cimguizmo_branch),
+        "dear-imguizmo-quat-sys": (crate_roots["dear-imguizmo-quat-sys"] / "third-party/cimguizmo_quat", args.cimguizmo_branch),
     }
 
     # Parse crates list
@@ -135,6 +137,7 @@ def main() -> int:
         "dear-implot-sys": "IMPLOT_SYS_SKIP_CC",
         "dear-imnodes-sys": "IMNODES_SYS_SKIP_CC",
         "dear-imguizmo-sys": "IMGUIZMO_SYS_SKIP_CC",
+        "dear-imguizmo-quat-sys": "IMGUIZMO_QUAT_SYS_SKIP_CC",
     }
     target_dir = Path(env_base.get("CARGO_TARGET_DIR", repo_root / "target"))
     for crate in crates:

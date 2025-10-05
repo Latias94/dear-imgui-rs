@@ -29,8 +29,8 @@
 //! DockBuilder::finish(dockspace_id);
 //! ```
 
-use crate::sys;
 use crate::Id;
+use crate::sys;
 use crate::ui::Ui;
 use std::ffi::CString;
 use std::marker::PhantomData;
@@ -425,7 +425,13 @@ impl DockBuilder {
     /// For advanced remapping, prefer using the raw sys bindings.
     #[doc(alias = "DockBuilderCopyDockSpace")]
     pub fn copy_dock_space(src_dockspace_id: Id, dst_dockspace_id: Id) {
-        unsafe { sys::igDockBuilderCopyDockSpace(src_dockspace_id.into(), dst_dockspace_id.into(), std::ptr::null_mut()) }
+        unsafe {
+            sys::igDockBuilderCopyDockSpace(
+                src_dockspace_id.into(),
+                dst_dockspace_id.into(),
+                std::ptr::null_mut(),
+            )
+        }
     }
 
     /// Copies a single dock node from `src_node_id` to `dst_node_id`.
@@ -434,7 +440,9 @@ impl DockBuilder {
     /// use the raw sys bindings and provide an `ImVector_ImGuiID` buffer.
     #[doc(alias = "DockBuilderCopyNode")]
     pub fn copy_node(src_node_id: Id, dst_node_id: Id) {
-        unsafe { sys::igDockBuilderCopyNode(src_node_id.into(), dst_node_id.into(), std::ptr::null_mut()) }
+        unsafe {
+            sys::igDockBuilderCopyNode(src_node_id.into(), dst_node_id.into(), std::ptr::null_mut())
+        }
     }
 
     /// Copies persistent window docking settings from `src_name` to `dst_name`.
@@ -469,7 +477,11 @@ impl DockBuilder {
             Data: boxed.as_mut_ptr(),
         };
         unsafe {
-            sys::igDockBuilderCopyDockSpace(src_dockspace_id.into(), dst_dockspace_id.into(), &mut vec_in);
+            sys::igDockBuilderCopyDockSpace(
+                src_dockspace_id.into(),
+                dst_dockspace_id.into(),
+                &mut vec_in,
+            );
         }
         // keep boxed + cstrings alive until after the call
         drop(boxed);
@@ -479,10 +491,7 @@ impl DockBuilder {
     /// Copies a node and returns the node ID remap pairs as a vector
     /// of `(old_id, new_id)` tuples.
     #[doc(alias = "DockBuilderCopyNode")]
-    pub fn copy_node_with_remap_out(
-        src_node_id: Id,
-        dst_node_id: Id,
-    ) -> Vec<(Id, Id)> {
+    pub fn copy_node_with_remap_out(src_node_id: Id, dst_node_id: Id) -> Vec<(Id, Id)> {
         let mut out = sys::ImVector_ImGuiID::default();
         unsafe {
             sys::igDockBuilderCopyNode(src_node_id.into(), dst_node_id.into(), &mut out);

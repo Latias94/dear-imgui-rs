@@ -8,6 +8,7 @@ publish = false
 dear-implot = ["dep:dear-implot"]
 dear-imguizmo = ["dep:dear-imguizmo"]
 dear-imnodes = ["dep:dear-imnodes"]
+dear-imguizmo-quat = ["dep:dear-imguizmo-quat"]
 freetype = ["dear-imgui-rs/freetype"]
 dear-file-browser = ["dep:dear-file-browser"]
 
@@ -83,6 +84,12 @@ path = "imnodes_basic.rs"
 required-features = ["dear-imnodes"]
 
 [[bin]]
+name = "imguizmo_quat_basic"
+path = "imguizmo_quat_basic.rs"
+required-features = ["dear-imguizmo-quat"]
+
+
+[[bin]]
 name = "wgpu_rtt_gameview"
 path = "04-integration/wgpu_rtt_gameview.rs"
 
@@ -114,6 +121,7 @@ arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
 dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
+dear-imguizmo-quat = { path = "../extensions/dear-imguizmo-quat", optional = true }
 dear-file-browser = { path = "../extensions/dear-file-browser", optional = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
@@ -127,3 +135,4 @@ glutin = { workspace = true }
 glutin-winit = { workspace = true }
 raw-window-handle = { workspace = true }
 image = { workspace = true }
+bytemuck = { workspace = true }

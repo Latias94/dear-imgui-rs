@@ -16,6 +16,7 @@ Run any example with:
   - `--features dear-implot` for ImPlot
   - `--features dear-imnodes` for ImNodes
   - `--features dear-imguizmo` for ImGuizmo
+  - `--features dear-imguizmo-quat` for ImGuIZMO.quat
   - `--features dear-file-browser` for File Browser / Dialogs
 
 Quick picks:
@@ -26,6 +27,7 @@ Quick picks:
 - WGPU minimal: `cargo run -p dear-imgui-examples --bin wgpu_basic`
 - OpenGL + textures: `cargo run -p dear-imgui-examples --bin glow_textures`
 - WGPU + textures: `cargo run -p dear-imgui-examples --bin wgpu_textures`
+- ImGuIZMO.quat (WGPU): `cargo run -p dear-imgui-examples --features dear-imguizmo-quat --bin imguizmo_quat_basic`
 - WGPU RTT Game View: `cargo run -p dear-imgui-examples --bin wgpu_rtt_gameview`
 - Console (log): `cargo run -p dear-imgui-examples --bin console_log`
 - Asset browser: `cargo run -p dear-imgui-examples --bin asset_browser_grid`

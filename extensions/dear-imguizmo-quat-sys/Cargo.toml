@@ -1,0 +1,55 @@
+[package]
+name = "dear-imguizmo-quat-sys"
+version = "0.3.0"
+edition.workspace = true
+description = "Low-level FFI bindings for ImGuIZMO.quat via cimguizmo_quat (C API)"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+build = "build.rs"
+links = "dear_imguizmo_quat"
+
+# Exclude heavy upstream folders from package tarball
+exclude = [
+    "third-party/cimguizmo_quat/imGuIZMO.quat/**/examples/**",
+    "third-party/cimguizmo_quat/imGuIZMO.quat/**/.github/**",
+    "third-party/cimguizmo_quat/**/bin/**",
+    "third-party/cimguizmo_quat/**/Images/**",
+]
+
+[package.metadata.docs.rs]
+no-default-features = true
+all-features = false
+features = []
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.3" }
+cfg-if.workspace = true
+flate2 = { version = "1", optional = true }
+tar = { version = "0.4", optional = true }
+build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../../tools/build-support", optional = true }
+
+[build-dependencies]
+bindgen.workspace = true
+cc.workspace = true
+xshell = { workspace = true }
+pkg-config = { workspace = true }
+flate2 = "1"
+tar = "0.4"
+build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../../tools/build-support" }
+
+[[bin]]
+name = "package"
+path = "bin/package/main.rs"
+required-features = ["package-bin"]
+
+[features]
+package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
+default = []
+freetype = ["dear-imgui-sys/freetype"]
+prebuilt = []
+build-from-source = []
+

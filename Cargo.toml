@@ -11,6 +11,8 @@ members = [
     "extensions/dear-implot",
     "extensions/dear-imguizmo-sys",
     "extensions/dear-imguizmo",
+    "extensions/dear-imguizmo-quat-sys",
+    "extensions/dear-imguizmo-quat",
     "extensions/dear-imnodes-sys",
     "extensions/dear-imnodes",
     "examples",

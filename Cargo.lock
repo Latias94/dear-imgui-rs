@@ -919,12 +919,14 @@ name = "dear-imgui-examples"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "bytemuck",
  "dear-file-browser",
  "dear-imgui-glow",
  "dear-imgui-rs",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "dear-imguizmo",
+ "dear-imguizmo-quat",
  "dear-imnodes",
  "dear-implot",
  "env_logger",
@@ -1041,6 +1043,34 @@ dependencies = [
  "glam",
  "mint",
  "thiserror 2.0.17",
+]
+
+[[package]]
+name = "dear-imguizmo-quat"
+version = "0.3.0"
+dependencies = [
+ "bitflags 2.9.4",
+ "dear-imgui-rs",
+ "dear-imgui-sys",
+ "dear-imguizmo-quat-sys",
+ "glam",
+ "mint",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "dear-imguizmo-quat-sys"
+version = "0.3.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cfg-if",
+ "dear-imgui-build-support",
+ "dear-imgui-sys",
+ "flate2",
+ "pkg-config",
+ "tar",
+ "xshell",
 ]
 
 [[package]]

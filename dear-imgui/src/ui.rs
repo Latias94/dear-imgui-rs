@@ -12,13 +12,13 @@
 //! ui.text("Hello, world!");
 //! ```
 //!
+use crate::Id;
 use crate::draw::DrawListMut;
 use crate::input::MouseCursor;
 use crate::internal::RawWrapper;
 use crate::string::UiBuffer;
 use crate::sys;
 use crate::texture::TextureRef;
-use crate::Id;
 use std::cell::UnsafeCell;
 use std::ffi::CString;
 

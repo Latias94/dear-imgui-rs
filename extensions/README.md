@@ -6,6 +6,7 @@ Extensions in this workspace build on top of `dear-imgui-sys` (cimgui C API) to 
 |-----------|------------------------|-----------|----------------------------------|-----------------------------------------------------|
 | ImPlot    | Scientific plotting    | Complete  | [dear-implot](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-implot)     | [cimgui/cimplot](https://github.com/cimgui/cimplot) |
 | ImGuizmo  | 3D transform gizmos    | Complete  | [dear-imguizmo](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo) | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo) |
+| ImGuIZMO.quat | Quaternion + 3D gizmo | Proposed  | [dear-imguizmo-quat](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo-quat) | [cimgui/cimguizmo_quat](https://github.com/cimgui/cimguizmo_quat) |
 | ImNodes   | Node editor widgets    | Complete  | [dear-imnodes](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imnodes)   | [cimgui/cimnodes](https://github.com/cimgui/cimnodes)  |
 | File Browser | File dialogs + in-UI browser | Preview   | [dear-file-browser](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-file-browser) | Pure ImGui UI + rfd (native) |
 
@@ -38,6 +39,8 @@ Environment variables:
 - ImGuizmo: `IMGUIZMO_SYS_LIB_DIR`, `IMGUIZMO_SYS_PREBUILT_URL`, `IMGUIZMO_SYS_SKIP_CC`.
 
 - ImNodes: `IMNODES_SYS_LIB_DIR`, `IMNODES_SYS_PREBUILT_URL`, `IMNODES_SYS_SKIP_CC`.
+
+- ImGuIZMO.quat: `IMGUIZMO_QUAT_SYS_LIB_DIR`, `IMGUIZMO_QUAT_SYS_PREBUILT_URL`, `IMGUIZMO_QUAT_SYS_SKIP_CC`.
 
 Optional toggles:
 

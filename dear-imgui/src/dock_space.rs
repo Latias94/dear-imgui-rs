@@ -28,8 +28,8 @@
 //! });
 //! ```
 
-use crate::sys;
 use crate::Id;
+use crate::sys;
 use crate::ui::Ui;
 use std::ptr;
 
@@ -195,7 +195,10 @@ impl Ui {
     /// ```
     #[doc(alias = "DockSpaceOverViewport")]
     pub fn dockspace_over_main_viewport(&self) -> Id {
-        self.dockspace_over_main_viewport_with_flags(Id::from(0u32), DockNodeFlags::PASSTHRU_CENTRAL_NODE)
+        self.dockspace_over_main_viewport_with_flags(
+            Id::from(0u32),
+            DockNodeFlags::PASSTHRU_CENTRAL_NODE,
+        )
     }
 
     /// Creates a dockspace with the specified ID, size, and flags
@@ -243,7 +246,12 @@ impl Ui {
             } else {
                 ptr::null()
             };
-            Id::from(sys::igDockSpace(id.into(), size_vec, flags.bits(), window_class_ptr))
+            Id::from(sys::igDockSpace(
+                id.into(),
+                size_vec,
+                flags.bits(),
+                window_class_ptr,
+            ))
         }
     }
 
