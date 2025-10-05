@@ -145,43 +145,79 @@ impl AppWindow {
             .prepare_frame(&self.window, &mut self.imgui.context);
         let ui = self.imgui.context.frame();
 
-        // 1) Fullscreen DockSpace over main viewport
-        let dockspace_id = ui.dockspace_over_main_viewport();
+        // 1) Host a fullscreen window for the DockSpace (mirrors minimal C++ docking example)
+        use dear_imgui_rs::{
+            DockBuilder, DockNodeFlags, SplitDirection, StyleColor, StyleVar, WindowFlags, Id,
+        };
 
-        // 2) On first frame, create a simple left/right layout programmatically
-        if !self.first_layout_applied {
-            self.first_layout_applied = true;
-            // Remove any previous layout and make a split
-            dear_imgui_rs::DockBuilder::remove_node(dockspace_id);
-            // Recreate the root dock node before splitting; required after remove_node
-            dear_imgui_rs::DockBuilder::add_node(dockspace_id, dear_imgui_rs::DockNodeFlags::NONE);
-            let left_id = dear_imgui_rs::DockBuilder::split_node(
-                dockspace_id,
-                dear_imgui_rs::SplitDirection::Left,
-                0.25,
-                None,
-            );
-            let right_id = dockspace_id; // Remaining node
-            dear_imgui_rs::DockBuilder::dock_window("Properties", left_id);
-            dear_imgui_rs::DockBuilder::dock_window("Main View", right_id);
-            dear_imgui_rs::DockBuilder::finish(dockspace_id);
-        }
+        let viewport = ui.main_viewport();
+        // Ensure this window is associated with the main viewport (safe wrapper)
+        ui.set_next_window_viewport(viewport.id().into());
+        let pos = viewport.pos();
+        let size = viewport.size();
 
-        // 3) Build docked windows
-        ui.window("Main View")
-            .size([600.0, 400.0], Condition::FirstUseEver)
+        let mut window_flags = WindowFlags::MENU_BAR | WindowFlags::NO_DOCKING;
+        window_flags |= WindowFlags::NO_TITLE_BAR
+            | WindowFlags::NO_COLLAPSE
+            | WindowFlags::NO_RESIZE
+            | WindowFlags::NO_MOVE
+            | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS
+            | WindowFlags::NO_NAV_FOCUS;
+
+        // Zero rounding/border and remove padding for a clean host window
+        let rounding = ui.push_style_var(StyleVar::WindowRounding(0.0));
+        let border = ui.push_style_var(StyleVar::WindowBorderSize(0.0));
+        let padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
+
+        ui.window("DockSpace Demo")
+            .flags(window_flags)
+            .position(pos, Condition::Always)
+            .size(size, Condition::Always)
             .build(|| {
-                ui.text("This is the main view. Drag me to rearrange.");
-            });
+                // Pop padding/border/rounding to restore defaults
+                padding.pop();
+                border.pop();
+                rounding.pop();
 
-        ui.window("Properties")
-            .size([300.0, 400.0], Condition::FirstUseEver)
-            .build(|| {
-                ui.text("Basic Docking Example");
-                if ui.button("Reset Layout") {
-                    self.first_layout_applied = false; // apply again next frame
+                let dockspace_id = ui.get_id("MyDockspace");
+                // Configure DockBuilder only once (if node doesn't exist yet)
+                if !DockBuilder::node_exists(&ui, dockspace_id) {
+                    DockBuilder::remove_node(dockspace_id);
+                    DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
+                    DockBuilder::set_node_size(dockspace_id, size);
+
+                    let mut dock_main_id = dockspace_id;
+                    let (dock_id_left, new_main) =
+                        DockBuilder::split_node_pair(dock_main_id, SplitDirection::Left, 0.20);
+                    dock_main_id = new_main;
+
+                    let (dock_id_right, new_main) =
+                        DockBuilder::split_node_pair(dock_main_id, SplitDirection::Right, 0.20);
+                    dock_main_id = new_main;
+
+                    let (dock_id_bottom, new_main) =
+                        DockBuilder::split_node_pair(dock_main_id, SplitDirection::Down, 0.20);
+                    dock_main_id = new_main;
+
+                    DockBuilder::dock_window("James_1", dock_id_left);
+                    DockBuilder::dock_window("James_2", dock_main_id);
+                    DockBuilder::dock_window("James_3", dock_id_right);
+                    DockBuilder::dock_window("James_4", dock_id_bottom);
+                    DockBuilder::finish(dockspace_id);
                 }
             });
+
+        let dockspace_id = ui.get_id("MyDockspace");
+        // Render DockSpace with a red empty background for visibility
+        let color = ui.push_style_color(StyleColor::DockingEmptyBg, [1.0, 0.0, 0.0, 1.0]);
+        let _ = ui.dock_space(dockspace_id, [0.0, 0.0]);
+        color.pop();
+
+        // 2) Create docked windows
+        ui.window("James_1").build(|| ui.text("Text 1"));
+        ui.window("James_2").build(|| ui.text("Text 2"));
+        ui.window("James_3").build(|| ui.text("Text 3"));
+        ui.window("James_4").build(|| ui.text("Text 4"));
 
         // Clear and render
         if let Some(gl) = self.imgui.renderer.gl_context() {

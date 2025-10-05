@@ -18,7 +18,9 @@ use crate::internal::RawWrapper;
 use crate::string::UiBuffer;
 use crate::sys;
 use crate::texture::TextureRef;
+use crate::Id;
 use std::cell::UnsafeCell;
+use std::ffi::CString;
 
 /// Represents the Dear ImGui user interface for one frame
 #[derive(Debug)]
@@ -110,6 +112,25 @@ impl Ui {
                 end as *const std::os::raw::c_char,
             );
         }
+    }
+
+    /// Set the viewport for the next window.
+    ///
+    /// This is a convenience wrapper over `ImGui::SetNextWindowViewport`.
+    /// Useful when hosting a fullscreen DockSpace window inside the main viewport.
+    #[doc(alias = "SetNextWindowViewport")]
+    pub fn set_next_window_viewport(&self, viewport_id: Id) {
+        unsafe { sys::igSetNextWindowViewport(viewport_id.into()) }
+    }
+
+    /// Returns an ID from a string label in the current ID scope.
+    ///
+    /// This mirrors `ImGui::GetID(label)`. Useful for building stable IDs
+    /// for widgets or dockspaces inside the current window/scope.
+    #[doc(alias = "GetID")]
+    pub fn get_id(&self, label: &str) -> Id {
+        let c = CString::new(label).expect("label contained null byte");
+        unsafe { Id::from(sys::igGetID_Str(c.as_ptr())) }
     }
 
     /// Access to the current window's draw list

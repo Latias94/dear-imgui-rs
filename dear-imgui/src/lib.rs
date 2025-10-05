@@ -215,6 +215,36 @@
 // Re-export the sys crate for advanced users
 pub extern crate dear_imgui_sys as sys;
 
+/// Strongly-typed wrapper around ImGuiID.
+///
+/// This avoids leaking the `sys` type in safe APIs and improves clarity
+/// when passing/returning identifiers (e.g., dock ids, viewport ids).
+#[repr(transparent)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
+pub struct Id(pub(crate) sys::ImGuiID);
+
+impl Id {
+    /// Returns the raw ImGuiID value.
+    pub fn raw(self) -> sys::ImGuiID {
+        self.0
+    }
+}
+
+impl From<sys::ImGuiID> for Id {
+    fn from(v: sys::ImGuiID) -> Self {
+        Id(v)
+    }
+}
+
+impl From<Id> for sys::ImGuiID {
+    fn from(v: Id) -> Self {
+        v.0
+    }
+}
+
+// Note: do not add From<u32> or From<Id> for u32 here to avoid
+// overlapping/conflicting impls on platforms where ImGuiID == u32.
+
 /// Condition for setting window/widget properties
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(i32)]

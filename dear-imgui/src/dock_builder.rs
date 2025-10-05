@@ -30,8 +30,13 @@
 //! ```
 
 use crate::sys;
+use crate::Id;
+use crate::ui::Ui;
 use std::ffi::CString;
+use std::marker::PhantomData;
+use std::os::raw::c_void;
 use std::ptr;
+use std::slice;
 
 /// Direction for splitting dock nodes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,25 +65,144 @@ impl From<SplitDirection> for sys::ImGuiDir {
 /// DockBuilder API for programmatic dock layout creation
 pub struct DockBuilder;
 
-impl DockBuilder {
-    /// Gets a dock node by its ID
-    ///
-    /// # Parameters
-    ///
-    /// * `node_id` - The ID of the dock node to retrieve
-    ///
-    /// # Returns
-    ///
-    /// A pointer to the dock node, or null if not found
-    ///
-    /// # Safety
-    ///
-    /// The returned pointer is only valid until the next ImGui frame.
-    /// Do not store this pointer across frames.
-    #[doc(alias = "DockBuilderGetNode")]
-    pub fn get_node(node_id: sys::ImGuiID) -> *mut sys::ImGuiDockNode {
-        unsafe { sys::igDockBuilderGetNode(node_id) }
+/// Opaque reference to an ImGui dock node, valid for the duration of the current frame.
+///
+/// This wraps a raw `ImGuiDockNode*` and exposes a few read-only queries.
+/// Instances are created via `DockBuilder::node()` / `DockBuilder::central_node()`
+/// with a lifetime tied to a `Ui` reference.
+pub struct DockNode<'ui> {
+    raw: *mut sys::ImGuiDockNode,
+    _phantom: PhantomData<&'ui Ui>,
+}
+
+/// Rectangle in screen space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NodeRect {
+    pub min: [f32; 2],
+    pub max: [f32; 2],
+}
+
+impl<'ui> DockNode<'ui> {
+    /// Returns true if this node is the central node of its hierarchy
+    pub fn is_central(&self) -> bool {
+        unsafe { sys::ImGuiDockNode_IsCentralNode(self.raw) }
     }
+
+    /// Returns true if this node is a dock space
+    pub fn is_dock_space(&self) -> bool {
+        unsafe { sys::ImGuiDockNode_IsDockSpace(self.raw) }
+    }
+
+    /// Returns true if this node is empty (no windows)
+    pub fn is_empty(&self) -> bool {
+        unsafe { sys::ImGuiDockNode_IsEmpty(self.raw) }
+    }
+
+    /// Returns true if this node is a split node
+    pub fn is_split(&self) -> bool {
+        unsafe { sys::ImGuiDockNode_IsSplitNode(self.raw) }
+    }
+
+    /// Returns true if this node is the root of its dock tree
+    pub fn is_root(&self) -> bool {
+        unsafe { sys::ImGuiDockNode_IsRootNode(self.raw) }
+    }
+
+    /// Returns true if this node is a floating node
+    pub fn is_floating(&self) -> bool {
+        unsafe { sys::ImGuiDockNode_IsFloatingNode(self.raw) }
+    }
+
+    /// Returns true if this node has its tab bar hidden
+    pub fn is_hidden_tab_bar(&self) -> bool {
+        unsafe { sys::ImGuiDockNode_IsHiddenTabBar(self.raw) }
+    }
+
+    /// Returns true if this node has no tab bar
+    pub fn is_no_tab_bar(&self) -> bool {
+        unsafe { sys::ImGuiDockNode_IsNoTabBar(self.raw) }
+    }
+
+    /// Returns true if this node is a leaf node
+    pub fn is_leaf(&self) -> bool {
+        unsafe { sys::ImGuiDockNode_IsLeafNode(self.raw) }
+    }
+
+    /// Returns the depth of this node within the dock tree
+    pub fn depth(&self) -> i32 {
+        unsafe { sys::igDockNodeGetDepth(self.raw as *const sys::ImGuiDockNode) as i32 }
+    }
+
+    /// Returns the menu button ID for this node
+    pub fn window_menu_button_id(&self) -> sys::ImGuiID {
+        unsafe { sys::igDockNodeGetWindowMenuButtonId(self.raw as *const sys::ImGuiDockNode) }
+    }
+
+    /// Returns the root node of this dock tree
+    pub fn root<'a>(&self, _ui: &'a Ui) -> Option<DockNode<'a>> {
+        let ptr = unsafe { sys::igDockNodeGetRootNode(self.raw) };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(DockNode {
+                raw: ptr,
+                _phantom: PhantomData,
+            })
+        }
+    }
+
+    /// Returns true if `self` is in the hierarchy of `parent`
+    pub fn is_in_hierarchy_of(&self, parent: &DockNode<'_>) -> bool {
+        unsafe { sys::igDockNodeIsInHierarchyOf(self.raw, parent.raw) }
+    }
+
+    /// Returns the rectangle of this dock node in screen coordinates.
+    pub fn rect(&self) -> NodeRect {
+        let mut r = sys::ImRect {
+            Min: sys::ImVec2 { x: 0.0, y: 0.0 },
+            Max: sys::ImVec2 { x: 0.0, y: 0.0 },
+        };
+        unsafe { sys::ImGuiDockNode_Rect(&mut r as *mut _, self.raw) };
+        NodeRect {
+            min: [r.Min.x, r.Min.y],
+            max: [r.Max.x, r.Max.y],
+        }
+    }
+}
+
+impl DockBuilder {
+    /// Returns a reference to a dock node by ID, scoped to the current frame.
+    pub fn node<'ui>(_ui: &'ui Ui, node_id: Id) -> Option<DockNode<'ui>> {
+        let ptr = unsafe { sys::igDockBuilderGetNode(node_id.into()) };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(DockNode {
+                raw: ptr,
+                _phantom: PhantomData,
+            })
+        }
+    }
+
+    /// Returns the central node for a given dockspace ID, scoped to the current frame.
+    pub fn central_node<'ui>(_ui: &'ui Ui, dockspace_id: Id) -> Option<DockNode<'ui>> {
+        let ptr = unsafe { sys::igDockBuilderGetCentralNode(dockspace_id.into()) };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(DockNode {
+                raw: ptr,
+                _phantom: PhantomData,
+            })
+        }
+    }
+
+    /// Returns true if a dock node with the given ID exists this frame.
+    pub fn node_exists(ui: &Ui, node_id: Id) -> bool {
+        Self::node(ui, node_id).is_some()
+    }
+
+    // Removed raw-pointer getter in favor of lifetime-scoped accessors.
 
     /// Adds a new dock node
     ///
@@ -98,8 +222,8 @@ impl DockBuilder {
     /// let node_id = DockBuilder::add_node(0, DockNodeFlags::NO_RESIZE);
     /// ```
     #[doc(alias = "DockBuilderAddNode")]
-    pub fn add_node(node_id: sys::ImGuiID, flags: crate::DockNodeFlags) -> sys::ImGuiID {
-        unsafe { sys::igDockBuilderAddNode(node_id, flags.bits()) }
+    pub fn add_node(node_id: Id, flags: crate::DockNodeFlags) -> Id {
+        unsafe { Id::from(sys::igDockBuilderAddNode(node_id.into(), flags.bits())) }
     }
 
     /// Removes a dock node
@@ -115,8 +239,8 @@ impl DockBuilder {
     /// DockBuilder::remove_node(123);
     /// ```
     #[doc(alias = "DockBuilderRemoveNode")]
-    pub fn remove_node(node_id: sys::ImGuiID) {
-        unsafe { sys::igDockBuilderRemoveNode(node_id) }
+    pub fn remove_node(node_id: Id) {
+        unsafe { sys::igDockBuilderRemoveNode(node_id.into()) }
     }
 
     /// Removes all docked windows from a node
@@ -133,8 +257,8 @@ impl DockBuilder {
     /// DockBuilder::remove_node_docked_windows(123, true);
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeDockedWindows")]
-    pub fn remove_node_docked_windows(node_id: sys::ImGuiID, clear_settings_refs: bool) {
-        unsafe { sys::igDockBuilderRemoveNodeDockedWindows(node_id, clear_settings_refs) }
+    pub fn remove_node_docked_windows(node_id: Id, clear_settings_refs: bool) {
+        unsafe { sys::igDockBuilderRemoveNodeDockedWindows(node_id.into(), clear_settings_refs) }
     }
 
     /// Removes all child nodes from a dock node
@@ -150,8 +274,8 @@ impl DockBuilder {
     /// DockBuilder::remove_node_child_nodes(123);
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeChildNodes")]
-    pub fn remove_node_child_nodes(node_id: sys::ImGuiID) {
-        unsafe { sys::igDockBuilderRemoveNodeChildNodes(node_id) }
+    pub fn remove_node_child_nodes(node_id: Id) {
+        unsafe { sys::igDockBuilderRemoveNodeChildNodes(node_id.into()) }
     }
 
     /// Sets the position of a dock node
@@ -168,13 +292,13 @@ impl DockBuilder {
     /// DockBuilder::set_node_pos(123, [100.0, 50.0]);
     /// ```
     #[doc(alias = "DockBuilderSetNodePos")]
-    pub fn set_node_pos(node_id: sys::ImGuiID, pos: [f32; 2]) {
+    pub fn set_node_pos(node_id: Id, pos: [f32; 2]) {
         unsafe {
             let pos_vec = sys::ImVec2 {
                 x: pos[0],
                 y: pos[1],
             };
-            sys::igDockBuilderSetNodePos(node_id, pos_vec)
+            sys::igDockBuilderSetNodePos(node_id.into(), pos_vec)
         }
     }
 
@@ -192,13 +316,13 @@ impl DockBuilder {
     /// DockBuilder::set_node_size(123, [800.0, 600.0]);
     /// ```
     #[doc(alias = "DockBuilderSetNodeSize")]
-    pub fn set_node_size(node_id: sys::ImGuiID, size: [f32; 2]) {
+    pub fn set_node_size(node_id: Id, size: [f32; 2]) {
         unsafe {
             let size_vec = sys::ImVec2 {
                 x: size[0],
                 y: size[1],
             };
-            sys::igDockBuilderSetNodeSize(node_id, size_vec)
+            sys::igDockBuilderSetNodeSize(node_id.into(), size_vec)
         }
     }
 
@@ -224,24 +348,53 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderSplitNode")]
     pub fn split_node(
-        node_id: sys::ImGuiID,
+        node_id: Id,
         split_dir: SplitDirection,
         size_ratio_for_node_at_dir: f32,
-        out_id_at_dir: Option<&mut sys::ImGuiID>,
-    ) -> sys::ImGuiID {
+        out_id_at_dir: Option<&mut Id>,
+    ) -> Id {
         unsafe {
-            let out_ptr = if let Some(out) = out_id_at_dir {
-                out as *mut _
+            let mut tmp_out: sys::ImGuiID = 0;
+            let out_ptr: *mut sys::ImGuiID = if let Some(ref out) = out_id_at_dir {
+                tmp_out = (*out).raw();
+                &mut tmp_out
             } else {
                 ptr::null_mut()
             };
-            sys::igDockBuilderSplitNode(
-                node_id,
+            let ret = sys::igDockBuilderSplitNode(
+                node_id.into(),
                 split_dir.into(),
                 size_ratio_for_node_at_dir,
                 out_ptr,
                 ptr::null_mut(),
-            )
+            );
+            if let Some(out) = out_id_at_dir {
+                *out = Id::from(tmp_out);
+            }
+            Id::from(ret)
+        }
+    }
+
+    /// Splits a dock node and returns both resulting node IDs.
+    ///
+    /// Returns `(id_at_dir, id_at_opposite_dir)`.
+    #[doc(alias = "DockBuilderSplitNode")]
+    pub fn split_node_pair(
+        node_id: Id,
+        split_dir: SplitDirection,
+        size_ratio_for_node_at_dir: f32,
+    ) -> (Id, Id) {
+        unsafe {
+            let mut id_at_dir: sys::ImGuiID = 0;
+            let mut id_at_opposite: sys::ImGuiID = 0;
+            let _ = sys::igDockBuilderSplitNode(
+                node_id.into(),
+                split_dir.into(),
+                size_ratio_for_node_at_dir,
+                &mut id_at_dir,
+                &mut id_at_opposite,
+            );
+            (Id::from(id_at_dir), Id::from(id_at_opposite))
         }
     }
 
@@ -259,9 +412,98 @@ impl DockBuilder {
     /// DockBuilder::dock_window("My Tool", 123);
     /// ```
     #[doc(alias = "DockBuilderDockWindow")]
-    pub fn dock_window(window_name: &str, node_id: sys::ImGuiID) {
+    pub fn dock_window(window_name: &str, node_id: Id) {
         let c_name = CString::new(window_name).expect("Window name contained null byte");
-        unsafe { sys::igDockBuilderDockWindow(c_name.as_ptr(), node_id) }
+        unsafe { sys::igDockBuilderDockWindow(c_name.as_ptr(), node_id.into()) }
+    }
+
+    // Removed raw-pointer central-node getter in favor of lifetime-scoped accessor.
+
+    /// Copies a dockspace layout from `src_dockspace_id` to `dst_dockspace_id`.
+    ///
+    /// This variant does not provide window remap pairs and will copy windows by name.
+    /// For advanced remapping, prefer using the raw sys bindings.
+    #[doc(alias = "DockBuilderCopyDockSpace")]
+    pub fn copy_dock_space(src_dockspace_id: Id, dst_dockspace_id: Id) {
+        unsafe { sys::igDockBuilderCopyDockSpace(src_dockspace_id.into(), dst_dockspace_id.into(), std::ptr::null_mut()) }
+    }
+
+    /// Copies a single dock node from `src_node_id` to `dst_node_id`.
+    ///
+    /// This variant does not return node remap pairs. For detailed remap output,
+    /// use the raw sys bindings and provide an `ImVector_ImGuiID` buffer.
+    #[doc(alias = "DockBuilderCopyNode")]
+    pub fn copy_node(src_node_id: Id, dst_node_id: Id) {
+        unsafe { sys::igDockBuilderCopyNode(src_node_id.into(), dst_node_id.into(), std::ptr::null_mut()) }
+    }
+
+    /// Copies persistent window docking settings from `src_name` to `dst_name`.
+    #[doc(alias = "DockBuilderCopyWindowSettings")]
+    pub fn copy_window_settings(src_name: &str, dst_name: &str) {
+        let c_src = CString::new(src_name).expect("Source name contained null byte");
+        let c_dst = CString::new(dst_name).expect("Destination name contained null byte");
+        unsafe { sys::igDockBuilderCopyWindowSettings(c_src.as_ptr(), c_dst.as_ptr()) }
+    }
+
+    /// Copies a dockspace layout with explicit window name remapping.
+    ///
+    /// Provide pairs of (src_window_name, dst_window_name). The vector will be flattened
+    /// into `[src, dst, src, dst, ...]` as expected by ImGui.
+    #[doc(alias = "DockBuilderCopyDockSpace")]
+    pub fn copy_dock_space_with_window_remap(
+        src_dockspace_id: Id,
+        dst_dockspace_id: Id,
+        window_remaps: &[(&str, &str)],
+    ) {
+        // Build CStrings and a contiguous array of const char* pointers
+        let mut cstrings: Vec<CString> = Vec::with_capacity(window_remaps.len() * 2);
+        for (src, dst) in window_remaps {
+            cstrings.push(CString::new(*src).expect("Source window name contained null byte"));
+            cstrings.push(CString::new(*dst).expect("Destination window name contained null byte"));
+        }
+        let mut ptrs: Vec<*const i8> = cstrings.iter().map(|s| s.as_ptr()).collect();
+        let mut boxed: Box<[*const i8]> = ptrs.into_boxed_slice();
+        let mut vec_in = sys::ImVector_const_charPtr {
+            Size: boxed.len() as i32,
+            Capacity: boxed.len() as i32,
+            Data: boxed.as_mut_ptr(),
+        };
+        unsafe {
+            sys::igDockBuilderCopyDockSpace(src_dockspace_id.into(), dst_dockspace_id.into(), &mut vec_in);
+        }
+        // keep boxed + cstrings alive until after the call
+        drop(boxed);
+        drop(cstrings);
+    }
+
+    /// Copies a node and returns the node ID remap pairs as a vector
+    /// of `(old_id, new_id)` tuples.
+    #[doc(alias = "DockBuilderCopyNode")]
+    pub fn copy_node_with_remap_out(
+        src_node_id: Id,
+        dst_node_id: Id,
+    ) -> Vec<(Id, Id)> {
+        let mut out = sys::ImVector_ImGuiID::default();
+        unsafe {
+            sys::igDockBuilderCopyNode(src_node_id.into(), dst_node_id.into(), &mut out);
+        }
+        let mut result: Vec<(Id, Id)> = Vec::new();
+        unsafe {
+            if !out.Data.is_null() && out.Size > 0 {
+                let len = out.Size as usize;
+                let slice_ids = slice::from_raw_parts(out.Data, len);
+                // Interpret as pairs
+                for pair in slice_ids.chunks_exact(2) {
+                    result.push((Id::from(pair[0]), Id::from(pair[1])));
+                }
+                // Free the buffer allocated by ImGui (ImVector uses ImGui::MemAlloc)
+                sys::igMemFree(out.Data as *mut c_void);
+                out.Data = std::ptr::null_mut();
+                out.Size = 0;
+                out.Capacity = 0;
+            }
+        }
+        result
     }
 
     /// Finishes the dock builder operations
@@ -282,7 +524,7 @@ impl DockBuilder {
     /// DockBuilder::finish(dockspace_id);
     /// ```
     #[doc(alias = "DockBuilderFinish")]
-    pub fn finish(node_id: sys::ImGuiID) {
-        unsafe { sys::igDockBuilderFinish(node_id) }
+    pub fn finish(node_id: Id) {
+        unsafe { sys::igDockBuilderFinish(node_id.into()) }
     }
 }

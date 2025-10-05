@@ -29,6 +29,7 @@
 //! ```
 
 use crate::sys;
+use crate::Id;
 use crate::ui::Ui;
 use std::ptr;
 
@@ -162,16 +163,16 @@ impl Ui {
     #[doc(alias = "DockSpaceOverViewport")]
     pub fn dockspace_over_main_viewport_with_flags(
         &self,
-        dockspace_id: sys::ImGuiID,
+        dockspace_id: Id,
         flags: DockNodeFlags,
-    ) -> sys::ImGuiID {
+    ) -> Id {
         unsafe {
-            sys::igDockSpaceOverViewport(
-                dockspace_id,
+            Id::from(sys::igDockSpaceOverViewport(
+                dockspace_id.into(),
                 sys::igGetMainViewport(),
                 flags.bits(),
                 ptr::null(),
-            )
+            ))
         }
     }
 
@@ -193,8 +194,8 @@ impl Ui {
     /// let dockspace_id = ui.dockspace_over_main_viewport();
     /// ```
     #[doc(alias = "DockSpaceOverViewport")]
-    pub fn dockspace_over_main_viewport(&self) -> sys::ImGuiID {
-        self.dockspace_over_main_viewport_with_flags(0, DockNodeFlags::PASSTHRU_CENTRAL_NODE)
+    pub fn dockspace_over_main_viewport(&self) -> Id {
+        self.dockspace_over_main_viewport_with_flags(Id::from(0u32), DockNodeFlags::PASSTHRU_CENTRAL_NODE)
     }
 
     /// Creates a dockspace with the specified ID, size, and flags
@@ -226,11 +227,11 @@ impl Ui {
     #[doc(alias = "DockSpace")]
     pub fn dock_space_with_class(
         &self,
-        id: sys::ImGuiID,
+        id: Id,
         size: [f32; 2],
         flags: DockNodeFlags,
         window_class: Option<&WindowClass>,
-    ) -> sys::ImGuiID {
+    ) -> Id {
         unsafe {
             let size_vec = sys::ImVec2 {
                 x: size[0],
@@ -242,7 +243,7 @@ impl Ui {
             } else {
                 ptr::null()
             };
-            sys::igDockSpace(id, size_vec, flags.bits(), window_class_ptr)
+            Id::from(sys::igDockSpace(id.into(), size_vec, flags.bits(), window_class_ptr))
         }
     }
 
@@ -266,7 +267,7 @@ impl Ui {
     /// let dockspace_id = ui.dock_space(0, [800.0, 600.0]);
     /// ```
     #[doc(alias = "DockSpace")]
-    pub fn dock_space(&self, id: sys::ImGuiID, size: [f32; 2]) -> sys::ImGuiID {
+    pub fn dock_space(&self, id: Id, size: [f32; 2]) -> Id {
         self.dock_space_with_class(id, size, DockNodeFlags::NONE, None)
     }
 
@@ -292,9 +293,9 @@ impl Ui {
     /// });
     /// ```
     #[doc(alias = "SetNextWindowDockID")]
-    pub fn set_next_window_dock_id_with_cond(&self, dock_id: sys::ImGuiID, cond: crate::Condition) {
+    pub fn set_next_window_dock_id_with_cond(&self, dock_id: Id, cond: crate::Condition) {
         unsafe {
-            sys::igSetNextWindowDockID(dock_id, cond as i32);
+            sys::igSetNextWindowDockID(dock_id.into(), cond as i32);
         }
     }
 
@@ -320,7 +321,7 @@ impl Ui {
     /// });
     /// ```
     #[doc(alias = "SetNextWindowDockID")]
-    pub fn set_next_window_dock_id(&self, dock_id: sys::ImGuiID) {
+    pub fn set_next_window_dock_id(&self, dock_id: Id) {
         self.set_next_window_dock_id_with_cond(dock_id, crate::Condition::Always)
     }
 
@@ -374,8 +375,8 @@ impl Ui {
     /// });
     /// ```
     #[doc(alias = "GetWindowDockID")]
-    pub fn get_window_dock_id(&self) -> sys::ImGuiID {
-        unsafe { sys::igGetWindowDockID() }
+    pub fn get_window_dock_id(&self) -> Id {
+        unsafe { Id::from(sys::igGetWindowDockID()) }
     }
 
     /// Checks if the current window is docked

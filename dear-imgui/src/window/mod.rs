@@ -98,6 +98,11 @@ bitflags! {
         const NO_NAV_FOCUS = sys::ImGuiWindowFlags_NoNavFocus as i32;
         /// Display a dot next to the title. When used in a tab/docking context, tab is selected when clicking the X + closure is not assumed (will wait for user to stop submitting the tab). Otherwise closure is assumed when pressing the X, so if you keep submitting the tab may reappear at end of tab bar.
         const UNSAVED_DOCUMENT = sys::ImGuiWindowFlags_UnsavedDocument as i32;
+        // Docking related flags
+        /// Disable docking for this window (the window will not be able to dock into another and others won't be able to dock into it)
+        const NO_DOCKING = sys::ImGuiWindowFlags_NoDocking as i32;
+        /// Indicate this window is a dock node host. Generally set by imgui internally when hosting a DockSpace.
+        const DOCK_NODE_HOST = sys::ImGuiWindowFlags_DockNodeHost as i32;
         /// Disable gamepad/keyboard navigation and focusing
         const NO_NAV = Self::NO_NAV_INPUTS.bits() | Self::NO_NAV_FOCUS.bits();
         /// Disable all window decorations
