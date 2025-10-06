@@ -44,12 +44,14 @@ fn main() {
         };
         let plot_ui = plot_ctx.get_plot_ui(ui);
 
-        ui.window("ImPlot3D Demo")
+        ui.window("ImPlot3D Demo (Rust)")
             .size([600.0, 750.0], Condition::FirstUseEver)
             .position([100.0, 100.0], Condition::FirstUseEver)
             .build(|| {
                 ui.text(format!("ImPlot3D says olá! (0.3 WIP)"));
                 ui.spacing();
+                // Tools toggles similar to upstream demo
+                demo_tools(ui);
 
                 if let Some(tab_bar) = ui.tab_bar("ImPlot3DDemoTabs") {
                     // Plots Tab
@@ -61,6 +63,7 @@ fn main() {
                         demo_header(ui, "Surface Plots", || demo_surface_plots(ui, &plot_ui));
                         demo_header(ui, "Mesh Plots", || demo_mesh_plots(ui, &plot_ui));
                         demo_header(ui, "Realtime Plots", || demo_realtime_plots(ui, &plot_ui));
+                        demo_header(ui, "Image Plots", || demo_image_plots(ui, &plot_ui));
                         demo_header(ui, "Markers and Text", || {
                             demo_markers_and_text(ui, &plot_ui)
                         });
@@ -93,13 +96,23 @@ fn main() {
                     drop(tab_bar);
                 }
             });
+
+        // Also show the official upstream C++ ImPlot3D demo window for side-by-side comparison
+        // (uses its own window title "ImPlot3D Demo")
+        implot3d::show_demo_window();
     })
     .unwrap();
 }
 
 // Helper function to create collapsible demo sections
 fn demo_header<F: FnOnce()>(ui: &Ui, label: &str, demo: F) {
-    if ui.collapsing_header(label, TreeNodeFlags::NONE) {
+    if let Some(_node) = ui
+        .tree_node_config(label)
+        .framed(true)
+        .span_avail_width(true)
+        .frame_padding(true)
+        .push()
+    {
         demo();
     }
 }
@@ -226,9 +239,13 @@ fn demo_triangle_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     }
 
     let mut flags = FLAGS.with(|f| f.get());
-    ui.checkbox_flags("NoLines", &mut flags, Triangle3DFlags::NO_LINES);
-    ui.checkbox_flags("NoFill", &mut flags, Triangle3DFlags::NO_FILL);
-    ui.checkbox_flags("NoMarkers", &mut flags, Triangle3DFlags::NO_MARKERS);
+    ui.checkbox_flags("NoLines##Triangles", &mut flags, Triangle3DFlags::NO_LINES);
+    ui.checkbox_flags("NoFill##Triangles", &mut flags, Triangle3DFlags::NO_FILL);
+    ui.checkbox_flags(
+        "NoMarkers##Triangles",
+        &mut flags,
+        Triangle3DFlags::NO_MARKERS,
+    );
     FLAGS.with(|f| f.set(flags));
 
     if let Some(_tok) = plot_ui.begin_plot("Triangle Plots").build() {
@@ -303,9 +320,9 @@ fn demo_quad_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     }
 
     let mut flags = FLAGS.with(|f| f.get());
-    ui.checkbox_flags("NoLines", &mut flags, Quad3DFlags::NO_LINES);
-    ui.checkbox_flags("NoFill", &mut flags, Quad3DFlags::NO_FILL);
-    ui.checkbox_flags("NoMarkers", &mut flags, Quad3DFlags::NO_MARKERS);
+    ui.checkbox_flags("NoLines##Quads", &mut flags, Quad3DFlags::NO_LINES);
+    ui.checkbox_flags("NoFill##Quads", &mut flags, Quad3DFlags::NO_FILL);
+    ui.checkbox_flags("NoMarkers##Quads", &mut flags, Quad3DFlags::NO_MARKERS);
     FLAGS.with(|f| f.set(flags));
 
     if let Some(_tok) = plot_ui.begin_plot("Quad Plots").build() {
@@ -445,9 +462,9 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 
     // Select flags
     let mut flags = FLAGS.with(|f| f.get());
-    ui.checkbox_flags("NoLines", &mut flags, Surface3DFlags::NO_LINES);
-    ui.checkbox_flags("NoFill", &mut flags, Surface3DFlags::NO_FILL);
-    ui.checkbox_flags("NoMarkers", &mut flags, Surface3DFlags::NO_MARKERS);
+    ui.checkbox_flags("NoLines##Surface", &mut flags, Surface3DFlags::NO_LINES);
+    ui.checkbox_flags("NoFill##Surface", &mut flags, Surface3DFlags::NO_FILL);
+    ui.checkbox_flags("NoMarkers##Surface", &mut flags, Surface3DFlags::NO_MARKERS);
     FLAGS.with(|f| f.set(flags));
 
     // Begin the plot
@@ -518,37 +535,73 @@ fn demo_mesh_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     ];
     let indices: [u32; 12] = [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3];
 
-    // Mesh flags
+    // Mesh flags & colors
     thread_local! {
         static FLAGS: Cell<Mesh3DFlags> = Cell::new(Mesh3DFlags::NONE);
+        static LINE_COLOR: Cell<[f32;4]> = Cell::new([0.5, 0.5, 0.2, 0.6]);
+        static FILL_COLOR: Cell<[f32;4]> = Cell::new([0.8, 0.8, 0.2, 0.6]);
+        static MARKER_COLOR: Cell<[f32;4]> = Cell::new([0.5, 0.5, 0.2, 0.6]);
+        static MESH_ID: Cell<i32> = Cell::new(0); // 0=Tetrahedron, 1=Cube
     }
 
+    // Mesh selector
+    let mut mesh_id = MESH_ID.with(|m| m.get());
+    let items = ["Tetrahedron", "Cube"];
+    let preview = items[mesh_id as usize];
+    if let Some(_combo) = ui.begin_combo("Mesh##Mesh", preview) {
+        for (i, name) in items.iter().enumerate() {
+            if ui.selectable(name) {
+                mesh_id = i as i32;
+            }
+        }
+    }
+    MESH_ID.with(|m| m.set(mesh_id));
+
     let mut flags = FLAGS.with(|f| f.get());
-    ui.checkbox_flags("NoLines", &mut flags, Mesh3DFlags::NO_LINES);
-    ui.checkbox_flags("NoFill", &mut flags, Mesh3DFlags::NO_FILL);
-    ui.checkbox_flags("NoMarkers", &mut flags, Mesh3DFlags::NO_MARKERS);
+    ui.checkbox_flags("NoLines##Mesh", &mut flags, Mesh3DFlags::NO_LINES);
+    ui.checkbox_flags("NoFill##Mesh", &mut flags, Mesh3DFlags::NO_FILL);
+    ui.checkbox_flags("NoMarkers##Mesh", &mut flags, Mesh3DFlags::NO_MARKERS);
     FLAGS.with(|f| f.set(flags));
+
+    let mut line_color = LINE_COLOR.with(|c| c.get());
+    let mut fill_color = FILL_COLOR.with(|c| c.get());
+    let mut marker_color = MARKER_COLOR.with(|c| c.get());
+    ui.color_edit4_config("Line Color##Mesh", &mut line_color)
+        .build();
+    ui.color_edit4_config("Fill Color##Mesh", &mut fill_color)
+        .build();
+    ui.color_edit4_config("Marker Color##Mesh", &mut marker_color)
+        .build();
+    LINE_COLOR.with(|c| c.set(line_color));
+    FILL_COLOR.with(|c| c.set(fill_color));
+    MARKER_COLOR.with(|c| c.set(marker_color));
 
     if let Some(_tok) = plot_ui.begin_plot("Mesh Plots").build() {
         plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Once);
-        set_next_fill_style([0.8, 0.8, 0.2, 0.6], 1.0);
-        set_next_line_style([0.5, 0.5, 0.2, 0.6], 1.0);
-        let marker_col = [0.5, 0.5, 0.2, 0.6];
-        set_next_marker_style(Marker3D::Square, 3.0, marker_col, -1.0, marker_col);
-        Mesh3D::new("Tetrahedron", &vertices, &indices)
-            .flags(flags)
-            .plot(plot_ui);
+        set_next_fill_style(fill_color, 1.0);
+        set_next_line_style(line_color, 1.0);
+        set_next_marker_style(Marker3D::Square, 3.0, marker_color, -1.0, marker_color);
+        if mesh_id == 0 {
+            Mesh3D::new("Tetrahedron", &vertices, &indices)
+                .flags(flags)
+                .plot(plot_ui);
+        } else {
+            use implot3d::meshes::{CUBE_INDICES, CUBE_VERTICES};
+            Mesh3D::new("Cube", CUBE_VERTICES, CUBE_INDICES)
+                .flags(flags)
+                .plot(plot_ui);
+        }
     }
 }
 
-// ScrollingBuffer helper for realtime plots
-struct ScrollingBuffer {
+// Scrolling buffers (1D) for realtime demo
+struct ScrollingBuffer1D {
     max_size: usize,
     offset: usize,
-    data: Vec<[f32; 2]>,
+    data: Vec<f32>,
 }
 
-impl ScrollingBuffer {
+impl ScrollingBuffer1D {
     fn new(max_size: usize) -> Self {
         Self {
             max_size,
@@ -556,99 +609,88 @@ impl ScrollingBuffer {
             data: Vec::new(),
         }
     }
-
-    fn add_point(&mut self, x: f32, y: f32) {
+    fn add(&mut self, v: f32) {
         if self.data.len() < self.max_size {
-            self.data.push([x, y]);
+            self.data.push(v);
         } else {
-            self.data[self.offset] = [x, y];
+            self.data[self.offset] = v;
             self.offset = (self.offset + 1) % self.max_size;
         }
     }
-
-    fn erase(&mut self) {
-        if !self.data.is_empty() {
-            self.data.clear();
-            self.offset = 0;
-        }
-    }
-
-    fn get_data(&self) -> (Vec<f32>, Vec<f32>) {
-        let mut xs = Vec::with_capacity(self.data.len());
-        let mut ys = Vec::with_capacity(self.data.len());
-
-        for i in 0..self.data.len() {
-            let idx = (self.offset + i) % self.data.len();
-            xs.push(self.data[idx][0]);
-            ys.push(self.data[idx][1]);
-        }
-
-        (xs, ys)
+    fn clear(&mut self) {
+        self.data.clear();
+        self.offset = 0;
     }
 }
 
 fn demo_realtime_plots(ui: &Ui, plot_ui: &Plot3DUi) {
+    ui.bullet_text("Move your mouse to change the data!");
+
     thread_local! {
         static T: Cell<f32> = Cell::new(0.0);
-        static HISTORY: Cell<f32> = Cell::new(10.0);
-        static SDATA1: RefCell<ScrollingBuffer> = RefCell::new(ScrollingBuffer::new(1000));
-        static SDATA2: RefCell<ScrollingBuffer> = RefCell::new(ScrollingBuffer::new(1000));
-        static SDATA3: RefCell<ScrollingBuffer> = RefCell::new(ScrollingBuffer::new(1000));
-    }
-
-    let t = T.with(|t| {
-        let val = t.get() + ui.io().delta_time();
-        t.set(val);
-        val
-    });
-
-    SDATA1.with(|s| s.borrow_mut().add_point(t, (2.0 * t).sin()));
-    SDATA2.with(|s| s.borrow_mut().add_point(t, (2.0 * t).cos()));
-    SDATA3.with(|s| {
-        s.borrow_mut()
-            .add_point(t, (2.0 * t + PI / 2.0).sin() * (2.0 * t + PI / 2.0).cos())
-    });
-
-    let mut history = HISTORY.with(|h| h.get());
-    ui.slider_config("History", 1.0, 30.0).build(&mut history);
-    HISTORY.with(|h| h.set(history));
-
-    ui.same_line();
-    if ui.button("Reset") {
-        SDATA1.with(|s| s.borrow_mut().erase());
-        SDATA2.with(|s| s.borrow_mut().erase());
-        SDATA3.with(|s| s.borrow_mut().erase());
-        T.with(|t| t.set(0.0));
+        static LAST_T: Cell<f32> = Cell::new(-1.0);
+        static XS: RefCell<ScrollingBuffer1D> = RefCell::new(ScrollingBuffer1D::new(2000));
+        static YS: RefCell<ScrollingBuffer1D> = RefCell::new(ScrollingBuffer1D::new(2000));
+        static ZS: RefCell<ScrollingBuffer1D> = RefCell::new(ScrollingBuffer1D::new(2000));
     }
 
     if let Some(_tok) = plot_ui
-        .begin_plot("Realtime Plots")
+        .begin_plot("Scrolling Plot")
         .size([-1.0, 400.0])
         .build()
     {
-        plot_ui.setup_axes_limits(
-            (t - history) as f64,
-            t as f64,
-            -1.0,
-            1.0,
-            -1.0,
-            1.0,
-            Plot3DCond::Always,
-        );
+        let t = T.with(|tc| {
+            let v = tc.get() + ui.io().delta_time();
+            tc.set(v);
+            v
+        });
 
-        let (xs1, ys1) = SDATA1.with(|s| s.borrow().get_data());
-        let (xs2, ys2) = SDATA2.with(|s| s.borrow().get_data());
-        let (xs3, zs3) = SDATA3.with(|s| s.borrow().get_data());
+        // Set up axes BEFORE any plot-utils or plot items
+        let flags = Axis3DFlags::NO_TICK_LABELS;
+        plot_ui.setup_axes("Time", "Mouse X", "Mouse Y", flags, flags, flags);
+        plot_ui.setup_axis_limits(Axis3D::X, (t - 10.0) as f64, t as f64, Plot3DCond::Always);
+        plot_ui.setup_axis_limits(Axis3D::Y, -400.0, 400.0, Plot3DCond::Once);
+        plot_ui.setup_axis_limits(Axis3D::Z, -400.0, 400.0, Plot3DCond::Once);
 
-        if !xs1.is_empty() {
-            Line3D::f32("sin(2t)", &xs1, &ys1, &vec![0.0; xs1.len()]).plot(plot_ui);
+        // Now sample/fill buffers and use plot utils
+        let last_t = LAST_T.with(|lt| lt.get());
+        if t - last_t > 0.01 {
+            LAST_T.with(|lt| lt.set(t));
+            let mouse = ui.io().mouse_pos();
+            if mouse[0].abs() < 1.0e4 && mouse[1].abs() < 1.0e4 {
+                let pos = plot_ui.get_frame_pos();
+                let sz = plot_ui.get_frame_size();
+                let center = [pos[0] + sz[0] / 2.0, pos[1] + sz[1] / 2.0];
+                XS.with(|b| b.borrow_mut().add(t));
+                YS.with(|b| b.borrow_mut().add(mouse[0] - center[0]));
+                ZS.with(|b| b.borrow_mut().add(mouse[1] - center[1]));
+            }
         }
-        if !xs2.is_empty() {
-            Line3D::f32("cos(2t)", &xs2, &vec![0.0; xs2.len()], &ys2).plot(plot_ui);
-        }
-        if !xs3.is_empty() {
-            Line3D::f32("sin*cos", &xs3, &vec![0.0; xs3.len()], &zs3).plot(plot_ui);
-        }
+
+        // Plot line using raw ring-buffer data
+        XS.with(|xs| {
+            let xs = xs.borrow();
+            YS.with(|ys| {
+                let ys = ys.borrow();
+                ZS.with(|zs| {
+                    let zs = zs.borrow();
+                    if !xs.data.is_empty()
+                        && xs.data.len() == ys.data.len()
+                        && ys.data.len() == zs.data.len()
+                    {
+                        plot_ui.plot_line_f32_raw(
+                            "Mouse",
+                            &xs.data,
+                            &ys.data,
+                            &zs.data,
+                            Line3DFlags::NONE,
+                            xs.offset as i32,
+                            0,
+                        );
+                    }
+                });
+            });
+        });
     }
 }
 
@@ -736,113 +778,317 @@ fn demo_box_rotation(ui: &Ui, plot_ui: &Plot3DUi) {
     }
 }
 
-fn demo_tick_labels(_ui: &Ui, plot_ui: &Plot3DUi) {
-    let xs = [0.0f64, 1.0, 2.0];
-    let ys = [0.0f64, 1.0, 2.0];
-    let zs = [0.0f64, 1.0, 2.0];
+fn demo_tick_labels(ui: &Ui, plot_ui: &Plot3DUi) {
+    thread_local! {
+        static CUSTOM_TICKS: Cell<bool> = Cell::new(true);
+        static CUSTOM_LABELS: Cell<bool> = Cell::new(true);
+    }
+    let mut custom_ticks = CUSTOM_TICKS.with(|c| c.get());
+    let mut custom_labels = CUSTOM_LABELS.with(|c| c.get());
+    ui.checkbox("Show Custom Ticks", &mut custom_ticks);
+    if custom_ticks {
+        ui.same_line();
+        ui.checkbox("Show Custom Labels", &mut custom_labels);
+    }
+    CUSTOM_TICKS.with(|c| c.set(custom_ticks));
+    CUSTOM_LABELS.with(|c| c.set(custom_labels));
 
-    if let Some(_tok) = plot_ui.begin_plot("Tick Labels").build() {
-        plot_ui.setup_axes_limits(-0.5, 2.5, -0.5, 2.5, -0.5, 2.5, Plot3DCond::Once);
-
-        // Custom tick labels
-        let x_labels = ["Low", "Mid", "High"];
-        let y_labels = ["A", "B", "C"];
-        let z_labels = ["Min", "Med", "Max"];
-
-        plot_ui.setup_axis_ticks_values(Axis3D::X, &xs, Some(&x_labels), false);
-        plot_ui.setup_axis_ticks_values(Axis3D::Y, &ys, Some(&y_labels), false);
-        plot_ui.setup_axis_ticks_values(Axis3D::Z, &zs, Some(&z_labels), false);
-
-        let xs_f32 = [0.0f32, 1.0, 2.0];
-        let ys_f32 = [0.0f32, 1.0, 2.0];
-        let zs_f32 = [0.0f32, 1.0, 2.0];
-        Scatter3D::f32("Points", &xs_f32, &ys_f32, &zs_f32).plot(plot_ui);
+    if let Some(_tok) = plot_ui.begin_plot("##Ticks").build() {
+        plot_ui.setup_axes_limits(2.0, 5.0, 0.0, 1.0, 0.0, 1.0, Plot3DCond::Once);
+        if custom_ticks {
+            let pi = 3.14f64;
+            let letters_ticks = [0.0f64, 0.2, 0.4, 0.6, 0.8, 1.0];
+            let pi_lbl = ["PI"];
+            let letters_lbl = ["A", "B", "C", "D", "E", "F"];
+            plot_ui.setup_axis_ticks_values(
+                Axis3D::X,
+                &[pi],
+                if custom_labels { Some(&pi_lbl) } else { None },
+                true,
+            );
+            plot_ui.setup_axis_ticks_values(
+                Axis3D::Y,
+                &letters_ticks,
+                if custom_labels {
+                    Some(&letters_lbl)
+                } else {
+                    None
+                },
+                false,
+            );
+            plot_ui.setup_axis_ticks_range(
+                Axis3D::Z,
+                0.0,
+                1.0,
+                6,
+                if custom_labels {
+                    Some(&letters_lbl)
+                } else {
+                    None
+                },
+                false,
+            );
+        }
     }
 }
 
 fn demo_axis_constraints(ui: &Ui, plot_ui: &Plot3DUi) {
     thread_local! {
-        static ENABLE_LIMITS: Cell<bool> = Cell::new(false);
-        static ENABLE_ZOOM: Cell<bool> = Cell::new(false);
+        static LIMITS: Cell<[f32;2]> = Cell::new([-10.0, 10.0]);
+        static ZOOMS: Cell<[f32;2]> = Cell::new([1.0, 20.0]);
+        static FLAGS: Cell<Axis3DFlags> = Cell::new(Axis3DFlags::empty());
     }
 
-    let mut enable_limits = ENABLE_LIMITS.with(|e| e.get());
-    let mut enable_zoom = ENABLE_ZOOM.with(|e| e.get());
+    let mut limits = LIMITS.with(|c| c.get());
+    let mut zooms = ZOOMS.with(|c| c.get());
+    let mut axis_flags = FLAGS.with(|f| f.get());
+    ui.drag_float2("Limits Constraints", &mut limits);
+    ui.drag_float2("Zoom Constraints", &mut zooms);
+    ui.checkbox_flags("PanStretch", &mut axis_flags, Axis3DFlags::PAN_STRETCH);
+    LIMITS.with(|c| c.set(limits));
+    ZOOMS.with(|c| c.set(zooms));
+    FLAGS.with(|f| f.set(axis_flags));
 
-    ui.checkbox("Enable Limits Constraints", &mut enable_limits);
-    ui.checkbox("Enable Zoom Constraints", &mut enable_zoom);
-
-    ENABLE_LIMITS.with(|e| e.set(enable_limits));
-    ENABLE_ZOOM.with(|e| e.set(enable_zoom));
-
-    let xs = [0.0f32, 1.0, 2.0];
-    let ys = [0.0f32, 1.0, 2.0];
-    let zs = [0.0f32, 1.0, 2.0];
-
-    if let Some(_tok) = plot_ui.begin_plot("Axis Constraints").build() {
-        plot_ui.setup_axes_limits(-1.0, 3.0, -1.0, 3.0, -1.0, 3.0, Plot3DCond::Once);
-
-        if enable_limits {
-            plot_ui.setup_axis_limits_constraints(Axis3D::X, -0.5, 2.5);
-            plot_ui.setup_axis_limits_constraints(Axis3D::Y, -0.5, 2.5);
-            plot_ui.setup_axis_limits_constraints(Axis3D::Z, -0.5, 2.5);
-        }
-
-        if enable_zoom {
-            plot_ui.setup_axis_zoom_constraints(Axis3D::X, 0.5, 5.0);
-            plot_ui.setup_axis_zoom_constraints(Axis3D::Y, 0.5, 5.0);
-            plot_ui.setup_axis_zoom_constraints(Axis3D::Z, 0.5, 5.0);
-        }
-
-        Scatter3D::f32("Points", &xs, &ys, &zs).plot(plot_ui);
+    if let Some(_tok) = plot_ui.begin_plot("##AxisConstraints").build() {
+        plot_ui.setup_axes("X", "Y", "Z", axis_flags, axis_flags, axis_flags);
+        plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Once);
+        plot_ui.setup_axis_limits_constraints(Axis3D::X, limits[0] as f64, limits[1] as f64);
+        plot_ui.setup_axis_limits_constraints(Axis3D::Y, limits[0] as f64, limits[1] as f64);
+        plot_ui.setup_axis_limits_constraints(Axis3D::Z, limits[0] as f64, limits[1] as f64);
+        plot_ui.setup_axis_zoom_constraints(Axis3D::X, zooms[0] as f64, zooms[1] as f64);
+        plot_ui.setup_axis_zoom_constraints(Axis3D::Y, zooms[0] as f64, zooms[1] as f64);
+        plot_ui.setup_axis_zoom_constraints(Axis3D::Z, zooms[0] as f64, zooms[1] as f64);
     }
 }
 
-fn demo_markers_and_text(_ui: &Ui, plot_ui: &Plot3DUi) {
-    let xs = [0.0f32, 1.0, 2.0, 3.0];
-    let ys = [0.0f32, 1.0, 2.0, 3.0];
-    let zs = [0.0f32, 1.0, 2.0, 3.0];
+fn demo_image_plots(ui: &Ui, plot_ui: &Plot3DUi) {
+    use dear_imgui_rs::texture::TextureRef as ImgTextureRef;
 
-    if let Some(_tok) = plot_ui.begin_plot("Markers & Text").build() {
-        plot_ui.setup_axes_limits(-0.5, 3.5, -0.5, 3.5, -0.5, 3.5, Plot3DCond::Once);
+    // Use the font atlas texture (always available) like the official demo
+    let tex_ref_opt: Option<ImgTextureRef> = unsafe {
+        let io = dear_imgui_rs::sys::igGetIO_Nil();
+        if io.is_null() {
+            None
+        } else {
+            let atlas = (*io).Fonts;
+            if atlas.is_null() {
+                None
+            } else {
+                let raw = (*atlas).TexRef; // ImTextureRef from font atlas
+                Some(ImgTextureRef::from_raw(raw))
+            }
+        }
+    };
+    if tex_ref_opt.is_none() {
+        ui.text("Font atlas texture not ready yet.");
+        return;
+    }
+    let tex = tex_ref_opt.unwrap();
 
-        // Different marker styles
+    // Controls/info
+    ui.bullet_text("Using font atlas texture for demo");
+    ui.bullet_text("Use Image3D with center+axes or corner points");
+
+    // Parameters
+    thread_local! {
+        static CENTER1: Cell<[f32;3]> = Cell::new([0.0, 0.0, 1.0]);
+        static AXIS_U1: Cell<[f32;3]> = Cell::new([1.0, 0.0, 0.0]);
+        static AXIS_V1: Cell<[f32;3]> = Cell::new([0.0, 1.0, 0.0]);
+        static UV0_1: Cell<[f32;2]> = Cell::new([0.0, 0.0]);
+        static UV1_1: Cell<[f32;2]> = Cell::new([1.0, 1.0]);
+        static TINT1: Cell<[f32;4]> = Cell::new([1.0, 1.0, 1.0, 1.0]);
+
+        static P0: Cell<[f32;3]> = Cell::new([-1.0, -1.0, 0.0]);
+        static P1: Cell<[f32;3]> = Cell::new([ 1.0, -1.0, 0.0]);
+        static P2: Cell<[f32;3]> = Cell::new([ 1.0,  1.0, 0.0]);
+        static P3: Cell<[f32;3]> = Cell::new([-1.0,  1.0, 0.0]);
+        static UV0: Cell<[f32;2]> = Cell::new([0.0, 0.0]);
+        static UV1: Cell<[f32;2]> = Cell::new([1.0, 0.0]);
+        static UV2: Cell<[f32;2]> = Cell::new([1.0, 1.0]);
+        static UV3: Cell<[f32;2]> = Cell::new([0.0, 1.0]);
+        static TINT2: Cell<[f32;4]> = Cell::new([1.0, 1.0, 1.0, 1.0]);
+    }
+
+    // Plot
+    if let Some(_tok) = plot_ui
+        .begin_plot("Image Plot")
+        .flags(Plot3DFlags::NO_CLIP)
+        .build()
+    {
+        let center1 = CENTER1.with(|c| c.get());
+        let axis_u1 = AXIS_U1.with(|c| c.get());
+        let axis_v1 = AXIS_V1.with(|c| c.get());
+        let uv0_1 = UV0_1.with(|c| c.get());
+        let uv1_1 = UV1_1.with(|c| c.get());
+        let tint1 = TINT1.with(|c| c.get());
+        plot_ui
+            .image_by_axes("Image 1", tex, center1, axis_u1, axis_v1)
+            .uv(uv0_1, uv1_1)
+            .tint(tint1)
+            .plot();
+
+        let p0 = P0.with(|c| c.get());
+        let p1 = P1.with(|c| c.get());
+        let p2 = P2.with(|c| c.get());
+        let p3 = P3.with(|c| c.get());
+        let uv0 = UV0.with(|c| c.get());
+        let uv1 = UV1.with(|c| c.get());
+        let uv2 = UV2.with(|c| c.get());
+        let uv3 = UV3.with(|c| c.get());
+        let tint2 = TINT2.with(|c| c.get());
+        plot_ui
+            .image_by_corners("Image 2", tex, p0, p1, p2, p3)
+            .uvs(uv0, uv1, uv2, uv3)
+            .tint(tint2)
+            .plot();
+    }
+}
+
+fn demo_markers_and_text(ui: &Ui, plot_ui: &Plot3DUi) {
+    // Marker size/weight controls
+    thread_local! {
+        static MK_SIZE: Cell<f32> = Cell::new(6.0);
+        static MK_WEIGHT: Cell<f32> = Cell::new(1.5);
+    }
+    let mut mk_size = MK_SIZE.with(|c| c.get());
+    let mut mk_weight = MK_WEIGHT.with(|c| c.get());
+    ui.drag_float("Marker Size", &mut mk_size);
+    ui.drag_float("Marker Weight", &mut mk_weight);
+    MK_SIZE.with(|c| c.set(mk_size));
+    MK_WEIGHT.with(|c| c.set(mk_weight));
+
+    if let Some(_tok) = plot_ui
+        .begin_plot("##MarkerStyles")
+        .flags(Plot3DFlags::CANVAS_ONLY)
+        .build()
+    {
+        plot_ui.setup_axes(
+            "",
+            "",
+            "",
+            Axis3DFlags::NO_DECORATIONS,
+            Axis3DFlags::NO_DECORATIONS,
+            Axis3DFlags::NO_DECORATIONS,
+        );
+        plot_ui.setup_axes_limits(-0.5, 1.5, -0.5, 1.5, 0.0, 12.0, Plot3DCond::Once);
+
+        // Prepare two points; marker is drawn at both
+        let mut xs = [0.0f32, 0.0];
+        let mut ys = [0.0f32, 0.0];
+        let mut zs = [0.0f32, 0.0];
+
         let markers = [
             Marker3D::Circle,
             Marker3D::Square,
             Marker3D::Diamond,
             Marker3D::Up,
+            Marker3D::Down,
+            Marker3D::Left,
+            Marker3D::Right,
+            Marker3D::Cross,
+            Marker3D::Plus,
+            Marker3D::Asterisk,
         ];
 
-        for (i, &marker) in markers.iter().enumerate() {
-            let col = get_colormap_color(i as i32);
-            set_next_marker_style(marker, 8.0, col, 2.0, col);
-            Scatter3D::f32(&format!("Marker {}", i), &[xs[i]], &[ys[i]], &[zs[i]]).plot(plot_ui);
-
-            // Add text label
-            plot_ui.plot_text(&format!("P{}", i), xs[i], ys[i], zs[i], 0.0, [10.0, 10.0]);
+        // Filled markers column at x=0
+        zs[0] = markers.len() as f32;
+        zs[1] = zs[0] + 1.0;
+        for (i, &m) in markers.iter().enumerate() {
+            xs[0] = 0.0;
+            ys[0] = 0.0;
+            xs[1] = xs[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
+            ys[1] = ys[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
+            set_next_marker_style(
+                m,
+                mk_size,
+                get_colormap_color(0),
+                mk_weight,
+                get_colormap_color(0),
+            );
+            Line3D::f32(&format!("##Filled_{}", i), &xs, &ys, &zs).plot(plot_ui);
+            zs[0] -= 1.0;
+            zs[1] -= 1.0;
         }
+
+        // Open markers column at x=1
+        zs[0] = markers.len() as f32;
+        zs[1] = zs[0] + 1.0;
+        xs[0] = 1.0;
+        ys[0] = 1.0;
+        for (i, &m) in markers.iter().enumerate() {
+            xs[1] = xs[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
+            ys[1] = ys[0] - (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
+            set_next_marker_style(
+                m,
+                mk_size,
+                [0.0, 0.0, 0.0, 0.0],
+                mk_weight,
+                get_colormap_color(0),
+            );
+            Line3D::f32(&format!("##Open_{}", i), &xs, &ys, &zs).plot(plot_ui);
+            zs[0] -= 1.0;
+            zs[1] -= 1.0;
+        }
+
+        // Labels
+        plot_ui.plot_text(
+            "Filled Markers",
+            0.0,
+            0.0,
+            markers.len() as f32 + 2.0,
+            0.0,
+            [0.0, 0.0],
+        );
+        plot_ui.plot_text(
+            "Open Markers",
+            1.0,
+            1.0,
+            markers.len() as f32 + 2.0,
+            0.0,
+            [0.0, 0.0],
+        );
+        plot_ui.plot_text(
+            "Rotated Text",
+            0.5,
+            0.5,
+            6.0,
+            std::f32::consts::PI / 4.0,
+            [0.0, 0.0],
+        );
     }
 }
 
-fn demo_nan_values(_ui: &Ui, plot_ui: &Plot3DUi) {
-    let xs = [0.0f32, 1.0, 2.0, f32::NAN, 4.0, 5.0];
-    let ys = [0.0f32, 1.0, f32::NAN, 3.0, 4.0, 5.0];
-    let zs = [0.0f32, f32::NAN, 2.0, 3.0, 4.0, 5.0];
+fn demo_nan_values(ui: &Ui, plot_ui: &Plot3DUi) {
+    thread_local! {
+        static INCLUDE_NAN: Cell<bool> = Cell::new(true);
+        static FLAGS: Cell<Line3DFlags> = Cell::new(Line3DFlags::empty());
+    }
+    let mut include_nan = INCLUDE_NAN.with(|c| c.get());
+    let mut flags = FLAGS.with(|f| f.get());
+    ui.checkbox("Include NaN", &mut include_nan);
+    ui.same_line();
+    ui.checkbox_flags("Skip NaN", &mut flags, Line3DFlags::SKIP_NAN);
+    INCLUDE_NAN.with(|c| c.set(include_nan));
+    FLAGS.with(|f| f.set(flags));
 
-    if let Some(_tok) = plot_ui.begin_plot("NaN Values").build() {
-        plot_ui.setup_axes_limits(-0.5, 5.5, -0.5, 5.5, -0.5, 5.5, Plot3DCond::Once);
+    let mut xs = [0.0f32, 0.25, 0.5, 0.75, 1.0];
+    let mut ys = [0.0f32, 0.25, 0.5, 0.75, 1.0];
+    let mut zs = [0.0f32, 0.25, 0.5, 0.75, 1.0];
+    if include_nan {
+        xs[2] = f32::NAN;
+    }
 
-        // NaN values are automatically skipped
-        Line3D::f32("Line with NaN", &xs, &ys, &zs).plot(plot_ui);
+    if let Some(_tok) = plot_ui.begin_plot("##NaNValues").build() {
         set_next_marker_style(
-            Marker3D::Circle,
+            Marker3D::Square,
             6.0,
-            [1.0, 0.0, 0.0, 1.0],
+            get_colormap_color(0),
             -1.0,
-            [1.0, 0.0, 0.0, 1.0],
+            get_colormap_color(0),
         );
-        Scatter3D::f32("Scatter with NaN", &xs, &ys, &zs).plot(plot_ui);
+        Line3D::f32("Line", &xs, &ys, &zs)
+            .flags(flags)
+            .plot(plot_ui);
     }
 }
 
@@ -992,4 +1238,63 @@ fn demo_help(ui: &Ui) {
     ui.bullet_text("Type-safe f32/f64 support");
     ui.bullet_text("RAII-based resource management");
     ui.bullet_text("Integration with dear-imgui-rs ecosystem");
+}
+// Tools toggles and auxiliary windows (metrics, style editors, demos)
+fn demo_tools(ui: &Ui) {
+    thread_local! {
+        static SHOW_IP3D_METRICS: Cell<bool> = Cell::new(false);
+        static SHOW_IP3D_STYLE: Cell<bool> = Cell::new(false);
+        static SHOW_IMGUI_METRICS: Cell<bool> = Cell::new(false);
+        static SHOW_IMGUI_STYLE: Cell<bool> = Cell::new(false);
+        static SHOW_IMGUI_DEMO: Cell<bool> = Cell::new(false);
+    }
+
+    let mut ip3d_metrics = SHOW_IP3D_METRICS.with(|c| c.get());
+    let mut ip3d_style = SHOW_IP3D_STYLE.with(|c| c.get());
+    let mut imgui_metrics = SHOW_IMGUI_METRICS.with(|c| c.get());
+    let mut imgui_style = SHOW_IMGUI_STYLE.with(|c| c.get());
+    let mut imgui_demo = SHOW_IMGUI_DEMO.with(|c| c.get());
+
+    ui.checkbox("ImPlot3D Metrics", &mut ip3d_metrics);
+    ui.same_line();
+    ui.checkbox("ImPlot3D Style Editor", &mut ip3d_style);
+    ui.same_line();
+    ui.checkbox("ImGui Demo", &mut imgui_demo);
+    ui.same_line();
+    ui.checkbox("ImGui Metrics", &mut imgui_metrics);
+    ui.same_line();
+    ui.checkbox("ImGui Style Editor", &mut imgui_style);
+
+    SHOW_IP3D_METRICS.with(|c| c.set(ip3d_metrics));
+    SHOW_IP3D_STYLE.with(|c| c.set(ip3d_style));
+    SHOW_IMGUI_METRICS.with(|c| c.set(imgui_metrics));
+    SHOW_IMGUI_STYLE.with(|c| c.set(imgui_style));
+    SHOW_IMGUI_DEMO.with(|c| c.set(imgui_demo));
+
+    if ip3d_metrics {
+        implot3d::show_metrics_window();
+    }
+    if ip3d_style {
+        ui.window("Style Editor (ImPlot3D)").build(|| {
+            implot3d::show_style_editor();
+        });
+    }
+    if imgui_metrics {
+        let mut opened = true;
+        ui.show_metrics_window(&mut opened);
+        if !opened {
+            SHOW_IMGUI_METRICS.with(|c| c.set(false));
+        }
+    }
+    if imgui_style {
+        ui.window("Style Editor (ImGui)")
+            .build(|| ui.show_default_style_editor());
+    }
+    if imgui_demo {
+        let mut opened = true;
+        ui.show_demo_window(&mut opened);
+        if !opened {
+            SHOW_IMGUI_DEMO.with(|c| c.set(false));
+        }
+    }
 }

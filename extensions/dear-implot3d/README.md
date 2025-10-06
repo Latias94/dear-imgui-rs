@@ -1,9 +1,32 @@
 # dear-implot3d
 
+[![Crates.io](https://img.shields.io/crates/v/dear-implot3d.svg)](https://crates.io/crates/dear-implot3d)
+[![Documentation](https://docs.rs/dear-implot3d/badge.svg)](https://docs.rs/dear-implot3d)
+
 High-level Rust bindings for ImPlot3D, integrating with `dear-imgui-rs`.
 
 This crate sits on top of `dear-implot3d-sys` (FFI to `cimplot3d`) and mirrors
 the ergonomics of `dear-implot`.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/implot3d-basic.png" alt="ImPlot3D" width="75%"/>
+  <br/>
+</p>
+
+## Links
+
+- Upstream: https://github.com/brenocq/implot3d
+- C API: https://github.com/cimgui/cimplot3d
+
+## Compatibility
+
+| Item               | Version |
+|--------------------|---------|
+| Crate              | 0.3.x   |
+| dear-imgui-rs      | 0.3.x   |
+| dear-implot3d-sys  | 0.3.x   |
+
+See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
 ## Features
 

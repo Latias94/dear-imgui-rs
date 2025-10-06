@@ -9,6 +9,11 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
   <br/>
 </p>
 
+## Links
+
+- Upstream: https://github.com/epezent/implot
+- C API: https://github.com/cimgui/cimplot
+
 ## Compatibility
 
 | Item              | Version |

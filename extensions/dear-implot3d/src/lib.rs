@@ -52,6 +52,73 @@ pub use ui_ext::*;
 pub mod meshes;
 pub mod plots;
 
+// Debug-only: enforce BeginPlot/Setup/Plot call ordering
+#[cfg(debug_assertions)]
+thread_local! {
+    static DEBUG_PLOT_STATE: PlotDebugState = PlotDebugState { in_plot: std::cell::Cell::new(false), setup_locked: std::cell::Cell::new(false) };
+}
+
+#[cfg(debug_assertions)]
+struct PlotDebugState {
+    in_plot: std::cell::Cell<bool>,
+    setup_locked: std::cell::Cell<bool>,
+}
+
+#[cfg(debug_assertions)]
+#[inline]
+fn debug_begin_plot() {
+    DEBUG_PLOT_STATE.with(|s| {
+        s.in_plot.set(true);
+        s.setup_locked.set(false);
+    });
+}
+
+#[cfg(debug_assertions)]
+#[inline]
+fn debug_end_plot() {
+    DEBUG_PLOT_STATE.with(|s| {
+        s.in_plot.set(false);
+        s.setup_locked.set(false);
+    });
+}
+
+#[cfg(debug_assertions)]
+#[inline]
+fn debug_before_setup() {
+    DEBUG_PLOT_STATE.with(|s| {
+        debug_assert!(
+            s.in_plot.get(),
+            "Setup* called outside of BeginPlot/EndPlot"
+        );
+        debug_assert!(
+            !s.setup_locked.get(),
+            "Setup* must be called before any plotting (PlotX) or locking operations"
+        );
+    });
+}
+
+#[cfg(debug_assertions)]
+#[inline]
+fn debug_before_plot() {
+    DEBUG_PLOT_STATE.with(|s| {
+        debug_assert!(s.in_plot.get(), "Plot* called outside of BeginPlot/EndPlot");
+        s.setup_locked.set(true);
+    });
+}
+
+#[cfg(not(debug_assertions))]
+#[inline]
+fn debug_begin_plot() {}
+#[cfg(not(debug_assertions))]
+#[inline]
+fn debug_end_plot() {}
+#[cfg(not(debug_assertions))]
+#[inline]
+fn debug_before_setup() {}
+#[cfg(not(debug_assertions))]
+#[inline]
+fn debug_before_plot() {}
+
 /// Show upstream ImPlot3D demos (from C++ demo)
 ///
 /// This displays all available ImPlot3D demos in a single window.
@@ -262,6 +329,7 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = std::mem::size_of::<f32>() as i32;
         unsafe {
             sys::ImPlot3D_PlotLine_FloatPtr(
                 label_c.as_ptr(),
@@ -271,7 +339,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 0,
-                0,
+                stride_bytes,
             );
         }
     }
@@ -294,6 +362,11 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f32>() as i32
+        } else {
+            stride
+        };
         unsafe {
             sys::ImPlot3D_PlotLine_FloatPtr(
                 label_c.as_ptr(),
@@ -303,7 +376,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 offset,
-                stride,
+                stride_bytes,
             );
         }
     }
@@ -324,6 +397,7 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = std::mem::size_of::<f64>() as i32;
         unsafe {
             sys::ImPlot3D_PlotLine_doublePtr(
                 label_c.as_ptr(),
@@ -333,7 +407,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 0,
-                0,
+                stride_bytes,
             );
         }
     }
@@ -356,6 +430,11 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f64>() as i32
+        } else {
+            stride
+        };
         unsafe {
             sys::ImPlot3D_PlotLine_doublePtr(
                 label_c.as_ptr(),
@@ -365,7 +444,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 offset,
-                stride,
+                stride_bytes,
             );
         }
     }
@@ -386,6 +465,7 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = std::mem::size_of::<f32>() as i32;
         unsafe {
             sys::ImPlot3D_PlotScatter_FloatPtr(
                 label_c.as_ptr(),
@@ -395,7 +475,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 0,
-                0,
+                stride_bytes,
             );
         }
     }
@@ -418,6 +498,11 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f32>() as i32
+        } else {
+            stride
+        };
         unsafe {
             sys::ImPlot3D_PlotScatter_FloatPtr(
                 label_c.as_ptr(),
@@ -427,7 +512,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 offset,
-                stride,
+                stride_bytes,
             );
         }
     }
@@ -448,6 +533,7 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = std::mem::size_of::<f64>() as i32;
         unsafe {
             sys::ImPlot3D_PlotScatter_doublePtr(
                 label_c.as_ptr(),
@@ -457,7 +543,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 0,
-                0,
+                stride_bytes,
             );
         }
     }
@@ -480,6 +566,11 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f64>() as i32
+        } else {
+            stride
+        };
         unsafe {
             sys::ImPlot3D_PlotScatter_doublePtr(
                 label_c.as_ptr(),
@@ -489,7 +580,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 offset,
-                stride,
+                stride_bytes,
             );
         }
     }
@@ -510,6 +601,7 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = std::mem::size_of::<f32>() as i32;
         unsafe {
             sys::ImPlot3D_PlotTriangle_FloatPtr(
                 label_c.as_ptr(),
@@ -519,7 +611,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 0,
-                0,
+                stride_bytes,
             );
         }
     }
@@ -541,6 +633,11 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f32>() as i32
+        } else {
+            stride
+        };
         unsafe {
             sys::ImPlot3D_PlotTriangle_FloatPtr(
                 label_c.as_ptr(),
@@ -550,7 +647,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 offset,
-                stride,
+                stride_bytes,
             );
         }
     }
@@ -571,6 +668,7 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = std::mem::size_of::<f32>() as i32;
         unsafe {
             sys::ImPlot3D_PlotQuad_FloatPtr(
                 label_c.as_ptr(),
@@ -580,7 +678,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 0,
-                0,
+                stride_bytes,
             );
         }
     }
@@ -602,6 +700,11 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f32>() as i32
+        } else {
+            stride
+        };
         unsafe {
             sys::ImPlot3D_PlotQuad_FloatPtr(
                 label_c.as_ptr(),
@@ -611,7 +714,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 offset,
-                stride,
+                stride_bytes,
             );
         }
     }
@@ -632,6 +735,7 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = std::mem::size_of::<f64>() as i32;
         unsafe {
             sys::ImPlot3D_PlotTriangle_doublePtr(
                 label_c.as_ptr(),
@@ -641,7 +745,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 0,
-                0,
+                stride_bytes,
             );
         }
     }
@@ -663,6 +767,11 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f64>() as i32
+        } else {
+            stride
+        };
         unsafe {
             sys::ImPlot3D_PlotTriangle_doublePtr(
                 label_c.as_ptr(),
@@ -672,7 +781,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 offset,
-                stride,
+                stride_bytes,
             );
         }
     }
@@ -693,6 +802,7 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = std::mem::size_of::<f64>() as i32;
         unsafe {
             sys::ImPlot3D_PlotQuad_doublePtr(
                 label_c.as_ptr(),
@@ -702,7 +812,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 0,
-                0,
+                stride_bytes,
             );
         }
     }
@@ -724,6 +834,11 @@ impl<'ui> Plot3DUi<'ui> {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f64>() as i32
+        } else {
+            stride
+        };
         unsafe {
             sys::ImPlot3D_PlotQuad_doublePtr(
                 label_c.as_ptr(),
@@ -733,7 +848,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.len() as i32,
                 flags.bits() as i32,
                 offset,
-                stride,
+                stride_bytes,
             );
         }
     }
@@ -742,6 +857,7 @@ impl<'ui> Plot3DUi<'ui> {
 impl Drop for Plot3DToken {
     fn drop(&mut self) {
         unsafe {
+            debug_end_plot();
             sys::ImPlot3D_EndPlot();
         }
     }
@@ -786,7 +902,12 @@ impl Plot3DBuilder {
                 self.flags.bits() as i32,
             )
         };
-        if ok { Some(Plot3DToken) } else { None }
+        if ok {
+            debug_begin_plot();
+            Some(Plot3DToken)
+        } else {
+            None
+        }
     }
 }
 
@@ -956,17 +1077,94 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
-        let x_count = xs.len() as i32;
-        let y_count = ys.len() as i32;
+        debug_before_plot();
+        let x_count = xs.len();
+        let y_count = ys.len();
+        let expected = match x_count.checked_mul(y_count) {
+            Some(v) => v,
+            None => return,
+        };
+        if zs.len() != expected {
+            // Invalid grid: require zs to be x_count * y_count
+            return;
+        }
+
+        // Flatten xs/ys to per-vertex arrays expected by the C++ API (length = x_count * y_count)
+        let mut xs_flat = Vec::with_capacity(expected);
+        let mut ys_flat = Vec::with_capacity(expected);
+        for yi in 0..y_count {
+            for xi in 0..x_count {
+                xs_flat.push(xs[xi]);
+                ys_flat.push(ys[yi]);
+            }
+        }
+
         let label_c = match std::ffi::CString::new(label.as_ref()) {
             Ok(s) => s,
             Err(_) => return,
         };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f32>() as i32
+        } else {
+            stride
+        };
         unsafe {
             sys::ImPlot3D_PlotSurface_FloatPtr(
                 label_c.as_ptr(),
-                xs.as_ptr(),
-                ys.as_ptr(),
+                xs_flat.as_ptr(),
+                ys_flat.as_ptr(),
+                zs.as_ptr(),
+                x_count as i32,
+                y_count as i32,
+                scale_min,
+                scale_max,
+                flags.bits() as i32,
+                offset,
+                stride_bytes,
+            );
+        }
+    }
+
+    /// Plot a surface with already flattened per-vertex X/Y arrays (no internal allocation)
+    ///
+    /// Use this when you already have per-vertex `xs_flat` and `ys_flat` of length `x_count * y_count`,
+    /// matching the layout of `zs`. This avoids per-frame allocations for large dynamic grids.
+    pub fn surface_f32_flat<S: AsRef<str>>(
+        &self,
+        label: S,
+        xs_flat: &[f32],
+        ys_flat: &[f32],
+        zs: &[f32],
+        x_count: i32,
+        y_count: i32,
+        scale_min: f64,
+        scale_max: f64,
+        flags: Surface3DFlags,
+        offset: i32,
+        stride: i32,
+    ) {
+        debug_before_plot();
+        if x_count <= 0 || y_count <= 0 {
+            return;
+        }
+        let expected = (x_count as usize).saturating_mul(y_count as usize);
+        if xs_flat.len() != expected || ys_flat.len() != expected || zs.len() != expected {
+            return;
+        }
+        let label_c = match std::ffi::CString::new(label.as_ref()) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let stride_bytes = if stride == 0 {
+            std::mem::size_of::<f32>() as i32
+        } else {
+            stride
+        };
+        unsafe {
+            sys::ImPlot3D_PlotSurface_FloatPtr(
+                label_c.as_ptr(),
+                xs_flat.as_ptr(),
+                ys_flat.as_ptr(),
                 zs.as_ptr(),
                 x_count,
                 y_count,
@@ -974,7 +1172,7 @@ impl<'ui> Plot3DUi<'ui> {
                 scale_max,
                 flags.bits() as i32,
                 offset,
-                stride,
+                stride_bytes,
             );
         }
     }
@@ -1010,6 +1208,7 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
     }
     pub fn plot(self) {
         unsafe {
+            debug_before_plot();
             sys::ImPlot3D_PlotImage_Vec2(
                 self.label.as_ptr(),
                 self.tex_ref,
@@ -1083,6 +1282,7 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
     }
     pub fn plot(self) {
         unsafe {
+            debug_before_plot();
             sys::ImPlot3D_PlotImage_Plot3DPoInt(
                 self.label.as_ptr(),
                 self.tex_ref,
@@ -1151,6 +1351,7 @@ impl<'ui> Plot3DUi<'ui> {
             _TexData: tr._TexData as *mut sys::ImTextureData,
             _TexID: tr._TexID as sys::ImTextureID,
         };
+        debug_before_plot();
         Image3DByAxesBuilder {
             _ui: self,
             label: label_c,
@@ -1182,6 +1383,7 @@ impl<'ui> Plot3DUi<'ui> {
             _TexData: tr._TexData as *mut sys::ImTextureData,
             _TexID: tr._TexID as sys::ImTextureID,
         };
+        debug_before_plot();
         Image3DByCornersBuilder {
             _ui: self,
             label: label_c,
@@ -1211,6 +1413,7 @@ impl<'ui> Plot3DUi<'ui> {
         y_flags: Axis3DFlags,
         z_flags: Axis3DFlags,
     ) {
+        debug_before_setup();
         let cx = std::ffi::CString::new(x_label).unwrap_or_default();
         let cy = std::ffi::CString::new(y_label).unwrap_or_default();
         let cz = std::ffi::CString::new(z_label).unwrap_or_default();
@@ -1227,11 +1430,13 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn setup_axis(&self, axis: Axis3D, label: &str, flags: Axis3DFlags) {
+        debug_before_setup();
         let c = std::ffi::CString::new(label).unwrap_or_default();
         unsafe { sys::ImPlot3D_SetupAxis(axis as i32, c.as_ptr(), flags.bits() as i32) }
     }
 
     pub fn setup_axis_limits(&self, axis: Axis3D, min: f64, max: f64, cond: Plot3DCond) {
+        debug_before_setup();
         unsafe { sys::ImPlot3D_SetupAxisLimits(axis as i32, min, max, cond as i32) }
     }
 
@@ -1245,16 +1450,19 @@ impl<'ui> Plot3DUi<'ui> {
         z_max: f64,
         cond: Plot3DCond,
     ) {
+        debug_before_setup();
         unsafe {
             sys::ImPlot3D_SetupAxesLimits(x_min, x_max, y_min, y_max, z_min, z_max, cond as i32)
         }
     }
 
     pub fn setup_axis_limits_constraints(&self, axis: Axis3D, v_min: f64, v_max: f64) {
+        debug_before_setup();
         unsafe { sys::ImPlot3D_SetupAxisLimitsConstraints(axis as i32, v_min, v_max) }
     }
 
     pub fn setup_axis_zoom_constraints(&self, axis: Axis3D, z_min: f64, z_max: f64) {
+        debug_before_setup();
         unsafe { sys::ImPlot3D_SetupAxisZoomConstraints(axis as i32, z_min, z_max) }
     }
 
@@ -1265,6 +1473,7 @@ impl<'ui> Plot3DUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        debug_before_setup();
         let n_ticks = values.len() as i32;
         let labels_ptr = if let Some(lbls) = labels {
             let c_labels: Vec<std::ffi::CString> = lbls
@@ -1296,6 +1505,7 @@ impl<'ui> Plot3DUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        debug_before_setup();
         let labels_ptr = if let Some(lbls) = labels {
             let c_labels: Vec<std::ffi::CString> = lbls
                 .iter()
@@ -1319,6 +1529,7 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn setup_box_scale(&self, x: f32, y: f32, z: f32) {
+        debug_before_setup();
         unsafe { sys::ImPlot3D_SetupBoxScale(x, y, z) }
     }
 
@@ -1329,16 +1540,19 @@ impl<'ui> Plot3DUi<'ui> {
         animate: bool,
         cond: Plot3DCond,
     ) {
+        debug_before_setup();
         unsafe { sys::ImPlot3D_SetupBoxRotation_Float(elevation, azimuth, animate, cond as i32) }
     }
 
     pub fn setup_box_initial_rotation(&self, elevation: f32, azimuth: f32) {
+        debug_before_setup();
         unsafe { sys::ImPlot3D_SetupBoxInitialRotation_Float(elevation, azimuth) }
     }
 
     pub fn plot_text(&self, text: &str, x: f32, y: f32, z: f32, angle: f32, pix_offset: [f32; 2]) {
         let c_text = std::ffi::CString::new(text).unwrap_or_default();
         unsafe {
+            debug_before_plot();
             sys::ImPlot3D_PlotText(
                 c_text.as_ptr(),
                 x,
@@ -1407,6 +1621,7 @@ impl<'ui> Mesh3DBuilder<'ui> {
         let vtx_count = self.vertices.len() as i32;
         let idx_count = self.indices.len() as i32;
         unsafe {
+            debug_before_plot();
             let vtx_ptr = self.vertices.as_ptr() as *const sys::ImPlot3DPoint;
             sys::ImPlot3D_PlotMesh(
                 self.label.as_ptr(),
