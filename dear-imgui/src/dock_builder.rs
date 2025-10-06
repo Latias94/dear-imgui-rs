@@ -469,7 +469,7 @@ impl DockBuilder {
             cstrings.push(CString::new(*src).expect("Source window name contained null byte"));
             cstrings.push(CString::new(*dst).expect("Destination window name contained null byte"));
         }
-        let mut ptrs: Vec<*const i8> = cstrings.iter().map(|s| s.as_ptr()).collect();
+        let ptrs: Vec<*const i8> = cstrings.iter().map(|s| s.as_ptr()).collect();
         let mut boxed: Box<[*const i8]> = ptrs.into_boxed_slice();
         let mut vec_in = sys::ImVector_const_charPtr {
             Size: boxed.len() as i32,
