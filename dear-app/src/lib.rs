@@ -19,7 +19,7 @@
 //! }
 //! ```
 use dear_imgui_rs as imgui;
-use dear_imgui_rs::{ConfigFlags, DockFlags, WindowFlags};
+use dear_imgui_rs::{ConfigFlags, DockFlags, Id, WindowFlags};
 use dear_imgui_wgpu as imgui_wgpu;
 use dear_imgui_winit as imgui_winit;
 use pollster::block_on;
@@ -594,10 +594,11 @@ impl AppWindow {
             .prepare_frame(&self.window, &mut self.imgui.context);
         let ui = self.imgui.context.frame();
 
-        // Optional fullscreen dockspace (compat with crates.io 0.3 APIs)
+        // Optional fullscreen dockspace
         if docking.enable && docking.auto_dockspace {
             let viewport = ui.main_viewport();
             // Host window always covering the main viewport
+            ui.set_next_window_viewport(Id::from(viewport.id()));
             let pos = viewport.pos();
             let size = viewport.size();
             // NO_BACKGROUND if passthru central node
@@ -612,8 +613,7 @@ impl AppWindow {
                 .size([size[0], size[1]], imgui::Condition::Always)
                 .build(|| {
                     let ds_flags = DockFlags::from_bits_retain(current_flags.bits());
-                    // Older dear-imgui-rs 0.3 expects a raw dockspace id (u32)
-                    let _ = ui.dockspace_over_main_viewport_with_flags(0, ds_flags);
+                    let _ = ui.dockspace_over_main_viewport_with_flags(Id::from(0u32), ds_flags);
                 });
         }
 

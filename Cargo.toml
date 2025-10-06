@@ -1,8 +1,27 @@
 [workspace]
 resolver = "2"
-# Temporarily narrow workspace to only dear-app for publishing.
 members = [
+    "dear-imgui-sys",
+    "dear-imgui",
+    "backends/dear-imgui-winit",
+    "backends/dear-imgui-wgpu",
+    "backends/dear-imgui-glow",
     "dear-app",
+    "extensions/dear-file-browser",
+    "extensions/dear-implot-sys",
+    "extensions/dear-implot",
+    "extensions/dear-implot3d-sys",
+    "extensions/dear-implot3d",
+    "extensions/dear-imguizmo-sys",
+    "extensions/dear-imguizmo",
+    "extensions/dear-imguizmo-quat-sys",
+    "extensions/dear-imguizmo-quat",
+    "extensions/dear-imnodes-sys",
+    "extensions/dear-imnodes",
+    "examples",
+    "examples-wasm",
+    "xtask",
+    "tools/build-support",
 ]
 
 exclude = [
@@ -66,5 +85,3 @@ flate2 = "1"
 tar = "0.4"
 bytemuck = "1.0"
 memoffset = "0.9"
-
-# Ensure local workspace crates are used everywhere, avoiding crates.io
