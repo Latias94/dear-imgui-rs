@@ -156,8 +156,9 @@ pub enum Axis3D {
 /// Condition for setup calls (match ImGuiCond)
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::unnecessary_cast)] // Cast is necessary on some platforms where bindgen generates u32
 pub enum Plot3DCond {
-    None = sys::ImPlot3DCond_None,
-    Always = sys::ImPlot3DCond_Always,
-    Once = sys::ImPlot3DCond_Once,
+    None = sys::ImPlot3DCond_None as i32,
+    Always = sys::ImPlot3DCond_Always as i32,
+    Once = sys::ImPlot3DCond_Once as i32,
 }
