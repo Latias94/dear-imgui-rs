@@ -1,5 +1,8 @@
 # dear-imnodes
 
+[![Crates.io](https://img.shields.io/crates/v/dear-imnodes.svg)](https://crates.io/crates/dear-imnodes)
+[![Documentation](https://docs.rs/dear-imnodes/badge.svg)](https://docs.rs/dear-imnodes)
+
 Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes) via the [cimnodes](https://github.com/cimgui/cimnodes) C API, aligned with our dear-imgui workspace and BEST_PRACTICES.
 
 - Ui extension: `ui.imnodes(&ctx)` returns a `NodesUi` for the current frame
@@ -12,6 +15,11 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
   <img src="https://github.com/user-attachments/assets/b1c56b58-7254-41f6-a97b-e97eac147a1e" alt="ImNodes" width="75%"/>
   <br/>
 </p>
+
+## Links
+
+- Upstream: https://github.com/Nelarius/imnodes
+- C API: https://github.com/cimgui/cimnodes
 
 ## Compatibility
 

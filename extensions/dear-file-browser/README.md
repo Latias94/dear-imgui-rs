@@ -1,11 +1,26 @@
 # dear-file-browser
 
+[![Crates.io](https://img.shields.io/crates/v/dear-file-browser.svg)](https://crates.io/crates/dear-file-browser)
+[![Documentation](https://docs.rs/dear-file-browser/badge.svg)](https://docs.rs/dear-file-browser)
+
 File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 - Native (`rfd`): OS dialogs on desktop, Web File Picker on WASM
 - ImGui UI: a pure Dear ImGui file browser/widget (configurable layout + UX)
 
 ![ImGui File Browser](https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/file_browser_imgui.png)
+
+## Links
+
+- Native backend: https://github.com/PolyMeilex/rfd
+- In-UI: Pure Dear ImGui implementation (no C API)
+
+## Compatibility
+
+| Item          | Version |
+|---------------|---------|
+| Crate         | 0.3.x   |
+| dear-imgui-rs | 0.3.x   |
 
 ## Features
 

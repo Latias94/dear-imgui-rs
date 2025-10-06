@@ -1,5 +1,8 @@
 # Dear ImGuizmo - Rust Bindings
 
+[![Crates.io](https://img.shields.io/crates/v/dear-imguizmo.svg)](https://crates.io/crates/dear-imguizmo)
+[![Documentation](https://docs.rs/dear-imguizmo/badge.svg)](https://docs.rs/dear-imguizmo)
+
 High-level Rust bindings for [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo), built on the C API ([cimguizmo](https://github.com/cimgui/cimguizmo)) and integrated with `dear-imgui-rs`.
 
 This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ binding.

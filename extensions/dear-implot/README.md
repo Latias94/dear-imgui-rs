@@ -1,5 +1,8 @@
 # Dear ImPlot - Rust Bindings
 
+[![Crates.io](https://img.shields.io/crates/v/dear-implot.svg)](https://crates.io/crates/dear-implot)
+[![Documentation](https://docs.rs/dear-implot/badge.svg)](https://docs.rs/dear-implot)
+
 High-level Rust bindings for ImPlot, the immediate mode plotting library. This crate provides safe, idiomatic Rust bindings designed to work seamlessly with `dear-imgui-rs` (which uses cimgui C API) and `dear-implot-sys` (which uses cimplot C API).
 
 For native build/link options (source, system/prebuilt, remote prebuilt), see `extensions/dear-implot-sys/README.md`.
