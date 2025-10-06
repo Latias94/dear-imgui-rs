@@ -8,6 +8,7 @@ on:
       - 'dear-imnodes-sys-v*'
       - 'dear-imguizmo-sys-v*'
       - 'dear-imguizmo-quat-sys-v*'
+      - 'dear-implot3d-sys-v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -20,7 +21,7 @@ on:
         type: string
         default: main
       crates:
-        description: 'Comma-separated sys crates: all, dear-imgui-sys, dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys, dear-imguizmo-quat-sys'
+        description: 'Comma-separated sys crates: all, dear-imgui-sys, dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys, dear-imguizmo-quat-sys, dear-implot3d-sys'
         required: false
         type: string
         default: all
@@ -230,6 +231,26 @@ jobs:
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           IMGUIZMO_SYS_PKG_CRT: ${{ matrix.crt }}
+          TARGET: ${{ matrix.target }}
+
+      - name: Build dear-implot3d-sys (Release)
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-implot3d-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-implot3d-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-implot3d-sys-v'))
+        run: cargo build -p dear-implot3d-sys --release --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - name: Package dear-implot3d-sys static library + headers
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-implot3d-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-implot3d-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-implot3d-sys-v'))
+        run: cargo run -p dear-implot3d-sys --features package-bin --bin package --release --target ${{ matrix.target }}
+        env:
+          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          IMPLOT3D_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-imguizmo-quat-sys (Release)

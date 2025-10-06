@@ -10,6 +10,8 @@ members = [
     "extensions/dear-file-browser",
     "extensions/dear-implot-sys",
     "extensions/dear-implot",
+    "extensions/dear-implot3d-sys",
+    "extensions/dear-implot3d",
     "extensions/dear-imguizmo-sys",
     "extensions/dear-imguizmo",
     "extensions/dear-imguizmo-quat-sys",

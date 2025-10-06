@@ -40,6 +40,8 @@ use winit::window::{Window, WindowId};
 use dear_imnodes as imnodes;
 #[cfg(feature = "implot")]
 use dear_implot as implot;
+#[cfg(feature = "implot3d")]
+use dear_implot3d as implot3d;
 
 #[derive(Debug, Error)]
 pub enum DearAppError {
@@ -62,6 +64,7 @@ pub enum DearAppError {
 pub struct AddOnsConfig {
     pub with_implot: bool,
     pub with_imnodes: bool,
+    pub with_implot3d: bool,
 }
 
 impl AddOnsConfig {
@@ -72,6 +75,7 @@ impl AddOnsConfig {
         Self {
             with_implot: cfg!(feature = "implot"),
             with_imnodes: cfg!(feature = "imnodes"),
+            with_implot3d: cfg!(feature = "implot3d"),
         }
     }
 }
@@ -87,6 +91,11 @@ pub struct AddOns<'a> {
     pub imnodes: Option<&'a imnodes::Context>,
     #[cfg(not(feature = "imnodes"))]
     pub imnodes: Option<()>,
+
+    #[cfg(feature = "implot3d")]
+    pub implot3d: Option<&'a implot3d::Plot3DContext>,
+    #[cfg(not(feature = "implot3d"))]
+    pub implot3d: Option<()>,
     pub docking: DockingApi<'a>,
     _marker: PhantomData<&'a ()>,
 }
@@ -374,6 +383,8 @@ struct AppWindow {
     implot_ctx: Option<implot::PlotContext>,
     #[cfg(feature = "imnodes")]
     imnodes_ctx: Option<imnodes::Context>,
+    #[cfg(feature = "implot3d")]
+    implot3d_ctx: Option<implot3d::Plot3DContext>,
 
     // config for rendering
     clear_color: wgpu::Color,
@@ -507,6 +518,13 @@ impl AppWindow {
             None
         };
 
+        #[cfg(feature = "implot3d")]
+        let implot3d_ctx = if addons.with_implot3d {
+            Some(implot3d::Plot3DContext::create(&context))
+        } else {
+            None
+        };
+
         let imgui = ImguiState {
             context,
             platform,
@@ -525,6 +543,8 @@ impl AppWindow {
             implot_ctx,
             #[cfg(feature = "imnodes")]
             imnodes_ctx,
+            #[cfg(feature = "implot3d")]
+            implot3d_ctx,
             clear_color: wgpu::Color {
                 r: cfg.clear_color[0] as f64,
                 g: cfg.clear_color[1] as f64,
@@ -607,6 +627,10 @@ impl AppWindow {
             imnodes: self.imnodes_ctx.as_ref(),
             #[cfg(not(feature = "imnodes"))]
             imnodes: None,
+            #[cfg(feature = "implot3d")]
+            implot3d: self.implot3d_ctx.as_ref(),
+            #[cfg(not(feature = "implot3d"))]
+            implot3d: None,
             docking: DockingApi {
                 ctrl: &mut self.docking_ctrl,
             },

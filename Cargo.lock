@@ -902,6 +902,7 @@ dependencies = [
  "dear-imgui-winit",
  "dear-imnodes",
  "dear-implot",
+ "dear-implot3d",
  "pollster",
  "thiserror 2.0.17",
  "tracing",
@@ -946,12 +947,14 @@ dependencies = [
  "dear-imguizmo-quat",
  "dear-imnodes",
  "dear-implot",
+ "dear-implot3d",
  "env_logger",
  "glam",
  "glow",
  "glutin",
  "glutin-winit",
  "image",
+ "once_cell",
  "pollster",
  "raw-window-handle",
  "tracing",
@@ -1152,6 +1155,32 @@ dependencies = [
  "bindgen",
  "cc",
  "cmake",
+ "dear-imgui-build-support",
+ "dear-imgui-sys",
+ "flate2",
+ "pkg-config",
+ "tar",
+ "xshell",
+]
+
+[[package]]
+name = "dear-implot3d"
+version = "0.3.0"
+dependencies = [
+ "bitflags 2.9.4",
+ "dear-imgui-rs",
+ "dear-imgui-sys",
+ "dear-implot3d-sys",
+ "mint",
+]
+
+[[package]]
+name = "dear-implot3d-sys"
+version = "0.3.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cfg-if",
  "dear-imgui-build-support",
  "dear-imgui-sys",
  "flate2",

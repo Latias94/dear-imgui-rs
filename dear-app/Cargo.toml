@@ -22,9 +22,10 @@ thiserror.workspace = true
 # Optional add-ons
 dear-implot = { path = "../extensions/dear-implot", version = "0.3", optional = true }
 dear-imnodes = { path = "../extensions/dear-imnodes", version = "0.3", optional = true }
+dear-implot3d = { path = "../extensions/dear-implot3d", version = "0.3", optional = true }
 
 [features]
 default = []
 implot = ["dep:dear-implot"]
 imnodes = ["dep:dear-imnodes"]
-
+implot3d = ["dep:dear-implot3d"]

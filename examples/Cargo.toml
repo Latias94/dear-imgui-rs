@@ -9,6 +9,8 @@ dear-implot = ["dep:dear-implot"]
 dear-imguizmo = ["dep:dear-imguizmo"]
 dear-imnodes = ["dep:dear-imnodes"]
 dear-imguizmo-quat = ["dep:dear-imguizmo-quat"]
+dear-implot3d = ["dep:dear-implot3d"]
+implot3d = ["dear-implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
 dear-file-browser = ["dep:dear-file-browser"]
 
@@ -74,6 +76,11 @@ path = "implot_basic.rs"
 required-features = ["dear-implot"]
 
 [[bin]]
+name = "implot3d_basic"
+path = "implot3d_basic.rs"
+required-features = ["dear-implot3d"]
+
+[[bin]]
 name = "imguizmo_basic"
 path = "imguizmo_basic.rs"
 required-features = ["dear-imguizmo"]
@@ -124,12 +131,13 @@ dear-imgui-rs = { path = "../dear-imgui", version = "0.3" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.3" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.3" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.3" }
-dear-app = { path = "../dear-app", version = "0.3", features = ["implot", "imnodes"] }
+dear-app = { path = "../dear-app", version = "0.3", features = ["implot", "imnodes", "implot3d"] }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
 dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
 dear-imguizmo-quat = { path = "../extensions/dear-imguizmo-quat", optional = true }
+dear-implot3d = { path = "../extensions/dear-implot3d", optional = true }
 dear-file-browser = { path = "../extensions/dear-file-browser", optional = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
@@ -144,3 +152,4 @@ glutin-winit = { workspace = true }
 raw-window-handle = { workspace = true }
 image = { workspace = true }
 bytemuck = { workspace = true }
+once_cell = "1"

@@ -1,0 +1,55 @@
+[package]
+name = "dear-implot3d-sys"
+version = "0.3.0"
+edition.workspace = true
+description = "Low-level FFI bindings for ImPlot3D via cimplot3d (C API)"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+build = "build.rs"
+links = "dear_implot3d"
+
+# Exclude heavy upstream folders from package tarball
+exclude = [
+    # upstream cimplot3d generator (not needed in crate)
+    "third-party/cimplot3d/generator/**",
+    # upstream implot3d heavy content not needed to build the wrapper
+    "third-party/cimplot3d/implot3d/example/**",
+    "third-party/cimplot3d/implot3d/.github/**",
+]
+
+[package.metadata.docs.rs]
+no-default-features = true
+all-features = false
+features = []
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.3" }
+cfg-if.workspace = true
+flate2 = { version = "1", optional = true }
+tar = { version = "0.4", optional = true }
+build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../../tools/build-support", optional = true }
+
+[build-dependencies]
+bindgen.workspace = true
+cc.workspace = true
+pkg-config = { workspace = true, optional = true }
+xshell = { workspace = true }
+flate2 = "1"
+tar = "0.4"
+build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../../tools/build-support" }
+
+[[bin]]
+name = "package"
+path = "bin/package/main.rs"
+required-features = ["package-bin"]
+
+[features]
+default = []
+package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
+prebuilt = []
+build-from-source = []
+
