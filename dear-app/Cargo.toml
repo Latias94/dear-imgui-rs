@@ -11,22 +11,27 @@ keywords.workspace = true
 readme = "README.md"
 
 [dependencies]
-dear-imgui-rs = { path = "../dear-imgui", version = "0.3" }
-dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.3" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.3" }
-wgpu.workspace = true
+# Use crates.io versions for publishing compatibility
+dear-imgui-rs = { version = "0.3" }
+dear-imgui-winit = { version = "0.3" }
+dear-imgui-wgpu = { version = "0.3" }
+
+# Align with crates.io dear-imgui-wgpu 0.3 (wgpu v26)
+wgpu = "26"
 winit.workspace = true
 pollster.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 
 # Optional add-ons
-dear-implot = { path = "../extensions/dear-implot", version = "0.3", optional = true }
-dear-imnodes = { path = "../extensions/dear-imnodes", version = "0.3", optional = true }
-dear-implot3d = { path = "../extensions/dear-implot3d", version = "0.3", optional = true }
+# Temporarily removed for publish (no crates.io release yet)
+# dear-implot = { version = "0.3", optional = true }
+# dear-imnodes = { version = "0.3", optional = true }
+# dear-implot3d = { version = "0.3", optional = true }
 
 [features]
 default = []
-implot = ["dep:dear-implot"]
-imnodes = ["dep:dear-imnodes"]
-implot3d = ["dep:dear-implot3d"]
+# Placeholder features for future add-ons (no deps wired for crates.io publish)
+implot = []
+imnodes = []
+implot3d = []

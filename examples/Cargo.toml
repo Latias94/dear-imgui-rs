@@ -127,10 +127,11 @@ name = "dear_app_quickstart"
 path = "00-quickstart/dear_app_quickstart.rs"
 
 [dependencies]
-dear-imgui-rs = { path = "../dear-imgui", version = "0.3" }
-dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.3" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.3" }
-dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.3" }
+# Use crates.io versions to avoid local links duplication during dear-app publish
+dear-imgui-rs = { version = "0.3" }
+dear-imgui-winit = { version = "0.3" }
+dear-imgui-wgpu = { version = "0.3" }
+dear-imgui-glow = { version = "0.3" }
 dear-app = { path = "../dear-app", version = "0.3", features = ["implot", "imnodes", "implot3d"] }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
