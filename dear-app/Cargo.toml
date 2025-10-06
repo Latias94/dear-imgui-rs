@@ -1,0 +1,30 @@
+[package]
+name = "dear-app"
+version = "0.3.0"
+edition.workspace = true
+description = "Convenient Dear ImGui application runner for dear-imgui-rs (Winit + WGPU)"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+dear-imgui-rs = { path = "../dear-imgui", version = "0.3" }
+dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.3" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.3" }
+wgpu.workspace = true
+winit.workspace = true
+pollster.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+# Optional add-ons
+dear-implot = { path = "../extensions/dear-implot", version = "0.3", optional = true }
+dear-imnodes = { path = "../extensions/dear-imnodes", version = "0.3", optional = true }
+
+[features]
+default = []
+implot = ["dep:dear-implot"]
+imnodes = ["dep:dear-imnodes"]
+

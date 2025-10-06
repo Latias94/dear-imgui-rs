@@ -7,6 +7,7 @@ on:
       - 'dear-implot-sys-v*'
       - 'dear-imnodes-sys-v*'
       - 'dear-imguizmo-sys-v*'
+      - 'dear-imguizmo-quat-sys-v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -19,7 +20,7 @@ on:
         type: string
         default: main
       crates:
-        description: 'Comma-separated sys crates: all, dear-imgui-sys, dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys'
+        description: 'Comma-separated sys crates: all, dear-imgui-sys, dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys, dear-imguizmo-quat-sys'
         required: false
         type: string
         default: all
@@ -229,6 +230,26 @@ jobs:
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           IMGUIZMO_SYS_PKG_CRT: ${{ matrix.crt }}
+          TARGET: ${{ matrix.target }}
+
+      - name: Build dear-imguizmo-quat-sys (Release)
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imguizmo-quat-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imguizmo-quat-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imguizmo-quat-sys-v'))
+        run: cargo build -p dear-imguizmo-quat-sys --release --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - name: Package dear-imguizmo-quat-sys static library + headers
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imguizmo-quat-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imguizmo-quat-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imguizmo-quat-sys-v'))
+        run: cargo run -p dear-imguizmo-quat-sys --features package-bin --bin package --release --target ${{ matrix.target }}
+        env:
+          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          IMGUIZMO_QUAT_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
       - name: Upload to release

@@ -15,6 +15,7 @@ links = "dear-imgui"
 # Exclude unnecessary files to reduce package size
 exclude = [
     # Exclude heavy upstream folders from cimgui/imgui submodule
+    "third-party/cimgui/imgui/.github/**",
     "third-party/cimgui/imgui/backends/**",
     "third-party/cimgui/imgui/docs/**", 
     "third-party/cimgui/imgui/examples/**",

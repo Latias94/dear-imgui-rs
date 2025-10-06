@@ -1,4 +1,4 @@
-use dear_imgui as imgui;
+use dear_imgui_rs as imgui;
 use std::sync::{Mutex, OnceLock};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -21,7 +21,7 @@ fn input_text_growable_buffer_no_panic() {
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     // Long initial string to exercise our owned buffer path
-    let mut text = String::from_iter(std::iter::repeat('a').take(2048));
+    let mut text = String::from_iter(std::iter::repeat_n('a', 2048));
 
     let ui = ctx.frame();
     let _ = ui.input_text("LongText", &mut text).build();
@@ -51,7 +51,7 @@ fn input_text_multiline_growable_buffer_no_panic() {
         .input_text_multiline("LongMultiline", &mut text, [300.0, 120.0])
         .build();
     // ImString variant
-    let mut im = imgui::ImString::new(String::from_iter(std::iter::repeat('c').take(4096)));
+    let mut im = imgui::ImString::new(String::from_iter(std::iter::repeat_n('c', 4096)));
     let _ = ui
         .input_text_multiline_imstr("ImStrMultiline", &mut im, [300.0, 120.0])
         .build();
@@ -72,8 +72,8 @@ fn input_scalars_build_no_panic() {
     let ui = ctx.frame();
 
     let mut i = 42i32;
-    let mut f = 3.14f32;
-    let mut d = 2.71828f64;
+    let mut f = std::f32::consts::PI;
+    let mut d = std::f64::consts::E;
     let mut i2 = [1i32, 2];
     let mut i3 = [3i32, 4, 5];
     let mut f2 = [1.0f32, 2.0];

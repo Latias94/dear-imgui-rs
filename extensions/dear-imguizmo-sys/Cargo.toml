@@ -14,12 +14,15 @@ links = "dear_imguizmo"
 # Exclude heavy upstream folders from package tarball
 exclude = [
     "third-party/cimguizmo/ImGuizmo/example/**",
+    "third-party/cimguizmo/ImGuizmo/vcpkg-example/**",
     "third-party/cimguizmo/ImGuizmo/.github/**",
     "third-party/cimguizmo/ImGuizmo/docs/**",
     "third-party/cimguizmo/ImGuizmo/generator/**",
     # Exclude upstream binary artifacts and images
     "third-party/cimguizmo/ImGuizmo/bin/**",
     "third-party/cimguizmo/ImGuizmo/Images/**",
+    # Exclude top-level generator output
+    "third-party/cimguizmo/generator/**",
 ]
 
 # docs.rs configuration for offline builds

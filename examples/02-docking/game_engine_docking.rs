@@ -34,7 +34,6 @@ struct GameEngineState {
 
     // Demo: zero-copy text buffers (ImString)
     title_imstr: dear_imgui_rs::ImString,
-    notes_imstr: dear_imgui_rs::ImString,
 
     // Viewport settings
     viewport_size: [f32; 2],
@@ -92,7 +91,6 @@ impl Default for GameEngineState {
             ],
             asset_search: dear_imgui_rs::ImString::new(""),
             title_imstr: dear_imgui_rs::ImString::new("Untitled"),
-            notes_imstr: dear_imgui_rs::ImString::new(""),
             viewport_size: [800.0, 600.0],
             show_wireframe: false,
             show_grid: true,
@@ -216,9 +214,11 @@ impl AppWindow {
             .set_ini_filename::<std::path::PathBuf>(None)
             .unwrap();
 
-        // Enable docking
+        // Enable docking (multi-viewport disabled in this project)
         let io = context.io_mut();
-        io.set_config_flags(ConfigFlags::DOCKING_ENABLE | ConfigFlags::VIEWPORTS_ENABLE);
+        let mut cf = io.config_flags();
+        cf.insert(ConfigFlags::DOCKING_ENABLE);
+        io.set_config_flags(cf);
 
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(
@@ -279,20 +279,18 @@ impl AppWindow {
 
         let ui = imgui.context.frame();
 
-        // Create dockspace over main viewport (call every frame)
-        let dock_id = ui.dockspace_over_main_viewport_with_flags(
-            0,
+        // Stable dockspace id and layout setup before submitting DockSpace
+        let dock_id_struct = ui.get_id("MainDockSpace");
+        imgui.dockspace_id = dock_id_struct.into();
+        if imgui.first_frame {
+            setup_initial_docking_layout(dear_imgui_rs::Id::from(imgui.dockspace_id));
+            imgui.first_frame = false;
+        }
+        let _ = ui.dockspace_over_main_viewport_with_flags(
+            dear_imgui_rs::Id::from(imgui.dockspace_id),
             dear_imgui_rs::DockNodeFlags::PASSTHRU_CENTRAL_NODE
                 | dear_imgui_rs::DockNodeFlags::AUTO_HIDE_TAB_BAR,
         );
-        // Use returned dockspace id as root
-        imgui.dockspace_id = dock_id;
-
-        // Only setup initial layout on first frame (DockBuilder-only, no INI)
-        if imgui.first_frame {
-            setup_initial_docking_layout(imgui.dockspace_id);
-            imgui.first_frame = false;
-        }
 
         let actions = render_main_menu_bar(ui, &mut imgui.game_state);
         render_hierarchy(ui, &mut imgui.game_state);
@@ -303,7 +301,6 @@ impl AppWindow {
         render_console(ui, &mut imgui.game_state);
         render_asset_browser(ui, &mut imgui.game_state);
         render_performance(ui, &mut imgui.game_state);
-        render_notes_imstr(ui, &mut imgui.game_state);
 
         // Let the platform backend finalize per-frame data (required for viewports)
         imgui
@@ -346,7 +343,7 @@ impl AppWindow {
 
         // Handle deferred actions (safe after frame is rendered)
         if actions.reset_layout {
-            setup_initial_docking_layout(imgui.dockspace_id);
+            setup_initial_docking_layout(dear_imgui_rs::Id::from(imgui.dockspace_id));
         }
         if actions.load_ini {
             if let Ok(s) = std::fs::read_to_string("examples/02-docking/game_engine_docking.ini") {
@@ -383,8 +380,8 @@ impl AppWindow {
 }
 
 /// Setup the initial docking layout - Unity-style game engine layout
-fn setup_initial_docking_layout(dockspace_id: u32) {
-    use dear_imgui_rs::{DockBuilder, SplitDirection};
+fn setup_initial_docking_layout(dockspace_id: dear_imgui_rs::Id) {
+    use dear_imgui_rs::{DockBuilder, Id, SplitDirection};
 
     println!("Setting up initial docking layout...");
 
@@ -408,54 +405,66 @@ fn setup_initial_docking_layout(dockspace_id: u32) {
     // |      Project      |         Console           |   Performance     |
     // +-------------------+---------------------------+-------------------+
 
-    // Split horizontally: Left panel (~24%) | Center (~52%) | Right panel (~24%)
-    let mut left_panel_id = 0u32;
-    let remaining_after_left = DockBuilder::split_node(
+    // Split horizontally to match Unity-like proportions derived from INI (approx.):
+    // Right Inspector ~25.1%, Left Hierarchy column ~21.7%, Center ~remaining
+    // First split right from root
+    let mut inspector_id = Id::default();
+    let after_right = DockBuilder::split_node(
         dockspace_id,
+        SplitDirection::Right,
+        0.251, // 402/1600
+        Some(&mut inspector_id),
+    );
+    // Then split left from the remaining
+    let mut left_panel_id = Id::default();
+    let center_area_id = DockBuilder::split_node(
+        after_right,
         SplitDirection::Left,
-        0.24,
+        0.2896, // normalized 0.217/(1-0.251)
         Some(&mut left_panel_id),
     );
 
-    let mut right_panel_id = 0u32;
-    let center_area_id = DockBuilder::split_node(
-        remaining_after_left,
-        SplitDirection::Right,
-        0.24,
-        Some(&mut right_panel_id),
-    );
-
-    // Split left panel vertically: Project/Asset Browser (~30%) bottom, Hierarchy (~70%) top
-    let mut project_id = 0u32;
-    let hierarchy_id = DockBuilder::split_node(
+    // Split left panel vertically to match INI heights (approx):
+    // total H ~881, Hierarchy 337, Project 264, Asset 276
+    // First split bottom Asset (~276/881 ≈ 0.313)
+    let mut asset_id = Id::default();
+    let top_left_stack = DockBuilder::split_node(
         left_panel_id,
         SplitDirection::Down,
-        0.3,
+        0.313, // Asset Browser
+        Some(&mut asset_id),
+    );
+    // Then split the remaining into Hierarchy (337) and Project (264)
+    let mut project_id = Id::default();
+    let hierarchy_id = DockBuilder::split_node(
+        top_left_stack,
+        SplitDirection::Down,
+        0.439, // 337/(337+264)
         Some(&mut project_id),
     );
 
     // Split right panel vertically: Performance (~20%) bottom, Inspector (~80%) top
-    let mut performance_id = 0u32;
+    let mut performance_id = Id::default();
     let inspector_id = DockBuilder::split_node(
-        right_panel_id,
+        inspector_id,
         SplitDirection::Down,
         0.2,
         Some(&mut performance_id),
     );
 
     // Split center vertically: Console (~27%) bottom, Scene/Game (~73%) top
-    let mut console_id = 0u32;
+    let mut console_id = Id::default();
     let scene_game_id = DockBuilder::split_node(
         center_area_id,
         SplitDirection::Down,
-        0.27,
+        0.313, // 276/881 approx
         Some(&mut console_id),
     );
 
     // Dock all windows to their designated areas
     DockBuilder::dock_window("Hierarchy", hierarchy_id);
     DockBuilder::dock_window("Project", project_id);
-    DockBuilder::dock_window("Asset Browser", project_id); // Tabbed with Project
+    DockBuilder::dock_window("Asset Browser", asset_id); // Tabbed vertically under Project
     DockBuilder::dock_window("Scene View", scene_game_id);
     DockBuilder::dock_window("Game View", scene_game_id); // Tabbed with Scene View
     DockBuilder::dock_window("Console", console_id); // Bottom center
@@ -1374,28 +1383,6 @@ fn render_performance(ui: &Ui, game_state: &mut GameEngineState) {
 
             // Note: plot_lines might not be available in current API
             ui.text("(Graph visualization would go here)");
-        });
-}
-
-/// Demo panel using zero-copy ImString-backed inputs
-fn render_notes_imstr(ui: &Ui, game_state: &mut GameEngineState) {
-    ui.window("Notes (ImString)")
-        .size([360.0, 260.0], Condition::FirstUseEver)
-        .build(|| {
-            ui.text("Title:");
-            ui.same_line();
-            ui.input_text_imstr("##title_im", &mut game_state.title_imstr)
-                .build();
-
-            ui.separator();
-            ui.text("Notes:");
-            let avail = ui.content_region_avail();
-            ui.input_text_multiline_imstr(
-                "##notes_im",
-                &mut game_state.notes_imstr,
-                [avail[0], avail[1]],
-            )
-            .build();
         });
 }
 

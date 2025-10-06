@@ -13,10 +13,21 @@ links = "dear_imguizmo_quat"
 
 # Exclude heavy upstream folders from package tarball
 exclude = [
-    "third-party/cimguizmo_quat/imGuIZMO.quat/**/examples/**",
-    "third-party/cimguizmo_quat/imGuIZMO.quat/**/.github/**",
+    # upstream generated helpers and outputs
+    "third-party/cimguizmo_quat/generator/**",
+    # imGuIZMO.quat upstream heavy folders not needed for building the C API wrapper
+    "third-party/cimguizmo_quat/imGuIZMO.quat/examples/**",
+    "third-party/cimguizmo_quat/imGuIZMO.quat/basic_examples/**",
+    "third-party/cimguizmo_quat/imGuIZMO.quat/old_examples/**",
+    "third-party/cimguizmo_quat/imGuIZMO.quat/commons/**",
+    "third-party/cimguizmo_quat/imGuIZMO.quat/libs/**",
+    "third-party/cimguizmo_quat/imGuIZMO.quat/.github/**",
+    # generic binary/assets folders
     "third-party/cimguizmo_quat/**/bin/**",
     "third-party/cimguizmo_quat/**/Images/**",
+    # IDE folders
+    "third-party/cimguizmo_quat/**/.vs/**",
+    "third-party/cimguizmo_quat/**/.vscode/**",
 ]
 
 [package.metadata.docs.rs]
@@ -52,4 +63,3 @@ default = []
 freetype = ["dear-imgui-sys/freetype"]
 prebuilt = []
 build-from-source = []
-

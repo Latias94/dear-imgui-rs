@@ -205,13 +205,12 @@ impl AppWindow {
                     DockBuilder::dock_window("James_4", dock_id_bottom);
                     DockBuilder::finish(dockspace_id);
                 }
-            });
 
-        let dockspace_id = ui.get_id("MyDockspace");
-        // Render DockSpace with a red empty background for visibility
-        let color = ui.push_style_color(StyleColor::DockingEmptyBg, [1.0, 0.0, 0.0, 1.0]);
-        let _ = ui.dock_space(dockspace_id, [0.0, 0.0]);
-        color.pop();
+                // Render DockSpace inside the host window
+                let color = ui.push_style_color(StyleColor::DockingEmptyBg, [1.0, 0.0, 0.0, 1.0]);
+                let _ = ui.dock_space(dockspace_id, [0.0, 0.0]);
+                color.pop();
+            });
 
         // 2) Create docked windows
         ui.window("James_1").build(|| ui.text("Text 1"));

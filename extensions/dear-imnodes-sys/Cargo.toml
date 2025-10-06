@@ -20,6 +20,8 @@ exclude = [
     "third-party/cimnodes/imnodes/docs/**",
     "third-party/cimnodes/imnodes/generator/**",
     "third-party/cimnodes/imnodes/img/**",
+    # Exclude top-level generator output
+    "third-party/cimnodes/generator/**",
 ]
 
 # docs.rs configuration for offline builds

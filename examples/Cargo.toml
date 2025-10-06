@@ -111,12 +111,20 @@ name = "file_browser_imgui"
 path = "04-integration/file_browser_imgui.rs"
 required-features = ["dear-file-browser"]
 
+[[bin]]
+name = "dear_app_docking"
+path = "02-docking/dear_app_docking.rs"
+
+[[bin]]
+name = "dear_app_quickstart"
+path = "00-quickstart/dear_app_quickstart.rs"
 
 [dependencies]
 dear-imgui-rs = { path = "../dear-imgui", version = "0.3" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.3" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.3" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.3" }
+dear-app = { path = "../dear-app", version = "0.3", features = ["implot", "imnodes"] }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
