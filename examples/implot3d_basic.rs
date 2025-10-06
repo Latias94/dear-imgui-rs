@@ -1,7 +1,7 @@
-//! ImPlot3D Demo - Rust port of official implot3d_demo.cpp
+//! ImPlot3D Demo - Complete Rust port of official implot3d_demo.cpp
 //!
-//! This example demonstrates the main features of ImPlot3D by replicating
-//! key demos from the official C++ demo.
+//! This example is a faithful reproduction of the official C++ ImPlot3D demo,
+//! showcasing all major features of the library.
 
 use dear_app::{AddOnsConfig, RunnerConfig, run};
 use dear_imgui_rs::*;
@@ -9,6 +9,12 @@ use dear_implot3d as implot3d;
 use implot3d::plots::*;
 use implot3d::*;
 use std::f32::consts::PI;
+
+// ImPlot3DStyleVar constants (from cimplot3d.h)
+const IMPLOT3D_STYLEVAR_LINE_WEIGHT: i32 = 0;
+const IMPLOT3D_STYLEVAR_MARKER_SIZE: i32 = 2;
+const IMPLOT3D_STYLEVAR_MARKER_WEIGHT: i32 = 3;
+const IMPLOT3D_STYLEVAR_FILL_ALPHA: i32 = 4;
 
 fn main() {
     dear_imgui_rs::logging::init_tracing_with_filter(
@@ -38,71 +44,51 @@ fn main() {
         let plot_ui = plot_ctx.get_plot_ui(ui);
 
         ui.window("ImPlot3D Demo")
-            .size([1000.0, 700.0], Condition::FirstUseEver)
+            .size([600.0, 750.0], Condition::FirstUseEver)
+            .position([100.0, 100.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text(format!("ImPlot3D says olá! (Rust bindings)"));
-                ui.separator();
+                ui.text(format!("ImPlot3D says olá! (0.3 WIP)"));
+                ui.spacing();
 
-                if let Some(tab_bar) = ui.tab_bar("ImPlot3D Demo Tabs") {
-                    // Tab 1: Line Plots
-                    if let Some(_tab) = ui.tab_item("Line Plots") {
-                        demo_line_plots(ui, &plot_ui);
+                if let Some(tab_bar) = ui.tab_bar("ImPlot3DDemoTabs") {
+                    // Plots Tab
+                    if let Some(_tab) = ui.tab_item("Plots") {
+                        demo_header(ui, "Line Plots", || demo_line_plots(ui, &plot_ui));
+                        demo_header(ui, "Scatter Plots", || demo_scatter_plots(ui, &plot_ui));
+                        demo_header(ui, "Triangle Plots", || demo_triangle_plots(ui, &plot_ui));
+                        demo_header(ui, "Quad Plots", || demo_quad_plots(ui, &plot_ui));
+                        demo_header(ui, "Surface Plots", || demo_surface_plots(ui, &plot_ui));
+                        demo_header(ui, "Mesh Plots", || demo_mesh_plots(ui, &plot_ui));
+                        demo_header(ui, "Realtime Plots", || demo_realtime_plots(ui, &plot_ui));
+                        demo_header(ui, "Markers and Text", || {
+                            demo_markers_and_text(ui, &plot_ui)
+                        });
+                        demo_header(ui, "NaN Values", || demo_nan_values(ui, &plot_ui));
                     }
 
-                    // Tab 2: Scatter Plots
-                    if let Some(_tab) = ui.tab_item("Scatter Plots") {
-                        demo_scatter_plots(ui, &plot_ui);
+                    // Axes Tab
+                    if let Some(_tab) = ui.tab_item("Axes") {
+                        demo_header(ui, "Box Scale", || demo_box_scale(ui, &plot_ui));
+                        demo_header(ui, "Box Rotation", || demo_box_rotation(ui, &plot_ui));
+                        demo_header(ui, "Tick Labels", || demo_tick_labels(ui, &plot_ui));
+                        demo_header(ui, "Axis Constraints", || {
+                            demo_axis_constraints(ui, &plot_ui)
+                        });
                     }
 
-                    // Tab 3: Triangle Plots (Pyramid)
-                    if let Some(_tab) = ui.tab_item("Triangle Plots") {
-                        demo_triangle_plots(ui, &plot_ui);
+                    // Custom Tab
+                    if let Some(_tab) = ui.tab_item("Custom") {
+                        demo_header(ui, "Custom Styles", || demo_custom_styles(ui, &plot_ui));
+                        demo_header(ui, "Custom Rendering", || {
+                            demo_custom_rendering(ui, &plot_ui)
+                        });
                     }
 
-                    // Tab 4: Quad Plots (Cube)
-                    if let Some(_tab) = ui.tab_item("Quad Plots") {
-                        demo_quad_plots(ui, &plot_ui);
+                    // Help Tab
+                    if let Some(_tab) = ui.tab_item("Help") {
+                        demo_help(ui);
                     }
 
-                    // Tab 5: Surface Plots
-                    if let Some(_tab) = ui.tab_item("Surface Plots") {
-                        demo_surface_plots(ui, &plot_ui);
-                    }
-
-                    // Tab 6: Mesh Plots
-                    if let Some(_tab) = ui.tab_item("Mesh Plots") {
-                        demo_mesh_plots(ui, &plot_ui);
-                    }
-
-                    // Tab 7: Box Scale
-                    if let Some(_tab) = ui.tab_item("Box Scale") {
-                        demo_box_scale(ui, &plot_ui);
-                    }
-
-                    // Tab 8: Box Rotation
-                    if let Some(_tab) = ui.tab_item("Box Rotation") {
-                        demo_box_rotation(ui, &plot_ui);
-                    }
-
-                    // Tab 9: Tick Labels
-                    if let Some(_tab) = ui.tab_item("Tick Labels") {
-                        demo_tick_labels(ui, &plot_ui);
-                    }
-
-                    // Tab 10: Axis Constraints
-                    if let Some(_tab) = ui.tab_item("Axis Constraints") {
-                        demo_axis_constraints(ui, &plot_ui);
-                    }
-
-                    // Tab 11: Markers and Text
-                    if let Some(_tab) = ui.tab_item("Markers & Text") {
-                        demo_markers_and_text(ui, &plot_ui);
-                    }
-
-                    // Tab 12: NaN Values
-                    if let Some(_tab) = ui.tab_item("NaN Values") {
-                        demo_nan_values(ui, &plot_ui);
-                    }
                     drop(tab_bar);
                 }
             });
@@ -110,13 +96,20 @@ fn main() {
     .unwrap();
 }
 
+// Helper function to create collapsible demo sections
+fn demo_header<F: FnOnce()>(ui: &Ui, label: &str, demo: F) {
+    if ui.collapsing_header(label, TreeNodeFlags::NONE) {
+        demo();
+    }
+}
+
 // ============================================================================
-// Demo Functions (ported from C++ implot3d_demo.cpp)
+// Demo Functions (Complete port from C++ implot3d_demo.cpp)
 // ============================================================================
 
-fn demo_line_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
+fn demo_line_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     // Animated line plot
-    let time = unsafe { dear_imgui_sys::igGetTime() } as f32;
+    let time = ui.time() as f32;
     let mut xs1 = vec![0.0f32; 1001];
     let mut ys1 = vec![0.0f32; 1001];
     let mut zs1 = vec![0.0f32; 1001];
@@ -180,7 +173,7 @@ fn demo_scatter_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
 
     if let Some(_tok) = plot_ui.begin_plot("Scatter Plots").build() {
         Scatter3D::f32("Data 1", &xs1, &ys1, &zs1).plot(plot_ui);
-        push_style_var_f32(dear_implot3d_sys::ImPlot3DStyleVar_FillAlpha as i32, 0.25);
+        push_style_var_f32(IMPLOT3D_STYLEVAR_FILL_ALPHA, 0.25);
         let col1 = get_colormap_color(1);
         set_next_marker_style(Marker3D::Square, 6.0, col1, -1.0, col1);
         Scatter3D::f32("Data 2", &xs2, &ys2, &zs2).plot(plot_ui);
@@ -188,7 +181,7 @@ fn demo_scatter_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
     }
 }
 
-fn demo_triangle_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
+fn demo_triangle_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     // Pyramid coordinates
     let ax = 0.0f32;
     let ay = 0.0f32;
@@ -226,17 +219,29 @@ fn demo_triangle_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
     add_vertex(cx[2], cy[2], cz[2]);
     add_vertex(cx[3], cy[3], cz[3]);
 
+    // Triangle flags
+    static mut FLAGS: Triangle3DFlags = Triangle3DFlags::NONE;
+    unsafe {
+        ui.checkbox_flags("NoLines", &mut FLAGS, Triangle3DFlags::NO_LINES);
+        ui.checkbox_flags("NoFill", &mut FLAGS, Triangle3DFlags::NO_FILL);
+        ui.checkbox_flags("NoMarkers", &mut FLAGS, Triangle3DFlags::NO_MARKERS);
+    }
+
     if let Some(_tok) = plot_ui.begin_plot("Triangle Plots").build() {
         plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -0.5, 1.5, Plot3DCond::Once);
         set_next_fill_style(get_colormap_color(0), 1.0);
         set_next_line_style(get_colormap_color(1), 2.0);
         let col2 = get_colormap_color(2);
         set_next_marker_style(Marker3D::Square, 3.0, col2, -1.0, col2);
-        Triangles3D::f32("Pyramid", &xs, &ys, &zs).plot(plot_ui);
+        unsafe {
+            Triangles3D::f32("Pyramid", &xs, &ys, &zs)
+                .flags(FLAGS)
+                .plot(plot_ui);
+        }
     }
 }
 
-fn demo_quad_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
+fn demo_quad_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     let mut xs = vec![0.0f32; 6 * 4];
     let mut ys = vec![0.0f32; 6 * 4];
     let mut zs = vec![0.0f32; 6 * 4];
@@ -290,6 +295,14 @@ fn demo_quad_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
         }
     }
 
+    // Quad flags
+    static mut FLAGS: Quad3DFlags = Quad3DFlags::NONE;
+    unsafe {
+        ui.checkbox_flags("NoLines", &mut FLAGS, Quad3DFlags::NO_LINES);
+        ui.checkbox_flags("NoFill", &mut FLAGS, Quad3DFlags::NO_FILL);
+        ui.checkbox_flags("NoMarkers", &mut FLAGS, Quad3DFlags::NO_MARKERS);
+    }
+
     if let Some(_tok) = plot_ui.begin_plot("Quad Plots").build() {
         plot_ui.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
 
@@ -300,23 +313,39 @@ fn demo_quad_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
         set_next_fill_style(color_x, 1.0);
         set_next_line_style(color_x, 2.0);
         set_next_marker_style(Marker3D::Square, 3.0, color_x, -1.0, color_x);
-        Quads3D::f32("X", &xs[0..8], &ys[0..8], &zs[0..8]).plot(plot_ui);
+        unsafe {
+            Quads3D::f32("X", &xs[0..8], &ys[0..8], &zs[0..8])
+                .flags(FLAGS)
+                .plot(plot_ui);
+        }
 
         set_next_fill_style(color_y, 1.0);
         set_next_line_style(color_y, 2.0);
         set_next_marker_style(Marker3D::Square, 3.0, color_y, -1.0, color_y);
-        Quads3D::f32("Y", &xs[8..16], &ys[8..16], &zs[8..16]).plot(plot_ui);
+        unsafe {
+            Quads3D::f32("Y", &xs[8..16], &ys[8..16], &zs[8..16])
+                .flags(FLAGS)
+                .plot(plot_ui);
+        }
 
         set_next_fill_style(color_z, 1.0);
         set_next_line_style(color_z, 2.0);
         set_next_marker_style(Marker3D::Square, 3.0, color_z, -1.0, color_z);
-        Quads3D::f32("Z", &xs[16..24], &ys[16..24], &zs[16..24]).plot(plot_ui);
+        unsafe {
+            Quads3D::f32("Z", &xs[16..24], &ys[16..24], &zs[16..24])
+                .flags(FLAGS)
+                .plot(plot_ui);
+        }
     }
 }
 
 fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     const N: usize = 20;
-    let time = unsafe { dear_imgui_sys::igGetTime() } as f32;
+    static mut T: f32 = 0.0;
+
+    unsafe {
+        T += ui.io().delta_time();
+    }
 
     let mut xs = vec![0.0f32; N * N];
     let mut ys = vec![0.0f32; N * N];
@@ -332,24 +361,41 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
             xs[idx] = MIN_VAL + j as f32 * STEP;
             ys[idx] = MIN_VAL + i as f32 * STEP;
             let r = (xs[idx] * xs[idx] + ys[idx] * ys[idx]).sqrt();
-            zs[idx] = (2.0 * time + r).sin();
+            unsafe {
+                zs[idx] = (2.0 * T + r).sin();
+            }
         }
     }
 
+    // Choose fill color
     ui.text("Fill color");
-    static mut SELECTED_FILL: bool = true;
-    static mut SEL_COLORMAP: i32 = 5;
+    static mut SELECTED_FILL: i32 = 1; // Colormap by default
+    static mut SOLID_COLOR: [f32; 4] = [0.8, 0.8, 0.2, 0.6];
+    static mut SEL_COLORMAP: i32 = 5; // Jet by default
 
     unsafe {
-        if ui.radio_button_bool("Solid", !SELECTED_FILL) {
-            SELECTED_FILL = false;
+        ui.indent();
+
+        // Choose solid color
+        if ui.radio_button("Solid", SELECTED_FILL == 0) {
+            SELECTED_FILL = 0;
         }
-        if ui.radio_button_bool("Colormap", SELECTED_FILL) {
-            SELECTED_FILL = true;
-        }
-        if SELECTED_FILL {
+        if SELECTED_FILL == 0 {
             ui.same_line();
-            let colormaps = ["Viridis", "Plasma", "Hot", "Cool", "Pink", "Jet"];
+            ui.color_edit4_config("##SurfaceSolidColor", &mut SOLID_COLOR)
+                .build();
+        }
+
+        // Choose colormap
+        if ui.radio_button("Colormap", SELECTED_FILL == 1) {
+            SELECTED_FILL = 1;
+        }
+        if SELECTED_FILL == 1 {
+            ui.same_line();
+            let colormaps = [
+                "Viridis", "Plasma", "Hot", "Cool", "Pink", "Jet", "Twilight", "RdBu", "BrBG",
+                "PiYG", "Spectral", "Greys",
+            ];
             if let Some(_combo) =
                 ui.begin_combo("##SurfaceColormap", colormaps[SEL_COLORMAP as usize])
             {
@@ -360,30 +406,107 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
                 }
             }
         }
+        ui.unindent();
+    }
 
-        if SELECTED_FILL {
-            let colormaps = ["Viridis", "Plasma", "Hot", "Cool", "Pink", "Jet"];
-            set_style_colormap_by_name(colormaps[SEL_COLORMAP as usize]);
+    // Choose range
+    static mut CUSTOM_RANGE: bool = false;
+    static mut RANGE_MIN: f32 = -1.0;
+    static mut RANGE_MAX: f32 = 1.0;
+
+    unsafe {
+        ui.checkbox("Custom range", &mut CUSTOM_RANGE);
+        ui.indent();
+
+        let _disabled = if !CUSTOM_RANGE {
+            Some(ui.begin_disabled())
+        } else {
+            None
+        };
+        ui.slider_config("Range min", -1.0, RANGE_MAX - 0.01)
+            .build(&mut RANGE_MIN);
+        ui.slider_config("Range max", RANGE_MIN + 0.01, 1.0)
+            .build(&mut RANGE_MAX);
+        drop(_disabled);
+
+        ui.unindent();
+    }
+
+    // Select flags
+    static mut FLAGS: Surface3DFlags = Surface3DFlags::NO_MARKERS;
+    unsafe {
+        ui.checkbox_flags("NoLines", &mut FLAGS, Surface3DFlags::NO_LINES);
+        ui.checkbox_flags("NoFill", &mut FLAGS, Surface3DFlags::NO_FILL);
+        ui.checkbox_flags("NoMarkers", &mut FLAGS, Surface3DFlags::NO_MARKERS);
+    }
+
+    // Begin the plot
+    unsafe {
+        if SELECTED_FILL == 1 {
+            let colormaps = [
+                "Viridis", "Plasma", "Hot", "Cool", "Pink", "Jet", "Twilight", "RdBu", "BrBG",
+                "PiYG", "Spectral", "Greys",
+            ];
+            push_colormap_name(colormaps[SEL_COLORMAP as usize]);
         }
     }
 
     if let Some(_tok) = plot_ui
         .begin_plot("Surface Plots")
-        .size([0.0, 400.0])
+        .size([-1.0, 400.0])
+        .flags(Plot3DFlags::NO_CLIP)
         .build()
     {
         plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.5, 1.5, Plot3DCond::Once);
-        push_style_var_f32(dear_implot3d_sys::ImPlot3DStyleVar_FillAlpha as i32, 0.8);
+
+        // Set fill style
+        push_style_var_f32(IMPLOT3D_STYLEVAR_FILL_ALPHA, 0.8);
+        unsafe {
+            if SELECTED_FILL == 0 {
+                set_next_fill_style(SOLID_COLOR, 1.0);
+            }
+        }
+
+        // Set line style
+        set_next_line_style(get_colormap_color(1), 1.0);
+
+        // Set marker style
+        set_next_marker_style(
+            Marker3D::Square,
+            -1.0,
+            get_colormap_color(2),
+            -1.0,
+            get_colormap_color(2),
+        );
 
         let x_grid: Vec<f32> = (0..N).map(|j| MIN_VAL + j as f32 * STEP).collect();
         let y_grid: Vec<f32> = (0..N).map(|i| MIN_VAL + i as f32 * STEP).collect();
 
-        Surface3D::new("Wave Surface", &x_grid, &y_grid, &zs).plot(plot_ui);
+        unsafe {
+            if CUSTOM_RANGE {
+                Surface3D::new("Wave Surface", &x_grid, &y_grid, &zs)
+                    .scale(RANGE_MIN as f64, RANGE_MAX as f64)
+                    .flags(FLAGS)
+                    .plot(plot_ui);
+            } else {
+                Surface3D::new("Wave Surface", &x_grid, &y_grid, &zs)
+                    .scale(0.0, 0.0)
+                    .flags(FLAGS)
+                    .plot(plot_ui);
+            }
+        }
+
         pop_style_var(1);
+    }
+
+    unsafe {
+        if SELECTED_FILL == 1 {
+            pop_colormap(1);
+        }
     }
 }
 
-fn demo_mesh_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
+fn demo_mesh_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     // Simple tetrahedron
     let vertices: [[f32; 3]; 4] = [
         [0.0, 0.0, 0.8],
@@ -393,13 +516,136 @@ fn demo_mesh_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
     ];
     let indices: [u32; 12] = [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3];
 
+    // Mesh flags
+    static mut FLAGS: Mesh3DFlags = Mesh3DFlags::NONE;
+    unsafe {
+        ui.checkbox_flags("NoLines", &mut FLAGS, Mesh3DFlags::NO_LINES);
+        ui.checkbox_flags("NoFill", &mut FLAGS, Mesh3DFlags::NO_FILL);
+        ui.checkbox_flags("NoMarkers", &mut FLAGS, Mesh3DFlags::NO_MARKERS);
+    }
+
     if let Some(_tok) = plot_ui.begin_plot("Mesh Plots").build() {
         plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Once);
         set_next_fill_style([0.8, 0.8, 0.2, 0.6], 1.0);
         set_next_line_style([0.5, 0.5, 0.2, 0.6], 1.0);
         let marker_col = [0.5, 0.5, 0.2, 0.6];
         set_next_marker_style(Marker3D::Square, 3.0, marker_col, -1.0, marker_col);
-        Mesh3D::new("Tetrahedron", &vertices, &indices).plot(plot_ui);
+        unsafe {
+            Mesh3D::new("Tetrahedron", &vertices, &indices)
+                .flags(FLAGS)
+                .plot(plot_ui);
+        }
+    }
+}
+
+// ScrollingBuffer helper for realtime plots
+struct ScrollingBuffer {
+    max_size: usize,
+    offset: usize,
+    data: Vec<[f32; 2]>,
+}
+
+impl ScrollingBuffer {
+    fn new(max_size: usize) -> Self {
+        Self {
+            max_size,
+            offset: 0,
+            data: Vec::new(),
+        }
+    }
+
+    fn add_point(&mut self, x: f32, y: f32) {
+        if self.data.len() < self.max_size {
+            self.data.push([x, y]);
+        } else {
+            self.data[self.offset] = [x, y];
+            self.offset = (self.offset + 1) % self.max_size;
+        }
+    }
+
+    fn erase(&mut self) {
+        if !self.data.is_empty() {
+            self.data.clear();
+            self.offset = 0;
+        }
+    }
+
+    fn get_data(&self) -> (Vec<f32>, Vec<f32>) {
+        let mut xs = Vec::with_capacity(self.data.len());
+        let mut ys = Vec::with_capacity(self.data.len());
+
+        for i in 0..self.data.len() {
+            let idx = (self.offset + i) % self.data.len();
+            xs.push(self.data[idx][0]);
+            ys.push(self.data[idx][1]);
+        }
+
+        (xs, ys)
+    }
+}
+
+fn demo_realtime_plots(ui: &Ui, plot_ui: &Plot3DUi) {
+    static mut T: f32 = 0.0;
+    static mut HISTORY: f32 = 10.0;
+    static mut SDATA1: Option<ScrollingBuffer> = None;
+    static mut SDATA2: Option<ScrollingBuffer> = None;
+    static mut SDATA3: Option<ScrollingBuffer> = None;
+
+    unsafe {
+        if SDATA1.is_none() {
+            SDATA1 = Some(ScrollingBuffer::new(1000));
+            SDATA2 = Some(ScrollingBuffer::new(1000));
+            SDATA3 = Some(ScrollingBuffer::new(1000));
+        }
+
+        T += ui.io().delta_time();
+
+        let sdata1 = SDATA1.as_mut().unwrap();
+        let sdata2 = SDATA2.as_mut().unwrap();
+        let sdata3 = SDATA3.as_mut().unwrap();
+
+        sdata1.add_point(T, (2.0 * T).sin());
+        sdata2.add_point(T, (2.0 * T).cos());
+        sdata3.add_point(T, (2.0 * T + PI / 2.0).sin() * (2.0 * T + PI / 2.0).cos());
+
+        ui.slider_config("History", 1.0, 30.0).build(&mut HISTORY);
+        ui.same_line();
+        if ui.button("Reset") {
+            sdata1.erase();
+            sdata2.erase();
+            sdata3.erase();
+            T = 0.0;
+        }
+
+        if let Some(_tok) = plot_ui
+            .begin_plot("Realtime Plots")
+            .size([-1.0, 400.0])
+            .build()
+        {
+            plot_ui.setup_axes_limits(
+                (T - HISTORY) as f64,
+                T as f64,
+                -1.0,
+                1.0,
+                -1.0,
+                1.0,
+                Plot3DCond::Always,
+            );
+
+            let (xs1, ys1) = sdata1.get_data();
+            let (xs2, ys2) = sdata2.get_data();
+            let (xs3, zs3) = sdata3.get_data();
+
+            if !xs1.is_empty() {
+                Line3D::f32("sin(2t)", &xs1, &ys1, &vec![0.0; xs1.len()]).plot(plot_ui);
+            }
+            if !xs2.is_empty() {
+                Line3D::f32("cos(2t)", &xs2, &vec![0.0; xs2.len()], &ys2).plot(plot_ui);
+            }
+            if !xs3.is_empty() {
+                Line3D::f32("sin*cos", &xs3, &vec![0.0; xs3.len()], &zs3).plot(plot_ui);
+            }
+        }
     }
 }
 
@@ -475,9 +721,9 @@ fn demo_box_rotation(ui: &Ui, plot_ui: &Plot3DUi) {
 }
 
 fn demo_tick_labels(_ui: &Ui, plot_ui: &Plot3DUi) {
-    let xs = [0.0f32, 1.0, 2.0];
-    let ys = [0.0f32, 1.0, 2.0];
-    let zs = [0.0f32, 1.0, 2.0];
+    let xs = [0.0f64, 1.0, 2.0];
+    let ys = [0.0f64, 1.0, 2.0];
+    let zs = [0.0f64, 1.0, 2.0];
 
     if let Some(_tok) = plot_ui.begin_plot("Tick Labels").build() {
         plot_ui.setup_axes_limits(-0.5, 2.5, -0.5, 2.5, -0.5, 2.5, Plot3DCond::Once);
@@ -491,7 +737,10 @@ fn demo_tick_labels(_ui: &Ui, plot_ui: &Plot3DUi) {
         plot_ui.setup_axis_ticks_values(Axis3D::Y, &ys, Some(&y_labels), false);
         plot_ui.setup_axis_ticks_values(Axis3D::Z, &zs, Some(&z_labels), false);
 
-        Scatter3D::f32("Points", &xs, &ys, &zs).plot(plot_ui);
+        let xs_f32 = [0.0f32, 1.0, 2.0];
+        let ys_f32 = [0.0f32, 1.0, 2.0];
+        let zs_f32 = [0.0f32, 1.0, 2.0];
+        Scatter3D::f32("Points", &xs_f32, &ys_f32, &zs_f32).plot(plot_ui);
     }
 }
 
@@ -575,4 +824,144 @@ fn demo_nan_values(_ui: &Ui, plot_ui: &Plot3DUi) {
         );
         Scatter3D::f32("Scatter with NaN", &xs, &ys, &zs).plot(plot_ui);
     }
+}
+
+fn demo_custom_styles(ui: &Ui, plot_ui: &Plot3DUi) {
+    ui.text("Modify the style of plots using ImPlot3D style variables.");
+    ui.spacing();
+
+    // Style variables
+    static mut LINE_WEIGHT: f32 = 2.0;
+    static mut MARKER_SIZE: f32 = 5.0;
+    static mut MARKER_WEIGHT: f32 = 1.0;
+    static mut FILL_ALPHA: f32 = 0.5;
+
+    unsafe {
+        ui.slider_config("LineWeight", 0.5, 5.0)
+            .build(&mut LINE_WEIGHT);
+        ui.slider_config("MarkerSize", 2.0, 10.0)
+            .build(&mut MARKER_SIZE);
+        ui.slider_config("MarkerWeight", 0.5, 3.0)
+            .build(&mut MARKER_WEIGHT);
+        ui.slider_config("FillAlpha", 0.0, 1.0)
+            .build(&mut FILL_ALPHA);
+    }
+
+    // Generate data
+    let mut xs = vec![0.0f32; 100];
+    let mut ys = vec![0.0f32; 100];
+    let mut zs = vec![0.0f32; 100];
+    for i in 0..100 {
+        let t = i as f32 / 99.0;
+        xs[i] = (t * 2.0 * PI).sin();
+        ys[i] = (t * 2.0 * PI).cos();
+        zs[i] = t * 2.0 - 1.0;
+    }
+
+    if let Some(_tok) = plot_ui.begin_plot("Custom Styles").build() {
+        plot_ui.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
+
+        unsafe {
+            push_style_var_f32(IMPLOT3D_STYLEVAR_LINE_WEIGHT, LINE_WEIGHT);
+            push_style_var_f32(IMPLOT3D_STYLEVAR_MARKER_SIZE, MARKER_SIZE);
+            push_style_var_f32(IMPLOT3D_STYLEVAR_MARKER_WEIGHT, MARKER_WEIGHT);
+            push_style_var_f32(IMPLOT3D_STYLEVAR_FILL_ALPHA, FILL_ALPHA);
+        }
+
+        set_next_marker_style(
+            Marker3D::Circle,
+            -1.0,
+            get_colormap_color(0),
+            -1.0,
+            get_colormap_color(0),
+        );
+        Line3D::f32("Styled Line", &xs, &ys, &zs).plot(plot_ui);
+
+        pop_style_var(4);
+    }
+}
+
+fn demo_custom_rendering(ui: &Ui, plot_ui: &Plot3DUi) {
+    ui.text("Use custom rendering to draw additional elements in the plot.");
+    ui.text("This demo shows how to use PlotToPixels for custom drawing.");
+    ui.spacing();
+
+    // Generate a simple helix
+    let mut xs = vec![0.0f32; 100];
+    let mut ys = vec![0.0f32; 100];
+    let mut zs = vec![0.0f32; 100];
+    for i in 0..100 {
+        let t = i as f32 / 99.0 * 4.0 * PI;
+        xs[i] = t.cos();
+        ys[i] = t.sin();
+        zs[i] = t / (4.0 * PI) * 2.0 - 1.0;
+    }
+
+    if let Some(_tok) = plot_ui.begin_plot("Custom Rendering").build() {
+        plot_ui.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
+
+        // Draw the helix
+        Line3D::f32("Helix", &xs, &ys, &zs).plot(plot_ui);
+
+        // Custom rendering: highlight start and end points
+        let draw_list = ui.get_window_draw_list();
+
+        // Convert 3D points to 2D screen coordinates
+        let start_pixel = plot_ui.plot_to_pixels([xs[0], ys[0], zs[0]]);
+        let end_pixel = plot_ui.plot_to_pixels([xs[99], ys[99], zs[99]]);
+
+        // Draw circles at start and end
+        draw_list
+            .add_circle([start_pixel[0], start_pixel[1]], 10.0, [0.0, 1.0, 0.0, 1.0])
+            .filled(true)
+            .build();
+
+        draw_list
+            .add_circle([end_pixel[0], end_pixel[1]], 10.0, [1.0, 0.0, 0.0, 1.0])
+            .filled(true)
+            .build();
+
+        // Add text labels
+        draw_list.add_text(
+            [start_pixel[0] + 15.0, start_pixel[1]],
+            [0.0, 1.0, 0.0, 1.0],
+            "Start",
+        );
+        draw_list.add_text(
+            [end_pixel[0] + 15.0, end_pixel[1]],
+            [1.0, 0.0, 0.0, 1.0],
+            "End",
+        );
+    }
+}
+
+fn demo_help(ui: &Ui) {
+    ui.text("ABOUT THIS DEMO:");
+    ui.bullet_text("This is a complete port of the official ImPlot3D C++ demo.");
+    ui.bullet_text("It showcases all major features of the ImPlot3D library.");
+    ui.spacing();
+
+    ui.text("USER GUIDE:");
+    ui.bullet_text("Left click and drag to rotate the plot.");
+    ui.bullet_text("Right click and drag to pan the plot.");
+    ui.bullet_text("Scroll to zoom in and out.");
+    ui.bullet_text("Double-click to reset the view.");
+    ui.spacing();
+
+    ui.text("FEATURES:");
+    ui.bullet_text("Line plots with animated data");
+    ui.bullet_text("Scatter plots with custom markers");
+    ui.bullet_text("Triangle and quad plots for 3D shapes");
+    ui.bullet_text("Surface plots with colormap support");
+    ui.bullet_text("Mesh plots for complex geometries");
+    ui.bullet_text("Realtime plots with scrolling buffers");
+    ui.bullet_text("Custom styles and rendering");
+    ui.bullet_text("Axis constraints and transformations");
+    ui.spacing();
+
+    ui.text("RUST BINDINGS:");
+    ui.bullet_text("Safe Rust API with builder patterns");
+    ui.bullet_text("Type-safe f32/f64 support");
+    ui.bullet_text("RAII-based resource management");
+    ui.bullet_text("Integration with dear-imgui-rs ecosystem");
 }

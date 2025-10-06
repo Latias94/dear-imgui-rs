@@ -3,6 +3,40 @@
 //! Safe wrapper over `dear-implot3d-sys`, designed to integrate with
 //! `dear-imgui-rs`. Mirrors `dear-implot` design: context + Ui facade,
 //! builder-style helpers, optional `mint` inputs.
+//!
+//! # Quick Start
+//!
+//! ```no_run
+//! use dear_imgui_rs::*;
+//! use dear_implot3d::*;
+//!
+//! let mut imgui_ctx = Context::create();
+//! let plot3d_ctx = Plot3DContext::create(&imgui_ctx);
+//!
+//! // In your main loop:
+//! let ui = imgui_ctx.frame();
+//! let plot_ui = plot3d_ctx.get_plot_ui(&ui);
+//!
+//! if let Some(_token) = plot_ui.begin_plot("3D Plot").build() {
+//!     let xs = [0.0, 1.0, 2.0];
+//!     let ys = [0.0, 1.0, 0.0];
+//!     let zs = [0.0, 0.5, 1.0];
+//!     plot_ui.plot_line_f32("Line", &xs, &ys, &zs, Line3DFlags::NONE);
+//! }
+//! ```
+//!
+//! # Features
+//!
+//! - **mint**: Enable support for `mint` math types (Point3, Vector3)
+//!
+//! # Architecture
+//!
+//! This crate follows the same design patterns as `dear-implot`:
+//! - `Plot3DContext`: Manages the ImPlot3D context (create once)
+//! - `Plot3DUi`: Per-frame access to plotting functions
+//! - RAII tokens: `Plot3DToken` automatically calls `EndPlot` on drop
+//! - Builder pattern: Fluent API for configuring plots
+//! - Type-safe flags: Using `bitflags!` for compile-time safety
 
 use dear_imgui_rs::texture::TextureRef;
 pub use dear_imgui_rs::{Context, Ui};
@@ -15,24 +49,86 @@ mod ui_ext;
 pub use flags::*;
 pub use style::*;
 pub use ui_ext::*;
+pub mod meshes;
 pub mod plots;
 
 /// Show upstream ImPlot3D demos (from C++ demo)
+///
+/// This displays all available ImPlot3D demos in a single window.
+/// Useful for learning and testing the library.
 pub fn show_all_demos() {
     unsafe { sys::ImPlot3D_ShowAllDemos() }
 }
 
 /// Show the main ImPlot3D demo window (C++ upstream)
+///
+/// This displays the main demo window with tabs for different plot types.
+/// Pass `None` to always show, or `Some(&mut bool)` to control visibility.
+///
+/// # Example
+///
+/// ```no_run
+/// use dear_implot3d::*;
+///
+/// let mut show_demo = true;
+/// show_demo_window_with_flag(&mut show_demo);
+/// ```
 pub fn show_demo_window() {
     unsafe { sys::ImPlot3D_ShowDemoWindow(std::ptr::null_mut()) }
 }
 
+/// Show the main ImPlot3D demo window with a visibility flag
+pub fn show_demo_window_with_flag(p_open: &mut bool) {
+    unsafe { sys::ImPlot3D_ShowDemoWindow(p_open as *mut bool) }
+}
+
+/// Show the ImPlot3D style editor window
+///
+/// This displays a window for editing ImPlot3D style settings in real-time.
+/// Pass `None` to use the current style, or `Some(&mut ImPlot3DStyle)` to edit a specific style.
+pub fn show_style_editor() {
+    unsafe { sys::ImPlot3D_ShowStyleEditor(std::ptr::null_mut()) }
+}
+
+/// Show the ImPlot3D metrics/debugger window
+///
+/// This displays performance metrics and debugging information.
+/// Pass `None` to always show, or `Some(&mut bool)` to control visibility.
+pub fn show_metrics_window() {
+    unsafe { sys::ImPlot3D_ShowMetricsWindow(std::ptr::null_mut()) }
+}
+
+/// Show the ImPlot3D metrics/debugger window with a visibility flag
+pub fn show_metrics_window_with_flag(p_open: &mut bool) {
+    unsafe { sys::ImPlot3D_ShowMetricsWindow(p_open as *mut bool) }
+}
+
 /// Plot3D context wrapper
+///
+/// This manages the ImPlot3D context lifetime. Create one instance per application
+/// and keep it alive for the duration of your program.
+///
+/// # Example
+///
+/// ```no_run
+/// use dear_imgui_rs::*;
+/// use dear_implot3d::*;
+///
+/// let mut imgui_ctx = Context::create();
+/// let plot3d_ctx = Plot3DContext::create(&imgui_ctx);
+///
+/// // In your main loop:
+/// let ui = imgui_ctx.frame();
+/// let plot_ui = plot3d_ctx.get_plot_ui(&ui);
+/// ```
 pub struct Plot3DContext {
     owned: bool,
 }
 
 impl Plot3DContext {
+    /// Create a new ImPlot3D context
+    ///
+    /// This should be called once after creating your ImGui context.
     pub fn create(_imgui: &Context) -> Self {
         unsafe {
             let ctx = sys::ImPlot3D_CreateContext();
@@ -42,10 +138,18 @@ impl Plot3DContext {
         Self { owned: true }
     }
 
+    /// Get a raw pointer to the current ImPlot3D style
+    ///
+    /// This is an advanced function for direct style manipulation.
+    /// Prefer using the safe style functions in the `style` module.
     pub fn raw_style_mut() -> *mut sys::ImPlot3DStyle {
         unsafe { sys::ImPlot3D_GetStyle() }
     }
 
+    /// Get a per-frame plotting interface
+    ///
+    /// Call this once per frame to get access to plotting functions.
+    /// The returned `Plot3DUi` is tied to the lifetime of the `Ui` frame.
     pub fn get_plot_ui<'ui>(&self, ui: &'ui Ui) -> Plot3DUi<'ui> {
         Plot3DUi { _ui: ui }
     }
@@ -62,15 +166,55 @@ impl Drop for Plot3DContext {
 }
 
 /// Per-frame access helper mirroring `dear-implot`
+///
+/// This provides access to all 3D plotting functions. It is tied to the lifetime
+/// of the current ImGui frame and should be obtained via `Plot3DContext::get_plot_ui()`.
+///
+/// # Example
+///
+/// ```no_run
+/// use dear_implot3d::*;
+///
+/// # let plot_ui: Plot3DUi = todo!();
+/// if let Some(_token) = plot_ui.begin_plot("My 3D Plot").build() {
+///     plot_ui.setup_axes("X", "Y", "Z", Axis3DFlags::NONE, Axis3DFlags::NONE, Axis3DFlags::NONE);
+///
+///     let xs = [0.0, 1.0, 2.0];
+///     let ys = [0.0, 1.0, 0.0];
+///     let zs = [0.0, 0.5, 1.0];
+///     plot_ui.plot_line_f32("Line", &xs, &ys, &zs, Line3DFlags::NONE);
+/// }
+/// ```
 pub struct Plot3DUi<'ui> {
     _ui: &'ui Ui,
 }
 
 /// RAII token that ends the plot on drop
+///
+/// This token is returned by `Plot3DBuilder::build()` and automatically calls
+/// `ImPlot3D_EndPlot()` when it goes out of scope, ensuring proper cleanup.
 pub struct Plot3DToken;
 
 impl<'ui> Plot3DUi<'ui> {
     /// Builder to configure and begin a 3D plot
+    ///
+    /// Returns a `Plot3DBuilder` that allows you to configure the plot before calling `.build()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use dear_implot3d::*;
+    ///
+    /// # let plot_ui: Plot3DUi = todo!();
+    /// if let Some(_token) = plot_ui
+    ///     .begin_plot("My Plot")
+    ///     .size([600.0, 400.0])
+    ///     .flags(Plot3DFlags::NO_LEGEND)
+    ///     .build()
+    /// {
+    ///     // Plot content here
+    /// }
+    /// ```
     pub fn begin_plot<S: AsRef<str>>(&self, title: S) -> Plot3DBuilder {
         Plot3DBuilder {
             title: title.as_ref().into(),
@@ -80,6 +224,29 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     /// Convenience: plot a simple 3D line (f32)
+    ///
+    /// This is a quick way to plot a line without using the builder pattern.
+    /// For more control, use the `plots::Line3D` builder.
+    ///
+    /// # Arguments
+    ///
+    /// * `label` - Label for the legend
+    /// * `xs` - X coordinates
+    /// * `ys` - Y coordinates
+    /// * `zs` - Z coordinates
+    /// * `flags` - Line flags (e.g., `Line3DFlags::SEGMENTS`, `Line3DFlags::LOOP`)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use dear_implot3d::*;
+    ///
+    /// # let plot_ui: Plot3DUi = todo!();
+    /// let xs = [0.0, 1.0, 2.0];
+    /// let ys = [0.0, 1.0, 0.0];
+    /// let zs = [0.0, 0.5, 1.0];
+    /// plot_ui.plot_line_f32("Line", &xs, &ys, &zs, Line3DFlags::NONE);
+    /// ```
     pub fn plot_line_f32<S: AsRef<str>>(
         &self,
         label: S,
@@ -624,8 +791,36 @@ impl Plot3DBuilder {
 }
 
 /// Optional mint support for inputs
+///
+/// When the `mint` feature is enabled, you can use `mint::Point3<f32>` and `mint::Vector3<f32>`
+/// types directly with plotting functions. This provides interoperability with popular math
+/// libraries like `glam`, `nalgebra`, `cgmath`, etc.
+///
+/// # Example
+///
+/// ```no_run
+/// # #[cfg(feature = "mint")]
+/// # {
+/// use dear_implot3d::*;
+/// use mint::Point3;
+///
+/// # let plot_ui: Plot3DUi = todo!();
+/// let points = vec![
+///     Point3 { x: 0.0, y: 0.0, z: 0.0 },
+///     Point3 { x: 1.0, y: 1.0, z: 1.0 },
+///     Point3 { x: 2.0, y: 0.0, z: 2.0 },
+/// ];
+///
+/// if let Some(_token) = plot_ui.begin_plot("Mint Example").build() {
+///     plot_ui.plot_line_mint("Line", &points, Line3DFlags::NONE);
+/// }
+/// # }
+/// ```
 #[cfg(feature = "mint")]
 impl<'ui> Plot3DUi<'ui> {
+    /// Plot a 3D line using `mint::Point3<f32>` points
+    ///
+    /// This is a convenience function that converts mint points to separate x, y, z arrays.
     pub fn plot_line_mint<S: AsRef<str>>(
         &self,
         label: S,
@@ -641,6 +836,40 @@ impl<'ui> Plot3DUi<'ui> {
             zs.push(p.z);
         }
         self.plot_line_f32(label, &xs, &ys, &zs, flags);
+    }
+
+    /// Plot a 3D scatter using `mint::Point3<f32>` points
+    pub fn plot_scatter_mint<S: AsRef<str>>(
+        &self,
+        label: S,
+        pts: &[mint::Point3<f32>],
+        flags: Scatter3DFlags,
+    ) {
+        let mut xs = Vec::with_capacity(pts.len());
+        let mut ys = Vec::with_capacity(pts.len());
+        let mut zs = Vec::with_capacity(pts.len());
+        for p in pts {
+            xs.push(p.x);
+            ys.push(p.y);
+            zs.push(p.z);
+        }
+        self.plot_scatter_f32(label, &xs, &ys, &zs, flags);
+    }
+
+    /// Plot 3D text at a `mint::Point3<f32>` position
+    pub fn plot_text_mint(
+        &self,
+        text: &str,
+        pos: mint::Point3<f32>,
+        angle: f32,
+        pix_offset: [f32; 2],
+    ) {
+        self.plot_text(text, pos.x, pos.y, pos.z, angle, pix_offset);
+    }
+
+    /// Convert a `mint::Point3<f32>` to pixel coordinates
+    pub fn plot_to_pixels_mint(&self, point: mint::Point3<f32>) -> [f32; 2] {
+        self.plot_to_pixels([point.x, point.y, point.z])
     }
 }
 
