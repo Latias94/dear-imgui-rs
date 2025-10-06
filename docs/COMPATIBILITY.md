@@ -19,6 +19,12 @@ Backends
 | dear-imgui-glow  | 0.3.x   | glow = 0.16        |       |
 | dear-imgui-winit | 0.3.x   | winit = 0.30.12    |       |
 
+Utilities
+
+| Crate     | Version | External deps | Notes |
+|-----------|---------|---------------|-------|
+| dear-app  | 0.3.x   | winit, wgpu   | App runner (docking, themes, add-ons) |
+
 Extensions
 
 | Crate         | Version | Requires dear-imgui-rs | Sys crate               | Notes |
@@ -27,6 +33,8 @@ Extensions
 | dear-imnodes  | 0.3.x   | 0.3.x                  | dear-imnodes-sys 0.3.x  |       |
 | dear-imguizmo | 0.3.x   | 0.3.x                  | dear-imguizmo-sys 0.3.x |       |
 | dear-file-browser | 0.3.x | 0.3.x               | — (pure Rust + rfd)     | ImGui UI + native (rfd) backends |
+| dear-implot3d | 0.3.x   | 0.3.x                  | dear-implot3d-sys 0.3.x | 3D plotting |
+| dear-imguizmo-quat | 0.3.x | 0.3.x               | dear-imguizmo-quat-sys 0.3.x | Quaternion gizmo |
 
 ## History
 
@@ -36,8 +44,8 @@ Release Train 0.3 (current)
 - **All crates unified to 0.3.0**: Complete version alignment across the entire workspace
   - Core: dear-imgui-rs 0.3.0, dear-imgui-sys 0.3.0
   - Backends: dear-imgui-wgpu 0.3.0, dear-imgui-glow 0.3.0, dear-imgui-winit 0.3.0
-  - Extensions: dear-implot 0.3.0, dear-imnodes 0.3.0, dear-imguizmo 0.3.0
-  - Sys crates: dear-implot-sys 0.3.0, dear-imnodes-sys 0.3.0, dear-imguizmo-sys 0.3.0
+  - Extensions: dear-implot 0.3.0, dear-imnodes 0.3.0, dear-imguizmo 0.3.0, dear-implot3d 0.3.0, dear-imguizmo-quat 0.3.0
+  - Sys crates: dear-implot-sys 0.3.0, dear-imnodes-sys 0.3.0, dear-imguizmo-sys 0.3.0, dear-implot3d-sys 0.3.0, dear-imguizmo-quat-sys 0.3.0
 - dear-imgui-sys 0.3.x binds Dear ImGui v1.92.3 (docking) via cimgui.
 - dear-imgui-rs 0.3.x layers a safe API over the 0.3.x sys crate.
 - External dependencies: wgpu 26, winit 0.30.12, glow 0.16

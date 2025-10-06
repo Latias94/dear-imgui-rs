@@ -69,6 +69,9 @@ jobs:
       - name: Build examples with extensions
         run: cargo build -p dear-imgui-examples --features "dear-imguizmo dear-imnodes dear-implot"
 
+      - name: Build dear-app with all add-ons
+        run: cargo build -p dear-app --features "implot imnodes implot3d"
+
   publish-check:
     name: Package check (ubuntu)
     runs-on: ubuntu-latest

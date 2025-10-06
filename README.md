@@ -27,10 +27,13 @@
   - `dear-imgui-sys` — low‑level FFI via cimgui (docking branch), bindgen against Dear ImGui v1.92.3
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-winit`
+  - `dear-app` — convenient Winit + WGPU application runner (docking, themes, add-ons)
 - Extensions
   - `dear-imguizmo` — 3D gizmo (cimguizmo C API) + a pure‑Rust GraphEditor
   - `dear-imnodes` — node editor (cimnodes C API)
   - `dear-implot` — plotting (cimplot C API)
+  - `dear-implot3d` — 3D plotting (cimplot3d C API)
+  - `dear-imguizmo-quat` — quaternion + 3D gizmo (cimguizmo_quat C API)
   - `dear-file-browser` — native dialogs (rfd) + pure ImGui in-UI file browser
 
 All crates are maintained together in this workspace.
@@ -144,6 +147,9 @@ Extensions
 | dear-implot   | 0.3.x   | 0.3.x                  | dear-implot-sys 0.3.x |     |
 | dear-imnodes  | 0.3.x   | 0.3.x                  | dear-imnodes-sys 0.3.x |     |
 | dear-imguizmo | 0.3.x   | 0.3.x                  | dear-imguizmo-sys 0.3.x |    |
+| dear-implot3d | 0.3.x   | 0.3.x                  | dear-implot3d-sys 0.3.x | ImPlot3D (3D plotting) |
+| dear-imguizmo-quat | 0.3.x | 0.3.x               | dear-imguizmo-quat-sys 0.3.x | ImGuIZMO.quat (quaternion gizmo) |
+| dear-file-browser | 0.3.x | 0.3.x               | —                      | ImGui UI + native (rfd) backends |
 
 Maintenance rules
 
@@ -181,6 +187,9 @@ extensions/
   dear-imguizmo/       # ImGuizmo + pure‑Rust GraphEditor
   dear-imnodes/        # ImNodes (node editor)
   dear-implot/         # ImPlot (plotting)
+  dear-implot3d/       # ImPlot3D (3D plotting)
+  dear-imguizmo-quat/  # ImGuIZMO.quat (quaternion gizmo)
+  dear-file-browser/   # File dialogs (rfd) + pure ImGui browser
 ```
 
 ## Limitations

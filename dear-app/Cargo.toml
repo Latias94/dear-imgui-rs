@@ -8,6 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
+readme = "README.md"
 
 [dependencies]
 dear-imgui-rs = { path = "../dear-imgui", version = "0.3" }

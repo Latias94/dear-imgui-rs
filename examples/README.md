@@ -17,6 +17,7 @@ Run any example with:
   - `--features dear-imnodes` for ImNodes
   - `--features dear-imguizmo` for ImGuizmo
   - `--features dear-imguizmo-quat` for ImGuIZMO.quat
+  - `--features dear-implot3d` for ImPlot3D (and, if your workspace doesn’t pre-enable add-ons on dear-app, also add `, dear-app/implot3d`)
   - `--features dear-file-browser` for File Browser / Dialogs
 
 Quick picks:
@@ -34,6 +35,8 @@ Quick picks:
 - File dialog (native): `cargo run -p dear-imgui-examples --features dear-file-browser --bin file_dialog_native`
 - File browser (ImGui): `cargo run -p dear-imgui-examples --features dear-file-browser --bin file_browser_imgui`
 - Style & Fonts + FreeType: `cargo run -p dear-imgui-examples --features freetype --bin style_and_fonts`
+- ImPlot3D Demo: `cargo run -p dear-imgui-examples --bin implot3d_basic --features "dear-implot3d"`
+  - If your workspace doesn’t pre-enable dear-app add-on features, use: `cargo run -p dear-imgui-examples --bin implot3d_basic --features "dear-implot3d, dear-app/implot3d"`
 
 Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
 - Extensions (e.g., ImPlot): `cargo run -p dear-imgui-examples --bin implot_basic --features dear-implot`
@@ -90,6 +93,13 @@ This is the intended organization.
 - Integration: `04-integration/wgpu_rtt_gameview.rs`, `04-integration/console_log.rs`, `04-integration/asset_browser_grid.rs`
   and `04-integration/file_dialog_native.rs`, `04-integration/file_browser_imgui.rs`
 - Extensions: `implot_basic.rs`, `imnodes_basic.rs`, `imguizmo_basic.rs`
+
+### dear-app helpers
+
+These examples use the `dear-app` runner (Winit + WGPU) with minimal code:
+
+- Quickstart: `cargo run -p dear-imgui-examples --bin dear_app_quickstart`
+- Docking template: `cargo run -p dear-imgui-examples --bin dear_app_docking`
 
 These will remain runnable as-is; future additions may live in subfolders with explicit `[[bin]]` paths.
 
