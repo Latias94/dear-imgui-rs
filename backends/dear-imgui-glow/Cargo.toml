@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-glow"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 description = "Glow (OpenGL) renderer for Dear ImGui"
 license.workspace = true
