@@ -21,9 +21,9 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.3.x   |
-| dear-imgui-rs     | 0.3.x   |
-| dear-implot-sys   | 0.2.x   |
+| Crate             | 0.4.x   |
+| dear-imgui-rs     | 0.4.x   |
+| dear-implot-sys   | 0.4.x   |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 

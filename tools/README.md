@@ -93,10 +93,10 @@ python tools/publish.py --wait 60
 
 ### 3. `bump_version.py` - Version Bumping
 
-Updates version numbers across all crates.
+Updates version numbers across all crates and README files.
 
 ```bash
-# Bump to a specific version
+# Bump to a specific version (updates Cargo.toml and README files)
 python tools/bump_version.py 0.5.0
 
 # Dry run (show what would change)
@@ -107,7 +107,12 @@ python tools/bump_version.py 0.5.0 --old-version 0.4.0
 
 # Bump only specific crates
 python tools/bump_version.py 0.5.0 --crates dear-imgui-sys,dear-imgui-rs
+
+# Skip README updates
+python tools/bump_version.py 0.5.0 --skip-readme
 ```
+
+**Note**: This script now automatically updates README files in addition to Cargo.toml files.
 
 ### 4. `pre_publish_check.py` - Validation
 
@@ -152,6 +157,23 @@ python tools/update_submodule_and_bindings.py \
   --submodules update \
   --profile release
 ```
+
+### 6. `update_readme_versions.py` - README Version Updater
+
+Updates version numbers in README files (compatibility tables and examples).
+
+```bash
+# Update to a specific version
+python tools/update_readme_versions.py 0.5.0
+
+# Dry run (show what would change)
+python tools/update_readme_versions.py 0.5.0 --dry-run
+
+# Specify old version manually
+python tools/update_readme_versions.py 0.5.0 --old-version 0.4.0
+```
+
+**Note**: This script is automatically called by `bump_version.py`, so you usually don't need to run it manually.
 
 ## Typical Release Workflow
 

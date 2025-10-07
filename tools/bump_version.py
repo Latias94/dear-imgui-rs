@@ -200,7 +200,12 @@ def main() -> int:
         action="store_true",
         help="Show what would be changed without making changes"
     )
-    
+    parser.add_argument(
+        "--skip-readme",
+        action="store_true",
+        help="Skip updating README files"
+    )
+
     args = parser.parse_args()
     
     # Validate new version
@@ -274,6 +279,30 @@ def main() -> int:
     if error_count > 0:
         print_error(f"Failed to update: {error_count} crate(s)")
     
+    # Update README files if not skipped
+    if not args.skip_readme:
+        print(f"\n{Colors.BOLD}{'=' * 80}{Colors.ENDC}")
+        print(f"{Colors.BOLD}Updating README files{Colors.ENDC}")
+        print(f"{Colors.BOLD}{'=' * 80}{Colors.ENDC}\n")
+
+        # Import and run the README updater
+        import subprocess
+        readme_cmd = [
+            sys.executable,
+            str(repo_root / "tools" / "update_readme_versions.py"),
+            args.new_version,
+            "--old-version", old_version
+        ]
+        if args.dry_run:
+            readme_cmd.append("--dry-run")
+
+        try:
+            result = subprocess.run(readme_cmd, check=False)
+            if result.returncode != 0:
+                print_warning("README update had some issues, but continuing...")
+        except Exception as e:
+            print_warning(f"Failed to run README updater: {e}")
+
     if args.dry_run:
         print_warning("\nDRY RUN: No files were actually modified")
         print_info("Run without --dry-run to apply changes")
@@ -281,11 +310,11 @@ def main() -> int:
         print_info("\nNext steps:")
         print("  1. Review the changes: git diff")
         print("  2. Update CHANGELOG.md")
-        print("  3. Update README.md and docs/COMPATIBILITY.md")
+        print("  3. Update docs/COMPATIBILITY.md")
         print("  4. Run: cargo update")
         print("  5. Test: cargo test --workspace")
         print("  6. Commit: git add -A && git commit -m 'chore: bump version to " + args.new_version + "'")
-    
+
     return 1 if error_count > 0 else 0
 
 

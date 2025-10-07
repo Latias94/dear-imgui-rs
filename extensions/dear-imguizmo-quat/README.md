@@ -19,9 +19,9 @@ Safe, idiomatic Rust bindings for ImGuIZMO.quat (quaternion + 3D gizmo helpers) 
 
 | Item                   | Version |
 |------------------------|---------|
-| Crate                  | 0.3.x   |
-| dear-imgui-rs          | 0.3.x   |
-| dear-imguizmo-quat-sys | 0.3.x   |
+| Crate                  | 0.4.x   |
+| dear-imgui-rs          | 0.4.x   |
+| dear-imguizmo-quat-sys | 0.4.x   |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
