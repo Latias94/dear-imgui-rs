@@ -181,18 +181,18 @@ Application Runner
 
 | Crate     | Version | Requires dear-imgui-rs | Notes |
 |-----------|---------|------------------------|-------|
-| dear-app  | 0.3.x   | 0.3.x                  | Convenient Winit + WGPU runner with docking, themes, and add-ons support |
+| dear-app  | 0.4.x   | 0.4.x                  | Convenient Winit + WGPU runner with docking, themes, and add-ons support |
 
 Extensions
 
 | Crate         | Version | Requires dear-imgui-rs | Sys crate            | Notes |
 |---------------|---------|------------------------|----------------------|-------|
-| dear-implot   | 0.3.x   | 0.3.x                  | dear-implot-sys 0.3.x |     |
-| dear-imnodes  | 0.3.x   | 0.3.x                  | dear-imnodes-sys 0.3.x |     |
-| dear-imguizmo | 0.3.x   | 0.3.x                  | dear-imguizmo-sys 0.3.x |    |
-| dear-implot3d | 0.3.x   | 0.3.x                  | dear-implot3d-sys 0.3.x | ImPlot3D (3D plotting) |
-| dear-imguizmo-quat | 0.3.x | 0.3.x               | dear-imguizmo-quat-sys 0.3.x | ImGuIZMO.quat (quaternion gizmo) |
-| dear-file-browser | 0.3.x | 0.3.x               | —                      | ImGui UI + native (rfd) backends |
+| dear-implot   | 0.4.x   | 0.4.x                  | dear-implot-sys 0.4.x |     |
+| dear-imnodes  | 0.4.x   | 0.4.x                  | dear-imnodes-sys 0.4.x |     |
+| dear-imguizmo | 0.4.x   | 0.4.x                  | dear-imguizmo-sys 0.4.x |    |
+| dear-implot3d | 0.4.x   | 0.4.x                  | dear-implot3d-sys 0.4.x | ImPlot3D (3D plotting) |
+| dear-imguizmo-quat | 0.4.x | 0.4.x               | dear-imguizmo-quat-sys 0.4.x | ImGuIZMO.quat (quaternion gizmo) |
+| dear-file-browser | 0.4.x | 0.4.x               | —                      | ImGui UI + native (rfd) backends |
 
 Maintenance rules
 
