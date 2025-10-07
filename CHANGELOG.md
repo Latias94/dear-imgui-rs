@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2025-10-07
+
+Small, focused improvements to enable real-time texture workflows (game view, atlas tools, image browsers) without frame delay.
+
+### Added
+
+- dear-imgui-wgpu 0.4.1
+  - External texture APIs for real-time usage:
+    - `WgpuRenderer::register_external_texture(&Texture, &TextureView) -> u64`
+    - `WgpuRenderer::update_external_texture_view(id, &TextureView) -> bool`
+    - `WgpuRenderer::unregister_texture(id)`
+  - These allow displaying existing `wgpu::Texture` resources via legacy `TextureId` in the same frame (no reliance on TextureData state machine), ideal for game views/RTTs or dynamic atlases.
+
+- dear-app 0.4.1
+  - New `AddOns.gpu` API exposing:
+    - `device()` / `queue()` passthroughs
+    - `register_texture`, `update_texture_view`, `unregister_texture`
+    - `update_texture_data(&mut TextureData)` that applies the backend result to set `TexID/Status` immediately (no white frame).
+  - New example `examples/01-renderers/dear_app_wgpu_textures.rs` showcasing both managed `TextureData` updates and external WGPU textures in real time.
+
+### Changed
+
+- Examples now include a dear-app + wgpu textures demo exhibiting same-frame updates and game-view style external texture display.
+
+### Version Updates
+
+- `dear-imgui-wgpu` → 0.4.1
+- `dear-app` → 0.4.1
+
 ## [0.4.0] - 2025-10-07
 
 This is a major feature release that introduces several new extensions, improves the docking API, and adds a convenient application runner.
@@ -248,3 +277,4 @@ No API changes were made - only the crate name changed.
 - `dear-imgui-glow`: OpenGL/GLOW renderer backend
 - `dear-implot-sys`: ImPlot FFI bindings
 - `dear-implot`: ImPlot Rust API
+

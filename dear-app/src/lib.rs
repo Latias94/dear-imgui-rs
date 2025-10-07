@@ -97,6 +97,7 @@ pub struct AddOns<'a> {
     #[cfg(not(feature = "implot3d"))]
     pub implot3d: Option<()>,
     pub docking: DockingApi<'a>,
+    pub gpu: GpuApi<'a>,
     _marker: PhantomData<&'a ()>,
 }
 
@@ -370,6 +371,50 @@ impl<'a> DockingApi<'a> {
     }
 }
 
+// Minimal textures API to allow explicit texture updates from UI code
+/// GPU access API for real-time scenarios (game view, image browser, atlas editor)
+pub struct GpuApi<'a> {
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    renderer: &'a mut imgui_wgpu::WgpuRenderer,
+}
+
+impl<'a> GpuApi<'a> {
+    /// Access the WGPU device
+    pub fn device(&self) -> &wgpu::Device {
+        self.device
+    }
+    /// Access the default WGPU queue
+    pub fn queue(&self) -> &wgpu::Queue {
+        self.queue
+    }
+    /// Register an external texture + view and obtain an ImGui TextureId (u64)
+    pub fn register_texture(&mut self, texture: &wgpu::Texture, view: &wgpu::TextureView) -> u64 {
+        self.renderer.register_external_texture(texture, view)
+    }
+    /// Update the view for an existing registered texture
+    pub fn update_texture_view(&mut self, tex_id: u64, view: &wgpu::TextureView) -> bool {
+        self.renderer.update_external_texture_view(tex_id, view)
+    }
+    /// Unregister a previously registered texture
+    pub fn unregister_texture(&mut self, tex_id: u64) {
+        self.renderer.unregister_texture(tex_id)
+    }
+    /// Optional: directly drive managed TextureData create/update without waiting for draw pass
+    pub fn update_texture_data(
+        &mut self,
+        texture_data: &mut dear_imgui_rs::TextureData,
+    ) -> Result<(), String> {
+        let res = self
+            .renderer
+            .update_texture(texture_data)
+            .map_err(|e| format!("update_texture failed: {e}"))?;
+        // Important: apply result so TexID/Status are written back
+        res.apply_to(texture_data);
+        Ok(())
+    }
+}
+
 struct AppWindow {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -633,6 +678,11 @@ impl AppWindow {
             implot3d: None,
             docking: DockingApi {
                 ctrl: &mut self.docking_ctrl,
+            },
+            gpu: GpuApi {
+                device: &self.device,
+                queue: &self.queue,
+                renderer: &mut self.imgui.renderer,
             },
             _marker: PhantomData,
         };

@@ -1,6 +1,6 @@
 [package]
 name = "dear-app"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 description = "Convenient Dear ImGui application runner for dear-imgui-rs (Winit + WGPU)"
 license.workspace = true
@@ -13,7 +13,7 @@ readme = "README.md"
 [dependencies]
 dear-imgui-rs = { path = "../dear-imgui", version = "0.4" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.4" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.4" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.4.1" }
 wgpu.workspace = true
 winit.workspace = true
 pollster.workspace = true
