@@ -113,21 +113,21 @@ This is a major feature release that introduces several new extensions, improves
 - `dear-imgui-glow` → 0.4.0
 - `dear-imgui-winit` → 0.4.0
 
-#### Application Runner (0.3.0)
-- `dear-app` → 0.3.0 (new)
+#### Application Runner (0.4.0)
+- `dear-app` → 0.4.0 (new)
 
-#### Extensions (0.3.0)
-- `dear-implot` → 0.3.0
-- `dear-implot-sys` → 0.3.0
-- `dear-imnodes` → 0.3.0
-- `dear-imnodes-sys` → 0.3.0
-- `dear-imguizmo` → 0.3.0
-- `dear-imguizmo-sys` → 0.3.0
-- `dear-implot3d` → 0.3.0 (new)
-- `dear-implot3d-sys` → 0.3.0 (new)
-- `dear-imguizmo-quat` → 0.3.0 (new)
-- `dear-imguizmo-quat-sys` → 0.3.0 (new)
-- `dear-file-browser` → 0.3.0 (new)
+#### Extensions (0.4.0)
+- `dear-implot` → 0.4.0
+- `dear-implot-sys` → 0.4.0
+- `dear-imnodes` → 0.4.0
+- `dear-imnodes-sys` → 0.4.0
+- `dear-imguizmo` → 0.4.0
+- `dear-imguizmo-sys` → 0.4.0
+- `dear-implot3d` → 0.4.0 (new)
+- `dear-implot3d-sys` → 0.4.0 (new)
+- `dear-imguizmo-quat` → 0.4.0 (new)
+- `dear-imguizmo-quat-sys` → 0.4.0 (new)
+- `dear-file-browser` → 0.4.0 (new)
 
 ### 📚 Examples
 
