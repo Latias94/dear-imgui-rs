@@ -156,7 +156,7 @@ impl AppWindow {
         let pos = viewport.pos();
         let size = viewport.size();
 
-        let mut window_flags = WindowFlags::MENU_BAR | WindowFlags::NO_DOCKING;
+        let mut window_flags = WindowFlags::NO_DOCKING;
         window_flags |= WindowFlags::NO_TITLE_BAR
             | WindowFlags::NO_COLLAPSE
             | WindowFlags::NO_RESIZE
