@@ -1,5 +1,9 @@
 [workspace]
-git_release_enable = false
+git_release_enable = true # create a single workspace GitHub release
+git_tag_enable = true     # create one tag for the whole release train
+# Use a unified tag/name like v0.5.0 instead of per-crate tags
+git_tag_name = "v{{ version }}"
+git_release_name = "v{{ version }}"
 dependencies_update = true # run `cargo update` in the release PR
 allow_dirty = true # allow submodule updates without committing
 publish_no_verify = false # enable verification for production releases
@@ -27,31 +31,30 @@ git_release_body = """
 [[package]]
 name = "dear-imgui-rs"
 changelog_path = "./CHANGELOG.md"
-git_release_enable = true # create GitHub release
+git_release_enable = false # workspace-level release only
 
 # System bindings package
 [[package]]
 name = "dear-imgui-sys"
 git_release_enable = false # don't create separate releases for sys crate
 changelog_update = false # don't require changelog for sys crate
-# Let release-plz create tags for sys crate to trigger prebuilt workflow
-# (default tag pattern is "{{ package }}-v{{ version }}")
-git_tag_enable = true
+# Use the unified workspace tag (v{{version}}) to trigger prebuilt workflow
+git_tag_enable = false
 
 # Backend packages
 [[package]]
 name = "dear-imgui-winit"
-git_release_enable = true
+git_release_enable = false
 changelog_path = "./backends/dear-imgui-winit/CHANGELOG.md"
 
 [[package]]
 name = "dear-imgui-wgpu"
-git_release_enable = true
+git_release_enable = false
 changelog_path = "./backends/dear-imgui-wgpu/CHANGELOG.md"
 
 [[package]]
 name = "dear-imgui-glow"
-git_release_enable = true
+git_release_enable = false
 changelog_path = "./backends/dear-imgui-glow/CHANGELOG.md"
 
 # Extension packages
@@ -59,34 +62,34 @@ changelog_path = "./backends/dear-imgui-glow/CHANGELOG.md"
 name = "dear-imguizmo-sys"
 git_release_enable = false
 changelog_update = false
-git_tag_enable = true
+git_tag_enable = false
 
 [[package]]
 name = "dear-imguizmo"
 changelog_path = "./extensions/dear-imguizmo/CHANGELOG.md"
-git_release_enable = true
+git_release_enable = false
 
 [[package]]
 name = "dear-implot-sys"
 git_release_enable = false
 changelog_update = false
-git_tag_enable = true
+git_tag_enable = false
 
 [[package]]
 name = "dear-implot"
-git_release_enable = true
+git_release_enable = false
 changelog_path = "./extensions/dear-implot/CHANGELOG.md"
 
 [[package]]
 name = "dear-imnodes-sys"
 git_release_enable = false
 changelog_update = false
-git_tag_enable = true
+git_tag_enable = false
 
 [[package]]
 name = "dear-imnodes"
 changelog_path = "./extensions/dear-imnodes/CHANGELOG.md"
-git_release_enable = true
+git_release_enable = false
 
 # Examples are not meant for crates.io publishing or releases.
 [[package]]
