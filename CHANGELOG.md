@@ -5,6 +5,180 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-10-07
+
+This is a major feature release that introduces several new extensions, improves the docking API, and adds a convenient application runner.
+
+### 🎉 New Features
+
+#### New Extensions
+
+- **dear-app** - A convenient application runner built on Winit + WGPU
+  - Provides easy-to-use application framework with docking support
+  - Built-in theme support and add-ons integration
+  - Simplifies the setup process for new projects
+  - See examples: `dear_app_quickstart.rs`, `dear_app_docking.rs`
+
+- **dear-implot3d** - 3D plotting extension
+  - Full Rust bindings for ImPlot3D (cimplot3d C API)
+  - Support for 3D scatter plots, line plots, surface plots, mesh plots
+  - Triangle and quad rendering capabilities
+  - 3D image display support
+  - Comprehensive style customization
+  - Example: `implot3d_basic.rs`
+
+- **dear-imguizmo-quat** - Quaternion-based 3D gizmo
+  - Full Rust bindings for ImGuIZMO.quat (cimguizmo_quat C API)
+  - Quaternion manipulation widgets
+  - 3D direction and rotation controls
+  - Example: `imguizmo_quat_basic.rs`
+
+- **dear-file-browser** - File browser and dialog extension
+  - Native OS file dialogs via `rfd` backend
+  - Pure ImGui in-UI file browser implementation
+  - Support for file/folder selection, save dialogs
+  - Customizable file filters and multi-selection
+  - Examples: `file_dialog_native.rs`, `file_browser_imgui.rs`
+
+#### Core Improvements
+
+- **Safe DockBuilder API** ([#14d96cf](https://github.com/Latias94/dear-imgui-rs/commit/14d96cf2f527d978a23c793e84d34d80cd8c6a5f))
+  - Added `Ui::set_next_window_viewport()` and `Ui::get_id()` helper methods
+  - Introduced `DockNode<'ui>` with read-only queries and `NodeRect` type
+  - Added safe methods: `DockBuilder::node()`, `central_node()`, `node_exists()`
+  - Removed unsafe methods: `DockBuilder::get_node()`, `get_central_node()`
+  - Updated docking examples to use safe APIs
+
+- **Enhanced Docking Support**
+  - Fixed docking split node function for more reliable layout management
+  - Improved game engine docking example with better UI organization
+  - Updated dockspace minimal example with safe API usage
+
+### 🔧 Improvements
+
+#### Dependencies
+
+- **Updated wgpu to v27** - Latest WGPU version with improved performance and features
+- Updated workspace to use Rust edition 2024
+
+#### Build System
+
+- Added prebuilt binary packaging support for `dear-imguizmo-quat-sys`
+- Improved CI workflow for prebuilt binaries
+- Added cargo clippy checks to CI pipeline
+- Optimized cargo exclude patterns for smaller package sizes
+
+#### Documentation
+
+- Comprehensive README updates for all new extensions
+- Updated compatibility matrix in `docs/COMPATIBILITY.md`
+- Added detailed usage examples for new features
+- Improved build instructions and feature flag documentation
+
+### 📦 Version Updates
+
+#### Core Packages (0.4.0)
+- `dear-imgui-rs` → 0.4.0
+- `dear-imgui-sys` → 0.4.0
+- `dear-imgui-wgpu` → 0.4.0
+- `dear-imgui-glow` → 0.4.0
+- `dear-imgui-winit` → 0.4.0
+
+#### Application Runner (0.3.0)
+- `dear-app` → 0.3.0 (new)
+
+#### Extensions (0.3.0)
+- `dear-implot` → 0.3.0
+- `dear-implot-sys` → 0.3.0
+- `dear-imnodes` → 0.3.0
+- `dear-imnodes-sys` → 0.3.0
+- `dear-imguizmo` → 0.3.0
+- `dear-imguizmo-sys` → 0.3.0
+- `dear-implot3d` → 0.3.0 (new)
+- `dear-implot3d-sys` → 0.3.0 (new)
+- `dear-imguizmo-quat` → 0.3.0 (new)
+- `dear-imguizmo-quat-sys` → 0.3.0 (new)
+- `dear-file-browser` → 0.3.0 (new)
+
+### 📚 Examples
+
+New examples added:
+- `dear_app_quickstart.rs` - Quick start guide using dear-app
+- `dear_app_docking.rs` - Docking example using dear-app
+- `implot3d_basic.rs` - Comprehensive 3D plotting demo
+- `imguizmo_quat_basic.rs` - Quaternion gizmo demonstration
+- `file_dialog_native.rs` - Native file dialog usage
+- `file_browser_imgui.rs` - ImGui file browser UI
+
+Updated examples:
+- `game_engine_docking.rs` - Significantly improved with better layout and features
+- `dockspace_minimal.rs` - Rewritten to use safe DockBuilder APIs
+- `tables_minimal.rs` - Minor improvements
+
+### ⚠️ Breaking Changes
+
+- **DockBuilder API**: Removed unsafe methods `get_node()` and `get_central_node()`. Use the new safe alternatives: `node()` and `central_node()`
+- **Docking Split API**: Updated signature for split node functions to be more type-safe
+
+### 🔮 Experimental
+
+- Multi-viewport support is still work-in-progress and not production-ready
+  - Test example available: `cargo run --bin multi_viewport_wgpu --features multi-viewport`
+  - This feature is excluded from this release as it's not yet complete
+
+### 📖 Migration Guide
+
+#### Updating DockBuilder Usage
+
+**Before (v0.3.0):**
+```rust
+unsafe {
+    let node = DockBuilder::get_node(dock_id);
+    let central = DockBuilder::get_central_node(dock_id);
+}
+```
+
+**After (v0.4.0):**
+```rust
+if let Some(node) = DockBuilder::node(ui, dock_id) {
+    // Use node safely
+}
+if let Some(central) = DockBuilder::central_node(ui, dock_id) {
+    // Use central node safely
+}
+```
+
+#### Using the New dear-app Runner
+
+**Before (manual setup):**
+```rust
+// Manual Winit + WGPU setup code...
+```
+
+**After (with dear-app):**
+```rust
+use dear_app::*;
+
+fn main() {
+    App::new("My App")
+        .run(|ui| {
+            ui.window("Hello").build(|| {
+                ui.text("Hello, world!");
+            });
+        });
+}
+```
+
+### 🙏 Acknowledgments
+
+Special thanks to all contributors and the upstream projects:
+- Dear ImGui by Omar Cornut
+- ImPlot3D for 3D plotting capabilities
+- ImGuIZMO.quat for quaternion manipulation
+- rfd for native file dialogs
+
+**Full Changelog**: https://github.com/Latias94/dear-imgui-rs/compare/v0.3.0...v0.4.0
+
 ## [0.3.0] - 2025-09-30
 
 ### Changed

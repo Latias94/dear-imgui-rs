@@ -1,12 +1,17 @@
 # Releasing (sys crates with offline docs.rs)
 
-The 4 `-sys` crates must build docs on docs.rs without network or submodules. Before publishing, pre-generate `src/bindings_pregenerated.rs` so docs.rs can compile in a fully offline environment.
+> **Note**: For a complete publishing guide including automated scripts, see [PUBLISHING.md](./PUBLISHING.md).
+> This document focuses on the technical details of sys crate bindings generation.
+
+The `-sys` crates must build docs on docs.rs without network or submodules. Before publishing, pre-generate `src/bindings_pregenerated.rs` so docs.rs can compile in a fully offline environment.
 
 Supported crates:
 - `dear-imgui-sys` (third-party: cimgui)
 - `extensions/dear-implot-sys` (third-party: cimplot)
 - `extensions/dear-imnodes-sys` (third-party: cimnodes)
 - `extensions/dear-imguizmo-sys` (third-party: cimguizmo)
+- `extensions/dear-implot3d-sys` (third-party: cimplot3d)
+- `extensions/dear-imguizmo-quat-sys` (third-party: cimguizmo_quat)
 
 ## Prerequisites
 - `git`, `cargo`, and `python3` (>= 3.7) in PATH.
@@ -81,18 +86,30 @@ DOCS_RS=1 cargo check -p dear-imguizmo-sys
 These checks generate/use bindings only and won’t build/link native code.
 
 ## Recommended publish order
+
+> **Tip**: Use the automated publishing script for easier workflow:
+> ```bash
+> python tools/tasks.py release-prep 0.5.0  # Prepare release
+> python tools/tasks.py publish             # Publish all crates
+> ```
+> See [PUBLISHING.md](./PUBLISHING.md) for details.
+
+Manual workflow:
+
 1) Run the script to pregenerate bindings (and update submodules if needed).
 2) Commit changes (includes submodule pointers and pregenerated files):
 ```
 git add -A
 git commit -m "chore(sys): update third-party and pregenerated bindings"
 ```
-3) Tag and publish crates:
+3) Tag and publish crates (or use `python tools/publish.py`):
 ```
 cargo publish -p dear-imgui-sys
 cargo publish -p dear-implot-sys
 cargo publish -p dear-imnodes-sys
 cargo publish -p dear-imguizmo-sys
+cargo publish -p dear-implot3d-sys
+cargo publish -p dear-imguizmo-quat-sys
 ```
 
 ## Pre-release checklist
