@@ -39,11 +39,11 @@ fn apply_default_layout(ui: &Ui, dockspace_id: Id) {
 
     // Layout like the C++ demo comments:
     // Split Main -> Down: Misc (25%) + Main
-    let (misc, main) = DockBuilder::split_node_pair(root, SplitDirection::Down, 0.25);
+    let (misc, main) = DockBuilder::split_node(root, SplitDirection::Down, 0.25);
     // Split Main -> Left: Command (25%) + Main
-    let (command, main) = DockBuilder::split_node_pair(main, SplitDirection::Left, 0.25);
+    let (command, main) = DockBuilder::split_node(main, SplitDirection::Left, 0.25);
     // Split Main -> Down: Command2 (50%) + Main
-    let (command2, main) = DockBuilder::split_node_pair(main, SplitDirection::Down, 0.5);
+    let (command2, main) = DockBuilder::split_node(main, SplitDirection::Down, 0.5);
 
     // Dock windows
     DockBuilder::dock_window("Main View", main);
@@ -64,9 +64,9 @@ fn apply_alternative_layout(ui: &Ui, dockspace_id: Id) {
     DockBuilder::set_node_size(root, [size[0], size[1]]);
 
     // Alternative layout: Misc on left (30%), bottom split between Command and Command2
-    let (misc, main) = DockBuilder::split_node_pair(root, SplitDirection::Left, 0.30);
-    let (command, bottom) = DockBuilder::split_node_pair(main, SplitDirection::Down, 0.35);
-    let (command2, main) = DockBuilder::split_node_pair(bottom, SplitDirection::Right, 0.5);
+    let (misc, main) = DockBuilder::split_node(root, SplitDirection::Left, 0.30);
+    let (command, bottom) = DockBuilder::split_node(main, SplitDirection::Down, 0.35);
+    let (command2, main) = DockBuilder::split_node(bottom, SplitDirection::Right, 0.5);
 
     DockBuilder::dock_window("Main View", main);
     DockBuilder::dock_window("Command", command);

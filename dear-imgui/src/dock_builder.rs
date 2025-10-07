@@ -15,15 +15,27 @@
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
 //! // Create a dockspace
-//! let dockspace_id = ui.dockspace_over_main_viewport();
+//! let dockspace_id = ui.get_id("MyDockspace");
+//! DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
 //!
-//! // Use DockBuilder to create a layout
-//! let left_id = DockBuilder::split_node(dockspace_id, SplitDirection::Left, 0.3, None);
-//! let right_id = DockBuilder::split_node(dockspace_id, SplitDirection::Right, 0.7, None);
+//! // Split the dockspace: 30% left panel, 70% remaining
+//! let (left_panel, main_area) = DockBuilder::split_node(
+//!     dockspace_id,
+//!     SplitDirection::Left,
+//!     0.30
+//! );
+//!
+//! // Further split the main area: 70% top, 30% bottom
+//! let (top_area, bottom_area) = DockBuilder::split_node(
+//!     main_area,
+//!     SplitDirection::Down,
+//!     0.30
+//! );
 //!
 //! // Dock windows to specific nodes
-//! DockBuilder::dock_window("Tool Panel", left_id);
-//! DockBuilder::dock_window("Main View", right_id);
+//! DockBuilder::dock_window("Tool Panel", left_panel);
+//! DockBuilder::dock_window("Main View", top_area);
+//! DockBuilder::dock_window("Console", bottom_area);
 //!
 //! // Finish the layout
 //! DockBuilder::finish(dockspace_id);
@@ -35,7 +47,6 @@ use crate::ui::Ui;
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
-use std::ptr;
 use std::slice;
 
 /// Direction for splitting dock nodes
@@ -326,60 +337,60 @@ impl DockBuilder {
         }
     }
 
-    /// Splits a dock node into two nodes
+    /// Splits a dock node into two child nodes.
+    ///
+    /// This function splits the specified dock node in the given direction, creating two child nodes.
+    /// The original node becomes a parent node containing the two new child nodes.
     ///
     /// # Parameters
     ///
     /// * `node_id` - The ID of the dock node to split
-    /// * `split_dir` - The direction to split
-    /// * `size_ratio_for_node_at_dir` - The size ratio for the new node (0.0 to 1.0)
-    /// * `out_id_at_dir` - Optional output for the ID of the new node in the split direction
+    /// * `split_dir` - The direction to split (Left, Right, Up, or Down)
+    /// * `size_ratio_for_node_at_dir` - The size ratio for the new node in the split direction (0.0 to 1.0)
     ///
     /// # Returns
     ///
-    /// The ID of the remaining node (opposite to the split direction)
+    /// A tuple `(id_at_dir, id_at_opposite_dir)` containing:
+    /// - `id_at_dir`: The ID of the new node in the split direction
+    /// - `id_at_opposite_dir`: The ID of the new node in the opposite direction
     ///
     /// # Example
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// let dockspace_id = 1;
-    /// let left_id = DockBuilder::split_node(dockspace_id, SplitDirection::Left, 0.3, None);
+    /// # let mut ctx = Context::create();
+    /// # let ui = ctx.frame();
+    /// let dockspace_id = ui.get_id("MyDockspace");
+    /// DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
+    ///
+    /// // Split the dockspace: 20% left panel, 80% remaining
+    /// let (left_panel, main_area) = DockBuilder::split_node(
+    ///     dockspace_id,
+    ///     SplitDirection::Left,
+    ///     0.20
+    /// );
+    ///
+    /// // Further split the main area: 70% top, 30% bottom
+    /// let (top_area, bottom_area) = DockBuilder::split_node(
+    ///     main_area,
+    ///     SplitDirection::Down,
+    ///     0.30
+    /// );
+    ///
+    /// // Dock windows to the created nodes
+    /// DockBuilder::dock_window("Left Panel", left_panel);
+    /// DockBuilder::dock_window("Main View", top_area);
+    /// DockBuilder::dock_window("Console", bottom_area);
+    /// DockBuilder::finish(dockspace_id);
     /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Make sure to call `DockBuilder::set_node_size()` before splitting if you want reliable split sizes
+    /// - The original `node_id` becomes a parent node after splitting
+    /// - Call `DockBuilder::finish()` after all layout operations are complete
     #[doc(alias = "DockBuilderSplitNode")]
     pub fn split_node(
-        node_id: Id,
-        split_dir: SplitDirection,
-        size_ratio_for_node_at_dir: f32,
-        out_id_at_dir: Option<&mut Id>,
-    ) -> Id {
-        unsafe {
-            let mut tmp_out: sys::ImGuiID = 0;
-            let out_ptr: *mut sys::ImGuiID = if let Some(ref out) = out_id_at_dir {
-                tmp_out = (*out).raw();
-                &mut tmp_out
-            } else {
-                ptr::null_mut()
-            };
-            let ret = sys::igDockBuilderSplitNode(
-                node_id.into(),
-                split_dir.into(),
-                size_ratio_for_node_at_dir,
-                out_ptr,
-                ptr::null_mut(),
-            );
-            if let Some(out) = out_id_at_dir {
-                *out = Id::from(tmp_out);
-            }
-            Id::from(ret)
-        }
-    }
-
-    /// Splits a dock node and returns both resulting node IDs.
-    ///
-    /// Returns `(id_at_dir, id_at_opposite_dir)`.
-    #[doc(alias = "DockBuilderSplitNode")]
-    pub fn split_node_pair(
         node_id: Id,
         split_dir: SplitDirection,
         size_ratio_for_node_at_dir: f32,

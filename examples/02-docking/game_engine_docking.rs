@@ -408,57 +408,42 @@ fn setup_initial_docking_layout(dockspace_id: dear_imgui_rs::Id) {
     // Split horizontally to match Unity-like proportions derived from INI (approx.):
     // Right Inspector ~25.1%, Left Hierarchy column ~21.7%, Center ~remaining
     // First split right from root
-    let mut inspector_id = Id::default();
-    let after_right = DockBuilder::split_node(
+    let (inspector_panel, after_right) = DockBuilder::split_node(
         dockspace_id,
         SplitDirection::Right,
         0.251, // 402/1600
-        Some(&mut inspector_id),
     );
     // Then split left from the remaining
-    let mut left_panel_id = Id::default();
-    let center_area_id = DockBuilder::split_node(
+    let (left_panel_id, center_area_id) = DockBuilder::split_node(
         after_right,
         SplitDirection::Left,
         0.2896, // normalized 0.217/(1-0.251)
-        Some(&mut left_panel_id),
     );
 
     // Split left panel vertically to match INI heights (approx):
     // total H ~881, Hierarchy 337, Project 264, Asset 276
     // First split bottom Asset (~276/881 ≈ 0.313)
-    let mut asset_id = Id::default();
-    let top_left_stack = DockBuilder::split_node(
+    let (asset_id, top_left_stack) = DockBuilder::split_node(
         left_panel_id,
         SplitDirection::Down,
         0.313, // Asset Browser
-        Some(&mut asset_id),
     );
     // Then split the remaining into Hierarchy (337) and Project (264)
-    let mut project_id = Id::default();
-    let hierarchy_id = DockBuilder::split_node(
+    let (project_id, hierarchy_id) = DockBuilder::split_node(
         top_left_stack,
         SplitDirection::Down,
         0.439, // 337/(337+264)
-        Some(&mut project_id),
     );
 
     // Split right panel vertically: Performance (~20%) bottom, Inspector (~80%) top
-    let mut performance_id = Id::default();
-    let inspector_id = DockBuilder::split_node(
-        inspector_id,
-        SplitDirection::Down,
-        0.2,
-        Some(&mut performance_id),
-    );
+    let (performance_id, inspector_id) =
+        DockBuilder::split_node(inspector_panel, SplitDirection::Down, 0.2);
 
     // Split center vertically: Console (~27%) bottom, Scene/Game (~73%) top
-    let mut console_id = Id::default();
-    let scene_game_id = DockBuilder::split_node(
+    let (console_id, scene_game_id) = DockBuilder::split_node(
         center_area_id,
         SplitDirection::Down,
         0.313, // 276/881 approx
-        Some(&mut console_id),
     );
 
     // Dock all windows to their designated areas
