@@ -1,6 +1,6 @@
 [package]
 name = "dear-imguizmo-quat"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 description = "High-level Rust bindings for ImGuIZMO.quat (C API) with Dear ImGui integration"
 license.workspace = true

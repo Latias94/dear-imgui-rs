@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-rs"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 description = "High-level Rust bindings to Dear ImGui with docking support"
 license.workspace = true

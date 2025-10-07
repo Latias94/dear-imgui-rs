@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "dear-file-browser"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "chrono",
  "dear-imgui-rs",
@@ -965,7 +965,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-glow"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "dear-imgui-rs",
  "env_logger",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-rs"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "approx",
  "bitflags 2.9.4",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-winit"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "dear-imgui-rs",
  "instant",
@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bitflags 2.9.4",
  "dear-imgui-rs",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-quat"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bitflags 2.9.4",
  "dear-imgui-rs",
@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imnodes"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bitflags 2.9.4",
  "dear-imgui-rs",
@@ -1138,7 +1138,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "approx",
  "bitflags 2.9.4",
@@ -1166,7 +1166,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot3d"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bitflags 2.9.4",
  "dear-imgui-rs",
