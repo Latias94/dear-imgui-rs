@@ -71,7 +71,12 @@ pub(crate) fn client_to_screen_pos(window: &Window, logical: [f64; 2]) -> Option
         .inner_position()
         .ok()
         .map(|p| [p.x as f32, p.y as f32])
-        .or_else(|| window.outer_position().ok().map(|p| [p.x as f32, p.y as f32]));
+        .or_else(|| {
+            window
+                .outer_position()
+                .ok()
+                .map(|p| [p.x as f32, p.y as f32])
+        });
     if let Some([bx, by]) = base {
         Some([bx + offset_px_x, by + offset_px_y])
     } else {
@@ -997,7 +1002,10 @@ unsafe extern "C" fn winit_get_window_work_area_insets(
 unsafe extern "C" fn winit_on_changed_viewport(_vp: *mut dear_imgui_rs::sys::ImGuiViewport) {}
 
 /// Set window alpha (no-op for winit)
-unsafe extern "C" fn winit_set_window_alpha(vp: *mut dear_imgui_rs::sys::ImGuiViewport, alpha: f32) {
+unsafe extern "C" fn winit_set_window_alpha(
+    vp: *mut dear_imgui_rs::sys::ImGuiViewport,
+    alpha: f32,
+) {
     if vp.is_null() {
         return;
     }
