@@ -11,37 +11,37 @@ Also see `examples-wasm/` for WebAssembly (WASM) examples.
 
 Run any example with:
 
-- `cargo run -p dear-imgui-examples --bin <name>`
+- `cargo run --bin <name>`
 - Extensions require features, for example:
-  - `--features dear-implot` for ImPlot
-  - `--features dear-imnodes` for ImNodes
-  - `--features dear-imguizmo` for ImGuizmo
-  - `--features dear-imguizmo-quat` for ImGuIZMO.quat
-  - `--features dear-implot3d` for ImPlot3D (and, if your workspace doesn’t pre-enable add-ons on dear-app, also add `, dear-app/implot3d`)
-  - `--features dear-file-browser` for File Browser / Dialogs
+  - `--features implot` for ImPlot
+  - `--features imnodes` for ImNodes
+  - `--features imguizmo` for ImGuizmo
+  - `--features imguizmo-quat` for ImGuIZMO.quat
+  - `--features implot3d` for ImPlot3D (and, if your workspace doesn’t pre-enable add-ons on dear-app, also add `, dear-app/implot3d`)
+  - `--features file-browser` for File Browser / Dialogs
 
 Quick picks:
 
-- Hello world: `cargo run -p dear-imgui-examples --bin hello_world`
-- Core + docking: `cargo run -p dear-imgui-examples --bin game_engine_docking`
-- Docking minimal: `cargo run -p dear-imgui-examples --bin dockspace_minimal`
-- WGPU minimal: `cargo run -p dear-imgui-examples --bin wgpu_basic`
-- OpenGL + textures: `cargo run -p dear-imgui-examples --bin glow_textures`
-- WGPU + textures: `cargo run -p dear-imgui-examples --bin wgpu_textures`
-- ImGuIZMO.quat (WGPU): `cargo run -p dear-imgui-examples --features dear-imguizmo-quat --bin imguizmo_quat_basic`
-- WGPU RTT Game View: `cargo run -p dear-imgui-examples --bin wgpu_rtt_gameview`
-- Console (log): `cargo run -p dear-imgui-examples --bin console_log`
-- Asset browser: `cargo run -p dear-imgui-examples --bin asset_browser_grid`
-- File dialog (native): `cargo run -p dear-imgui-examples --features dear-file-browser --bin file_dialog_native`
-- File browser (ImGui): `cargo run -p dear-imgui-examples --features dear-file-browser --bin file_browser_imgui`
-- Style & Fonts + FreeType: `cargo run -p dear-imgui-examples --features freetype --bin style_and_fonts`
-- ImPlot3D Demo: `cargo run -p dear-imgui-examples --bin implot3d_basic --features "dear-implot3d"`
-  - If your workspace doesn’t pre-enable dear-app add-on features, use: `cargo run -p dear-imgui-examples --bin implot3d_basic --features "dear-implot3d, dear-app/implot3d"`
+- Hello world: `cargo run --bin hello_world`
+- Core + docking: `cargo run --bin game_engine_docking`
+- Docking minimal: `cargo run --bin dockspace_minimal`
+- WGPU minimal: `cargo run --bin wgpu_basic`
+- OpenGL + textures: `cargo run --bin glow_textures`
+- WGPU + textures: `cargo run --bin wgpu_textures`
+- ImGuIZMO.quat (WGPU): `cargo run --features imguizmo-quat --bin imguizmo_quat_basic`
+- WGPU RTT Game View: `cargo run --bin wgpu_rtt_gameview`
+- Console (log): `cargo run --bin console_log`
+- Asset browser: `cargo run --bin asset_browser_grid`
+- File dialog (native): `cargo run --features file-browser --bin file_dialog_native`
+- File browser (ImGui): `cargo run --features file-browser --bin file_browser_imgui`
+- Style & Fonts + FreeType: `cargo run --features freetype --bin style_and_fonts`
+- ImPlot3D Demo: `cargo run --bin implot3d_basic --features "implot3d"`
+  - If your workspace doesn’t pre-enable dear-app add-on features, use: `cargo run --bin implot3d_basic --features "implot3d, dear-app/implot3d"`
 
 Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
-- Extensions (e.g., ImPlot): `cargo run -p dear-imgui-examples --bin implot_basic --features dear-implot`
-  - ImNodes: `cargo run -p dear-imgui-examples --bin imnodes_basic --features dear-imnodes`
-  - ImGuizmo: `cargo run -p dear-imgui-examples --bin imguizmo_basic --features dear-imguizmo`
+- Extensions (e.g., ImPlot): `cargo run --bin implot_basic --features implot`
+  - ImNodes: `cargo run --bin imnodes_basic --features imnodes`
+  - ImGuizmo: `cargo run --bin imguizmo_basic --features imguizmo`
 
 ## Structure (from easy to advanced)
 
@@ -101,8 +101,8 @@ This is the intended organization.
 
 These examples use the `dear-app` runner (Winit + WGPU) with minimal code:
 
-- Quickstart: `cargo run -p dear-imgui-examples --bin dear_app_quickstart`
-- Docking template: `cargo run -p dear-imgui-examples --bin dear_app_docking`
+- Quickstart: `cargo run --bin dear_app_quickstart`
+- Docking template: `cargo run --bin dear_app_docking`
 
 These will remain runnable as-is; future additions may live in subfolders with explicit `[[bin]]` paths.
 
@@ -122,7 +122,7 @@ Tip: On Windows/macOS, CWD may differ when launching from an IDE. Prefer absolut
 ## FreeType (OTF/Color Emoji)
 
 - Enable at build time:
-  - `cargo run -p dear-imgui-examples --features freetype --bin style_and_fonts`
+  - `cargo run --features freetype --bin style_and_fonts`
 - Requires system FreeType + pkg-config:
   - Windows: MSYS2 (`pacman -S mingw-w64-ucrt-x86_64-freetype pkgconf`) or vcpkg.
   - Linux/macOS: install `freetype` and `pkg-config` via your package manager.
@@ -130,7 +130,7 @@ Tip: On Windows/macOS, CWD may differ when launching from an IDE. Prefer absolut
 
 ## Example ideas (next up)
 
-- “Unity layout” DockBuilder (proportional splits, tabs) with a one-click reset.
+- “Unity layout�?DockBuilder (proportional splits, tabs) with a one-click reset.
 - Texture upload and dynamic updates in WGPU matching `glow_textures.rs` capabilities.
 - InputText best-practice demos: `String` with `capacity_hint`, and zero-copy `ImString` fields.
 - Table angled headers (Ex) demo exercising custom header data.

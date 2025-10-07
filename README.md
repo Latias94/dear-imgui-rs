@@ -72,13 +72,13 @@ cargo run --bin dear_app_quickstart
 cargo run --bin dear_app_docking
 
 # Extension examples (using wgpu + winit directly)
-cargo run --bin imguizmo_basic --features dear-imguizmo
-cargo run --bin imnodes_basic --features dear-imnodes
-cargo run --bin implot_basic --features dear-implot
-cargo run --bin imguizmo_quat_basic --features dear-imguizmo-quat
+cargo run --bin imguizmo_basic --features imguizmo
+cargo run --bin imnodes_basic --features imnodes
+cargo run --bin implot_basic --features implot
+cargo run --bin imguizmo_quat_basic --features imguizmo-quat
 
-# implot3d example (uses dear-app, requires both features)
-cargo run --bin implot3d_basic --features "dear-implot3d, dear-app/implot3d"
+# implot3d example (uses dear-app)
+cargo run --bin implot3d_basic --features implot3d
 ```
 
 Tip: The ImNodes example includes multiple tabs (Hello, Multi-Editor, Style, Advanced Style, Save/Load, Color Editor, Shader Graph, MiniMap Callback).
@@ -89,10 +89,10 @@ See `examples/README.md` for a curated index and the planned from‑easy‑to‑
 
 ```bash
 # OS-native dialogs (rfd)
-cargo run --bin file_dialog_native --features dear-file-browser
+cargo run --bin file_dialog_native --features file-browser
 
 # Pure ImGui in-UI file browser
-cargo run --bin file_browser_imgui --features dear-file-browser
+cargo run --bin file_browser_imgui --features file-browser
 ```
 
 ## Installation

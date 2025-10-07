@@ -67,13 +67,13 @@ jobs:
           IMGUIZMO_SYS_FORCE_BUILD: "1"
 
       - name: Build examples with extensions
-        run: cargo build -p dear-imgui-examples --features "dear-imguizmo dear-imnodes dear-implot"
+        run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot"
 
       - name: Build dear-app with all add-ons
         run: cargo build -p dear-app --features "implot imnodes implot3d"
 
       - name: Build examples (ImPlot3D + ImGuIZMO.quat)
-        run: cargo build -p dear-imgui-examples --features "dear-implot3d dear-imguizmo-quat"
+        run: cargo build -p dear-imgui-examples --features "implot3d imguizmo-quat"
 
   publish-check:
     name: Package check (ubuntu)

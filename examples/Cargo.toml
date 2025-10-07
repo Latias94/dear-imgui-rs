@@ -5,14 +5,14 @@ edition.workspace = true
 publish = false
 
 [features]
-dear-implot = ["dep:dear-implot"]
-dear-imguizmo = ["dep:dear-imguizmo"]
-dear-imnodes = ["dep:dear-imnodes"]
-dear-imguizmo-quat = ["dep:dear-imguizmo-quat"]
-dear-implot3d = ["dep:dear-implot3d"]
-implot3d = ["dear-implot3d"]
+# Extension features - use simple names to avoid conflicts
+implot = ["dep:dear-implot", "dear-app/implot"]
+imguizmo = ["dep:dear-imguizmo"]
+imnodes = ["dep:dear-imnodes", "dear-app/imnodes"]
+imguizmo-quat = ["dep:dear-imguizmo-quat"]
+implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
-dear-file-browser = ["dep:dear-file-browser"]
+file-browser = ["dep:dear-file-browser"]
 multi-viewport = ["dear-imgui-rs/multi-viewport", "dear-imgui-winit/multi-viewport", "dear-imgui-wgpu/multi-viewport"]
 
 [[bin]]
@@ -79,27 +79,27 @@ path = "01-renderers/wgpu_textures.rs"
 [[bin]]
 name = "implot_basic"
 path = "implot_basic.rs"
-required-features = ["dear-implot"]
+required-features = ["implot"]
 
 [[bin]]
 name = "implot3d_basic"
 path = "implot3d_basic.rs"
-required-features = ["dear-implot3d"]
+required-features = ["implot3d"]
 
 [[bin]]
 name = "imguizmo_basic"
 path = "imguizmo_basic.rs"
-required-features = ["dear-imguizmo"]
+required-features = ["imguizmo"]
 
 [[bin]]
 name = "imnodes_basic"
 path = "imnodes_basic.rs"
-required-features = ["dear-imnodes"]
+required-features = ["imnodes"]
 
 [[bin]]
 name = "imguizmo_quat_basic"
 path = "imguizmo_quat_basic.rs"
-required-features = ["dear-imguizmo-quat"]
+required-features = ["imguizmo-quat"]
 
 
 [[bin]]
@@ -117,12 +117,12 @@ path = "04-integration/asset_browser_grid.rs"
 [[bin]]
 name = "file_dialog_native"
 path = "04-integration/file_dialog_native.rs"
-required-features = ["dear-file-browser"]
+required-features = ["file-browser"]
 
 [[bin]]
 name = "file_browser_imgui"
 path = "04-integration/file_browser_imgui.rs"
-required-features = ["dear-file-browser"]
+required-features = ["file-browser"]
 
 [[bin]]
 name = "dear_app_docking"
@@ -137,7 +137,7 @@ dear-imgui-rs = { path = "../dear-imgui", version = "0.3" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.3" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.3" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.3" }
-dear-app = { path = "../dear-app", version = "0.3", features = ["implot", "imnodes", "implot3d"] }
+dear-app = { path = "../dear-app", version = "0.3" }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
