@@ -24,6 +24,9 @@ Quick picks:
 
 - Hello world: `cargo run --bin hello_world`
 - Core + docking: `cargo run --bin game_engine_docking`
+  - With ImPlot (FPS graph): `cargo run --bin game_engine_docking --features implot`
+  - With ImGuizmo (3D gizmo): `cargo run --bin game_engine_docking --features imguizmo`
+  - With all extensions: `cargo run --bin game_engine_docking --features "implot,imguizmo"`
 - Docking minimal: `cargo run --bin dockspace_minimal`
 - WGPU minimal: `cargo run --bin wgpu_basic`
 - OpenGL + textures: `cargo run --bin glow_textures`
@@ -67,6 +70,7 @@ This is the intended organization.
   - `dockspace_minimal.rs`: enable docking + a simple dockspace.
   - `game_engine_docking.rs`: complex Unity-style layout, tabs, panels.
     - Menu already includes: Reset to Unity Layout, Save INI, Load INI.
+    - Optional extensions: `--features implot` (FPS graph), `--features imguizmo` (3D gizmo manipulation).
     - Note: INI path is relative to the process CWD; see INI section below.
   - `multi_viewport_wgpu.rs`: **Experimental test example only** - multi-viewport support is not production-ready.
     - Run with: `cargo run --bin multi_viewport_wgpu --features multi-viewport`
@@ -130,7 +134,7 @@ Tip: On Windows/macOS, CWD may differ when launching from an IDE. Prefer absolut
 
 ## Example ideas (next up)
 
-- “Unity layout�?DockBuilder (proportional splits, tabs) with a one-click reset.
+- “Unity layout�?DockBuilder (proportional splits, tabs) with a one-click reset.
 - Texture upload and dynamic updates in WGPU matching `glow_textures.rs` capabilities.
 - InputText best-practice demos: `String` with `capacity_hint`, and zero-copy `ImString` fields.
 - Table angled headers (Ex) demo exercising custom header data.

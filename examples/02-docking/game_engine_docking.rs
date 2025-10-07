@@ -12,6 +12,16 @@ use winit::{
     window::Window,
 };
 
+// Optional extensions - only imported if features are enabled
+#[cfg(feature = "implot")]
+use dear_implot::{LinePlot, Plot, PlotContext, PlotUi};
+
+#[cfg(feature = "imguizmo")]
+use dear_imguizmo::{GuizmoExt, Mode, Operation};
+
+#[cfg(feature = "imguizmo")]
+use glam::{Mat4, Quat, Vec3};
+
 /// Game engine state with various panels
 struct GameEngineState {
     // Scene hierarchy
@@ -49,9 +59,28 @@ struct GameEngineState {
     frame_time: f32,
     draw_calls: u32,
     vertices: u32,
+    fps_history: Vec<(f64, f32)>, // FPS history for graph: (timestamp, fps)
 
     // UI search/filter state
     hierarchy_search: dear_imgui_rs::ImString,
+
+    // ImGuizmo state (optional)
+    #[cfg(feature = "imguizmo")]
+    gizmo_operation: Operation,
+    #[cfg(feature = "imguizmo")]
+    gizmo_mode: Mode,
+    #[cfg(feature = "imguizmo")]
+    object_matrix: Mat4,
+    #[cfg(feature = "imguizmo")]
+    camera_view: Mat4,
+    #[cfg(feature = "imguizmo")]
+    camera_proj: Mat4,
+    #[cfg(feature = "imguizmo")]
+    camera_distance: f32,
+    #[cfg(feature = "imguizmo")]
+    camera_y_angle: f32,
+    #[cfg(feature = "imguizmo")]
+    camera_x_angle: f32,
 }
 
 impl Default for GameEngineState {
@@ -100,7 +129,33 @@ impl Default for GameEngineState {
             frame_time: 16.67,
             draw_calls: 45,
             vertices: 12543,
+            fps_history: Vec::new(), // Will be populated during runtime
             hierarchy_search: dear_imgui_rs::ImString::new(""),
+            #[cfg(feature = "imguizmo")]
+            gizmo_operation: Operation::TRANSLATE,
+            #[cfg(feature = "imguizmo")]
+            gizmo_mode: Mode::Local,
+            #[cfg(feature = "imguizmo")]
+            object_matrix: Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            #[cfg(feature = "imguizmo")]
+            camera_view: Mat4::look_at_rh(
+                Vec3::new(5.0, 5.0, 5.0), // eye
+                Vec3::new(0.0, 0.0, 0.0), // target
+                Vec3::new(0.0, 1.0, 0.0), // up
+            ),
+            #[cfg(feature = "imguizmo")]
+            camera_proj: Mat4::perspective_rh(
+                45.0_f32.to_radians(), // fov
+                800.0 / 600.0,         // aspect
+                0.1,                   // near
+                100.0,                 // far
+            ),
+            #[cfg(feature = "imguizmo")]
+            camera_distance: 8.66, // sqrt(5^2 + 5^2 + 5^2)
+            #[cfg(feature = "imguizmo")]
+            camera_y_angle: 45.0_f32.to_radians(),
+            #[cfg(feature = "imguizmo")]
+            camera_x_angle: 35.26_f32.to_radians(), // atan(1/sqrt(2))
         }
     }
 }
@@ -114,6 +169,8 @@ struct ImguiState {
     game_state: GameEngineState,
     dockspace_id: u32,
     first_frame: bool,
+    #[cfg(feature = "implot")]
+    plot_context: PlotContext,
 }
 
 struct AppWindow {
@@ -245,6 +302,9 @@ impl AppWindow {
             a: 1.0,
         };
 
+        #[cfg(feature = "implot")]
+        let plot_context = PlotContext::create(&context);
+
         self.imgui = Some(ImguiState {
             context,
             platform,
@@ -254,6 +314,8 @@ impl AppWindow {
             game_state: GameEngineState::default(),
             dockspace_id: 0,
             first_frame: true,
+            #[cfg(feature = "implot")]
+            plot_context,
         });
     }
 
@@ -300,6 +362,14 @@ impl AppWindow {
         render_game_view(ui, &mut imgui.game_state);
         render_console(ui, &mut imgui.game_state);
         render_asset_browser(ui, &mut imgui.game_state);
+
+        // Render performance panel with optional ImPlot support
+        #[cfg(feature = "implot")]
+        {
+            let plot_ui = imgui.plot_context.get_plot_ui(ui);
+            render_performance(ui, &plot_ui, &mut imgui.game_state);
+        }
+        #[cfg(not(feature = "implot"))]
         render_performance(ui, &mut imgui.game_state);
 
         // Let the platform backend finalize per-frame data (required for viewports)
@@ -663,7 +733,7 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
             ui.separator();
 
             // Search filter with icon
-            ui.text("🔍");
+            ui.text("[Search]");
             ui.same_line();
             ui.input_text_imstr("##search", &mut game_state.hierarchy_search)
                 .build();
@@ -684,13 +754,13 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
 
                 // Add hierarchy indentation and icons
                 let icon = if entity.contains("Camera") {
-                    "📷"
+                    "[C]"
                 } else if entity.contains("Light") {
-                    "💡"
+                    "[L]"
                 } else if entity.contains("Mesh") {
-                    "🔷"
+                    "[M]"
                 } else {
-                    "🎯"
+                    "[O]"
                 };
 
                 ui.text(icon);
@@ -782,7 +852,7 @@ fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
             ui.separator();
 
             // Folder path
-            ui.text("📁");
+            ui.text("[Folder]");
             ui.same_line();
             ui.text(&game_state.current_folder);
 
@@ -816,15 +886,15 @@ fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
                 }
 
                 let icon = if asset.ends_with(".cs") {
-                    "📄"
+                    "[TXT]"
                 } else if asset.ends_with(".png") || asset.ends_with(".jpg") {
-                    "🖼️"
+                    "[IMG]"
                 } else if asset.ends_with(".fbx") || asset.ends_with(".obj") {
-                    "🎲"
+                    "[3D]"
                 } else if asset.ends_with(".wav") || asset.ends_with(".mp3") {
-                    "🔊"
+                    "[SND]"
                 } else {
-                    "📄"
+                    "[FILE]"
                 };
 
                 ui.button(format!("{}\n{}", icon, asset));
@@ -867,26 +937,96 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
 
                 // Transform component
                 if ui.collapsing_header("Transform", TreeNodeFlags::DEFAULT_OPEN) {
+                    // Calculate width for each component (label + 3 inputs)
+                    let available_width = ui.content_region_avail()[0];
+                    let label_width = 70.0; // Increased from 60.0 to prevent "Position" text overflow
+                    let spacing = ui.clone_style().item_spacing()[0];
+                    // Reserve more space for spacing to prevent overlap
+                    let input_width = (available_width - label_width - spacing * 3.0) / 3.0;
+
+                    // Position
                     ui.text("Position");
-                    ui.drag_float("X##pos", &mut game_state.transform_position[0]);
+                    ui.same_line_with_pos(label_width);
+                    ui.set_next_item_width(input_width);
+                    let mut pos_changed = ui
+                        .drag_float_config("##pos_x")
+                        .speed(0.1)
+                        .build(ui, &mut game_state.transform_position[0]);
                     ui.same_line();
-                    ui.drag_float("Y##pos", &mut game_state.transform_position[1]);
+                    ui.set_next_item_width(input_width);
+                    pos_changed = ui
+                        .drag_float_config("##pos_y")
+                        .speed(0.1)
+                        .build(ui, &mut game_state.transform_position[1])
+                        || pos_changed;
                     ui.same_line();
-                    ui.drag_float("Z##pos", &mut game_state.transform_position[2]);
+                    ui.set_next_item_width(input_width);
+                    pos_changed = ui
+                        .drag_float_config("##pos_z")
+                        .speed(0.1)
+                        .build(ui, &mut game_state.transform_position[2])
+                        || pos_changed;
 
+                    // Rotation
                     ui.text("Rotation");
-                    ui.drag_float("X##rot", &mut game_state.transform_rotation[0]);
+                    ui.same_line_with_pos(label_width);
+                    ui.set_next_item_width(input_width);
+                    let mut rot_changed = ui
+                        .drag_float_config("##rot_x")
+                        .speed(1.0)
+                        .build(ui, &mut game_state.transform_rotation[0]);
                     ui.same_line();
-                    ui.drag_float("Y##rot", &mut game_state.transform_rotation[1]);
+                    ui.set_next_item_width(input_width);
+                    rot_changed = ui
+                        .drag_float_config("##rot_y")
+                        .speed(1.0)
+                        .build(ui, &mut game_state.transform_rotation[1])
+                        || rot_changed;
                     ui.same_line();
-                    ui.drag_float("Z##rot", &mut game_state.transform_rotation[2]);
+                    ui.set_next_item_width(input_width);
+                    rot_changed = ui
+                        .drag_float_config("##rot_z")
+                        .speed(1.0)
+                        .build(ui, &mut game_state.transform_rotation[2])
+                        || rot_changed;
 
+                    // Scale
                     ui.text("Scale");
-                    ui.drag_float("X##scale", &mut game_state.transform_scale[0]);
+                    ui.same_line_with_pos(label_width);
+                    ui.set_next_item_width(input_width);
+                    let mut scale_changed = ui
+                        .drag_float_config("##scale_x")
+                        .speed(0.01)
+                        .build(ui, &mut game_state.transform_scale[0]);
                     ui.same_line();
-                    ui.drag_float("Y##scale", &mut game_state.transform_scale[1]);
+                    ui.set_next_item_width(input_width);
+                    scale_changed = ui
+                        .drag_float_config("##scale_y")
+                        .speed(0.01)
+                        .build(ui, &mut game_state.transform_scale[1])
+                        || scale_changed;
                     ui.same_line();
-                    ui.drag_float("Z##scale", &mut game_state.transform_scale[2]);
+                    ui.set_next_item_width(input_width);
+                    scale_changed = ui
+                        .drag_float_config("##scale_z")
+                        .speed(0.01)
+                        .build(ui, &mut game_state.transform_scale[2])
+                        || scale_changed;
+
+                    // Update object_matrix when transform changes in inspector
+                    #[cfg(feature = "imguizmo")]
+                    if pos_changed || rot_changed || scale_changed {
+                        let translation = Vec3::from_array(game_state.transform_position);
+                        let rotation = Quat::from_euler(
+                            glam::EulerRot::XYZ,
+                            game_state.transform_rotation[0].to_radians(),
+                            game_state.transform_rotation[1].to_radians(),
+                            game_state.transform_rotation[2].to_radians(),
+                        );
+                        let scale = Vec3::from_array(game_state.transform_scale);
+                        game_state.object_matrix =
+                            Mat4::from_scale_rotation_translation(scale, rotation, translation);
+                    }
                 }
 
                 // Renderer component (example)
@@ -945,12 +1085,176 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
 }
 
 /// Render the Scene View (Unity-style editor view)
+#[cfg(feature = "imguizmo")]
 fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
     ui.window("Scene View")
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
             // Scene view toolbar
-            ui.text("🔧");
+            ui.text("[Tools]");
+            ui.same_line();
+
+            // Operation buttons
+            if ui.button("Move") {
+                game_state.gizmo_operation = Operation::TRANSLATE;
+                game_state
+                    .console_logs
+                    .push("[INFO] Move tool selected".to_string());
+            }
+            ui.same_line();
+            if ui.button("Rotate") {
+                game_state.gizmo_operation = Operation::ROTATE;
+                game_state
+                    .console_logs
+                    .push("[INFO] Rotate tool selected".to_string());
+            }
+            ui.same_line();
+            if ui.button("Scale") {
+                game_state.gizmo_operation = Operation::SCALE;
+                game_state
+                    .console_logs
+                    .push("[INFO] Scale tool selected".to_string());
+            }
+
+            ui.same_line();
+            ui.separator_vertical();
+            ui.same_line();
+
+            // Mode buttons
+            if ui.button("Local") {
+                game_state.gizmo_mode = Mode::Local;
+            }
+            ui.same_line();
+            if ui.button("World") {
+                game_state.gizmo_mode = Mode::World;
+            }
+
+            ui.same_line();
+            ui.separator_vertical();
+            ui.same_line();
+
+            ui.checkbox("Grid", &mut game_state.show_grid);
+
+            ui.separator();
+
+            // Scene view area
+            let content_region = ui.content_region_avail();
+            game_state.viewport_size = [content_region[0], content_region[1]];
+
+            // Only draw if we have a valid canvas size
+            if content_region[0] > 0.0 && content_region[1] > 0.0 {
+                let canvas_pos = ui.cursor_screen_pos();
+                let canvas_size = content_region;
+
+                // Update camera aspect ratio
+                let aspect = canvas_size[0] / canvas_size[1];
+                game_state.camera_proj =
+                    Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 100.0);
+
+                // Update camera view from angles
+                let eye = Vec3::new(
+                    game_state.camera_distance
+                        * game_state.camera_y_angle.cos()
+                        * game_state.camera_x_angle.cos(),
+                    game_state.camera_distance * game_state.camera_x_angle.sin(),
+                    game_state.camera_distance
+                        * game_state.camera_y_angle.sin()
+                        * game_state.camera_x_angle.cos(),
+                );
+                game_state.camera_view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+
+                // Draw scene background
+                let draw_list = ui.get_window_draw_list();
+                draw_list
+                    .add_rect(
+                        canvas_pos,
+                        [
+                            canvas_pos[0] + canvas_size[0],
+                            canvas_pos[1] + canvas_size[1],
+                        ],
+                        [0.15, 0.15, 0.15, 1.0],
+                    )
+                    .filled(true)
+                    .build();
+
+                // Setup ImGuizmo viewport
+                let giz = ui.guizmo();
+                giz.set_drawlist_window();
+                giz.set_rect(canvas_pos[0], canvas_pos[1], canvas_size[0], canvas_size[1]);
+
+                // Draw grid using ImGuizmo
+                if game_state.show_grid {
+                    let identity = Mat4::IDENTITY;
+                    giz.draw_grid(
+                        &game_state.camera_view,
+                        &game_state.camera_proj,
+                        &identity,
+                        100.0,
+                    );
+                }
+
+                // Draw and manipulate object if selected
+                if game_state.selected_entity.is_some() {
+                    // Draw cube
+                    giz.draw_cubes(
+                        &game_state.camera_view,
+                        &game_state.camera_proj,
+                        &[game_state.object_matrix],
+                    );
+
+                    // Manipulate object
+                    let _used = giz
+                        .manipulate_config(
+                            &game_state.camera_view,
+                            &game_state.camera_proj,
+                            &mut game_state.object_matrix,
+                        )
+                        .operation(game_state.gizmo_operation)
+                        .mode(game_state.gizmo_mode)
+                        .build();
+
+                    // Sync transform with inspector
+                    if giz.is_using() {
+                        let (scale, rotation, translation) =
+                            game_state.object_matrix.to_scale_rotation_translation();
+                        game_state.transform_position = translation.to_array();
+                        game_state.transform_scale = scale.to_array();
+                        let euler = rotation.to_euler(glam::EulerRot::XYZ);
+                        game_state.transform_rotation = [
+                            euler.0.to_degrees(),
+                            euler.1.to_degrees(),
+                            euler.2.to_degrees(),
+                        ];
+                    }
+                } else {
+                    // Show hint (centered text)
+                    let text = "Select an object in Hierarchy to manipulate";
+                    let text_pos = [
+                        canvas_pos[0] + canvas_size[0] * 0.5 - 150.0, // Approximate center
+                        canvas_pos[1] + canvas_size[1] * 0.5,
+                    ];
+                    draw_list.add_text(text_pos, [0.5, 0.5, 0.5, 1.0], text);
+                }
+
+                // Scene info
+                ui.text(format!(
+                    "Scene Size: {:.0}x{:.0}",
+                    canvas_size[0], canvas_size[1]
+                ));
+            } else {
+                ui.text("Scene view too small to render");
+            }
+        });
+}
+
+/// Render the Scene View (Unity-style editor view) - No ImGuizmo version
+#[cfg(not(feature = "imguizmo"))]
+fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
+    ui.window("Scene View")
+        .size([800.0, 600.0], Condition::FirstUseEver)
+        .build(|| {
+            // Scene view toolbar
+            ui.text("[Tools]");
             ui.same_line();
             if ui.button("Move") {
                 game_state
@@ -1062,6 +1366,7 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
                     "Scene Size: {:.0}x{:.0}",
                     canvas_size[0], canvas_size[1]
                 ));
+                ui.text("(Enable 'imguizmo' feature for 3D gizmo)");
             } else {
                 ui.text("Scene view too small to render");
             }
@@ -1074,19 +1379,19 @@ fn render_game_view(ui: &Ui, game_state: &mut GameEngineState) {
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
             // Game view toolbar
-            if ui.button("🎮 Play") {
+            if ui.button("▶ Play") {
                 game_state
                     .console_logs
                     .push("[INFO] Play mode started".to_string());
             }
             ui.same_line();
-            if ui.button("⏸ Pause") {
+            if ui.button("|| Pause") {
                 game_state
                     .console_logs
                     .push("[INFO] Play mode paused".to_string());
             }
             ui.same_line();
-            if ui.button("⏹ Stop") {
+            if ui.button("■ Stop") {
                 game_state
                     .console_logs
                     .push("[INFO] Play mode stopped".to_string());
@@ -1266,15 +1571,15 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
         .size([300.0, 300.0], Condition::FirstUseEver)
         .build(|| {
             // Current folder path
-            ui.text(format!("📁 {}", game_state.current_folder));
+            ui.text(format!("[Folder] {}", game_state.current_folder));
             ui.separator();
 
             // Navigation buttons
-            if ui.button("⬆ Up") && game_state.current_folder != "Assets/" {
+            if ui.button("↑ Up") && game_state.current_folder != "Assets/" {
                 game_state.current_folder = "Assets/".to_string();
             }
             ui.same_line();
-            if ui.button("🔄 Refresh") {
+            if ui.button("⟳ Refresh") {
                 game_state
                     .console_logs
                     .push("[INFO] Asset browser refreshed".to_string());
@@ -1299,7 +1604,7 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
                 }
 
                 let is_folder = asset.ends_with('/');
-                let icon = if is_folder { "📁" } else { "📄" };
+                let icon = if is_folder { "[DIR]" } else { "[FILE]" };
                 let display_name = if is_folder {
                     asset.trim_end_matches('/')
                 } else {
@@ -1335,18 +1640,34 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
 }
 
 /// Render the performance stats panel
-fn render_performance(ui: &Ui, game_state: &mut GameEngineState) {
+#[cfg(feature = "implot")]
+fn render_performance(ui: &Ui, plot_ui: &PlotUi, game_state: &mut GameEngineState) {
     ui.window("Performance")
-        .size([250.0, 200.0], Condition::FirstUseEver)
+        .size([350.0, 600.0], Condition::FirstUseEver) // Increased height to show full graph
         .build(|| {
             ui.text("Performance Statistics");
             ui.separator();
 
-            // Update fake performance data
-            game_state.fps = 60.0 + (ui.time() * 2.0).sin() as f32 * 5.0;
+            // Update real performance data
+            game_state.fps = ui.io().framerate();
             game_state.frame_time = 1000.0 / game_state.fps;
+            // Keep fake data for draw calls and vertices (would come from real renderer)
             game_state.draw_calls = 45 + ((ui.time() * 0.5).sin() as f32 * 10.0) as u32;
             game_state.vertices = 12543 + ((ui.time() * 0.3).cos() as f32 * 1000.0) as u32;
+
+            // Update FPS history with timestamp
+            let current_time = ui.time();
+            game_state.fps_history.push((current_time, game_state.fps));
+
+            // Keep last 5 seconds of data (assuming ~60 FPS = 300 samples)
+            let history_duration = 5.0; // seconds
+            while !game_state.fps_history.is_empty() {
+                if current_time - game_state.fps_history[0].0 > history_duration {
+                    game_state.fps_history.remove(0);
+                } else {
+                    break;
+                }
+            }
 
             ui.text(format!("FPS: {:.1}", game_state.fps));
             ui.text(format!("Frame Time: {:.2}ms", game_state.frame_time));
@@ -1359,15 +1680,91 @@ fn render_performance(ui: &Ui, game_state: &mut GameEngineState) {
             let memory_used = 256.0 + (ui.time() * 0.1).sin() as f32 * 50.0;
             ui.text(format!("Memory: {:.1}MB", memory_used));
 
-            // Simple performance graph
-            ui.text("FPS Graph:");
-            let _fps_history: Vec<f32> = (0..60)
-                .map(|i| 60.0 + ((ui.time() - i as f64 * 0.1) * 2.0).sin() as f32 * 5.0)
-                .collect();
-            // TODO: Implement actual graph rendering with plot_lines when available
+            ui.separator();
 
-            // Note: plot_lines might not be available in current API
-            ui.text("(Graph visualization would go here)");
+            // FPS Graph using ImPlot
+            ui.text("FPS Graph (Last 5s):");
+
+            if !game_state.fps_history.is_empty() {
+                // Extract x (time) and y (fps) data
+                let x_data: Vec<f64> = game_state.fps_history.iter().map(|(t, _)| *t).collect();
+                let y_data: Vec<f64> = game_state
+                    .fps_history
+                    .iter()
+                    .map(|(_, fps)| *fps as f64)
+                    .collect();
+
+                // Create plot with fixed X axis range (scrolling window)
+                if let Some(token) = plot_ui.begin_plot("##FPS") {
+                    // Set axes labels and limits
+                    plot_ui.setup_axes(
+                        Some("Time (s)"),
+                        Some("FPS"),
+                        dear_implot::AxisFlags::NONE,
+                        dear_implot::AxisFlags::NONE,
+                    );
+
+                    // Set axes limits with scrolling window
+                    plot_ui.setup_axes_limits(
+                        current_time - history_duration, // x_min
+                        current_time,                    // x_max
+                        40.0,                            // y_min
+                        80.0,                            // y_max
+                        dear_implot::PlotCond::Always,
+                    );
+
+                    LinePlot::new("FPS", &x_data, &y_data).plot();
+                    token.end();
+                }
+            } else {
+                ui.text("Collecting data...");
+            }
+        });
+}
+
+#[cfg(not(feature = "implot"))]
+fn render_performance(ui: &Ui, game_state: &mut GameEngineState) {
+    ui.window("Performance")
+        .size([250.0, 200.0], Condition::FirstUseEver)
+        .build(|| {
+            ui.text("Performance Statistics");
+            ui.separator();
+
+            // Update real performance data
+            game_state.fps = ui.io().framerate();
+            game_state.frame_time = 1000.0 / game_state.fps;
+            // Keep fake data for draw calls and vertices (would come from real renderer)
+            game_state.draw_calls = 45 + ((ui.time() * 0.5).sin() as f32 * 10.0) as u32;
+            game_state.vertices = 12543 + ((ui.time() * 0.3).cos() as f32 * 1000.0) as u32;
+
+            // Update FPS history with timestamp (even without ImPlot, for consistency)
+            let current_time = ui.time();
+            game_state.fps_history.push((current_time, game_state.fps));
+
+            // Keep last 5 seconds of data
+            let history_duration = 5.0;
+            while !game_state.fps_history.is_empty() {
+                if current_time - game_state.fps_history[0].0 > history_duration {
+                    game_state.fps_history.remove(0);
+                } else {
+                    break;
+                }
+            }
+
+            ui.text(format!("FPS: {:.1}", game_state.fps));
+            ui.text(format!("Frame Time: {:.2}ms", game_state.frame_time));
+            ui.text(format!("Draw Calls: {}", game_state.draw_calls));
+            ui.text(format!("Vertices: {}", game_state.vertices));
+
+            ui.separator();
+
+            // Memory usage (fake data)
+            let memory_used = 256.0 + (ui.time() * 0.1).sin() as f32 * 50.0;
+            ui.text(format!("Memory: {:.1}MB", memory_used));
+
+            ui.separator();
+            ui.text("FPS Graph:");
+            ui.text("(Enable 'implot' feature to see graph)");
         });
 }
 
@@ -1502,20 +1899,20 @@ fn main() {
 
     let mut app = App::default();
 
-    println!("🎮 Game Engine Docking Demo");
+    println!("=== Game Engine Docking Demo ===");
     println!("Features:");
-    println!("  • Scene Hierarchy - Manage game objects");
-    println!("  • Inspector - Edit object properties");
-    println!("  • Viewport - 3D scene view with controls");
-    println!("  • Console - Command input and logging");
-    println!("  • Asset Browser - File management");
-    println!("  • Performance Stats - Real-time metrics");
+    println!("  * Scene Hierarchy - Manage game objects");
+    println!("  * Inspector - Edit object properties");
+    println!("  * Viewport - 3D scene view with controls");
+    println!("  * Console - Command input and logging");
+    println!("  * Asset Browser - File management");
+    println!("  * Performance Stats - Real-time metrics");
     println!();
     println!("Controls:");
-    println!("  • Drag panel tabs to rearrange layout");
-    println!("  • Right-click on objects for context menus");
-    println!("  • Use console commands: help, clear, fps, version");
-    println!("  • Press ESC to exit");
+    println!("  * Drag panel tabs to rearrange layout");
+    println!("  * Right-click on objects for context menus");
+    println!("  * Use console commands: help, clear, fps, version");
+    println!("  * Press ESC to exit");
     println!();
 
     event_loop.run_app(&mut app).unwrap();
