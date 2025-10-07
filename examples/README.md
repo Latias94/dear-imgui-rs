@@ -62,13 +62,16 @@ This is the intended organization.
 - 01-renderers (single-file, backend topics)
   - `glow_textures.rs`: modern texture system (register/update).
   - `wgpu_textures.rs`: CPU-updated texture registered in WGPU backend.
-  - multi-viewport (planned, if/when supported in backends).
 
 - 02-docking
   - `dockspace_minimal.rs`: enable docking + a simple dockspace.
   - `game_engine_docking.rs`: complex Unity-style layout, tabs, panels.
     - Menu already includes: Reset to Unity Layout, Save INI, Load INI.
     - Note: INI path is relative to the process CWD; see INI section below.
+  - `multi_viewport_wgpu.rs`: **Experimental test example only** - multi-viewport support is not production-ready.
+    - Run with: `cargo run --bin multi_viewport_wgpu --features multi-viewport`
+    - ⚠️ This is a work-in-progress test example for development purposes only.
+    - ⚠️ Multi-viewport functionality may have bugs or incomplete features.
 
 - 03-extensions (feature-gated)
   - ImPlot: `implot_basic.rs`.

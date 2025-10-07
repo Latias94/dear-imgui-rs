@@ -237,7 +237,9 @@ extensions/
 
 ## Limitations
 
-- **Multi-viewport support**: Currently not supported
+- **Multi-viewport support**: Currently not supported (experimental code exists but is not production-ready)
+  - A test example exists: `cargo run --bin multi_viewport_wgpu --features multi-viewport`
+  - This feature is work-in-progress and may have bugs or incomplete functionality
 - **WebAssembly (WASM)**: Currently not supported
 
 ## Related Projects

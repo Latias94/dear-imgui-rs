@@ -13,6 +13,7 @@ dear-implot3d = ["dep:dear-implot3d"]
 implot3d = ["dear-implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
 dear-file-browser = ["dep:dear-file-browser"]
+multi-viewport = ["dear-imgui-rs/multi-viewport", "dear-imgui-winit/multi-viewport", "dear-imgui-wgpu/multi-viewport"]
 
 [[bin]]
 name = "wgpu_basic"
@@ -69,6 +70,7 @@ path = "02-docking/dockspace_minimal.rs"
 [[bin]]
 name = "multi_viewport_wgpu"
 path = "02-docking/multi_viewport_wgpu.rs"
+required-features = ["multi-viewport"]
 
 [[bin]]
 name = "wgpu_textures"

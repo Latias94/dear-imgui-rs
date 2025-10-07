@@ -1,9 +1,24 @@
 //! Minimal multi-viewport sample using winit + wgpu backends
 //!
+//! ⚠️ **EXPERIMENTAL TEST EXAMPLE ONLY** ⚠️
+//!
+//! Multi-viewport support is currently **NOT PRODUCTION-READY**.
+//! This example is for testing and development purposes only.
+//!
+//! Run with:
+//! ```bash
+//! cargo run --bin multi_viewport_wgpu --features multi-viewport
+//! ```
+//!
+//! What this example demonstrates:
 //! - Creates a main window with WGPU rendering
-//! - Enables Dear ImGui multi-viewport
+//! - Enables Dear ImGui multi-viewport (experimental)
 //! - Routes input events for secondary windows
 //! - Lets Dear ImGui create/update/destroy platform windows and renders them
+//!
+//! Known limitations:
+//! - Multi-viewport functionality may have bugs or incomplete features
+//! - Not recommended for production use
 
 use dear_imgui_rs::{Condition, Context};
 use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
