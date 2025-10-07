@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+# Changelog
+
+
+
+### Chore
+
+- update image url (5b2ebfc…)
+
+
+### Features
+
+- add dear-file-browser (72a7a06…)
+
+- safe DockBuilder node API + viewport/id helpers; update docking demo [imgui] (14d96cf…)
+
+- add imguizmo.quat, cargo fmt (b9b1dc2…)
+
+- add dear-app, optimize cargo exclude, add package bin for dear-imguizmo-quat-sys (16b1ee5…)
+
+- fix implot3d bugs and fix examples, add readme (2aa7a25…)
+
+
+### Fixes
+
+- cargo clippy and add ci (a69ff25…)
+
+- fix docking split node function [imgui] (5e4f303…)
+
+- fix multi viewport example feature (7eef1bc…)
+
+- fix example features (082581e…)
+
+
+### Doc
+
+- add readme (8515569…)
+
+- modify readme (e9d36ed…)
+
+
 
 ## [0.3.0] - 2025-09-30
 
