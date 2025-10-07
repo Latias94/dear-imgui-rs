@@ -63,13 +63,22 @@ ui.window("Hello")
 git clone https://github.com/Latias94/dear-imgui-rs
 git submodule update --init --recursive
 
-# Core & docking
-cargo run -p dear-imgui-examples --bin game_engine_docking
+# Core & docking examples
+cargo run --bin game_engine_docking
+cargo run --bin dockspace_minimal
 
-# Extensions
-cargo run -p dear-imgui-examples --bin imguizmo_basic   --features dear-imguizmo
-cargo run -p dear-imgui-examples --bin imnodes_basic    --features dear-imnodes
-cargo run -p dear-imgui-examples --bin implot_basic     --features dear-implot
+# dear-app examples (application runner with docking support)
+cargo run --bin dear_app_quickstart
+cargo run --bin dear_app_docking
+
+# Extension examples (using wgpu + winit directly)
+cargo run --bin imguizmo_basic --features dear-imguizmo
+cargo run --bin imnodes_basic --features dear-imnodes
+cargo run --bin implot_basic --features dear-implot
+cargo run --bin imguizmo_quat_basic --features dear-imguizmo-quat
+
+# implot3d example (uses dear-app, requires both features)
+cargo run --bin implot3d_basic --features "dear-implot3d, dear-app/implot3d"
 ```
 
 Tip: The ImNodes example includes multiple tabs (Hello, Multi-Editor, Style, Advanced Style, Save/Load, Color Editor, Shader Graph, MiniMap Callback).
@@ -78,22 +87,50 @@ See `examples/README.md` for a curated index and the planned from‑easy‑to‑
 
 ### File Browser
 
-```
+```bash
 # OS-native dialogs (rfd)
-cargo run -p dear-imgui-examples --features dear-file-browser --bin file_dialog_native
+cargo run --bin file_dialog_native --features dear-file-browser
 
 # Pure ImGui in-UI file browser
-cargo run -p dear-imgui-examples --features dear-file-browser --bin file_browser_imgui
+cargo run --bin file_browser_imgui --features dear-file-browser
 ```
 
 ## Installation
 
+### Core + Backends
+
 ```toml
 [dependencies]
 dear-imgui-rs = "0.3"
-# choose a backend + platform integration
+# Choose a backend + platform integration
 dear-imgui-wgpu = "0.3"   # or dear-imgui-glow
 dear-imgui-winit = "0.3"
+```
+
+### Application Runner (Recommended for Quick Start)
+
+```toml
+[dependencies]
+dear-app = "0.3"  # Includes dear-imgui-rs, wgpu backend, and docking support
+```
+
+### Extensions
+
+```toml
+[dependencies]
+# Plotting
+dear-implot = "0.3"      # 2D plotting
+dear-implot3d = "0.3"    # 3D plotting
+
+# 3D Gizmos
+dear-imguizmo = "0.3"         # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = "0.3"    # Quaternion-based gizmo
+
+# Node Editor
+dear-imnodes = "0.3"
+
+# File Browser
+dear-file-browser = "0.3"  # Native dialogs + ImGui file browser
 ```
 
 ## Build Strategy
@@ -140,6 +177,12 @@ Backends
 | dear-imgui-glow  | 0.3.x   | glow = 0.16           |       |
 | dear-imgui-winit | 0.3.x   | winit = 0.30.12       |       |
 
+Application Runner
+
+| Crate     | Version | Requires dear-imgui-rs | Notes |
+|-----------|---------|------------------------|-------|
+| dear-app  | 0.3.x   | 0.3.x                  | Convenient Winit + WGPU runner with docking, themes, and add-ons support |
+
 Extensions
 
 | Crate         | Version | Requires dear-imgui-rs | Sys crate            | Notes |
@@ -168,7 +211,6 @@ Maintenance rules
   - Release download URLs default to owner/repo configured in `tools/build-support/src/lib.rs`.
     Override via env: `BUILD_SUPPORT_GH_OWNER`, `BUILD_SUPPORT_GH_REPO`.
 
-
 ## Version & FFI
 
 - FFI layer is generated from the cimgui “docking” branch matching Dear ImGui v1.92.3.
@@ -183,10 +225,11 @@ backends/
   dear-imgui-wgpu/     # WGPU renderer
   dear-imgui-glow/     # OpenGL renderer
   dear-imgui-winit/    # Winit platform
+dear-app/              # Application runner (Winit + WGPU + docking + themes)
 extensions/
   dear-imguizmo/       # ImGuizmo + pure‑Rust GraphEditor
   dear-imnodes/        # ImNodes (node editor)
-  dear-implot/         # ImPlot (plotting)
+  dear-implot/         # ImPlot (2D plotting)
   dear-implot3d/       # ImPlot3D (3D plotting)
   dear-imguizmo-quat/  # ImGuIZMO.quat (quaternion gizmo)
   dear-file-browser/   # File dialogs (rfd) + pure ImGui browser
@@ -219,4 +262,3 @@ Dual-licensed under either of:
 
 - Apache License, Version 2.0 (<http://www.apache.org/licenses/LICENSE-2.0>)
 - MIT license (<http://opensource.org/licenses/MIT>)
-
