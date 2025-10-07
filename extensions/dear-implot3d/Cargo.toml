@@ -1,6 +1,6 @@
 [package]
 name = "dear-implot3d"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 description = "High-level Rust bindings to ImPlot3D with Dear ImGui compatibility"
 license.workspace = true
@@ -16,12 +16,11 @@ features = []
 
 [dependencies]
 bitflags.workspace = true
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.3" }
-dear-implot3d-sys = { path = "../dear-implot3d-sys", version = "0.3" }
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.3" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.4" }
+dear-implot3d-sys = { path = "../dear-implot3d-sys", version = "0.4" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.4" }
 mint = { workspace = true, optional = true }
 
 [features]
 default = []
 mint = ["dep:mint"]
-

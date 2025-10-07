@@ -17,10 +17,10 @@ Convenient Dear ImGui application runner for `dear-imgui-rs`, bundling Winit + W
 
 ```toml
 [dependencies]
-dear-app = "0.3"
+dear-app = "0.4"
 
 # Optional add-ons (enable any subset)
-dear-app = { version = "0.3", features = ["implot", "imnodes", "implot3d"] }
+dear-app = { version = "0.4", features = ["implot", "imnodes", "implot3d"] }
 ```
 
 Minimal usage:
@@ -76,4 +76,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 - Backends: Uses `dear-imgui-winit` and `dear-imgui-wgpu` internally.
 - Fonts/FreeType: Configure in the `on_fonts` callback; FreeType can be enabled via `dear-imgui-rs/freetype`.
-

@@ -101,17 +101,17 @@ cargo run --bin file_browser_imgui --features file-browser
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.3"
+dear-imgui-rs = "0.4"
 # Choose a backend + platform integration
-dear-imgui-wgpu = "0.3"   # or dear-imgui-glow
-dear-imgui-winit = "0.3"
+dear-imgui-wgpu = "0.4"   # or dear-imgui-glow
+dear-imgui-winit = "0.4"
 ```
 
 ### Application Runner (Recommended for Quick Start)
 
 ```toml
 [dependencies]
-dear-app = "0.3"  # Includes dear-imgui-rs, wgpu backend, and docking support
+dear-app = "0.4"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```
 
 ### Extensions
@@ -119,18 +119,18 @@ dear-app = "0.3"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```toml
 [dependencies]
 # Plotting
-dear-implot = "0.3"      # 2D plotting
-dear-implot3d = "0.3"    # 3D plotting
+dear-implot = "0.4"      # 2D plotting
+dear-implot3d = "0.4"    # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo = "0.3"         # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat = "0.3"    # Quaternion-based gizmo
+dear-imguizmo = "0.4"         # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = "0.4"    # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = "0.3"
+dear-imnodes = "0.4"
 
 # File Browser
-dear-file-browser = "0.3"  # Native dialogs + ImGui file browser
+dear-file-browser = "0.4"  # Native dialogs + ImGui file browser
 ```
 
 ## Build Strategy
@@ -166,16 +166,16 @@ Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.3.x   | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.3.x   | Binds Dear ImGui v1.92.3 (docking branch) |
+| dear-imgui-rs   | 0.4.x   | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.4.x   | Binds Dear ImGui v1.92.3 (docking branch) |
 
 Backends
 
 | Crate            | Version | External deps         | Notes |
 |------------------|---------|-----------------------|-------|
-| dear-imgui-wgpu  | 0.3.x   | wgpu = 26             |       |
-| dear-imgui-glow  | 0.3.x   | glow = 0.16           |       |
-| dear-imgui-winit | 0.3.x   | winit = 0.30.12       |       |
+| dear-imgui-wgpu  | 0.4.x   | wgpu = 27             |       |
+| dear-imgui-glow  | 0.4.x   | glow = 0.16           |       |
+| dear-imgui-winit | 0.4.x   | winit = 0.30.12       |       |
 
 Application Runner
 

@@ -34,8 +34,8 @@ This crate integrates with `dear-imgui-rs` directly — add both crates, then bu
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.3"
-dear-implot = "0.3"
+dear-imgui-rs = "0.4"
+dear-implot = "0.4"
 ```
 
 ```rust
@@ -86,8 +86,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.3"
-dear-implot = "0.3"
+dear-imgui-rs = "0.4"
+dear-implot = "0.4"
 ```
 
 Basic usage:

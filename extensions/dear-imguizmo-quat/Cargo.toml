@@ -1,6 +1,6 @@
 [package]
 name = "dear-imguizmo-quat"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 description = "High-level Rust bindings for ImGuIZMO.quat (C API) with Dear ImGui integration"
 license.workspace = true
@@ -12,9 +12,9 @@ keywords.workspace = true
 readme = "README.md"
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.3" }
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.3" }
-dear-imguizmo-quat-sys = { path = "../dear-imguizmo-quat-sys", version = "0.3" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.4" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.4" }
+dear-imguizmo-quat-sys = { path = "../dear-imguizmo-quat-sys", version = "0.4" }
 thiserror.workspace = true
 bitflags = { workspace = true }
 glam = { workspace = true, optional = true }
@@ -25,4 +25,3 @@ default = ["glam"]
 freetype = ["dear-imgui-rs/freetype", "dear-imguizmo-quat-sys/freetype"]
 glam = ["dep:glam"]
 mint = ["dep:mint"]
-

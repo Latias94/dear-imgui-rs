@@ -37,8 +37,8 @@ All math parameters are generic over lightweight traits so you can also use plai
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.3"
-dear-imguizmo-quat = "0.3"
+dear-imgui-rs = "0.4"
+dear-imguizmo-quat = "0.4"
 ```
 
 Minimal usage with the Ui extension and builder API:
