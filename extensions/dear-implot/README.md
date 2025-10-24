@@ -21,9 +21,9 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.4.x   |
-| dear-imgui-rs     | 0.4.x   |
-| dear-implot-sys   | 0.4.x   |
+| Crate             | 0.5.x   |
+| dear-imgui-rs     | 0.5.x   |
+| dear-implot-sys   | 0.5.x   |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -34,8 +34,8 @@ This crate integrates with `dear-imgui-rs` directly — add both crates, then bu
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.4"
-dear-implot = "0.4"
+dear-imgui-rs = "0.5"
+dear-implot = "0.5"
 ```
 
 ```rust
@@ -86,8 +86,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.4"
-dear-implot = "0.4"
+dear-imgui-rs = "0.5"
+dear-implot = "0.5"
 ```
 
 Basic usage:

@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-winit"
-version = "0.4.1"
+version = "0.5.0"
 edition.workspace = true
 description = "Winit backend for Dear ImGui"
 license.workspace = true
@@ -11,7 +11,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.4" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.5" }
 winit.workspace = true
 #cfg-if.workspace = true
 instant = { version = "0.1", features = ["wasm-bindgen"] }

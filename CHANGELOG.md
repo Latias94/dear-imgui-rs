@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-10-24
+
+Upgrade to Dear ImGui v1.92.4 (docking branch) with new color styling option and bug fixes.
+
+### Added
+
+- dear-imgui-rs 0.5.0
+  - New `StyleColor::UnsavedMarker` color for marking unsaved documents/windows
+  - This color is used by Dear ImGui to indicate unsaved state in tabs and windows
+
+- dear-imgui-sys 0.5.0
+  - Updated to Dear ImGui v1.92.4 (docking branch)
+  - Updated cimgui submodule to v1.92.4dock (commit 2d91c9d)
+  - Regenerated FFI bindings with new ImGuiCol_UnsavedMarker constant
+
+### Changed
+
+- Updated all documentation references from v1.92.3 to v1.92.4
+- ImGuiCol_COUNT increased from 60 to 61 due to new color addition
+
+### Fixed
+
+- Inherited all bug fixes from Dear ImGui v1.92.4:
+  - InputText: Fixed single-line character clipping regression from v1.92.3
+  - InputText: Fixed potential infinite loop in callback handling
+  - Improved texture lifecycle management
+  - Fixed multi-context ImFontAtlas sharing issues
+
+### Version Updates
+
+**All crates in the workspace have been upgraded to 0.5.0** due to the Dear ImGui v1.92.4 upgrade.
+
+**Core:**
+- `dear-imgui-sys` → 0.5.0
+- `dear-imgui-rs` → 0.5.0
+
+**Backends:**
+- `dear-imgui-wgpu` → 0.5.0
+- `dear-imgui-glow` → 0.5.0
+- `dear-imgui-winit` → 0.5.0
+
+**Application Framework:**
+- `dear-app` → 0.5.0
+
+**Extensions:**
+- `dear-imnodes` → 0.5.0 (+ `dear-imnodes-sys` → 0.5.0)
+- `dear-implot` → 0.5.0 (+ `dear-implot-sys` → 0.5.0)
+- `dear-implot3d` → 0.5.0 (+ `dear-implot3d-sys` → 0.5.0)
+- `dear-imguizmo` → 0.5.0 (+ `dear-imguizmo-sys` → 0.5.0)
+- `dear-imguizmo-quat` → 0.5.0 (+ `dear-imguizmo-quat-sys` → 0.5.0)
+- `dear-file-browser` → 0.5.0
+
 ## [0.4.1] - 2025-10-07
 
 Small, focused improvements to enable real-time texture workflows (game view, atlas tools, image browsers) without frame delay.

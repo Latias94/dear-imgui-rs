@@ -19,9 +19,9 @@ Safe, idiomatic Rust bindings for ImGuIZMO.quat (quaternion + 3D gizmo helpers) 
 
 | Item                   | Version |
 |------------------------|---------|
-| Crate                  | 0.4.x   |
-| dear-imgui-rs          | 0.4.x   |
-| dear-imguizmo-quat-sys | 0.4.x   |
+| Crate                  | 0.5.x   |
+| dear-imgui-rs          | 0.5.x   |
+| dear-imguizmo-quat-sys | 0.5.x   |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
@@ -37,8 +37,8 @@ All math parameters are generic over lightweight traits so you can also use plai
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.4"
-dear-imguizmo-quat = "0.4"
+dear-imgui-rs = "0.5"
+dear-imguizmo-quat = "0.5"
 ```
 
 Minimal usage with the Ui extension and builder API:

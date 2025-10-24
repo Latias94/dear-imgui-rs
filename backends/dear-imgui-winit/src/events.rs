@@ -133,7 +133,7 @@ pub fn handle_touch_event(touch: &winit::event::Touch, _window: &Window, _imgui_
 
     // Convert touch events to mouse events for basic touch support
     ACTIVE_TOUCH.with(|active| {
-        let mut active_id = active.borrow().clone();
+        let active_id = active.borrow().clone();
         let id = touch.id;
         match touch.phase {
             TouchPhase::Started => {

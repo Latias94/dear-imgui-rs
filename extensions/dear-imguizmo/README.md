@@ -26,9 +26,9 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.4.x   |
-| dear-imgui-rs     | 0.4.x   |
-| dear-imguizmo-sys | 0.4.x   |
+| Crate             | 0.5.x   |
+| dear-imgui-rs     | 0.5.x   |
+| dear-imguizmo-sys | 0.5.x   |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -44,8 +44,8 @@ All matrix arguments in the API are generic over a `Mat4Like` trait, implemented
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.4"
-dear-imguizmo = "0.4"
+dear-imgui-rs = "0.5"
+dear-imguizmo = "0.5"
 ```
 
 Minimal usage (dear-imgui-style API):

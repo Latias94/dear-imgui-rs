@@ -728,9 +728,10 @@ pub const ImGuiBackendFlags_HasMouseCursors: ImGuiBackendFlags_ = 2;
 pub const ImGuiBackendFlags_HasSetMousePos: ImGuiBackendFlags_ = 4;
 pub const ImGuiBackendFlags_RendererHasVtxOffset: ImGuiBackendFlags_ = 8;
 pub const ImGuiBackendFlags_RendererHasTextures: ImGuiBackendFlags_ = 16;
-pub const ImGuiBackendFlags_PlatformHasViewports: ImGuiBackendFlags_ = 1024;
-pub const ImGuiBackendFlags_HasMouseHoveredViewport: ImGuiBackendFlags_ = 2048;
-pub const ImGuiBackendFlags_RendererHasViewports: ImGuiBackendFlags_ = 4096;
+pub const ImGuiBackendFlags_RendererHasViewports: ImGuiBackendFlags_ = 1024;
+pub const ImGuiBackendFlags_PlatformHasViewports: ImGuiBackendFlags_ = 2048;
+pub const ImGuiBackendFlags_HasMouseHoveredViewport: ImGuiBackendFlags_ = 4096;
+pub const ImGuiBackendFlags_HasParentViewport: ImGuiBackendFlags_ = 8192;
 pub type ImGuiBackendFlags_ = ::std::os::raw::c_int;
 pub const ImGuiCol_Text: ImGuiCol_ = 0;
 pub const ImGuiCol_TextDisabled: ImGuiCol_ = 1;
@@ -788,11 +789,12 @@ pub const ImGuiCol_TextLink: ImGuiCol_ = 52;
 pub const ImGuiCol_TextSelectedBg: ImGuiCol_ = 53;
 pub const ImGuiCol_TreeLines: ImGuiCol_ = 54;
 pub const ImGuiCol_DragDropTarget: ImGuiCol_ = 55;
-pub const ImGuiCol_NavCursor: ImGuiCol_ = 56;
-pub const ImGuiCol_NavWindowingHighlight: ImGuiCol_ = 57;
-pub const ImGuiCol_NavWindowingDimBg: ImGuiCol_ = 58;
-pub const ImGuiCol_ModalWindowDimBg: ImGuiCol_ = 59;
-pub const ImGuiCol_COUNT: ImGuiCol_ = 60;
+pub const ImGuiCol_UnsavedMarker: ImGuiCol_ = 56;
+pub const ImGuiCol_NavCursor: ImGuiCol_ = 57;
+pub const ImGuiCol_NavWindowingHighlight: ImGuiCol_ = 58;
+pub const ImGuiCol_NavWindowingDimBg: ImGuiCol_ = 59;
+pub const ImGuiCol_ModalWindowDimBg: ImGuiCol_ = 60;
+pub const ImGuiCol_COUNT: ImGuiCol_ = 61;
 pub type ImGuiCol_ = ::std::os::raw::c_int;
 pub const ImGuiStyleVar_Alpha: ImGuiStyleVar_ = 0;
 pub const ImGuiStyleVar_DisabledAlpha: ImGuiStyleVar_ = 1;
@@ -1088,7 +1090,7 @@ pub struct ImGuiStyle {
     pub AntiAliasedFill: bool,
     pub CurveTessellationTol: f32,
     pub CircleTessellationMaxError: f32,
-    pub Colors: [ImVec4; 60usize],
+    pub Colors: [ImVec4; 61usize],
     pub HoverStationaryDelay: f32,
     pub HoverDelayShort: f32,
     pub HoverDelayNormal: f32,
@@ -1160,7 +1162,7 @@ pub struct ImGuiIO {
     pub ConfigViewportsNoTaskBarIcon: bool,
     pub ConfigViewportsNoDecoration: bool,
     pub ConfigViewportsNoDefaultParent: bool,
-    pub ConfigViewportPlatformFocusSetsImGuiFocus: bool,
+    pub ConfigViewportsPlatformFocusSetsImGuiFocus: bool,
     pub ConfigDpiScaleFonts: bool,
     pub ConfigDpiScaleViewports: bool,
     pub MouseDrawCursor: bool,
@@ -2660,6 +2662,7 @@ pub struct ImGuiViewport {
     pub WorkSize: ImVec2,
     pub DpiScale: f32,
     pub ParentViewportId: ImGuiID,
+    pub ParentViewport: *mut ImGuiViewport,
     pub DrawData: *mut ImDrawData,
     pub RendererUserData: *mut ::std::os::raw::c_void,
     pub PlatformUserData: *mut ::std::os::raw::c_void,
@@ -3709,8 +3712,8 @@ pub type ImGuiKeyRoutingIndex = ImS16;
 pub struct ImGuiKeyRoutingData {
     pub NextEntryIndex: ImGuiKeyRoutingIndex,
     pub Mods: ImU16,
-    pub RoutingCurrScore: ImU8,
-    pub RoutingNextScore: ImU8,
+    pub RoutingCurrScore: ImU16,
+    pub RoutingNextScore: ImU16,
     pub RoutingCurr: ImGuiID,
     pub RoutingNext: ImGuiID,
 }
@@ -5739,6 +5742,7 @@ pub struct ImGuiContext {
     pub DragDropTargetRect: ImRect,
     pub DragDropTargetClipRect: ImRect,
     pub DragDropTargetId: ImGuiID,
+    pub DragDropTargetFullViewport: ImGuiID,
     pub DragDropAcceptFlags: ImGuiDragDropFlags,
     pub DragDropAcceptIdCurrRectSurface: f32,
     pub DragDropAcceptIdCurr: ImGuiID,
@@ -10813,6 +10817,12 @@ unsafe extern "C" {
     pub fn ImGuiPlatformIO_destroy(self_: *mut ImGuiPlatformIO);
 }
 unsafe extern "C" {
+    pub fn ImGuiPlatformIO_ClearPlatformHandlers(self_: *mut ImGuiPlatformIO);
+}
+unsafe extern "C" {
+    pub fn ImGuiPlatformIO_ClearRendererHandlers(self_: *mut ImGuiPlatformIO);
+}
+unsafe extern "C" {
     pub fn ImGuiPlatformMonitor_ImGuiPlatformMonitor() -> *mut ImGuiPlatformMonitor;
 }
 unsafe extern "C" {
@@ -13038,13 +13048,20 @@ unsafe extern "C" {
     pub fn igBeginDragDropTargetCustom(bb: ImRect, id: ImGuiID) -> bool;
 }
 unsafe extern "C" {
+    pub fn igBeginDragDropTargetViewport(viewport: *mut ImGuiViewport, p_bb: *const ImRect)
+    -> bool;
+}
+unsafe extern "C" {
     pub fn igClearDragDrop();
 }
 unsafe extern "C" {
     pub fn igIsDragDropPayloadBeingAccepted() -> bool;
 }
 unsafe extern "C" {
-    pub fn igRenderDragDropTargetRect(bb: ImRect, item_clip_rect: ImRect);
+    pub fn igRenderDragDropTargetRectForItem(bb: ImRect);
+}
+unsafe extern "C" {
+    pub fn igRenderDragDropTargetRectEx(draw_list: *mut ImDrawList, bb: ImRect);
 }
 unsafe extern "C" {
     pub fn igGetTypingSelectRequest(flags: ImGuiTypingSelectFlags)

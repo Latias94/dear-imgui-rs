@@ -167,7 +167,7 @@ impl AppWindow {
             .and_then(|r| r.with_guessed_format())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         {
-            Ok(mut r) => match r.decode() {
+            Ok(r) => match r.decode() {
                 Ok(img) => {
                     let rgba = img.to_rgba8();
                     let (w, h) = rgba.dimensions();
