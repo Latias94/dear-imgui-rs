@@ -340,6 +340,7 @@ impl WinitPlatform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::test_sync::lock_context;
 
     #[test]
     fn test_hidpi_mode_default() {
@@ -348,6 +349,7 @@ mod tests {
 
     #[test]
     fn test_platform_creation() {
+        let _guard = lock_context();
         let mut ctx = Context::create();
         let platform = WinitPlatform::new(&mut ctx);
 
@@ -359,6 +361,7 @@ mod tests {
 
     #[test]
     fn test_hidpi_mode_setting() {
+        let _guard = lock_context();
         let mut ctx = Context::create();
         let mut platform = WinitPlatform::new(&mut ctx);
 

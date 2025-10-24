@@ -51,6 +51,8 @@ mod input;
 #[cfg(feature = "multi-viewport")]
 pub mod multi_viewport;
 mod platform;
+#[cfg(test)]
+mod test_util;
 
 // Re-export main types
 pub use platform::{HiDpiMode, WinitPlatform};

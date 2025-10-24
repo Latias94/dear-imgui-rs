@@ -24,6 +24,9 @@ Upgrade to Dear ImGui v1.92.4 (docking branch) with new color styling option and
 
 - Updated all documentation references from v1.92.3 to v1.92.4
 - ImGuiCol_COUNT increased from 60 to 61 due to new color addition
+- dear-imgui-winit: Map extra mouse buttons
+  - `winit::event::MouseButton::Back/Forward` and common `Other(3)/Other(4)` are now mapped to `ImGuiMouseButton::Extra1/Extra2`
+  - Improves out-of-the-box support for side buttons on modern mice; no API changes
 
 ### Fixed
 
@@ -32,6 +35,7 @@ Upgrade to Dear ImGui v1.92.4 (docking branch) with new color styling option and
   - InputText: Fixed potential infinite loop in callback handling
   - Improved texture lifecycle management
   - Fixed multi-context ImFontAtlas sharing issues
+- dear-imgui-winit: Stabilized tests that create an ImGui context by serializing them to avoid spurious `ContextAlreadyActive` panics (internal, no runtime impact)
 
 ### Version Updates
 
@@ -329,4 +333,3 @@ No API changes were made - only the crate name changed.
 - `dear-imgui-glow`: OpenGL/GLOW renderer backend
 - `dear-implot-sys`: ImPlot FFI bindings
 - `dear-implot`: ImPlot Rust API
-

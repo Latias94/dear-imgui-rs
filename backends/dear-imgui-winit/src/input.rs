@@ -186,11 +186,11 @@ mod tests {
         );
         assert_eq!(
             to_imgui_mouse_button(WinitMouseButton::Back),
-            None // Not supported in our MouseButton enum
+            Some(ImGuiMouseButton::Extra1)
         );
         assert_eq!(
             to_imgui_mouse_button(WinitMouseButton::Forward),
-            None // Not supported in our MouseButton enum
+            Some(ImGuiMouseButton::Extra2)
         );
         assert_eq!(to_imgui_mouse_button(WinitMouseButton::Other(10)), None);
     }

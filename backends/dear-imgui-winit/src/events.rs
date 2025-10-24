@@ -189,6 +189,7 @@ pub fn handle_focused(focused: bool, imgui_ctx: &mut Context) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::test_sync::lock_context;
     use dear_imgui_rs::Context;
     use winit::event::{ElementState, MouseButton};
 
@@ -205,6 +206,7 @@ mod tests {
 
     #[test]
     fn test_mouse_button_handling() {
+        let _guard = lock_context();
         let mut ctx = Context::create();
 
         let handled = handle_mouse_button(MouseButton::Left, ElementState::Pressed, &mut ctx);
@@ -216,6 +218,7 @@ mod tests {
 
     #[test]
     fn test_cursor_moved() {
+        let _guard = lock_context();
         let mut ctx = Context::create();
 
         let handled = handle_cursor_moved([100.0, 200.0], &mut ctx);
