@@ -95,7 +95,7 @@ impl<'ui> crate::NodeEditor<'ui> {
         match value {
             StyleVarValue::Float(v) => unsafe { sys::imnodes_PushStyleVar_Float(var as i32, v) },
             StyleVarValue::Vec2(v) => unsafe {
-                sys::imnodes_PushStyleVar_Vec2(var as i32, sys::ImVec2 { x: v[0], y: v[1] })
+                sys::imnodes_PushStyleVar_Vec2(var as i32, sys::ImVec2_c { x: v[0], y: v[1] })
             },
         }
         StyleVarToken
@@ -110,7 +110,7 @@ impl<'ui> crate::NodeEditor<'ui> {
         unsafe {
             sys::imnodes_PushStyleVar_Vec2(
                 var,
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: value[0],
                     y: value[1],
                 },
@@ -134,12 +134,6 @@ pub fn rgba_to_abgr_u32(rgba: [f32; 4]) -> u32 {
 
 /// Convert ImGui-packed ABGR (u32) to RGBA floats [0,1]
 pub fn abgr_u32_to_rgba(col: u32) -> [f32; 4] {
-    let mut out = imgui_sys::ImVec4 {
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-        w: 0.0,
-    };
-    unsafe { imgui_sys::igColorConvertU32ToFloat4(&mut out as *mut _, col) };
+    let out = unsafe { imgui_sys::igColorConvertU32ToFloat4(col) };
     [out.x, out.y, out.z, out.w]
 }

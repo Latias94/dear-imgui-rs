@@ -112,7 +112,7 @@ impl<'ui> PlotUi<'ui> {
     pub fn begin_plot(&self, title: &str) -> Option<PlotToken<'_>> {
         let title_cstr = std::ffi::CString::new(title).ok()?;
 
-        let size = sys::ImVec2 { x: -1.0, y: 0.0 };
+        let size = sys::ImVec2_c { x: -1.0, y: 0.0 };
         let started = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), size, 0) };
 
         if started {
@@ -126,7 +126,7 @@ impl<'ui> PlotUi<'ui> {
     pub fn begin_plot_with_size(&self, title: &str, size: [f32; 2]) -> Option<PlotToken<'_>> {
         let title_cstr = std::ffi::CString::new(title).ok()?;
 
-        let plot_size = sys::ImVec2 {
+        let plot_size = sys::ImVec2_c {
             x: size[0],
             y: size[1],
         };
@@ -197,24 +197,12 @@ impl<'ui> PlotUi<'ui> {
             2 => 5,
             _ => 3,
         };
-        let mut out = sys::ImPlotPoint { x: 0.0, y: 0.0 };
-        unsafe {
-            sys::ImPlot_GetPlotMousePos(&mut out as *mut sys::ImPlotPoint, 0, y_axis);
-        }
-        out
+        unsafe { sys::ImPlot_GetPlotMousePos(0, y_axis) }
     }
 
     /// Get the mouse position in plot coordinates for specific axes
     pub fn get_plot_mouse_pos_axes(&self, x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotPoint {
-        let mut out = sys::ImPlotPoint { x: 0.0, y: 0.0 };
-        unsafe {
-            sys::ImPlot_GetPlotMousePos(
-                &mut out as *mut sys::ImPlotPoint,
-                x_axis as i32,
-                y_axis as i32,
-            )
-        };
-        out
+        unsafe { sys::ImPlot_GetPlotMousePos(x_axis as i32, y_axis as i32) }
     }
 
     /// Set current axes for subsequent plot submissions

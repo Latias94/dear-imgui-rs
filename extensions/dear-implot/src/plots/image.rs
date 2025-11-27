@@ -59,22 +59,22 @@ impl<'a> Plot for ImagePlot<'a> {
             return;
         }
         let label_c = safe_cstring(self.label);
-        let uv0 = sys::ImVec2 {
+        let uv0 = sys::ImVec2_c {
             x: self.uv0[0],
             y: self.uv0[1],
         };
-        let uv1 = sys::ImVec2 {
+        let uv1 = sys::ImVec2_c {
             x: self.uv1[0],
             y: self.uv1[1],
         };
-        let tint = sys::ImVec4 {
+        let tint = sys::ImVec4_c {
             x: self.tint[0],
             y: self.tint[1],
             z: self.tint[2],
             w: self.tint[3],
         };
         // Construct ImTextureRef from ImTextureID
-        let tex_ref = sys::ImTextureRef {
+        let tex_ref = sys::ImTextureRef_c {
             _TexData: std::ptr::null_mut(),
             _TexID: self.tex_id,
         };

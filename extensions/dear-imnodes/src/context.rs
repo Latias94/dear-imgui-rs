@@ -71,15 +71,14 @@ impl EditorContext {
 
     pub fn get_panning(&self) -> [f32; 2] {
         unsafe { sys::imnodes_EditorContextSet(self.raw) };
-        let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::imnodes_EditorContextGetPanning(&mut out as *mut _) };
+        let out = unsafe { sys::imnodes_EditorContextGetPanning() };
         [out.x, out.y]
     }
 
     pub fn reset_panning(&self, pos: [f32; 2]) {
         unsafe { sys::imnodes_EditorContextSet(self.raw) };
         unsafe {
-            sys::imnodes_EditorContextResetPanning(sys::ImVec2 {
+            sys::imnodes_EditorContextResetPanning(sys::ImVec2_c {
                 x: pos[0],
                 y: pos[1],
             })
@@ -464,7 +463,7 @@ impl<'ui> NodeEditor<'ui> {
         unsafe {
             sys::imnodes_SetNodeGridSpacePos(
                 node_id,
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: pos[0],
                     y: pos[1],
                 },
@@ -473,8 +472,7 @@ impl<'ui> NodeEditor<'ui> {
     }
 
     pub fn get_node_pos_grid(&self, node_id: i32) -> [f32; 2] {
-        let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::imnodes_GetNodeGridSpacePos(&mut out as *mut _, node_id) };
+        let out = unsafe { sys::imnodes_GetNodeGridSpacePos(node_id) };
         [out.x, out.y]
     }
 
@@ -496,7 +494,7 @@ impl<'ui> NodeEditor<'ui> {
     }
     pub fn set_node_padding(&self, padding: [f32; 2]) {
         unsafe {
-            (*sys::imnodes_GetStyle()).NodePadding = sys::ImVec2 {
+            (*sys::imnodes_GetStyle()).NodePadding = sys::ImVec2_c {
                 x: padding[0],
                 y: padding[1],
             };
@@ -549,7 +547,7 @@ impl<'ui> NodeEditor<'ui> {
     }
     pub fn set_minimap_padding(&self, padding: [f32; 2]) {
         unsafe {
-            (*sys::imnodes_GetStyle()).MiniMapPadding = sys::ImVec2 {
+            (*sys::imnodes_GetStyle()).MiniMapPadding = sys::ImVec2_c {
                 x: padding[0],
                 y: padding[1],
             };
@@ -557,7 +555,7 @@ impl<'ui> NodeEditor<'ui> {
     }
     pub fn set_minimap_offset(&self, offset: [f32; 2]) {
         unsafe {
-            (*sys::imnodes_GetStyle()).MiniMapOffset = sys::ImVec2 {
+            (*sys::imnodes_GetStyle()).MiniMapOffset = sys::ImVec2_c {
                 x: offset[0],
                 y: offset[1],
             };
@@ -579,13 +577,7 @@ impl<'ui> NodeEditor<'ui> {
     /// Get a style color as RGBA floats [0,1]
     pub fn get_color(&self, elem: crate::style::ColorElement) -> [f32; 4] {
         let col = unsafe { (*sys::imnodes_GetStyle()).Colors[elem as u32 as usize] };
-        let mut out = imgui_sys::ImVec4 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            w: 0.0,
-        };
-        unsafe { imgui_sys::igColorConvertU32ToFloat4(&mut out as *mut _, col) };
+        let out = unsafe { imgui_sys::igColorConvertU32ToFloat4(col) };
         [out.x, out.y, out.z, out.w]
     }
 
@@ -594,7 +586,7 @@ impl<'ui> NodeEditor<'ui> {
         unsafe {
             sys::imnodes_SetNodeScreenSpacePos(
                 node_id,
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: pos[0],
                     y: pos[1],
                 },
@@ -605,7 +597,7 @@ impl<'ui> NodeEditor<'ui> {
         unsafe {
             sys::imnodes_SetNodeEditorSpacePos(
                 node_id,
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: pos[0],
                     y: pos[1],
                 },
@@ -613,13 +605,11 @@ impl<'ui> NodeEditor<'ui> {
         }
     }
     pub fn get_node_pos_screen(&self, node_id: i32) -> [f32; 2] {
-        let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::imnodes_GetNodeScreenSpacePos(&mut out, node_id) };
+        let out = unsafe { sys::imnodes_GetNodeScreenSpacePos(node_id) };
         [out.x, out.y]
     }
     pub fn get_node_pos_editor(&self, node_id: i32) -> [f32; 2] {
-        let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::imnodes_GetNodeEditorSpacePos(&mut out, node_id) };
+        let out = unsafe { sys::imnodes_GetNodeEditorSpacePos(node_id) };
         [out.x, out.y]
     }
 
@@ -631,8 +621,7 @@ impl<'ui> NodeEditor<'ui> {
         unsafe { sys::imnodes_SnapNodeToGrid(node_id) }
     }
     pub fn get_node_dimensions(&self, node_id: i32) -> [f32; 2] {
-        let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::imnodes_GetNodeDimensions(&mut out, node_id) };
+        let out = unsafe { sys::imnodes_GetNodeDimensions(node_id) };
         [out.x, out.y]
     }
 

@@ -60,7 +60,7 @@ impl<'a> TextPlot<'a> {
     pub fn plot(self) {
         let text_cstring = safe_cstring(self.text);
 
-        let pix_offset = sys::ImVec2 {
+        let pix_offset = sys::ImVec2_c {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
         };
@@ -243,7 +243,7 @@ impl FormattedTextPlot {
     pub fn plot(self) {
         let text_cstring = safe_cstring(&self.text);
 
-        let pix_offset = sys::ImVec2 {
+        let pix_offset = sys::ImVec2_c {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
         };

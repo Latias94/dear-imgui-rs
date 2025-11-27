@@ -78,7 +78,7 @@ impl<'a> SubplotGrid<'a> {
             CString::new(self.title).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
         let size = self.size.unwrap_or([-1.0, -1.0]);
-        let size_vec = sys::ImVec2 {
+        let size_vec = sys::ImVec2_c {
             x: size[0],
             y: size[1],
         };
@@ -183,7 +183,7 @@ impl<'a> MultiAxisPlot<'a> {
             CString::new(self.title).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
         let size = self.size.unwrap_or([-1.0, -1.0]);
-        let size_vec = sys::ImVec2 {
+        let size_vec = sys::ImVec2_c {
             x: size[0],
             y: size[1],
         };

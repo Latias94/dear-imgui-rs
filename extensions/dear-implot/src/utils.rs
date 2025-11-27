@@ -27,28 +27,12 @@ pub fn get_plot_mouse_position(y_axis_choice: Option<crate::YAxisChoice>) -> sys
         Some(crate::YAxisChoice::Third) => 5,  // ImAxis_Y3
         None => 3,                             // Default to Y1
     };
-    let mut out = sys::ImPlotPoint { x: 0.0, y: 0.0 };
-    unsafe {
-        sys::ImPlot_GetPlotMousePos(
-            &mut out as *mut sys::ImPlotPoint,
-            x_axis as sys::ImAxis,
-            y_axis as sys::ImAxis,
-        )
-    }
-    out
+    unsafe { sys::ImPlot_GetPlotMousePos(x_axis as sys::ImAxis, y_axis as sys::ImAxis) }
 }
 
 /// Get the mouse position in plot coordinates for specific axes
 pub fn get_plot_mouse_position_axes(x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotPoint {
-    let mut out = sys::ImPlotPoint { x: 0.0, y: 0.0 };
-    unsafe {
-        sys::ImPlot_GetPlotMousePos(
-            &mut out as *mut sys::ImPlotPoint,
-            x_axis as sys::ImAxis,
-            y_axis as sys::ImAxis,
-        )
-    };
-    out
+    unsafe { sys::ImPlot_GetPlotMousePos(x_axis as sys::ImAxis, y_axis as sys::ImAxis) }
 }
 
 /// Convert pixels to plot coordinates
@@ -150,9 +134,7 @@ pub fn get_plot_limits(
         Some(crate::YAxisChoice::Third) => 5,  // ImAxis_Y3
         None => 3,                             // Default to Y1
     };
-    let mut rect: sys::ImPlotRect = unsafe { std::mem::zeroed() };
-    unsafe { sys::ImPlot_GetPlotLimits(&mut rect as *mut sys::ImPlotRect, x_axis, y_axis) };
-    rect
+    unsafe { sys::ImPlot_GetPlotLimits(x_axis, y_axis) }
 }
 
 /// Whether a plot has an active selection region
@@ -165,14 +147,7 @@ pub fn get_plot_selection_axes(x_axis: XAxis, y_axis: YAxis) -> Option<sys::ImPl
     if !is_plot_selected() {
         return None;
     }
-    let mut rect: sys::ImPlotRect = unsafe { std::mem::zeroed() };
-    unsafe {
-        sys::ImPlot_GetPlotSelection(
-            &mut rect as *mut sys::ImPlotRect,
-            x_axis as i32,
-            y_axis as i32,
-        )
-    };
+    let rect = unsafe { sys::ImPlot_GetPlotSelection(x_axis as i32, y_axis as i32) };
     Some(rect)
 }
 
@@ -185,13 +160,13 @@ pub fn annotation_point(
     clamp: bool,
     round: bool,
 ) {
-    let col = sys::ImVec4 {
+    let col = sys::ImVec4_c {
         x: color[0],
         y: color[1],
         z: color[2],
         w: color[3],
     };
-    let off = sys::ImVec2 {
+    let off = sys::ImVec2_c {
         x: pixel_offset[0],
         y: pixel_offset[1],
     };
@@ -200,7 +175,7 @@ pub fn annotation_point(
 
 /// Tag the X axis at position x with a tick-like mark
 pub fn tag_x(x: f64, color: [f32; 4], round: bool) {
-    let col = sys::ImVec4 {
+    let col = sys::ImVec4_c {
         x: color[0],
         y: color[1],
         z: color[2],
@@ -211,7 +186,7 @@ pub fn tag_x(x: f64, color: [f32; 4], round: bool) {
 
 /// Tag the Y axis at position y with a tick-like mark
 pub fn tag_y(y: f64, color: [f32; 4], round: bool) {
-    let col = sys::ImVec4 {
+    let col = sys::ImVec4_c {
         x: color[0],
         y: color[1],
         z: color[2],
@@ -222,15 +197,7 @@ pub fn tag_y(y: f64, color: [f32; 4], round: bool) {
 
 /// Get the current plot limits for specific axes
 pub fn get_plot_limits_axes(x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotRect {
-    let mut rect: sys::ImPlotRect = unsafe { std::mem::zeroed() };
-    unsafe {
-        sys::ImPlot_GetPlotLimits(
-            &mut rect as *mut sys::ImPlotRect,
-            x_axis as i32,
-            y_axis as i32,
-        )
-    };
-    rect
+    unsafe { sys::ImPlot_GetPlotLimits(x_axis as i32, y_axis as i32) }
 }
 
 /// Check if an axis is hovered
@@ -286,15 +253,13 @@ pub fn show_metrics_window(open: &mut bool) {
 
 /// Get current plot position (top-left) in pixels
 pub fn get_plot_pos() -> [f32; 2] {
-    let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-    unsafe { sys::ImPlot_GetPlotPos(&mut out as *mut _) };
+    let out = unsafe { sys::ImPlot_GetPlotPos() };
     [out.x, out.y]
 }
 
 /// Get current plot size in pixels
 pub fn get_plot_size() -> [f32; 2] {
-    let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-    unsafe { sys::ImPlot_GetPlotSize(&mut out as *mut _) };
+    let out = unsafe { sys::ImPlot_GetPlotSize() };
     [out.x, out.y]
 }
 
@@ -326,8 +291,8 @@ pub struct DragResult {
     pub held: bool,
 }
 
-fn color4(rgba: [f32; 4]) -> sys::ImVec4 {
-    sys::ImVec4 {
+fn color4(rgba: [f32; 4]) -> sys::ImVec4_c {
+    sys::ImVec4_c {
         x: rgba[0],
         y: rgba[1],
         z: rgba[2],

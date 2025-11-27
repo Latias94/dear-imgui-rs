@@ -112,7 +112,7 @@ pub fn push_style_var_vec2(var: StyleVar, value: [f32; 2]) -> StyleVarToken {
     unsafe {
         sys::ImPlot_PushStyleVar_Vec2(
             var as sys::ImPlotStyleVar,
-            sys::ImVec2 {
+            sys::ImVec2_c {
                 x: value[0],
                 y: value[1],
             },
@@ -209,7 +209,7 @@ pub fn colormap_scale(
     cmap: Option<sys::ImPlotColormap>,
 ) {
     let c = std::ffi::CString::new(label).unwrap_or_default();
-    let size = sys::ImVec2 { x: 0.0, y: height };
+    let size = sys::ImVec2_c { x: 0.0, y: height };
     let fmt_ptr: *const i8 = std::ptr::null();
     let flags: i32 = 0; // ImPlotColormapScaleFlags_None
     unsafe {
@@ -253,7 +253,7 @@ pub fn colormap_slider(
 /// Draw a colormap picker button; returns true if clicked
 pub fn colormap_button(label: &str, size: [f32; 2], cmap: sys::ImPlotColormap) -> bool {
     let c = std::ffi::CString::new(label).unwrap_or_default();
-    let sz = sys::ImVec2 {
+    let sz = sys::ImVec2_c {
         x: size[0],
         y: size[1],
     };
