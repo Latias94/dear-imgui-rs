@@ -7,13 +7,13 @@ the unified release train model where all crates share the same version.
 
 Usage:
   # Bump to a specific version
-  python tools/bump_version.py 0.5.0
+  python tools/bump_version.py 0.6.0
 
   # Dry run (show what would be changed)
-  python tools/bump_version.py 0.5.0 --dry-run
+  python tools/bump_version.py 0.6.0 --dry-run
 
   # Bump only specific crates
-  python tools/bump_version.py 0.5.0 --crates dear-imgui-sys,dear-imgui-rs
+  python tools/bump_version.py 0.6.0 --crates dear-imgui-sys,dear-imgui-rs
 
 Requirements:
   - Python 3.7+
@@ -126,7 +126,7 @@ def update_cargo_toml(
     
     # Pattern 2: Dependency version with path
     # dear-imgui-sys = { path = "...", version = "0.4" }
-    # We need to update to the minor version (e.g., "0.5" for "0.5.0")
+    # We need to update to the minor version (e.g., "0.6" for "0.6.0")
     old_minor = '.'.join(old_version.split('.')[:2])
     new_minor = '.'.join(new_version.split('.')[:2])
     
@@ -185,7 +185,7 @@ def main() -> int:
     )
     parser.add_argument(
         "new_version",
-        help="New version number (e.g., 0.5.0)"
+        help="New version number (e.g., 0.6.0)"
     )
     parser.add_argument(
         "--old-version",
@@ -211,7 +211,7 @@ def main() -> int:
     # Validate new version
     if not validate_version(args.new_version):
         print_error(f"Invalid version format: {args.new_version}")
-        print_info("Expected format: MAJOR.MINOR.PATCH (e.g., 0.5.0)")
+        print_info("Expected format: MAJOR.MINOR.PATCH (e.g., 0.6.0)")
         return 1
     
     # Get repository root

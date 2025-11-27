@@ -407,16 +407,14 @@ impl crate::Ui {
     /// Get mouse position in screen coordinates
     #[doc(alias = "GetMousePos")]
     pub fn mouse_pos(&self) -> [f32; 2] {
-        let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::igGetMousePos(&mut pos) };
+        let pos = unsafe { sys::igGetMousePos() };
         [pos.x, pos.y]
     }
 
     /// Get mouse position when a specific button was clicked
     #[doc(alias = "GetMousePosOnOpeningCurrentPopup")]
     pub fn mouse_pos_on_opening_current_popup(&self) -> [f32; 2] {
-        let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::igGetMousePosOnOpeningCurrentPopup(&mut pos) };
+        let pos = unsafe { sys::igGetMousePosOnOpeningCurrentPopup() };
         [pos.x, pos.y]
     }
 
@@ -468,8 +466,7 @@ impl crate::Ui {
     /// Get mouse drag delta
     #[doc(alias = "GetMouseDragDelta")]
     pub fn mouse_drag_delta(&self, button: MouseButton) -> [f32; 2] {
-        let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::igGetMouseDragDelta(&mut delta, button as i32, -1.0) };
+        let delta = unsafe { sys::igGetMouseDragDelta(button as i32, -1.0) };
         [delta.x, delta.y]
     }
 
@@ -480,8 +477,7 @@ impl crate::Ui {
         button: MouseButton,
         lock_threshold: f32,
     ) -> [f32; 2] {
-        let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::igGetMouseDragDelta(&mut delta, button as i32, lock_threshold) };
+        let delta = unsafe { sys::igGetMouseDragDelta(button as i32, lock_threshold) };
         [delta.x, delta.y]
     }
 

@@ -1,6 +1,6 @@
 [package]
 name = "dear-imnodes"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 description = "Safe, idiomatic Rust bindings for ImNodes (node editor for Dear ImGui)"
 license.workspace = true
@@ -10,8 +10,8 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.5" }
-dear-imnodes-sys = { path = "../dear-imnodes-sys", version = "0.5" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.6" }
+dear-imnodes-sys = { path = "../dear-imnodes-sys", version = "0.6" }
 bitflags.workspace = true
 thiserror.workspace = true
 

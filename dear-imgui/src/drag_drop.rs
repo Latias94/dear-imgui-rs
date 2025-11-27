@@ -66,6 +66,8 @@ bitflags::bitflags! {
         const ACCEPT_NO_DRAW_DEFAULT_RECT = sys::ImGuiDragDropFlags_AcceptNoDrawDefaultRect as u32;
         /// Don't show preview tooltip from source
         const ACCEPT_NO_PREVIEW_TOOLTIP = sys::ImGuiDragDropFlags_AcceptNoPreviewTooltip as u32;
+        /// Render accepting target as hovered (e.g. allow Button() as drop target)
+        const ACCEPT_DRAW_AS_HOVERED = sys::ImGuiDragDropFlags_AcceptDrawAsHovered as u32;
         /// Convenience flag for peeking (ACCEPT_BEFORE_DELIVERY | ACCEPT_NO_DRAW_DEFAULT_RECT)
         const ACCEPT_PEEK_ONLY = sys::ImGuiDragDropFlags_AcceptPeekOnly as u32;
     }

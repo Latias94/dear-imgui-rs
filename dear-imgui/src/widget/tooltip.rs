@@ -177,23 +177,16 @@ impl Ui {
     /// Gets the bounding rectangle of the last item in screen space.
     #[doc(alias = "GetItemRectMin", alias = "GetItemRectMax")]
     pub fn item_rect(&self) -> ([f32; 2], [f32; 2]) {
-        unsafe {
-            let mut min = sys::ImVec2 { x: 0.0, y: 0.0 };
-            let mut max = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetItemRectMin(&mut min);
-            sys::igGetItemRectMax(&mut max);
-            ([min.x, min.y], [max.x, max.y])
-        }
+        let min = unsafe { sys::igGetItemRectMin() };
+        let max = unsafe { sys::igGetItemRectMax() };
+        ([min.x, min.y], [max.x, max.y])
     }
 
     /// Gets the size of the last item.
     #[doc(alias = "GetItemRectSize")]
     pub fn item_rect_size(&self) -> [f32; 2] {
-        unsafe {
-            let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetItemRectSize(&mut size);
-            [size.x, size.y]
-        }
+        let size = unsafe { sys::igGetItemRectSize() };
+        [size.x, size.y]
     }
 }
 

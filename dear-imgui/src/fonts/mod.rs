@@ -70,8 +70,7 @@ impl Ui {
     #[doc(alias = "GetFontTexUvWhitePixel")]
     pub fn font_tex_uv_white_pixel(&self) -> [f32; 2] {
         unsafe {
-            let mut uv = crate::sys::ImVec2 { x: 0.0, y: 0.0 };
-            crate::sys::igGetFontTexUvWhitePixel(&mut uv);
+            let uv = crate::sys::igGetFontTexUvWhitePixel();
             [uv.x, uv.y]
         }
     }

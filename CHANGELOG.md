@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-11-27
+
+Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new return-by-value helpers, and refresh all C API submodules.
+
+### Added
+
+- dear-imgui-rs 0.6.0
+  - New drag/drop flag `DragDropFlags::ACCEPT_DRAW_AS_HOVERED`, wrapping `ImGuiDragDropFlags_AcceptDrawAsHovered`.
+  - New style color `StyleColor::DragDropTargetBg`, exposing `ImGuiCol_DragDropTargetBg`.
+
+- dear-imgui-sys 0.6.0
+  - Updated to Dear ImGui v1.92.5 (docking branch).
+  - Updated cimgui submodule to `1.92.5dock` (Dear ImGui `v1.92.5-docking`).
+  - Regenerated FFI bindings, including new enums/fields added in 1.92.5.
+
+### Changed
+
+- Adjusted FFI signatures and safe wrappers to follow upstream return-by-value helpers introduced in 1.92.x:
+  - Functions such as `igGetMousePos`, `igGetMouseDragDelta`, `igGetWindowPos/Size`,
+    `igGetCursorPos/CursorScreenPos/CursorStartPos`, `igGetItemRectMin/Max/Size` and
+    `igGetContentRegionAvail` now return `ImVec2` instead of writing through out-parameters.
+  - Docking helpers now return `ImRect` directly (e.g. `ImGuiDockNode_Rect`).
+  - Text helpers such as `ImFont_CalcTextSizeA` and `igCalcTextSize` now return an `ImVec2` result.
+  - All affected safe APIs in `dear-imgui-rs` have been updated to transparently use the new signatures.
+- Inherited all bug fixes and behavior changes from Dear ImGui v1.92.5, including improved drag/drop,
+  navigation, InputText, and table behavior (see upstream release notes for details).
+
+- Updated C API submodules for extensions to latest branches and regenerated bindings:
+  - `dear-implot-sys` (cimplot, ImPlot C API).
+  - `dear-implot3d-sys` (cimplot3d, ImPlot3D C API).
+  - `dear-imnodes-sys` (cimnodes, ImNodes C API).
+  - `dear-imguizmo-sys` (cimguizmo, ImGuizmo C API).
+  - `dear-imguizmo-quat-sys` (cimguizmo_quat, ImGuIZMO.quat C API).
+  - Safe wrappers for these crates have been adjusted as needed to match any signature changes reported by bindgen.
+
+### Version Updates
+
+**All crates in the workspace have been upgraded to 0.6.0** due to the Dear ImGui v1.92.5 upgrade and C API refresh.
+
+**Core:**
+- `dear-imgui-sys` → 0.6.0
+- `dear-imgui-rs` → 0.6.0
+
+**Backends:**
+- `dear-imgui-wgpu` → 0.6.0
+- `dear-imgui-glow` → 0.6.0
+- `dear-imgui-winit` → 0.6.0
+
+**Application Framework:**
+- `dear-app` → 0.6.0
+
+**Extensions:**
+- `dear-imnodes` → 0.6.0 (+ `dear-imnodes-sys` → 0.6.0)
+- `dear-implot` → 0.6.0 (+ `dear-implot-sys` → 0.6.0)
+- `dear-implot3d` → 0.6.0 (+ `dear-implot3d-sys` → 0.6.0)
+- `dear-imguizmo` → 0.6.0 (+ `dear-imguizmo-sys` → 0.6.0)
+- `dear-imguizmo-quat` → 0.6.0 (+ `dear-imguizmo-quat-sys` → 0.6.0)
+- `dear-file-browser` → 0.6.0
+
 ## [0.5.0] - 2025-10-24
 
 Upgrade to Dear ImGui v1.92.4 (docking branch) with new color styling option and bug fixes.

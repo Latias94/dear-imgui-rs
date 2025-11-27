@@ -169,11 +169,7 @@ impl<'ui> DockNode<'ui> {
 
     /// Returns the rectangle of this dock node in screen coordinates.
     pub fn rect(&self) -> NodeRect {
-        let mut r = sys::ImRect {
-            Min: sys::ImVec2 { x: 0.0, y: 0.0 },
-            Max: sys::ImVec2 { x: 0.0, y: 0.0 },
-        };
-        unsafe { sys::ImGuiDockNode_Rect(&mut r as *mut _, self.raw) };
+        let r = unsafe { sys::ImGuiDockNode_Rect(self.raw) };
         NodeRect {
             min: [r.Min.x, r.Min.y],
             max: [r.Max.x, r.Max.y],

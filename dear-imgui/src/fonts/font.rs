@@ -64,10 +64,8 @@ impl Font {
         unsafe {
             let text_start = text.as_ptr() as *const std::os::raw::c_char;
             let text_end = text_start.add(text.len());
-            let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
             let mut out_remaining: *const std::os::raw::c_char = std::ptr::null();
-            sys::ImFont_CalcTextSizeA(
-                &mut out,
+            let out = sys::ImFont_CalcTextSizeA(
                 self.raw(),
                 size,
                 max_width,

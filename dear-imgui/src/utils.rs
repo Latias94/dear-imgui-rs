@@ -71,21 +71,15 @@ impl crate::ui::Ui {
     /// Returns the upper-left bounding rectangle of the last item (screen space)
     #[doc(alias = "GetItemRectMin")]
     pub fn item_rect_min(&self) -> [f32; 2] {
-        unsafe {
-            let mut rect = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetItemRectMin(&mut rect);
-            [rect.x, rect.y]
-        }
+        let rect = unsafe { sys::igGetItemRectMin() };
+        [rect.x, rect.y]
     }
 
     /// Returns the lower-right bounding rectangle of the last item (screen space)
     #[doc(alias = "GetItemRectMax")]
     pub fn item_rect_max(&self) -> [f32; 2] {
-        unsafe {
-            let mut rect = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetItemRectMax(&mut rect);
-            [rect.x, rect.y]
-        }
+        let rect = unsafe { sys::igGetItemRectMax() };
+        [rect.x, rect.y]
     }
 
     // ============================================================================
@@ -151,31 +145,22 @@ impl crate::ui::Ui {
     /// Returns the mouse position in screen coordinates
     #[doc(alias = "GetMousePos")]
     pub fn get_mouse_pos(&self) -> [f32; 2] {
-        unsafe {
-            let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetMousePos(&mut pos);
-            [pos.x, pos.y]
-        }
+        let pos = unsafe { sys::igGetMousePos() };
+        [pos.x, pos.y]
     }
 
     /// Returns the mouse position when the button was clicked
     #[doc(alias = "GetMousePosOnOpeningCurrentPopup")]
     pub fn get_mouse_pos_on_opening_current_popup(&self) -> [f32; 2] {
-        unsafe {
-            let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetMousePosOnOpeningCurrentPopup(&mut pos);
-            [pos.x, pos.y]
-        }
+        let pos = unsafe { sys::igGetMousePosOnOpeningCurrentPopup() };
+        [pos.x, pos.y]
     }
 
     /// Returns the mouse drag delta
     #[doc(alias = "GetMouseDragDelta")]
     pub fn get_mouse_drag_delta(&self, button: MouseButton, lock_threshold: f32) -> [f32; 2] {
-        unsafe {
-            let mut delta = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetMouseDragDelta(&mut delta, button.into(), lock_threshold);
-            [delta.x, delta.y]
-        }
+        let delta = unsafe { sys::igGetMouseDragDelta(button.into(), lock_threshold) };
+        [delta.x, delta.y]
     }
 
     /// Returns the mouse wheel delta
@@ -273,21 +258,15 @@ impl crate::ui::Ui {
     /// Get cursor position in screen coordinates.
     #[doc(alias = "GetCursorScreenPos")]
     pub fn get_cursor_screen_pos(&self) -> [f32; 2] {
-        unsafe {
-            let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetCursorScreenPos(&mut pos);
-            [pos.x, pos.y]
-        }
+        let pos = unsafe { sys::igGetCursorScreenPos() };
+        [pos.x, pos.y]
     }
 
     /// Get available content region size.
     #[doc(alias = "GetContentRegionAvail")]
     pub fn get_content_region_avail(&self) -> [f32; 2] {
-        unsafe {
-            let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetContentRegionAvail(&mut size);
-            [size.x, size.y]
-        }
+        let size = unsafe { sys::igGetContentRegionAvail() };
+        [size.x, size.y]
     }
 
     /// Check if a point is inside a rectangle.

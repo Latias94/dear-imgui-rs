@@ -864,15 +864,13 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Get current minimum clip rectangle point.
     pub fn clip_rect_min(&self) -> [f32; 2] {
-        let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::ImDrawList_GetClipRectMin(&mut out as *mut sys::ImVec2, self.draw_list) };
+        let out = unsafe { sys::ImDrawList_GetClipRectMin(self.draw_list) };
         out.into()
     }
 
     /// Get current maximum clip rectangle point.
     pub fn clip_rect_max(&self) -> [f32; 2] {
-        let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-        unsafe { sys::ImDrawList_GetClipRectMax(&mut out as *mut sys::ImVec2, self.draw_list) };
+        let out = unsafe { sys::ImDrawList_GetClipRectMax(self.draw_list) };
         out.into()
     }
 

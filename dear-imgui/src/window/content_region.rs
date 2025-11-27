@@ -12,11 +12,8 @@ impl Ui {
     /// This is the size of the window minus decorations (title bar, scrollbars, etc.)
     #[doc(alias = "GetContentRegionAvail")]
     pub fn content_region_avail(&self) -> [f32; 2] {
-        unsafe {
-            let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::igGetContentRegionAvail(&mut size);
-            [size.x, size.y]
-        }
+        let size = unsafe { sys::igGetContentRegionAvail() };
+        [size.x, size.y]
     }
 
     /// Returns the width of the content region available for widgets

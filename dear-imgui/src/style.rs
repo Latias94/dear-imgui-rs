@@ -643,6 +643,7 @@ pub enum StyleColor {
     TreeLines = sys::ImGuiCol_TreeLines as i32,
     InputTextCursor = sys::ImGuiCol_InputTextCursor as i32,
     DragDropTarget = sys::ImGuiCol_DragDropTarget as i32,
+    DragDropTargetBg = sys::ImGuiCol_DragDropTargetBg as i32,
     UnsavedMarker = sys::ImGuiCol_UnsavedMarker as i32,
     NavCursor = sys::ImGuiCol_NavCursor as i32,
     NavWindowingHighlight = sys::ImGuiCol_NavWindowingHighlight as i32,

@@ -1,8 +1,8 @@
 [package]
 name = "dear-imgui-sys"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
-description = "Low level FFI bindings for Dear ImGui v1.92.4 with docking support"
+description = "Low level FFI bindings for Dear ImGui v1.92.5 with docking support"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
