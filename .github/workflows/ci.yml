@@ -51,7 +51,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake
+          # CMake is needed by various -sys crates; SDL3 is required by the
+          # dear-imgui-sdl3 backend on macOS (we rely on system headers/libs
+          # instead of building SDL3 from source here).
+          brew install cmake sdl3
 
       - name: Install Windows deps
         if: runner.os == 'Windows'
