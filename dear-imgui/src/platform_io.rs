@@ -3,6 +3,12 @@
 //! This module provides access to Dear ImGui's platform IO system, which handles
 //! multi-viewport and platform-specific functionality.
 
+// Multi-viewport requires platform callbacks (C calling back into Rust). On the
+// web (wasm32 import-style build), this is not supported yet, so we currently
+// disable the `multi-viewport` feature for wasm at compile time.
+#[cfg(all(target_arch = "wasm32", feature = "multi-viewport"))]
+compile_error!("The `multi-viewport` feature is not supported on wasm32 targets yet.");
+
 use crate::sys;
 #[cfg(feature = "multi-viewport")]
 use core::ffi::c_char;

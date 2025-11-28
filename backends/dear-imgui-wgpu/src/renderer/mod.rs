@@ -65,10 +65,22 @@ impl WgpuRenderer {
     /// let init_info = WgpuInitInfo::new(device, queue, surface_format);
     /// let mut renderer = WgpuRenderer::new(init_info, &mut imgui_context)?;
     /// ```
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(init_info: WgpuInitInfo, imgui_ctx: &mut Context) -> RendererResult<Self> {
         let mut renderer = Self::empty();
         renderer.init_with_context(init_info, imgui_ctx)?;
         Ok(renderer)
+    }
+
+    /// Create a new WGPU renderer on wasm32 without touching the font atlas.
+    ///
+    /// The web build uses an import-style Dear ImGui provider living in a separate
+    /// wasm module. Safely exposing `ImFontAtlas` through that boundary is still
+    /// evolving, so for now we avoid any font-atlas manipulation here and rely on
+    /// Dear ImGui's default font.
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(init_info: WgpuInitInfo, imgui_ctx: &mut Context) -> RendererResult<Self> {
+        Self::new_without_font_atlas(init_info, imgui_ctx)
     }
 
     /// Create an empty WGPU renderer for advanced usage

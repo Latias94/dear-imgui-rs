@@ -466,6 +466,20 @@ impl Context {
     /// Get the font atlas from the IO structure
     pub fn font_atlas(&self) -> FontAtlas {
         let _guard = CTX_MUTEX.lock();
+
+        // For now, accessing the font atlas from Rust is not supported on wasm targets.
+        // The import-style wasm build keeps Dear ImGui state in a separate provider
+        // module; safely wiring FontAtlas through that boundary requires additional
+        // design that is not finished yet.
+        #[cfg(target_arch = "wasm32")]
+        {
+            panic!(
+                "font_atlas() is not supported on wasm32 targets yet; \
+                 see docs/WASM.md for current limitations."
+            );
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         unsafe {
             let io = sys::igGetIO_Nil();
             let atlas_ptr = (*io).Fonts;
@@ -477,10 +491,17 @@ impl Context {
     pub fn font_atlas_mut(&mut self) -> FontAtlas {
         let _guard = CTX_MUTEX.lock();
 
-        // For WASM, return a null atlas to avoid pointer issues
+        // For now, mutating the font atlas from Rust is not supported on wasm targets.
+        // The import-style wasm build shares memory with a separate cimgui provider,
+        // and exposing FontAtlas mutation safely across that boundary is left as
+        // future work. Panicking here avoids undefined behaviour from null or
+        // mismatched pointers.
         #[cfg(target_arch = "wasm32")]
         {
-            return unsafe { FontAtlas::from_raw(ptr::null_mut()) };
+            panic!(
+                "font_atlas_mut()/fonts() are not supported on wasm32 targets yet; \
+                 custom font management for web is still WIP."
+            );
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -530,7 +551,15 @@ impl Context {
         let clipboard_ctx: Box<UnsafeCell<_>> =
             Box::new(UnsafeCell::new(ClipboardContext::new(backend)));
 
-        // Set the clipboard callbacks in the ImGui PlatformIO
+        // On native/desktop targets, register clipboard callbacks in ImGui PlatformIO
+        // so ImGui can call back into Rust for copy/paste.
+        //
+        // On wasm32 (import-style build), function pointers cannot safely cross the
+        // module boundary between the Rust main module and the cimgui provider. We
+        // therefore keep the backend alive on the Rust side but do not hook it into
+        // ImGui's PlatformIO yet; clipboard integration for web will need a dedicated
+        // design using JS bindings.
+        #[cfg(not(target_arch = "wasm32"))]
         unsafe {
             let platform_io = sys::igGetPlatformIO_Nil();
             (*platform_io).Platform_SetClipboardTextFn = Some(crate::clipboard::set_clipboard_text);

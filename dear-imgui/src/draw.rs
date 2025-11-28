@@ -1316,8 +1316,23 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
 impl<'ui> DrawListMut<'ui> {
     /// Safe variant: add a Rust callback (executed when the draw list is rendered).
     /// Note: if the draw list is never rendered, the callback will not run and its resources won't be reclaimed.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn add_callback_safe<F: FnOnce() + 'static>(&'ui self, callback: F) -> Callback<'ui, F> {
         Callback::new(self, callback)
+    }
+
+    /// Safe variant: add a Rust callback (executed when the draw list is rendered).
+    ///
+    /// On wasm32 targets using the import-style Dear ImGui provider, C code cannot
+    /// safely invoke Rust function pointers across module boundaries. For now this
+    /// API is disabled on wasm to avoid undefined behaviour; use other mechanisms
+    /// (e.g. higher-level rendering hooks) instead.
+    #[cfg(target_arch = "wasm32")]
+    pub fn add_callback_safe<F: FnOnce() + 'static>(&'ui self, _callback: F) -> Callback<'ui, F> {
+        panic!(
+            "DrawListMut::add_callback_safe is not supported on wasm32 targets; \
+             C->Rust callbacks are not available in the import-style web build."
+        );
     }
 }
 
