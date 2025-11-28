@@ -957,6 +957,7 @@ dependencies = [
  "dear-file-browser",
  "dear-imgui-glow",
  "dear-imgui-rs",
+ "dear-imgui-sdl3",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "dear-imguizmo",
@@ -973,6 +974,7 @@ dependencies = [
  "once_cell",
  "pollster",
  "raw-window-handle",
+ "sdl3",
  "tracing",
  "tracing-subscriber",
  "wgpu",
@@ -1008,6 +1010,19 @@ dependencies = [
  "thiserror 2.0.17",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "dear-imgui-sdl3"
+version = "0.6.0"
+dependencies = [
+ "cc",
+ "dear-imgui-rs",
+ "dear-imgui-sys",
+ "pkg-config",
+ "sdl3",
+ "sdl3-sys",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3725,6 +3740,26 @@ dependencies = [
  "smithay-client-toolkit",
  "tiny-skia",
 ]
+
+[[package]]
+name = "sdl3"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40ad6a0142275b5a39c20051c071ab6719068d3ecb345cc96f78b9818e73e44a"
+dependencies = [
+ "bitflags 2.10.0",
+ "lazy_static",
+ "libc",
+ "objc2 0.6.3",
+ "raw-window-handle",
+ "sdl3-sys",
+]
+
+[[package]]
+name = "sdl3-sys"
+version = "0.5.10+SDL3-3.2.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c531aa18059783450bcddc82a6effc48df5f173bb46142eb421ff2cfccf53984"
 
 [[package]]
 name = "serde"

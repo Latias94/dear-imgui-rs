@@ -20,7 +20,7 @@
 //! - Multi-viewport functionality may have bugs or incomplete features
 //! - Not recommended for production use
 
-use dear_imgui_rs::{Condition, Context};
+use dear_imgui_rs::{Condition, Context, TextureId};
 use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use pollster::block_on;
@@ -43,10 +43,20 @@ struct AppWindow {
     platform: WinitPlatform,
     renderer: WgpuRenderer,
     last_frame: Instant,
+    enable_viewports: bool,
+    // Offscreen "game view" texture and view
+    game_tex: wgpu::Texture,
+    game_tex_view: wgpu::TextureView,
+    game_tex_id: TextureId,
 }
 
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
+        // For now, winit + WGPU multi-viewport is not considered supported on macOS.
+        // We still allow building this example, but avoid creating secondary OS windows
+        // on macOS to reduce the chance of platform crashes.
+        let enable_viewports = !cfg!(target_os = "macos");
+
         // Create WGPU instance first (also used by renderer for per-viewport surfaces)
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
 
@@ -92,10 +102,29 @@ impl AppWindow {
         };
         surface.configure(&device, &surface_config);
 
+        // Create a simple offscreen texture for a "game view" (rendered every frame).
+        let game_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mvw_game_view_texture"),
+            size: wgpu::Extent3d {
+                width: 512,
+                height: 512,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let game_tex_view = game_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
         // Dear ImGui context + platform
         let mut imgui = Context::create();
 
-        imgui.enable_multi_viewport();
+        if enable_viewports {
+            imgui.enable_multi_viewport();
+        }
         {
             let io = imgui.io_mut();
             let mut flags = io.config_flags();
@@ -113,6 +142,10 @@ impl AppWindow {
         let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
         renderer.set_gamma_mode(GammaMode::Auto);
 
+        // Register the offscreen texture as an external ImGui texture.
+        let game_tex_raw_id = renderer.register_external_texture(&game_tex, &game_tex_view);
+        let game_tex_id = TextureId::from(game_tex_raw_id);
+
         // Build Self first to pin renderer and imgui in their final locations
         let mut app = Self {
             window,
@@ -124,13 +157,19 @@ impl AppWindow {
             platform,
             renderer,
             last_frame: Instant::now(),
+            enable_viewports,
+            game_tex,
+            game_tex_view,
+            game_tex_id,
         };
 
-        // Install platform (winit) viewport handlers (required by Dear ImGui)
-        winit_mvp::init_multi_viewport_support(&mut app.imgui, &app.window);
+        if app.enable_viewports {
+            // Install platform (winit) viewport handlers (required by Dear ImGui)
+            winit_mvp::init_multi_viewport_support(&mut app.imgui, &app.window);
 
-        // Renderer viewport callbacks (install AFTER winit so our callbacks take precedence)
-        dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui);
+            // Renderer viewport callbacks (install AFTER winit so our callbacks take precedence)
+            dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui);
+        }
 
         Ok(app)
     }
@@ -157,19 +196,74 @@ impl AppWindow {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        // First render a simple "game view" into the offscreen texture.
+        {
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("mvw_game_view_encoder"),
+                });
+
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mvw_game_view_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.game_tex_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        // Simple animated clear: color changes over time.
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: (self.last_frame.elapsed().as_secs_f32().sin() * 0.5 + 0.5) as f64,
+                            g: 0.2,
+                            b: 0.4,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            drop(rpass);
+
+            self.queue.submit(Some(encoder.finish()));
+        }
+
         self.platform.prepare_frame(&self.window, &mut self.imgui);
         let ui = self.imgui.frame();
 
         // Keep a dockspace in the main viewport so it always has content
         ui.dockspace_over_main_viewport();
 
-        // Simple UI that can be torn out into another viewport
+        // Simple UI that can be torn out into another viewport (when enabled)
         ui.window("Main")
             .size([420.0, 260.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("Drag this window outside to create a new OS window.");
-                ui.separator();
-                ui.text("Multi-viewport is enabled.");
+                if self.enable_viewports {
+                    ui.text("Drag this window outside to create a new OS window.");
+                    ui.separator();
+                    ui.text("Multi-viewport is enabled (experimental).");
+                } else {
+                    ui.text("Multi-viewport is disabled on this platform (winit + WGPU).");
+                    ui.separator();
+                    ui.text("Use the SDL3 + OpenGL example for a stable multi-viewport demo:");
+                    ui.text("  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport");
+                }
+            });
+
+        // "Game View" window showing the offscreen texture; you can drag this window
+        // to any viewport (including secondary OS windows) and the texture will render
+        // via the WGPU backend automatically.
+        ui.window("Game View")
+            .size([520.0, 540.0], Condition::FirstUseEver)
+            .build(|| {
+                // Fit the game view into the available region while keeping it square.
+                let avail = ui.content_region_avail();
+                let side = avail[0].min(avail[1]).max(64.0);
+                let size = [side, side];
+                ui.text("Offscreen WGPU texture rendered each frame:");
+                ui.image(self.game_tex_id, size);
             });
 
         // Optionally show demo to validate interaction
@@ -218,8 +312,10 @@ impl AppWindow {
         frame.present();
 
         // Update + render all platform windows (secondary viewports)
-        self.imgui.update_platform_windows();
-        self.imgui.render_platform_windows_default();
+        if self.enable_viewports {
+            self.imgui.update_platform_windows();
+            self.imgui.render_platform_windows_default();
+        }
         Ok(())
     }
 
@@ -239,11 +335,13 @@ struct App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        // Allow Dear ImGui to create windows using the event loop
-        winit_mvp::set_event_loop(event_loop);
-
         match AppWindow::new(event_loop) {
             Ok(mut win) => {
+                // Allow Dear ImGui to create windows using the event loop
+                if win.enable_viewports {
+                    winit_mvp::set_event_loop(event_loop);
+                }
+
                 // Place the window struct first so its address is stable
                 win.window.request_redraw();
                 self.window = Some(win);

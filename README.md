@@ -26,7 +26,7 @@
 - Core
   - `dear-imgui-sys` — low‑level FFI via cimgui (docking branch), bindgen against Dear ImGui v1.92.5
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
-  - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-winit`
+  - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-winit`, `dear-imgui-sdl3`
   - `dear-app` — convenient Winit + WGPU application runner (docking, themes, add-ons)
 - Extensions
   - `dear-imguizmo` — 3D gizmo (cimguizmo C API) + a pure‑Rust GraphEditor
@@ -79,6 +79,12 @@ cargo run --bin imguizmo_quat_basic --features imguizmo-quat
 
 # implot3d example (uses dear-app)
 cargo run --bin implot3d_basic --features implot3d
+
+# SDL3 backends (native)
+# SDL3 + OpenGL3 with official C++ backends (multi-viewport via imgui_impl_sdl3/imgui_impl_opengl3)
+cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport
+# SDL3 + WGPU (single-window; multi-viewport is intentionally disabled for WebGPU)
+cargo run -p dear-imgui-examples --bin sdl3_wgpu
 ```
 
 Tip: The ImNodes example includes multiple tabs (Hello, Multi-Editor, Style, Advanced Style, Save/Load, Color Editor, Shader Graph, MiniMap Callback).
@@ -295,9 +301,12 @@ For more details and troubleshooting, see `docs/WASM.md`.
 
 ## Limitations
 
-- **Multi-viewport support**: Currently not supported (experimental code exists but is not production-ready)
-  - A test example exists: `cargo run --bin multi_viewport_wgpu --features multi-viewport`
-  - This feature is work-in-progress and may have bugs or incomplete functionality
+- **Multi-viewport support**
+  - **SDL3 + OpenGL3**: supported via upstream C++ backends (`imgui_impl_sdl3` + `imgui_impl_opengl3`).
+    - Example: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport`
+  - **winit + WGPU**: experimental only; not supported for production use.
+    - Test example: `cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport`
+  - **SDL3 + WGPU**: single-window only; multi-viewport intentionally disabled to match upstream `imgui_impl_wgpu`.
 - **WebAssembly (WASM)**: Supported via the import-style build described above; some features
   (clipboard, raw draw callbacks, multi-viewport) remain disabled on wasm.
 

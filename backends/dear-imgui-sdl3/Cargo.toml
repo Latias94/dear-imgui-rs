@@ -1,0 +1,29 @@
+[package]
+name = "dear-imgui-sdl3"
+version = "0.6.0"
+edition.workspace = true
+description = "SDL3 + OpenGL backend for Dear ImGui"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dear-imgui-sdl3"
+categories.workspace = true
+keywords.workspace = true
+build = "build.rs"
+links = "dear-imgui-sdl3-backend"
+
+[dependencies]
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.6" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.6" }
+sdl3 = "0.16.2"
+sdl3-sys = "0.5"
+thiserror.workspace = true
+
+[build-dependencies]
+cc.workspace = true
+pkg-config.workspace = true
+
+[features]
+default = []
+# Enable multi-viewport helpers (requires multi-viewport support in dear-imgui-rs).
+multi-viewport = ["dear-imgui-rs/multi-viewport"]

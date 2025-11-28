@@ -6,6 +6,7 @@ members = [
     "backends/dear-imgui-winit",
     "backends/dear-imgui-wgpu",
     "backends/dear-imgui-glow",
+    "backends/dear-imgui-sdl3",
     "dear-app",
     "extensions/dear-file-browser",
     "extensions/dear-implot-sys",

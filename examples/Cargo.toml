@@ -13,7 +13,12 @@ imguizmo-quat = ["dep:dear-imguizmo-quat"]
 implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
 file-browser = ["dep:dear-file-browser"]
-multi-viewport = ["dear-imgui-rs/multi-viewport", "dear-imgui-winit/multi-viewport", "dear-imgui-wgpu/multi-viewport"]
+multi-viewport = [
+    "dear-imgui-rs/multi-viewport",
+    "dear-imgui-winit/multi-viewport",
+    "dear-imgui-wgpu/multi-viewport",
+    "dear-imgui-sdl3/multi-viewport",
+]
 
 [[bin]]
 name = "wgpu_basic"
@@ -71,6 +76,15 @@ path = "02-docking/dockspace_minimal.rs"
 name = "multi_viewport_wgpu"
 path = "02-docking/multi_viewport_wgpu.rs"
 required-features = ["multi-viewport"]
+
+[[bin]]
+name = "sdl3_opengl_multi_viewport"
+path = "02-docking/sdl3_opengl_multi_viewport.rs"
+required-features = ["multi-viewport"]
+
+[[bin]]
+name = "sdl3_wgpu"
+path = "01-renderers/sdl3_wgpu.rs"
 
 [[bin]]
 name = "wgpu_textures"
@@ -141,6 +155,8 @@ dear-imgui-rs = { path = "../dear-imgui", version = "0.6" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.6" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.6" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.6" }
+dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.6" }
+sdl3 = { version = "0.16.2", features = ["raw-window-handle"] }
 dear-app = { path = "../dear-app", version = "0.6" }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }

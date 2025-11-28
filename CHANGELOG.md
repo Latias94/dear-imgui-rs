@@ -11,6 +11,16 @@ Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new
 
 ### Added
 
+- Backends
+  - New `dear-imgui-sdl3` backend crate:
+    - Thin, safe wrapper around upstream `imgui_impl_sdl3.cpp` + `imgui_impl_opengl3.cpp`.
+    - Provides SDL3 platform integration for Dear ImGui and OpenGL3 rendering.
+    - Includes an SDL3 + OpenGL3 multi-viewport example:
+      - `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport`
+    - SDL3 + WGPU is supported via the Rust WGPU backend (`dear-imgui-wgpu`) with a basic example:
+      - `cargo run -p dear-imgui-examples --bin sdl3_wgpu`
+      - Multi-viewport remains **disabled** for WebGPU, matching upstream `imgui_impl_wgpu` which does not yet support multi-viewport.
+
 - dear-imgui-rs 0.6.0
   - New drag/drop flag `DragDropFlags::ACCEPT_DRAW_AS_HOVERED`, wrapping `ImGuiDragDropFlags_AcceptDrawAsHovered`.
   - New style color `StyleColor::DragDropTargetBg`, exposing `ImGuiCol_DragDropTargetBg`.
@@ -46,6 +56,23 @@ Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new
   - `dear-imguizmo-sys` (cimguizmo, ImGuizmo C API).
   - `dear-imguizmo-quat-sys` (cimguizmo_quat, ImGuIZMO.quat C API).
   - Safe wrappers for these crates have been adjusted as needed to match any signature changes reported by bindgen.
+
+### Multi-viewport notes (0.6.x)
+
+- SDL3 + OpenGL3:
+  - Multi-viewport is provided by upstream C++ backends (`imgui_impl_sdl3.cpp` + `imgui_impl_opengl3.cpp`) and considered stable for desktop use.
+  - The `sdl3_opengl_multi_viewport` example shows how to:
+    - Drive Dear ImGui via the official SDL3 platform backend;
+    - Render a user-provided OpenGL texture inside an ImGui window (`Game View`) that can be dragged to secondary OS windows.
+- SDL3 + WGPU:
+  - Uses the SDL3 platform backend (`imgui_impl_sdl3`) + Rust WGPU renderer (`dear-imgui-wgpu`).
+  - The `sdl3_wgpu` example demonstrates SDL3 + WGPU integration (single window); multi-viewport remains **disabled** on this route for WebGPU, matching upstream `imgui_impl_wgpu` which does not yet implement multi-viewport.
+- Winit + WGPU:
+  - Experimental multi-viewport support exists in `dear-imgui-winit::multi_viewport` + `dear-imgui-wgpu::multi_viewport`, and is exercised by the `multi_viewport_wgpu` example.
+  - This path is **not supported** in 0.6.x for production use and is known to be unstable on some platforms (especially macOS/winit).
+  - The example is kept as a testbed to illustrate the architecture:
+    - the platform backend owns OS windows and fills `ImGuiPlatformIO` callbacks (create/destroy/update window, event routing);
+    - the renderer backend installs `Renderer_CreateWindow` / `Renderer_RenderWindow` / `Renderer_SwapBuffers` callbacks to create per-viewport render targets and draw ImGui content into them.
 
 ### Version Updates
 

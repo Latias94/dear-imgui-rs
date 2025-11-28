@@ -37,7 +37,8 @@ jobs:
             build-essential pkg-config \
             libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
             libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev
+            mesa-common-dev libgl1-mesa-dev \
+            libsdl3-dev
 
       - name: Install LLVM (libclang) for bindgen (Linux)
         if: runner.os == 'Linux'
@@ -49,7 +50,9 @@ jobs:
 
       - name: Install macOS deps
         if: runner.os == 'macOS'
-        run: brew update
+        run: |
+          brew update
+          brew install sdl3
 
       - name: Install Windows deps
         if: runner.os == 'Windows'
@@ -123,3 +126,33 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  wasm-check:
+    name: WASM bindings (wasm32-unknown-unknown)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install LLVM (libclang) for bindgen
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          directory: ${{ runner.temp }}/llvm
+          cached: true
+          version: '14.0'
+
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Generate pregenerated WASM bindings for dear-imgui-sys
+        run: cargo run -p xtask -- wasm-bindgen imgui-sys-v0
+
+      - name: Build web demo crate for wasm32-unknown-unknown
+        run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown
