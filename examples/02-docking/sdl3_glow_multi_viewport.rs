@@ -1,11 +1,11 @@
 //! SDL3 + Glow multi-viewport example.
 //!
-//! 这是一个实验性的示例，演示如何用：
-//! - SDL3 + OpenGL 上下文做平台和窗口管理（含多视口）
-//! - Rust 版 Glow 渲染后端 `dear-imgui-glow`
-//! - 高层 `dear-imgui-rs` API
+//! This is an experimental example showing how to drive Dear ImGui using:
+//! - SDL3 window + GL context for platform and multi-viewport management
+//! - Rust Glow renderer backend (`dear-imgui-glow`)
+//! - the high-level `dear-imgui-rs` API.
 //!
-//! 运行方式：
+//! Run with:
 //!   cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport \
 //!       --features multi-viewport,sdl3-backends
 

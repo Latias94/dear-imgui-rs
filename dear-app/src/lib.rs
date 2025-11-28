@@ -321,7 +321,7 @@ where
     run_with_callbacks(runner, addons_cfg, RunnerCallbacks::default(), gui)
 }
 
-/// Run with lifecycle callbacks (builder使用)
+/// Run with explicit lifecycle callbacks (used by the builder-style API)
 pub fn run_with_callbacks<F>(
     runner: RunnerConfig,
     addons_cfg: AddOnsConfig,
