@@ -66,6 +66,7 @@ This is the intended organization.
   - `glow_textures.rs`: modern texture system (register/update).
   - `wgpu_textures.rs`: CPU-updated texture registered in WGPU backend.
   - `sdl3_wgpu.rs`: SDL3 window + WGPU renderer (single window, no multi-viewport; uses official SDL3 platform backend).
+    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-backends`
 
 - 02-docking
   - `dockspace_minimal.rs`: enable docking + a simple dockspace.
@@ -78,7 +79,7 @@ This is the intended organization.
     - ⚠️ This is a work-in-progress test example for development purposes only.
     - ⚠️ Multi-viewport functionality may have bugs or incomplete features.
   - `sdl3_opengl_multi_viewport.rs`: SDL3 + OpenGL3 multi-viewport example using official C++ backends.
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport`
+    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features "multi-viewport sdl3-backends"`
     - Shows how to combine SDL3 platform backend with OpenGL renderer, including a simple "Game View" texture inside an ImGui window that can be dragged across OS windows.
 
 - 03-extensions (feature-gated)

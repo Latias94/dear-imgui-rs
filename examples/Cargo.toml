@@ -19,6 +19,15 @@ multi-viewport = [
     "dear-imgui-wgpu/multi-viewport",
     "dear-imgui-sdl3/multi-viewport",
 ]
+### SDL3 backends (platform + renderers)
+###
+### This feature gates SDL3-related dependencies so that examples which do not
+### use SDL3 (e.g. `game_engine_docking`) do not pay the cost of building SDL3
+### or its C dependencies (CMake, SDKs, etc.).
+sdl3-backends = [
+    "dep:sdl3",
+    "dep:dear-imgui-sdl3",
+]
 
 [[bin]]
 name = "wgpu_basic"
@@ -80,11 +89,12 @@ required-features = ["multi-viewport"]
 [[bin]]
 name = "sdl3_opengl_multi_viewport"
 path = "02-docking/sdl3_opengl_multi_viewport.rs"
-required-features = ["multi-viewport"]
+required-features = ["multi-viewport", "sdl3-backends"]
 
 [[bin]]
 name = "sdl3_wgpu"
 path = "01-renderers/sdl3_wgpu.rs"
+required-features = ["sdl3-backends"]
 
 [[bin]]
 name = "wgpu_textures"
@@ -155,9 +165,7 @@ dear-imgui-rs = { path = "../dear-imgui", version = "0.6" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.6" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.6" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.6" }
-dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.6" }
-# Use build-from-source so CI and users don't need a system SDL3 installation.
-sdl3 = { version = "0.16.2", features = ["raw-window-handle", "build-from-source"] }
+dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.6", optional = true }
 dear-app = { path = "../dear-app", version = "0.6" }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
@@ -180,3 +188,14 @@ raw-window-handle = { workspace = true }
 image = { workspace = true }
 bytemuck = { workspace = true }
 once_cell = "1"
+
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+# On Linux/Windows, prefer building SDL3 from source so CI and users don't
+# need a pre-installed system SDL3. This uses sdl3-sys + CMake internally.
+sdl3 = { version = "0.16.2", features = ["raw-window-handle", "build-from-source"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# On macOS, rely on a system SDL3 install (e.g. `brew install sdl3`) instead of
+# building from source to avoid CMake permission/toolchain issues on user
+# machines. The `raw-window-handle` feature is still required for WGPU.
+sdl3 = { version = "0.16.2", features = ["raw-window-handle"], optional = true }
