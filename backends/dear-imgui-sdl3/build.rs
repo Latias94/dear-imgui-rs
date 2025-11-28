@@ -5,7 +5,9 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=wrapper.cpp");
 
-    // Upstream Dear ImGui source tree is provided by dear-imgui-sys.
+    // Upstream Dear ImGui core headers (imgui.h etc.) are provided by dear-imgui-sys.
+    // We vend the backend sources (imgui_impl_sdl3/imgui_impl_opengl3) directly in this
+    // crate to avoid relying on dear-imgui-sys packaging internal backends sources.
     let imgui_root = env::var("DEP_DEAR_IMGUI_THIRD_PARTY")
         .or_else(|_| env::var("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH"))
         .expect(
@@ -14,14 +16,19 @@ fn main() {
         );
 
     let imgui_root = PathBuf::from(imgui_root);
-    let imgui_backends = imgui_root.join("backends");
+
+    // Crate-local copy of Dear ImGui SDL3/OpenGL3 backends (headers + sources).
+    let crate_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let local_backends = crate_root.join("backends");
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
 
-    // Dear ImGui includes
+    // Dear ImGui core includes
     build.include(&imgui_root);
-    build.include(&imgui_backends);
+
+    // Local backend includes (vendored from upstream imgui/backends)
+    build.include(&crate_root);
 
     // SDL3 includes:
     //
@@ -98,9 +105,9 @@ fn main() {
         );
     }
 
-    // Backend sources: SDL3 platform + OpenGL3 renderer.
-    build.file(imgui_backends.join("imgui_impl_sdl3.cpp"));
-    build.file(imgui_backends.join("imgui_impl_opengl3.cpp"));
+    // Backend sources: SDL3 platform + OpenGL3 renderer (vendored copies).
+    build.file(local_backends.join("imgui_impl_sdl3.cpp"));
+    build.file(local_backends.join("imgui_impl_opengl3.cpp"));
 
     // C wrappers used by Rust FFI (see wrapper.cpp).
     build.file("wrapper.cpp");
