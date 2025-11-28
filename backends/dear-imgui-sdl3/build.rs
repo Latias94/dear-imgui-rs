@@ -28,6 +28,8 @@ fn main() {
     // 1. Allow explicit override via SDL3_INCLUDE_DIR.
     // 2. Try pkg-config "sdl3" (if available).
     // 3. Try a few common default locations (Homebrew, /usr/local).
+    // 4. As a fallback, try the include path produced by sdl3-sys when
+    //    building SDL3 from source (DEP_SDL3_OUT_DIR/include).
     let mut have_sdl_headers = false;
 
     if let Ok(dir) = env::var("SDL3_INCLUDE_DIR") {
@@ -67,11 +69,32 @@ fn main() {
         }
     }
 
+    // Fallback: use the include path from sdl3-sys when it built SDL3 from source.
+    // sdl3-sys prints cargo metadata like `CMAKE_DIR` and `OUT_DIR`, which Cargo
+    // exposes as DEP_SDL3_CMAKE_DIR / DEP_SDL3_OUT_DIR for dependents.
+    if !have_sdl_headers {
+        if let Ok(out_dir) = env::var("DEP_SDL3_OUT_DIR") {
+            let out = PathBuf::from(out_dir);
+            let include_root = out.join("include");
+            let hdr = include_root.join("SDL3/SDL.h");
+            if hdr.exists() {
+                build.include(&include_root);
+                have_sdl_headers = true;
+                println!(
+                    "cargo:warning=dear-imgui-sdl3: using SDL3 headers from sdl3-sys OUT_DIR={}",
+                    include_root.display()
+                );
+            }
+        }
+    }
+
     if !have_sdl_headers {
         panic!(
             "dear-imgui-sdl3: could not find SDL3 headers. \
-             Install SDL3 development files (e.g. `brew install sdl3`) \
-             or set SDL3_INCLUDE_DIR to the SDL3 include path."
+             Install SDL3 development files (e.g. `brew install sdl3`), \
+             set SDL3_INCLUDE_DIR to the SDL3 include path, \
+             or enable `build-from-source` on the `sdl3` crate so sdl3-sys can \
+             build SDL3 and expose headers via DEP_SDL3_OUT_DIR."
         );
     }
 
