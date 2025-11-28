@@ -62,12 +62,17 @@ impl WinitPlatform {
 
         #[cfg(feature = "multi-viewport")]
         {
-            let mut config_flags = io.config_flags();
-            config_flags.insert(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE);
-            io.set_config_flags(config_flags);
+            // Mark that this platform backend is capable of handling viewports.
+            // Note: we intentionally DO NOT enable `ConfigFlags::VIEWPORTS_ENABLE` here.
+            // Multi-viewport is an opt-in feature and should be enabled explicitly via:
+            //
+            //     imgui_ctx.enable_multi_viewport();
+            //
+            // This matches Dear ImGui's guidance and avoids partially-enabled viewport
+            // behavior when the renderer/platform callbacks are not fully wired.
             backend_flags.insert(BackendFlags::PLATFORM_HAS_VIEWPORTS);
-            // When viewports are enabled, avoid moving OS cursor from ImGui (no global set in winit)
-            backend_flags.remove(BackendFlags::HAS_SET_MOUSE_POS);
+            // We keep `HAS_SET_MOUSE_POS` flag: `prepare_render()` will avoid using it
+            // whenever `ConfigFlags::VIEWPORTS_ENABLE` is actually set.
         }
 
         io.set_backend_flags(backend_flags);

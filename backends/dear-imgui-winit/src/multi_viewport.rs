@@ -115,10 +115,10 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
             pio_sys,
             Some(winit_get_window_size_out_v2),
         );
-        // Enable framebuffer scale callback for proper HiDPI support
-        // Note: We use DpiScale (float) instead of FramebufferScale (ImVec2) to avoid MSVC ABI issues
-        // ImGui will use DpiScale for both X and Y if FramebufferScale is not set
-        (*pio_sys).Platform_GetWindowFramebufferScale = None; // Keep None, use DpiScale instead
+        // Enable framebuffer scale callback for proper HiDPI support.
+        // ImGui will use FramebufferScale when available, falling back to
+        // DisplayFramebufferScale otherwise.
+        (*pio_sys).Platform_GetWindowFramebufferScale = Some(winit_get_window_framebuffer_scale);
         (*pio_sys).Platform_GetWindowDpiScale = Some(winit_get_window_dpi_scale);
         (*pio_sys).Platform_GetWindowWorkAreaInsets = None;
         (*pio_sys).Platform_OnChangedViewport = Some(winit_on_changed_viewport);
@@ -288,13 +288,9 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                                                 (*vp).PlatformRequestResize = true;
                                             }
                                         }
-                                        WindowEvent::ScaleFactorChanged {
-                                            scale_factor, ..
-                                        } => {
-                                            let s = *scale_factor as f32;
-                                            (*vp).DpiScale = s;
-                                            (*vp).FramebufferScale.x = s;
-                                            (*vp).FramebufferScale.y = s;
+                                        WindowEvent::ScaleFactorChanged { .. } => {
+                                            // DPI/FramebufferScale will be refreshed on next frame
+                                            // via Platform_GetWindowDpiScale/FramebufferScale.
                                         }
                                         WindowEvent::CloseRequested => {
                                             (*vp).PlatformRequestClose = true;
@@ -372,6 +368,48 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
         }
         _ => false,
     }
+}
+
+/// Convenience helper: handle an event for both the main window and all ImGui-created viewports.
+///
+/// This mirrors the pattern used in `examples/02-docking/multi_viewport_wgpu.rs` and helps
+/// avoid forgetting to route events to secondary viewports.
+///
+/// Usage:
+///
+/// ```ignore
+/// let full = Event::WindowEvent { window_id, event: event.clone() };
+/// let _ = multi_viewport::handle_event_with_multi_viewport(
+///     &mut platform,
+///     &mut imgui,
+///     &main_window,
+///     &full,
+/// );
+/// ```
+#[cfg(feature = "multi-viewport")]
+pub fn handle_event_with_multi_viewport<T>(
+    platform: &mut crate::platform::WinitPlatform,
+    imgui_ctx: &mut Context,
+    main_window: &Window,
+    event: &Event<T>,
+) -> bool {
+    let mut consumed = false;
+
+    // Forward events that target the main window through the standard platform handler
+    if let Event::WindowEvent { window_id, .. } = event {
+        if *window_id == main_window.id() {
+            if platform.handle_event(imgui_ctx, main_window, event) {
+                consumed = true;
+            }
+        }
+    }
+
+    // Route events (including those for secondary windows) to ImGui viewports
+    if route_event_to_viewports(imgui_ctx, event) {
+        consumed = true;
+    }
+
+    consumed
 }
 
 /// Initialize the main viewport with proper ViewportData

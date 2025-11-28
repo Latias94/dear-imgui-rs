@@ -1,6 +1,7 @@
 // Multi-viewport support (Renderer_* callbacks and helpers)
 
 use super::*;
+use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::Viewport;
 use std::ffi::c_void;
 use std::sync::OnceLock;
@@ -259,13 +260,17 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         Some(b) => (b.device.clone(), b.queue.clone()),
         None => return,
     };
-    let vpm = &mut *vp;
+    // Obtain draw data for this viewport
+    let vpm = unsafe { &mut *vp };
     let raw_dd = vpm.draw_data();
     if raw_dd.is_null() {
+        // No draw data for this viewport (e.g. minimized or empty)
         return;
     }
-    // SAFETY: Dear ImGui provides a valid ImDrawData during RenderPlatformWindowsDefault
-    let draw_data: &dear_imgui_rs::render::DrawData = std::mem::transmute(&*raw_dd);
+    // SAFETY: Dear ImGui guarantees that during RenderPlatformWindowsDefault, draw_data()
+    // returns a valid ImDrawData pointer for each viewport being rendered.
+    let draw_data: &dear_imgui_rs::render::DrawData =
+        unsafe { dear_imgui_rs::render::DrawData::from_raw(&*raw_dd) };
     mvlog!(
         "[wgpu-mv] draw_data: valid={} lists={} fb_scale=({:.2},{:.2}) disp=({:.1},{:.1})",
         draw_data.valid(),
@@ -327,7 +332,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                         view: &view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            load: wgpu::LoadOp::Clear(renderer.viewport_clear_color()),
                             store: wgpu::StoreOp::Store,
                         },
                         depth_slice: None,
@@ -338,29 +343,22 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                 });
                 mvlog!("[wgpu-mv] begin_render_pass ok");
                 mvlog!("[wgpu-mv] about to render_draw_data for viewport");
-                // Reuse existing draw path with explicit framebuffer size override
-                let saved_index_opt = renderer.backend_data.as_ref().map(|b| b.frame_index);
+                // Reuse existing draw path with explicit framebuffer size override, but do
+                // not advance frame index: we already advanced it for the main window.
                 if let Some(vd) = viewport_user_data_mut(vp) {
                     let fb_w = vd.config.width;
                     let fb_h = vd.config.height;
-                    if let Err(e) = renderer.render_draw_data_with_fb_size(
+                    if let Err(e) = renderer.render_draw_data_with_fb_size_ex(
                         &draw_data,
                         &mut render_pass,
                         fb_w,
                         fb_h,
+                        false,
                     ) {
                         eprintln!("[wgpu-mv] render_draw_data(with_fb) error: {:?}", e);
                     }
                 } else if let Err(e) = renderer.render_draw_data(&draw_data, &mut render_pass) {
                     eprintln!("[wgpu-mv] render_draw_data error: {:?}", e);
-                }
-                if let Some(saved_index) = saved_index_opt {
-                    if let Some(backend) = renderer.backend_data.as_mut() {
-                        // Only restore to a meaningful value; avoid resetting to u32::MAX
-                        if saved_index != u32::MAX {
-                            backend.frame_index = saved_index;
-                        }
-                    }
                 }
                 mvlog!("[wgpu-mv] finished render_draw_data");
             }

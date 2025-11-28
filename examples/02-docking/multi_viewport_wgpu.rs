@@ -276,17 +276,17 @@ impl ApplicationHandler for App {
             return;
         };
 
-        // Forward event to main window platform integration ONLY if it targets the main window
         let full: Event<()> = Event::WindowEvent {
             window_id,
             event: event.clone(),
         };
-        if window_id == app.window.id() {
-            app.platform
-                .handle_event(&mut app.imgui, &app.window, &full);
-        }
-        // Route to ImGui-created windows (secondary viewports)
-        let _ = winit_mvp::route_event_to_viewports(&mut app.imgui, &full);
+        // Let platform + multi-viewport helper route events to main + secondary windows
+        let _ = winit_mvp::handle_event_with_multi_viewport(
+            &mut app.platform,
+            &mut app.imgui,
+            &app.window,
+            &full,
+        );
 
         match event {
             WindowEvent::CloseRequested => {

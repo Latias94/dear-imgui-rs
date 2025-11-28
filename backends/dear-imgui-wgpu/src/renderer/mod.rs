@@ -46,6 +46,8 @@ pub struct WgpuRenderer {
     font_texture_id: Option<u64>,
     /// Gamma mode: automatic (by format), force linear (1.0), or force 2.2
     gamma_mode: GammaMode,
+    /// Clear color used for secondary viewports (multi-viewport mode)
+    viewport_clear_color: Color,
 }
 
 impl WgpuRenderer {
@@ -105,6 +107,7 @@ impl WgpuRenderer {
             default_texture: None,
             font_texture_id: None,
             gamma_mode: GammaMode::Auto,
+            viewport_clear_color: Color::BLACK,
         }
     }
 
@@ -182,6 +185,22 @@ impl WgpuRenderer {
     /// Set gamma mode
     pub fn set_gamma_mode(&mut self, mode: GammaMode) {
         self.gamma_mode = mode;
+    }
+
+    /// Set clear color for secondary viewports (multi-viewport mode).
+    ///
+    /// This color is used as the load/clear color when rendering ImGui-created
+    /// platform windows via `RenderPlatformWindowsDefault`. It is independent
+    /// from whatever clear color your main swapchain uses.
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_viewport_clear_color(&mut self, color: Color) {
+        self.viewport_clear_color = color;
+    }
+
+    /// Get current clear color for secondary viewports.
+    #[cfg(feature = "multi-viewport")]
+    pub fn viewport_clear_color(&self) -> Color {
+        self.viewport_clear_color
     }
 
     /// Configure Dear ImGui context with WGPU backend capabilities
@@ -473,16 +492,27 @@ impl WgpuRenderer {
         Ok(())
     }
 
-    /// Render Dear ImGui draw data with explicit framebuffer size override
-    ///
-    /// This clones the logic of `render_draw_data` but clamps scissor to the provided
-    /// `fb_width`/`fb_height` instead of deriving it from `DrawData`.
     pub fn render_draw_data_with_fb_size(
         &mut self,
         draw_data: &DrawData,
         render_pass: &mut RenderPass,
         fb_width: u32,
         fb_height: u32,
+    ) -> RendererResult<()> {
+        // Public helper used by the main window: advance frame resources as usual.
+        self.render_draw_data_with_fb_size_ex(draw_data, render_pass, fb_width, fb_height, true)
+    }
+
+    /// Internal variant that optionally skips advancing the frame index.
+    ///
+    /// When `advance_frame` is `false`, we reuse the current frame resources.
+    fn render_draw_data_with_fb_size_ex(
+        &mut self,
+        draw_data: &DrawData,
+        render_pass: &mut RenderPass,
+        fb_width: u32,
+        fb_height: u32,
+        advance_frame: bool,
     ) -> RendererResult<()> {
         mvlog!(
             "[wgpu-mv] render_draw_data(with_fb) lists={} override_fb=({}, {}) disp=({:.1},{:.1})",
@@ -512,7 +542,9 @@ impl WgpuRenderer {
             &backend_data.queue,
         );
 
-        backend_data.next_frame();
+        if advance_frame {
+            backend_data.next_frame();
+        }
         Self::prepare_frame_resources_static(draw_data, backend_data)?;
 
         let gamma = match self.gamma_mode {
