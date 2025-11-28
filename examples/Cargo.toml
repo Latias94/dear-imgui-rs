@@ -156,7 +156,8 @@ dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.6" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.6" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.6" }
 dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.6" }
-sdl3 = { version = "0.16.2", features = ["raw-window-handle"] }
+# Use build-from-source so CI and users don't need a system SDL3 installation.
+sdl3 = { version = "0.16.2", features = ["raw-window-handle", "build-from-source"] }
 dear-app = { path = "../dear-app", version = "0.6" }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }

@@ -37,8 +37,7 @@ jobs:
             build-essential pkg-config \
             libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
             libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev \
-            libsdl3-dev
+            mesa-common-dev libgl1-mesa-dev cmake
 
       - name: Install LLVM (libclang) for bindgen (Linux)
         if: runner.os == 'Linux'
@@ -52,7 +51,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install sdl3
+          brew install cmake
 
       - name: Install Windows deps
         if: runner.os == 'Windows'

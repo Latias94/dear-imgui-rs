@@ -15,7 +15,8 @@ links = "dear-imgui-sdl3-backend"
 [dependencies]
 dear-imgui-rs = { path = "../../dear-imgui", version = "0.6" }
 dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.6" }
-sdl3 = "0.16.2"
+# Use build-from-source so CI and users don't need a system SDL3 installation.
+sdl3 = { version = "0.16.2", features = ["build-from-source"] }
 sdl3-sys = "0.5"
 thiserror.workspace = true
 
