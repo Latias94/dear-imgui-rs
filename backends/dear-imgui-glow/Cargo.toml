@@ -45,7 +45,7 @@ vertex_offset_support = []              # `glDrawElementsBaseVertex` (core)
 debug_message_insert_support = []       # `gl.debug_message_insert`
 
 # Multi-viewport (WIP: declared but off by default)
-multi-viewport = []
+multi-viewport = ["dear-imgui-rs/multi-viewport"]
 
 [dev-dependencies]
 env_logger.workspace = true
