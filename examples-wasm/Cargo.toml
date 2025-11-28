@@ -11,6 +11,10 @@ crate-type = ["cdylib"]
 # Enable both backends so wgpu decides at runtime (webgl2 or webgpu)
 default = ["web-backends"]
 web-backends = ["wgpu/webgl", "wgpu/webgpu", "dear-imgui-wgpu/webgl", "dear-imgui-wgpu/webgpu"]
+experimental-fonts = [
+    "dear-imgui-rs/wasm-font-atlas-experimental",
+    "dear-imgui-wgpu/wasm-font-atlas-experimental",
+]
 
 [dependencies]
 dear-imgui-rs = { path = "../dear-imgui", version = "0.6", features = ["wasm"] }

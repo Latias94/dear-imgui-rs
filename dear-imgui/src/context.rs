@@ -467,14 +467,27 @@ impl Context {
     pub fn font_atlas(&self) -> FontAtlas {
         let _guard = CTX_MUTEX.lock();
 
-        // For now, accessing the font atlas from Rust is not supported on wasm targets.
-        // The import-style wasm build keeps Dear ImGui state in a separate provider
-        // module; safely wiring FontAtlas through that boundary requires additional
-        // design that is not finished yet.
-        #[cfg(target_arch = "wasm32")]
+        // wasm32 import-style builds keep Dear ImGui state in a separate module
+        // and share linear memory. When the experimental font-atlas feature is
+        // enabled, we allow direct access to the atlas pointer, assuming the
+        // provider has been correctly configured via xtask.
+        #[cfg(all(target_arch = "wasm32", feature = "wasm-font-atlas-experimental"))]
+        unsafe {
+            let io = sys::igGetIO_Nil();
+            let atlas_ptr = (*io).Fonts;
+            assert!(
+                !atlas_ptr.is_null(),
+                "ImGui IO Fonts pointer is null on wasm; provider not initialized?"
+            );
+            FontAtlas::from_raw(atlas_ptr)
+        }
+
+        // Default wasm path: keep this API disabled to avoid accidental UB.
+        #[cfg(all(target_arch = "wasm32", not(feature = "wasm-font-atlas-experimental")))]
         {
             panic!(
-                "font_atlas() is not supported on wasm32 targets yet; \
+                "font_atlas() is not supported on wasm32 targets without \
+                 `wasm-font-atlas-experimental` feature; \
                  see docs/WASM.md for current limitations."
             );
         }
@@ -491,16 +504,27 @@ impl Context {
     pub fn font_atlas_mut(&mut self) -> FontAtlas {
         let _guard = CTX_MUTEX.lock();
 
-        // For now, mutating the font atlas from Rust is not supported on wasm targets.
-        // The import-style wasm build shares memory with a separate cimgui provider,
-        // and exposing FontAtlas mutation safely across that boundary is left as
-        // future work. Panicking here avoids undefined behaviour from null or
-        // mismatched pointers.
-        #[cfg(target_arch = "wasm32")]
+        // wasm32 import-style builds keep Dear ImGui state in a separate module
+        // and share linear memory. When the experimental font-atlas feature is
+        // enabled, we allow direct access to the atlas pointer, assuming the
+        // provider has been correctly configured via xtask.
+        #[cfg(all(target_arch = "wasm32", feature = "wasm-font-atlas-experimental"))]
+        unsafe {
+            let io = sys::igGetIO_Nil();
+            let atlas_ptr = (*io).Fonts;
+            assert!(
+                !atlas_ptr.is_null(),
+                "ImGui IO Fonts pointer is null on wasm; provider not initialized?"
+            );
+            return FontAtlas::from_raw(atlas_ptr);
+        }
+
+        // Default wasm path: keep this API disabled to avoid accidental UB.
+        #[cfg(all(target_arch = "wasm32", not(feature = "wasm-font-atlas-experimental")))]
         {
             panic!(
                 "font_atlas_mut()/fonts() are not supported on wasm32 targets yet; \
-                 custom font management for web is still WIP."
+                 enable `wasm-font-atlas-experimental` to opt-in for experiments."
             );
         }
 

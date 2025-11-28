@@ -25,3 +25,5 @@ multi-viewport = ["dear-imgui-rs/multi-viewport", "dep:winit"]
 # Enable WebGL support for WASM
 webgl = ["wgpu/webgl"]
 webgpu = ["wgpu/webgpu"]
+# Experimental: enable wasm font-atlas access for testing
+wasm-font-atlas-experimental = ["dear-imgui-rs/wasm-font-atlas-experimental"]

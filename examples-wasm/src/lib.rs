@@ -102,9 +102,21 @@ impl AppWindow {
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
 
+        // Optional: experiment with custom font settings when the experimental
+        // feature is enabled. This uses the modern FontAtlas API and verifies
+        // that the shared-memory provider and bindings are wired correctly.
+        #[cfg(feature = "experimental-fonts")]
+        {
+            use dear_imgui_rs::{FontConfig, FontSource};
+            let mut fonts = context.font_atlas_mut();
+            let cfg = FontConfig::default()
+                .size_pixels(18.0)
+                .name("Web Default 18px");
+            fonts.add_font(&[FontSource::default_font().with_config(cfg)]);
+        }
+
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
-        // Skip font atlas preparation for WASM to avoid pointer issues
         let renderer = WgpuRenderer::new(init_info, &mut context)
             .map_err(|e| JsValue::from_str(&format!("init renderer: {e}")))?;
 

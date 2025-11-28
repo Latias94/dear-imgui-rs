@@ -29,12 +29,14 @@ default = ["tracing"]
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (define feature to satisfy cfg checks; opt-in)
 multi-viewport = []
-# Enable tracing support for better debugging
 tracing = ["dep:tracing", "dep:tracing-subscriber"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
-# Enable for WASM targets
+# Enable for WASM targets (import-style provider)
 wasm = ["dear-imgui-sys/wasm"]
+# Experimental: enable direct font atlas access on wasm. Requires the shared
+# memory provider (imgui-sys-v0) built via xtask; API and behaviour may change.
+wasm-font-atlas-experimental = []
 
 [dev-dependencies]
 approx = "0.5"

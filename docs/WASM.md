@@ -25,10 +25,31 @@ This project supports compiling Dear ImGui + backends to WebAssembly using an im
 
 ## Why Emscripten?
 
-- Import‑style split builds keep Rust compilation fast and clean: the C/C++ side (cimgui + Dear ImGui) is compiled once as a provider.
-- Emscripten has mature support for exporting exactly the symbols we need (via `EXPORTED_FUNCTIONS`), emitting ES modules, and most importantly importing a shared memory (`-s IMPORTED_MEMORY=1`).
-- Sharing one `WebAssembly.Memory` between the Rust app (wasm-bindgen) and the provider is critical: ImGui IO/state written by Rust must be visible to cimgui.
-- Decoupling makes it easy to size and debug the provider independently (initial memory, GLOBAL_BASE, logs) without touching the Rust build.
+This repo deliberately keeps **two roles** separate:
+
+- The main application (Rust + winit + wgpu) targets `wasm32-unknown-unknown` and uses `wasm-bindgen`.
+- The cimgui + Dear ImGui implementation is compiled once as a **provider** module (`imgui-sys-v0`).
+
+For the provider we currently use Emscripten because it solves several hard problems for us:
+
+- **Import‑style + shared memory**:
+  - Emscripten has first‑class support for importing a shared memory via `-s IMPORTED_MEMORY=1`.
+  - This lets the provider reuse the same `WebAssembly.Memory` that wasm‑bindgen exports, so all ImGui IO/state written by Rust is visible to cimgui.
+- **Symbol export and ES modules**:
+  - We can feed Emscripten a JSON list of symbols derived from the pregenerated wasm bindings and let it emit an ES module that exports exactly those functions.
+  - It handles `EXPORTED_FUNCTIONS`, startup, and runtime glue, so the provider can be imported as a normal JS module.
+- **Debuggability and decoupling**:
+  - The provider build is independent from the Rust build: you can tweak its initial memory, `GLOBAL_BASE`, logging, and assertions without rebuilding Rust.
+  - Warnings, logs, and crashes in cimgui/ImGui are isolated in the provider, which simplifies debugging.
+- **Portability**:
+  - Emscripten ships a battle‑tested sysroot for C/C++ to WebAssembly, including the minimum runtime pieces we need, and is well supported on all major platforms.
+
+In principle, it is possible to build the provider with a “pure” `wasm32-unknown-unknown` toolchain and hand‑write the glue (imports/exports, memory wiring, JS module), but that significantly increases maintenance complexity for relatively little benefit. For now we intentionally keep:
+
+- **Main module**: `wasm32-unknown-unknown` + wasm‑bindgen.
+- **Provider module**: Emscripten‑built cimgui + Dear ImGui (`imgui-sys-v0`).
+
+We do *not* currently plan to replace the provider build with a custom single‑module (`wasm32-unknown-unknown` only) design in the short term.
 
 ## Overview
 
@@ -43,7 +64,7 @@ This project supports compiling Dear ImGui + backends to WebAssembly using an im
 - Rust target: `wasm32-unknown-unknown`
   - `rustup target add wasm32-unknown-unknown`
 - wasm-bindgen CLI (version must match the crate’s dependency)
-  - `cargo install -f wasm-bindgen-cli --version 0.2.104`
+  - `cargo install -f wasm-bindgen-cli --version 0.2.105`
 - wasm-tools (used by xtask to patch the main Wasm to import memory so it can share memory with the provider)
   - `cargo install -f wasm-tools`
 - Emscripten SDK (for provider build)
@@ -124,7 +145,7 @@ If your server serves `.mjs` as `text/plain`, modern browsers will reject it as 
 
 - Install target and wasm-bindgen-cli:
   - `rustup target add wasm32-unknown-unknown`
-  - `cargo install -f wasm-bindgen-cli --version 0.2.104`
+  - `cargo install -f wasm-bindgen-cli --version 0.2.105`
 - Build demo:
   - `cargo run -p xtask -- wasm-bindgen imgui-sys-v0`
   - `cargo run -p xtask -- web-demo`

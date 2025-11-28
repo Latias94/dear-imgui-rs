@@ -14,11 +14,18 @@ Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new
 - dear-imgui-rs 0.6.0
   - New drag/drop flag `DragDropFlags::ACCEPT_DRAW_AS_HOVERED`, wrapping `ImGuiDragDropFlags_AcceptDrawAsHovered`.
   - New style color `StyleColor::DragDropTargetBg`, exposing `ImGuiCol_DragDropTargetBg`.
+  - Experimental WebAssembly font atlas support behind `wasm-font-atlas-experimental` feature (import-style provider only; APIs and behaviour may change).
 
 - dear-imgui-sys 0.6.0
   - Updated to Dear ImGui v1.92.5 (docking branch).
   - Updated cimgui submodule to `1.92.5dock` (Dear ImGui `v1.92.5-docking`).
   - Regenerated FFI bindings, including new enums/fields added in 1.92.5.
+  - Added pregenerated wasm bindings (`wasm_bindings_pregenerated.rs`) importing from module `imgui-sys-v0` for import-style WASM builds.
+
+- Tooling / xtask
+  - `xtask wasm-bindgen imgui-sys-v0` generates import-style wasm bindings for `dear-imgui-sys` with `wasm-bindgen-cli 0.2.105`.
+  - `xtask web-demo` builds the `dear-imgui-web-demo` wasm example, patches the wasm to import memory from `env`, and injects shared memory wiring into the JS glue.
+  - `xtask build-cimgui-provider` builds an Emscripten-based `imgui-sys-v0` provider (`imgui-sys-v0.js` + `.wasm`) and injects an import map mapping `imgui-sys-v0` to `./imgui-sys-v0-wrapper.js`.
 
 ### Changed
 

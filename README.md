@@ -235,12 +235,71 @@ extensions/
   dear-file-browser/   # File dialogs (rfd) + pure ImGui browser
 ```
 
+## WebAssembly (WASM) support
+
+This workspace includes an import-style WASM build that reuses a separate cimgui
+provider module (`imgui-sys-v0`) and shares a single `WebAssembly.Memory` between
+the Rust app (wasm-bindgen) and the provider.
+
+Status:
+
+- The web demo (`dear-imgui-web-demo`) is wired up and runs on `wasm32-unknown-unknown`.
+- The core UI + WGPU backend are supported; clipboard, raw draw callbacks and
+  multi-viewport remain disabled on wasm for safety.
+- Font atlas access on wasm is available behind an experimental feature flag.
+
+Prerequisites:
+
+- Rust target:
+  - `rustup target add wasm32-unknown-unknown`
+- wasm-bindgen CLI (version must match the crate’s dependency):
+  - `cargo install -f wasm-bindgen-cli --version 0.2.105`
+- wasm-tools (used by `xtask web-demo` to patch memory imports/exports):
+  - `cargo install -f wasm-tools`
+- Emscripten SDK (`emsdk`) for building the cimgui provider:
+  - Install emsdk and run its env script (`emsdk_env.*`) or set `EMSDK` so that
+    `emcc`/`em++` are on `PATH`.
+
+Quick start (web demo):
+
+```bash
+# 1) Generate wasm bindings for dear-imgui-sys (optional; xtask will also
+#    generate them on-demand if missing, using import module name imgui-sys-v0)
+cargo run -p xtask -- wasm-bindgen imgui-sys-v0
+
+# 2) Build the main wasm module + JS glue (optionally enable experimental fonts)
+cargo run -p xtask -- web-demo --features experimental-fonts
+
+# 3) Build the cimgui provider (emscripten) and import map
+cargo run -p xtask -- build-cimgui-provider
+
+# 4) Serve and open in the browser
+python -m http.server -d target/web-demo 8080
+# Then open http://127.0.0.1:8080
+```
+
+Notes:
+
+- The provider build emits:
+  - `target/web-demo/imgui-sys-v0.wasm` and `imgui-sys-v0.js`
+  - `imgui-sys-v0-wrapper.js` (ESM wrapper) and an import map entry mapping
+    `"imgui-sys-v0"` to `"./imgui-sys-v0-wrapper.js"`.
+- `xtask web-demo`:
+  - Patches the wasm-bindgen output to import memory from `env.memory` and export it.
+  - Patches the JS glue to pass `globalThis.__imgui_shared_memory` to `env.memory`.
+- Font atlas mutation on wasm is guarded by the feature:
+  - `dear-imgui-rs/wasm-font-atlas-experimental`
+  - `examples-wasm/experimental-fonts` turns this on for the web demo only.
+
+For more details and troubleshooting, see `docs/WASM.md`.
+
 ## Limitations
 
 - **Multi-viewport support**: Currently not supported (experimental code exists but is not production-ready)
   - A test example exists: `cargo run --bin multi_viewport_wgpu --features multi-viewport`
   - This feature is work-in-progress and may have bugs or incomplete functionality
-- **WebAssembly (WASM)**: Currently not supported
+- **WebAssembly (WASM)**: Supported via the import-style build described above; some features
+  (clipboard, raw draw callbacks, multi-viewport) remain disabled on wasm.
 
 ## Related Projects
 
@@ -264,4 +323,3 @@ Dual-licensed under either of:
 
 - Apache License, Version 2.0 (<http://www.apache.org/licenses/LICENSE-2.0>)
 - MIT license (<http://opensource.org/licenses/MIT>)
-

@@ -375,14 +375,26 @@ fn build_cimgui_provider() -> Result<()> {
 
     // 1) Locate emsdk tools and ensure emscripten config exists
     let (empp, emcc, em_config) = find_emsdk_tools()?;
-    if !em_config.exists() {
+    // Newer emsdk setups may already have a global .emscripten config in the
+    // root EMSDK dir. In that case `emcc --generate-config` will fail with
+    // "config file already exists". Treat that as a non-fatal condition and
+    // rely on the existing config instead of bailing.
+    let mut use_custom_em_config = false;
+    if em_config.exists() {
+        use_custom_em_config = true;
+    } else {
         eprintln!("Generating Emscripten config at {}", em_config.display());
         let status = Command::new(&emcc)
             .arg("--generate-config")
             .arg(&em_config)
             .status()?;
-        if !status.success() {
-            anyhow::bail!("emcc --generate-config failed");
+        if status.success() {
+            use_custom_em_config = true;
+        } else {
+            eprintln!(
+                "Warning: emcc --generate-config failed; \
+                 continuing with existing EMSDK configuration"
+            );
         }
     }
 
@@ -493,7 +505,9 @@ fn build_cimgui_provider() -> Result<()> {
         std::env::join_paths(p).unwrap()
     };
     cmd.env("PATH", new_path);
-    cmd.env("EM_CONFIG", &em_config);
+    if use_custom_em_config {
+        cmd.env("EM_CONFIG", &em_config);
+    }
 
     eprintln!("Building cimgui provider -> {}", out_js.display());
     let status = cmd.status()?;
