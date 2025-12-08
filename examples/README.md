@@ -81,6 +81,9 @@ This is the intended organization.
   - `sdl3_opengl_multi_viewport.rs`: SDL3 + OpenGL3 multi-viewport example using official C++ backends.
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features "multi-viewport sdl3-backends"`
     - Shows how to combine SDL3 platform backend with OpenGL renderer, including a simple "Game View" texture inside an ImGui window that can be dragged across OS windows.
+  - `sdl3_glow_multi_viewport.rs`: SDL3 + Glow multi-viewport example using Rust Glow renderer backend.
+    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features "multi-viewport sdl3-backends"`
+    - Uses SDL3 platform backend for window/GL context management and `dear-imgui-glow` for rendering all viewports.
 
 - 03-extensions (feature-gated)
   - ImPlot: `implot_basic.rs`.

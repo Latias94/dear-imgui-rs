@@ -83,6 +83,8 @@ cargo run --bin implot3d_basic --features implot3d
 # SDL3 backends (native)
 # SDL3 + OpenGL3 with official C++ backends (multi-viewport via imgui_impl_sdl3/imgui_impl_opengl3)
 cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport
+# SDL3 + Glow (experimental multi-viewport using Rust Glow renderer)
+cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-backends
 # SDL3 + WGPU (single-window; multi-viewport is intentionally disabled for WebGPU)
 cargo run -p dear-imgui-examples --bin sdl3_wgpu
 ```

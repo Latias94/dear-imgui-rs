@@ -44,6 +44,9 @@ pub struct GlowRenderer {
     framebuffer_srgb: bool,
     // Optional: override color gamma applied to vertex colors (None = auto)
     color_gamma_override: Option<f32>,
+    // Clear color used for secondary viewports (multi-viewport). Main framebuffer
+    // clear remains responsibility of the application.
+    viewport_clear_color: [f32; 4],
 }
 
 impl GlowRenderer {
@@ -193,6 +196,7 @@ impl GlowRenderer {
             texture_map,
             framebuffer_srgb: false,
             color_gamma_override: None,
+            viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
         };
 
         Ok(renderer)
@@ -450,6 +454,15 @@ impl GlowRenderer {
     /// auto = 2.2 when sRGB is enabled, otherwise 1.0.
     pub fn set_color_gamma_override(&mut self, gamma: Option<f32>) {
         self.color_gamma_override = gamma;
+    }
+
+    /// Set clear color for secondary viewports when multi-viewport is enabled.
+    ///
+    /// This only affects the per-viewport renderer callback installed via
+    /// `multi_viewport::enable`. Clearing of the main framebuffer remains
+    /// responsibility of the application.
+    pub fn set_viewport_clear_color(&mut self, color: [f32; 4]) {
+        self.viewport_clear_color = color;
     }
 
     /// Render Dear ImGui draw data
@@ -923,63 +936,6 @@ impl GlowRenderer {
     }
 }
 
-/// Multi-viewport support functions
-#[cfg(feature = "multi-viewport")]
-pub mod multi_viewport {
-    use dear_imgui_rs::{ViewportFlags, sys};
-    use std::ffi::c_void;
-
-    /// Render a viewport (called by ImGui for multi-viewport support)
-    ///
-    /// # Safety
-    ///
-    /// This function is called by ImGui's C code and must be called with valid pointers.
-    /// The viewport pointer must be valid and point to a valid ImGuiViewport structure.
-    pub unsafe extern "C" fn render_window(
-        viewport: *mut sys::ImGuiViewport,
-        _render_arg: *mut c_void,
-    ) {
-        if viewport.is_null() {
-            return;
-        }
-        let viewport = unsafe { &*viewport };
-
-        // Clear the viewport if needed using Dear ImGui's ViewportFlags
-        let flags = ViewportFlags::from_bits_truncate(viewport.Flags);
-        if !flags.contains(ViewportFlags::NO_RENDERER_CLEAR) {
-            // Note: In a real implementation, you would get the GL context from somewhere
-            // This is a simplified example
-            // gl.clear_color(0.0, 0.0, 0.0, 1.0);
-            // gl.clear(glow::COLOR_BUFFER_BIT);
-        }
-
-        // Render the draw data
-        if !viewport.DrawData.is_null() {
-            // Note: In a real implementation, you would need to:
-            // 1. Get the GL context for this viewport
-            // 2. Get the renderer instance
-            // 3. Call renderer.render() with the draw data
-            // This requires more complex state management
-        }
-    }
-
-    /// Initialize multi-viewport support
-    pub fn init_multi_viewport_support(imgui_context: &mut dear_imgui_rs::Context) {
-        let platform_io = imgui_context.platform_io_mut();
-
-        // Set the renderer callback
-        unsafe {
-            (*platform_io.as_raw_mut()).Renderer_RenderWindow = Some(render_window);
-        }
-    }
-
-    /// Shutdown multi-viewport support
-    pub fn shutdown_multi_viewport_support(context: &mut dear_imgui_rs::Context) {
-        // Destroy platform windows using the high-level interface
-        context.destroy_platform_windows();
-    }
-}
-
 impl GlowRenderer {
     /// Update texture from Dear ImGui texture data
     /// Following the original Dear ImGui OpenGL3 implementation
@@ -1331,6 +1287,142 @@ impl GlowRenderer {
     /// Get mutable texture data for a given texture ID
     pub fn get_texture_data_mut(&mut self, texture_id: TextureId) -> Option<&mut TextureData> {
         self.texture_map.get_texture_data_mut(texture_id)
+    }
+}
+
+/// Multi-viewport support for the Glow renderer.
+///
+/// This follows the Dear ImGui pattern where:
+/// - the *platform* backend (e.g. SDL3, winit+glutin) owns OS windows and GL contexts;
+/// - the *renderer* backend only renders `ImDrawData` into the currently bound context.
+#[cfg(feature = "multi-viewport")]
+pub mod multi_viewport {
+    use super::GlowRenderer;
+    use dear_imgui_rs::{Context, ViewportFlags, internal::RawCast, render::DrawData, sys};
+    use glow::HasContext;
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Global pointer to the active GlowRenderer used for multi-viewport rendering.
+    //
+    // This mirrors the pattern used by the WGPU backend and the official C++ backends,
+    // where the renderer backend installs callbacks in ImGuiPlatformIO.
+    static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
+
+    #[inline]
+    fn get_renderer<'a>() -> Option<&'a mut GlowRenderer> {
+        let ptr = RENDERER_PTR.load(Ordering::SeqCst);
+        if ptr == 0 {
+            None
+        } else {
+            // Safety: we only ever store valid `GlowRenderer` pointers in RENDERER_PTR,
+            // and the caller must ensure the referenced renderer outlives callbacks.
+            Some(unsafe { &mut *(ptr as *mut GlowRenderer) })
+        }
+    }
+
+    /// Enable Glow multi-viewport rendering for the given ImGui context and renderer.
+    ///
+    /// This registers a `Renderer_RenderWindow` callback in `ImGuiPlatformIO`, which
+    /// Dear ImGui will call from `Context::render_platform_windows_default()` for each
+    /// secondary viewport.
+    ///
+    /// The platform backend (e.g. SDL3) is expected to:
+    /// - create/destroy platform windows;
+    /// - set the appropriate OpenGL context current in `Platform_RenderWindow`;
+    /// - swap buffers in `Platform_SwapBuffers`.
+    ///
+    /// This function assumes that `renderer` owns a `glow::Context` (the common case);
+    /// if `GlowRenderer` was created with an external context (`gl_context()` returns
+    /// `None`), the multi-viewport callback will early-return and do nothing.
+    pub fn enable(renderer: &mut GlowRenderer, imgui_context: &mut Context) {
+        // Store renderer pointer for callbacks
+        RENDERER_PTR.store(renderer as *mut _ as usize, Ordering::SeqCst);
+
+        // Install raw Renderer_RenderWindow callback. We don't need the typed
+        // trampolines here, as we never expose Viewport typed wrappers.
+        let platform_io = imgui_context.platform_io_mut();
+        platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
+    }
+
+    /// Disable Glow multi-viewport rendering and clear the renderer callback.
+    pub fn disable(imgui_context: &mut Context) {
+        let platform_io = imgui_context.platform_io_mut();
+        platform_io.set_renderer_render_window_raw(None);
+        RENDERER_PTR.store(0, Ordering::SeqCst);
+    }
+
+    /// Backwards-compatible helper mirroring older naming.
+    ///
+    /// Prefer using [`enable`] directly so the renderer instance is clearly threaded
+    /// through your setup code.
+    #[deprecated(
+        since = "0.6.0",
+        note = "use multi_viewport::enable(renderer, imgui_context) instead"
+    )]
+    pub fn init_multi_viewport_support(_imgui_context: &mut Context) {
+        // Kept only to avoid breaking existing code that might call this.
+        // Without a renderer reference there is nothing useful to do here.
+    }
+
+    /// Shutdown helper that clears callbacks and destroys platform windows.
+    pub fn shutdown_multi_viewport_support(context: &mut Context) {
+        disable(context);
+        context.destroy_platform_windows();
+    }
+
+    /// Renderer callback used by Dear ImGui for each secondary viewport.
+    ///
+    /// This corresponds to `ImGuiPlatformIO::Renderer_RenderWindow`.
+    ///
+    /// Safety: called from C with a valid `ImGuiViewport*` while the ImGui
+    /// context and registered renderer are still alive.
+    pub unsafe extern "C" fn renderer_render_window_sys(
+        viewport: *mut sys::ImGuiViewport,
+        _render_arg: *mut c_void,
+    ) {
+        if viewport.is_null() {
+            return;
+        }
+
+        let renderer = match get_renderer() {
+            Some(r) => r,
+            None => return,
+        };
+
+        // We currently only support the common case where GlowRenderer owns the
+        // GL context. If the context is externally managed, the application
+        // should render viewports by calling `render_with_context` manually.
+        let gl_rc = match renderer.gl_context() {
+            Some(rc) => rc.clone(),
+            None => return,
+        };
+        let gl = &*gl_rc;
+
+        // Safety: viewport was checked for null above.
+        let vp_ref = unsafe { &*viewport };
+
+        // Clear the viewport if needed using Dear ImGui's ViewportFlags.
+        let flags = ViewportFlags::from_bits_truncate(vp_ref.Flags);
+        if !flags.contains(ViewportFlags::NO_RENDERER_CLEAR) {
+            let c = renderer.viewport_clear_color;
+            unsafe {
+                gl.clear_color(c[0], c[1], c[2], c[3]);
+                gl.clear(glow::COLOR_BUFFER_BIT);
+            }
+        }
+
+        // Render the draw data for this viewport, if present.
+        if !vp_ref.DrawData.is_null() {
+            // Safety: DrawData pointer is owned by Dear ImGui for the duration
+            // of this callback.
+            let raw_dd: &sys::ImDrawData = unsafe { &*vp_ref.DrawData };
+            let draw_data: &DrawData = unsafe { DrawData::from_raw(raw_dd) };
+
+            if let Err(err) = renderer.render_with_context(gl, draw_data) {
+                eprintln!("dear-imgui-glow: error rendering viewport: {:?}", err);
+            }
+        }
     }
 }
 

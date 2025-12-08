@@ -18,6 +18,7 @@ multi-viewport = [
     "dear-imgui-winit/multi-viewport",
     "dear-imgui-wgpu/multi-viewport",
     "dear-imgui-sdl3/multi-viewport",
+    "dear-imgui-glow/multi-viewport",
 ]
 ### SDL3 backends (platform + renderers)
 ###
@@ -89,6 +90,11 @@ required-features = ["multi-viewport"]
 [[bin]]
 name = "sdl3_opengl_multi_viewport"
 path = "02-docking/sdl3_opengl_multi_viewport.rs"
+required-features = ["multi-viewport", "sdl3-backends"]
+
+[[bin]]
+name = "sdl3_glow_multi_viewport"
+path = "02-docking/sdl3_glow_multi_viewport.rs"
 required-features = ["multi-viewport", "sdl3-backends"]
 
 [[bin]]

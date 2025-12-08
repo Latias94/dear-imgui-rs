@@ -118,6 +118,34 @@ pub fn init_for_opengl(
     Ok(())
 }
 
+/// Initialize only the Dear ImGui SDL3 *platform* backend for an OpenGL context.
+///
+/// This is useful when you want to use a Rust renderer (e.g. `dear-imgui-glow`)
+/// instead of the official C++ OpenGL3 renderer. It:
+/// - configures the SDL3 platform backend (including multi-viewport support);
+/// - does **not** initialize `imgui_impl_opengl3`.
+///
+/// This assumes that:
+/// - a `dear_imgui_rs::Context` already exists;
+/// - `window` has an active OpenGL context (`gl_context`);
+/// - the same context will be current when rendering.
+pub fn init_platform_for_opengl(
+    _imgui: &mut Context,
+    window: &Window,
+    gl_context: &GLContext,
+) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+    let sdl_gl = unsafe { gl_context.raw() };
+
+    unsafe {
+        if !ffi::ImGui_ImplSDL3_InitForOpenGL_Rust(sdl_window, sdl_gl as *mut c_void) {
+            return Err(Sdl3BackendError::Sdl3InitFailed);
+        }
+    }
+
+    Ok(())
+}
+
 /// Initialize the Dear ImGui SDL3 platform backend only.
 ///
 /// This is useful when using a non-OpenGL renderer (e.g. WGPU) and only

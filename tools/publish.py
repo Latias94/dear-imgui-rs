@@ -7,7 +7,7 @@ dependencies are published before their dependents.
 
 Publishing Order:
 1. Core: dear-imgui-sys → dear-imgui-rs
-2. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow
+2. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-sdl3
 3. Extensions (sys): dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys, 
                      dear-implot3d-sys, dear-imguizmo-quat-sys
 4. Extensions (high-level): dear-implot, dear-imnodes, dear-imguizmo,
@@ -38,6 +38,7 @@ Requirements:
 """
 
 import argparse
+import shutil
 import subprocess
 import sys
 import time
@@ -55,6 +56,7 @@ PUBLISH_ORDER = [
     ("dear-imgui-winit", "backends/dear-imgui-winit"),
     ("dear-imgui-wgpu", "backends/dear-imgui-wgpu"),
     ("dear-imgui-glow", "backends/dear-imgui-glow"),
+    ("dear-imgui-sdl3", "backends/dear-imgui-sdl3"),
     
     # Extension sys crates (depend on dear-imgui-sys)
     ("dear-implot-sys", "extensions/dear-implot-sys"),
@@ -190,6 +192,59 @@ def check_crate_published(crate_name: str, version: str) -> bool:
     return False
 
 
+def sync_dear_imgui_sdl3_backends(repo_root: Path) -> bool:
+    """
+    Ensure dear-imgui-sdl3 has local copies of the upstream SDL3/OpenGL3 backends.
+
+    We vendor the backend sources from the dear-imgui-sys cimgui/imgui backends
+    directory into backends/dear-imgui-sdl3/backends so that the crate published
+    to crates.io does not depend on internal layout of dear-imgui-sys packages.
+    """
+    imgui_backends = (
+        repo_root
+        / "dear-imgui-sys"
+        / "third-party"
+        / "cimgui"
+        / "imgui"
+        / "backends"
+    )
+    sdl3_backends = (
+        repo_root / "backends" / "dear-imgui-sdl3" / "backends"
+    )
+
+    required_files = [
+        "imgui_impl_sdl3.h",
+        "imgui_impl_sdl3.cpp",
+        "imgui_impl_opengl3.h",
+        "imgui_impl_opengl3.cpp",
+        "imgui_impl_opengl3_loader.h",
+    ]
+
+    if not imgui_backends.exists():
+        print_error(
+            f"dear-imgui-sdl3 sync: upstream imgui backends directory not found: {imgui_backends}"
+        )
+        return False
+
+    sdl3_backends.mkdir(parents=True, exist_ok=True)
+
+    print_info("Syncing dear-imgui-sdl3 vendored backends from dear-imgui-sys...")
+    for fname in required_files:
+        src = imgui_backends / fname
+        dst = sdl3_backends / fname
+        if not src.exists():
+            print_error(f"Missing upstream backend file: {src}")
+            return False
+        try:
+            shutil.copy2(src, dst)
+        except Exception as e:
+            print_error(f"Failed to copy {src} -> {dst}: {e}")
+            return False
+
+    print_success("dear-imgui-sdl3 backends synced successfully")
+    return True
+
+
 def publish_crate(
     crate_name: str,
     crate_path: Path,
@@ -215,6 +270,12 @@ def publish_crate(
     print_info(f"Crate: {crate_name}")
     print_info(f"Version: {version}")
     print_info(f"Path: {crate_path}")
+
+    # Special handling: keep dear-imgui-sdl3 vendored backends in sync before publishing.
+    if crate_name == "dear-imgui-sdl3":
+        if not sync_dear_imgui_sdl3_backends(repo_root):
+            print_error("Failed to sync dear-imgui-sdl3 backends; aborting publish")
+            return False
 
     # Check if already published
     if not dry_run and check_crate_published(crate_name, version):

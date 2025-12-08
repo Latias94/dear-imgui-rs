@@ -20,6 +20,15 @@ Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new
     - SDL3 + WGPU is supported via the Rust WGPU backend (`dear-imgui-wgpu`) with a basic example:
       - `cargo run -p dear-imgui-examples --bin sdl3_wgpu`
       - Multi-viewport remains **disabled** for WebGPU, matching upstream `imgui_impl_wgpu` which does not yet support multi-viewport.
+  - `dear-imgui-glow`:
+    - Experimental multi-viewport support mirroring the upstream OpenGL3 renderer backend:
+      - Adds a `multi_viewport` helper module and `multi_viewport::enable(&mut GlowRenderer, &mut Context)` API.
+      - Clears secondary viewports using a configurable clear color via `GlowRenderer::set_viewport_clear_color`.
+      - Uses Dear ImGui’s `ImGuiPlatformIO::Renderer_RenderWindow` callback in the same way as `imgui_impl_opengl3`.
+    - When combined with SDL3 platform backend, provides a pure-Rust SDL3 + Glow multi-viewport stack:
+      - New helper `dear-imgui-sdl3::init_platform_for_opengl` to initialize only the SDL3 platform backend (no C++ OpenGL3 renderer).
+      - New example using SDL3 + Glow multi-viewport:
+        - `cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-backends`
 
 - dear-imgui-rs 0.6.0
   - New drag/drop flag `DragDropFlags::ACCEPT_DRAW_AS_HOVERED`, wrapping `ImGuiDragDropFlags_AcceptDrawAsHovered`.
@@ -64,6 +73,12 @@ Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new
   - The `sdl3_opengl_multi_viewport` example shows how to:
     - Drive Dear ImGui via the official SDL3 platform backend;
     - Render a user-provided OpenGL texture inside an ImGui window (`Game View`) that can be dragged to secondary OS windows.
+- SDL3 + Glow (experimental):
+  - Uses SDL3 platform backend (`dear-imgui-sdl3`) + Rust Glow renderer backend (`dear-imgui-glow`).
+  - Platform responsibilities (window creation, GL context switching, swap buffers) remain in the C++ SDL3 backend; rendering of all viewports is handled by `GlowRenderer` via `multi_viewport::enable`.
+  - The `sdl3_glow_multi_viewport` example demonstrates this stack:
+    - `cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-backends`
+  - This path is intended as an experimental native OpenGL alternative to the C++ `imgui_impl_opengl3` renderer.
 - SDL3 + WGPU:
   - Uses the SDL3 platform backend (`imgui_impl_sdl3`) + Rust WGPU renderer (`dear-imgui-wgpu`).
   - The `sdl3_wgpu` example demonstrates SDL3 + WGPU integration (single window); multi-viewport remains **disabled** on this route for WebGPU, matching upstream `imgui_impl_wgpu` which does not yet implement multi-viewport.
