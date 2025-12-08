@@ -13,13 +13,16 @@ use std::error::Error;
 use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_sdl3 as imgui_sdl3_backend;
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
 use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::video::{SwapInterval, WindowPos};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // Enable native IME UI before creating any SDL3 windows (recommended for IME-heavy locales).
+    imgui_sdl3_backend::enable_native_ime_ui();
+
     // Initialize SDL3 (video + events).
     let sdl = sdl3::init()?;
     let video = sdl.video()?;
@@ -112,6 +115,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize SDL3 platform backend (for "other" renderer).
     imgui_sdl3_backend::init_for_other(&mut imgui, &window)?;
+    // Use AutoAll so all connected gamepads are merged into ImGui's gamepad state.
+    imgui_sdl3_backend::set_gamepad_mode(GamepadMode::AutoAll);
 
     // Initialize WGPU renderer backend.
     let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format);
@@ -174,6 +179,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ui.text("Dear ImGui running on SDL3 + WGPU");
                 ui.separator();
                 ui.checkbox("Show demo window", &mut show_demo);
+
+                ui.text("Gamepad: SDL3 backend in AutoAll mode (all controllers merged)");
 
                 ui.text(format!(
                     "Application average {:.3} ms/frame ({:.1} FPS)",

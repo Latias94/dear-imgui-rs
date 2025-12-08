@@ -12,8 +12,6 @@
 
 use std::ffi::{CString, c_char, c_void};
 
-#[cfg(feature = "multi-viewport")]
-use dear_imgui_rs::ConfigFlags;
 use dear_imgui_rs::{Context, TextureData, render::DrawData};
 use dear_imgui_sys as sys;
 use sdl3::video::{GLContext, Window};
@@ -38,6 +36,9 @@ mod ffi {
         pub fn ImGui_ImplOpenGL3_NewFrame_Rust();
         pub fn ImGui_ImplOpenGL3_RenderDrawData_Rust(draw_data: *mut sys::ImDrawData);
         pub fn ImGui_ImplOpenGL3_UpdateTexture_Rust(tex: *mut sys::ImTextureData);
+
+        pub fn ImGui_ImplSDL3_SetGamepadMode_AutoFirst_Rust();
+        pub fn ImGui_ImplSDL3_SetGamepadMode_AutoAll_Rust();
     }
 }
 
@@ -50,6 +51,40 @@ pub enum Sdl3BackendError {
     OpenGlInitFailed,
     #[error("Invalid GLSL version string")]
     InvalidGlslVersion,
+}
+
+/// Gamepad handling mode used by the SDL3 backend.
+///
+/// This controls how many SDL3 gamepads are opened and merged into ImGui's
+/// gamepad input state.
+#[derive(Copy, Clone, Debug)]
+pub enum GamepadMode {
+    /// Automatically open the first available gamepad (Dear ImGui default).
+    AutoFirst,
+    /// Automatically open all available gamepads and merge their state.
+    AutoAll,
+}
+
+/// Configure how the SDL3 backend handles gamepads.
+///
+/// Call this after [`init_for_opengl`] or [`init_for_other`] if you want a
+/// mode other than the default `AutoFirst`.
+pub fn set_gamepad_mode(mode: GamepadMode) {
+    unsafe {
+        match mode {
+            GamepadMode::AutoFirst => ffi::ImGui_ImplSDL3_SetGamepadMode_AutoFirst_Rust(),
+            GamepadMode::AutoAll => ffi::ImGui_ImplSDL3_SetGamepadMode_AutoAll_Rust(),
+        }
+    }
+}
+
+/// Enable native IME UI for SDL3 (recommended on IME-heavy platforms).
+///
+/// This should be called before creating any SDL3 windows so that the
+/// underlying backend can display the OS IME UI correctly.
+pub fn enable_native_ime_ui() {
+    // Best-effort: ignore return value; missing hints are not fatal.
+    let _ = sdl3::hint::set("SDL_HINT_IME_SHOW_UI", "1");
 }
 
 /// Initialize the Dear ImGui SDL3 + OpenGL3 backends.

@@ -51,4 +51,12 @@ void ImGui_ImplOpenGL3_UpdateTexture_Rust(ImTextureData* tex) {
     ImGui_ImplOpenGL3_UpdateTexture(tex);
 }
 
+void ImGui_ImplSDL3_SetGamepadMode_AutoFirst_Rust() {
+    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoFirst, nullptr, 0);
+}
+
+void ImGui_ImplSDL3_SetGamepadMode_AutoAll_Rust() {
+    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll, nullptr, 0);
+}
+
 } // extern "C"

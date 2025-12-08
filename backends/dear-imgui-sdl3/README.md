@@ -119,13 +119,13 @@ SDL3 平台后端封装，用于将 Dear ImGui 接入 SDL3 窗口系统。实现
 使用示例
 --------
 
-SDL3 + OpenGL3 多视口示例：
+### SDL3 + OpenGL3 多视口
 
 ```bash
 cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport
 ```
 
-SDL3 + WGPU 示例（单窗口）：
+### SDL3 + WGPU（单窗口）
 
 ```bash
 cargo run -p dear-imgui-examples --bin sdl3_wgpu
@@ -133,3 +133,24 @@ cargo run -p dear-imgui-examples --bin sdl3_wgpu
 
 注意：目前 WebGPU 路线（包括 SDL3 + WGPU）沿用 upstream `imgui_impl_wgpu` 的设计，不开启多视口支持；多视口推荐使用 SDL3 + OpenGL3 或 winit + OpenGL 路线。
 
+IME 与手柄配置
+--------------
+
+- **IME 显示（中文输入法等）**
+
+  官方后端要求在创建窗口前开启 `SDL_HINT_IME_SHOW_UI`：
+
+  ```rust
+  // 在 SDL3 创建任何窗口之前调用
+  dear_imgui_sdl3::enable_native_ime_ui();
+  ```
+
+- **手柄模式**
+
+  默认模式会自动打开第一个可用手柄，你也可以切换为“全部合并”模式：
+
+  ```rust
+  use dear_imgui_sdl3::{set_gamepad_mode, GamepadMode};
+
+  set_gamepad_mode(GamepadMode::AutoAll);
+  ```

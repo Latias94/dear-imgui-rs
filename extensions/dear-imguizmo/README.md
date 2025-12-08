@@ -26,9 +26,9 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.5.x   |
-| dear-imgui-rs     | 0.5.x   |
-| dear-imguizmo-sys | 0.5.x   |
+| Crate             | 0.6.x   |
+| dear-imgui-rs     | 0.6.x   |
+| dear-imguizmo-sys | 0.6.x   |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -194,4 +194,3 @@ Notes:
 - Pin hover, node/link hover outlines are shown using `GraphStyle` colors.
 - Simple 2D interop: `graph::Vec2Like` supports `(f32,f32)`, `[f32;2]`, `mint::Vector2<f32>`, and (with `glam`) `glam::Vec2`.
 - This module is pure Rust and independent of the C++ GraphEditor; improvements are welcome.
-

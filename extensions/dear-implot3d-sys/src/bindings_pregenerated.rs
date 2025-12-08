@@ -318,11 +318,25 @@ pub type ImGuiSelectionUserData = ImS64;
 pub type ImGuiSizeCallback =
     ::std::option::Option<unsafe extern "C" fn(data: *mut ImGuiSizeCallbackData)>;
 #[repr(C)]
-pub struct ImTextureRef {
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct ImVec2_c {
+    pub x: f32,
+    pub y: f32,
+}
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct ImVec4_c {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+#[repr(C)]
+pub struct ImTextureRef_c {
     pub _TexData: *mut ImTextureData,
     pub _TexID: ImTextureID,
 }
-impl Default for ImTextureRef {
+impl Default for ImTextureRef_c {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
         unsafe {
@@ -546,30 +560,31 @@ impl Default for ImGuiTableColumnSortSpecs {
     }
 }
 #[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiStyle {
     pub FontSizeBase: f32,
     pub FontScaleMain: f32,
     pub FontScaleDpi: f32,
     pub Alpha: f32,
     pub DisabledAlpha: f32,
-    pub WindowPadding: ImVec2,
+    pub WindowPadding: ImVec2_c,
     pub WindowRounding: f32,
     pub WindowBorderSize: f32,
     pub WindowBorderHoverPadding: f32,
-    pub WindowMinSize: ImVec2,
-    pub WindowTitleAlign: ImVec2,
+    pub WindowMinSize: ImVec2_c,
+    pub WindowTitleAlign: ImVec2_c,
     pub WindowMenuButtonPosition: ImGuiDir,
     pub ChildRounding: f32,
     pub ChildBorderSize: f32,
     pub PopupRounding: f32,
     pub PopupBorderSize: f32,
-    pub FramePadding: ImVec2,
+    pub FramePadding: ImVec2_c,
     pub FrameRounding: f32,
     pub FrameBorderSize: f32,
-    pub ItemSpacing: ImVec2,
-    pub ItemInnerSpacing: ImVec2,
-    pub CellPadding: ImVec2,
-    pub TouchExtraPadding: ImVec2,
+    pub ItemSpacing: ImVec2_c,
+    pub ItemInnerSpacing: ImVec2_c,
+    pub CellPadding: ImVec2_c,
+    pub TouchExtraPadding: ImVec2_c,
     pub IndentSpacing: f32,
     pub ColumnsMinSpacing: f32,
     pub ScrollbarSize: f32,
@@ -588,18 +603,21 @@ pub struct ImGuiStyle {
     pub TabBarBorderSize: f32,
     pub TabBarOverlineSize: f32,
     pub TableAngledHeadersAngle: f32,
-    pub TableAngledHeadersTextAlign: ImVec2,
+    pub TableAngledHeadersTextAlign: ImVec2_c,
     pub TreeLinesFlags: ImGuiTreeNodeFlags,
     pub TreeLinesSize: f32,
     pub TreeLinesRounding: f32,
+    pub DragDropTargetRounding: f32,
+    pub DragDropTargetBorderSize: f32,
+    pub DragDropTargetPadding: f32,
     pub ColorButtonPosition: ImGuiDir,
-    pub ButtonTextAlign: ImVec2,
-    pub SelectableTextAlign: ImVec2,
+    pub ButtonTextAlign: ImVec2_c,
+    pub SelectableTextAlign: ImVec2_c,
     pub SeparatorTextBorderSize: f32,
-    pub SeparatorTextAlign: ImVec2,
-    pub SeparatorTextPadding: ImVec2,
-    pub DisplayWindowPadding: ImVec2,
-    pub DisplaySafeAreaPadding: ImVec2,
+    pub SeparatorTextAlign: ImVec2_c,
+    pub SeparatorTextPadding: ImVec2_c,
+    pub DisplayWindowPadding: ImVec2_c,
+    pub DisplaySafeAreaPadding: ImVec2_c,
     pub DockingNodeHasCloseButton: bool,
     pub DockingSeparatorSize: f32,
     pub MouseCursorScale: f32,
@@ -608,7 +626,7 @@ pub struct ImGuiStyle {
     pub AntiAliasedFill: bool,
     pub CurveTessellationTol: f32,
     pub CircleTessellationMaxError: f32,
-    pub Colors: [ImVec4; 61usize],
+    pub Colors: [ImVec4_c; 62usize],
     pub HoverStationaryDelay: f32,
     pub HoverDelayShort: f32,
     pub HoverDelayNormal: f32,
@@ -654,8 +672,8 @@ impl Default for ImVector_ImWchar {
 pub struct ImGuiIO {
     pub ConfigFlags: ImGuiConfigFlags,
     pub BackendFlags: ImGuiBackendFlags,
-    pub DisplaySize: ImVec2,
-    pub DisplayFramebufferScale: ImVec2,
+    pub DisplaySize: ImVec2_c,
+    pub DisplayFramebufferScale: ImVec2_c,
     pub DeltaTime: f32,
     pub IniSavingRate: f32,
     pub IniFilename: *const ::std::os::raw::c_char,
@@ -672,6 +690,7 @@ pub struct ImGuiIO {
     pub ConfigNavCursorVisibleAuto: bool,
     pub ConfigNavCursorVisibleAlways: bool,
     pub ConfigDockingNoSplit: bool,
+    pub ConfigDockingNoDockingOver: bool,
     pub ConfigDockingWithShift: bool,
     pub ConfigDockingAlwaysTabBar: bool,
     pub ConfigDockingTransparentPayload: bool,
@@ -726,9 +745,9 @@ pub struct ImGuiIO {
     pub MetricsRenderIndices: ::std::os::raw::c_int,
     pub MetricsRenderWindows: ::std::os::raw::c_int,
     pub MetricsActiveWindows: ::std::os::raw::c_int,
-    pub MouseDelta: ImVec2,
+    pub MouseDelta: ImVec2_c,
     pub Ctx: *mut ImGuiContext,
-    pub MousePos: ImVec2,
+    pub MousePos: ImVec2_c,
     pub MouseDown: [bool; 5usize],
     pub MouseWheel: f32,
     pub MouseWheelH: f32,
@@ -741,8 +760,8 @@ pub struct ImGuiIO {
     pub KeyMods: ImGuiKeyChord,
     pub KeysData: [ImGuiKeyData; 155usize],
     pub WantCaptureMouseUnlessPopupClose: bool,
-    pub MousePosPrev: ImVec2,
-    pub MouseClickedPos: [ImVec2; 5usize],
+    pub MousePosPrev: ImVec2_c,
+    pub MouseClickedPos: [ImVec2_c; 5usize],
     pub MouseClickedTime: [f64; 5usize],
     pub MouseClicked: [bool; 5usize],
     pub MouseDoubleClicked: [bool; 5usize],
@@ -756,7 +775,7 @@ pub struct ImGuiIO {
     pub MouseCtrlLeftAsRightClick: bool,
     pub MouseDownDuration: [f32; 5usize],
     pub MouseDownDurationPrev: [f32; 5usize],
-    pub MouseDragMaxDistanceAbs: [ImVec2; 5usize],
+    pub MouseDragMaxDistanceAbs: [ImVec2_c; 5usize],
     pub MouseDragMaxDistanceSqr: [f32; 5usize],
     pub PenPressure: f32,
     pub AppFocusLost: bool,
@@ -774,11 +793,12 @@ impl Default for ImGuiIO {
     }
 }
 #[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiSizeCallbackData {
     pub UserData: *mut ::std::os::raw::c_void,
-    pub Pos: ImVec2,
-    pub CurrentSize: ImVec2,
-    pub DesiredSize: ImVec2,
+    pub Pos: ImVec2_c,
+    pub CurrentSize: ImVec2_c,
+    pub DesiredSize: ImVec2_c,
 }
 impl Default for ImGuiSizeCallbackData {
     fn default() -> Self {
@@ -1005,8 +1025,8 @@ pub type ImDrawCallback = ::std::option::Option<
 >;
 #[repr(C)]
 pub struct ImDrawCmd {
-    pub ClipRect: ImVec4,
-    pub TexRef: ImTextureRef,
+    pub ClipRect: ImVec4_c,
+    pub TexRef: ImTextureRef_c,
     pub VtxOffset: ::std::os::raw::c_uint,
     pub IdxOffset: ::std::os::raw::c_uint,
     pub ElemCount: ::std::os::raw::c_uint,
@@ -1025,24 +1045,16 @@ impl Default for ImDrawCmd {
     }
 }
 #[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImDrawVert {
-    pub pos: ImVec2,
-    pub uv: ImVec2,
+    pub pos: ImVec2_c,
+    pub uv: ImVec2_c,
     pub col: ImU32,
-}
-impl Default for ImDrawVert {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
 }
 #[repr(C)]
 pub struct ImDrawCmdHeader {
-    pub ClipRect: ImVec4,
-    pub TexRef: ImTextureRef,
+    pub ClipRect: ImVec4_c,
+    pub TexRef: ImTextureRef_c,
     pub VtxOffset: ::std::os::raw::c_uint,
 }
 impl Default for ImDrawCmdHeader {
@@ -1154,7 +1166,7 @@ impl Default for ImVector_ImDrawVert {
 pub struct ImVector_ImVec2 {
     pub Size: ::std::os::raw::c_int,
     pub Capacity: ::std::os::raw::c_int,
-    pub Data: *mut ImVec2,
+    pub Data: *mut ImVec2_c,
 }
 impl Default for ImVector_ImVec2 {
     fn default() -> Self {
@@ -1170,7 +1182,7 @@ impl Default for ImVector_ImVec2 {
 pub struct ImVector_ImVec4 {
     pub Size: ::std::os::raw::c_int,
     pub Capacity: ::std::os::raw::c_int,
-    pub Data: *mut ImVec4,
+    pub Data: *mut ImVec4_c,
 }
 impl Default for ImVector_ImVec4 {
     fn default() -> Self {
@@ -1186,7 +1198,7 @@ impl Default for ImVector_ImVec4 {
 pub struct ImVector_ImTextureRef {
     pub Size: ::std::os::raw::c_int,
     pub Capacity: ::std::os::raw::c_int,
-    pub Data: *mut ImTextureRef,
+    pub Data: *mut ImTextureRef_c,
 }
 impl Default for ImVector_ImTextureRef {
     fn default() -> Self {
@@ -1246,15 +1258,16 @@ impl Default for ImVector_ImTextureDataPtr {
     }
 }
 #[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImDrawData {
     pub Valid: bool,
     pub CmdListsCount: ::std::os::raw::c_int,
     pub TotalIdxCount: ::std::os::raw::c_int,
     pub TotalVtxCount: ::std::os::raw::c_int,
     pub CmdLists: ImVector_ImDrawListPtr,
-    pub DisplayPos: ImVec2,
-    pub DisplaySize: ImVec2,
-    pub FramebufferScale: ImVec2,
+    pub DisplayPos: ImVec2_c,
+    pub DisplaySize: ImVec2_c,
+    pub FramebufferScale: ImVec2_c,
     pub OwnerViewport: *mut ImGuiViewport,
     pub Textures: *mut ImVector_ImTextureDataPtr,
 }
@@ -1329,6 +1342,7 @@ impl Default for ImTextureData {
     }
 }
 #[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImFontConfig {
     pub Name: [::std::os::raw::c_char; 40usize],
     pub FontData: *mut ::std::os::raw::c_void,
@@ -1343,7 +1357,7 @@ pub struct ImFontConfig {
     pub SizePixels: f32,
     pub GlyphRanges: *const ImWchar,
     pub GlyphExcludeRanges: *const ImWchar,
-    pub GlyphOffset: ImVec2,
+    pub GlyphOffset: ImVec2_c,
     pub GlyphMinAdvanceX: f32,
     pub GlyphMaxAdvanceX: f32,
     pub GlyphExtraAdvanceX: f32,
@@ -1600,18 +1614,18 @@ pub struct ImFontAtlas {
     pub TexMaxWidth: ::std::os::raw::c_int,
     pub TexMaxHeight: ::std::os::raw::c_int,
     pub UserData: *mut ::std::os::raw::c_void,
-    pub TexRef: ImTextureRef,
+    pub TexRef: ImTextureRef_c,
     pub TexData: *mut ImTextureData,
     pub TexList: ImVector_ImTextureDataPtr,
     pub Locked: bool,
     pub RendererHasTextures: bool,
     pub TexIsBuilt: bool,
     pub TexPixelsUseColors: bool,
-    pub TexUvScale: ImVec2,
-    pub TexUvWhitePixel: ImVec2,
+    pub TexUvScale: ImVec2_c,
+    pub TexUvWhitePixel: ImVec2_c,
     pub Fonts: ImVector_ImFontPtr,
     pub Sources: ImVector_ImFontConfig,
-    pub TexUvLines: [ImVec4; 33usize],
+    pub TexUvLines: [ImVec4_c; 33usize],
     pub TexNextUniqueID: ::std::os::raw::c_int,
     pub FontNextUniqueID: ::std::os::raw::c_int,
     pub DrawListSharedDatas: ImVector_ImDrawListSharedDataPtr,
@@ -1695,7 +1709,7 @@ pub struct ImFontBaked {
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 4usize]>,
     pub LastUsedFrame: ::std::os::raw::c_int,
     pub BakedId: ImGuiID,
-    pub ContainerFont: *mut ImFont,
+    pub OwnerFont: *mut ImFont,
     pub FontLoaderDatas: *mut ::std::os::raw::c_void,
 }
 impl Default for ImFontBaked {
@@ -1886,7 +1900,7 @@ impl Default for ImVector_ImFontConfigPtr {
 #[repr(C)]
 pub struct ImFont {
     pub LastBaked: *mut ImFontBaked,
-    pub ContainerAtlas: *mut ImFontAtlas,
+    pub OwnerAtlas: *mut ImFontAtlas,
     pub Flags: ImFontFlags,
     pub CurrentRasterizerDensity: f32,
     pub FontId: ImGuiID,
@@ -1911,11 +1925,11 @@ impl Default for ImFont {
 pub struct ImGuiViewport {
     pub ID: ImGuiID,
     pub Flags: ImGuiViewportFlags,
-    pub Pos: ImVec2,
-    pub Size: ImVec2,
-    pub FramebufferScale: ImVec2,
-    pub WorkPos: ImVec2,
-    pub WorkSize: ImVec2,
+    pub Pos: ImVec2_c,
+    pub Size: ImVec2_c,
+    pub FramebufferScale: ImVec2_c,
+    pub WorkPos: ImVec2_c,
+    pub WorkSize: ImVec2_c,
     pub DpiScale: f32,
     pub ParentViewportId: ImGuiID,
     pub ParentViewport: *mut ImGuiViewport,
@@ -2000,15 +2014,15 @@ pub struct ImGuiPlatformIO {
     pub Platform_DestroyWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_ShowWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_SetWindowPos:
-        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, pos: ImVec2)>,
+        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, pos: ImVec2_c)>,
     pub Platform_GetWindowPos:
-        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport) -> ImVec2>,
+        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport) -> ImVec2_c>,
     pub Platform_SetWindowSize:
-        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: ImVec2)>,
+        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: ImVec2_c)>,
     pub Platform_GetWindowSize:
-        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport) -> ImVec2>,
+        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport) -> ImVec2_c>,
     pub Platform_GetWindowFramebufferScale:
-        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport) -> ImVec2>,
+        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport) -> ImVec2_c>,
     pub Platform_SetWindowFocus:
         ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_GetWindowFocus:
@@ -2032,7 +2046,7 @@ pub struct ImGuiPlatformIO {
     pub Platform_OnChangedViewport:
         ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_GetWindowWorkAreaInsets:
-        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport) -> ImVec4>,
+        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport) -> ImVec4_c>,
     pub Platform_CreateVkSurface: ::std::option::Option<
         unsafe extern "C" fn(
             vp: *mut ImGuiViewport,
@@ -2044,7 +2058,7 @@ pub struct ImGuiPlatformIO {
     pub Renderer_CreateWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Renderer_DestroyWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Renderer_SetWindowSize:
-        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: ImVec2)>,
+        ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: ImVec2_c)>,
     pub Renderer_RenderWindow: ::std::option::Option<
         unsafe extern "C" fn(vp: *mut ImGuiViewport, render_arg: *mut ::std::os::raw::c_void),
     >,
@@ -2065,11 +2079,12 @@ impl Default for ImGuiPlatformIO {
     }
 }
 #[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiPlatformMonitor {
-    pub MainPos: ImVec2,
-    pub MainSize: ImVec2,
-    pub WorkPos: ImVec2,
-    pub WorkSize: ImVec2,
+    pub MainPos: ImVec2_c,
+    pub MainSize: ImVec2_c,
+    pub WorkPos: ImVec2_c,
+    pub WorkSize: ImVec2_c,
     pub DpiScale: f32,
     pub PlatformHandle: *mut ::std::os::raw::c_void,
 }
@@ -2086,7 +2101,7 @@ impl Default for ImGuiPlatformMonitor {
 pub struct ImGuiPlatformImeData {
     pub WantVisible: bool,
     pub WantTextInput: bool,
-    pub InputPos: ImVec2,
+    pub InputPos: ImVec2_c,
     pub InputLineHeight: f32,
     pub ViewportId: ImGuiID,
 }
@@ -2111,6 +2126,7 @@ pub type ImGuiNextItemDataFlags = ::std::os::raw::c_int;
 pub type ImGuiNextWindowDataFlags = ::std::os::raw::c_int;
 pub type ImGuiScrollFlags = ::std::os::raw::c_int;
 pub type ImGuiTypingSelectFlags = ::std::os::raw::c_int;
+pub type ImGuiWindowBgClickFlags = ::std::os::raw::c_int;
 pub type ImGuiWindowRefreshFlags = ::std::os::raw::c_int;
 pub type ImGuiTableColumnIdx = ImS16;
 pub type ImGuiTableDrawChannelIdx = ImU16;
@@ -2122,7 +2138,7 @@ pub struct ImVec1 {
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
-pub struct ImVec2i {
+pub struct ImVec2i_c {
     pub x: ::std::os::raw::c_int,
     pub y: ::std::os::raw::c_int,
 }
@@ -2133,18 +2149,10 @@ pub struct ImVec2ih {
     pub y: ::std::os::raw::c_short,
 }
 #[repr(C)]
-pub struct ImRect {
-    pub Min: ImVec2,
-    pub Max: ImVec2,
-}
-impl Default for ImRect {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct ImRect_c {
+    pub Min: ImVec2_c,
+    pub Max: ImVec2_c,
 }
 pub type ImBitArrayPtr = *mut ImU32;
 pub type ImPoolIdx = ::std::os::raw::c_int;
@@ -2180,9 +2188,10 @@ impl Default for ImGuiTextIndex {
     }
 }
 #[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImDrawListSharedData {
-    pub TexUvWhitePixel: ImVec2,
-    pub TexUvLines: *const ImVec4,
+    pub TexUvWhitePixel: ImVec2_c,
+    pub TexUvLines: *const ImVec4_c,
     pub FontAtlas: *mut ImFontAtlas,
     pub Font: *mut ImFont,
     pub FontSize: f32,
@@ -2191,11 +2200,11 @@ pub struct ImDrawListSharedData {
     pub CircleSegmentMaxError: f32,
     pub InitialFringeScale: f32,
     pub InitialFlags: ImDrawListFlags,
-    pub ClipRectFullscreen: ImVec4,
+    pub ClipRectFullscreen: ImVec4_c,
     pub TempBuffer: ImVector_ImVec2,
     pub DrawLists: ImVector_ImDrawListPtr,
     pub Context: *mut ImGuiContext,
-    pub ArcFastVtx: [ImVec2; 48usize],
+    pub ArcFastVtx: [ImVec2_c; 48usize],
     pub ArcFastRadiusCutoff: f32,
     pub CircleSegmentCounts: [ImU8; 64usize],
 }
@@ -2240,18 +2249,10 @@ impl Default for ImFontStackData {
     }
 }
 #[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImGuiColorMod {
     pub Col: ImGuiCol,
-    pub BackupValue: ImVec4,
-}
-impl Default for ImGuiColorMod {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
+    pub BackupValue: ImVec4_c,
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -2293,34 +2294,27 @@ pub const ImGuiAxis_X: ImGuiAxis = 0;
 pub const ImGuiAxis_Y: ImGuiAxis = 1;
 pub type ImGuiAxis = ::std::os::raw::c_int;
 #[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImGuiComboPreviewData {
-    pub PreviewRect: ImRect,
-    pub BackupCursorPos: ImVec2,
-    pub BackupCursorMaxPos: ImVec2,
-    pub BackupCursorPosPrevLine: ImVec2,
+    pub PreviewRect: ImRect_c,
+    pub BackupCursorPos: ImVec2_c,
+    pub BackupCursorMaxPos: ImVec2_c,
+    pub BackupCursorPosPrevLine: ImVec2_c,
     pub BackupPrevLineTextBaseOffset: f32,
     pub BackupLayout: ImGuiLayoutType,
-}
-impl Default for ImGuiComboPreviewData {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
 }
 #[repr(C)]
 pub struct ImGuiGroupData {
     pub WindowID: ImGuiID,
-    pub BackupCursorPos: ImVec2,
-    pub BackupCursorMaxPos: ImVec2,
-    pub BackupCursorPosPrevLine: ImVec2,
+    pub BackupCursorPos: ImVec2_c,
+    pub BackupCursorMaxPos: ImVec2_c,
+    pub BackupCursorPosPrevLine: ImVec2_c,
     pub BackupIndent: ImVec1,
     pub BackupGroupOffset: ImVec1,
-    pub BackupCurrLineSize: ImVec2,
+    pub BackupCurrLineSize: ImVec2_c,
     pub BackupCurrLineTextBaseOffset: f32,
     pub BackupActiveIdIsAlive: ImGuiID,
+    pub BackupActiveIdHasBeenEditedThisFrame: bool,
     pub BackupDeactivatedIdIsAlive: bool,
     pub BackupHoveredIdIsAlive: bool,
     pub BackupIsSameLine: bool,
@@ -2374,7 +2368,7 @@ pub struct ImGuiInputTextState {
     pub TextToRevertTo: ImVector_char,
     pub CallbackTextBackup: ImVector_char,
     pub BufCapacity: ::std::os::raw::c_int,
-    pub Scroll: ImVec2,
+    pub Scroll: ImVec2_c,
     pub LineCount: ::std::os::raw::c_int,
     pub WrapWidth: f32,
     pub CursorAnim: f32,
@@ -2403,23 +2397,23 @@ pub struct ImGuiNextWindowData {
     pub SizeCond: ImGuiCond,
     pub CollapsedCond: ImGuiCond,
     pub DockCond: ImGuiCond,
-    pub PosVal: ImVec2,
-    pub PosPivotVal: ImVec2,
-    pub SizeVal: ImVec2,
-    pub ContentSizeVal: ImVec2,
-    pub ScrollVal: ImVec2,
+    pub PosVal: ImVec2_c,
+    pub PosPivotVal: ImVec2_c,
+    pub SizeVal: ImVec2_c,
+    pub ContentSizeVal: ImVec2_c,
+    pub ScrollVal: ImVec2_c,
     pub WindowFlags: ImGuiWindowFlags,
     pub ChildFlags: ImGuiChildFlags,
     pub PosUndock: bool,
     pub CollapsedVal: bool,
-    pub SizeConstraintRect: ImRect,
+    pub SizeConstraintRect: ImRect_c,
     pub SizeCallback: ImGuiSizeCallback,
     pub SizeCallbackUserData: *mut ::std::os::raw::c_void,
     pub BgAlphaVal: f32,
     pub ViewportId: ImGuiID,
     pub DockId: ImGuiID,
     pub WindowClass: ImGuiWindowClass,
-    pub MenuBarOffsetMinVal: ImVec2,
+    pub MenuBarOffsetMinVal: ImVec2_c,
     pub RefreshFlagsVal: ImGuiWindowRefreshFlags,
 }
 impl Default for ImGuiNextWindowData {
@@ -2459,10 +2453,10 @@ pub struct ImGuiLastItemData {
     pub ID: ImGuiID,
     pub ItemFlags: ImGuiItemFlags,
     pub StatusFlags: ImGuiItemStatusFlags,
-    pub Rect: ImRect,
-    pub NavRect: ImRect,
-    pub DisplayRect: ImRect,
-    pub ClipRect: ImRect,
+    pub Rect: ImRect_c,
+    pub NavRect: ImRect_c,
+    pub DisplayRect: ImRect_c,
+    pub ClipRect: ImRect_c,
     pub Shortcut: ImGuiKeyChord,
 }
 impl Default for ImGuiLastItemData {
@@ -2479,7 +2473,7 @@ pub struct ImGuiTreeNodeStackData {
     pub ID: ImGuiID,
     pub TreeFlags: ImGuiTreeNodeFlags,
     pub ItemFlags: ImGuiItemFlags,
-    pub NavRect: ImRect,
+    pub NavRect: ImRect_c,
     pub DrawLinesX1: f32,
     pub DrawLinesToNodesY2: f32,
     pub DrawLinesTableColumn: ImGuiTableColumnIdx,
@@ -2571,8 +2565,8 @@ pub struct ImGuiPopupData {
     pub ParentNavLayer: ::std::os::raw::c_int,
     pub OpenFrameCount: ::std::os::raw::c_int,
     pub OpenParentId: ImGuiID,
-    pub OpenPopupPos: ImVec2,
-    pub OpenMousePos: ImVec2,
+    pub OpenPopupPos: ImVec2_c,
+    pub OpenMousePos: ImVec2_c,
 }
 impl Default for ImGuiPopupData {
     fn default() -> Self {
@@ -2848,7 +2842,7 @@ pub struct ImGuiNavItemData {
     pub Window: *mut ImGuiWindow,
     pub ID: ImGuiID,
     pub FocusScopeId: ImGuiID,
-    pub RectRel: ImRect,
+    pub RectRel: ImRect_c,
     pub ItemFlags: ImGuiItemFlags,
     pub DistBox: f32,
     pub DistCenter: f32,
@@ -2916,20 +2910,12 @@ impl Default for ImGuiTypingSelectState {
     }
 }
 #[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImGuiOldColumnData {
     pub OffsetNorm: f32,
     pub OffsetNormBeforeResize: f32,
     pub Flags: ImGuiOldColumnFlags,
-    pub ClipRect: ImRect,
-}
-impl Default for ImGuiOldColumnData {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
+    pub ClipRect: ImRect_c,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -2961,9 +2947,9 @@ pub struct ImGuiOldColumns {
     pub LineMaxY: f32,
     pub HostCursorPosY: f32,
     pub HostCursorMaxPosX: f32,
-    pub HostInitialClipRect: ImRect,
-    pub HostBackupClipRect: ImRect,
-    pub HostBackupParentWorkRect: ImRect,
+    pub HostInitialClipRect: ImRect_c,
+    pub HostBackupClipRect: ImRect_c,
+    pub HostBackupParentWorkRect: ImRect_c,
     pub Columns: ImVector_ImGuiOldColumnData,
     pub Splitter: ImDrawListSplitter,
 }
@@ -2986,14 +2972,14 @@ pub struct ImGuiBoxSelectState {
     pub RequestClear: bool,
     pub _bitfield_align_1: [u16; 0],
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 2usize]>,
-    pub StartPosRel: ImVec2,
-    pub EndPosRel: ImVec2,
-    pub ScrollAccum: ImVec2,
+    pub StartPosRel: ImVec2_c,
+    pub EndPosRel: ImVec2_c,
+    pub ScrollAccum: ImVec2_c,
     pub Window: *mut ImGuiWindow,
     pub UnclipMode: bool,
-    pub UnclipRect: ImRect,
-    pub BoxSelectRectPrev: ImRect,
-    pub BoxSelectRectCurr: ImRect,
+    pub UnclipRect: ImRect_c,
+    pub BoxSelectRectPrev: ImRect_c,
+    pub BoxSelectRectCurr: ImRect_c,
 }
 impl Default for ImGuiBoxSelectState {
     fn default() -> Self {
@@ -3054,8 +3040,8 @@ pub struct ImGuiMultiSelectTempData {
     pub Storage: *mut ImGuiMultiSelectState,
     pub FocusScopeId: ImGuiID,
     pub Flags: ImGuiMultiSelectFlags,
-    pub ScopeRectMin: ImVec2,
-    pub BackupCursorMaxPos: ImVec2,
+    pub ScopeRectMin: ImVec2_c,
+    pub BackupCursorMaxPos: ImVec2_c,
     pub LastSubmittedItem: ImGuiSelectionUserData,
     pub BoxSelectId: ImGuiID,
     pub KeyMods: ImGuiKeyChord,
@@ -3129,9 +3115,9 @@ pub struct ImGuiDockNode {
     pub ChildNodes: [*mut ImGuiDockNode; 2usize],
     pub Windows: ImVector_ImGuiWindowPtr,
     pub TabBar: *mut ImGuiTabBar,
-    pub Pos: ImVec2,
-    pub Size: ImVec2,
-    pub SizeRef: ImVec2,
+    pub Pos: ImVec2_c,
+    pub Size: ImVec2_c,
+    pub SizeRef: ImVec2_c,
     pub SplitAxis: ImGuiAxis,
     pub WindowClass: ImGuiWindowClass,
     pub LastBgColor: ImU32,
@@ -3705,7 +3691,7 @@ impl ImGuiDockNode {
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiWindowDockStyle {
-    pub Colors: [ImU32; 8usize],
+    pub Colors: [ImU32; 9usize],
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -3764,8 +3750,8 @@ pub struct ImGuiViewportP {
     pub LastFrameActive: ::std::os::raw::c_int,
     pub LastFocusedStampCount: ::std::os::raw::c_int,
     pub LastNameHash: ImGuiID,
-    pub LastPos: ImVec2,
-    pub LastSize: ImVec2,
+    pub LastPos: ImVec2_c,
+    pub LastSize: ImVec2_c,
     pub Alpha: f32,
     pub LastAlpha: f32,
     pub LastFocusedHadNavWindow: bool,
@@ -3774,13 +3760,13 @@ pub struct ImGuiViewportP {
     pub BgFgDrawLists: [*mut ImDrawList; 2usize],
     pub DrawDataP: ImDrawData,
     pub DrawDataBuilder: ImDrawDataBuilder,
-    pub LastPlatformPos: ImVec2,
-    pub LastPlatformSize: ImVec2,
-    pub LastRendererSize: ImVec2,
-    pub WorkInsetMin: ImVec2,
-    pub WorkInsetMax: ImVec2,
-    pub BuildWorkInsetMin: ImVec2,
-    pub BuildWorkInsetMax: ImVec2,
+    pub LastPlatformPos: ImVec2_c,
+    pub LastPlatformSize: ImVec2_c,
+    pub LastRendererSize: ImVec2_c,
+    pub WorkInsetMin: ImVec2_c,
+    pub WorkInsetMax: ImVec2_c,
+    pub BuildWorkInsetMin: ImVec2_c,
+    pub BuildWorkInsetMax: ImVec2_c,
 }
 impl Default for ImGuiViewportP {
     fn default() -> Self {
@@ -3920,19 +3906,16 @@ impl Default for ImVector_ImGuiStackLevelInfo {
     }
 }
 #[repr(C)]
-pub struct ImGuiIDStackTool {
-    pub LastActiveFrame: ::std::os::raw::c_int,
-    pub StackLevel: ::std::os::raw::c_int,
-    pub QueryMainId: ImGuiID,
+pub struct ImGuiDebugItemPathQuery {
+    pub MainID: ImGuiID,
+    pub Active: bool,
+    pub Complete: bool,
+    pub Step: ImS8,
     pub Results: ImVector_ImGuiStackLevelInfo,
-    pub QueryHookActive: bool,
-    pub OptHexEncodeNonAsciiChars: bool,
-    pub OptCopyToClipboardOnCtrlC: bool,
-    pub CopyToClipboardLastTime: f32,
-    pub ResultPathsBuf: ImGuiTextBuffer,
-    pub ResultTempBuf: ImGuiTextBuffer,
+    pub ResultsDescBuf: ImGuiTextBuffer,
+    pub ResultPathBuf: ImGuiTextBuffer,
 }
-impl Default for ImGuiIDStackTool {
+impl Default for ImGuiDebugItemPathQuery {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
         unsafe {
@@ -3940,6 +3923,14 @@ impl Default for ImGuiIDStackTool {
             s.assume_init()
         }
     }
+}
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct ImGuiIDStackTool {
+    pub OptHexEncodeNonAsciiChars: bool,
+    pub OptCopyToClipboardOnCtrlC: bool,
+    pub LastActiveFrame: ::std::os::raw::c_int,
+    pub CopyToClipboardLastTime: f32,
 }
 pub type ImGuiContextHookCallback = ::std::option::Option<
     unsafe extern "C" fn(ctx: *mut ImGuiContext, hook: *mut ImGuiContextHook),
@@ -4434,14 +4425,15 @@ impl Default for ImVector_ImGuiContextHook {
     }
 }
 #[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiWindowTempData {
-    pub CursorPos: ImVec2,
-    pub CursorPosPrevLine: ImVec2,
-    pub CursorStartPos: ImVec2,
-    pub CursorMaxPos: ImVec2,
-    pub IdealMaxPos: ImVec2,
-    pub CurrLineSize: ImVec2,
-    pub PrevLineSize: ImVec2,
+    pub CursorPos: ImVec2_c,
+    pub CursorPosPrevLine: ImVec2_c,
+    pub CursorStartPos: ImVec2_c,
+    pub CursorMaxPos: ImVec2_c,
+    pub IdealMaxPos: ImVec2_c,
+    pub CurrLineSize: ImVec2_c,
+    pub PrevLineSize: ImVec2_c,
     pub CurrLineTextBaseOffset: f32,
     pub PrevLineTextBaseOffset: f32,
     pub IsSameLine: bool,
@@ -4449,7 +4441,7 @@ pub struct ImGuiWindowTempData {
     pub Indent: ImVec1,
     pub ColumnsOffset: ImVec1,
     pub GroupOffset: ImVec1,
-    pub CursorStartPosLossyness: ImVec2,
+    pub CursorStartPosLossyness: ImVec2_c,
     pub NavLayerCurrent: ImGuiNavLayer,
     pub NavLayersActiveMask: ::std::os::raw::c_short,
     pub NavLayersActiveMaskNext: ::std::os::raw::c_short,
@@ -4457,7 +4449,7 @@ pub struct ImGuiWindowTempData {
     pub NavHideHighlightOneFrame: bool,
     pub NavWindowHasScrollY: bool,
     pub MenuBarAppending: bool,
-    pub MenuBarOffset: ImVec2,
+    pub MenuBarOffset: ImVec2_c,
     pub MenuColumns: ImGuiMenuColumns,
     pub TreeDepth: ::std::os::raw::c_int,
     pub TreeHasStackDataDepthMask: ImU32,
@@ -4472,7 +4464,7 @@ pub struct ImGuiWindowTempData {
     pub WindowItemStatusFlags: ImGuiItemStatusFlags,
     pub ChildItemStatusFlags: ImGuiItemStatusFlags,
     pub DockTabItemStatusFlags: ImGuiItemStatusFlags,
-    pub DockTabItemRect: ImRect,
+    pub DockTabItemRect: ImRect_c,
     pub ItemWidth: f32,
     pub TextWrapPos: f32,
     pub ItemWidthStack: ImVector_float,
@@ -4514,15 +4506,15 @@ pub struct ImGuiWindow {
     pub WindowClass: ImGuiWindowClass,
     pub Viewport: *mut ImGuiViewportP,
     pub ViewportId: ImGuiID,
-    pub ViewportPos: ImVec2,
+    pub ViewportPos: ImVec2_c,
     pub ViewportAllowPlatformMonitorExtend: ::std::os::raw::c_int,
-    pub Pos: ImVec2,
-    pub Size: ImVec2,
-    pub SizeFull: ImVec2,
-    pub ContentSize: ImVec2,
-    pub ContentSizeIdeal: ImVec2,
-    pub ContentSizeExplicit: ImVec2,
-    pub WindowPadding: ImVec2,
+    pub Pos: ImVec2_c,
+    pub Size: ImVec2_c,
+    pub SizeFull: ImVec2_c,
+    pub ContentSize: ImVec2_c,
+    pub ContentSizeIdeal: ImVec2_c,
+    pub ContentSizeExplicit: ImVec2_c,
+    pub WindowPadding: ImVec2_c,
     pub WindowRounding: f32,
     pub WindowBorderSize: f32,
     pub TitleBarHeight: f32,
@@ -4538,12 +4530,12 @@ pub struct ImGuiWindow {
     pub TabId: ImGuiID,
     pub ChildId: ImGuiID,
     pub PopupId: ImGuiID,
-    pub Scroll: ImVec2,
-    pub ScrollMax: ImVec2,
-    pub ScrollTarget: ImVec2,
-    pub ScrollTargetCenterRatio: ImVec2,
-    pub ScrollTargetEdgeSnapDist: ImVec2,
-    pub ScrollbarSizes: ImVec2,
+    pub Scroll: ImVec2_c,
+    pub ScrollMax: ImVec2_c,
+    pub ScrollTarget: ImVec2_c,
+    pub ScrollTargetCenterRatio: ImVec2_c,
+    pub ScrollTargetEdgeSnapDist: ImVec2_c,
+    pub ScrollbarSizes: ImVec2_c,
     pub ScrollbarX: bool,
     pub ScrollbarY: bool,
     pub ScrollbarXStabilizeEnabled: bool,
@@ -4568,27 +4560,27 @@ pub struct ImGuiWindow {
     pub BeginOrderWithinParent: ::std::os::raw::c_short,
     pub BeginOrderWithinContext: ::std::os::raw::c_short,
     pub FocusOrder: ::std::os::raw::c_short,
+    pub AutoPosLastDirection: ImGuiDir,
     pub AutoFitFramesX: ImS8,
     pub AutoFitFramesY: ImS8,
     pub AutoFitOnlyGrows: bool,
-    pub AutoPosLastDirection: ImGuiDir,
     pub HiddenFramesCanSkipItems: ImS8,
     pub HiddenFramesCannotSkipItems: ImS8,
     pub HiddenFramesForRenderOnly: ImS8,
     pub DisableInputsFrames: ImS8,
     pub _bitfield_align_1: [u8; 0],
-    pub _bitfield_1: __BindgenBitfieldUnit<[u8; 4usize]>,
-    pub SetWindowPosVal: ImVec2,
-    pub SetWindowPosPivot: ImVec2,
+    pub _bitfield_1: __BindgenBitfieldUnit<[u8; 5usize]>,
+    pub SetWindowPosVal: ImVec2_c,
+    pub SetWindowPosPivot: ImVec2_c,
     pub IDStack: ImVector_ImGuiID,
     pub DC: ImGuiWindowTempData,
-    pub OuterRectClipped: ImRect,
-    pub InnerRect: ImRect,
-    pub InnerClipRect: ImRect,
-    pub WorkRect: ImRect,
-    pub ParentWorkRect: ImRect,
-    pub ClipRect: ImRect,
-    pub ContentRegionRect: ImRect,
+    pub OuterRectClipped: ImRect_c,
+    pub InnerRect: ImRect_c,
+    pub InnerClipRect: ImRect_c,
+    pub WorkRect: ImRect_c,
+    pub ParentWorkRect: ImRect_c,
+    pub ClipRect: ImRect_c,
+    pub ContentRegionRect: ImRect_c,
     pub HitTestHoleSize: ImVec2ih,
     pub HitTestHoleOffset: ImVec2ih,
     pub LastFrameActive: ::std::os::raw::c_int,
@@ -4613,8 +4605,8 @@ pub struct ImGuiWindow {
     pub ParentWindowForFocusRoute: *mut ImGuiWindow,
     pub NavLastChildNavWindow: *mut ImGuiWindow,
     pub NavLastIds: [ImGuiID; 2usize],
-    pub NavRectRel: [ImRect; 2usize],
-    pub NavPreferredScoringPosRel: [ImVec2; 2usize],
+    pub NavRectRel: [ImRect_c; 2usize],
+    pub NavPreferredScoringPosRel: [ImVec2_c; 2usize],
     pub NavRootFocusScopeId: ImGuiID,
     pub MemoryDrawListIdxCapacity: ::std::os::raw::c_int,
     pub MemoryDrawListVtxCapacity: ::std::os::raw::c_int,
@@ -4638,22 +4630,55 @@ impl Default for ImGuiWindow {
 }
 impl ImGuiWindow {
     #[inline]
-    pub fn SetWindowPosAllowFlags(&self) -> ImGuiCond {
+    pub fn BgClickFlags(&self) -> ImGuiWindowBgClickFlags {
         unsafe { ::std::mem::transmute(self._bitfield_1.get(0usize, 8u8) as u32) }
     }
     #[inline]
-    pub fn set_SetWindowPosAllowFlags(&mut self, val: ImGuiCond) {
+    pub fn set_BgClickFlags(&mut self, val: ImGuiWindowBgClickFlags) {
         unsafe {
             let val: u32 = ::std::mem::transmute(val);
             self._bitfield_1.set(0usize, 8u8, val as u64)
         }
     }
     #[inline]
-    pub unsafe fn SetWindowPosAllowFlags_raw(this: *const Self) -> ImGuiCond {
+    pub unsafe fn BgClickFlags_raw(this: *const Self) -> ImGuiWindowBgClickFlags {
         unsafe {
-            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 4usize]>>::raw_get(
+            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 5usize]>>::raw_get(
                 ::std::ptr::addr_of!((*this)._bitfield_1),
                 0usize,
+                8u8,
+            ) as u32)
+        }
+    }
+    #[inline]
+    pub unsafe fn set_BgClickFlags_raw(this: *mut Self, val: ImGuiWindowBgClickFlags) {
+        unsafe {
+            let val: u32 = ::std::mem::transmute(val);
+            <__BindgenBitfieldUnit<[u8; 5usize]>>::raw_set(
+                ::std::ptr::addr_of_mut!((*this)._bitfield_1),
+                0usize,
+                8u8,
+                val as u64,
+            )
+        }
+    }
+    #[inline]
+    pub fn SetWindowPosAllowFlags(&self) -> ImGuiCond {
+        unsafe { ::std::mem::transmute(self._bitfield_1.get(8usize, 8u8) as u32) }
+    }
+    #[inline]
+    pub fn set_SetWindowPosAllowFlags(&mut self, val: ImGuiCond) {
+        unsafe {
+            let val: u32 = ::std::mem::transmute(val);
+            self._bitfield_1.set(8usize, 8u8, val as u64)
+        }
+    }
+    #[inline]
+    pub unsafe fn SetWindowPosAllowFlags_raw(this: *const Self) -> ImGuiCond {
+        unsafe {
+            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 5usize]>>::raw_get(
+                ::std::ptr::addr_of!((*this)._bitfield_1),
+                8usize,
                 8u8,
             ) as u32)
         }
@@ -4662,9 +4687,9 @@ impl ImGuiWindow {
     pub unsafe fn set_SetWindowPosAllowFlags_raw(this: *mut Self, val: ImGuiCond) {
         unsafe {
             let val: u32 = ::std::mem::transmute(val);
-            <__BindgenBitfieldUnit<[u8; 4usize]>>::raw_set(
+            <__BindgenBitfieldUnit<[u8; 5usize]>>::raw_set(
                 ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                0usize,
+                8usize,
                 8u8,
                 val as u64,
             )
@@ -4672,21 +4697,21 @@ impl ImGuiWindow {
     }
     #[inline]
     pub fn SetWindowSizeAllowFlags(&self) -> ImGuiCond {
-        unsafe { ::std::mem::transmute(self._bitfield_1.get(8usize, 8u8) as u32) }
+        unsafe { ::std::mem::transmute(self._bitfield_1.get(16usize, 8u8) as u32) }
     }
     #[inline]
     pub fn set_SetWindowSizeAllowFlags(&mut self, val: ImGuiCond) {
         unsafe {
             let val: u32 = ::std::mem::transmute(val);
-            self._bitfield_1.set(8usize, 8u8, val as u64)
+            self._bitfield_1.set(16usize, 8u8, val as u64)
         }
     }
     #[inline]
     pub unsafe fn SetWindowSizeAllowFlags_raw(this: *const Self) -> ImGuiCond {
         unsafe {
-            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 4usize]>>::raw_get(
+            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 5usize]>>::raw_get(
                 ::std::ptr::addr_of!((*this)._bitfield_1),
-                8usize,
+                16usize,
                 8u8,
             ) as u32)
         }
@@ -4695,9 +4720,9 @@ impl ImGuiWindow {
     pub unsafe fn set_SetWindowSizeAllowFlags_raw(this: *mut Self, val: ImGuiCond) {
         unsafe {
             let val: u32 = ::std::mem::transmute(val);
-            <__BindgenBitfieldUnit<[u8; 4usize]>>::raw_set(
+            <__BindgenBitfieldUnit<[u8; 5usize]>>::raw_set(
                 ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                8usize,
+                16usize,
                 8u8,
                 val as u64,
             )
@@ -4705,21 +4730,21 @@ impl ImGuiWindow {
     }
     #[inline]
     pub fn SetWindowCollapsedAllowFlags(&self) -> ImGuiCond {
-        unsafe { ::std::mem::transmute(self._bitfield_1.get(16usize, 8u8) as u32) }
+        unsafe { ::std::mem::transmute(self._bitfield_1.get(24usize, 8u8) as u32) }
     }
     #[inline]
     pub fn set_SetWindowCollapsedAllowFlags(&mut self, val: ImGuiCond) {
         unsafe {
             let val: u32 = ::std::mem::transmute(val);
-            self._bitfield_1.set(16usize, 8u8, val as u64)
+            self._bitfield_1.set(24usize, 8u8, val as u64)
         }
     }
     #[inline]
     pub unsafe fn SetWindowCollapsedAllowFlags_raw(this: *const Self) -> ImGuiCond {
         unsafe {
-            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 4usize]>>::raw_get(
+            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 5usize]>>::raw_get(
                 ::std::ptr::addr_of!((*this)._bitfield_1),
-                16usize,
+                24usize,
                 8u8,
             ) as u32)
         }
@@ -4728,9 +4753,9 @@ impl ImGuiWindow {
     pub unsafe fn set_SetWindowCollapsedAllowFlags_raw(this: *mut Self, val: ImGuiCond) {
         unsafe {
             let val: u32 = ::std::mem::transmute(val);
-            <__BindgenBitfieldUnit<[u8; 4usize]>>::raw_set(
+            <__BindgenBitfieldUnit<[u8; 5usize]>>::raw_set(
                 ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                16usize,
+                24usize,
                 8u8,
                 val as u64,
             )
@@ -4738,21 +4763,21 @@ impl ImGuiWindow {
     }
     #[inline]
     pub fn SetWindowDockAllowFlags(&self) -> ImGuiCond {
-        unsafe { ::std::mem::transmute(self._bitfield_1.get(24usize, 8u8) as u32) }
+        unsafe { ::std::mem::transmute(self._bitfield_1.get(32usize, 8u8) as u32) }
     }
     #[inline]
     pub fn set_SetWindowDockAllowFlags(&mut self, val: ImGuiCond) {
         unsafe {
             let val: u32 = ::std::mem::transmute(val);
-            self._bitfield_1.set(24usize, 8u8, val as u64)
+            self._bitfield_1.set(32usize, 8u8, val as u64)
         }
     }
     #[inline]
     pub unsafe fn SetWindowDockAllowFlags_raw(this: *const Self) -> ImGuiCond {
         unsafe {
-            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 4usize]>>::raw_get(
+            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 5usize]>>::raw_get(
                 ::std::ptr::addr_of!((*this)._bitfield_1),
-                24usize,
+                32usize,
                 8u8,
             ) as u32)
         }
@@ -4761,9 +4786,9 @@ impl ImGuiWindow {
     pub unsafe fn set_SetWindowDockAllowFlags_raw(this: *mut Self, val: ImGuiCond) {
         unsafe {
             let val: u32 = ::std::mem::transmute(val);
-            <__BindgenBitfieldUnit<[u8; 4usize]>>::raw_set(
+            <__BindgenBitfieldUnit<[u8; 5usize]>>::raw_set(
                 ::std::ptr::addr_of_mut!((*this)._bitfield_1),
-                24usize,
+                32usize,
                 8u8,
                 val as u64,
             )
@@ -4771,28 +4796,33 @@ impl ImGuiWindow {
     }
     #[inline]
     pub fn new_bitfield_1(
+        BgClickFlags: ImGuiWindowBgClickFlags,
         SetWindowPosAllowFlags: ImGuiCond,
         SetWindowSizeAllowFlags: ImGuiCond,
         SetWindowCollapsedAllowFlags: ImGuiCond,
         SetWindowDockAllowFlags: ImGuiCond,
-    ) -> __BindgenBitfieldUnit<[u8; 4usize]> {
-        let mut __bindgen_bitfield_unit: __BindgenBitfieldUnit<[u8; 4usize]> = Default::default();
+    ) -> __BindgenBitfieldUnit<[u8; 5usize]> {
+        let mut __bindgen_bitfield_unit: __BindgenBitfieldUnit<[u8; 5usize]> = Default::default();
         __bindgen_bitfield_unit.set(0usize, 8u8, {
+            let BgClickFlags: u32 = unsafe { ::std::mem::transmute(BgClickFlags) };
+            BgClickFlags as u64
+        });
+        __bindgen_bitfield_unit.set(8usize, 8u8, {
             let SetWindowPosAllowFlags: u32 =
                 unsafe { ::std::mem::transmute(SetWindowPosAllowFlags) };
             SetWindowPosAllowFlags as u64
         });
-        __bindgen_bitfield_unit.set(8usize, 8u8, {
+        __bindgen_bitfield_unit.set(16usize, 8u8, {
             let SetWindowSizeAllowFlags: u32 =
                 unsafe { ::std::mem::transmute(SetWindowSizeAllowFlags) };
             SetWindowSizeAllowFlags as u64
         });
-        __bindgen_bitfield_unit.set(16usize, 8u8, {
+        __bindgen_bitfield_unit.set(24usize, 8u8, {
             let SetWindowCollapsedAllowFlags: u32 =
                 unsafe { ::std::mem::transmute(SetWindowCollapsedAllowFlags) };
             SetWindowCollapsedAllowFlags as u64
         });
-        __bindgen_bitfield_unit.set(24usize, 8u8, {
+        __bindgen_bitfield_unit.set(32usize, 8u8, {
             let SetWindowDockAllowFlags: u32 =
                 unsafe { ::std::mem::transmute(SetWindowDockAllowFlags) };
             SetWindowDockAllowFlags as u64
@@ -5010,7 +5040,7 @@ pub struct ImGuiTabBar {
     pub VisibleTabId: ImGuiID,
     pub CurrFrameVisible: ::std::os::raw::c_int,
     pub PrevFrameVisible: ::std::os::raw::c_int,
-    pub BarRect: ImRect,
+    pub BarRect: ImRect_c,
     pub BarRectPrevWidth: f32,
     pub CurrTabsContentsHeight: f32,
     pub PrevTabsContentsHeight: f32,
@@ -5034,8 +5064,8 @@ pub struct ImGuiTabBar {
     pub TabsActiveCount: ImS16,
     pub LastTabItemIdx: ImS16,
     pub ItemSpacingY: f32,
-    pub FramePadding: ImVec2,
-    pub BackupCursorPos: ImVec2,
+    pub FramePadding: ImVec2_c,
+    pub BackupCursorPos: ImVec2_c,
     pub TabsNames: ImGuiTextBuffer,
 }
 impl Default for ImGuiTabBar {
@@ -5058,7 +5088,7 @@ pub struct ImGuiTableColumn {
     pub WidthMax: f32,
     pub StretchWeight: f32,
     pub InitStretchWeightOrWidth: f32,
-    pub ClipRect: ImRect,
+    pub ClipRect: ImRect_c,
     pub UserID: ImGuiID,
     pub WorkMinX: f32,
     pub WorkMaxX: f32,
@@ -5382,15 +5412,15 @@ pub struct ImGuiTable {
     pub RefScale: f32,
     pub AngledHeadersHeight: f32,
     pub AngledHeadersSlope: f32,
-    pub OuterRect: ImRect,
-    pub InnerRect: ImRect,
-    pub WorkRect: ImRect,
-    pub InnerClipRect: ImRect,
-    pub BgClipRect: ImRect,
-    pub Bg0ClipRectForDrawCmd: ImRect,
-    pub Bg2ClipRectForDrawCmd: ImRect,
-    pub HostClipRect: ImRect,
-    pub HostBackupInnerClipRect: ImRect,
+    pub OuterRect: ImRect_c,
+    pub InnerRect: ImRect_c,
+    pub WorkRect: ImRect_c,
+    pub InnerClipRect: ImRect_c,
+    pub BgClipRect: ImRect_c,
+    pub Bg0ClipRectForDrawCmd: ImRect_c,
+    pub Bg2ClipRectForDrawCmd: ImRect_c,
+    pub HostClipRect: ImRect_c,
+    pub HostBackupInnerClipRect: ImRect_c,
     pub OuterWindow: *mut ImGuiWindow,
     pub InnerWindow: *mut ImGuiWindow,
     pub ColumnsNames: ImGuiTextBuffer,
@@ -5560,17 +5590,18 @@ impl Default for ImVector_ImGuiTableHeaderData {
 }
 #[repr(C)]
 pub struct ImGuiTableTempData {
+    pub WindowID: ImGuiID,
     pub TableIndex: ::std::os::raw::c_int,
     pub LastTimeActive: f32,
     pub AngledHeadersExtraWidth: f32,
     pub AngledHeadersRequests: ImVector_ImGuiTableHeaderData,
-    pub UserOuterSize: ImVec2,
+    pub UserOuterSize: ImVec2_c,
     pub DrawSplitter: ImDrawListSplitter,
-    pub HostBackupWorkRect: ImRect,
-    pub HostBackupParentWorkRect: ImRect,
-    pub HostBackupPrevLineSize: ImVec2,
-    pub HostBackupCurrLineSize: ImVec2,
-    pub HostBackupCursorMaxPos: ImVec2,
+    pub HostBackupWorkRect: ImRect_c,
+    pub HostBackupParentWorkRect: ImRect_c,
+    pub HostBackupPrevLineSize: ImVec2_c,
+    pub HostBackupCurrLineSize: ImVec2_c,
+    pub HostBackupCursorMaxPos: ImVec2_c,
     pub HostBackupColumnsOffset: ImVec1,
     pub HostBackupItemWidth: f32,
     pub HostBackupItemWidthStackSize: ::std::os::raw::c_int,
@@ -5862,8 +5893,8 @@ pub struct ImFontAtlasBuilder {
     pub RectsDiscardedCount: ::std::os::raw::c_int,
     pub RectsDiscardedSurface: ::std::os::raw::c_int,
     pub FrameCount: ::std::os::raw::c_int,
-    pub MaxRectSize: ImVec2i,
-    pub MaxRectBounds: ImVec2i,
+    pub MaxRectSize: ImVec2i_c,
+    pub MaxRectBounds: ImVec2i_c,
     pub LockDisableResize: bool,
     pub PreloadedAllGlyphsRanges: bool,
     pub BakedPool: ImStableVector_ImFontBaked__32,
@@ -5893,6 +5924,7 @@ pub type ImPlot3DMarker = ::std::os::raw::c_int;
 pub type ImPlot3DLocation = ::std::os::raw::c_int;
 pub type ImAxis3D = ::std::os::raw::c_int;
 pub type ImPlane3D = ::std::os::raw::c_int;
+pub type ImPlot3DScale = ::std::os::raw::c_int;
 pub type ImPlot3DColormap = ::std::os::raw::c_int;
 pub type ImPlot3DFlags = ::std::os::raw::c_int;
 pub type ImPlot3DItemFlags = ::std::os::raw::c_int;
@@ -5903,6 +5935,7 @@ pub type ImPlot3DQuadFlags = ::std::os::raw::c_int;
 pub type ImPlot3DSurfaceFlags = ::std::os::raw::c_int;
 pub type ImPlot3DMeshFlags = ::std::os::raw::c_int;
 pub type ImPlot3DImageFlags = ::std::os::raw::c_int;
+pub type ImPlot3DDummyFlags = ::std::os::raw::c_int;
 pub type ImPlot3DLegendFlags = ::std::os::raw::c_int;
 pub type ImPlot3DAxisFlags = ::std::os::raw::c_int;
 pub const ImPlot3DFlags_None: ImPlot3DFlags_ = 0;
@@ -5911,6 +5944,11 @@ pub const ImPlot3DFlags_NoLegend: ImPlot3DFlags_ = 2;
 pub const ImPlot3DFlags_NoMouseText: ImPlot3DFlags_ = 4;
 pub const ImPlot3DFlags_NoClip: ImPlot3DFlags_ = 8;
 pub const ImPlot3DFlags_NoMenus: ImPlot3DFlags_ = 16;
+pub const ImPlot3DFlags_Equal: ImPlot3DFlags_ = 32;
+pub const ImPlot3DFlags_NoRotate: ImPlot3DFlags_ = 64;
+pub const ImPlot3DFlags_NoPan: ImPlot3DFlags_ = 128;
+pub const ImPlot3DFlags_NoZoom: ImPlot3DFlags_ = 256;
+pub const ImPlot3DFlags_NoInputs: ImPlot3DFlags_ = 512;
 pub const ImPlot3DFlags_CanvasOnly: ImPlot3DFlags_ = 7;
 pub type ImPlot3DFlags_ = ::std::os::raw::c_uint;
 pub const ImPlot3DCond_None: ImPlot3DCond_ = 0;
@@ -5943,10 +5981,11 @@ pub const ImPlot3DStyleVar_PlotDefaultSize: ImPlot3DStyleVar_ = 5;
 pub const ImPlot3DStyleVar_PlotMinSize: ImPlot3DStyleVar_ = 6;
 pub const ImPlot3DStyleVar_PlotPadding: ImPlot3DStyleVar_ = 7;
 pub const ImPlot3DStyleVar_LabelPadding: ImPlot3DStyleVar_ = 8;
-pub const ImPlot3DStyleVar_LegendPadding: ImPlot3DStyleVar_ = 9;
-pub const ImPlot3DStyleVar_LegendInnerPadding: ImPlot3DStyleVar_ = 10;
-pub const ImPlot3DStyleVar_LegendSpacing: ImPlot3DStyleVar_ = 11;
-pub const ImPlot3DStyleVar_COUNT: ImPlot3DStyleVar_ = 12;
+pub const ImPlot3DStyleVar_ViewScaleFactor: ImPlot3DStyleVar_ = 9;
+pub const ImPlot3DStyleVar_LegendPadding: ImPlot3DStyleVar_ = 10;
+pub const ImPlot3DStyleVar_LegendInnerPadding: ImPlot3DStyleVar_ = 11;
+pub const ImPlot3DStyleVar_LegendSpacing: ImPlot3DStyleVar_ = 12;
+pub const ImPlot3DStyleVar_COUNT: ImPlot3DStyleVar_ = 13;
 pub type ImPlot3DStyleVar_ = ::std::os::raw::c_uint;
 pub const ImPlot3DMarker_None: ImPlot3DMarker_ = -1;
 pub const ImPlot3DMarker_Circle: ImPlot3DMarker_ = 0;
@@ -6008,6 +6047,8 @@ pub const ImPlot3DImageFlags_None: ImPlot3DImageFlags_ = 0;
 pub const ImPlot3DImageFlags_NoLegend: ImPlot3DImageFlags_ = 1;
 pub const ImPlot3DImageFlags_NoFit: ImPlot3DImageFlags_ = 2;
 pub type ImPlot3DImageFlags_ = ::std::os::raw::c_uint;
+pub const ImPlot3DDummyFlags_None: ImPlot3DDummyFlags_ = 0;
+pub type ImPlot3DDummyFlags_ = ::std::os::raw::c_uint;
 pub const ImPlot3DLegendFlags_None: ImPlot3DLegendFlags_ = 0;
 pub const ImPlot3DLegendFlags_NoButtons: ImPlot3DLegendFlags_ = 1;
 pub const ImPlot3DLegendFlags_NoHighlightItem: ImPlot3DLegendFlags_ = 2;
@@ -6036,6 +6077,10 @@ pub const ImPlot3DAxisFlags_PanStretch: ImPlot3DAxisFlags_ = 256;
 pub const ImPlot3DAxisFlags_Lock: ImPlot3DAxisFlags_ = 48;
 pub const ImPlot3DAxisFlags_NoDecorations: ImPlot3DAxisFlags_ = 11;
 pub type ImPlot3DAxisFlags_ = ::std::os::raw::c_uint;
+pub const ImPlot3DScale_Linear: ImPlot3DScale_ = 0;
+pub const ImPlot3DScale_Log10: ImPlot3DScale_ = 1;
+pub const ImPlot3DScale_SymLog: ImPlot3DScale_ = 2;
+pub type ImPlot3DScale_ = ::std::os::raw::c_uint;
 pub const ImPlot3DColormap_Deep: ImPlot3DColormap_ = 0;
 pub const ImPlot3DColormap_Dark: ImPlot3DColormap_ = 1;
 pub const ImPlot3DColormap_Pastel: ImPlot3DColormap_ = 2;
@@ -6055,77 +6100,76 @@ pub const ImPlot3DColormap_Greys: ImPlot3DColormap_ = 15;
 pub type ImPlot3DColormap_ = ::std::os::raw::c_uint;
 pub type ImPlot3DFormatter = ::std::option::Option<
     unsafe extern "C" fn(
-        value: f32,
+        value: f64,
         buff: *mut ::std::os::raw::c_char,
         size: ::std::os::raw::c_int,
         user_data: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int,
 >;
+pub type ImPlot3DTransform = ::std::option::Option<
+    unsafe extern "C" fn(value: f64, user_data: *mut ::std::os::raw::c_void) -> f64,
+>;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct ImPlot3DPoint {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+pub struct ImPlot3DPoint_c {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImPlot3DRay {
-    pub Origin: ImPlot3DPoint,
-    pub Direction: ImPlot3DPoint,
+    pub Origin: ImPlot3DPoint_c,
+    pub Direction: ImPlot3DPoint_c,
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImPlot3DPlane {
-    pub Point: ImPlot3DPoint,
-    pub Normal: ImPlot3DPoint,
+    pub Point: ImPlot3DPoint_c,
+    pub Normal: ImPlot3DPoint_c,
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImPlot3DBox {
-    pub Min: ImPlot3DPoint,
-    pub Max: ImPlot3DPoint,
+    pub Min: ImPlot3DPoint_c,
+    pub Max: ImPlot3DPoint_c,
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImPlot3DRange {
-    pub Min: f32,
-    pub Max: f32,
+    pub Min: f64,
+    pub Max: f64,
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct ImPlot3DQuat {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub w: f32,
+pub struct ImPlot3DQuat_c {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub w: f64,
 }
 #[repr(C)]
-pub struct ImPlot3DStyle {
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct ImPlot3DStyle_c {
     pub LineWeight: f32,
     pub Marker: ::std::os::raw::c_int,
     pub MarkerSize: f32,
     pub MarkerWeight: f32,
     pub FillAlpha: f32,
-    pub PlotDefaultSize: ImVec2,
-    pub PlotMinSize: ImVec2,
-    pub PlotPadding: ImVec2,
-    pub LabelPadding: ImVec2,
-    pub LegendPadding: ImVec2,
-    pub LegendInnerPadding: ImVec2,
-    pub LegendSpacing: ImVec2,
-    pub Colors: [ImVec4; 15usize],
+    pub PlotDefaultSize: ImVec2_c,
+    pub PlotMinSize: ImVec2_c,
+    pub PlotPadding: ImVec2_c,
+    pub LabelPadding: ImVec2_c,
+    pub ViewScaleFactor: f32,
+    pub LegendPadding: ImVec2_c,
+    pub LegendInnerPadding: ImVec2_c,
+    pub LegendSpacing: ImVec2_c,
+    pub Colors: [ImVec4_c; 15usize],
     pub Colormap: ImPlot3DColormap,
 }
-impl Default for ImPlot3DStyle {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
-}
+pub type ImPlot3DPoint = ImPlot3DPoint_c;
+pub type ImPlot3DQuat = ImPlot3DQuat_c;
+pub type ImPlot3DStyle = ImPlot3DStyle_c;
 unsafe extern "C" {
     pub fn ImPlot3D_CreateContext() -> *mut ImPlot3DContext;
 }
@@ -6141,7 +6185,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn ImPlot3D_BeginPlot(
         title_id: *const ::std::os::raw::c_char,
-        size: ImVec2,
+        size: ImVec2_c,
         flags: ImPlot3DFlags,
     ) -> bool;
 }
@@ -6185,10 +6229,21 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn ImPlot3D_SetupAxisScale_Plot3DScale(axis: ImAxis3D, scale: ImPlot3DScale);
+}
+unsafe extern "C" {
+    pub fn ImPlot3D_SetupAxisScale_Plot3DTransform(
+        axis: ImAxis3D,
+        forward: ImPlot3DTransform,
+        inverse: ImPlot3DTransform,
+        data: *mut ::std::os::raw::c_void,
+    );
+}
+unsafe extern "C" {
     pub fn ImPlot3D_SetupAxisLimitsConstraints(axis: ImAxis3D, v_min: f64, v_max: f64);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SetupAxisZoomConstraints(axis: ImAxis3D, z_min: f64, z_max: f64);
+    pub fn ImPlot3D_SetupAxisZoomConstraints(axis: ImAxis3D, zoom_min: f64, zoom_max: f64);
 }
 unsafe extern "C" {
     pub fn ImPlot3D_SetupAxes(
@@ -6212,28 +6267,28 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SetupBoxRotation_Float(
-        elevation: f32,
-        azimuth: f32,
+    pub fn ImPlot3D_SetupBoxRotation_double(
+        elevation: f64,
+        azimuth: f64,
         animate: bool,
         cond: ImPlot3DCond,
     );
 }
 unsafe extern "C" {
     pub fn ImPlot3D_SetupBoxRotation_Plot3DQuat(
-        rotation: ImPlot3DQuat,
+        rotation: ImPlot3DQuat_c,
         animate: bool,
         cond: ImPlot3DCond,
     );
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SetupBoxInitialRotation_Float(elevation: f32, azimuth: f32);
+    pub fn ImPlot3D_SetupBoxInitialRotation_double(elevation: f64, azimuth: f64);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SetupBoxInitialRotation_Plot3DQuat(rotation: ImPlot3DQuat);
+    pub fn ImPlot3D_SetupBoxInitialRotation_Plot3DQuat(rotation: ImPlot3DQuat_c);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SetupBoxScale(x: f32, y: f32, z: f32);
+    pub fn ImPlot3D_SetupBoxScale(x: f64, y: f64, z: f64);
 }
 unsafe extern "C" {
     pub fn ImPlot3D_SetupLegend(location: ImPlot3DLocation, flags: ImPlot3DLegendFlags);
@@ -6881,76 +6936,77 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn ImPlot3D_PlotImage_Vec2(
         label_id: *const ::std::os::raw::c_char,
-        tex_ref: ImTextureRef,
-        center: ImPlot3DPoint,
-        axis_u: ImPlot3DPoint,
-        axis_v: ImPlot3DPoint,
-        uv0: ImVec2,
-        uv1: ImVec2,
-        tint_col: ImVec4,
+        tex_ref: ImTextureRef_c,
+        center: ImPlot3DPoint_c,
+        axis_u: ImPlot3DPoint_c,
+        axis_v: ImPlot3DPoint_c,
+        uv0: ImVec2_c,
+        uv1: ImVec2_c,
+        tint_col: ImVec4_c,
         flags: ImPlot3DImageFlags,
     );
 }
 unsafe extern "C" {
     pub fn ImPlot3D_PlotImage_Plot3DPoInt(
         label_id: *const ::std::os::raw::c_char,
-        tex_ref: ImTextureRef,
-        p0: ImPlot3DPoint,
-        p1: ImPlot3DPoint,
-        p2: ImPlot3DPoint,
-        p3: ImPlot3DPoint,
-        uv0: ImVec2,
-        uv1: ImVec2,
-        uv2: ImVec2,
-        uv3: ImVec2,
-        tint_col: ImVec4,
+        tex_ref: ImTextureRef_c,
+        p0: ImPlot3DPoint_c,
+        p1: ImPlot3DPoint_c,
+        p2: ImPlot3DPoint_c,
+        p3: ImPlot3DPoint_c,
+        uv0: ImVec2_c,
+        uv1: ImVec2_c,
+        uv2: ImVec2_c,
+        uv3: ImVec2_c,
+        tint_col: ImVec4_c,
         flags: ImPlot3DImageFlags,
     );
 }
 unsafe extern "C" {
     pub fn ImPlot3D_PlotText(
         text: *const ::std::os::raw::c_char,
-        x: f32,
-        y: f32,
-        z: f32,
-        angle: f32,
-        pix_offset: ImVec2,
+        x: f64,
+        y: f64,
+        z: f64,
+        angle: f64,
+        pix_offset: ImVec2_c,
     );
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_PlotToPixels_Plot3DPoInt(pOut: *mut ImVec2, point: ImPlot3DPoint);
+    pub fn ImPlot3D_PlotDummy(label_id: *const ::std::os::raw::c_char, flags: ImPlot3DDummyFlags);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_PlotToPixels_double(pOut: *mut ImVec2, x: f64, y: f64, z: f64);
+    pub fn ImPlot3D_PlotToPixels_Plot3DPoInt(point: ImPlot3DPoint_c) -> ImVec2_c;
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_PixelsToPlotRay_Vec2(pix: ImVec2) -> ImPlot3DRay;
+    pub fn ImPlot3D_PlotToPixels_double(x: f64, y: f64, z: f64) -> ImVec2_c;
+}
+unsafe extern "C" {
+    pub fn ImPlot3D_PixelsToPlotRay_Vec2(pix: ImVec2_c) -> ImPlot3DRay;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_PixelsToPlotRay_double(x: f64, y: f64) -> ImPlot3DRay;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_PixelsToPlotPlane_Vec2(
-        pOut: *mut ImPlot3DPoint,
-        pix: ImVec2,
+        pix: ImVec2_c,
         plane: ImPlane3D,
         mask: bool,
-    );
+    ) -> ImPlot3DPoint_c;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_PixelsToPlotPlane_double(
-        pOut: *mut ImPlot3DPoint,
         x: f64,
         y: f64,
         plane: ImPlane3D,
         mask: bool,
-    );
+    ) -> ImPlot3DPoint_c;
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_GetPlotPos(pOut: *mut ImVec2);
+    pub fn ImPlot3D_GetPlotRectPos() -> ImVec2_c;
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_GetPlotSize(pOut: *mut ImVec2);
+    pub fn ImPlot3D_GetPlotRectSize() -> ImVec2_c;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_GetPlotDrawList() -> *mut ImDrawList;
@@ -6959,7 +7015,7 @@ unsafe extern "C" {
     pub fn ImPlot3D_GetStyle() -> *mut ImPlot3DStyle;
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SetStyle(style: ImPlot3DStyle);
+    pub fn ImPlot3D_SetStyle(style: ImPlot3DStyle_c);
 }
 unsafe extern "C" {
     pub fn ImPlot3D_StyleColorsAuto(dst: *mut ImPlot3DStyle);
@@ -6977,7 +7033,7 @@ unsafe extern "C" {
     pub fn ImPlot3D_PushStyleColor_U32(idx: ImPlot3DCol, col: ImU32);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_PushStyleColor_Vec4(idx: ImPlot3DCol, col: ImVec4);
+    pub fn ImPlot3D_PushStyleColor_Vec4(idx: ImPlot3DCol, col: ImVec4_c);
 }
 unsafe extern "C" {
     pub fn ImPlot3D_PopStyleColor(count: ::std::os::raw::c_int);
@@ -6989,28 +7045,28 @@ unsafe extern "C" {
     pub fn ImPlot3D_PushStyleVar_Int(idx: ImPlot3DStyleVar, val: ::std::os::raw::c_int);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_PushStyleVar_Vec2(idx: ImPlot3DStyleVar, val: ImVec2);
+    pub fn ImPlot3D_PushStyleVar_Vec2(idx: ImPlot3DStyleVar, val: ImVec2_c);
 }
 unsafe extern "C" {
     pub fn ImPlot3D_PopStyleVar(count: ::std::os::raw::c_int);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SetNextLineStyle(col: ImVec4, weight: f32);
+    pub fn ImPlot3D_SetNextLineStyle(col: ImVec4_c, weight: f32);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SetNextFillStyle(col: ImVec4, alpha_mod: f32);
+    pub fn ImPlot3D_SetNextFillStyle(col: ImVec4_c, alpha_mod: f32);
 }
 unsafe extern "C" {
     pub fn ImPlot3D_SetNextMarkerStyle(
         marker: ImPlot3DMarker,
         size: f32,
-        fill: ImVec4,
+        fill: ImVec4_c,
         weight: f32,
-        outline: ImVec4,
+        outline: ImVec4_c,
     );
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_GetStyleColorVec4(pOut: *mut ImVec4, idx: ImPlot3DCol);
+    pub fn ImPlot3D_GetStyleColorVec4(idx: ImPlot3DCol) -> ImVec4_c;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_GetStyleColorU32(idx: ImPlot3DCol) -> ImU32;
@@ -7050,20 +7106,19 @@ unsafe extern "C" {
     pub fn ImPlot3D_PopColormap(count: ::std::os::raw::c_int);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_NextColormapColor(pOut: *mut ImVec4);
+    pub fn ImPlot3D_NextColormapColor() -> ImVec4_c;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_GetColormapSize(cmap: ImPlot3DColormap) -> ::std::os::raw::c_int;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_GetColormapColor(
-        pOut: *mut ImVec4,
         idx: ::std::os::raw::c_int,
         cmap: ImPlot3DColormap,
-    );
+    ) -> ImVec4_c;
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SampleColormap(pOut: *mut ImVec4, t: f32, cmap: ImPlot3DColormap);
+    pub fn ImPlot3D_SampleColormap(t: f32, cmap: ImPlot3DColormap) -> ImVec4_c;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_ShowDemoWindow(p_open: *mut bool);
@@ -7075,5 +7130,14 @@ unsafe extern "C" {
     pub fn ImPlot3D_ShowStyleEditor(ref_: *mut ImPlot3DStyle);
 }
 unsafe extern "C" {
+    pub fn ImPlot3D_ShowStyleSelector(label: *const ::std::os::raw::c_char) -> bool;
+}
+unsafe extern "C" {
+    pub fn ImPlot3D_ShowColormapSelector(label: *const ::std::os::raw::c_char) -> bool;
+}
+unsafe extern "C" {
     pub fn ImPlot3D_ShowMetricsWindow(p_popen: *mut bool);
+}
+unsafe extern "C" {
+    pub fn ImPlot3D_ShowAboutWindow(p_open: *mut bool);
 }

@@ -895,7 +895,7 @@ impl Plot3DBuilder {
             }
             sys::ImPlot3D_BeginPlot(
                 title_c.as_ptr(),
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: size[0],
                     y: size[1],
                 },
@@ -1182,7 +1182,7 @@ impl<'ui> Plot3DUi<'ui> {
 pub struct Image3DByAxesBuilder<'ui> {
     _ui: &'ui Plot3DUi<'ui>,
     label: std::ffi::CString,
-    tex_ref: sys::ImTextureRef,
+    tex_ref: sys::ImTextureRef_c,
     center: [f32; 3],
     axis_u: [f32; 3],
     axis_v: [f32; 3],
@@ -1212,30 +1212,30 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
             sys::ImPlot3D_PlotImage_Vec2(
                 self.label.as_ptr(),
                 self.tex_ref,
-                sys::ImPlot3DPoint {
-                    x: self.center[0],
-                    y: self.center[1],
-                    z: self.center[2],
+                sys::ImPlot3DPoint_c {
+                    x: self.center[0] as f64,
+                    y: self.center[1] as f64,
+                    z: self.center[2] as f64,
                 },
-                sys::ImPlot3DPoint {
-                    x: self.axis_u[0],
-                    y: self.axis_u[1],
-                    z: self.axis_u[2],
+                sys::ImPlot3DPoint_c {
+                    x: self.axis_u[0] as f64,
+                    y: self.axis_u[1] as f64,
+                    z: self.axis_u[2] as f64,
                 },
-                sys::ImPlot3DPoint {
-                    x: self.axis_v[0],
-                    y: self.axis_v[1],
-                    z: self.axis_v[2],
+                sys::ImPlot3DPoint_c {
+                    x: self.axis_v[0] as f64,
+                    y: self.axis_v[1] as f64,
+                    z: self.axis_v[2] as f64,
                 },
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: self.uv0[0],
                     y: self.uv0[1],
                 },
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: self.uv1[0],
                     y: self.uv1[1],
                 },
-                sys::ImVec4 {
+                sys::ImVec4_c {
                     x: self.tint[0],
                     y: self.tint[1],
                     z: self.tint[2],
@@ -1251,7 +1251,7 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
 pub struct Image3DByCornersBuilder<'ui> {
     _ui: &'ui Plot3DUi<'ui>,
     label: std::ffi::CString,
-    tex_ref: sys::ImTextureRef,
+    tex_ref: sys::ImTextureRef_c,
     p0: [f32; 3],
     p1: [f32; 3],
     p2: [f32; 3],
@@ -1286,43 +1286,43 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
             sys::ImPlot3D_PlotImage_Plot3DPoInt(
                 self.label.as_ptr(),
                 self.tex_ref,
-                sys::ImPlot3DPoint {
-                    x: self.p0[0],
-                    y: self.p0[1],
-                    z: self.p0[2],
+                sys::ImPlot3DPoint_c {
+                    x: self.p0[0] as f64,
+                    y: self.p0[1] as f64,
+                    z: self.p0[2] as f64,
                 },
-                sys::ImPlot3DPoint {
-                    x: self.p1[0],
-                    y: self.p1[1],
-                    z: self.p1[2],
+                sys::ImPlot3DPoint_c {
+                    x: self.p1[0] as f64,
+                    y: self.p1[1] as f64,
+                    z: self.p1[2] as f64,
                 },
-                sys::ImPlot3DPoint {
-                    x: self.p2[0],
-                    y: self.p2[1],
-                    z: self.p2[2],
+                sys::ImPlot3DPoint_c {
+                    x: self.p2[0] as f64,
+                    y: self.p2[1] as f64,
+                    z: self.p2[2] as f64,
                 },
-                sys::ImPlot3DPoint {
-                    x: self.p3[0],
-                    y: self.p3[1],
-                    z: self.p3[2],
+                sys::ImPlot3DPoint_c {
+                    x: self.p3[0] as f64,
+                    y: self.p3[1] as f64,
+                    z: self.p3[2] as f64,
                 },
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: self.uv0[0],
                     y: self.uv0[1],
                 },
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: self.uv1[0],
                     y: self.uv1[1],
                 },
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: self.uv2[0],
                     y: self.uv2[1],
                 },
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: self.uv3[0],
                     y: self.uv3[1],
                 },
-                sys::ImVec4 {
+                sys::ImVec4_c {
                     x: self.tint[0],
                     y: self.tint[1],
                     z: self.tint[2],
@@ -1347,7 +1347,7 @@ impl<'ui> Plot3DUi<'ui> {
         let label_c = std::ffi::CString::new(label.as_ref())
             .unwrap_or_else(|_| std::ffi::CString::new("image").unwrap());
         let tr = tex.into().raw();
-        let tex_ref = sys::ImTextureRef {
+        let tex_ref = sys::ImTextureRef_c {
             _TexData: tr._TexData as *mut sys::ImTextureData,
             _TexID: tr._TexID as sys::ImTextureID,
         };
@@ -1379,7 +1379,7 @@ impl<'ui> Plot3DUi<'ui> {
         let label_c = std::ffi::CString::new(label.as_ref())
             .unwrap_or_else(|_| std::ffi::CString::new("image").unwrap());
         let tr = tex.into().raw();
-        let tex_ref = sys::ImTextureRef {
+        let tex_ref = sys::ImTextureRef_c {
             _TexData: tr._TexData as *mut sys::ImTextureData,
             _TexID: tr._TexID as sys::ImTextureID,
         };
@@ -1530,7 +1530,7 @@ impl<'ui> Plot3DUi<'ui> {
 
     pub fn setup_box_scale(&self, x: f32, y: f32, z: f32) {
         debug_before_setup();
-        unsafe { sys::ImPlot3D_SetupBoxScale(x, y, z) }
+        unsafe { sys::ImPlot3D_SetupBoxScale(x as f64, y as f64, z as f64) }
     }
 
     pub fn setup_box_rotation(
@@ -1541,12 +1541,19 @@ impl<'ui> Plot3DUi<'ui> {
         cond: Plot3DCond,
     ) {
         debug_before_setup();
-        unsafe { sys::ImPlot3D_SetupBoxRotation_Float(elevation, azimuth, animate, cond as i32) }
+        unsafe {
+            sys::ImPlot3D_SetupBoxRotation_double(
+                elevation as f64,
+                azimuth as f64,
+                animate,
+                cond as i32,
+            )
+        }
     }
 
     pub fn setup_box_initial_rotation(&self, elevation: f32, azimuth: f32) {
         debug_before_setup();
-        unsafe { sys::ImPlot3D_SetupBoxInitialRotation_Float(elevation, azimuth) }
+        unsafe { sys::ImPlot3D_SetupBoxInitialRotation_double(elevation as f64, azimuth as f64) }
     }
 
     pub fn plot_text(&self, text: &str, x: f32, y: f32, z: f32, angle: f32, pix_offset: [f32; 2]) {
@@ -1555,11 +1562,11 @@ impl<'ui> Plot3DUi<'ui> {
             debug_before_plot();
             sys::ImPlot3D_PlotText(
                 c_text.as_ptr(),
-                x,
-                y,
-                z,
-                angle,
-                sys::ImVec2 {
+                x as f64,
+                y as f64,
+                z as f64,
+                angle as f64,
+                sys::ImVec2_c {
                     x: pix_offset[0],
                     y: pix_offset[1],
                 },
@@ -1569,9 +1576,7 @@ impl<'ui> Plot3DUi<'ui> {
 
     pub fn plot_to_pixels(&self, point: [f32; 3]) -> [f32; 2] {
         unsafe {
-            let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::ImPlot3D_PlotToPixels_double(
-                &mut out,
+            let out = sys::ImPlot3D_PlotToPixels_double(
                 point[0] as f64,
                 point[1] as f64,
                 point[2] as f64,
@@ -1586,16 +1591,14 @@ impl<'ui> Plot3DUi<'ui> {
 
     pub fn get_frame_pos(&self) -> [f32; 2] {
         unsafe {
-            let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::ImPlot3D_GetPlotPos(&mut out);
+            let out = sys::ImPlot3D_GetPlotRectPos();
             [out.x, out.y]
         }
     }
 
     pub fn get_frame_size(&self) -> [f32; 2] {
         unsafe {
-            let mut out = sys::ImVec2 { x: 0.0, y: 0.0 };
-            sys::ImPlot3D_GetPlotSize(&mut out);
+            let out = sys::ImPlot3D_GetPlotRectSize();
             [out.x, out.y]
         }
     }

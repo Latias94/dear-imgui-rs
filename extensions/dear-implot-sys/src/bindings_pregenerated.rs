@@ -136,15 +136,19 @@ where
         }
     }
 }
-pub type va_list = *mut ::std::os::raw::c_char;
-pub type __time64_t = ::std::os::raw::c_longlong;
-pub type time_t = __time64_t;
+pub type __int64_t = ::std::os::raw::c_longlong;
+pub type __darwin_va_list = __builtin_va_list;
+pub type __darwin_time_t = ::std::os::raw::c_long;
+pub type __darwin_off_t = __int64_t;
+pub type va_list = __darwin_va_list;
+pub type fpos_t = __darwin_off_t;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub struct _iobuf {
-    pub _Placeholder: *mut ::std::os::raw::c_void,
+pub struct __sbuf {
+    pub _base: *mut ::std::os::raw::c_uchar,
+    pub _size: ::std::os::raw::c_int,
 }
-impl Default for _iobuf {
+impl Default for __sbuf {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
         unsafe {
@@ -153,8 +157,65 @@ impl Default for _iobuf {
         }
     }
 }
-pub type FILE = _iobuf;
-pub type ImU64 = ::std::os::raw::c_ulonglong;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct __sFILEX {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct __sFILE {
+    pub _p: *mut ::std::os::raw::c_uchar,
+    pub _r: ::std::os::raw::c_int,
+    pub _w: ::std::os::raw::c_int,
+    pub _flags: ::std::os::raw::c_short,
+    pub _file: ::std::os::raw::c_short,
+    pub _bf: __sbuf,
+    pub _lbfsize: ::std::os::raw::c_int,
+    pub _cookie: *mut ::std::os::raw::c_void,
+    pub _close: ::std::option::Option<
+        unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void) -> ::std::os::raw::c_int,
+    >,
+    pub _read: ::std::option::Option<
+        unsafe extern "C" fn(
+            arg1: *mut ::std::os::raw::c_void,
+            arg2: *mut ::std::os::raw::c_char,
+            __n: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int,
+    >,
+    pub _seek: ::std::option::Option<
+        unsafe extern "C" fn(
+            arg1: *mut ::std::os::raw::c_void,
+            arg2: fpos_t,
+            arg3: ::std::os::raw::c_int,
+        ) -> fpos_t,
+    >,
+    pub _write: ::std::option::Option<
+        unsafe extern "C" fn(
+            arg1: *mut ::std::os::raw::c_void,
+            arg2: *const ::std::os::raw::c_char,
+            __n: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int,
+    >,
+    pub _ub: __sbuf,
+    pub _extra: *mut __sFILEX,
+    pub _ur: ::std::os::raw::c_int,
+    pub _ubuf: [::std::os::raw::c_uchar; 3usize],
+    pub _nbuf: [::std::os::raw::c_uchar; 1usize],
+    pub _lb: __sbuf,
+    pub _blksize: ::std::os::raw::c_int,
+    pub _offset: fpos_t,
+}
+impl Default for __sFILE {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+pub type FILE = __sFILE;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ImGuiDockRequest {
@@ -183,6 +244,7 @@ pub type ImU16 = ::std::os::raw::c_ushort;
 pub type ImS32 = ::std::os::raw::c_int;
 pub type ImU32 = ::std::os::raw::c_uint;
 pub type ImS64 = ::std::os::raw::c_longlong;
+pub type ImU64 = ::std::os::raw::c_ulonglong;
 pub type ImGuiCol = ::std::os::raw::c_int;
 pub type ImGuiMouseCursor = ::std::os::raw::c_int;
 pub type ImGuiStyleVar = ::std::os::raw::c_int;
@@ -252,7 +314,7 @@ pub type ImGuiDir = ::std::os::raw::c_int;
 pub const ImGuiSortDirection_None: ImGuiSortDirection = 0;
 pub const ImGuiSortDirection_Ascending: ImGuiSortDirection = 1;
 pub const ImGuiSortDirection_Descending: ImGuiSortDirection = 2;
-pub type ImGuiSortDirection = ::std::os::raw::c_int;
+pub type ImGuiSortDirection = ::std::os::raw::c_uint;
 pub const ImGuiKey_None: ImGuiKey = 0;
 pub const ImGuiKey_NamedKey_BEGIN: ImGuiKey = 512;
 pub const ImGuiKey_Tab: ImGuiKey = 512;
@@ -418,12 +480,12 @@ pub const ImGuiMod_Shift: ImGuiKey = 8192;
 pub const ImGuiMod_Alt: ImGuiKey = 16384;
 pub const ImGuiMod_Super: ImGuiKey = 32768;
 pub const ImGuiMod_Mask_: ImGuiKey = 61440;
-pub type ImGuiKey = ::std::os::raw::c_int;
+pub type ImGuiKey = ::std::os::raw::c_uint;
 pub const ImGuiMouseSource_Mouse: ImGuiMouseSource = 0;
 pub const ImGuiMouseSource_TouchScreen: ImGuiMouseSource = 1;
 pub const ImGuiMouseSource_Pen: ImGuiMouseSource = 2;
 pub const ImGuiMouseSource_COUNT: ImGuiMouseSource = 3;
-pub type ImGuiMouseSource = ::std::os::raw::c_int;
+pub type ImGuiMouseSource = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiTableSortSpecs {
@@ -683,7 +745,7 @@ impl Default for ImGuiMultiSelectIO {
 pub const ImGuiSelectionRequestType_None: ImGuiSelectionRequestType = 0;
 pub const ImGuiSelectionRequestType_SetAll: ImGuiSelectionRequestType = 1;
 pub const ImGuiSelectionRequestType_SetRange: ImGuiSelectionRequestType = 2;
-pub type ImGuiSelectionRequestType = ::std::os::raw::c_int;
+pub type ImGuiSelectionRequestType = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiSelectionRequest {
@@ -942,13 +1004,13 @@ impl Default for ImVector_ImTextureDataPtr {
 }
 pub const ImTextureFormat_RGBA32: ImTextureFormat = 0;
 pub const ImTextureFormat_Alpha8: ImTextureFormat = 1;
-pub type ImTextureFormat = ::std::os::raw::c_int;
+pub type ImTextureFormat = ::std::os::raw::c_uint;
 pub const ImTextureStatus_OK: ImTextureStatus = 0;
 pub const ImTextureStatus_Destroyed: ImTextureStatus = 1;
 pub const ImTextureStatus_WantCreate: ImTextureStatus = 2;
 pub const ImTextureStatus_WantUpdates: ImTextureStatus = 3;
 pub const ImTextureStatus_WantDestroy: ImTextureStatus = 4;
-pub type ImTextureStatus = ::std::os::raw::c_int;
+pub type ImTextureStatus = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImTextureRect {
@@ -2185,13 +2247,13 @@ pub const ImGuiInputEventType_Key: ImGuiInputEventType = 5;
 pub const ImGuiInputEventType_Text: ImGuiInputEventType = 6;
 pub const ImGuiInputEventType_Focus: ImGuiInputEventType = 7;
 pub const ImGuiInputEventType_COUNT: ImGuiInputEventType = 8;
-pub type ImGuiInputEventType = ::std::os::raw::c_int;
+pub type ImGuiInputEventType = ::std::os::raw::c_uint;
 pub const ImGuiInputSource_None: ImGuiInputSource = 0;
 pub const ImGuiInputSource_Mouse: ImGuiInputSource = 1;
 pub const ImGuiInputSource_Keyboard: ImGuiInputSource = 2;
 pub const ImGuiInputSource_Gamepad: ImGuiInputSource = 3;
 pub const ImGuiInputSource_COUNT: ImGuiInputSource = 4;
-pub type ImGuiInputSource = ::std::os::raw::c_int;
+pub type ImGuiInputSource = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiInputEventMousePos {
@@ -2406,7 +2468,7 @@ impl Default for ImGuiListClipperData {
 pub const ImGuiNavLayer_Main: ImGuiNavLayer = 0;
 pub const ImGuiNavLayer_Menu: ImGuiNavLayer = 1;
 pub const ImGuiNavLayer_COUNT: ImGuiNavLayer = 2;
-pub type ImGuiNavLayer = ::std::os::raw::c_int;
+pub type ImGuiNavLayer = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiNavItemData {
@@ -2538,7 +2600,6 @@ pub struct ImGuiBoxSelectState {
     pub RequestClear: bool,
     pub _bitfield_align_1: [u16; 0],
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 2usize]>,
-    pub __bindgen_padding_0: u32,
     pub StartPosRel: ImVec2_c,
     pub EndPosRel: ImVec2_c,
     pub ScrollAccum: ImVec2_c,
@@ -2655,7 +2716,7 @@ pub const ImGuiDockNodeState_Unknown: ImGuiDockNodeState = 0;
 pub const ImGuiDockNodeState_HostWindowHiddenBecauseSingleWindow: ImGuiDockNodeState = 1;
 pub const ImGuiDockNodeState_HostWindowHiddenBecauseWindowsAreResizing: ImGuiDockNodeState = 2;
 pub const ImGuiDockNodeState_HostWindowVisible: ImGuiDockNodeState = 3;
-pub type ImGuiDockNodeState = ::std::os::raw::c_int;
+pub type ImGuiDockNodeState = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImGuiWindowPtr {
@@ -3499,7 +3560,7 @@ pub const ImGuiContextHookType_RenderPre: ImGuiContextHookType = 4;
 pub const ImGuiContextHookType_RenderPost: ImGuiContextHookType = 5;
 pub const ImGuiContextHookType_Shutdown: ImGuiContextHookType = 6;
 pub const ImGuiContextHookType_PendingRemoval_: ImGuiContextHookType = 7;
-pub type ImGuiContextHookType = ::std::os::raw::c_int;
+pub type ImGuiContextHookType = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiContextHook {
@@ -4127,7 +4188,6 @@ pub struct ImGuiWindow {
     pub DisableInputsFrames: ImS8,
     pub _bitfield_align_1: [u8; 0],
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 5usize]>,
-    pub __bindgen_padding_0: u32,
     pub SetWindowPosVal: ImVec2_c,
     pub SetWindowPosPivot: ImVec2_c,
     pub IDStack: ImVector_ImGuiID,
@@ -5459,8 +5519,9 @@ impl Default for ImFontAtlasBuilder {
     }
 }
 pub type ImRect = ImRect_c;
+pub type time_t = __darwin_time_t;
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct tm {
     pub tm_sec: ::std::os::raw::c_int,
     pub tm_min: ::std::os::raw::c_int,
@@ -5471,6 +5532,17 @@ pub struct tm {
     pub tm_wday: ::std::os::raw::c_int,
     pub tm_yday: ::std::os::raw::c_int,
     pub tm_isdst: ::std::os::raw::c_int,
+    pub tm_gmtoff: ::std::os::raw::c_long,
+    pub tm_zone: *mut ::std::os::raw::c_char,
+}
+impl Default for tm {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -5601,7 +5673,7 @@ pub const ImPlotFlags_NoFrame: ImPlotFlags_ = 64;
 pub const ImPlotFlags_Equal: ImPlotFlags_ = 128;
 pub const ImPlotFlags_Crosshairs: ImPlotFlags_ = 256;
 pub const ImPlotFlags_CanvasOnly: ImPlotFlags_ = 55;
-pub type ImPlotFlags_ = ::std::os::raw::c_int;
+pub type ImPlotFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotAxisFlags_None: ImPlotAxisFlags_ = 0;
 pub const ImPlotAxisFlags_NoLabel: ImPlotAxisFlags_ = 1;
 pub const ImPlotAxisFlags_NoGridLines: ImPlotAxisFlags_ = 2;
@@ -5622,7 +5694,7 @@ pub const ImPlotAxisFlags_LockMax: ImPlotAxisFlags_ = 32768;
 pub const ImPlotAxisFlags_Lock: ImPlotAxisFlags_ = 49152;
 pub const ImPlotAxisFlags_NoDecorations: ImPlotAxisFlags_ = 15;
 pub const ImPlotAxisFlags_AuxDefault: ImPlotAxisFlags_ = 258;
-pub type ImPlotAxisFlags_ = ::std::os::raw::c_int;
+pub type ImPlotAxisFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotSubplotFlags_None: ImPlotSubplotFlags_ = 0;
 pub const ImPlotSubplotFlags_NoTitle: ImPlotSubplotFlags_ = 1;
 pub const ImPlotSubplotFlags_NoLegend: ImPlotSubplotFlags_ = 2;
@@ -5635,7 +5707,7 @@ pub const ImPlotSubplotFlags_LinkCols: ImPlotSubplotFlags_ = 128;
 pub const ImPlotSubplotFlags_LinkAllX: ImPlotSubplotFlags_ = 256;
 pub const ImPlotSubplotFlags_LinkAllY: ImPlotSubplotFlags_ = 512;
 pub const ImPlotSubplotFlags_ColMajor: ImPlotSubplotFlags_ = 1024;
-pub type ImPlotSubplotFlags_ = ::std::os::raw::c_int;
+pub type ImPlotSubplotFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotLegendFlags_None: ImPlotLegendFlags_ = 0;
 pub const ImPlotLegendFlags_NoButtons: ImPlotLegendFlags_ = 1;
 pub const ImPlotLegendFlags_NoHighlightItem: ImPlotLegendFlags_ = 2;
@@ -5645,87 +5717,87 @@ pub const ImPlotLegendFlags_Outside: ImPlotLegendFlags_ = 16;
 pub const ImPlotLegendFlags_Horizontal: ImPlotLegendFlags_ = 32;
 pub const ImPlotLegendFlags_Sort: ImPlotLegendFlags_ = 64;
 pub const ImPlotLegendFlags_Reverse: ImPlotLegendFlags_ = 128;
-pub type ImPlotLegendFlags_ = ::std::os::raw::c_int;
+pub type ImPlotLegendFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotMouseTextFlags_None: ImPlotMouseTextFlags_ = 0;
 pub const ImPlotMouseTextFlags_NoAuxAxes: ImPlotMouseTextFlags_ = 1;
 pub const ImPlotMouseTextFlags_NoFormat: ImPlotMouseTextFlags_ = 2;
 pub const ImPlotMouseTextFlags_ShowAlways: ImPlotMouseTextFlags_ = 4;
-pub type ImPlotMouseTextFlags_ = ::std::os::raw::c_int;
+pub type ImPlotMouseTextFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotDragToolFlags_None: ImPlotDragToolFlags_ = 0;
 pub const ImPlotDragToolFlags_NoCursors: ImPlotDragToolFlags_ = 1;
 pub const ImPlotDragToolFlags_NoFit: ImPlotDragToolFlags_ = 2;
 pub const ImPlotDragToolFlags_NoInputs: ImPlotDragToolFlags_ = 4;
 pub const ImPlotDragToolFlags_Delayed: ImPlotDragToolFlags_ = 8;
-pub type ImPlotDragToolFlags_ = ::std::os::raw::c_int;
+pub type ImPlotDragToolFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotColormapScaleFlags_None: ImPlotColormapScaleFlags_ = 0;
 pub const ImPlotColormapScaleFlags_NoLabel: ImPlotColormapScaleFlags_ = 1;
 pub const ImPlotColormapScaleFlags_Opposite: ImPlotColormapScaleFlags_ = 2;
 pub const ImPlotColormapScaleFlags_Invert: ImPlotColormapScaleFlags_ = 4;
-pub type ImPlotColormapScaleFlags_ = ::std::os::raw::c_int;
+pub type ImPlotColormapScaleFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotItemFlags_None: ImPlotItemFlags_ = 0;
 pub const ImPlotItemFlags_NoLegend: ImPlotItemFlags_ = 1;
 pub const ImPlotItemFlags_NoFit: ImPlotItemFlags_ = 2;
-pub type ImPlotItemFlags_ = ::std::os::raw::c_int;
+pub type ImPlotItemFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotLineFlags_None: ImPlotLineFlags_ = 0;
 pub const ImPlotLineFlags_Segments: ImPlotLineFlags_ = 1024;
 pub const ImPlotLineFlags_Loop: ImPlotLineFlags_ = 2048;
 pub const ImPlotLineFlags_SkipNaN: ImPlotLineFlags_ = 4096;
 pub const ImPlotLineFlags_NoClip: ImPlotLineFlags_ = 8192;
 pub const ImPlotLineFlags_Shaded: ImPlotLineFlags_ = 16384;
-pub type ImPlotLineFlags_ = ::std::os::raw::c_int;
+pub type ImPlotLineFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotScatterFlags_None: ImPlotScatterFlags_ = 0;
 pub const ImPlotScatterFlags_NoClip: ImPlotScatterFlags_ = 1024;
-pub type ImPlotScatterFlags_ = ::std::os::raw::c_int;
+pub type ImPlotScatterFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotStairsFlags_None: ImPlotStairsFlags_ = 0;
 pub const ImPlotStairsFlags_PreStep: ImPlotStairsFlags_ = 1024;
 pub const ImPlotStairsFlags_Shaded: ImPlotStairsFlags_ = 2048;
-pub type ImPlotStairsFlags_ = ::std::os::raw::c_int;
+pub type ImPlotStairsFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotShadedFlags_None: ImPlotShadedFlags_ = 0;
-pub type ImPlotShadedFlags_ = ::std::os::raw::c_int;
+pub type ImPlotShadedFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotBarsFlags_None: ImPlotBarsFlags_ = 0;
 pub const ImPlotBarsFlags_Horizontal: ImPlotBarsFlags_ = 1024;
-pub type ImPlotBarsFlags_ = ::std::os::raw::c_int;
+pub type ImPlotBarsFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotBarGroupsFlags_None: ImPlotBarGroupsFlags_ = 0;
 pub const ImPlotBarGroupsFlags_Horizontal: ImPlotBarGroupsFlags_ = 1024;
 pub const ImPlotBarGroupsFlags_Stacked: ImPlotBarGroupsFlags_ = 2048;
-pub type ImPlotBarGroupsFlags_ = ::std::os::raw::c_int;
+pub type ImPlotBarGroupsFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotErrorBarsFlags_None: ImPlotErrorBarsFlags_ = 0;
 pub const ImPlotErrorBarsFlags_Horizontal: ImPlotErrorBarsFlags_ = 1024;
-pub type ImPlotErrorBarsFlags_ = ::std::os::raw::c_int;
+pub type ImPlotErrorBarsFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotStemsFlags_None: ImPlotStemsFlags_ = 0;
 pub const ImPlotStemsFlags_Horizontal: ImPlotStemsFlags_ = 1024;
-pub type ImPlotStemsFlags_ = ::std::os::raw::c_int;
+pub type ImPlotStemsFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotInfLinesFlags_None: ImPlotInfLinesFlags_ = 0;
 pub const ImPlotInfLinesFlags_Horizontal: ImPlotInfLinesFlags_ = 1024;
-pub type ImPlotInfLinesFlags_ = ::std::os::raw::c_int;
+pub type ImPlotInfLinesFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotPieChartFlags_None: ImPlotPieChartFlags_ = 0;
 pub const ImPlotPieChartFlags_Normalize: ImPlotPieChartFlags_ = 1024;
 pub const ImPlotPieChartFlags_IgnoreHidden: ImPlotPieChartFlags_ = 2048;
 pub const ImPlotPieChartFlags_Exploding: ImPlotPieChartFlags_ = 4096;
-pub type ImPlotPieChartFlags_ = ::std::os::raw::c_int;
+pub type ImPlotPieChartFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotHeatmapFlags_None: ImPlotHeatmapFlags_ = 0;
 pub const ImPlotHeatmapFlags_ColMajor: ImPlotHeatmapFlags_ = 1024;
-pub type ImPlotHeatmapFlags_ = ::std::os::raw::c_int;
+pub type ImPlotHeatmapFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotHistogramFlags_None: ImPlotHistogramFlags_ = 0;
 pub const ImPlotHistogramFlags_Horizontal: ImPlotHistogramFlags_ = 1024;
 pub const ImPlotHistogramFlags_Cumulative: ImPlotHistogramFlags_ = 2048;
 pub const ImPlotHistogramFlags_Density: ImPlotHistogramFlags_ = 4096;
 pub const ImPlotHistogramFlags_NoOutliers: ImPlotHistogramFlags_ = 8192;
 pub const ImPlotHistogramFlags_ColMajor: ImPlotHistogramFlags_ = 16384;
-pub type ImPlotHistogramFlags_ = ::std::os::raw::c_int;
+pub type ImPlotHistogramFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotDigitalFlags_None: ImPlotDigitalFlags_ = 0;
-pub type ImPlotDigitalFlags_ = ::std::os::raw::c_int;
+pub type ImPlotDigitalFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotImageFlags_None: ImPlotImageFlags_ = 0;
-pub type ImPlotImageFlags_ = ::std::os::raw::c_int;
+pub type ImPlotImageFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotTextFlags_None: ImPlotTextFlags_ = 0;
 pub const ImPlotTextFlags_Vertical: ImPlotTextFlags_ = 1024;
-pub type ImPlotTextFlags_ = ::std::os::raw::c_int;
+pub type ImPlotTextFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotDummyFlags_None: ImPlotDummyFlags_ = 0;
-pub type ImPlotDummyFlags_ = ::std::os::raw::c_int;
+pub type ImPlotDummyFlags_ = ::std::os::raw::c_uint;
 pub const ImPlotCond_None: ImPlotCond_ = 0;
 pub const ImPlotCond_Always: ImPlotCond_ = 1;
 pub const ImPlotCond_Once: ImPlotCond_ = 2;
-pub type ImPlotCond_ = ::std::os::raw::c_int;
+pub type ImPlotCond_ = ::std::os::raw::c_uint;
 pub const ImPlotCol_Line: ImPlotCol_ = 0;
 pub const ImPlotCol_Fill: ImPlotCol_ = 1;
 pub const ImPlotCol_MarkerOutline: ImPlotCol_ = 2;
@@ -5748,7 +5820,7 @@ pub const ImPlotCol_AxisBgActive: ImPlotCol_ = 18;
 pub const ImPlotCol_Selection: ImPlotCol_ = 19;
 pub const ImPlotCol_Crosshairs: ImPlotCol_ = 20;
 pub const ImPlotCol_COUNT: ImPlotCol_ = 21;
-pub type ImPlotCol_ = ::std::os::raw::c_int;
+pub type ImPlotCol_ = ::std::os::raw::c_uint;
 pub const ImPlotStyleVar_LineWeight: ImPlotStyleVar_ = 0;
 pub const ImPlotStyleVar_Marker: ImPlotStyleVar_ = 1;
 pub const ImPlotStyleVar_MarkerSize: ImPlotStyleVar_ = 2;
@@ -5777,12 +5849,12 @@ pub const ImPlotStyleVar_FitPadding: ImPlotStyleVar_ = 24;
 pub const ImPlotStyleVar_PlotDefaultSize: ImPlotStyleVar_ = 25;
 pub const ImPlotStyleVar_PlotMinSize: ImPlotStyleVar_ = 26;
 pub const ImPlotStyleVar_COUNT: ImPlotStyleVar_ = 27;
-pub type ImPlotStyleVar_ = ::std::os::raw::c_int;
+pub type ImPlotStyleVar_ = ::std::os::raw::c_uint;
 pub const ImPlotScale_Linear: ImPlotScale_ = 0;
 pub const ImPlotScale_Time: ImPlotScale_ = 1;
 pub const ImPlotScale_Log10: ImPlotScale_ = 2;
 pub const ImPlotScale_SymLog: ImPlotScale_ = 3;
-pub type ImPlotScale_ = ::std::os::raw::c_int;
+pub type ImPlotScale_ = ::std::os::raw::c_uint;
 pub const ImPlotMarker_None: ImPlotMarker_ = -1;
 pub const ImPlotMarker_Circle: ImPlotMarker_ = 0;
 pub const ImPlotMarker_Square: ImPlotMarker_ = 1;
@@ -5812,7 +5884,7 @@ pub const ImPlotColormap_BrBG: ImPlotColormap_ = 12;
 pub const ImPlotColormap_PiYG: ImPlotColormap_ = 13;
 pub const ImPlotColormap_Spectral: ImPlotColormap_ = 14;
 pub const ImPlotColormap_Greys: ImPlotColormap_ = 15;
-pub type ImPlotColormap_ = ::std::os::raw::c_int;
+pub type ImPlotColormap_ = ::std::os::raw::c_uint;
 pub const ImPlotLocation_Center: ImPlotLocation_ = 0;
 pub const ImPlotLocation_North: ImPlotLocation_ = 1;
 pub const ImPlotLocation_South: ImPlotLocation_ = 2;
@@ -5822,7 +5894,7 @@ pub const ImPlotLocation_NorthWest: ImPlotLocation_ = 5;
 pub const ImPlotLocation_NorthEast: ImPlotLocation_ = 9;
 pub const ImPlotLocation_SouthWest: ImPlotLocation_ = 6;
 pub const ImPlotLocation_SouthEast: ImPlotLocation_ = 10;
-pub type ImPlotLocation_ = ::std::os::raw::c_int;
+pub type ImPlotLocation_ = ::std::os::raw::c_uint;
 pub const ImPlotBin_Sqrt: ImPlotBin_ = -1;
 pub const ImPlotBin_Sturges: ImPlotBin_ = -2;
 pub const ImPlotBin_Rice: ImPlotBin_ = -3;
@@ -5935,14 +6007,14 @@ pub const ImPlotTimeUnit_Day: ImPlotTimeUnit_ = 5;
 pub const ImPlotTimeUnit_Mo: ImPlotTimeUnit_ = 6;
 pub const ImPlotTimeUnit_Yr: ImPlotTimeUnit_ = 7;
 pub const ImPlotTimeUnit_COUNT: ImPlotTimeUnit_ = 8;
-pub type ImPlotTimeUnit_ = ::std::os::raw::c_int;
+pub type ImPlotTimeUnit_ = ::std::os::raw::c_uint;
 pub const ImPlotDateFmt_None: ImPlotDateFmt_ = 0;
 pub const ImPlotDateFmt_DayMo: ImPlotDateFmt_ = 1;
 pub const ImPlotDateFmt_DayMoYr: ImPlotDateFmt_ = 2;
 pub const ImPlotDateFmt_MoYr: ImPlotDateFmt_ = 3;
 pub const ImPlotDateFmt_Mo: ImPlotDateFmt_ = 4;
 pub const ImPlotDateFmt_Yr: ImPlotDateFmt_ = 5;
-pub type ImPlotDateFmt_ = ::std::os::raw::c_int;
+pub type ImPlotDateFmt_ = ::std::os::raw::c_uint;
 pub const ImPlotTimeFmt_None: ImPlotTimeFmt_ = 0;
 pub const ImPlotTimeFmt_Us: ImPlotTimeFmt_ = 1;
 pub const ImPlotTimeFmt_SUs: ImPlotTimeFmt_ = 2;
@@ -5953,7 +6025,7 @@ pub const ImPlotTimeFmt_HrMinSMs: ImPlotTimeFmt_ = 6;
 pub const ImPlotTimeFmt_HrMinS: ImPlotTimeFmt_ = 7;
 pub const ImPlotTimeFmt_HrMin: ImPlotTimeFmt_ = 8;
 pub const ImPlotTimeFmt_Hr: ImPlotTimeFmt_ = 9;
-pub type ImPlotTimeFmt_ = ::std::os::raw::c_int;
+pub type ImPlotTimeFmt_ = ::std::os::raw::c_uint;
 pub type ImPlotLocator = ::std::option::Option<
     unsafe extern "C" fn(
         ticker: *mut ImPlotTicker,
@@ -11661,3 +11733,4 @@ unsafe extern "C" {
         formatter_data: *mut ::std::os::raw::c_void,
     );
 }
+pub type __builtin_va_list = *mut ::std::os::raw::c_char;

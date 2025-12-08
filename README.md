@@ -110,14 +110,14 @@ cargo run --bin file_browser_imgui --features file-browser
 dear-imgui-rs = "0.6"
 # Choose a backend + platform integration
 dear-imgui-wgpu = "0.6"   # or dear-imgui-glow
-dear-imgui-winit | 0.6.x= "0.6"
+dear-imgui-winit = "0.6"
 ```
 
 ### Application Runner (Recommended for Quick Start)
 
 ```toml
 [dependencies]
-dear-app = "0.5"  # Includes dear-imgui-rs, wgpu backend, and docking support
+dear-app = "0.6"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```
 
 ### Extensions
@@ -125,18 +125,18 @@ dear-app = "0.5"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```toml
 [dependencies]
 # Plotting
-dear-implot = "0.5"      # 2D plotting
-dear-implot3d | 0.6.x= "0.5"    # 3D plotting
+dear-implot = "0.6"      # 2D plotting
+dear-implot3d = "0.6"    # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo | 0.6.x= "0.5"         # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat | 0.6.x= "0.5"    # Quaternion-based gizmo
+dear-imguizmo = "0.6"         # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = "0.6"    # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = "0.5"
+dear-imnodes = "0.6"
 
 # File Browser
-dear-file-browser | 0.6.x= "0.5"  # Native dialogs + ImGui file browser
+dear-file-browser = "0.6"  # Native dialogs + ImGui file browser
 ```
 
 ## Build Strategy

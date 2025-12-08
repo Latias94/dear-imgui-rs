@@ -12,7 +12,7 @@ use std::error::Error;
 use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context, TextureId};
-use dear_imgui_sdl3 as imgui_sdl3_backend;
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::video::{GLProfile, SwapInterval, WindowPos};
@@ -20,6 +20,9 @@ use sdl3::video::{GLProfile, SwapInterval, WindowPos};
 fn main() -> Result<(), Box<dyn Error>> {
     // Enable multi-viewport at runtime.
     const ENABLE_VIEWPORTS: bool = true;
+
+    // Enable native IME UI before creating any SDL3 windows.
+    imgui_sdl3_backend::enable_native_ime_ui();
 
     let sdl = sdl3::init()?;
     let video = sdl.video()?;
@@ -84,6 +87,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize SDL3 + OpenGL3 backends (C++ side).
     imgui_sdl3_backend::init_for_opengl(&mut imgui, &window, &gl_context, "#version 150")?;
+    // Let the backend merge all connected gamepads instead of only the first one.
+    imgui_sdl3_backend::set_gamepad_mode(GamepadMode::AutoAll);
 
     // Basic style scaling using the window's display scale.
     let window_scale = window.display_scale();
@@ -137,6 +142,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ui.text("SDL3 + OpenGL3 + Dear ImGui multi-viewport");
                 ui.separator();
                 ui.text("Drag this window outside the main viewport to spawn OS windows.");
+                ui.text("Gamepad: SDL3 backend in AutoAll mode (all controllers merged)");
             });
 
         // "Game View" window showing a static OpenGL texture. You can drag this

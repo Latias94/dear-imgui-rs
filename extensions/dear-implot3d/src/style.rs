@@ -23,7 +23,7 @@ pub fn push_style_color(idx: i32, col: [f32; 4]) {
     unsafe {
         sys::ImPlot3D_PushStyleColor_Vec4(
             idx,
-            sys::ImVec4 {
+            sys::ImVec4_c {
                 x: col[0],
                 y: col[1],
                 z: col[2],
@@ -55,7 +55,7 @@ pub fn push_style_var_vec2(idx: i32, val: [f32; 2]) {
     unsafe {
         sys::ImPlot3D_PushStyleVar_Vec2(
             idx,
-            sys::ImVec2 {
+            sys::ImVec2_c {
                 x: val[0],
                 y: val[1],
             },
@@ -73,7 +73,7 @@ pub fn pop_style_var(count: i32) {
 pub fn set_next_line_style(col: [f32; 4], weight: f32) {
     unsafe {
         sys::ImPlot3D_SetNextLineStyle(
-            sys::ImVec4 {
+            sys::ImVec4_c {
                 x: col[0],
                 y: col[1],
                 z: col[2],
@@ -88,7 +88,7 @@ pub fn set_next_line_style(col: [f32; 4], weight: f32) {
 pub fn set_next_fill_style(col: [f32; 4], alpha_mod: f32) {
     unsafe {
         sys::ImPlot3D_SetNextFillStyle(
-            sys::ImVec4 {
+            sys::ImVec4_c {
                 x: col[0],
                 y: col[1],
                 z: col[2],
@@ -111,14 +111,14 @@ pub fn set_next_marker_style(
         sys::ImPlot3D_SetNextMarkerStyle(
             marker as i32,
             size,
-            sys::ImVec4 {
+            sys::ImVec4_c {
                 x: fill[0],
                 y: fill[1],
                 z: fill[2],
                 w: fill[3],
             },
             weight,
-            sys::ImVec4 {
+            sys::ImVec4_c {
                 x: outline[0],
                 y: outline[1],
                 z: outline[2],
@@ -228,13 +228,8 @@ pub fn set_style_colormap_by_name(name: &str) {
 /// Get a color from the current colormap at index
 pub fn get_colormap_color(idx: i32) -> [f32; 4] {
     unsafe {
-        let mut out = sys::ImVec4 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            w: 1.0,
-        };
-        sys::ImPlot3D_GetColormapColor(&mut out, idx, -1);
+        // Pass -1 for "current" colormap (upstream convention)
+        let out = sys::ImPlot3D_GetColormapColor(idx, -1);
         [out.x, out.y, out.z, out.w]
     }
 }
@@ -242,13 +237,7 @@ pub fn get_colormap_color(idx: i32) -> [f32; 4] {
 /// Get next colormap color (advances internal counter)
 pub fn next_colormap_color() -> [f32; 4] {
     unsafe {
-        let mut out = sys::ImVec4 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            w: 1.0,
-        };
-        sys::ImPlot3D_NextColormapColor(&mut out);
+        let out = sys::ImPlot3D_NextColormapColor();
         [out.x, out.y, out.z, out.w]
     }
 }
