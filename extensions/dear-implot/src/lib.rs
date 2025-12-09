@@ -150,61 +150,58 @@ pub enum Marker {
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PlotColorElement {
-    Line = 0,
-    Fill = 1,
-    MarkerOutline = 2,
-    MarkerFill = 3,
-    ErrorBar = 4,
-    FrameBg = 5,
-    PlotBg = 6,
-    PlotBorder = 7,
-    LegendBackground = 8,
-    LegendBorder = 9,
-    LegendText = 10,
-    TitleText = 11,
-    InlayText = 12,
-    XAxis = 13,
-    XAxisGrid = 14,
-    YAxis = 15,
-    YAxisGrid = 16,
-    YAxis2 = 17,
-    YAxisGrid2 = 18,
-    YAxis3 = 19,
-    YAxisGrid3 = 20,
-    Selection = 21,
-    Crosshairs = 22,
-    Query = 23,
+    Line = sys::ImPlotCol_Line as u32,
+    Fill = sys::ImPlotCol_Fill as u32,
+    MarkerOutline = sys::ImPlotCol_MarkerOutline as u32,
+    MarkerFill = sys::ImPlotCol_MarkerFill as u32,
+    ErrorBar = sys::ImPlotCol_ErrorBar as u32,
+    FrameBg = sys::ImPlotCol_FrameBg as u32,
+    PlotBg = sys::ImPlotCol_PlotBg as u32,
+    PlotBorder = sys::ImPlotCol_PlotBorder as u32,
+    LegendBg = sys::ImPlotCol_LegendBg as u32,
+    LegendBorder = sys::ImPlotCol_LegendBorder as u32,
+    LegendText = sys::ImPlotCol_LegendText as u32,
+    TitleText = sys::ImPlotCol_TitleText as u32,
+    InlayText = sys::ImPlotCol_InlayText as u32,
+    AxisText = sys::ImPlotCol_AxisText as u32,
+    AxisGrid = sys::ImPlotCol_AxisGrid as u32,
+    AxisTick = sys::ImPlotCol_AxisTick as u32,
+    AxisBg = sys::ImPlotCol_AxisBg as u32,
+    AxisBgHovered = sys::ImPlotCol_AxisBgHovered as u32,
+    AxisBgActive = sys::ImPlotCol_AxisBgActive as u32,
+    Selection = sys::ImPlotCol_Selection as u32,
+    Crosshairs = sys::ImPlotCol_Crosshairs as u32,
 }
 
 /// Built-in colormaps
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Colormap {
-    Deep = 0,
-    Dark = 1,
-    Pastel = 2,
-    Paired = 3,
-    Viridis = 4,
-    Plasma = 5,
-    Hot = 6,
-    Cool = 7,
-    Pink = 8,
-    Jet = 9,
+    Deep = sys::ImPlotColormap_Deep as u32,
+    Dark = sys::ImPlotColormap_Dark as u32,
+    Pastel = sys::ImPlotColormap_Pastel as u32,
+    Paired = sys::ImPlotColormap_Paired as u32,
+    Viridis = sys::ImPlotColormap_Viridis as u32,
+    Plasma = sys::ImPlotColormap_Plasma as u32,
+    Hot = sys::ImPlotColormap_Hot as u32,
+    Cool = sys::ImPlotColormap_Cool as u32,
+    Pink = sys::ImPlotColormap_Pink as u32,
+    Jet = sys::ImPlotColormap_Jet as u32,
 }
 
 /// Plot location for legends, labels, etc.
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PlotLocation {
-    Center = 0,
-    North = 1,
-    South = 2,
-    West = 4,
-    East = 8,
-    NorthWest = 5,
-    NorthEast = 9,
-    SouthWest = 6,
-    SouthEast = 10,
+    Center = sys::ImPlotLocation_Center as u32,
+    North = sys::ImPlotLocation_North as u32,
+    South = sys::ImPlotLocation_South as u32,
+    West = sys::ImPlotLocation_West as u32,
+    East = sys::ImPlotLocation_East as u32,
+    NorthWest = sys::ImPlotLocation_NorthWest as u32,
+    NorthEast = sys::ImPlotLocation_NorthEast as u32,
+    SouthWest = sys::ImPlotLocation_SouthWest as u32,
+    SouthEast = sys::ImPlotLocation_SouthEast as u32,
 }
 
 /// Plot orientation
@@ -229,81 +226,81 @@ pub enum BinMethod {
 bitflags::bitflags! {
     /// Flags for heatmap plots
     pub struct HeatmapFlags: u32 {
-        const NONE = 0;
-        const COL_MAJOR = 1 << 10;
+        const NONE = sys::ImPlotHeatmapFlags_None as u32;
+        const COL_MAJOR = sys::ImPlotHeatmapFlags_ColMajor as u32;
     }
 }
 
 bitflags::bitflags! {
     /// Flags for histogram plots
     pub struct HistogramFlags: u32 {
-        const NONE = 0;
-        const HORIZONTAL = 1 << 10;
-        const CUMULATIVE = 1 << 11;
-        const DENSITY = 1 << 12;
-        const NO_OUTLIERS = 1 << 13;
-        const COL_MAJOR = 1 << 14;
+        const NONE = sys::ImPlotHistogramFlags_None as u32;
+        const HORIZONTAL = sys::ImPlotHistogramFlags_Horizontal as u32;
+        const CUMULATIVE = sys::ImPlotHistogramFlags_Cumulative as u32;
+        const DENSITY = sys::ImPlotHistogramFlags_Density as u32;
+        const NO_OUTLIERS = sys::ImPlotHistogramFlags_NoOutliers as u32;
+        const COL_MAJOR = sys::ImPlotHistogramFlags_ColMajor as u32;
     }
 }
 
 bitflags::bitflags! {
     /// Flags for pie chart plots
     pub struct PieChartFlags: u32 {
-        const NONE = 0;
-        const NORMALIZE = 1 << 10;
-        const IGNORE_HIDDEN = 1 << 11;
-        const EXPLODING = 1 << 12;
+        const NONE = sys::ImPlotPieChartFlags_None as u32;
+        const NORMALIZE = sys::ImPlotPieChartFlags_Normalize as u32;
+        const IGNORE_HIDDEN = sys::ImPlotPieChartFlags_IgnoreHidden as u32;
+        const EXPLODING = sys::ImPlotPieChartFlags_Exploding as u32;
     }
 }
 
 bitflags::bitflags! {
     /// Flags for line plots
     pub struct LineFlags: u32 {
-        const NONE = 0;
-        const SEGMENTS = 1 << 10;
-        const LOOP = 1 << 11;
-        const SKIP_NAN = 1 << 12;
-        const NO_CLIP = 1 << 13;
-        const SHADED = 1 << 14;
+        const NONE = sys::ImPlotLineFlags_None as u32;
+        const SEGMENTS = sys::ImPlotLineFlags_Segments as u32;
+        const LOOP = sys::ImPlotLineFlags_Loop as u32;
+        const SKIP_NAN = sys::ImPlotLineFlags_SkipNaN as u32;
+        const NO_CLIP = sys::ImPlotLineFlags_NoClip as u32;
+        const SHADED = sys::ImPlotLineFlags_Shaded as u32;
     }
 }
 
 bitflags::bitflags! {
     /// Flags for scatter plots
     pub struct ScatterFlags: u32 {
-        const NONE = 0;
-        const NO_CLIP = 1 << 10;
+        const NONE = sys::ImPlotScatterFlags_None as u32;
+        const NO_CLIP = sys::ImPlotScatterFlags_NoClip as u32;
     }
 }
 
 bitflags::bitflags! {
     /// Flags for bar plots
     pub struct BarsFlags: u32 {
-        const NONE = 0;
-        const HORIZONTAL = 1 << 10;
+        const NONE = sys::ImPlotBarsFlags_None as u32;
+        const HORIZONTAL = sys::ImPlotBarsFlags_Horizontal as u32;
     }
 }
 
 bitflags::bitflags! {
     /// Flags for shaded plots
     pub struct ShadedFlags: u32 {
-        const NONE = 0;
+        const NONE = sys::ImPlotShadedFlags_None as u32;
     }
 }
 
 bitflags::bitflags! {
     /// Flags for stem plots
     pub struct StemsFlags: u32 {
-        const NONE = 0;
-        const HORIZONTAL = 1 << 10;
+        const NONE = sys::ImPlotStemsFlags_None as u32;
+        const HORIZONTAL = sys::ImPlotStemsFlags_Horizontal as u32;
     }
 }
 
 bitflags::bitflags! {
     /// Flags for error bar plots
     pub struct ErrorBarsFlags: u32 {
-        const NONE = 0;
-        const HORIZONTAL = 1 << 10;
+        const NONE = sys::ImPlotErrorBarsFlags_None as u32;
+        const HORIZONTAL = sys::ImPlotErrorBarsFlags_Horizontal as u32;
     }
 }
 
@@ -311,9 +308,9 @@ bitflags::bitflags! {
     /// Flags for stairs plots
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct StairsFlags: u32 {
-        const NONE = 0;
-        const PRE_STEP = 1 << 10;
-        const SHADED = 1 << 11;
+        const NONE = sys::ImPlotStairsFlags_None as u32;
+        const PRE_STEP = sys::ImPlotStairsFlags_PreStep as u32;
+        const SHADED = sys::ImPlotStairsFlags_Shaded as u32;
     }
 }
 
@@ -321,9 +318,9 @@ bitflags::bitflags! {
     /// Flags for bar groups plots
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct BarGroupsFlags: u32 {
-        const NONE = 0;
-        const HORIZONTAL = 1 << 10;
-        const STACKED = 1 << 11;
+        const NONE = sys::ImPlotBarGroupsFlags_None as u32;
+        const HORIZONTAL = sys::ImPlotBarGroupsFlags_Horizontal as u32;
+        const STACKED = sys::ImPlotBarGroupsFlags_Stacked as u32;
     }
 }
 
@@ -331,7 +328,7 @@ bitflags::bitflags! {
     /// Flags for digital plots
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct DigitalFlags: u32 {
-        const NONE = 0;
+        const NONE = sys::ImPlotDigitalFlags_None as u32;
     }
 }
 
@@ -339,8 +336,8 @@ bitflags::bitflags! {
     /// Flags for text plots
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct TextFlags: u32 {
-        const NONE = 0;
-        const VERTICAL = 1 << 10;
+        const NONE = sys::ImPlotTextFlags_None as u32;
+        const VERTICAL = sys::ImPlotTextFlags_Vertical as u32;
     }
 }
 
@@ -348,7 +345,7 @@ bitflags::bitflags! {
     /// Flags for dummy plots
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct DummyFlags: u32 {
-        const NONE = 0;
+        const NONE = sys::ImPlotDummyFlags_None as u32;
     }
 }
 
@@ -356,11 +353,11 @@ bitflags::bitflags! {
     /// Flags for drag tools (points/lines)
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct DragToolFlags: u32 {
-        const NONE = 0;
-        const NO_CURSORS = 1 << 0;
-        const NO_FIT = 1 << 1;
-        const NO_INPUTS = 1 << 2;
-        const DELAYED = 1 << 3;
+        const NONE = sys::ImPlotDragToolFlags_None as u32;
+        const NO_CURSORS = sys::ImPlotDragToolFlags_NoCursors as u32;
+        const NO_FIT = sys::ImPlotDragToolFlags_NoFit as u32;
+        const NO_INPUTS = sys::ImPlotDragToolFlags_NoInputs as u32;
+        const DELAYED = sys::ImPlotDragToolFlags_Delayed as u32;
     }
 }
 
@@ -368,8 +365,8 @@ bitflags::bitflags! {
     /// Flags for infinite lines plots
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct InfLinesFlags: u32 {
-        const NONE = 0;
-        const HORIZONTAL = 1 << 10;
+        const NONE = sys::ImPlotInfLinesFlags_None as u32;
+        const HORIZONTAL = sys::ImPlotInfLinesFlags_Horizontal as u32;
     }
 }
 
@@ -377,7 +374,7 @@ bitflags::bitflags! {
     /// Flags for image plots
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ImageFlags: u32 {
-        const NONE = 0;
+        const NONE = sys::ImPlotImageFlags_None as u32;
     }
 }
 
@@ -385,23 +382,23 @@ bitflags::bitflags! {
     /// Axis flags matching ImPlotAxisFlags_ (see cimplot.h)
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct AxisFlags: u32 {
-        const NONE           = 0;
-        const NO_LABEL       = 1 << 0;
-        const NO_GRID_LINES  = 1 << 1;
-        const NO_TICK_MARKS  = 1 << 2;
-        const NO_TICK_LABELS = 1 << 3;
-        const NO_INITIAL_FIT = 1 << 4;
-        const NO_MENUS       = 1 << 5;
-        const NO_SIDE_SWITCH = 1 << 6;
-        const NO_HIGHLIGHT   = 1 << 7;
-        const OPPOSITE       = 1 << 8;
-        const FOREGROUND     = 1 << 9;
-        const INVERT         = 1 << 10;
-        const AUTO_FIT       = 1 << 11;
-        const RANGE_FIT      = 1 << 12;
-        const PAN_STRETCH    = 1 << 13;
-        const LOCK_MIN       = 1 << 14;
-        const LOCK_MAX       = 1 << 15;
+        const NONE           = sys::ImPlotAxisFlags_None as u32;
+        const NO_LABEL       = sys::ImPlotAxisFlags_NoLabel as u32;
+        const NO_GRID_LINES  = sys::ImPlotAxisFlags_NoGridLines as u32;
+        const NO_TICK_MARKS  = sys::ImPlotAxisFlags_NoTickMarks as u32;
+        const NO_TICK_LABELS = sys::ImPlotAxisFlags_NoTickLabels as u32;
+        const NO_INITIAL_FIT = sys::ImPlotAxisFlags_NoInitialFit as u32;
+        const NO_MENUS       = sys::ImPlotAxisFlags_NoMenus as u32;
+        const NO_SIDE_SWITCH = sys::ImPlotAxisFlags_NoSideSwitch as u32;
+        const NO_HIGHLIGHT   = sys::ImPlotAxisFlags_NoHighlight as u32;
+        const OPPOSITE       = sys::ImPlotAxisFlags_Opposite as u32;
+        const FOREGROUND     = sys::ImPlotAxisFlags_Foreground as u32;
+        const INVERT         = sys::ImPlotAxisFlags_Invert as u32;
+        const AUTO_FIT       = sys::ImPlotAxisFlags_AutoFit as u32;
+        const RANGE_FIT      = sys::ImPlotAxisFlags_RangeFit as u32;
+        const PAN_STRETCH    = sys::ImPlotAxisFlags_PanStretch as u32;
+        const LOCK_MIN       = sys::ImPlotAxisFlags_LockMin as u32;
+        const LOCK_MAX       = sys::ImPlotAxisFlags_LockMax as u32;
     }
 }
 

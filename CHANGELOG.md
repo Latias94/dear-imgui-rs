@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - dear-imgui-rs
   - Align `FontLoaderFlags` with Dear ImGui's `ImGuiFreeTypeLoaderFlags`, fixing the bit mapping for FreeType integration (e.g. `LOAD_COLOR` now correctly enables color-layered glyphs instead of toggling hinting).
+  - Align child window `ChildFlags` with Dear ImGui's `ImGuiChildFlags` constants instead of hard-coded bit positions (safer against future upstream changes).
+- dear-implot
+  - Align plot enums and flags with the updated ImPlot C API (`PlotColorElement`, colormap/legend locations, and axis/plot flag bitfields now map directly to `ImPlot*` constants).
+ - dear-imguizmo
+   - Align gizmo operation, mode, and color enums with the underlying C API (`OPERATION`, `MODE`, and `COLOR` constants), removing hard-coded bit patterns and indices.
 
 ## [0.6.0] - 2025-11-28
 
@@ -129,6 +134,11 @@ Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new
 - `dear-imguizmo` → 0.6.0 (+ `dear-imguizmo-sys` → 0.6.0)
 - `dear-imguizmo-quat` → 0.6.0 (+ `dear-imguizmo-quat-sys` → 0.6.0)
 - `dear-file-browser` → 0.6.0
+
+### Misc
+
+- Documentation and minor internal cleanups for extension crates:
+  - Fix and consolidate READMEs / examples across `dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`, and `dear-file-browser`.
 
 ## [0.5.0] - 2025-10-24
 

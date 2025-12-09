@@ -34,23 +34,23 @@ bitflags::bitflags! {
         /// No flags
         const NONE = 0;
         /// Show an outer border and enable WindowPadding
-        const BORDERS = 1 << 0;
+        const BORDERS = sys::ImGuiChildFlags_Borders as u32;
         /// Pad with style.WindowPadding even if no border are drawn
-        const ALWAYS_USE_WINDOW_PADDING = 1 << 1;
+        const ALWAYS_USE_WINDOW_PADDING = sys::ImGuiChildFlags_AlwaysUseWindowPadding as u32;
         /// Allow resize from right border
-        const RESIZE_X = 1 << 2;
+        const RESIZE_X = sys::ImGuiChildFlags_ResizeX as u32;
         /// Allow resize from bottom border
-        const RESIZE_Y = 1 << 3;
+        const RESIZE_Y = sys::ImGuiChildFlags_ResizeY as u32;
         /// Enable auto-resizing width
-        const AUTO_RESIZE_X = 1 << 4;
+        const AUTO_RESIZE_X = sys::ImGuiChildFlags_AutoResizeX as u32;
         /// Enable auto-resizing height
-        const AUTO_RESIZE_Y = 1 << 5;
+        const AUTO_RESIZE_Y = sys::ImGuiChildFlags_AutoResizeY as u32;
         /// Combined with AutoResizeX/AutoResizeY. Always measure size even when child is hidden
-        const ALWAYS_AUTO_RESIZE = 1 << 6;
+        const ALWAYS_AUTO_RESIZE = sys::ImGuiChildFlags_AlwaysAutoResize as u32;
         /// Style the child window like a framed item
-        const FRAME_STYLE = 1 << 7;
+        const FRAME_STYLE = sys::ImGuiChildFlags_FrameStyle as u32;
         /// Share focus scope, allow gamepad/keyboard navigation to cross over parent border
-        const NAV_FLATTENED = 1 << 8;
+        const NAV_FLATTENED = sys::ImGuiChildFlags_NavFlattened as u32;
     }
 }
 

@@ -3,26 +3,26 @@ use dear_imguizmo_sys as sys;
 bitflags::bitflags! {
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Operation: u32 {
-        const TRANSLATE_X = 1 << 0;
-        const TRANSLATE_Y = 1 << 1;
-        const TRANSLATE_Z = 1 << 2;
-        const ROTATE_X    = 1 << 3;
-        const ROTATE_Y    = 1 << 4;
-        const ROTATE_Z    = 1 << 5;
-        const ROTATE_SCREEN = 1 << 6;
-        const SCALE_X     = 1 << 7;
-        const SCALE_Y     = 1 << 8;
-        const SCALE_Z     = 1 << 9;
-        const BOUNDS      = 1 << 10;
-        const SCALE_UNIFORM_X = 1 << 11;
-        const SCALE_UNIFORM_Y = 1 << 12;
-        const SCALE_UNIFORM_Z = 1 << 13;
+        const TRANSLATE_X     = sys::TRANSLATE_X as u32;
+        const TRANSLATE_Y     = sys::TRANSLATE_Y as u32;
+        const TRANSLATE_Z     = sys::TRANSLATE_Z as u32;
+        const ROTATE_X        = sys::ROTATE_X as u32;
+        const ROTATE_Y        = sys::ROTATE_Y as u32;
+        const ROTATE_Z        = sys::ROTATE_Z as u32;
+        const ROTATE_SCREEN   = sys::ROTATE_SCREEN as u32;
+        const SCALE_X         = sys::SCALE_X as u32;
+        const SCALE_Y         = sys::SCALE_Y as u32;
+        const SCALE_Z         = sys::SCALE_Z as u32;
+        const BOUNDS          = sys::BOUNDS as u32;
+        const SCALE_UNIFORM_X = sys::SCALE_XU as u32;
+        const SCALE_UNIFORM_Y = sys::SCALE_YU as u32;
+        const SCALE_UNIFORM_Z = sys::SCALE_ZU as u32;
 
-        const TRANSLATE = Self::TRANSLATE_X.bits() | Self::TRANSLATE_Y.bits() | Self::TRANSLATE_Z.bits();
-        const ROTATE    = Self::ROTATE_X.bits() | Self::ROTATE_Y.bits() | Self::ROTATE_Z.bits() | Self::ROTATE_SCREEN.bits();
-        const SCALE     = Self::SCALE_X.bits() | Self::SCALE_Y.bits() | Self::SCALE_Z.bits();
-        const SCALE_UNIFORM = Self::SCALE_UNIFORM_X.bits() | Self::SCALE_UNIFORM_Y.bits() | Self::SCALE_UNIFORM_Z.bits();
-        const UNIVERSAL = Self::TRANSLATE.bits() | Self::ROTATE.bits() | Self::SCALE_UNIFORM.bits();
+        const TRANSLATE    = sys::TRANSLATE as u32;
+        const ROTATE       = sys::ROTATE as u32;
+        const SCALE        = sys::SCALE as u32;
+        const SCALE_UNIFORM= sys::SCALEU as u32;
+        const UNIVERSAL    = sys::UNIVERSAL as u32;
     }
 }
 
@@ -44,16 +44,13 @@ bitflags::bitflags! {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Mode {
-    Local = 0,
-    World = 1,
+    Local = sys::LOCAL as u32,
+    World = sys::WORLD as u32,
 }
 
 impl From<Mode> for sys::MODE {
     fn from(value: Mode) -> Self {
-        match value {
-            Mode::Local => 0 as sys::MODE,
-            Mode::World => 1 as sys::MODE,
-        }
+        value as sys::MODE
     }
 }
 
@@ -61,22 +58,22 @@ impl From<Mode> for sys::MODE {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Color {
-    DirectionX = 0,
-    DirectionY = 1,
-    DirectionZ = 2,
-    PlaneX = 3,
-    PlaneY = 4,
-    PlaneZ = 5,
-    Selection = 6,
-    Inactive = 7,
-    TranslationLine = 8,
-    ScaleLine = 9,
-    RotationUsingBorder = 10,
-    RotationUsingFill = 11,
-    HatchedAxisLines = 12,
-    Text = 13,
-    TextShadow = 14,
-    Count = 15,
+    DirectionX = sys::DIRECTION_X as u32,
+    DirectionY = sys::DIRECTION_Y as u32,
+    DirectionZ = sys::DIRECTION_Z as u32,
+    PlaneX = sys::PLANE_X as u32,
+    PlaneY = sys::PLANE_Y as u32,
+    PlaneZ = sys::PLANE_Z as u32,
+    Selection = sys::SELECTION as u32,
+    Inactive = sys::INACTIVE as u32,
+    TranslationLine = sys::TRANSLATION_LINE as u32,
+    ScaleLine = sys::SCALE_LINE as u32,
+    RotationUsingBorder = sys::ROTATION_USING_BORDER as u32,
+    RotationUsingFill = sys::ROTATION_USING_FILL as u32,
+    HatchedAxisLines = sys::HATCHED_AXIS_LINES as u32,
+    Text = sys::TEXT as u32,
+    TextShadow = sys::TEXT_SHADOW as u32,
+    Count = sys::COUNT as u32,
 }
 
 /// Draw list destination for ImGuizmo rendering

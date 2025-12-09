@@ -309,31 +309,32 @@ impl LegendManager {
     }
 }
 
-/// Legend location options
+/// Legend location options (ImPlotLocation)
 #[repr(i32)]
 pub enum LegendLocation {
-    Center = 0,
-    North = 1,
-    South = 2,
-    West = 4,
-    East = 8,
-    NorthWest = 5,
-    NorthEast = 9,
-    SouthWest = 6,
-    SouthEast = 10,
+    Center = sys::ImPlotLocation_Center as i32,
+    North = sys::ImPlotLocation_North as i32,
+    South = sys::ImPlotLocation_South as i32,
+    West = sys::ImPlotLocation_West as i32,
+    East = sys::ImPlotLocation_East as i32,
+    NorthWest = sys::ImPlotLocation_NorthWest as i32,
+    NorthEast = sys::ImPlotLocation_NorthEast as i32,
+    SouthWest = sys::ImPlotLocation_SouthWest as i32,
+    SouthEast = sys::ImPlotLocation_SouthEast as i32,
 }
 
 bitflags::bitflags! {
-    /// Flags for legend configuration
+    /// Flags for legend configuration (ImPlotLegendFlags)
     pub struct LegendFlags: u32 {
-        const NONE = 0;
-        const NO_BUTTONS = 1 << 0;
-        const NO_HIGHLIGHT_ITEM = 1 << 1;
-        const NO_HIGHLIGHT_AXIS = 1 << 2;
-        const NO_MENUS = 1 << 3;
-        const OUTSIDE = 1 << 4;
-        const HORIZONTAL = 1 << 5;
-        const SORT = 1 << 6;
+        const NONE              = sys::ImPlotLegendFlags_None as u32;
+        const NO_BUTTONS        = sys::ImPlotLegendFlags_NoButtons as u32;
+        const NO_HIGHLIGHT_ITEM = sys::ImPlotLegendFlags_NoHighlightItem as u32;
+        const NO_HIGHLIGHT_AXIS = sys::ImPlotLegendFlags_NoHighlightAxis as u32;
+        const NO_MENUS          = sys::ImPlotLegendFlags_NoMenus as u32;
+        const OUTSIDE           = sys::ImPlotLegendFlags_Outside as u32;
+        const HORIZONTAL        = sys::ImPlotLegendFlags_Horizontal as u32;
+        const SORT              = sys::ImPlotLegendFlags_Sort as u32;
+        // Note: ImPlotLegendFlags_Reverse is currently not exposed.
     }
 }
 
