@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0] - 2025-11-27
+## [Unreleased] - 0.7.0
+
+### Added
+
+- Upgrade ImPlot3D stack to the latest upstream:
+  - Pull `cimplot3d` to `main` with `implot3d v0.3` and Dear ImGui 1.92.5.
+  - Regenerate `dear-implot3d-sys` bindings against the updated C API.
+- Extend safe bindings to cover new/improved APIs:
+  - Box helpers now use double-precision (`SetupBoxScale/Rotation/InitialRotation`).
+  - Colormap helpers mirror upstream `ImPlot3D_GetColormapColor` / `NextColormapColor` signatures.
+  - Image helpers (`image_by_axes`, `image_by_corners`) use the new `ImTextureRef` + f64 coordinates
+
+### Changed
+
+- dear-imgui-rs
+  - Align `FontLoaderFlags` with Dear ImGui's `ImGuiFreeTypeLoaderFlags`, fixing the bit mapping for FreeType integration (e.g. `LOAD_COLOR` now correctly enables color-layered glyphs instead of toggling hinting).
+
+## [0.6.0] - 2025-11-28
 
 Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new return-by-value helpers, and refresh all C API submodules.
 

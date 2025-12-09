@@ -75,7 +75,12 @@ impl FontLoader {
     }
 }
 
-/// Font loader flags for controlling font loading behavior
+/// Font loader flags for controlling font loading behavior.
+///
+/// These bits mirror Dear ImGui's `ImGuiFreeTypeLoaderFlags` (see
+/// `misc/freetype/imgui_freetype.h`) and are only interpreted by the
+/// FreeType font backend. When using the stb_truetype backend, they
+/// are ignored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FontLoaderFlags(pub u32);
 
@@ -83,17 +88,35 @@ impl FontLoaderFlags {
     /// No special flags
     pub const NONE: Self = Self(0);
 
-    /// Load color glyphs (requires FreeType backend)
-    pub const LOAD_COLOR: Self = Self(1 << 0);
+    /// Disable hinting (more faithful to the original glyph shapes, but blurrier)
+    pub const NO_HINTING: Self = Self(1 << 0);
 
-    /// Force auto-hinting
-    pub const FORCE_AUTOHINT: Self = Self(1 << 1);
+    /// Disable auto-hinter (prefer the font's native hinter only)
+    pub const NO_AUTOHINT: Self = Self(1 << 1);
 
-    /// Disable hinting
-    pub const NO_HINTING: Self = Self(1 << 2);
+    /// Prefer auto-hinter over the font's native hinter
+    pub const FORCE_AUTOHINT: Self = Self(1 << 2);
 
-    /// Disable auto-hinting
-    pub const NO_AUTOHINT: Self = Self(1 << 3);
+    /// Light hinting (often closer to Windows ClearType appearance)
+    pub const LIGHT_HINTING: Self = Self(1 << 3);
+
+    /// Strong/mono hinting (intended for monochrome outputs)
+    pub const MONO_HINTING: Self = Self(1 << 4);
+
+    /// Artificially embolden the font
+    pub const BOLD: Self = Self(1 << 5);
+
+    /// Artificially slant the font (oblique)
+    pub const OBLIQUE: Self = Self(1 << 6);
+
+    /// Disable anti-aliasing (combine with `MONO_HINTING` for best results)
+    pub const MONOCHROME: Self = Self(1 << 7);
+
+    /// Enable color-layered glyphs (e.g. color emoji)
+    pub const LOAD_COLOR: Self = Self(1 << 8);
+
+    /// Enable FreeType bitmap glyphs
+    pub const BITMAP: Self = Self(1 << 9);
 }
 
 impl std::ops::BitOr for FontLoaderFlags {
