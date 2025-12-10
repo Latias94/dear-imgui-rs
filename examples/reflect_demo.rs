@@ -357,6 +357,11 @@ fn main() {
         // self-contained and does not rely on external setup.
         configure_global_reflect_settings();
 
+        // Collect container-structure events (insert/remove/reorder/rename)
+        // while the reflected UI is rendered, using the new ReflectResponse
+        // API as a lightweight analogue to ImReflect's ImResponse.
+        let mut response = reflect::ReflectResponse::default();
+
         ui.window("Reflect Demo")
             .size([520.0, 640.0], Condition::FirstUseEver)
             .build(|| {
@@ -364,23 +369,48 @@ fn main() {
                 ui.separator();
 
                 if let Some(_node) = ui.tree_node("Primitives & Bool Styles") {
-                    ui.input_reflect("Primitives", &mut state.primitives);
+                    reflect::input_with_response(
+                        ui,
+                        "Primitives",
+                        &mut state.primitives,
+                        &mut response,
+                    );
                 }
 
                 if let Some(_node) = ui.tree_node("Text & Containers") {
-                    ui.input_reflect("Text/Containers", &mut state.text_and_containers);
+                    reflect::input_with_response(
+                        ui,
+                        "Text/Containers",
+                        &mut state.text_and_containers,
+                        &mut response,
+                    );
                 }
 
                 if let Some(_node) = ui.tree_node("Maps & Tuples") {
-                    ui.input_reflect("Maps/Tuples", &mut state.maps_and_tuples);
+                    reflect::input_with_response(
+                        ui,
+                        "Maps/Tuples",
+                        &mut state.maps_and_tuples,
+                        &mut response,
+                    );
                 }
 
                 if let Some(_node) = ui.tree_node("Pointers") {
-                    ui.input_reflect("Pointers", &mut state.pointers);
+                    reflect::input_with_response(
+                        ui,
+                        "Pointers",
+                        &mut state.pointers,
+                        &mut response,
+                    );
                 }
 
                 if let Some(_node) = ui.tree_node("Type-level Numerics") {
-                    ui.input_reflect("Type Defaults", &mut state.type_level_numerics);
+                    reflect::input_with_response(
+                        ui,
+                        "Type Defaults",
+                        &mut state.type_level_numerics,
+                        &mut response,
+                    );
                 }
 
                 if let Some(_node) = ui.tree_node("Enums") {
@@ -390,6 +420,74 @@ fn main() {
 
                 if let Some(_node) = ui.tree_node("glam Vectors") {
                     ui.input_reflect("Glam", &mut state.glam);
+                }
+
+                if let Some(_node) = ui.tree_node("ReflectResponse Events") {
+                    if response.is_empty() {
+                        ui.text("No container-structure events this frame.");
+                    } else {
+                        ui.text("Container events this frame:");
+                        for event in response.events() {
+                            match event {
+                                reflect::ReflectEvent::VecInserted { path, index } => {
+                                    let path = path.as_deref().unwrap_or("<unknown field>");
+                                    ui.bullet_text(&format!(
+                                        "VecInserted at index {} (field: {})",
+                                        index, path
+                                    ));
+                                }
+                                reflect::ReflectEvent::VecRemoved { path, index } => {
+                                    let path = path.as_deref().unwrap_or("<unknown field>");
+                                    ui.bullet_text(&format!(
+                                        "VecRemoved at index {} (field: {})",
+                                        index, path
+                                    ));
+                                }
+                                reflect::ReflectEvent::VecReordered { path, from, to } => {
+                                    let path = path.as_deref().unwrap_or("<unknown field>");
+                                    ui.bullet_text(&format!(
+                                        "VecReordered {} -> {} (field: {})",
+                                        from, to, path
+                                    ));
+                                }
+                                reflect::ReflectEvent::ArrayReordered { path, from, to } => {
+                                    let path = path.as_deref().unwrap_or("<unknown field>");
+                                    ui.bullet_text(&format!(
+                                        "ArrayReordered {} <-> {} (field: {})",
+                                        from, to, path
+                                    ));
+                                }
+                                reflect::ReflectEvent::MapInserted { path, key } => {
+                                    let path = path.as_deref().unwrap_or("<unknown field>");
+                                    ui.bullet_text(&format!(
+                                        "MapInserted key \"{}\" (field: {})",
+                                        key, path
+                                    ));
+                                }
+                                reflect::ReflectEvent::MapRemoved { path, key } => {
+                                    let path = path.as_deref().unwrap_or("<unknown field>");
+                                    ui.bullet_text(&format!(
+                                        "MapRemoved key \"{}\" (field: {})",
+                                        key, path
+                                    ));
+                                }
+                                reflect::ReflectEvent::MapRenamed { path, from, to } => {
+                                    let path = path.as_deref().unwrap_or("<unknown field>");
+                                    ui.bullet_text(&format!(
+                                        "MapRenamed \"{}\" -> \"{}\" (field: {})",
+                                        from, to, path
+                                    ));
+                                }
+                                reflect::ReflectEvent::MapCleared { path, previous_len } => {
+                                    let path = path.as_deref().unwrap_or("<unknown field>");
+                                    ui.bullet_text(&format!(
+                                        "MapCleared ({} entries removed) (field: {})",
+                                        previous_len, path
+                                    ));
+                                }
+                            }
+                        }
+                    }
                 }
 
                 ui.separator();
