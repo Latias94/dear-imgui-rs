@@ -23,6 +23,7 @@ cfg-if.workspace = true
 thiserror.workspace = true
 tracing = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
+glam = { workspace = true, optional = true }
 
 [features]
 default = ["tracing"]
@@ -37,6 +38,9 @@ wasm = ["dear-imgui-sys/wasm"]
 # Experimental: enable direct font atlas access on wasm. Requires the shared
 # memory provider (imgui-sys-v0) built via xtask; API and behaviour may change.
 wasm-font-atlas-experimental = []
+# Optional math interop: enable glam support in the sys crate so draw/list APIs
+# taking Into<sys::ImVec2>/ImVec4 can accept glam vectors directly.
+glam = ["dep:glam", "dear-imgui-sys/glam"]
 
 [dev-dependencies]
 approx = "0.5"

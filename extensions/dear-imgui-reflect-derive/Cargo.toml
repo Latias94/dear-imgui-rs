@@ -1,0 +1,19 @@
+[package]
+name = "dear-imgui-reflect-derive"
+version = "0.6.0"
+edition.workspace = true
+description = "Derive macro for dear-imgui-reflect"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+

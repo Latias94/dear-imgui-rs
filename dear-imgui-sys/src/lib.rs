@@ -122,6 +122,14 @@ impl From<mint::Vector2<f32>> for ImVec2 {
     }
 }
 
+#[cfg(feature = "glam")]
+impl From<glam::Vec2> for ImVec2 {
+    #[inline]
+    fn from(v: glam::Vec2) -> ImVec2 {
+        ImVec2::new(v.x, v.y)
+    }
+}
+
 impl ImVec4 {
     #[inline]
     pub const fn new(x: f32, y: f32, z: f32, w: f32) -> ImVec4 {
@@ -170,6 +178,14 @@ impl From<ImVec4> for (f32, f32, f32, f32) {
 impl From<mint::Vector4<f32>> for ImVec4 {
     #[inline]
     fn from(v: mint::Vector4<f32>) -> ImVec4 {
+        ImVec4::new(v.x, v.y, v.z, v.w)
+    }
+}
+
+#[cfg(feature = "glam")]
+impl From<glam::Vec4> for ImVec4 {
+    #[inline]
+    fn from(v: glam::Vec4) -> ImVec4 {
         ImVec4::new(v.x, v.y, v.z, v.w)
     }
 }

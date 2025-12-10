@@ -19,6 +19,8 @@ members = [
     "extensions/dear-imguizmo-quat",
     "extensions/dear-imnodes-sys",
     "extensions/dear-imnodes",
+    "extensions/dear-imgui-reflect",
+    "extensions/dear-imgui-reflect-derive",
     "examples",
     "examples-wasm",
     "xtask",

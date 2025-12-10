@@ -649,13 +649,20 @@ unsafe extern "C" fn formatter_thunk(
     if user_data.is_null() || buff.is_null() || size <= 0 {
         return 0;
     }
-    let holder = unsafe { &*(user_data as *const FormatterHolder) };
+    // Safety: ImPlot passes back the same pointer we provided in `AxisFormatterToken::new`.
+    let holder = &*(user_data as *const FormatterHolder);
     let s = (holder.func)(value);
     let bytes = s.as_bytes();
     let max = (size - 1).max(0) as usize;
     let n = bytes.len().min(max);
-    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buff as *mut u8, n);
-    *buff.add(n) = 0;
+
+    // Safety: `buff` is assumed to point to a valid buffer of at least `size`
+    // bytes, with space for a terminating null. This matches ImPlot's
+    // formatter contract.
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buff as *mut u8, n);
+        *buff.add(n) = 0;
+    }
     n as std::os::raw::c_int
 }
 

@@ -704,6 +704,10 @@ impl<'ui> NodeEditor<'ui> {
 impl PostEditor {
     /// Save current editor state to an INI string
     pub fn save_state_to_ini_string(&self) -> String {
+        // Safety: ImNodes returns a pointer to an internal, null-terminated INI
+        // buffer and writes its size into `size`. The pointer remains valid
+        // until the next save/load call on the same editor, which we do not
+        // perform while this slice is alive.
         unsafe {
             let mut size: usize = 0;
             let ptr = sys::imnodes_SaveCurrentEditorStateToIniString(&mut size as *mut usize);
@@ -717,6 +721,9 @@ impl PostEditor {
 
     /// Load editor state from an INI string
     pub fn load_state_from_ini_string(&self, data: &str) {
+        // Safety: ImNodes expects a pointer to a valid UTF-8 buffer and its
+        // length; `data.as_ptr()` and `data.len()` satisfy this for the
+        // duration of the call.
         unsafe {
             sys::imnodes_LoadCurrentEditorStateFromIniString(
                 data.as_ptr() as *const i8,
@@ -727,10 +734,13 @@ impl PostEditor {
     /// Save/Load current editor state to/from INI file
     pub fn save_state_to_ini_file(&self, file_name: &str) {
         let c = std::ffi::CString::new(file_name).unwrap_or_default();
+        // Safety: `CString` guarantees a NUL-terminated string for the
+        // duration of the call; ImNodes reads it as a const char*.
         unsafe { sys::imnodes_SaveCurrentEditorStateToIniFile(c.as_ptr()) }
     }
     pub fn load_state_from_ini_file(&self, file_name: &str) {
         let c = std::ffi::CString::new(file_name).unwrap_or_default();
+        // Safety: see `save_state_to_ini_file`.
         unsafe { sys::imnodes_LoadCurrentEditorStateFromIniFile(c.as_ptr()) }
     }
     /// Selection helpers per id
@@ -753,6 +763,8 @@ impl PostEditor {
         unsafe { sys::imnodes_IsLinkSelected(link_id) }
     }
     pub fn selected_nodes(&self) -> Vec<i32> {
+        // Safety: ImNodes returns the current count of selected nodes, and
+        // `GetSelectedNodes` writes exactly that many IDs into the buffer.
         let n = unsafe { sys::imnodes_NumSelectedNodes() };
         if n <= 0 {
             return Vec::new();
@@ -763,6 +775,8 @@ impl PostEditor {
     }
 
     pub fn selected_links(&self) -> Vec<i32> {
+        // Safety: ImNodes returns the current count of selected links, and
+        // `GetSelectedLinks` writes exactly that many IDs into the buffer.
         let n = unsafe { sys::imnodes_NumSelectedLinks() };
         if n <= 0 {
             return Vec::new();

@@ -79,19 +79,17 @@ fn main() {
     // Fallback: use the include path from sdl3-sys when it built SDL3 from source.
     // sdl3-sys prints cargo metadata like `CMAKE_DIR` and `OUT_DIR`, which Cargo
     // exposes as DEP_SDL3_CMAKE_DIR / DEP_SDL3_OUT_DIR for dependents.
-    if !have_sdl_headers {
-        if let Ok(out_dir) = env::var("DEP_SDL3_OUT_DIR") {
-            let out = PathBuf::from(out_dir);
-            let include_root = out.join("include");
-            let hdr = include_root.join("SDL3/SDL.h");
-            if hdr.exists() {
-                build.include(&include_root);
-                have_sdl_headers = true;
-                println!(
-                    "cargo:warning=dear-imgui-sdl3: using SDL3 headers from sdl3-sys OUT_DIR={}",
-                    include_root.display()
-                );
-            }
+    if !have_sdl_headers && let Ok(out_dir) = env::var("DEP_SDL3_OUT_DIR") {
+        let out = PathBuf::from(out_dir);
+        let include_root = out.join("include");
+        let hdr = include_root.join("SDL3/SDL.h");
+        if hdr.exists() {
+            build.include(&include_root);
+            have_sdl_headers = true;
+            println!(
+                "cargo:warning=dear-imgui-sdl3: using SDL3 headers from sdl3-sys OUT_DIR={}",
+                include_root.display()
+            );
         }
     }
 

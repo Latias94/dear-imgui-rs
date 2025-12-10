@@ -34,7 +34,7 @@
 //! - `[f32; 2]` or `(f32, f32)`
 //! - `dear_imgui_sys::ImVec2`
 //! - `mint::Vector2<f32>` (via `dear-imgui-sys` conversions)
-//! - With optional integrations, `glam::Vec2` via your own `Into<ImVec2>`
+//! - With the optional `glam` feature, `glam::Vec2` directly (via `impl From<glam::Vec2> for ImVec2` in `dear-imgui-sys`)
 //!
 //! Example:
 //! ```no_run
@@ -46,6 +46,13 @@
 //! let a = mint::Vector2 { x: 10.0, y: 20.0 };
 //! let b = mint::Vector2 { x: 30.0, y: 40.0 };
 //! dl.add_rect(a, b, [1.0, 0.0, 0.0, 1.0]).build();
+//! // And with glam::Vec2 when the `glam` feature is enabled
+//! #[cfg(feature = "glam")]
+//! {
+//!     let a = glam::Vec2::new(10.0, 20.0);
+//!     let b = glam::Vec2::new(30.0, 40.0);
+//!     dl.add_rect(a, b, [0.0, 1.0, 0.0, 1.0]).build();
+//! }
 //! # }
 //! ```
 //!

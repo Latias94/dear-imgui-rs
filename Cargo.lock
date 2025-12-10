@@ -956,6 +956,7 @@ dependencies = [
  "dear-app",
  "dear-file-browser",
  "dear-imgui-glow",
+ "dear-imgui-reflect",
  "dear-imgui-rs",
  "dear-imgui-sdl3",
  "dear-imgui-wgpu",
@@ -995,6 +996,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "dear-imgui-reflect"
+version = "0.6.0"
+dependencies = [
+ "dear-imgui-reflect-derive",
+ "dear-imgui-rs",
+ "glam",
+ "mint",
+]
+
+[[package]]
+name = "dear-imgui-reflect-derive"
+version = "0.6.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "dear-imgui-rs"
 version = "0.6.0"
 dependencies = [
@@ -1002,6 +1022,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cfg-if",
  "dear-imgui-sys",
+ "glam",
  "mint",
  "once_cell",
  "parking_lot",
@@ -1035,6 +1056,7 @@ dependencies = [
  "cmake",
  "dear-imgui-build-support",
  "flate2",
+ "glam",
  "mint",
  "pkg-config",
  "tar",

@@ -46,8 +46,6 @@ pub use sys::{ImTextureID, ImVec2, ImVec4};
 
 mod advanced;
 mod context;
-mod plot;
-
 mod style;
 mod utils;
 
@@ -55,7 +53,6 @@ mod utils;
 pub mod plots;
 
 pub use context::*;
-pub use plot::*;
 pub use style::*;
 pub use utils::*;
 
@@ -382,23 +379,23 @@ bitflags::bitflags! {
     /// Axis flags matching ImPlotAxisFlags_ (see cimplot.h)
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct AxisFlags: u32 {
-        const NONE           = sys::ImPlotAxisFlags_None as u32;
-        const NO_LABEL       = sys::ImPlotAxisFlags_NoLabel as u32;
-        const NO_GRID_LINES  = sys::ImPlotAxisFlags_NoGridLines as u32;
-        const NO_TICK_MARKS  = sys::ImPlotAxisFlags_NoTickMarks as u32;
-        const NO_TICK_LABELS = sys::ImPlotAxisFlags_NoTickLabels as u32;
-        const NO_INITIAL_FIT = sys::ImPlotAxisFlags_NoInitialFit as u32;
-        const NO_MENUS       = sys::ImPlotAxisFlags_NoMenus as u32;
-        const NO_SIDE_SWITCH = sys::ImPlotAxisFlags_NoSideSwitch as u32;
-        const NO_HIGHLIGHT   = sys::ImPlotAxisFlags_NoHighlight as u32;
-        const OPPOSITE       = sys::ImPlotAxisFlags_Opposite as u32;
-        const FOREGROUND     = sys::ImPlotAxisFlags_Foreground as u32;
-        const INVERT         = sys::ImPlotAxisFlags_Invert as u32;
-        const AUTO_FIT       = sys::ImPlotAxisFlags_AutoFit as u32;
-        const RANGE_FIT      = sys::ImPlotAxisFlags_RangeFit as u32;
-        const PAN_STRETCH    = sys::ImPlotAxisFlags_PanStretch as u32;
-        const LOCK_MIN       = sys::ImPlotAxisFlags_LockMin as u32;
-        const LOCK_MAX       = sys::ImPlotAxisFlags_LockMax as u32;
+        const NONE           = sys::ImPlotAxisFlags_None;
+        const NO_LABEL       = sys::ImPlotAxisFlags_NoLabel;
+        const NO_GRID_LINES  = sys::ImPlotAxisFlags_NoGridLines;
+        const NO_TICK_MARKS  = sys::ImPlotAxisFlags_NoTickMarks;
+        const NO_TICK_LABELS = sys::ImPlotAxisFlags_NoTickLabels;
+        const NO_INITIAL_FIT = sys::ImPlotAxisFlags_NoInitialFit;
+        const NO_MENUS       = sys::ImPlotAxisFlags_NoMenus;
+        const NO_SIDE_SWITCH = sys::ImPlotAxisFlags_NoSideSwitch;
+        const NO_HIGHLIGHT   = sys::ImPlotAxisFlags_NoHighlight;
+        const OPPOSITE       = sys::ImPlotAxisFlags_Opposite;
+        const FOREGROUND     = sys::ImPlotAxisFlags_Foreground;
+        const INVERT         = sys::ImPlotAxisFlags_Invert;
+        const AUTO_FIT       = sys::ImPlotAxisFlags_AutoFit;
+        const RANGE_FIT      = sys::ImPlotAxisFlags_RangeFit;
+        const PAN_STRETCH    = sys::ImPlotAxisFlags_PanStretch;
+        const LOCK_MIN       = sys::ImPlotAxisFlags_LockMin;
+        const LOCK_MAX       = sys::ImPlotAxisFlags_LockMax;
     }
 }
 

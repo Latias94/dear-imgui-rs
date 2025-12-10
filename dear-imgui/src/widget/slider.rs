@@ -377,6 +377,22 @@ bitflags::bitflags! {
     pub struct SliderFlags: i32 {
         /// No flags
         const NONE = 0;
+        /// Wrap the value around when exceeding the current range.
+        ///
+        /// Corresponds to `ImGuiSliderFlags_WrapAround`.
+        const WRAP_AROUND = sys::ImGuiSliderFlags_WrapAround as i32;
+        /// Clamp on input when editing via CTRL+Click or direct text input.
+        ///
+        /// This is one of the two bits combined by `ALWAYS_CLAMP`.
+        const CLAMP_ON_INPUT = sys::ImGuiSliderFlags_ClampOnInput as i32;
+        /// Clamp zero-range sliders to avoid a zero-sized range.
+        ///
+        /// This is one of the two bits combined by `ALWAYS_CLAMP`.
+        const CLAMP_ZERO_RANGE = sys::ImGuiSliderFlags_ClampZeroRange as i32;
+        /// Disable small "smart" speed tweaks for very small/large ranges.
+        ///
+        /// Useful when precise, linear dragging behavior is desired.
+        const NO_SPEED_TWEAKS = sys::ImGuiSliderFlags_NoSpeedTweaks as i32;
         /// Clamp value to min/max bounds when input manually with CTRL+Click. By default CTRL+Click allows going out of bounds.
         const ALWAYS_CLAMP = sys::ImGuiSliderFlags_AlwaysClamp as i32;
         /// Make the widget logarithmic (linear otherwise). Consider using ImGuiSliderFlags_NoRoundToFormat with this if using a format-string with small amount of digits.

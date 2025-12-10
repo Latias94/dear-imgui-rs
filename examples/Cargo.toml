@@ -13,6 +13,7 @@ imguizmo-quat = ["dep:dear-imguizmo-quat"]
 implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
 file-browser = ["dep:dear-file-browser"]
+reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
 multi-viewport = [
     "dear-imgui-rs/multi-viewport",
     "dear-imgui-winit/multi-viewport",
@@ -166,6 +167,11 @@ path = "02-docking/dear_app_docking.rs"
 name = "dear_app_quickstart"
 path = "00-quickstart/dear_app_quickstart.rs"
 
+[[bin]]
+name = "reflect_demo"
+path = "reflect_demo.rs"
+required-features = ["reflect"]
+
 [dependencies]
 dear-imgui-rs = { path = "../dear-imgui", version = "0.6" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.6" }
@@ -180,6 +186,7 @@ dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
 dear-imguizmo-quat = { path = "../extensions/dear-imguizmo-quat", optional = true }
 dear-implot3d = { path = "../extensions/dear-implot3d", optional = true }
 dear-file-browser = { path = "../extensions/dear-file-browser", optional = true }
+dear-imgui-reflect = { path = "../extensions/dear-imgui-reflect", optional = true, features = ["glam"] }
 wgpu = { workspace = true }
 winit = { workspace = true }
 glam = { workspace = true }

@@ -43,6 +43,7 @@ cfg-if.workspace = true
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
 build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../tools/build-support", optional = true }
+glam = { workspace = true, optional = true }
 
 [build-dependencies]
 bindgen.workspace = true
@@ -71,3 +72,4 @@ wasm = []
 package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
 prebuilt = []
 build-from-source = []
+glam = ["dep:glam"]

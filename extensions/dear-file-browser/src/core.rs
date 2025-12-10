@@ -50,9 +50,15 @@ impl FileFilter {
     /// Extensions should be provided without dots (e.g. "png"). Matching is
     /// case-insensitive.
     pub fn new(name: impl Into<String>, exts: impl Into<Vec<String>>) -> Self {
+        let mut extensions: Vec<String> = exts.into();
+        // Normalize to lowercase so matching is case-insensitive even if callers
+        // provide mixed-case extensions.
+        for ext in &mut extensions {
+            *ext = ext.to_lowercase();
+        }
         Self {
             name: name.into(),
-            extensions: exts.into(),
+            extensions,
         }
     }
 }
@@ -240,5 +246,19 @@ impl FileDialog {
     /// Open a dialog asynchronously. Unsupported without `native-rfd`.
     pub async fn open_async(self) -> Result<Selection, FileDialogError> {
         Err(FileDialogError::Unsupported)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_filter_new_normalizes_extensions_to_lowercase() {
+        let f = FileFilter::new(
+            "Images",
+            vec!["PNG".to_string(), "Jpg".to_string(), "gif".to_string()],
+        );
+        assert_eq!(f.extensions, vec!["png", "jpg", "gif"]);
     }
 }

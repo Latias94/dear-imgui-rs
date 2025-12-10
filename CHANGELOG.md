@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- dear-imgui-sys
+  - Optional `glam` feature: add `impl From<glam::Vec2> for ImVec2` and `impl From<glam::Vec4> for ImVec4`, mirroring the existing `mint::Vector2/4<f32>` conversions so draw/config APIs taking `Into<ImVec2/ImVec4>` can accept glam vectors directly.
+- dear-imgui-rs
+  - Optional `glam` feature: forwards to `dear-imgui-sys/glam`, making `glam::Vec2/Vec4` usable with all drawing and coordinate-taking APIs out of the box.
+- New extension crate: `dear-imgui-reflect`
+  - Reflection-based UI helpers inspired by the C++ [ImReflect](https://github.com/Sven-vh/ImReflect) library: derive `ImGuiReflect` for your structs/enums and automatically get ImGui editors for their fields.
+  - Core concepts:
+    - `ImGuiValue`: per-type editing hooks (primitives, tuples, containers, smart pointers, glam/mint vectors).
+    - `ImGuiReflect` derive: struct/enum editors that walk fields and dispatch to `ImGuiValue`.
+    - `ReflectSettings` / `MemberSettings`: ImSettings-style configuration for numerics, bools, text, tuples, maps, `Vec<T>`, arrays, and read-only flags.
+  - Feature coverage (broadly aligned with ImReflect):
+    - Numeric widgets (input/drag/slider) with per-field attributes (`as_input`, `as_drag`, `slider`, `min/max`, `step/step_fast`, `speed`, log/clamp/wrap_around flags, format helpers).
+    - Bool styles (checkbox/button/radio/dropdown) with custom true/false labels.
+    - Text attributes: hints, `min_width`, multiline + `lines`, `auto_resize`, `read_only`, and display-only labels.
+    - Containers: `Option<T>`, `Vec<T>`, small fixed arrays, string-key `HashMap<String, V>` / `BTreeMap<String, V>` with insert/remove/reorder and const-map modes.
+    - Tuples `(T, U, ...)`: line/grid layouts, dropdown wrapping, global tuple settings, and per-element numeric overrides via member paths like `"field[0]"`.
+    - Smart pointers: transparent editing for `Box<T>` and editable-when-unique semantics for `Rc<T>` / `Arc<T>`.
+    - Math types: optional `glam` and `mint` support for `Vec2/3/4` and `mint::Vector2/3/4<f32>` via `input_floatN` editors.
+
 - Upgrade ImPlot3D stack to the latest upstream:
   - Pull `cimplot3d` to `main` with `implot3d v0.3` and Dear ImGui 1.92.5.
   - Regenerate `dear-implot3d-sys` bindings against the updated C API.
@@ -24,8 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Align child window `ChildFlags` with Dear ImGui's `ImGuiChildFlags` constants instead of hard-coded bit positions (safer against future upstream changes).
 - dear-implot
   - Align plot enums and flags with the updated ImPlot C API (`PlotColorElement`, colormap/legend locations, and axis/plot flag bitfields now map directly to `ImPlot*` constants).
- - dear-imguizmo
-   - Align gizmo operation, mode, and color enums with the underlying C API (`OPERATION`, `MODE`, and `COLOR` constants), removing hard-coded bit patterns and indices.
+  - Simplify and harden the safe ImPlot bridge layer by removing a legacy, hand-rolled `AxisFlags` in favour of a single `AxisFlags` backed by `ImPlotAxisFlags_*`, and by explicitly scoping unsafe pointer operations in the axis formatter/transform closure bridge (no behavioural change).
+- dear-imguizmo
+   - Align gizmo operation, mode, and color enums with the underlying C API (`OPERATION`, `MODE`, and `COLOR` constants), removing hard-coded bit patterns and indices, and keep the high-level `Mat4Like`/`Vec3Like` adapters (with `glam`/`mint` features) in sync with upstream ImGuizmo behaviour.
+ - dear-imnodes
+   - Tighten the safe ImNodes bridge by explicitly documenting the unsafe contracts for INI state save/load helpers and selection/link query APIs, and by adding a basic editor smoke test that exercises `Context`/`EditorContext`/`NodeEditor`/`PostEditor` together (no behavioural change).
+ - dear-file-browser
+   - Ensure `FileFilter::new` normalizes extensions to lowercase so extension matching is truly case-insensitive even for mixed-case inputs, and add a basic ImGui-embedded browser smoke test that opens a window for one frame and exercises the main UI path.
 
 ## [0.6.0] - 2025-11-28
 
