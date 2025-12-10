@@ -754,6 +754,12 @@ where
 /// ```no_run
 /// # use dear_imgui_reflect as reflect;
 /// # use reflect::ImGuiReflectExt;
+/// #
+/// # #[derive(reflect::ImGuiReflect, Default)]
+/// # struct MyType {
+/// #     items: Vec<i32>,
+/// # }
+/// #
 /// # fn ui_frame(ui: &reflect::imgui::Ui, value: &mut MyType) {
 /// reflect::with_settings_scope(|| {
 ///     reflect::with_settings(|s| {
@@ -762,7 +768,6 @@ where
 ///     ui.input_reflect("Debug Items", value);
 /// });
 /// # }
-/// # struct MyType;
 /// ```
 ///
 /// Inside the scope, `with_settings` can be used freely; once the closure
@@ -1023,6 +1028,10 @@ where
 
             if let Some(_source) = ui
                 .drag_drop_source_config("IMGUI_REFLECT_ARRAY_ITEM")
+                // Text() items do not have an ID, so allow a null ID here to
+                // avoid Dear ImGui assertions when starting a drag from this
+                // label.
+                .flags(imgui::DragDropFlags::SOURCE_ALLOW_NULL_ID)
                 .begin_payload(index as i32)
             {
                 ui.text(&handle_label);
@@ -1986,6 +1995,10 @@ where
 
             if let Some(_source) = ui
                 .drag_drop_source_config("IMGUI_REFLECT_VEC_ITEM")
+                // Text() items do not have an ID, so we must allow a null ID
+                // here to avoid Dear ImGui's internal assertion when starting
+                // a drag from this label.
+                .flags(imgui::DragDropFlags::SOURCE_ALLOW_NULL_ID)
                 .begin_payload(index as i32)
             {
                 ui.text(&handle_label);
