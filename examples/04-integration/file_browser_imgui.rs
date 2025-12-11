@@ -219,14 +219,10 @@ impl ApplicationHandler for App {
         if w.window.id() != window_id {
             return;
         }
-        // Feed to ImGui platform first
-        let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-            window_id,
-            event: event.clone(),
-        };
+        // Feed to ImGui platform first (window-local path)
         w.imgui
             .platform
-            .handle_event(&mut w.imgui.context, &w.window, &full_event);
+            .handle_window_event(&mut w.imgui.context, &w.window, &event);
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => w.resize(size),

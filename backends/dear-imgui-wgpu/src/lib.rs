@@ -8,7 +8,7 @@
 //! - **Modern texture management**: Full integration with Dear ImGui's ImTextureData system
 //! - **Gamma correction**: Automatic sRGB format detection and gamma correction
 //! - **Multi-frame buffering**: Support for multiple frames in flight
-//! - **Device object management**: Proper handling of device loss and recovery
+//! - **Device object management**: Helpers to recreate device objects (pipelines/buffers/textures) after loss
 //! - **Multi-viewport support**: Support for multiple windows (feature-gated)
 //!
 //! # Example
@@ -27,12 +27,9 @@
 //! // Create Dear ImGui context
 //! let mut imgui = Context::create();
 //!
-//! // Create renderer
+//! // Create renderer (recommended path)
 //! let init_info = WgpuInitInfo::new(device, queue, TextureFormat::Bgra8UnormSrgb);
-//! let mut renderer = WgpuRenderer::new();
-//! renderer.init(init_info)?;
-//! renderer.configure_imgui_context(&mut imgui);
-//! renderer.prepare_font_atlas(&mut imgui)?;
+//! let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
 //!
 //! // In your render loop:
 //! // imgui.new_frame();

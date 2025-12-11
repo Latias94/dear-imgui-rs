@@ -106,18 +106,26 @@ impl TextureDemo {
     }
 
     fn try_load_image_texture(&self, renderer: &mut GlowRenderer) -> Option<TextureId> {
-        // Fixed asset path under the examples crate (robust to CWD)
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("texture.jpg");
-        if !path.exists() {
-            eprintln!(
-                "Image not found at {:?}. Current dir: {:?}",
-                path,
-                std::env::current_dir().ok()
-            );
-            return None;
-        }
+        // Prefer the gradient test image we ship with the examples; fall back
+        // to the original JPEG if needed. This keeps behavior consistent with
+        // the WGPU texture demos.
+        let asset_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let candidates = [
+            asset_dir.join("texture_clean.ppm"),
+            asset_dir.join("texture.jpg"),
+        ];
+
+        let path = match candidates.iter().find(|p| p.exists()) {
+            Some(p) => p.clone(),
+            None => {
+                eprintln!(
+                    "Image not found in {:?}. Current dir: {:?}",
+                    asset_dir,
+                    std::env::current_dir().ok()
+                );
+                return None;
+            }
+        };
 
         match ImageReader::open(&path)
             .and_then(|r| r.with_guessed_format())
@@ -476,7 +484,7 @@ impl ApplicationHandler for App {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        window_id: WindowId,
+        _window_id: WindowId,
         event: WindowEvent,
     ) {
         let window = match self.window.as_mut() {
@@ -485,14 +493,11 @@ impl ApplicationHandler for App {
         };
 
         // Handle the event with ImGui first
-        let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-            window_id,
-            event: event.clone(),
-        };
-        window
-            .imgui
-            .platform
-            .handle_event(&mut window.imgui.context, &window.window, &full_event);
+        window.imgui.platform.handle_window_event(
+            &mut window.imgui.context,
+            &window.window,
+            &event,
+        );
 
         match event {
             WindowEvent::Resized(physical_size) => {

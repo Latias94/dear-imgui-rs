@@ -792,48 +792,97 @@ where
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        let window = match self.window.as_mut() {
-            Some(window) => window,
-            None => return,
-        };
-
-        let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-            window_id,
-            event: event.clone(),
-        };
-        if let Some(cb) = self.cbs.on_event.as_mut() {
-            cb(&full_event, &window.window, &mut window.imgui.context);
-        }
-        window
-            .imgui
-            .platform
-            .handle_event(&mut window.imgui.context, &window.window, &full_event);
-
+        // We may recreate the window/gpu stack on fatal GPU errors, so we avoid
+        // holding a mutable borrow of self.window across the whole match.
         match event {
-            WindowEvent::Resized(physical_size) => {
-                window.resize(physical_size);
-                window.window.request_redraw();
-            }
-            WindowEvent::ScaleFactorChanged { .. } => {
-                let new_size = window.window.inner_size();
-                window.resize(new_size);
-                window.window.request_redraw();
-            }
-            WindowEvent::CloseRequested => {
-                if let Some(cb) = self.cbs.on_exit.as_mut() {
-                    if let Some(w) = self.window.as_mut() {
-                        cb(&mut w.imgui.context);
+            WindowEvent::RedrawRequested => {
+                // Render and, on fatal errors, attempt a full GPU/window rebuild.
+                let mut need_recreate = false;
+                if let Some(window) = self.window.as_mut() {
+                    let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
+                        window_id,
+                        event: event.clone(),
+                    };
+                    if let Some(cb) = self.cbs.on_event.as_mut() {
+                        cb(&full_event, &window.window, &mut window.imgui.context);
+                    }
+                    window.imgui.platform.handle_event(
+                        &mut window.imgui.context,
+                        &window.window,
+                        &full_event,
+                    );
+
+                    if let Err(e) = window.render(&mut self.gui, &self.cfg.docking) {
+                        error!("Render error: {e}; attempting to recover by recreating GPU state");
+                        need_recreate = true;
+                    } else {
+                        window.window.request_redraw();
                     }
                 }
-                event_loop.exit();
-            }
-            WindowEvent::RedrawRequested => {
-                if let Err(e) = window.render(&mut self.gui, &self.cfg.docking) {
-                    error!("Render error: {e}");
+
+                if need_recreate {
+                    // Drop the existing window and try to rebuild the whole stack.
+                    self.window = None;
+                    if let Err(e) =
+                        AppWindow::new(event_loop, &self.cfg, &self.addons_cfg, &mut self.cbs)
+                    {
+                        error!("Failed to recreate window after GPU error: {e}");
+                        if let Some(cb) = self.cbs.on_exit.as_mut() {
+                            // Best-effort: give user a chance to clean up the old context if any.
+                            if let Some(w) = self.window.as_mut() {
+                                cb(&mut w.imgui.context);
+                            }
+                        }
+                        event_loop.exit();
+                    } else if let Some(window) = self.window.as_mut() {
+                        info!("Successfully recreated window and GPU state after error");
+                        if let Some(cb) = self.cbs.on_post_init.as_mut() {
+                            cb(&mut window.imgui.context);
+                        }
+                        window.window.request_redraw();
+                    }
                 }
-                window.window.request_redraw();
             }
-            _ => {}
+            _ => {
+                let window = match self.window.as_mut() {
+                    Some(window) => window,
+                    None => return,
+                };
+
+                let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
+                    window_id,
+                    event: event.clone(),
+                };
+                if let Some(cb) = self.cbs.on_event.as_mut() {
+                    cb(&full_event, &window.window, &mut window.imgui.context);
+                }
+                window.imgui.platform.handle_event(
+                    &mut window.imgui.context,
+                    &window.window,
+                    &full_event,
+                );
+
+                match event {
+                    WindowEvent::Resized(physical_size) => {
+                        window.resize(physical_size);
+                        window.window.request_redraw();
+                    }
+                    WindowEvent::ScaleFactorChanged { .. } => {
+                        let new_size = window.window.inner_size();
+                        window.resize(new_size);
+                        window.window.request_redraw();
+                    }
+                    WindowEvent::CloseRequested => {
+                        if let Some(cb) = self.cbs.on_exit.as_mut() {
+                            if let Some(w) = self.window.as_mut() {
+                                cb(&mut w.imgui.context);
+                            }
+                        }
+                        event_loop.exit();
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 

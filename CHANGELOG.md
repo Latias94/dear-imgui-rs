@@ -9,61 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- dear-imgui-sys
-  - Optional `glam` feature: add `impl From<glam::Vec2> for ImVec2` and `impl From<glam::Vec4> for ImVec4`, mirroring the existing `mint::Vector2/4<f32>` conversions so draw/config APIs taking `Into<ImVec2/ImVec4>` can accept glam vectors directly.
-- dear-imgui-rs
-  - Optional `glam` feature: forwards to `dear-imgui-sys/glam`, making `glam::Vec2/Vec4` usable with all drawing and coordinate-taking APIs out of the box.
+- Core (`dear-imgui-sys`, `dear-imgui-rs`)
+  - Optional `glam` integration so `glam::Vec2/Vec4` can be passed directly to drawing and coordinate-taking APIs.
 - New extension crate: `dear-imgui-reflect`
-  - Reflection-based UI helpers inspired by the C++ [ImReflect](https://github.com/Sven-vh/ImReflect) library: derive `ImGuiReflect` for your structs/enums and automatically get ImGui editors for their fields.
-  - Core concepts:
-    - `ImGuiValue`: per-type editing hooks (primitives, tuples, containers, smart pointers, glam/mint vectors).
-    - `ImGuiReflect` derive: struct/enum editors that walk fields and dispatch to `ImGuiValue`.
-    - `ReflectSettings` / `MemberSettings`: ImSettings-style configuration for numerics, bools, text, tuples, maps, `Vec<T>`, arrays, and read-only flags.
-  - Feature coverage (broadly aligned with ImReflect):
-    - Numeric widgets (input/drag/slider) with per-field attributes (`as_input`, `as_drag`, `slider`, `min/max`, `step/step_fast`, `speed`, log/clamp/wrap_around flags, format helpers).
-    - Bool styles (checkbox/button/radio/dropdown) with custom true/false labels.
-    - Text attributes: hints, `min_width`, multiline + `lines`, `auto_resize`, `read_only`, and display-only labels.
-    - Containers: `Option<T>`, `Vec<T>`, small fixed arrays, string-key `HashMap<String, V>` / `BTreeMap<String, V>` with insert/remove/reorder and const-map modes.
-    - Tuples `(T, U, ...)`: line/grid layouts, dropdown wrapping, global tuple settings, and per-element numeric overrides via member paths like `"field[0]"`.
-    - Smart pointers: transparent editing for `Box<T>` and editable-when-unique semantics for `Rc<T>` / `Arc<T>`.
-  - Math types: optional `glam` and `mint` support for `Vec2/3/4` and `mint::Vector2/3/4<f32>` via `input_floatN` editors.
-
-- WebAssembly (import-style) support (unreleased, planned for 0.7 train)
-  - Core:
-    - Import-style bindings for `dear-imgui-sys` that target a shared provider module `imgui-sys-v0` (Emscripten-built cimgui + Dear ImGui).
-    - `xtask wasm-bindgen imgui-sys-v0` to generate pregenerated wasm bindings and avoid running bindgen or cc in wasm builds.
-  - Extensions (all via the same `imgui-sys-v0` provider, import-style, experimental):
-    - `dear-implot` / `dear-implot-sys`: 2D plotting on wasm (`xtask wasm-bindgen-implot`).
-    - `dear-implot3d` / `dear-implot3d-sys`: 3D plotting on wasm (`xtask wasm-bindgen-implot3d`).
-    - `dear-imnodes` / `dear-imnodes-sys`: node editor on wasm (`xtask wasm-bindgen-imnodes`).
-    - `dear-imguizmo` / `dear-imguizmo-sys`: 3D gizmo on wasm (`xtask wasm-bindgen-imguizmo`).
-    - `dear-imguizmo-quat` / `dear-imguizmo-quat-sys`: quaternion gizmo on wasm (`xtask wasm-bindgen-imguizmo-quat`).
-  - Tooling:
-    - `xtask web-demo [features]` builds the `examples-wasm/dear-imgui-web-demo` crate for `wasm32-unknown-unknown` and lets callers opt into extensions via features like `implot`, `imnodes`, `imguizmo`, `imguizmo-quat`.
-    - `xtask build-cimgui-provider` builds the shared `imgui-sys-v0` provider (Emscripten, imported memory, ES module wrapper) including symbols for core ImGui + all enabled C API extensions.
-
-- Upgrade ImPlot3D stack to the latest upstream:
-  - Pull `cimplot3d` to `main` with `implot3d v0.3` and Dear ImGui 1.92.5.
-  - Regenerate `dear-implot3d-sys` bindings against the updated C API.
-- Extend safe bindings to cover new/improved APIs:
-  - Box helpers now use double-precision (`SetupBoxScale/Rotation/InitialRotation`).
-  - Colormap helpers mirror upstream `ImPlot3D_GetColormapColor` / `NextColormapColor` signatures.
-  - Image helpers (`image_by_axes`, `image_by_corners`) use the new `ImTextureRef` + f64 coordinates
+  - Derive-based helpers for generating ImGui editors for structs and enums (ImReflect-style auto UI).
+- `dear-imgui-winit`
+  - IME support for winit 0.30 (cursor area updates and enable/disable helpers) plus a new `ime_debug` example.
+  - Convenience API `WinitPlatform::handle_window_event` for `ApplicationHandler`-style event loops.
+- WebAssembly (import-style, experimental)
+  - Import-style provider module `imgui-sys-v0` and `xtask` commands to build the core + selected extensions (ImPlot, ImPlot3D, ImNodes, ImGuizmo, ImGuizmo.quat) for `wasm32-unknown-unknown`.
+- Examples
+  - Texture demos (WGPU, dear-app WGPU, Glow) now ship a clean gradient test image (`texture_clean.ppm`) alongside the existing JPEG, making texture sampling artifacts easier to inspect.
 
 ### Changed
 
 - dear-imgui-rs
-  - Align `FontLoaderFlags` with Dear ImGui's `ImGuiFreeTypeLoaderFlags`, fixing the bit mapping for FreeType integration (e.g. `LOAD_COLOR` now correctly enables color-layered glyphs instead of toggling hinting).
-  - Align child window `ChildFlags` with Dear ImGui's `ImGuiChildFlags` constants instead of hard-coded bit positions (safer against future upstream changes).
-- dear-implot
-  - Align plot enums and flags with the updated ImPlot C API (`PlotColorElement`, colormap/legend locations, and axis/plot flag bitfields now map directly to `ImPlot*` constants).
-  - Simplify and harden the safe ImPlot bridge layer by removing a legacy, hand-rolled `AxisFlags` in favour of a single `AxisFlags` backed by `ImPlotAxisFlags_*`, and by explicitly scoping unsafe pointer operations in the axis formatter/transform closure bridge (no behavioural change).
-- dear-imguizmo
-   - Align gizmo operation, mode, and color enums with the underlying C API (`OPERATION`, `MODE`, and `COLOR` constants), removing hard-coded bit patterns and indices, and keep the high-level `Mat4Like`/`Vec3Like` adapters (with `glam`/`mint` features) in sync with upstream ImGuizmo behaviour.
- - dear-imnodes
-   - Tighten the safe ImNodes bridge by explicitly documenting the unsafe contracts for INI state save/load helpers and selection/link query APIs, and by adding a basic editor smoke test that exercises `Context`/`EditorContext`/`NodeEditor`/`PostEditor` together (no behavioural change).
- - dear-file-browser
-   - Ensure `FileFilter::new` normalizes extensions to lowercase so extension matching is truly case-insensitive even for mixed-case inputs, and add a basic ImGui-embedded browser smoke test that opens a window for one frame and exercises the main UI path.
+  - Align several flag types (FreeType font loader flags, child window flags) with upstream Dear ImGui constants to reduce the risk of bit mismatches on future upgrades.
+- Extensions (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`, `dear-file-browser`)
+  - Refresh bindings to the latest C APIs and tighten safe wrappers; includes making file-extension filters in the file browser case-insensitive.
+
+- dear-imgui-wgpu
+  - Unified internal error handling to use the shared `RendererError` type instead of ad-hoc `Result<_, String>` values in frame/texture paths, making GPU failures easier to diagnose.
+  - Simplified pipeline/bind group layout wiring so the render pipeline now reuses the layouts owned by `RenderResources`/`UniformBuffer`, avoiding duplicated layout definitions and potential mismatches.
+  - Tightened texture/bind group lifetime coupling: when ImGui textures are created, updated, or destroyed via the 1.92+ texture system, any cached image bind groups are invalidated and rebuilt on demand.
+  - Minor internal cleanups (logging feature flag for multi-viewport traces, dead-code reductions) to keep the backend warning-free on newer Rust toolchains.
+
+- dear-app
+  - Render loop now performs basic GPU/surface loss recovery: if a frame render returns a fatal GPU error, dear-app tears down the existing `AppWindow` and attempts to recreate the WGPU device/surface/renderer stack using the same `RunnerConfig`/add-ons.
+  - Existing graceful handling of `SurfaceError::Lost`/`Outdated` remains in place (surface is reconfigured in-place when possible); the new logic adds a “full rebuild” path for irrecoverable errors instead of leaving the app in a broken redraw loop.
+
 
 ## [0.6.0] - 2025-11-28
 

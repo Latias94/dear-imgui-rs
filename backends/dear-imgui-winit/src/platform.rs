@@ -4,6 +4,7 @@
 //! for integrating Dear ImGui with winit windowing.
 
 use instant::Instant;
+use std::ffi::c_void;
 
 use dear_imgui_rs::{BackendFlags, ConfigFlags, Context};
 use winit::dpi::{LogicalPosition, LogicalSize};
@@ -12,6 +13,63 @@ use winit::window::{Window, WindowAttributes};
 
 use crate::cursor::CursorSettings;
 use crate::events;
+
+/// IME hook: Dear ImGui calls this when the text input caret moves. We forward
+/// the position to winit so platforms that support it can position the IME
+/// candidate/composition window near the caret.
+unsafe extern "C" fn imgui_winit_set_ime_data(
+    _ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+    viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    data: *mut dear_imgui_rs::sys::ImGuiPlatformImeData,
+) {
+    use dear_imgui_rs::sys::{ImGuiPlatformImeData, ImGuiViewport};
+
+    unsafe {
+        if viewport.is_null() || data.is_null() {
+            return;
+        }
+
+        // Retrieve the window pointer we stored in Platform_ImeUserData.
+        let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+        if pio.is_null() {
+            return;
+        }
+
+        let user_data = (*pio).Platform_ImeUserData as *mut Window;
+        if user_data.is_null() {
+            return;
+        }
+
+        // Safety: we rely on the application to keep the Window alive while the
+        // ImGui context is active. This matches typical winit usage.
+        let window: &Window = &*user_data;
+        let ime: &ImGuiPlatformImeData = &*data;
+        let vp: &ImGuiViewport = &*viewport;
+
+        // If IME is not visible and not expecting text input, there's nothing to do.
+        if !ime.WantVisible && !ime.WantTextInput {
+            return;
+        }
+
+        // Dear ImGui gives InputPos in the same coordinate space as the viewport's
+        // Pos. Convert to client-area coordinates by subtracting viewport origin.
+        let rel_x = (ime.InputPos.x - vp.Pos.x) as f64;
+        let rel_y = (ime.InputPos.y - vp.Pos.y) as f64;
+
+        let pos = LogicalPosition::new(rel_x, rel_y);
+
+        // Use the reported line height as a reasonable IME region height. Width is
+        // not very important for most IME implementations.
+        let line_h = if ime.InputLineHeight > 0.0 {
+            ime.InputLineHeight as f64
+        } else {
+            16.0
+        };
+        let size = LogicalSize::new(line_h, line_h);
+
+        window.set_ime_cursor_area(pos, size);
+    }
+}
 
 /// DPI scaling mode for the platform
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
@@ -30,8 +88,8 @@ pub struct WinitPlatform {
     hidpi_mode: HiDpiMode,
     hidpi_factor: f64,
     cursor_cache: Option<CursorSettings>,
-    #[allow(dead_code)]
     ime_enabled: bool,
+    ime_auto_manage: bool,
     last_frame: Instant,
 }
 
@@ -82,6 +140,7 @@ impl WinitPlatform {
             hidpi_factor: 1.0,
             cursor_cache: None,
             ime_enabled: false,
+            ime_auto_manage: true,
             last_frame: Instant::now(),
         }
     }
@@ -89,6 +148,36 @@ impl WinitPlatform {
     /// Set the DPI scaling mode
     pub fn set_hidpi_mode(&mut self, hidpi_mode: HiDpiMode) {
         self.hidpi_mode = hidpi_mode;
+    }
+
+    /// Enable or disable IME events for the attached window.
+    ///
+    /// Winit does not deliver `WindowEvent::Ime` events unless IME is explicitly
+    /// allowed on the window. When `ime_auto_manage` is enabled (default), the
+    /// backend will override this based on `io.want_text_input()` every frame.
+    /// Use this helper for immediate overrides (e.g. when auto-management is
+    /// disabled or you want to force a specific state for a while).
+    pub fn set_ime_allowed(&mut self, window: &Window, allowed: bool) {
+        window.set_ime_allowed(allowed);
+        self.ime_enabled = allowed;
+    }
+
+    /// Returns whether IME is currently allowed for the attached window.
+    ///
+    /// This reflects the last state set via `set_ime_allowed` or IME
+    /// `WindowEvent::Ime(Enabled/Disabled)` notifications.
+    pub fn ime_enabled(&self) -> bool {
+        self.ime_enabled
+    }
+
+    /// Enable or disable automatic IME management.
+    ///
+    /// When enabled (default), the backend will call `set_ime_allowed` based on
+    /// Dear ImGui's `io.want_text_input()` flag each frame, turning IME on
+    /// while text widgets are active and off otherwise. When disabled, IME
+    /// state is left entirely under application control.
+    pub fn set_ime_auto_management(&mut self, enabled: bool) {
+        self.ime_auto_manage = enabled;
     }
 
     /// Get the current DPI scaling factor
@@ -117,9 +206,36 @@ impl WinitPlatform {
 
         io.set_display_size([logical_size.width as f32, logical_size.height as f32]);
         io.set_display_framebuffer_scale([self.hidpi_factor as f32, self.hidpi_factor as f32]);
+
+        // Enable IME by default so WindowEvent::Ime events and IME composition
+        // are available on desktop platforms. Auto-management (when enabled)
+        // will further refine this for text widgets.
+        self.set_ime_allowed(window, true);
+
+        // Register Dear ImGui -> winit IME bridge so text input widgets can
+        // move the platform IME candidate/composition window near the caret.
+        unsafe {
+            let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+            if !pio.is_null() {
+                // Store a pointer to the main window; backend assumes a single
+                // primary window for IME purposes.
+                (*pio).Platform_ImeUserData = window as *const Window as *mut c_void;
+                // Install our callback (once per context).
+                if (*pio).Platform_SetImeDataFn.is_none() {
+                    (*pio).Platform_SetImeDataFn = Some(imgui_winit_set_ime_data);
+                }
+            }
+        }
     }
 
-    /// Handle a winit event
+    /// Handle a winit event.
+    ///
+    /// This is the most general entry point: pass the full `Event<T>` from
+    /// your event loop and the backend will dispatch to the appropriate
+    /// handlers. For `ApplicationHandler::window_event`, where you already
+    /// receive a `WindowEvent` for a specific window, you can use
+    /// `handle_window_event` instead and avoid constructing a synthetic
+    /// `Event::WindowEvent`.
     pub fn handle_event<T>(
         &mut self,
         imgui_ctx: &mut Context,
@@ -127,7 +243,9 @@ impl WinitPlatform {
         event: &Event<T>,
     ) -> bool {
         match event {
-            Event::WindowEvent { event, .. } => self.handle_window_event(imgui_ctx, window, event),
+            Event::WindowEvent { event, .. } => {
+                self.handle_window_event_internal(imgui_ctx, window, event)
+            }
             Event::DeviceEvent { event, .. } => {
                 events::handle_device_event(event);
                 false
@@ -136,8 +254,22 @@ impl WinitPlatform {
         }
     }
 
-    /// Handle a window event
-    fn handle_window_event(
+    /// Handle a single window event for a given window.
+    ///
+    /// This is a convenience wrapper for frameworks that already route
+    /// window-local events, such as winit's `ApplicationHandler::window_event`,
+    /// and don't need to build a full `Event::WindowEvent` value.
+    pub fn handle_window_event(
+        &mut self,
+        imgui_ctx: &mut Context,
+        window: &Window,
+        event: &WindowEvent,
+    ) -> bool {
+        self.handle_window_event_internal(imgui_ctx, window, event)
+    }
+
+    /// Internal implementation for window event handling.
+    fn handle_window_event_internal(
         &mut self,
         imgui_ctx: &mut Context,
         window: &Window,
@@ -222,6 +354,8 @@ impl WinitPlatform {
             }
             WindowEvent::Ime(ime) => {
                 events::handle_ime_event(ime, imgui_ctx);
+                // Track IME enabled/disabled state based on winit notifications.
+                self.ime_enabled = !matches!(ime, winit::event::Ime::Disabled);
                 imgui_ctx.io().want_capture_keyboard()
             }
             WindowEvent::Touch(touch) => {
@@ -273,6 +407,20 @@ impl WinitPlatform {
 
     /// Update cursor given a Ui reference (preferred, matches upstream)
     pub fn prepare_render_with_ui(&mut self, ui: &dear_imgui_rs::Ui, window: &Window) {
+        // Auto-manage IME allowed state based on Dear ImGui's intent. This lets
+        // the platform show/hide IME (and soft keyboards on mobile) only when
+        // text input widgets are active.
+        if self.ime_auto_manage {
+            let want_text = ui.io().want_text_input();
+            if want_text && !self.ime_enabled {
+                window.set_ime_allowed(true);
+                self.ime_enabled = true;
+            } else if !want_text && self.ime_enabled {
+                window.set_ime_allowed(false);
+                self.ime_enabled = false;
+            }
+        }
+
         // Only change OS cursor if not disabled by config flags
         if !ui
             .io()

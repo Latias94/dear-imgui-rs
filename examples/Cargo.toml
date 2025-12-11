@@ -160,6 +160,10 @@ path = "04-integration/file_browser_imgui.rs"
 required-features = ["file-browser"]
 
 [[bin]]
+name = "ime_debug"
+path = "04-integration/ime_debug.rs"
+
+[[bin]]
 name = "dear_app_docking"
 path = "02-docking/dear_app_docking.rs"
 

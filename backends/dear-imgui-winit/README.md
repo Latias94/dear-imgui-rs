@@ -28,11 +28,12 @@ struct App { /* ... */ }
 impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, el: &ActiveEventLoop) { /* create window + ImGui + WinitPlatform */ }
 
-    fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let window = /* get your window */;
-        // 1) forward events to ImGui
-        let full = winit::event::Event::WindowEvent { window_id: id, event: event.clone() };
-        self.imgui.platform.handle_event(&mut self.imgui.context, &window, &full);
+        // 1) forward the window-local event to ImGui
+        self.imgui
+            .platform
+            .handle_window_event(&mut self.imgui.context, &window, &event);
 
         match event {
             WindowEvent::RedrawRequested => {
@@ -61,7 +62,8 @@ impl winit::application::ApplicationHandler for App {
 APIs of interest:
 - `WinitPlatform::new(&mut Context)`
 - `WinitPlatform::attach_window(&Window, HiDpiMode, &mut Context)`
-- `WinitPlatform::handle_event(&mut Context, &Window, &Event<T>)`
+- `WinitPlatform::handle_window_event(&mut Context, &Window, &WindowEvent)` — for `ApplicationHandler::window_event`
+- `WinitPlatform::handle_event(&mut Context, &Window, &Event<T>)` — for closure-style `EventLoop::run`
 - `WinitPlatform::prepare_frame(&Window, &mut Context)`
 - `WinitPlatform::prepare_render_with_ui(&Ui, &Window)` — updates OS cursor from ImGui
 
@@ -98,6 +100,20 @@ coordinates ImGui uses:
 Basic touch-to-mouse translation is provided:
 - First active finger controls the pointer and Left mouse button.
 - Started -> set position + press LMB; Moved -> update position; End/Cancelled -> release LMB.
+
+### IME integration
+
+- IME is **auto-managed** by default: `prepare_render_with_ui` inspects
+  `ui.io().want_text_input()` and toggles `Window::set_ime_allowed(...)`
+  accordingly. This means IME (and soft keyboards on mobile) are only enabled
+  while text widgets are active.
+- You can temporarily override the state with
+  `WinitPlatform::set_ime_allowed(&window, bool)`. Auto-management may adjust
+  it again on subsequent frames unless you disable it.
+- To fully opt out and manage IME yourself, call
+  `WinitPlatform::set_ime_auto_management(false)`.
+- The backend tracks IME enabled/disabled state internally and exposes it
+  through `WinitPlatform::ime_enabled()`.
 
 ## Cursor Handling
 

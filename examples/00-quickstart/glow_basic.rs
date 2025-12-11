@@ -243,7 +243,7 @@ impl ApplicationHandler for App {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        window_id: WindowId,
+        _window_id: WindowId,
         event: WindowEvent,
     ) {
         let window = match self.window.as_mut() {
@@ -251,15 +251,12 @@ impl ApplicationHandler for App {
             None => return,
         };
 
-        // Handle the event with ImGui first
-        let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-            window_id,
-            event: event.clone(),
-        };
-        window
-            .imgui
-            .platform
-            .handle_event(&mut window.imgui.context, &window.window, &full_event);
+        // Handle the event with ImGui first (window-local path)
+        window.imgui.platform.handle_window_event(
+            &mut window.imgui.context,
+            &window.window,
+            &event,
+        );
 
         match event {
             WindowEvent::Resized(physical_size) => {

@@ -47,6 +47,7 @@ pub struct WgpuRenderer {
     /// Gamma mode: automatic (by format), force linear (1.0), or force 2.2
     gamma_mode: GammaMode,
     /// Clear color used for secondary viewports (multi-viewport mode)
+    #[cfg(feature = "multi-viewport")]
     viewport_clear_color: Color,
 }
 
@@ -107,6 +108,7 @@ impl WgpuRenderer {
             default_texture: None,
             font_texture_id: None,
             gamma_mode: GammaMode::Auto,
+            #[cfg(feature = "multi-viewport")]
             viewport_clear_color: Color::BLACK,
         }
     }
@@ -345,7 +347,8 @@ impl WgpuRenderer {
     /// ```rust,no_run
     /// # use dear_imgui_wgpu::*;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut renderer = WgpuRenderer::new();
+    /// # // Assume `renderer` has already been created and initialized elsewhere.
+    /// # let mut renderer: WgpuRenderer = todo!();
     /// # let mut texture_data = dear_imgui_rs::TextureData::new();
     /// let result = renderer.update_texture(&texture_data)?;
     /// result.apply_to(&mut texture_data);
@@ -356,10 +359,31 @@ impl WgpuRenderer {
         &mut self,
         texture_data: &dear_imgui_rs::TextureData,
     ) -> RendererResult<crate::TextureUpdateResult> {
-        if let Some(backend_data) = &self.backend_data {
-            self.texture_manager
-                .update_single_texture(texture_data, &backend_data.device, &backend_data.queue)
-                .map_err(RendererError::TextureCreationFailed)
+        if let Some(backend_data) = &mut self.backend_data {
+            let result = self.texture_manager.update_single_texture(
+                texture_data,
+                &backend_data.device,
+                &backend_data.queue,
+            )?;
+
+            // Invalidate any cached bind groups for this texture id so that subsequent
+            // draws will see the updated texture view.
+            match result {
+                crate::TextureUpdateResult::Created { texture_id } => {
+                    backend_data
+                        .render_resources
+                        .remove_image_bind_group(texture_id.id());
+                }
+                crate::TextureUpdateResult::Updated | crate::TextureUpdateResult::Destroyed => {
+                    let id = texture_data.tex_id().id();
+                    if id != 0 {
+                        backend_data.render_resources.remove_image_bind_group(id);
+                    }
+                }
+                crate::TextureUpdateResult::Failed | crate::TextureUpdateResult::NoAction => {}
+            }
+
+            Ok(result)
         } else {
             Err(RendererError::InvalidRenderState(
                 "Renderer not initialized".to_string(),
@@ -431,6 +455,7 @@ impl WgpuRenderer {
             draw_data,
             &backend_data.device,
             &backend_data.queue,
+            &mut backend_data.render_resources,
         );
 
         // Advance to next frame
@@ -540,6 +565,7 @@ impl WgpuRenderer {
             draw_data,
             &backend_data.device,
             &backend_data.queue,
+            &mut backend_data.render_resources,
         );
 
         if advance_frame {
@@ -572,7 +598,6 @@ impl WgpuRenderer {
             for draw_list in draw_data.draw_lists() {
                 let vtx_buffer = draw_list.vtx_buffer();
                 let idx_buffer = draw_list.idx_buffer();
-                let mut cmd_i = 0;
                 for cmd in draw_list.commands() {
                     match cmd {
                         dear_imgui_rs::render::DrawCmd::Elements {
@@ -583,11 +608,9 @@ impl WgpuRenderer {
                             // Texture bind group resolution mirrors render_draw_lists_static
                             let texture_bind_group = {
                                 // Resolve effective ImTextureID using raw_cmd (modern texture path)
-                                let tex_id = unsafe {
-                                    dear_imgui_rs::sys::ImDrawCmd_GetTexID(
-                                        raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
-                                    )
-                                } as u64;
+                                let tex_id = dear_imgui_rs::sys::ImDrawCmd_GetTexID(
+                                    raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
+                                ) as u64;
                                 if tex_id == 0 {
                                     if let Some(default_tex) = &self.default_texture {
                                         backend_data
@@ -646,7 +669,6 @@ impl WgpuRenderer {
                             clip_max_x = clip_max_x.min(fbw);
                             clip_max_y = clip_max_y.min(fbh);
                             if clip_max_x <= clip_min_x || clip_max_y <= clip_min_y {
-                                cmd_i += 1;
                                 continue;
                             }
                             render_pass.set_scissor_rect(
@@ -672,7 +694,6 @@ impl WgpuRenderer {
                             // Unsupported raw callbacks; skip.
                         }
                     }
-                    cmd_i += 1;
                 }
 
                 global_idx_offset += idx_buffer.len() as u32;

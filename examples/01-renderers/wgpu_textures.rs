@@ -151,17 +151,25 @@ impl AppWindow {
     }
 
     fn maybe_load_photo_texture() -> Option<Box<dear_imgui_rs::texture::TextureData>> {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("texture.jpg");
-        if !path.exists() {
-            eprintln!(
-                "Image not found at {:?}. Current dir: {:?}",
-                path,
-                std::env::current_dir().ok()
-            );
-            return None;
-        }
+        // Prefer a clean, low-frequency gradient test image; fall back to the
+        // original JPEG if the gradient asset is missing.
+        let asset_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let candidates = [
+            asset_dir.join("texture_clean.ppm"),
+            asset_dir.join("texture.jpg"),
+        ];
+
+        let path = match candidates.iter().find(|p| p.exists()) {
+            Some(p) => p.clone(),
+            None => {
+                eprintln!(
+                    "No demo image found in {:?}. Current dir: {:?}",
+                    asset_dir,
+                    std::env::current_dir().ok()
+                );
+                return None;
+            }
+        };
 
         match ImageReader::open(&path)
             .and_then(|r| r.with_guessed_format())
@@ -262,13 +270,11 @@ impl AppWindow {
 
                 if let Some(photo) = self.photo_tex.as_mut() {
                     ui.separator();
-                    ui.text("Loaded Image:");
-                    // Fit within 256 while preserving aspect
+                    ui.text("Loaded Image (1:1):");
+                    // Render at native resolution (no scaling)
                     let w = photo.width() as f32;
                     let h = photo.height() as f32;
-                    let max_dim = 256.0;
-                    let scale = if w > h { max_dim / w } else { max_dim / h };
-                    Image::new(ui, &mut **photo, [w * scale, h * scale]).build();
+                    Image::new(ui, &mut **photo, [w, h]).build();
                 } else {
                     ui.separator();
                     ui.text_wrapped(
@@ -343,7 +349,7 @@ impl ApplicationHandler for App {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        window_id: WindowId,
+        _window_id: WindowId,
         event: WindowEvent,
     ) {
         let window = match self.window.as_mut() {
@@ -351,14 +357,11 @@ impl ApplicationHandler for App {
             None => return,
         };
 
-        let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-            window_id,
-            event: event.clone(),
-        };
-        window
-            .imgui
-            .platform
-            .handle_event(&mut window.imgui.context, &window.window, &full_event);
+        window.imgui.platform.handle_window_event(
+            &mut window.imgui.context,
+            &window.window,
+            &event,
+        );
 
         match event {
             WindowEvent::Resized(physical_size) => {

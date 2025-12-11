@@ -793,16 +793,17 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
         if let Some(window) = &mut self.window {
-            let winit_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-                window_id: id,
-                event: event.clone(),
-            };
-            window.imgui.platform.handle_event(
+            window.imgui.platform.handle_window_event(
                 &mut window.imgui.context,
                 &window.window,
-                &winit_event,
+                &event,
             );
 
             match event {

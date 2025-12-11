@@ -2,7 +2,6 @@
 
 use super::*;
 use dear_imgui_rs::render::DrawData;
-use wgpu::*;
 
 impl WgpuRenderer {
     /// Prepare frame resources (buffers)
@@ -42,19 +41,11 @@ impl WgpuRenderer {
         let frame_resources = &mut backend_data.frame_resources[frame_index as usize];
 
         // Ensure buffer capacity and upload data
-        frame_resources
-            .ensure_vertex_buffer_capacity(&backend_data.device, total_vtx_count)
-            .map_err(RendererError::BufferCreationFailed)?;
-        frame_resources
-            .ensure_index_buffer_capacity(&backend_data.device, total_idx_count)
-            .map_err(RendererError::BufferCreationFailed)?;
+        frame_resources.ensure_vertex_buffer_capacity(&backend_data.device, total_vtx_count)?;
+        frame_resources.ensure_index_buffer_capacity(&backend_data.device, total_idx_count)?;
 
-        frame_resources
-            .upload_vertex_data(&backend_data.queue, &vertices)
-            .map_err(RendererError::BufferCreationFailed)?;
-        frame_resources
-            .upload_index_data(&backend_data.queue, &indices)
-            .map_err(RendererError::BufferCreationFailed)?;
+        frame_resources.upload_vertex_data(&backend_data.queue, &vertices)?;
+        frame_resources.upload_index_data(&backend_data.queue, &indices)?;
 
         Ok(())
     }
@@ -64,7 +55,7 @@ impl WgpuRenderer {
     /// This corresponds to ImGui_ImplWGPU_SetupRenderState in the C++ implementation
     pub(super) fn setup_render_state_static(
         draw_data: &DrawData,
-        render_pass: &mut RenderPass,
+        render_pass: &mut wgpu::RenderPass,
         backend_data: &WgpuBackendData,
         gamma: f32,
     ) -> RendererResult<()> {
@@ -101,7 +92,7 @@ impl WgpuRenderer {
             frame_resources.index_buffer(),
         ) {
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            render_pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint16);
+            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         }
 
         Ok(())
@@ -110,9 +101,9 @@ impl WgpuRenderer {
     /// Render all draw lists
     pub(super) fn render_draw_lists_static(
         texture_manager: &mut WgpuTextureManager,
-        default_texture: &Option<TextureView>,
+        default_texture: &Option<wgpu::TextureView>,
         draw_data: &DrawData,
-        render_pass: &mut RenderPass,
+        render_pass: &mut wgpu::RenderPass,
         backend_data: &mut WgpuBackendData,
         gamma: f32,
     ) -> RendererResult<()> {

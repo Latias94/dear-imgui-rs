@@ -64,17 +64,25 @@ impl TexDemoState {
     }
 
     fn maybe_load_photo_texture() -> Option<Box<dear_imgui_rs::texture::TextureData>> {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("texture.jpg");
-        if !path.exists() {
-            eprintln!(
-                "Image not found at {:?}. Current dir: {:?}",
-                path,
-                std::env::current_dir().ok()
-            );
-            return None;
-        }
+        // Prefer the shared gradient test image; fall back to the original JPEG
+        // asset to keep behavior reasonable if the gradient is missing.
+        let asset_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let candidates = [
+            asset_dir.join("texture_clean.ppm"),
+            asset_dir.join("texture.jpg"),
+        ];
+
+        let path = match candidates.iter().find(|p| p.exists()) {
+            Some(p) => p.clone(),
+            None => {
+                eprintln!(
+                    "No demo image found in {:?}. Current dir: {:?}",
+                    asset_dir,
+                    std::env::current_dir().ok()
+                );
+                return None;
+            }
+        };
 
         match ImageReader::open(&path)
             .and_then(|r| r.with_guessed_format())

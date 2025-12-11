@@ -3,6 +3,7 @@
 //! This module handles per-frame resources like vertex and index buffers,
 //! corresponding to the FrameResources struct in imgui_impl_wgpu.cpp
 
+use crate::{RendererError, RendererResult};
 use dear_imgui_rs::render::{DrawIdx, DrawVert};
 use wgpu::*;
 
@@ -49,7 +50,7 @@ impl FrameResources {
         &mut self,
         device: &Device,
         required_vertices: usize,
-    ) -> Result<(), String> {
+    ) -> RendererResult<()> {
         if self.vertex_buffer.is_none() || self.vertex_buffer_size < required_vertices {
             // Add some extra capacity to avoid frequent reallocations
             let new_size = (required_vertices + 5000).max(self.vertex_buffer_size * 2);
@@ -79,7 +80,7 @@ impl FrameResources {
         &mut self,
         device: &Device,
         required_indices: usize,
-    ) -> Result<(), String> {
+    ) -> RendererResult<()> {
         if self.index_buffer.is_none() || self.index_buffer_size < required_indices {
             // Add some extra capacity to avoid frequent reallocations
             let new_size = (required_indices + 10000).max(self.index_buffer_size * 2);
@@ -109,11 +110,10 @@ impl FrameResources {
         &mut self,
         queue: &Queue,
         vertices: &[DrawVert],
-    ) -> Result<(), String> {
-        let vertex_buffer = self
-            .vertex_buffer
-            .as_ref()
-            .ok_or("Vertex buffer not initialized")?;
+    ) -> RendererResult<()> {
+        let vertex_buffer = self.vertex_buffer.as_ref().ok_or_else(|| {
+            RendererError::InvalidRenderState("Vertex buffer not initialized".to_string())
+        })?;
 
         // Convert vertices to bytes
         let vertex_bytes = unsafe {
@@ -144,11 +144,10 @@ impl FrameResources {
     }
 
     /// Upload index data to the GPU buffer
-    pub fn upload_index_data(&mut self, queue: &Queue, indices: &[DrawIdx]) -> Result<(), String> {
-        let index_buffer = self
-            .index_buffer
-            .as_ref()
-            .ok_or("Index buffer not initialized")?;
+    pub fn upload_index_data(&mut self, queue: &Queue, indices: &[DrawIdx]) -> RendererResult<()> {
+        let index_buffer = self.index_buffer.as_ref().ok_or_else(|| {
+            RendererError::InvalidRenderState("Index buffer not initialized".to_string())
+        })?;
 
         // Convert indices to bytes
         let index_bytes = unsafe {

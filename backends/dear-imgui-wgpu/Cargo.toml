@@ -22,6 +22,8 @@ winit = { workspace = true, optional = true }
 default = []
 # Enable multi-viewport support
 multi-viewport = ["dear-imgui-rs/multi-viewport", "dep:winit"]
+# Debug logging for multi-viewport paths (see mvlog! macro)
+mv-log = []
 # Enable WebGL support for WASM
 webgl = ["wgpu/webgl"]
 webgpu = ["wgpu/webgpu"]

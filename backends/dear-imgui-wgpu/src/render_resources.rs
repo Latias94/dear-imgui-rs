@@ -15,10 +15,8 @@ use wgpu::*;
 pub struct RenderResources {
     /// Texture sampler
     pub sampler: Option<Sampler>,
-    /// Uniform buffer manager
+    /// Uniform buffer manager (also owns the common bind group layout)
     pub uniform_buffer: Option<UniformBuffer>,
-    /// Common bind group (uniforms + sampler)
-    pub common_bind_group: Option<BindGroup>,
     /// Image bind groups cache (texture_id -> bind_group)
     pub image_bind_groups: HashMap<u64, BindGroup>,
     /// Image bind group layout (cached for efficiency)
@@ -31,7 +29,6 @@ impl RenderResources {
         Self {
             sampler: None,
             uniform_buffer: None,
-            common_bind_group: None,
             image_bind_groups: HashMap::new(),
             image_bind_group_layout: None,
         }
@@ -54,10 +51,10 @@ impl RenderResources {
             ..Default::default()
         });
 
-        // Create uniform buffer
+        // Create uniform buffer + common bind group layout
         let uniform_buffer = UniformBuffer::new(device, &sampler);
 
-        // Create image bind group layout
+        // Create image bind group layout (for texture views)
         let image_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Dear ImGui Image Bind Group Layout"),
             entries: &[BindGroupLayoutEntry {
@@ -74,7 +71,6 @@ impl RenderResources {
 
         self.sampler = Some(sampler);
         self.uniform_buffer = Some(uniform_buffer);
-        self.common_bind_group = None; // Will be set from uniform_buffer
         self.image_bind_group_layout = Some(image_bind_group_layout);
 
         Ok(())

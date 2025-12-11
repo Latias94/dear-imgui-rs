@@ -2,7 +2,6 @@
 
 use super::*;
 use dear_imgui_rs::Context;
-use wgpu::*;
 
 impl WgpuRenderer {
     /// Load font texture from Dear ImGui context

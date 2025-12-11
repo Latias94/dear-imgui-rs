@@ -3,7 +3,7 @@
 //! This module handles texture creation, updates, and management,
 //! integrating with Dear ImGui's modern texture system.
 
-use crate::{RendererError, RendererResult};
+use crate::{RenderResources, RendererError, RendererResult};
 use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
 use std::collections::HashMap;
 use wgpu::*;
@@ -572,12 +572,15 @@ impl WgpuTextureManager {
     /// For `WantCreate`, we create the GPU texture, then write the generated id back into
     /// the `ImTextureData` via `set_tex_id()` and mark status `OK` (matching C++ backend).
     /// For `WantUpdates`, if a valid id is not yet assigned (first use), we create now and
-    /// assign the id; otherwise we update in place.
+    /// assign the id; otherwise we update in place. When textures are recreated or destroyed,
+    /// the corresponding cached bind groups in `RenderResources` are invalidated so that
+    /// subsequent draws will see the updated views.
     pub fn handle_texture_updates(
         &mut self,
         draw_data: &dear_imgui_rs::render::DrawData,
         device: &Device,
         queue: &Queue,
+        render_resources: &mut RenderResources,
     ) {
         for texture_data in draw_data.textures() {
             let status = texture_data.status();
@@ -587,6 +590,12 @@ impl WgpuTextureManager {
                 TextureStatus::WantCreate => {
                     // Create and upload new texture to graphics system
                     // Following the official imgui_impl_wgpu.cpp implementation
+
+                    // If ImGui already had a TexID associated, drop any stale bind group
+                    // so that a new one is created the first time we render with it.
+                    if current_tex_id != 0 {
+                        render_resources.remove_image_bind_group(current_tex_id);
+                    }
 
                     match self.create_texture_from_data(device, queue, texture_data) {
                         Ok(wgpu_texture_id) => {
@@ -615,7 +624,7 @@ impl WgpuTextureManager {
 
                     // If we don't have a valid texture id yet (first update) or the
                     // id isn't registered, create it now and write back the TexID,
-                    // so this frame (or the next) can bind the correct texture.
+                    // so this frame (or the next one) can bind the correct texture.
                     if internal_id == 0 || !self.contains_texture(internal_id) {
                         match self.create_texture_from_data(device, queue, texture_data) {
                             Ok(new_id) => {
@@ -628,6 +637,10 @@ impl WgpuTextureManager {
                             }
                         }
                     } else {
+                        // We are about to update/recreate an existing texture. Invalidate
+                        // any cached bind group so it will be rebuilt with the new view.
+                        render_resources.remove_image_bind_group(internal_id);
+
                         // Try in-place sub-rect updates first
                         if self
                             .apply_subrect_updates(queue, texture_data, internal_id)
@@ -668,8 +681,9 @@ impl WgpuTextureManager {
                     if can_destroy {
                         let imgui_tex_id = texture_data.tex_id();
                         let internal_id = imgui_tex_id.id();
-                        // Remove from cache
+                        // Remove from texture cache and any associated bind groups
                         self.remove_texture(internal_id);
+                        render_resources.remove_image_bind_group(internal_id);
                         texture_data.set_status(TextureStatus::Destroyed);
                     }
                 }
@@ -709,26 +723,22 @@ impl WgpuTextureManager {
         texture_data: &dear_imgui_rs::TextureData,
         device: &Device,
         queue: &Queue,
-    ) -> Result<TextureUpdateResult, String> {
+    ) -> RendererResult<TextureUpdateResult> {
         match texture_data.status() {
             TextureStatus::WantCreate => {
-                match self.create_texture_from_data(device, queue, texture_data) {
-                    Ok(texture_id) => Ok(TextureUpdateResult::Created {
-                        texture_id: TextureId::from(texture_id),
-                    }),
-                    Err(e) => Err(format!("Failed to create texture: {}", e)),
-                }
+                let texture_id = self.create_texture_from_data(device, queue, texture_data)?;
+                Ok(TextureUpdateResult::Created {
+                    texture_id: TextureId::from(texture_id),
+                })
             }
             TextureStatus::WantUpdates => {
                 let internal_id = texture_data.tex_id().id();
                 if internal_id == 0 || !self.contains_texture(internal_id) {
                     // No valid ID yet: create now and return Created so caller can set TexID
-                    match self.create_texture_from_data(device, queue, texture_data) {
-                        Ok(texture_id) => Ok(TextureUpdateResult::Created {
-                            texture_id: TextureId::from(texture_id),
-                        }),
-                        Err(e) => Err(format!("Failed to create texture: {}", e)),
-                    }
+                    let texture_id = self.create_texture_from_data(device, queue, texture_data)?;
+                    Ok(TextureUpdateResult::Created {
+                        texture_id: TextureId::from(texture_id),
+                    })
                 } else {
                     match self.update_texture_from_data_with_id(
                         device,
@@ -737,7 +747,7 @@ impl WgpuTextureManager {
                         internal_id,
                     ) {
                         Ok(_) => Ok(TextureUpdateResult::Updated),
-                        Err(_e) => Ok(TextureUpdateResult::Failed),
+                        Err(e) => Err(e),
                     }
                 }
             }
@@ -747,5 +757,112 @@ impl WgpuTextureManager {
             }
             TextureStatus::OK | TextureStatus::Destroyed => Ok(TextureUpdateResult::NoAction),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dear_imgui_rs::texture::{TextureData, TextureFormat as ImFormat, TextureRect};
+
+    #[test]
+    fn texture_update_result_apply_to_sets_status_and_id() {
+        let mut tex = TextureData::new();
+
+        // Created -> sets TexID and OK
+        TextureUpdateResult::Created {
+            texture_id: TextureId::from(42u64),
+        }
+        .apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::OK);
+        assert_eq!(tex.tex_id().id(), 42);
+
+        // Updated -> only status OK
+        TextureUpdateResult::Updated.apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::OK);
+        assert_eq!(tex.tex_id().id(), 42);
+
+        // Destroyed -> status Destroyed
+        TextureUpdateResult::Destroyed.apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::Destroyed);
+
+        // Failed -> also marks Destroyed
+        TextureUpdateResult::Failed.apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::Destroyed);
+
+        // NoAction -> leaves state unchanged
+        TextureUpdateResult::NoAction.apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::Destroyed);
+    }
+
+    #[test]
+    fn convert_subrect_to_rgba_rgba32_full_rect() {
+        let mut tex = TextureData::new();
+        let width = 2;
+        let height = 2;
+        tex.create(ImFormat::RGBA32, width, height);
+
+        // 2x2 RGBA pixels: row-major
+        let pixels: [u8; 16] = [
+            10, 20, 30, 40, // (0,0)
+            50, 60, 70, 80, // (1,0)
+            90, 100, 110, 120, // (0,1)
+            130, 140, 150, 160, // (1,1)
+        ];
+        tex.set_data(&pixels);
+
+        let rect = TextureRect {
+            x: 0,
+            y: 0,
+            w: width as u16,
+            h: height as u16,
+        };
+
+        let out = WgpuTextureManager::convert_subrect_to_rgba(&tex, rect).expect("expected data");
+        assert_eq!(out, pixels);
+    }
+
+    #[test]
+    fn convert_subrect_to_rgba_alpha8_full_rect() {
+        let mut tex = TextureData::new();
+        let width = 2;
+        let height = 2;
+        tex.create(ImFormat::Alpha8, width, height);
+
+        // 2x2 alpha-only pixels
+        let alphas: [u8; 4] = [0, 64, 128, 255];
+        tex.set_data(&alphas);
+
+        let rect = TextureRect {
+            x: 0,
+            y: 0,
+            w: width as u16,
+            h: height as u16,
+        };
+
+        let out = WgpuTextureManager::convert_subrect_to_rgba(&tex, rect).expect("expected data");
+        // Each alpha should expand to [255,255,255,a]
+        assert_eq!(
+            out,
+            vec![
+                255, 255, 255, 0, // a=0
+                255, 255, 255, 64, // a=64
+                255, 255, 255, 128, // a=128
+                255, 255, 255, 255, // a=255
+            ]
+        );
+    }
+
+    #[test]
+    fn convert_subrect_to_rgba_out_of_bounds_returns_none() {
+        let mut tex = TextureData::new();
+        tex.create(ImFormat::RGBA32, 2, 2);
+        let rect = TextureRect {
+            x: 10,
+            y: 10,
+            w: 1,
+            h: 1,
+        };
+        assert!(WgpuTextureManager::convert_subrect_to_rgba(&tex, rect).is_none());
     }
 }

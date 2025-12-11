@@ -1822,17 +1822,12 @@ impl ApplicationHandler for App {
             None => return,
         };
 
-        // Handle platform events first
+        // Handle platform events first (window-local path)
         {
             let imgui = window.imgui.as_mut().unwrap();
-            // Create a fake Event::WindowEvent for the platform handler
-            let fake_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-                window_id: _window_id,
-                event: event.clone(),
-            };
             imgui
                 .platform
-                .handle_event(&mut imgui.context, &window.window, &fake_event);
+                .handle_window_event(&mut imgui.context, &window.window, &event);
         }
 
         match event {

@@ -1,7 +1,6 @@
 // Renderer pipeline and device-objects creation
 
 use super::*;
-use wgpu::*;
 
 impl WgpuRenderer {
     /// Create device objects (pipeline, etc.)
@@ -13,13 +12,29 @@ impl WgpuRenderer {
     ) -> RendererResult<()> {
         let device = &backend_data.device;
 
-        // Create bind group layouts
-        let (common_layout, image_layout) = crate::shaders::create_bind_group_layouts(device);
+        // Reuse bind group layouts from shared render resources so that the
+        // pipeline layout and the actually bound groups share the same layouts.
+        let uniform_layout = backend_data
+            .render_resources
+            .uniform_buffer()
+            .map(|ub| ub.bind_group_layout())
+            .ok_or_else(|| {
+                RendererError::InvalidRenderState("Uniform buffer not initialized".to_string())
+            })?;
+
+        let image_layout = backend_data
+            .render_resources
+            .image_bind_group_layout()
+            .ok_or_else(|| {
+                RendererError::InvalidRenderState(
+                    "Image bind group layout not initialized".to_string(),
+                )
+            })?;
 
         // Create pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Dear ImGui Pipeline Layout"),
-            bind_group_layouts: &[&common_layout, &image_layout],
+            bind_group_layouts: &[uniform_layout, image_layout],
             push_constant_ranges: &[],
         });
 
