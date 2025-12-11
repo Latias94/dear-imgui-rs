@@ -39,6 +39,7 @@ README_FILES = [
     "extensions/dear-implot3d/README.md",
     "extensions/dear-imguizmo-quat/README.md",
     "extensions/dear-file-browser/README.md",
+    "extensions/dear-imgui-reflect/README.md",
 ]
 
 
@@ -258,4 +259,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

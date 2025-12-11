@@ -8,12 +8,14 @@ body:
       label: Target crates
       description: Which part(s) of the workspace does this affect?
       options:
-        - label: dear-imgui
+        - label: dear-imgui-rs
         - label: dear-imgui-sys
-        - label: backends (wgpu/glow/winit)
-        - label: extensions (implot/imnodes/imguizmo)
+        - label: backends (wgpu/glow/winit/sdl3)
+        - label: dear-app
+        - label: extensions (implot/implot3d/imnodes/imguizmo/imguizmo-quat/file-browser/reflect)
         - label: CI / packaging / prebuilt
         - label: Docs
+        - label: Other / Unsure
   - type: textarea
     id: problem
     attributes:

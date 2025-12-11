@@ -1,22 +1,24 @@
 # Dear ImGui Extensions
 
-Extensions in this workspace build on top of `dear-imgui-sys` (cimgui C API) to provide extra functionality like plotting and 3D gizmos.
+Extensions in this workspace build on top of `dear-imgui-sys` (cimgui C API) and `dear-imgui-rs` to provide extra functionality like plotting, 3D gizmos, and reflection-based UI helpers.
 
-| Extension | Description            | Status    | Rust Crate                       | Upstream C API                                      |
-|-----------|------------------------|-----------|----------------------------------|-----------------------------------------------------|
-| ImPlot    | Scientific plotting    | Complete  | [dear-implot](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-implot)     | [cimgui/cimplot](https://github.com/cimgui/cimplot) |
-| ImGuizmo  | 3D transform gizmos    | Complete  | [dear-imguizmo](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo) | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo) |
-| ImGuIZMO.quat | Quaternion + 3D gizmo | Proposed  | [dear-imguizmo-quat](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo-quat) | [cimgui/cimguizmo_quat](https://github.com/cimgui/cimguizmo_quat) |
-| ImNodes   | Node editor widgets    | Complete  | [dear-imnodes](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imnodes)   | [cimgui/cimnodes](https://github.com/cimgui/cimnodes)  |
-| File Browser | File dialogs + in-UI browser | Preview   | [dear-file-browser](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-file-browser) | Pure ImGui UI + rfd (native) |
+| Extension      | Description                     | Status    | Rust Crate                                                                 | Upstream C API / Reference                                   |
+|----------------|---------------------------------|-----------|----------------------------------------------------------------------------|--------------------------------------------------------------|
+| ImPlot         | Scientific plotting             | Complete  | [dear-implot](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-implot)         | [cimgui/cimplot](https://github.com/cimgui/cimplot)          |
+| ImGuizmo       | 3D transform gizmos             | Complete  | [dear-imguizmo](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo)     | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo)      |
+| ImGuIZMO.quat  | Quaternion + 3D gizmo           | Complete  | [dear-imguizmo-quat](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo-quat) | [cimgui/cimguizmo_quat](https://github.com/cimgui/cimguizmo_quat) |
+| ImNodes        | Node editor widgets             | Complete  | [dear-imnodes](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imnodes)       | [cimgui/cimnodes](https://github.com/cimgui/cimnodes)        |
+| File Browser   | File dialogs + in-UI browser    | Preview   | [dear-file-browser](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-file-browser) | Pure ImGui UI + rfd (native)                                 |
+| ImGui Reflect  | Reflection-based UI from types  | Preview   | [dear-imgui-reflect](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imgui-reflect) | C++ ImReflect (reference only; pure Rust implementation)     |
 
 ## Architecture
 
-All extensions use C bindings + bindgen (no C++ bindgen):
+Most extensions use C bindings + bindgen (no C++ bindgen):
 
 ```
 Core:        dear-imgui-sys (cimgui C API)  ->  dear-imgui (safe Rust)
 Extensions:  dear-xxx-sys (C API + bindgen) ->  dear-xxx (safe Rust)
+Pure-Rust:   dear-imgui-reflect builds directly on dear-imgui-rs (no -sys crate)
 ```
 
 Key points:
@@ -72,8 +74,8 @@ Examples are in the top-level `examples/` crate and are feature-gated per extens
 
 - `implot_basic` -> `--features dear-implot`
 - `imguizmo_basic` -> `--features dear-imguizmo`
-
 - `imnodes_basic` -> `--features dear-imnodes`
+- `reflect_demo` -> `--features reflect`
 
 Run:
 
@@ -81,6 +83,7 @@ Run:
 cargo run --bin implot_basic --features dear-implot
 cargo run --bin imguizmo_basic --features dear-imguizmo
 cargo run --bin imnodes_basic --features dear-imnodes
+cargo run --bin reflect_demo --features reflect
 
 # File Browser (new)
 
@@ -95,5 +98,3 @@ cargo run -p dear-imgui-examples --features dear-file-browser --bin file_browser
 ```
 
  
-
-

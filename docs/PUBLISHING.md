@@ -169,6 +169,8 @@ If you prefer to publish manually or need to publish individual crates:
    cargo publish -p dear-implot3d
    cargo publish -p dear-imguizmo-quat
    cargo publish -p dear-file-browser
+   cargo publish -p dear-imgui-reflect-derive
+   cargo publish -p dear-imgui-reflect
    ```
 
 5. **Application Runner**
@@ -316,4 +318,3 @@ All crates in the workspace are versioned together, even if some crates haven't 
 - [RELEASING.md](./RELEASING.md) - Technical details about sys crate bindings
 - [COMPATIBILITY.md](./COMPATIBILITY.md) - Version compatibility matrix
 - [README.md](../README.md) - Main project documentation
-

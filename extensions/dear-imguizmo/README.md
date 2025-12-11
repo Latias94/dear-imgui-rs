@@ -44,8 +44,8 @@ All matrix arguments in the API are generic over a `Mat4Like` trait, implemented
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.5"
-dear-imguizmo = "0.5"
+dear-imgui-rs = "0.6"
+dear-imguizmo = "0.6"
 ```
 
 Minimal usage (dear-imgui-style API):

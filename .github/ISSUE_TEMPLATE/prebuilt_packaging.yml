@@ -11,6 +11,8 @@ body:
         - dear-implot-sys
         - dear-imnodes-sys
         - dear-imguizmo-sys
+        - dear-imguizmo-quat-sys
+        - dear-implot3d-sys
     validations:
       required: true
   - type: input

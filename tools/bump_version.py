@@ -47,6 +47,8 @@ WORKSPACE_CRATES = [
     "extensions/dear-imguizmo-quat-sys",
     "extensions/dear-imguizmo-quat",
     "extensions/dear-file-browser",
+    "extensions/dear-imgui-reflect-derive",
+    "extensions/dear-imgui-reflect",
 ]
 
 
@@ -321,4 +323,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

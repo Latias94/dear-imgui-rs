@@ -35,6 +35,7 @@
   - `dear-implot3d` — 3D plotting (cimplot3d C API)
   - `dear-imguizmo-quat` — quaternion + 3D gizmo (cimguizmo_quat C API)
   - `dear-file-browser` — native dialogs (rfd) + pure ImGui in-UI file browser
+  - `dear-imgui-reflect` — reflection-based UI helpers (auto-generate ImGui widgets from Rust types)
 
 All crates are maintained together in this workspace.
 
@@ -76,6 +77,7 @@ cargo run --bin imguizmo_basic --features imguizmo
 cargo run --bin imnodes_basic --features imnodes
 cargo run --bin implot_basic --features implot
 cargo run --bin imguizmo_quat_basic --features imguizmo-quat
+cargo run --bin reflect_demo --features reflect
 
 # implot3d example (uses dear-app)
 cargo run --bin implot3d_basic --features implot3d
@@ -139,6 +141,32 @@ dear-imnodes = "0.6"
 
 # File Browser
 dear-file-browser = "0.6"  # Native dialogs + ImGui file browser
+
+# Reflection-based UI helpers
+dear-imgui-reflect = "0.6"
+```
+
+### Reflection-based UI (dear-imgui-reflect)
+
+`dear-imgui-reflect` lets you derive `ImGuiReflect` on your structs/enums and automatically get Dear ImGui editors for them. It is inspired by the C++ ImReflect library but implemented in pure Rust on top of `dear-imgui-rs`.
+
+Typical flow:
+
+```rust
+use dear_imgui_reflect as reflect;
+use reflect::ImGuiReflect;
+use reflect::ImGuiReflectExt;
+
+#[derive(ImGuiReflect, Default)]
+struct Settings {
+    #[imgui(slider, min = 0, max = 100)]
+    volume: i32,
+    fullscreen: bool,
+}
+
+fn ui_frame(ui: &reflect::imgui::Ui, settings: &mut Settings) {
+    ui.input_reflect("Settings", settings);
+}
 ```
 
 ## Build Strategy
@@ -174,33 +202,35 @@ Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.6.x|dear-imgui-rs   | 0.6.x   | Safe Rust API over dear-imgui-sys  | 0.6.x   | Binds Dear ImGui v1.92.5       |
-| dear-imgui-sys  | 0.6.x   | Binds Dear ImGui v1.92.5|dear-imgui-rs   | 0.6.x   |dear-imgui-sys  | 0.6.x   | Binds Dear ImGui v1.92.5 (docking branch) |
+| dear-imgui-rs   | 0.6.x   | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.6.x   | Binds Dear ImGui v1.92.5 (docking branch) |
 
 Backends
 
-| Crate            | Version | External deps         | Notes |
-|------------------|---------|-----------------------|-------|
-| dear-imgui-wgpu  | 0.6.x|dear-imgui-rs   | 0.6.x   | wgpu = 27             |       |
-| dear-imgui-glow  | 0.6.x|dear-imgui-rs   | 0.6.x   | glow = 0.16           |       |
-| dear-imgui-winit | 0.6.x|dear-imgui-rs   | 0.6.x   | winit = 0.30.12       |       |
+| Crate            | Version | External deps     | Notes                          |
+|------------------|---------|-------------------|--------------------------------|
+| dear-imgui-wgpu  | 0.6.x   | wgpu = 27         | WebGPU renderer (multi-viewport: experimental, winit only) |
+| dear-imgui-glow  | 0.6.x   | glow = 0.16       | OpenGL renderer (winit/glutin) |
+| dear-imgui-winit | 0.6.x   | winit = 0.30.12   | Winit platform backend         |
+| dear-imgui-sdl3  | 0.6.x   | sdl3 = 0.16       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
 
 Application Runner
 
-| Crate     | Version | Requires dear-imgui-rs | Notes |
-|-----------|---------|------------------------|-------|
-| dear-app  | 0.6.x|dear-imgui-rs   | 0.6.x   |dear-imgui-rs   | 0.6.x                  | Convenient Winit + WGPU runner with docking, themes, and add-ons support |
+| Crate     | Version | Requires dear-imgui-rs | Notes                                            |
+|-----------|---------|------------------------|--------------------------------------------------|
+| dear-app  | 0.6.x   | 0.6.x                  | App runner (docking, themes, add-ons)            |
 
 Extensions
 
-| Crate         | Version | Requires dear-imgui-rs | Sys crate            | Notes |
-|---------------|---------|------------------------|----------------------|-------|
-| dear-implot   | 0.6.x|dear-imgui-rs   | 0.6.x   |dear-imgui-rs   | 0.6.x                  | dear-implot-sysdear-imgui-rs   | 0.6.x |     |
-| dear-imnodes  | 0.6.x|dear-imgui-rs   | 0.6.x   |dear-imgui-rs   | 0.6.x                  | dear-imnodes-sysdear-imgui-rs   | 0.6.x |     |
-| dear-imguizmo | 0.6.x|dear-imgui-rs   | 0.6.x   |dear-imgui-rs   | 0.6.x                  | dear-imguizmo-sysdear-imgui-rs   | 0.6.x |    |
-| dear-implot3d | 0.6.x|dear-imgui-rs   | 0.6.x   |dear-imgui-rs   | 0.6.x                  | dear-implot3d-sysdear-imgui-rs   | 0.6.x | ImPlot3D (3D plotting) |
-| dear-imguizmo-quat | 0.6.x|dear-imgui-rs   | 0.6.x |dear-imgui-rs   | 0.6.x               | dear-imguizmo-quat-sysdear-imgui-rs   | 0.6.x | ImGuIZMO.quat (quaternion gizmo) |
-| dear-file-browser | 0.6.x|dear-imgui-rs   | 0.6.x |dear-imgui-rs   | 0.6.x               | —                      | ImGui UI + native (rfd) backends |
+| Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
+|---------------------|---------|------------------------|-----------------------------|----------------------------------------|
+| dear-implot         | 0.6.x   | 0.6.x                  | dear-implot-sys 0.6.x       | 2D plotting                            |
+| dear-imnodes        | 0.6.x   | 0.6.x                  | dear-imnodes-sys 0.6.x      | Node editor                            |
+| dear-imguizmo       | 0.6.x   | 0.6.x                  | dear-imguizmo-sys 0.6.x     | 3D gizmo + GraphEditor                 |
+| dear-file-browser   | 0.6.x   | 0.6.x                  | —                           | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.6.x   | 0.6.x                  | dear-implot3d-sys 0.6.x     | 3D plotting                            |
+| dear-imguizmo-quat  | 0.6.x   | 0.6.x                  | dear-imguizmo-quat-sys 0.6.x| Quaternion gizmo                       |
+| dear-imgui-reflect  | 0.6.x   | 0.6.x                  | —                           | Reflection-based UI helpers (pure Rust)|
 
 Maintenance rules
 
@@ -221,14 +251,14 @@ Maintenance rules
 
 ## Version & FFI
 
-- FFI layer is generated from the cimgui “docking” branch matching Dear ImGui v1.92.4.
+- FFI layer is generated from the cimgui “docking” branch matching Dear ImGui v1.92.5.
 - We avoid the C++ ABI by using the C API + bindgen. The safe layer mirrors imgui-rs style (RAII + builder).
 
 ## Crates (workspace)
 
 ```text
 dear-imgui-rs/         # Safe Rust bindings (renamed from dear-imgui)
-dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.92.4)
+dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.92.5)
 backends/
   dear-imgui-wgpu/     # WGPU renderer
   dear-imgui-glow/     # OpenGL renderer
@@ -241,6 +271,7 @@ extensions/
   dear-implot3d/       # ImPlot3D (3D plotting)
   dear-imguizmo-quat/  # ImGuIZMO.quat (quaternion gizmo)
   dear-file-browser/   # File dialogs (rfd) + pure ImGui browser
+  dear-imgui-reflect/  # Reflection-based UI helpers for dear-imgui-rs
 ```
 
 ## WebAssembly (WASM) support

@@ -6,7 +6,7 @@ This project supports compiling Dear ImGui + backends to WebAssembly using an im
 
 - Prerequisites
   - `rustup target add wasm32-unknown-unknown`
-  - `cargo install -f wasm-bindgen-cli --version 0.2.104`
+  - `cargo install -f wasm-bindgen-cli --version 0.2.105`
   - `cargo install -f wasm-tools`
   - Emscripten SDK (for provider). On Windows run `emsdk_env.bat`/`.ps1` so `emcc/em++` are on PATH, or set `EMSDK` to emsdk root.
 

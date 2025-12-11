@@ -6,24 +6,34 @@ body:
     id: crates
     attributes:
       label: Affected crates
-      description: Select all crates impacted by this issue.
+      description: Select all crates impacted by this issue (best‑effort; ok to leave blank or pick “Other / Unsure”).
       options:
-        - label: dear-imgui
+        - label: dear-imgui-rs
         - label: dear-imgui-sys
         - label: backends/dear-imgui-wgpu
         - label: backends/dear-imgui-glow
         - label: backends/dear-imgui-winit
+        - label: backends/dear-imgui-sdl3
+        - label: dear-app
         - label: extensions/dear-implot
         - label: extensions/dear-implot-sys
+        - label: extensions/dear-implot3d
+        - label: extensions/dear-implot3d-sys
         - label: extensions/dear-imnodes
         - label: extensions/dear-imnodes-sys
         - label: extensions/dear-imguizmo
         - label: extensions/dear-imguizmo-sys
+        - label: extensions/dear-imguizmo-quat
+        - label: extensions/dear-imguizmo-quat-sys
+        - label: extensions/dear-file-browser
+        - label: extensions/dear-imgui-reflect
+        - label: Docs / CI / tooling
+        - label: Other / Unsure
   - type: checkboxes
     id: targets
     attributes:
       label: Target(s)
-      description: Select all that apply.
+      description: Select all that apply (ok to leave blank or pick “Other / Unsure”).
       options:
         - label: Windows x86_64-pc-windows-msvc (MD)
         - label: Windows x86_64-pc-windows-msvc (MT)
@@ -31,10 +41,12 @@ body:
         - label: macOS x86_64-apple-darwin
         - label: macOS aarch64-apple-darwin
         - label: wasm32 (unknown or emscripten)
+        - label: Other / Unsure
   - type: dropdown
     id: build_strategy
     attributes:
       label: Build strategy used
+      description: Optional – pick the closest match; “Mixed / Unsure” is fine.
       options:
         - Source build
         - Prebuilt (Release asset)

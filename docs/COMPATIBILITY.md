@@ -36,14 +36,15 @@ Utilities
 
 Extensions
 
-| Crate               | Version | Requires dear-imgui-rs | Sys crate                  | Notes |
-|---------------------|---------|------------------------|----------------------------|-------|
-| dear-implot         | 0.6.x   | 0.6.x                  | dear-implot-sys 0.6.x      |       |
-| dear-imnodes        | 0.6.x   | 0.6.x                  | dear-imnodes-sys 0.6.x     |       |
-| dear-imguizmo       | 0.6.x   | 0.6.x                  | dear-imguizmo-sys 0.6.x    |       |
-| dear-file-browser   | 0.6.x   | 0.6.x                  | —                          | ImGui UI + native (rfd) backends |
-| dear-implot3d       | 0.6.x   | 0.6.x                  | dear-implot3d-sys 0.6.x    | 3D plotting |
-| dear-imguizmo-quat  | 0.6.x   | 0.6.x                  | dear-imguizmo-quat-sys 0.6.x | Quaternion gizmo |
+| Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
+|---------------------|---------|------------------------|------------------------------|----------------------------------------|
+| dear-implot         | 0.6.x   | 0.6.x                  | dear-implot-sys 0.6.x        |                                        |
+| dear-imnodes        | 0.6.x   | 0.6.x                  | dear-imnodes-sys 0.6.x       |                                        |
+| dear-imguizmo       | 0.6.x   | 0.6.x                  | dear-imguizmo-sys 0.6.x      |                                        |
+| dear-file-browser   | 0.6.x   | 0.6.x                  | —                            | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.6.x   | 0.6.x                  | dear-implot3d-sys 0.6.x      | 3D plotting                            |
+| dear-imguizmo-quat  | 0.6.x   | 0.6.x                  | dear-imguizmo-quat-sys 0.6.x | Quaternion gizmo                       |
+| dear-imgui-reflect  | 0.6.x   | 0.6.x                  | —                            | Reflection-based UI helpers (pure Rust)|
 
 ## History
 
@@ -53,7 +54,7 @@ Release Train 0.6 (current)
   - Core: dear-imgui-rs 0.6.0, dear-imgui-sys 0.6.0
   - Backends: dear-imgui-wgpu 0.6.0, dear-imgui-glow 0.6.0, dear-imgui-winit 0.6.0
   - Utilities: dear-app 0.6.0
-  - Extensions: dear-implot 0.6.0, dear-imnodes 0.6.0, dear-imguizmo 0.6.0, dear-implot3d 0.6.0, dear-imguizmo-quat 0.6.0, dear-file-browser 0.6.0
+  - Extensions: dear-implot 0.6.0, dear-imnodes 0.6.0, dear-imguizmo 0.6.0, dear-implot3d 0.6.0, dear-imguizmo-quat 0.6.0, dear-file-browser 0.6.0, dear-imgui-reflect 0.6.0
   - Sys crates: dear-implot-sys 0.6.0, dear-imnodes-sys 0.6.0, dear-imguizmo-sys 0.6.0, dear-implot3d-sys 0.6.0, dear-imguizmo-quat-sys 0.6.0
 - dear-imgui-sys 0.6.x binds Dear ImGui v1.92.5 (docking) via cimgui
 - New features:

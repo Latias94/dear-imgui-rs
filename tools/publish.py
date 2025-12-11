@@ -8,10 +8,11 @@ dependencies are published before their dependents.
 Publishing Order:
 1. Core: dear-imgui-sys → dear-imgui-rs
 2. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-sdl3
-3. Extensions (sys): dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys, 
+3. Extensions (sys): dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys,
                      dear-implot3d-sys, dear-imguizmo-quat-sys
 4. Extensions (high-level): dear-implot, dear-imnodes, dear-imguizmo,
-                            dear-implot3d, dear-imguizmo-quat, dear-file-browser
+                            dear-implot3d, dear-imguizmo-quat, dear-file-browser,
+                            dear-imgui-reflect-derive, dear-imgui-reflect
 5. Application: dear-app
 
 Usage:
@@ -72,6 +73,8 @@ PUBLISH_ORDER = [
     ("dear-implot3d", "extensions/dear-implot3d"),
     ("dear-imguizmo-quat", "extensions/dear-imguizmo-quat"),
     ("dear-file-browser", "extensions/dear-file-browser"),
+    ("dear-imgui-reflect-derive", "extensions/dear-imgui-reflect-derive"),
+    ("dear-imgui-reflect", "extensions/dear-imgui-reflect"),
     
     # Application runner (depends on backends and dear-imgui-rs)
     ("dear-app", "dear-app"),
@@ -427,4 +430,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

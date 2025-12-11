@@ -5,14 +5,20 @@
   - Problem it solves or motivation.
 
 - Affected crates
-  - [ ] dear-imgui
+  - [ ] dear-imgui-rs
   - [ ] dear-imgui-sys
-  - [ ] backends/wgpu
-  - [ ] backends/glow
-  - [ ] backends/winit
+  - [ ] backends/dear-imgui-wgpu
+  - [ ] backends/dear-imgui-glow
+  - [ ] backends/dear-imgui-winit
+  - [ ] backends/dear-imgui-sdl3
+  - [ ] dear-app
   - [ ] extensions/dear-implot(-sys)
+  - [ ] extensions/dear-implot3d(-sys)
   - [ ] extensions/dear-imnodes(-sys)
   - [ ] extensions/dear-imguizmo(-sys)
+  - [ ] extensions/dear-imguizmo-quat(-sys)
+  - [ ] extensions/dear-file-browser
+  - [ ] extensions/dear-imgui-reflect
   - [ ] CI / tooling / docs
 
 - Behavior
@@ -36,4 +42,3 @@
 - Links
   - Fixes #
   - Related #
-

@@ -1,0 +1,28 @@
+name: Quick bug / Other
+description: Short, low-friction bug report or other issue.
+labels: [triage]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What are you seeing? A couple of sentences is enough; maintainers may ask for more details later.
+      placeholder: |
+        Example:
+        - Crash when resizing window with multi-viewport enabled.
+        - ImPlot axis labels are missing on macOS release builds.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details / logs (optional)
+      description: Steps, code snippet, or logs if you have them. You can skip this if it’s hard to minimize.
+      render: shell
+  - type: input
+    id: versions
+    attributes:
+      label: Version / environment (optional)
+      description: Crate versions and OS/toolchain if known.
+      placeholder: dear-imgui-rs 0.6.x, rustc 1.xx.x, Windows 11 / Ubuntu 22.04 / macOS 14
+
