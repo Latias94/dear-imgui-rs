@@ -60,5 +60,6 @@ default = []
 # multi-viewport = ["dear-imgui-sys/multi-viewport"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
+wasm = ["dear-imgui-sys/wasm"]
 prebuilt = []
 build-from-source = []

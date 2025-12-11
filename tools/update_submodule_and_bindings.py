@@ -6,11 +6,22 @@ Why: docs.rs builds are offline and cannot fetch submodules. To guarantee
 successful docs.rs builds, we pre-generate Rust bindings and vendor headers
 via submodules locally before publishing.
 
-Supported crates:
+Supported crates (native bindings):
   - dear-imgui-sys (cimgui)
   - extensions/dear-implot-sys (cimplot)
+  - extensions/dear-implot3d-sys (cimplot3d)
   - extensions/dear-imnodes-sys (cimnodes)
   - extensions/dear-imguizmo-sys (cimguizmo)
+  - extensions/dear-imguizmo-quat-sys (cimguizmo_quat)
+
+WASM pregenerated bindings:
+  - dear-imgui-sys: via `xtask wasm-bindgen`
+  - optional extensions via `--wasm-ext`:
+    - dear-implot-sys: `xtask wasm-bindgen-implot`
+    - dear-implot3d-sys: `xtask wasm-bindgen-implot3d`
+    - dear-imnodes-sys: `xtask wasm-bindgen-imnodes`
+    - dear-imguizmo-sys: `xtask wasm-bindgen-imguizmo`
+    - dear-imguizmo-quat-sys: `xtask wasm-bindgen-imguizmo-quat`
 
 Usage examples:
   - Update cimgui and regenerate bindings for dear-imgui-sys (Debug):
@@ -74,11 +85,20 @@ def main() -> int:
     # Branch selection per submodule
     parser.add_argument("--cimgui-branch", default="docking_inter", help="Branch for cimgui submodule (dear-imgui-sys)")
     parser.add_argument("--cimplot-branch", default="master", help="Branch for cimplot submodule (dear-implot-sys)")
+    parser.add_argument("--cimplot3d-branch", default="main", help="Branch for cimplot3d submodule (dear-implot3d-sys)")
     parser.add_argument("--cimnodes-branch", default="master", help="Branch for cimnodes submodule (dear-imnodes-sys)")
     parser.add_argument("--cimguizmo-branch", default="master", help="Branch for cimguizmo submodule (dear-imguizmo-sys)")
     parser.add_argument("--remote", default="origin", help="Remote name for submodules")
     parser.add_argument("--wasm", action="store_true", help="Additionally generate wasm pregenerated bindings for dear-imgui-sys")
     parser.add_argument("--wasm-import", default="imgui-sys-v0", help="WASM import module name for generated bindings")
+    parser.add_argument(
+        "--wasm-ext",
+        default="",
+        help=(
+            "Comma-separated list of extension wasm bindings to pregenerate via xtask "
+            "(choices: implot,implot3d,imnodes,imguizmo,imguizmo-quat)"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing")
     args = parser.parse_args()
 
@@ -87,6 +107,7 @@ def main() -> int:
     crate_roots = {
         "dear-imgui-sys": repo_root / "dear-imgui-sys",
         "dear-implot-sys": repo_root / "extensions/dear-implot-sys",
+        "dear-implot3d-sys": repo_root / "extensions/dear-implot3d-sys",
         "dear-imnodes-sys": repo_root / "extensions/dear-imnodes-sys",
         "dear-imguizmo-sys": repo_root / "extensions/dear-imguizmo-sys",
         "dear-imguizmo-quat-sys": repo_root / "extensions/dear-imguizmo-quat-sys",
@@ -94,6 +115,7 @@ def main() -> int:
     submodules = {
         "dear-imgui-sys": (crate_roots["dear-imgui-sys"] / "third-party/cimgui", args.cimgui_branch),
         "dear-implot-sys": (crate_roots["dear-implot-sys"] / "third-party/cimplot", args.cimplot_branch),
+        "dear-implot3d-sys": (crate_roots["dear-implot3d-sys"] / "third-party/cimplot3d", args.cimplot3d_branch),
         "dear-imnodes-sys": (crate_roots["dear-imnodes-sys"] / "third-party/cimnodes", args.cimnodes_branch),
         "dear-imguizmo-sys": (crate_roots["dear-imguizmo-sys"] / "third-party/cimguizmo", args.cimguizmo_branch),
         "dear-imguizmo-quat-sys": (crate_roots["dear-imguizmo-quat-sys"] / "third-party/cimguizmo_quat", args.cimguizmo_branch),
@@ -135,6 +157,7 @@ def main() -> int:
     crate_skip_env = {
         "dear-imgui-sys": "IMGUI_SYS_SKIP_CC",
         "dear-implot-sys": "IMPLOT_SYS_SKIP_CC",
+        "dear-implot3d-sys": "IMPLOT3D_SYS_SKIP_CC",
         "dear-imnodes-sys": "IMNODES_SYS_SKIP_CC",
         "dear-imguizmo-sys": "IMGUIZMO_SYS_SKIP_CC",
         "dear-imguizmo-quat-sys": "IMGUIZMO_QUAT_SYS_SKIP_CC",
@@ -187,10 +210,55 @@ def main() -> int:
         if rc != 0:
             return rc
 
+    # Optionally generate wasm pregenerated bindings for extension -sys crates
+    wasm_exts = [
+        e.strip() for e in args.wasm_ext.split(",") if e.strip()
+    ]
+    if wasm_exts:
+        xtask = repo_root / "xtask"
+        if not xtask.exists():
+            print("xtask workspace member not found; cannot generate extension wasm bindings", file=sys.stderr)
+            return 6
+
+        # Map short extension names to xtask subcommands and -sys crate ids
+        ext_to_cmd = {
+            "implot": "wasm-bindgen-implot",
+            "implot3d": "wasm-bindgen-implot3d",
+            "imnodes": "wasm-bindgen-imnodes",
+            "imguizmo": "wasm-bindgen-imguizmo",
+            "imguizmo-quat": "wasm-bindgen-imguizmo-quat",
+        }
+        ext_to_sys_crate = {
+            "implot": "dear-implot-sys",
+            "implot3d": "dear-implot3d-sys",
+            "imnodes": "dear-imnodes-sys",
+            "imguizmo": "dear-imguizmo-sys",
+            "imguizmo-quat": "dear-imguizmo-quat-sys",
+        }
+
+        for ext in wasm_exts:
+            if ext not in ext_to_cmd:
+                print(f"Unknown wasm extension '{ext}'. Expected one of: {', '.join(sorted(ext_to_cmd.keys()))}", file=sys.stderr)
+                return 7
+            cmd = ext_to_cmd[ext]
+            sys_crate = ext_to_sys_crate[ext]
+            print(f"Generating wasm pregenerated bindings for {sys_crate} (ext='{ext}', import='{args.wasm_import}') via xtask...")
+            rc = run(
+                ["cargo", "run", "-p", "xtask", "--", cmd, args.wasm_import],
+                cwd=str(repo_root),
+                dry=args.dry_run,
+            )
+            if rc != 0:
+                return rc
+            wasm_preg = crate_roots[sys_crate] / "src" / "wasm_bindings_pregenerated.rs"
+            if not wasm_preg.exists():
+                print(f"WASM pregenerated bindings not found for {sys_crate}: {wasm_preg}", file=sys.stderr)
+                return 8
+            print(f"WASM pregenerated bindings ready for {sys_crate}: {wasm_preg}")
+
     print("Done.")
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

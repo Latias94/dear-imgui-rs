@@ -178,11 +178,11 @@ impl<'ui> GizmoUi<'ui> {
             sys::ImGuizmo_ViewManipulate_Float(
                 arr.as_mut_ptr(),
                 length,
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: position[0],
                     y: position[1],
                 },
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: size[0],
                     y: size[1],
                 },
@@ -218,11 +218,11 @@ impl<'ui> GizmoUi<'ui> {
                 mode.into(),
                 matrix_arr.as_mut_ptr(),
                 length,
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: position[0],
                     y: position[1],
                 },
-                sys::ImVec2 {
+                sys::ImVec2_c {
                     x: size[0],
                     y: size[1],
                 },

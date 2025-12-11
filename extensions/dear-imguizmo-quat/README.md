@@ -25,6 +25,39 @@ Safe, idiomatic Rust bindings for ImGuIZMO.quat (quaternion + 3D gizmo helpers) 
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
+### WASM (WebAssembly) support
+
+This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same import-style design used by the core ImGui bindings:
+
+- `dear-imguizmo-quat` + `dear-imguizmo-quat-sys` expose a `wasm` feature which:
+  - Enables import-style FFI that links against the shared `imgui-sys-v0` provider module.
+  - Avoids compiling C/C++ during the Rust build for wasm.
+- The provider module (`imgui-sys-v0`) is built once using Emscripten and contains:
+  - Dear ImGui + cimgui (from `dear-imgui-sys`)
+  - ImGuizmo + cimguizmo (from `dear-imguizmo-sys`)
+  - ImGuIZMO.quat + cimguizmo_quat (from `dear-imguizmo-quat-sys`)
+
+To try the web demo with ImGuIZMO.quat enabled:
+
+```bash
+# 1) Generate pregenerated wasm bindings (Dear ImGui core + ImGuIZMO.quat)
+cargo run -p xtask -- wasm-bindgen imgui-sys-v0
+cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0
+
+# 2) Build the main wasm + JS (includes an "ImGuIZMO.quat (Web)" window)
+cargo run -p xtask -- web-demo imguizmo-quat
+
+# 3) Build the provider (Emscripten imgui-sys-v0 with ImGui + ImGuIZMO.quat)
+cargo run -p xtask -- build-cimgui-provider
+
+# 4) Serve and open in a browser
+python -m http.server -d target/web-demo 8080
+```
+
+Notes:
+- The `dear-imgui-web-demo` crate in `examples-wasm` can enable the `imguizmo-quat` feature; when present, an “ImGuIZMO.quat (Web)” window is shown if bindings + provider are available.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific `0.6.x` release and follow changes in `docs/WASM.md`.
+
 ## Features
 
 - glam (default): pass and mutate `glam::Quat`, `glam::Vec3`, `glam::Vec4` directly

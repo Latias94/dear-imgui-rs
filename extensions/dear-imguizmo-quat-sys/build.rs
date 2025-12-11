@@ -6,6 +6,7 @@ struct BuildConfig {
     out_dir: PathBuf,
     target_os: String,
     target_env: String,
+    target_arch: String,
     docs_rs: bool,
 }
 
@@ -16,6 +17,7 @@ impl BuildConfig {
             out_dir: PathBuf::from(env::var("OUT_DIR").unwrap()),
             target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
             target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
+            target_arch: env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default(),
             docs_rs: env::var("DOCS_RS").is_ok(),
         }
     }
@@ -77,6 +79,33 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
     }
 }
 
+fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
+    let preg = Path::new("src").join("wasm_bindings_pregenerated.rs");
+    if preg.exists() {
+        match std::fs::read_to_string(&preg).and_then(|content| {
+            let sanitized = sanitize_bindings_string(&content);
+            std::fs::write(out_dir.join("bindings.rs"), sanitized)
+        }) {
+            Ok(()) => {
+                println!(
+                    "cargo:warning=Using pregenerated wasm bindings: {}",
+                    preg.display()
+                );
+                true
+            }
+            Err(e) => {
+                println!(
+                    "cargo:warning=Failed to write pregenerated wasm bindings: {}",
+                    e
+                );
+                false
+            }
+        }
+    } else {
+        false
+    }
+}
+
 fn sanitize_bindings_file(path: &Path) {
     if let Ok(content) = std::fs::read_to_string(path) {
         let sanitized = sanitize_bindings_string(&content);
@@ -105,20 +134,23 @@ fn sanitize_bindings_string(content: &str) -> String {
     out
 }
 
-fn docsrs_build(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
-    println!("cargo:warning=DOCS_RS detected: generating bindings, skipping native build");
-    println!("cargo:rustc-cfg=docsrs");
-
-    if use_pregenerated_bindings(&cfg.out_dir) {
-        return;
-    }
-
-    // Fallback: try to generate bindings from headers if available
-    if !imgui_src.exists() || !cimgui_root.exists() || !quat_root.exists() {
+fn generate_bindings(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+    // For wasm32 targets, rely on pregenerated import-style bindings that import
+    // from the shared imgui-sys-v0 provider instead of running bindgen here.
+    if cfg.target_arch == "wasm32" {
+        if !cfg!(feature = "wasm") {
+            panic!(
+                "dear-imguizmo-quat-sys: building for wasm32 requires the `wasm` feature.\n\
+                 Enable it in your Cargo.toml: features = [\"wasm\"]"
+            );
+        }
+        if use_pregenerated_wasm_bindings(&cfg.out_dir) {
+            println!("cargo:warning=Using pregenerated wasm bindings for dear-imguizmo-quat-sys");
+            return;
+        }
         panic!(
-            "DOCS_RS build: Required headers not found and no pregenerated bindings present.\n\
-             Please add src/bindings_pregenerated.rs (full bindgen output) to enable docs.rs builds.\n\
-             Run: cargo build -p dear-imguizmo-quat-sys && cp target/debug/build/dear-imguizmo-quat-sys-*/out/bindings.rs extensions/dear-imguizmo-quat-sys/src/bindings_pregenerated.rs"
+            "dear-imguizmo-quat-sys: wasm32 target detected but src/wasm_bindings_pregenerated.rs not found.\n\
+             Run: cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0"
         );
     }
 
@@ -159,6 +191,26 @@ fn docsrs_build(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_ro
         .write_to_file(&out)
         .expect("Couldn't write cimguizmo_quat bindings!");
     sanitize_bindings_file(&out);
+}
+
+fn docsrs_build(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+    println!("cargo:warning=DOCS_RS detected: generating bindings, skipping native build");
+    println!("cargo:rustc-cfg=docsrs");
+
+    if use_pregenerated_bindings(&cfg.out_dir) {
+        return;
+    }
+
+    // Fallback: try to generate bindings from headers if available
+    if !imgui_src.exists() || !cimgui_root.exists() || !quat_root.exists() {
+        panic!(
+            "DOCS_RS build: Required headers not found and no pregenerated bindings present.\n\
+             Please add src/bindings_pregenerated.rs (full bindgen output) to enable docs.rs builds.\n\
+             Run: cargo build -p dear-imguizmo-quat-sys && cp target/debug/build/dear-imguizmo-quat-sys-*/out/bindings.rs extensions/dear-imguizmo-quat-sys/src/bindings_pregenerated.rs"
+        );
+    }
+
+    generate_bindings(cfg, quat_root, imgui_src, cimgui_root);
 }
 
 fn expected_lib_name(target_env: &str) -> &'static str {
@@ -363,6 +415,10 @@ fn main() {
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let quat_root = cfg.manifest_dir.join("third-party/cimguizmo_quat");
+    if cfg.docs_rs {
+        docsrs_build(&cfg, &quat_root, &imgui_src, &cimgui_root);
+        return;
+    }
     if !imgui_src.exists() {
         panic!("ImGui include not found at {:?}", imgui_src);
     }
@@ -376,8 +432,8 @@ fn main() {
         );
     }
 
-    // Generate bindings
-    docsrs_build(&cfg, &quat_root, &imgui_src, &cimgui_root);
+    // Generate bindings (native/source build path)
+    generate_bindings(&cfg, &quat_root, &imgui_src, &cimgui_root);
 
     // Link/build native
     let force_build =
@@ -387,9 +443,13 @@ fn main() {
     } else {
         try_link_prebuilt_all(&cfg)
     };
-    if !cfg.docs_rs && !linked_prebuilt && env::var("IMGUIZMO_QUAT_SYS_SKIP_CC").is_err() {
-        build_with_cc(&cfg, &quat_root, &imgui_src, &cimgui_root);
-    } else if cfg.docs_rs {
-        docsrs_build(&cfg, &quat_root, &imgui_src, &cimgui_root);
+    if cfg.target_arch != "wasm32" {
+        if !cfg.docs_rs && !linked_prebuilt && env::var("IMGUIZMO_QUAT_SYS_SKIP_CC").is_err() {
+            build_with_cc(&cfg, &quat_root, &imgui_src, &cimgui_root);
+        }
+    } else {
+        println!(
+            "cargo:warning=Skipping native ImGuIZMO.quat build for wasm32 (using import-style wasm bindings)"
+        );
     }
 }

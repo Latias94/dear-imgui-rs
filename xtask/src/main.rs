@@ -13,11 +13,18 @@ fn run() -> Result<()> {
     let cmd = args.first().map(|s| s.as_str()).unwrap_or("wasm-bindgen");
     match cmd {
         "wasm-bindgen" => gen_wasm_bindings(args.get(1).map(|s| s.as_str()))?,
-        "web-demo" => build_web_demo()?,
+        "wasm-bindgen-implot" => gen_implot_wasm_bindings(args.get(1).map(|s| s.as_str()))?,
+        "wasm-bindgen-implot3d" => gen_implot3d_wasm_bindings(args.get(1).map(|s| s.as_str()))?,
+        "wasm-bindgen-imnodes" => gen_imnodes_wasm_bindings(args.get(1).map(|s| s.as_str()))?,
+        "wasm-bindgen-imguizmo" => gen_imguizmo_wasm_bindings(args.get(1).map(|s| s.as_str()))?,
+        "wasm-bindgen-imguizmo-quat" => {
+            gen_imguizmo_quat_wasm_bindings(args.get(1).map(|s| s.as_str()))?
+        }
+        "web-demo" => build_web_demo(args.get(1).map(|s| s.as_str()))?,
         "build-cimgui-provider" => build_cimgui_provider()?,
         _ => {
             eprintln!(
-                "Unknown command: {}\nCommands:\n  wasm-bindgen [import_mod]\n  web-demo\n  build-cimgui-provider",
+                "Unknown command: {}\nCommands:\n  wasm-bindgen [import_mod]\n  wasm-bindgen-implot [import_mod]\n  wasm-bindgen-implot3d [import_mod]\n  wasm-bindgen-imnodes [import_mod]\n  wasm-bindgen-imguizmo [import_mod]\n  wasm-bindgen-imguizmo-quat [import_mod]\n  web-demo [feature_list]\n  build-cimgui-provider\n\nExamples:\n  # Core ImGui only\n  xtask web-demo\n  # ImGui + ImPlot\n  xtask web-demo implot\n  # ImGui + ImPlot + ImNodes\n  xtask web-demo implot,imnodes",
                 cmd
             );
         }
@@ -74,7 +81,342 @@ fn gen_wasm_bindings(import_mod: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn build_web_demo() -> Result<()> {
+fn gen_implot_wasm_bindings(import_mod: Option<&str>) -> Result<()> {
+    let root = project_root();
+    let sys_root = root.join("extensions").join("dear-implot-sys");
+    let cimplot_root = sys_root.join("third-party").join("cimplot");
+    let imgui_sys_root = root.join("dear-imgui-sys");
+    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
+    let imgui_src = cimgui_root.join("imgui");
+    let header = cimplot_root.join("cimplot.h");
+    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
+    let import_name = import_mod.unwrap_or("imgui-sys-v0");
+
+    // Configure bindgen similar to dear-implot-sys build.rs, but generate
+    // wasm import-style bindings that link against the imgui-sys-v0 provider.
+    let mut builder = bindgen::Builder::default()
+        .header(header.to_string_lossy())
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .clang_arg(format!("-I{}", imgui_src.display()))
+        .clang_arg(format!("-I{}", cimgui_root.display()))
+        .clang_arg(format!("-I{}", cimplot_root.display()))
+        .clang_arg(format!("-I{}", cimplot_root.join("implot").display()))
+        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .allowlist_function("ImPlot.*")
+        .allowlist_type("ImPlot.*")
+        .allowlist_var("ImPlot.*")
+        .allowlist_var("IMPLOT_.*")
+        .blocklist_type("ImVec2")
+        .blocklist_type("ImVec4")
+        .blocklist_type("ImGuiCond")
+        .blocklist_type("ImTextureID")
+        .blocklist_type("ImGuiContext")
+        .blocklist_type("ImDrawList")
+        .blocklist_type("ImGuiMouseButton")
+        .blocklist_type("ImGuiDragDropFlags")
+        .blocklist_type("ImGuiIO")
+        .blocklist_type("ImFontAtlas")
+        .blocklist_type("ImDrawData")
+        .blocklist_type("ImGuiStyle")
+        .blocklist_type("ImGuiKeyModFlags")
+        .derive_default(true)
+        .derive_debug(true)
+        .derive_copy(true)
+        .derive_eq(true)
+        .derive_partialeq(true)
+        .derive_hash(true)
+        .prepend_enum_name(false)
+        .layout_tests(false)
+        .clang_arg("-x")
+        .clang_arg("c++")
+        .clang_arg("-std=c++17")
+        .wasm_import_module_name(import_name);
+
+    // Keep ImGui's platform/file functions disabled for WASM bindings to
+    // match the provider configuration.
+    builder = builder
+        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
+
+    eprintln!(
+        "Generating ImPlot wasm bindings to {} (import module: {})",
+        out.display(),
+        import_name
+    );
+    let bindings = builder
+        .generate()
+        .context("bindgen generate() failed for ImPlot")?;
+    bindings
+        .write_to_file(&out)
+        .with_context(|| format!("write bindings to {}", out.display()))?;
+    eprintln!("Done.");
+    Ok(())
+}
+
+fn gen_implot3d_wasm_bindings(import_mod: Option<&str>) -> Result<()> {
+    let root = project_root();
+    let sys_root = root.join("extensions").join("dear-implot3d-sys");
+    let cimplot3d_root = sys_root.join("third-party").join("cimplot3d");
+    let imgui_sys_root = root.join("dear-imgui-sys");
+    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
+    let imgui_src = cimgui_root.join("imgui");
+    let header = cimplot3d_root.join("cimplot3d.h");
+    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
+    let import_name = import_mod.unwrap_or("imgui-sys-v0");
+
+    // Configure bindgen similar to dear-implot3d-sys build.rs, but generate
+    // wasm import-style bindings that link against the imgui-sys-v0 provider.
+    let mut builder = bindgen::Builder::default()
+        .header(header.to_string_lossy())
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .clang_arg(format!("-I{}", imgui_src.display()))
+        .clang_arg(format!("-I{}", cimgui_root.display()))
+        .clang_arg(format!("-I{}", cimplot3d_root.display()))
+        .clang_arg(format!("-I{}", cimplot3d_root.join("implot3d").display()))
+        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .allowlist_function("ImPlot3D_.*")
+        .allowlist_type("ImPlot3D.*")
+        .allowlist_var("ImPlot3D.*")
+        .blocklist_type("ImVec2")
+        .blocklist_type("ImVec4")
+        .blocklist_type("ImGuiContext")
+        .blocklist_type("ImDrawList")
+        .blocklist_type("ImGuiID")
+        .blocklist_type("ImTextureID")
+        .derive_default(true)
+        .derive_debug(true)
+        .derive_copy(true)
+        .derive_eq(true)
+        .derive_partialeq(true)
+        .derive_hash(true)
+        .prepend_enum_name(false)
+        .layout_tests(false)
+        .clang_arg("-x")
+        .clang_arg("c++")
+        .clang_arg("-std=c++17")
+        .wasm_import_module_name(import_name);
+
+    // Match the core ImGui wasm configuration and disable platform/file functions.
+    builder = builder
+        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
+
+    eprintln!(
+        "Generating ImPlot3D wasm bindings to {} (import module: {})",
+        out.display(),
+        import_name
+    );
+    let bindings = builder
+        .generate()
+        .context("bindgen generate() failed for ImPlot3D")?;
+    bindings
+        .write_to_file(&out)
+        .with_context(|| format!("write bindings to {}", out.display()))?;
+    eprintln!("Done.");
+    Ok(())
+}
+
+fn gen_imnodes_wasm_bindings(import_mod: Option<&str>) -> Result<()> {
+    let root = project_root();
+    let sys_root = root.join("extensions").join("dear-imnodes-sys");
+    let cimnodes_root = sys_root.join("third-party").join("cimnodes");
+    let imgui_sys_root = root.join("dear-imgui-sys");
+    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
+    let imgui_src = cimgui_root.join("imgui");
+    let header = cimnodes_root.join("cimnodes.h");
+    let shim_header = sys_root.join("shim").join("imnodes_extra.h");
+    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
+    let import_name = import_mod.unwrap_or("imgui-sys-v0");
+
+    // Configure bindgen similar to dear-imnodes-sys build.rs, but generate
+    // wasm import-style bindings that link against the imgui-sys-v0 provider.
+    let mut builder = bindgen::Builder::default()
+        .header(header.to_string_lossy())
+        .header(shim_header.to_string_lossy())
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .clang_arg(format!("-I{}", cimgui_root.display()))
+        .clang_arg(format!("-I{}", imgui_src.display()))
+        .clang_arg(format!("-I{}", cimnodes_root.display()))
+        .clang_arg(format!("-I{}", cimnodes_root.join("imnodes").display()))
+        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .allowlist_function("imnodes_.*")
+        .allowlist_function("EmulateThreeButtonMouse_.*")
+        .allowlist_function("LinkDetachWithModifierClick_.*")
+        .allowlist_function("MultipleSelectModifier_.*")
+        .allowlist_function("getIOKeyCtrlPtr")
+        .allowlist_function("imnodes_getIOKeyShiftPtr")
+        .allowlist_function("imnodes_getIOKeyAltPtr")
+        .allowlist_type("ImNodes.*")
+        .allowlist_var("ImNodes.*")
+        .blocklist_type("ImVec2")
+        .blocklist_type("ImVec4")
+        .blocklist_type("ImGuiContext")
+        .blocklist_type("ImDrawList")
+        .derive_default(true)
+        .derive_debug(true)
+        .derive_copy(true)
+        .derive_eq(true)
+        .derive_partialeq(true)
+        .derive_hash(true)
+        .prepend_enum_name(false)
+        .layout_tests(false)
+        .clang_arg("-x")
+        .clang_arg("c++")
+        .clang_arg("-std=c++17")
+        .wasm_import_module_name(import_name);
+
+    // Match the core ImGui wasm configuration and disable platform/file functions.
+    builder = builder
+        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
+
+    eprintln!(
+        "Generating ImNodes wasm bindings to {} (import module: {})",
+        out.display(),
+        import_name
+    );
+    let bindings = builder
+        .generate()
+        .context("bindgen generate() failed for ImNodes")?;
+    bindings
+        .write_to_file(&out)
+        .with_context(|| format!("write bindings to {}", out.display()))?;
+    eprintln!("Done.");
+    Ok(())
+}
+
+fn gen_imguizmo_wasm_bindings(import_mod: Option<&str>) -> Result<()> {
+    let root = project_root();
+    let sys_root = root.join("extensions").join("dear-imguizmo-sys");
+    let cimguizmo_root = sys_root.join("third-party").join("cimguizmo");
+    let imgui_sys_root = root.join("dear-imgui-sys");
+    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
+    let imgui_src = cimgui_root.join("imgui");
+    let header = cimguizmo_root.join("cimguizmo.h");
+    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
+    let import_name = import_mod.unwrap_or("imgui-sys-v0");
+
+    // Configure bindgen similar to dear-imguizmo-sys build.rs, but generate
+    // wasm import-style bindings that link against the imgui-sys-v0 provider.
+    let mut builder = bindgen::Builder::default()
+        .header(header.to_string_lossy())
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .clang_arg(format!("-I{}", cimgui_root.display()))
+        .clang_arg(format!("-I{}", imgui_src.display()))
+        .clang_arg(format!("-I{}", cimguizmo_root.display()))
+        .clang_arg(format!("-I{}", cimguizmo_root.join("ImGuizmo").display()))
+        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .allowlist_function("ImGuizmo_.*")
+        .allowlist_function("Style_.*")
+        .allowlist_type("(Style|COLOR|MODE|OPERATION)")
+        .allowlist_var("(COLOR|MODE|OPERATION|COUNT|TRANSLATE.*|ROTATE.*|SCALE.*|UNIVERSAL)")
+        .blocklist_type("ImVec2")
+        .blocklist_type("ImVec4")
+        .blocklist_type("ImGuiContext")
+        .blocklist_type("ImDrawList")
+        .blocklist_type("ImGuiID")
+        .derive_default(true)
+        .derive_debug(true)
+        .derive_copy(true)
+        .derive_eq(true)
+        .derive_partialeq(true)
+        .derive_hash(true)
+        .prepend_enum_name(false)
+        .layout_tests(false)
+        .clang_arg("-x")
+        .clang_arg("c++")
+        .clang_arg("-std=c++17")
+        .wasm_import_module_name(import_name);
+
+    // Match the core ImGui wasm configuration and disable platform/file functions.
+    builder = builder
+        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
+
+    eprintln!(
+        "Generating ImGuizmo wasm bindings to {} (import module: {})",
+        out.display(),
+        import_name
+    );
+    let bindings = builder
+        .generate()
+        .context("bindgen generate() failed for ImGuizmo")?;
+    bindings
+        .write_to_file(&out)
+        .with_context(|| format!("write bindings to {}", out.display()))?;
+    eprintln!("Done.");
+    Ok(())
+}
+
+fn gen_imguizmo_quat_wasm_bindings(import_mod: Option<&str>) -> Result<()> {
+    let root = project_root();
+    let sys_root = root.join("extensions").join("dear-imguizmo-quat-sys");
+    let quat_root = sys_root.join("third-party").join("cimguizmo_quat");
+    let imgui_sys_root = root.join("dear-imgui-sys");
+    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
+    let imgui_src = cimgui_root.join("imgui");
+    let header = quat_root.join("cimguizmo_quat.h");
+    let imguizmo_quat_inc = quat_root.join("imGuIZMO.quat").join("imguizmo_quat");
+    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
+    let import_name = import_mod.unwrap_or("imgui-sys-v0");
+
+    // Configure bindgen similar to dear-imguizmo-quat-sys build.rs, but generate
+    // wasm import-style bindings that link against the imgui-sys-v0 provider.
+    let mut builder = bindgen::Builder::default()
+        .header(header.to_string_lossy())
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .clang_arg(format!("-I{}", cimgui_root.display()))
+        .clang_arg(format!("-I{}", imgui_src.display()))
+        .clang_arg(format!("-I{}", quat_root.display()))
+        .clang_arg(format!("-I{}", imguizmo_quat_inc.display()))
+        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .allowlist_function("imguiGizmo_.*")
+        .allowlist_function("iggizmo3D_.*")
+        .allowlist_function("(mat4|quat)_.*")
+        .blocklist_type("ImVec2")
+        .blocklist_type("ImDrawList")
+        .blocklist_type("ImGuiContext")
+        .blocklist_type("ImGuiID")
+        .blocklist_type("ImVec4")
+        .derive_default(true)
+        .derive_debug(true)
+        .derive_copy(true)
+        .derive_eq(true)
+        .derive_partialeq(true)
+        .derive_hash(true)
+        .prepend_enum_name(false)
+        .layout_tests(false)
+        .clang_arg("-x")
+        .clang_arg("c++")
+        .clang_arg("-std=c++17")
+        .wasm_import_module_name(import_name);
+
+    // Match the core ImGui wasm configuration and disable platform/file functions.
+    builder = builder
+        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
+        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
+
+    eprintln!(
+        "Generating ImGuIZMO.quat wasm bindings to {} (import module: {})",
+        out.display(),
+        import_name
+    );
+    let bindings = builder
+        .generate()
+        .context("bindgen generate() failed for ImGuIZMO.quat")?;
+    bindings
+        .write_to_file(&out)
+        .with_context(|| format!("write bindings to {}", out.display()))?;
+    eprintln!("Done.");
+    Ok(())
+}
+
+fn build_web_demo(features: Option<&str>) -> Result<()> {
     use std::fs;
     use std::process::Command;
 
@@ -96,6 +438,20 @@ fn build_web_demo() -> Result<()> {
 
     // 1) Build the web demo crate for wasm32-unknown-unknown
     eprintln!("Building dear-imgui-web-demo ({profile})...");
+    // Determine which features to enable on the web demo crate.
+    // Always enable the web-backends, and allow callers to opt into
+    // additional extensions (e.g. implot) via a simple comma-separated list.
+    let mut feature_list: Vec<String> = vec!["web-backends".to_string()];
+    if let Some(extra) = features {
+        for f in extra.split(',') {
+            let f = f.trim();
+            if !f.is_empty() && !feature_list.iter().any(|e| e == f) {
+                feature_list.push(f.to_string());
+            }
+        }
+    }
+    let feature_str = feature_list.join(",");
+
     let mut build_cmd = Command::new("cargo");
     let status = build_cmd
         .args([
@@ -104,6 +460,9 @@ fn build_web_demo() -> Result<()> {
             "dear-imgui-web-demo",
             "--target",
             "wasm32-unknown-unknown",
+            "--no-default-features",
+            "--features",
+            &feature_str,
         ])
         .status()?;
     if !status.success() {
@@ -402,6 +761,26 @@ fn build_cimgui_provider() -> Result<()> {
     let sys_root = root.join("dear-imgui-sys");
     let cimgui_root = sys_root.join("third-party").join("cimgui");
     let imgui_src = cimgui_root.join("imgui");
+    let implot_sys_root = root.join("extensions").join("dear-implot-sys");
+    let cimplot_root = implot_sys_root.join("third-party").join("cimplot");
+    let implot_src = cimplot_root.join("implot");
+    let implot3d_sys_root = root.join("extensions").join("dear-implot3d-sys");
+    let cimplot3d_root = implot3d_sys_root.join("third-party").join("cimplot3d");
+    let implot3d_src = cimplot3d_root.join("implot3d");
+    let imnodes_sys_root = root.join("extensions").join("dear-imnodes-sys");
+    let cimnodes_root = imnodes_sys_root.join("third-party").join("cimnodes");
+    let imnodes_src = cimnodes_root.join("imnodes");
+    let imnodes_shim = imnodes_sys_root.join("shim");
+    let imguizmo_sys_root = root.join("extensions").join("dear-imguizmo-sys");
+    let cimguizmo_root = imguizmo_sys_root.join("third-party").join("cimguizmo");
+    let imguizmo_src = cimguizmo_root.join("ImGuizmo");
+    let imguizmo_quat_sys_root = root.join("extensions").join("dear-imguizmo-quat-sys");
+    let cimguizmo_quat_root = imguizmo_quat_sys_root
+        .join("third-party")
+        .join("cimguizmo_quat");
+    let imguizmo_quat_src = cimguizmo_quat_root
+        .join("imGuIZMO.quat")
+        .join("imguizmo_quat");
     let out_js = out_dir.join("imgui-sys-v0.js"); // Output to .js, not .wasm
 
     // Generate ES module glue export names by scanning pregenerated wasm bindings
@@ -421,6 +800,134 @@ fn build_cimgui_provider() -> Result<()> {
                 }
             }
         }
+    }
+    // Also include ImPlot symbols from dear-implot-sys wasm bindings when available,
+    // so the provider can satisfy imports from the ImPlot FFI crate.
+    let implot_bindings = implot_sys_root
+        .join("src")
+        .join("wasm_bindings_pregenerated.rs");
+    if implot_bindings.exists() {
+        let content = fs::read_to_string(&implot_bindings)
+            .with_context(|| format!("read {}", implot_bindings.display()))?;
+        for line in content.lines() {
+            if let Some(i) = line.find("pub fn ") {
+                let rest = &line[i + 7..];
+                if let Some(j) = rest.find('(') {
+                    let name = rest[..j].trim();
+                    if name.starts_with("ImPlot") {
+                        names.insert(name.to_string());
+                    }
+                }
+            }
+        }
+    } else {
+        eprintln!(
+            "Warning: ImPlot wasm bindings not found at {}; provider will not export ImPlot symbols",
+            implot_bindings.display()
+        );
+    }
+
+    // Also include ImPlot3D symbols from dear-implot3d-sys wasm bindings when
+    // available, so the provider can satisfy imports from the ImPlot3D FFI crate.
+    let implot3d_bindings = implot3d_sys_root
+        .join("src")
+        .join("wasm_bindings_pregenerated.rs");
+    if implot3d_bindings.exists() {
+        let content = fs::read_to_string(&implot3d_bindings)
+            .with_context(|| format!("read {}", implot3d_bindings.display()))?;
+        for line in content.lines() {
+            if let Some(i) = line.find("pub fn ") {
+                let rest = &line[i + 7..];
+                if let Some(j) = rest.find('(') {
+                    let name = rest[..j].trim();
+                    if name.starts_with("ImPlot3D_") {
+                        names.insert(name.to_string());
+                    }
+                }
+            }
+        }
+    } else {
+        eprintln!(
+            "Warning: ImPlot3D wasm bindings not found at {}; provider will not export ImPlot3D symbols",
+            implot3d_bindings.display()
+        );
+    }
+
+    // Also include ImNodes symbols when wasm bindings are available.
+    let imnodes_bindings = imnodes_sys_root
+        .join("src")
+        .join("wasm_bindings_pregenerated.rs");
+    if imnodes_bindings.exists() {
+        let content = fs::read_to_string(&imnodes_bindings)
+            .with_context(|| format!("read {}", imnodes_bindings.display()))?;
+        for line in content.lines() {
+            if let Some(i) = line.find("pub fn ") {
+                let rest = &line[i + 7..];
+                if let Some(j) = rest.find('(') {
+                    let name = rest[..j].trim();
+                    if name.starts_with("imnodes_") {
+                        names.insert(name.to_string());
+                    }
+                }
+            }
+        }
+    } else {
+        eprintln!(
+            "Warning: ImNodes wasm bindings not found at {}; provider will not export imnodes_* symbols",
+            imnodes_bindings.display()
+        );
+    }
+    // Also include ImGuizmo symbols when wasm bindings are available.
+    let imguizmo_bindings = imguizmo_sys_root
+        .join("src")
+        .join("wasm_bindings_pregenerated.rs");
+    if imguizmo_bindings.exists() {
+        let content = fs::read_to_string(&imguizmo_bindings)
+            .with_context(|| format!("read {}", imguizmo_bindings.display()))?;
+        for line in content.lines() {
+            if let Some(i) = line.find("pub fn ") {
+                let rest = &line[i + 7..];
+                if let Some(j) = rest.find('(') {
+                    let name = rest[..j].trim();
+                    if name.starts_with("ImGuizmo_") || name.starts_with("Style_") {
+                        names.insert(name.to_string());
+                    }
+                }
+            }
+        }
+    } else {
+        eprintln!(
+            "Warning: ImGuizmo wasm bindings not found at {}; provider will not export ImGuizmo symbols",
+            imguizmo_bindings.display()
+        );
+    }
+    // Also include ImGuIZMO.quat symbols when wasm bindings are available.
+    let imguizmo_quat_bindings = imguizmo_quat_sys_root
+        .join("src")
+        .join("wasm_bindings_pregenerated.rs");
+    if imguizmo_quat_bindings.exists() {
+        let content = fs::read_to_string(&imguizmo_quat_bindings)
+            .with_context(|| format!("read {}", imguizmo_quat_bindings.display()))?;
+        for line in content.lines() {
+            if let Some(i) = line.find("pub fn ") {
+                let rest = &line[i + 7..];
+                if let Some(j) = rest.find('(') {
+                    let name = rest[..j].trim();
+                    if name.starts_with("imguiGizmo_")
+                        || name.starts_with("iggizmo3D_")
+                        || name.starts_with("mat4_")
+                        || name.starts_with("quat_")
+                    {
+                        names.insert(name.to_string());
+                    }
+                }
+            }
+        }
+    } else {
+        eprintln!(
+            "Warning: ImGuIZMO.quat wasm bindings not found at {}; provider will not export ImGuIZMO.quat symbols",
+            imguizmo_quat_bindings.display()
+        );
     }
     // Ensure provider wasm exports all symbols required by rust imports
     // Generate an exports list for Emscripten: EXPORTED_FUNCTIONS=["_igTextUnformatted", ...]
@@ -477,20 +984,63 @@ fn build_cimgui_provider() -> Result<()> {
         ))
         .arg("-fno-exceptions")
         .arg("-fno-rtti")
-        .arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
         .arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
         .arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS")
+        .arg("-DIMNODES_NAMESPACE=imnodes")
+        .arg("-DIMGUI_DEFINE_MATH_OPERATORS=1")
         .arg("-DIMGUI_USE_WCHAR32")
         .arg("-I")
         .arg(&cimgui_root)
         .arg("-I")
         .arg(&imgui_src)
+        .arg("-I")
+        .arg(&cimplot_root)
+        .arg("-I")
+        .arg(&implot_src)
+        .arg("-I")
+        .arg(&cimplot3d_root)
+        .arg("-I")
+        .arg(&implot3d_src)
+        .arg("-I")
+        .arg(&cimnodes_root)
+        .arg("-I")
+        .arg(&imnodes_src)
+        .arg("-I")
+        .arg(&imnodes_shim)
+        .arg("-I")
+        .arg(&cimguizmo_root)
+        .arg("-I")
+        .arg(&imguizmo_src)
+        .arg("-I")
+        .arg(&cimguizmo_quat_root)
+        .arg("-I")
+        .arg(&imguizmo_quat_src)
+        .arg("-I")
+        .arg(&cimguizmo_root)
+        .arg("-I")
+        .arg(&imguizmo_src)
         .arg(cimgui_root.join("cimgui.cpp"))
         .arg(imgui_src.join("imgui.cpp"))
         .arg(imgui_src.join("imgui_draw.cpp"))
         .arg(imgui_src.join("imgui_widgets.cpp"))
         .arg(imgui_src.join("imgui_tables.cpp"))
         .arg(imgui_src.join("imgui_demo.cpp"))
+        .arg(cimplot_root.join("cimplot.cpp"))
+        .arg(implot_src.join("implot.cpp"))
+        .arg(implot_src.join("implot_items.cpp"))
+        .arg(implot_src.join("implot_demo.cpp"))
+        .arg(cimplot3d_root.join("cimplot3d.cpp"))
+        .arg(implot3d_src.join("implot3d.cpp"))
+        .arg(implot3d_src.join("implot3d_items.cpp"))
+        .arg(implot3d_src.join("implot3d_meshes.cpp"))
+        .arg(implot3d_src.join("implot3d_demo.cpp"))
+        .arg(cimnodes_root.join("cimnodes.cpp"))
+        .arg(imnodes_src.join("imnodes.cpp"))
+        .arg(imnodes_shim.join("imnodes_extra.cpp"))
+        .arg(cimguizmo_root.join("cimguizmo.cpp"))
+        .arg(imguizmo_src.join("ImGuizmo.cpp"))
+        .arg(cimguizmo_quat_root.join("cimguizmo_quat.cpp"))
+        .arg(imguizmo_quat_src.join("imguizmo_quat.cpp"))
         .arg("-o")
         .arg(&out_js); // Output to .js file for MODULARIZE mode
 

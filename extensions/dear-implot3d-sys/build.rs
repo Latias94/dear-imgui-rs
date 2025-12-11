@@ -81,6 +81,33 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
     }
 }
 
+fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
+    let preg = Path::new("src").join("wasm_bindings_pregenerated.rs");
+    if preg.exists() {
+        match std::fs::read_to_string(&preg).and_then(|content| {
+            let sanitized = sanitize_bindings_string(&content);
+            std::fs::write(out_dir.join("bindings.rs"), sanitized)
+        }) {
+            Ok(()) => {
+                println!(
+                    "cargo:warning=Using pregenerated wasm bindings: {}",
+                    preg.display()
+                );
+                true
+            }
+            Err(e) => {
+                println!(
+                    "cargo:warning=Failed to write pregenerated wasm bindings: {}",
+                    e
+                );
+                false
+            }
+        }
+    } else {
+        false
+    }
+}
+
 fn sanitize_bindings_file(path: &Path) {
     if let Ok(content) = std::fs::read_to_string(path) {
         let sanitized = sanitize_bindings_string(&content);
@@ -115,6 +142,26 @@ fn generate_bindings(
     imgui_src: &Path,
     cimgui_root: &Path,
 ) {
+    // For wasm32 targets, rely on pregenerated import-style bindings that
+    // import symbols from the shared imgui-sys-v0 provider instead of running
+    // bindgen here (which requires a native C/C++ sysroot).
+    if cfg.target_arch == "wasm32" {
+        if !cfg!(feature = "wasm") {
+            panic!(
+                "dear-implot3d-sys: building for wasm32 requires the `wasm` feature.\n\
+                 Enable it in your Cargo.toml: features = [\"wasm\"]"
+            );
+        }
+        if use_pregenerated_wasm_bindings(&cfg.out_dir) {
+            println!("cargo:warning=Using pregenerated wasm bindings for dear-implot3d-sys");
+            return;
+        }
+        panic!(
+            "dear-implot3d-sys: wasm32 target detected but src/wasm_bindings_pregenerated.rs not found.\n\
+             Run: cargo run -p xtask -- wasm-bindgen-implot3d imgui-sys-v0"
+        );
+    }
+
     let bindings = bindgen::Builder::default()
         .header(cimplot3d_root.join("cimplot3d.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -401,9 +448,13 @@ fn main() {
     } else {
         try_link_prebuilt_all(&cfg)
     };
-    if !cfg.docs_rs && !linked_prebuilt && env::var("IMPLOT3D_SYS_SKIP_CC").is_err() {
-        build_with_cc(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
-    } else if cfg.docs_rs {
-        docsrs_build(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
+    if cfg.target_arch != "wasm32" {
+        if !cfg.docs_rs && !linked_prebuilt && env::var("IMPLOT3D_SYS_SKIP_CC").is_err() {
+            build_with_cc(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
+        }
+    } else {
+        println!(
+            "cargo:warning=Skipping native ImPlot3D build for wasm32 (using import-style wasm bindings)"
+        );
     }
 }

@@ -34,7 +34,7 @@ demo = []
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-rs/freetype", "dear-implot-sys/freetype"]
 # Enable for WASM targets
-# wasm = ["dear-imgui-rs/wasm", "dear-implot-sys/wasm"]
+wasm = ["dear-imgui-rs/wasm", "dear-implot-sys/wasm"]
 
 [dev-dependencies]
 approx = "0.5"

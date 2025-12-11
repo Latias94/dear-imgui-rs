@@ -4,20 +4,45 @@ This project supports compiling Dear ImGui + backends to WebAssembly using an im
 
 ## Quick start
 
+- Status: the import-style WASM path is developed on `main` and planned for the 0.7.0 release train. For crates.io releases prior to 0.7, these bindings and `xtask` flows are available only when depending on this repository directly (e.g. via a git dependency).
+
 - Prerequisites
   - `rustup target add wasm32-unknown-unknown`
   - `cargo install -f wasm-bindgen-cli --version 0.2.105`
   - `cargo install -f wasm-tools`
   - Emscripten SDK (for provider). On Windows run `emsdk_env.bat`/`.ps1` so `emcc/em++` are on PATH, or set `EMSDK` to emsdk root.
 
-- Build and run
-  1) Build the main WASM + JS and patch for shared memory
+- Build and run (core ImGui + optional ImPlot/ImNodes/ImGuizmo demos)
+  1) Generate pregenerated WASM bindings (import-style, `imgui-sys-v0` provider)
+     - Dear ImGui core:
+       - `cargo run -p xtask -- wasm-bindgen imgui-sys-v0`
+     - ImPlot (optional; enables ImPlot for wasm targets):
+       - `cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0`
+     - ImPlot3D (optional; enables ImPlot3D for wasm targets):
+       - `cargo run -p xtask -- wasm-bindgen-implot3d imgui-sys-v0`
+     - ImNodes (optional; enables ImNodes for wasm targets):
+       - `cargo run -p xtask -- wasm-bindgen-imnodes imgui-sys-v0`
+     - ImGuizmo (optional; enables ImGuizmo for wasm targets):
+       - `cargo run -p xtask -- wasm-bindgen-imguizmo imgui-sys-v0`
+     - ImGuIZMO.quat (optional; enables ImGuIZMO.quat for wasm targets):
+       - `cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0`
+  2) Build the main WASM + JS and patch for shared memory
      - `cargo run -p xtask -- web-demo`
-  2) Build the cimgui provider (Emscripten)
+       - By default, the `dear-imgui-web-demo` crate enables:
+         - `web-backends` (wgpu/webgl + dear-imgui-wgpu webgl/webgpu)
+         - `implot` (ImPlot integration, guarded by the `implot` feature)
+  3) Build the cimgui provider (Emscripten)
      - `cargo run -p xtask -- build-cimgui-provider`
-  3) Serve and open in browser
+       - Builds `imgui-sys-v0` as a single provider module containing:
+         - Dear ImGui + cimgui
+         - ImPlot + cimplot (when `wasm-bindgen-implot` has been run and bindings exist)
+         - ImPlot3D + cimplot3d (when `wasm-bindgen-implot3d` has been run and bindings exist)
+         - ImNodes + cimnodes (when `wasm-bindgen-imnodes` has been run and bindings exist)
+         - ImGuizmo + cimguizmo (when `wasm-bindgen-imguizmo` has been run and bindings exist)
+         - ImGuIZMO.quat + cimguizmo_quat (when `wasm-bindgen-imguizmo-quat` has been run and bindings exist)
+  4) Serve and open in browser
      - `python -m http.server -d target/web-demo 8080`
-     - Open http://127.0.0.1:8080 and hard‑refresh (Ctrl+F5)
+     - Open http://127.0.0.1:8080 and hard-refresh (Ctrl+F5)
 
 - Expected console logs
   - `[imgui-sys-v0] Shared memory pages= …` and `Module.wasmMemory===memory true`
@@ -76,36 +101,94 @@ On Windows, run `emsdk.bat` for setup and `emsdk_env.bat` to update PATH for the
 
 ## Commands (local)
 
-1) Generate WASM bindings (optional, defaults to `imgui-sys-v0`):
+1) Generate WASM bindings (import-style, defaults to `imgui-sys-v0`):
 
-```
+- Dear ImGui core:
+
+```bash
 cargo run -p xtask -- wasm-bindgen imgui-sys-v0
+```
+
+- ImPlot (optional extension for 2D plotting on wasm):
+
+```bash
+cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0
+```
+
+- ImNodes (optional node editor extension on wasm):
+
+```bash
+cargo run -p xtask -- wasm-bindgen-imnodes imgui-sys-v0
+```
+
+- ImGuizmo (optional gizmo extension on wasm):
+
+```bash
+cargo run -p xtask -- wasm-bindgen-imguizmo imgui-sys-v0
+```
+
+- ImGuIZMO.quat (optional quaternion gizmo extension on wasm):
+
+```bash
+cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0
 ```
 
 2) Build the web demo (main WASM + JS; xtask will also patch it to import memory so it can share memory with the provider):
 
-```
+```bash
+# Core ImGui only
 cargo run -p xtask -- web-demo
+
+# Core ImGui + ImPlot demo
+cargo run -p xtask -- web-demo implot
+
+# Core ImGui + ImPlot3D demo
+cargo run -p xtask -- web-demo implot3d
+
+# Core ImGui + ImNodes demo
+cargo run -p xtask -- web-demo imnodes
+
+# Core ImGui + ImPlot + ImNodes demos
+cargo run -p xtask -- web-demo implot,imnodes
+
+# Core ImGui + ImGuizmo demo
+cargo run -p xtask -- web-demo imguizmo
+
+# Core ImGui + ImGuIZMO.quat demo
+cargo run -p xtask -- web-demo imguizmo-quat
+
+# Core ImGui + ImPlot + ImPlot3D + ImNodes + ImGuizmo + ImGuIZMO.quat demos
+cargo run -p xtask -- web-demo implot,implot3d,imnodes,imguizmo,imguizmo-quat
 ```
 
-Outputs to `target/web-demo`.
+This builds `examples-wasm/dear-imgui-web-demo` with:
+
+- Always: `web-backends` feature (wgpu/webgl + dear-imgui-wgpu/webgl/webgpu)
+- Optional: `implot` feature when `web-demo implot` is used; this shows an “ImPlot (Web)” window
+- Optional: `implot3d` feature when `web-demo implot3d` is used; this shows an “ImPlot3D (Web)” window
+- Optional: `imnodes` feature when `web-demo imnodes` is used; this shows an “ImNodes (Web)” window
+- Optional: `imguizmo` feature when `web-demo imguizmo` is used; this shows an “ImGuizmo (Web)” window
+- Optional: `imguizmo-quat` feature when `web-demo imguizmo-quat` is used; this shows an “ImGuIZMO.quat (Web)” window
+
+Outputs go to `target/web-demo`.
 
 3) Build the cimgui provider and glue (Emscripten, like imgui-rs):
 
-```
+```bash
 # Ensure emsdk is on PATH (Windows: run emsdk_env.bat / emsdk_env.ps1) or set EMSDK env var
 cargo run -p xtask -- build-cimgui-provider
 ```
 
 This creates:
 
-- `target/web-demo/imgui-sys-v0.wasm` (Emscripten-built cimgui + Dear ImGui; imports `env.memory`)
-- `target/web-demo/imgui-sys-v0.js` (ES module that instantiates the provider with top-level await and re-exports its symbols)
-- Patches `target/web-demo/index.html` to add an import map that maps the bare import `imgui-sys-v0` to `./imgui-sys-v0.js`.
+- `target/web-demo/imgui-sys-v0.wasm` (Emscripten-built provider; imports `env.memory`)
+- `target/web-demo/imgui-sys-v0.js` (ES module that instantiates the provider)
+- `target/web-demo/imgui-sys-v0-wrapper.js` (wrapper that wires shared memory + logs)
+- Patches `target/web-demo/index.html` to add an import map that maps the bare import `imgui-sys-v0` to `./imgui-sys-v0-wrapper.js`.
 
 4) Serve locally:
 
-```
+```bash
 python -m http.server -d target/web-demo 8080
 ```
 

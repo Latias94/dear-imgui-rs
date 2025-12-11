@@ -136,10 +136,10 @@ python tools/pre_publish_check.py --skip-git-check --skip-doc-check
 
 ### 5. `update_submodule_and_bindings.py` - Bindings Generation
 
-Updates third-party submodules and regenerates pregenerated bindings.
+Updates third-party submodules and regenerates pregenerated bindings for `-sys` crates (including optional WASM pregenerated bindings).
 
 ```bash
-# Update all submodules and regenerate bindings
+# Update all submodules and regenerate native bindings (all -sys crates)
 python tools/update_submodule_and_bindings.py \
   --crates all \
   --submodules update \
@@ -151,11 +151,29 @@ python tools/update_submodule_and_bindings.py \
   --submodules skip \
   --profile release
 
-# Update specific crate
+# Update specific crate (e.g. dear-imgui-sys only)
 python tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys \
   --submodules update \
   --profile release
+
+# Additionally generate WASM pregenerated bindings:
+# - Core ImGui only (dear-imgui-sys, import module = imgui-sys-v0)
+python tools/update_submodule_and_bindings.py \
+  --crates dear-imgui-sys \
+  --submodules skip \
+  --profile release \
+  --wasm \
+  --wasm-import imgui-sys-v0
+
+# - Core ImGui + selected extensions (ImPlot, ImPlot3D, ImNodes, ImGuizmo, ImGuIZMO.quat)
+python tools/update_submodule_and_bindings.py \
+  --crates dear-imgui-sys,dear-implot-sys,dear-implot3d-sys,dear-imnodes-sys,dear-imguizmo-sys,dear-imguizmo-quat-sys \
+  --submodules skip \
+  --profile release \
+  --wasm \
+  --wasm-import imgui-sys-v0 \
+  --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
 ```
 
 ### 6. `update_readme_versions.py` - README Version Updater

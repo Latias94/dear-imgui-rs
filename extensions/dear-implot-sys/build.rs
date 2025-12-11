@@ -60,6 +60,26 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
 }
 
 fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+    // For wasm32 targets, we rely on pregenerated import-style bindings that
+    // import symbols from the shared imgui-sys-v0 provider instead of running
+    // bindgen in the build script (which requires a native C/C++ sysroot).
+    if cfg.target_arch == "wasm32" {
+        if !cfg!(feature = "wasm") {
+            panic!(
+                "dear-implot-sys: building for wasm32 requires the `wasm` feature.\n\
+                 Enable it in your Cargo.toml: features = [\"wasm\"]"
+            );
+        }
+        if use_pregenerated_wasm_bindings(&cfg.out_dir) {
+            println!("cargo:warning=Using pregenerated wasm bindings for dear-implot-sys");
+            return;
+        }
+        panic!(
+            "dear-implot-sys: wasm32 target detected but src/wasm_bindings_pregenerated.rs not found.\n\
+             Run: cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0"
+        );
+    }
+
     let bindings = bindgen::Builder::default()
         .header(cimplot_root.join("cimplot.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -157,11 +177,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
 
 fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
     let mut build = cc::Build::new();
-    if cfg.target_arch == "wasm32" {
-        build.define("IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS", "1");
-    } else {
-        build.cpp(true).std("c++17");
-    }
+    build.cpp(true).std("c++17");
 
     // MSVC flags align with dear-imgui-sys
     if cfg.is_msvc() && cfg.is_windows() {
@@ -258,14 +274,20 @@ fn main() {
     } else {
         try_link_prebuilt_all(&cfg)
     };
-    if !cfg.docs_rs
-        && (force_build || (!linked_prebuilt && env::var("IMPLOT_SYS_SKIP_CC").is_err()))
-    {
-        if use_cmake_requested() && build_with_cmake(&cfg, &cimplot_root) {
-            // built via CMake
-        } else {
-            build_with_cc(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+    if cfg.target_arch != "wasm32" {
+        if !cfg.docs_rs
+            && (force_build || (!linked_prebuilt && env::var("IMPLOT_SYS_SKIP_CC").is_err()))
+        {
+            if use_cmake_requested() && build_with_cmake(&cfg, &cimplot_root) {
+                // built via CMake
+            } else {
+                build_with_cc(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+            }
         }
+    } else {
+        println!(
+            "cargo:warning=Skipping native ImPlot build for wasm32 (using import-style wasm bindings)"
+        );
     }
 }
 
@@ -307,6 +329,33 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
             }
             Err(e) => {
                 println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
+                false
+            }
+        }
+    } else {
+        false
+    }
+}
+
+fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
+    let preg = Path::new("src").join("wasm_bindings_pregenerated.rs");
+    if preg.exists() {
+        match std::fs::read_to_string(&preg).and_then(|content| {
+            let sanitized = sanitize_bindings_string(&content);
+            std::fs::write(out_dir.join("bindings.rs"), sanitized)
+        }) {
+            Ok(()) => {
+                println!(
+                    "cargo:warning=Using pregenerated wasm bindings: {}",
+                    preg.display()
+                );
+                true
+            }
+            Err(e) => {
+                println!(
+                    "cargo:warning=Failed to write pregenerated wasm bindings: {}",
+                    e
+                );
                 false
             }
         }

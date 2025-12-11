@@ -25,6 +25,38 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 | dear-imgui-rs     | 0.6.x   |
 | dear-implot-sys   | 0.6.x   |
 
+### WASM (WebAssembly) support
+
+This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same import-style design used by the core ImGui bindings:
+
+- `dear-implot` + `dear-implot-sys` expose a `wasm` feature which:
+  - Enables import-style FFI that links against the shared `imgui-sys-v0` provider module.
+  - Avoids compiling C/C++ during the Rust build for wasm.
+- The provider module (`imgui-sys-v0`) is built once using Emscripten and contains:
+  - Dear ImGui + cimgui (from `dear-imgui-sys`)
+  - ImPlot + cimplot (from `dear-implot-sys`)
+
+To try the web demo with ImPlot enabled:
+
+```bash
+# 1) Generate pregenerated wasm bindings (Dear ImGui core + ImPlot)
+cargo run -p xtask -- wasm-bindgen imgui-sys-v0
+cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0
+
+# 2) Build the main wasm + JS (includes ImPlot demo window)
+cargo run -p xtask -- web-demo implot
+
+# 3) Build the provider (Emscripten imgui-sys-v0 with ImGui + ImPlot)
+cargo run -p xtask -- build-cimgui-provider
+
+# 4) Serve and open in a browser
+python -m http.server -d target/web-demo 8080
+```
+
+Notes:
+- The `dear-imgui-web-demo` crate in `examples-wasm` enables the `implot` feature by default, so the “ImPlot (Web)” window is shown when ImPlot bindings + provider are available.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific `0.6.x` release and follow changes in `docs/WASM.md`.
+
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
 

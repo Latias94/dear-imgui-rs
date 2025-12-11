@@ -60,6 +60,6 @@ default = []
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
 # Enable for WASM targets
-# wasm = ["dear-imgui-sys/wasm"]
+wasm = ["dear-imgui-sys/wasm"]
 prebuilt = []
 build-from-source = []

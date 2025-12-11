@@ -21,6 +21,7 @@ default = []
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = ["dear-imgui-rs/multi-viewport", "dear-imnodes-sys/multi-viewport"]
 freetype = ["dear-imgui-rs/freetype", "dear-imnodes-sys/freetype"]
+wasm = ["dear-imgui-rs/wasm", "dear-imnodes-sys/wasm"]
 
 [dev-dependencies]
 static_assertions = "1.1"

@@ -26,7 +26,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Containers: `Option<T>`, `Vec<T>`, small fixed arrays, string-key `HashMap<String, V>` / `BTreeMap<String, V>` with insert/remove/reorder and const-map modes.
     - Tuples `(T, U, ...)`: line/grid layouts, dropdown wrapping, global tuple settings, and per-element numeric overrides via member paths like `"field[0]"`.
     - Smart pointers: transparent editing for `Box<T>` and editable-when-unique semantics for `Rc<T>` / `Arc<T>`.
-    - Math types: optional `glam` and `mint` support for `Vec2/3/4` and `mint::Vector2/3/4<f32>` via `input_floatN` editors.
+  - Math types: optional `glam` and `mint` support for `Vec2/3/4` and `mint::Vector2/3/4<f32>` via `input_floatN` editors.
+
+- WebAssembly (import-style) support (unreleased, planned for 0.7 train)
+  - Core:
+    - Import-style bindings for `dear-imgui-sys` that target a shared provider module `imgui-sys-v0` (Emscripten-built cimgui + Dear ImGui).
+    - `xtask wasm-bindgen imgui-sys-v0` to generate pregenerated wasm bindings and avoid running bindgen or cc in wasm builds.
+  - Extensions (all via the same `imgui-sys-v0` provider, import-style, experimental):
+    - `dear-implot` / `dear-implot-sys`: 2D plotting on wasm (`xtask wasm-bindgen-implot`).
+    - `dear-implot3d` / `dear-implot3d-sys`: 3D plotting on wasm (`xtask wasm-bindgen-implot3d`).
+    - `dear-imnodes` / `dear-imnodes-sys`: node editor on wasm (`xtask wasm-bindgen-imnodes`).
+    - `dear-imguizmo` / `dear-imguizmo-sys`: 3D gizmo on wasm (`xtask wasm-bindgen-imguizmo`).
+    - `dear-imguizmo-quat` / `dear-imguizmo-quat-sys`: quaternion gizmo on wasm (`xtask wasm-bindgen-imguizmo-quat`).
+  - Tooling:
+    - `xtask web-demo [features]` builds the `examples-wasm/dear-imgui-web-demo` crate for `wasm32-unknown-unknown` and lets callers opt into extensions via features like `implot`, `imnodes`, `imguizmo`, `imguizmo-quat`.
+    - `xtask build-cimgui-provider` builds the shared `imgui-sys-v0` provider (Emscripten, imported memory, ES module wrapper) including symbols for core ImGui + all enabled C API extensions.
 
 - Upgrade ImPlot3D stack to the latest upstream:
   - Pull `cimplot3d` to `main` with `implot3d v0.3` and Dear ImGui 1.92.5.

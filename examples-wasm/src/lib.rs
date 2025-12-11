@@ -3,6 +3,16 @@
 use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
+#[cfg(feature = "imguizmo")]
+use dear_imguizmo::{GuizmoExt, Mode as GuizmoMode, Operation as GuizmoOperation};
+#[cfg(feature = "imguizmo-quat")]
+use dear_imguizmo_quat::{GizmoQuatExt, Mode as GizmoQuatMode};
+#[cfg(feature = "imnodes")]
+use dear_imnodes::{Context as ImnodesContext, EditorContext as ImnodesEditorContext, ImNodesExt};
+#[cfg(feature = "implot")]
+use dear_implot::PlotContext;
+#[cfg(feature = "implot3d")]
+use dear_implot3d::{Axis3DFlags, Plot3DContext, Plot3DFlags, Scatter3DFlags};
 use instant::Instant;
 use log::info;
 use std::{cell::RefCell, rc::Rc};
@@ -26,6 +36,18 @@ struct ImguiState {
     demo_open: bool,
     last_frame: Instant,
     frames: u32,
+    #[cfg(feature = "implot")]
+    implot_ctx: PlotContext,
+    #[cfg(feature = "implot3d")]
+    implot3d_ctx: Plot3DContext,
+    #[cfg(feature = "imnodes")]
+    imnodes_ctx: ImnodesContext,
+    #[cfg(feature = "imnodes")]
+    imnodes_editor: ImnodesEditorContext,
+    #[cfg(feature = "imguizmo")]
+    guizmo_model: [f32; 16],
+    #[cfg(feature = "imguizmo-quat")]
+    quat_rot: [f32; 4],
 }
 
 struct AppWindow {
@@ -120,6 +142,24 @@ impl AppWindow {
         let renderer = WgpuRenderer::new(init_info, &mut context)
             .map_err(|e| JsValue::from_str(&format!("init renderer: {e}")))?;
 
+        #[cfg(feature = "implot")]
+        let implot_ctx = PlotContext::create(&context);
+        #[cfg(feature = "implot3d")]
+        let implot3d_ctx = Plot3DContext::create(&context);
+        #[cfg(feature = "imnodes")]
+        let imnodes_ctx = ImnodesContext::create(&context);
+        #[cfg(feature = "imnodes")]
+        let imnodes_editor = ImnodesEditorContext::create();
+        #[cfg(feature = "imguizmo")]
+        let guizmo_model = [
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ];
+        #[cfg(feature = "imguizmo-quat")]
+        let quat_rot = [0.0_f32, 0.0, 0.0, 1.0];
+
         let imgui = ImguiState {
             context,
             platform,
@@ -133,6 +173,18 @@ impl AppWindow {
             demo_open: true,
             last_frame: Instant::now(),
             frames: 0,
+            #[cfg(feature = "implot")]
+            implot_ctx,
+            #[cfg(feature = "implot3d")]
+            implot3d_ctx,
+            #[cfg(feature = "imnodes")]
+            imnodes_ctx,
+            #[cfg(feature = "imnodes")]
+            imnodes_editor,
+            #[cfg(feature = "imguizmo")]
+            guizmo_model,
+            #[cfg(feature = "imguizmo-quat")]
+            quat_rot,
         };
 
         Ok(Self {
@@ -224,6 +276,137 @@ impl AppWindow {
 
         if self.imgui.demo_open {
             ui.show_demo_window(&mut self.imgui.demo_open);
+        }
+
+        #[cfg(feature = "implot")]
+        {
+            use dear_implot::ImPlotExt;
+
+            ui.window("ImPlot (Web)")
+                .size([480.0, 320.0], Condition::FirstUseEver)
+                .build(|| {
+                    let plot_ui = self.imgui.implot_ctx.get_plot_ui(&ui);
+                    let xs = [0.0_f64, 1.0, 2.0, 3.0];
+                    let ys = [0.0_f64, 1.0, 0.0, 1.0];
+                    if let Some(token) = plot_ui.begin_plot("ImPlot demo") {
+                        plot_ui.plot_line("line", &xs, &ys);
+                        token.end();
+                    }
+                });
+        }
+
+        #[cfg(feature = "implot3d")]
+        {
+            ui.window("ImPlot3D (Web)")
+                .size([480.0, 320.0], Condition::FirstUseEver)
+                .build(|| {
+                    let plot_ui = self.imgui.implot3d_ctx.get_plot_ui(&ui);
+                    if let Some(_token) = plot_ui
+                        .begin_plot("ImPlot3D demo")
+                        .size([0.0, 0.0])
+                        .flags(Plot3DFlags::NONE)
+                        .build()
+                    {
+                        plot_ui.setup_axes(
+                            "X",
+                            "Y",
+                            "Z",
+                            Axis3DFlags::NONE,
+                            Axis3DFlags::NONE,
+                            Axis3DFlags::NONE,
+                        );
+                        let xs = [0.0_f32, 1.0, 2.0, 3.0];
+                        let ys = [0.0_f32, 1.0, 0.0, -1.0];
+                        let zs = [0.0_f32, 0.5, 1.0, 0.0];
+                        plot_ui.plot_scatter_f32("points", &xs, &ys, &zs, Scatter3DFlags::NONE);
+                    }
+                });
+        }
+
+        #[cfg(feature = "imnodes")]
+        {
+            use dear_imnodes::PinShape;
+
+            ui.window("ImNodes (Web)")
+                .size([480.0, 320.0], Condition::FirstUseEver)
+                .build(|| {
+                    let nodes_ui = ui.imnodes(&self.imgui.imnodes_ctx);
+                    let editor = nodes_ui.editor(Some(&self.imgui.imnodes_editor));
+
+                    {
+                        let _node = editor.node(1);
+                        ui.text("Input Node");
+                        {
+                            let _attr = editor.input_attr(2, PinShape::CircleFilled);
+                            ui.text("In");
+                        }
+                    }
+
+                    {
+                        let _node = editor.node(3);
+                        ui.text("Output Node");
+                        {
+                            let _attr = editor.output_attr(4, PinShape::CircleFilled);
+                            ui.text("Out");
+                        }
+                    }
+
+                    editor.link(5, 2, 4);
+                });
+        }
+
+        #[cfg(feature = "imguizmo")]
+        {
+            ui.window("ImGuizmo (Web)")
+                .size([480.0, 320.0], Condition::FirstUseEver)
+                .build(|| {
+                    let giz = ui.guizmo();
+
+                    // Use the current window as the drawing target.
+                    let [wx, wy] = ui.window_pos();
+                    let [ww, wh] = ui.window_size();
+                    giz.set_rect(wx, wy, ww, wh);
+                    giz.set_drawlist_window();
+                    giz.set_orthographic(false);
+
+                    // Simple camera looking at the origin.
+                    let view = [
+                        1.0, 0.0, 0.0, 0.0, //
+                        0.0, 1.0, 0.0, 0.0, //
+                        0.0, 0.0, 1.0, 0.0, //
+                        0.0, 0.0, -5.0, 1.0,
+                    ];
+                    // Very simple perspective-style projection; good enough for a demo.
+                    let proj = [
+                        1.0, 0.0, 0.0, 0.0, //
+                        0.0, 1.0, 0.0, 0.0, //
+                        0.0, 0.0, -1.0, -1.0, //
+                        0.0, 0.0, -0.2, 0.0,
+                    ];
+
+                    // Draw a grid at the origin and manipulate a single cube model matrix.
+                    giz.draw_grid(&view, &proj, &self.imgui.guizmo_model, 10.0);
+                    let _id = giz.push_id(0);
+                    let _ = giz
+                        .manipulate_config(&view, &proj, &mut self.imgui.guizmo_model)
+                        .operation(GuizmoOperation::TRANSLATE)
+                        .mode(GuizmoMode::Local)
+                        .build();
+                });
+        }
+
+        #[cfg(feature = "imguizmo-quat")]
+        {
+            ui.window("ImGuIZMO.quat (Web)")
+                .size([260.0, 260.0], Condition::FirstUseEver)
+                .build(|| {
+                    let giz = ui.gizmo_quat();
+                    let _used = giz
+                        .builder()
+                        .size(220.0)
+                        .mode(GizmoQuatMode::MODE_DUAL | GizmoQuatMode::CUBE_AT_ORIGIN)
+                        .quat("##quat", &mut self.imgui.quat_rot);
+                });
         }
 
         let view = frame

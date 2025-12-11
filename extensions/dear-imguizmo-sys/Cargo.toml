@@ -61,5 +61,6 @@ default = []
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = ["dear-imgui-sys/multi-viewport"]
 freetype = ["dear-imgui-sys/freetype"]
+wasm = ["dear-imgui-sys/wasm"]
 prebuilt = []
 build-from-source = []

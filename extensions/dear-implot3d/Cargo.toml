@@ -24,3 +24,4 @@ mint = { workspace = true, optional = true }
 [features]
 default = []
 mint = ["dep:mint"]
+wasm = ["dear-imgui-rs/wasm", "dear-implot3d-sys/wasm"]

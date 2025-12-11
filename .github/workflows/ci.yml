@@ -156,5 +156,13 @@ jobs:
       - name: Generate pregenerated WASM bindings for dear-imgui-sys
         run: cargo run -p xtask -- wasm-bindgen imgui-sys-v0
 
-      - name: Build web demo crate for wasm32-unknown-unknown
-        run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown
+      - name: Generate WASM bindings for extensions (ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
+        run: |
+          cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0
+          cargo run -p xtask -- wasm-bindgen-implot3d imgui-sys-v0
+          cargo run -p xtask -- wasm-bindgen-imnodes imgui-sys-v0
+          cargo run -p xtask -- wasm-bindgen-imguizmo imgui-sys-v0
+          cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0
+
+      - name: Build web demo crate for wasm32-unknown-unknown (core + extensions)
+        run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown --no-default-features --features "web-backends,implot,implot3d,imnodes,imguizmo,imguizmo-quat"

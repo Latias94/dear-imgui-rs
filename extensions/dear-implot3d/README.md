@@ -28,6 +28,43 @@ the ergonomics of `dear-implot`.
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
+### WASM (WebAssembly) support
+
+This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same
+import-style design used by the core ImGui bindings and other extensions:
+
+- `dear-implot3d` and `dear-implot3d-sys` expose a `wasm` feature which:
+  - Enables import-style FFI that links against the shared `imgui-sys-v0` provider module.
+  - Avoids compiling C/C++ during the Rust build for wasm.
+- The provider module (`imgui-sys-v0`) is built once using Emscripten and contains:
+  - Dear ImGui + cimgui (from `dear-imgui-sys`)
+  - ImPlot3D + cimplot3d (from `dear-implot3d-sys`)
+
+To try the web demo with ImPlot3D enabled:
+
+```bash
+# 1) Generate pregenerated wasm bindings (Dear ImGui core + ImPlot3D)
+cargo run -p xtask -- wasm-bindgen imgui-sys-v0
+cargo run -p xtask -- wasm-bindgen-implot3d imgui-sys-v0
+
+# 2) Build the main wasm + JS (includes ImPlot3D demo window)
+cargo run -p xtask -- web-demo implot3d
+
+# 3) Build the provider (Emscripten imgui-sys-v0 with ImGui + ImPlot3D)
+cargo run -p xtask -- build-cimgui-provider
+
+# 4) Serve and open in a browser
+python -m http.server -d target/web-demo 8080
+```
+
+Notes:
+- The `dear-imgui-web-demo` crate in `examples-wasm` enables the `implot3d` feature when
+  you pass `implot3d` to `xtask web-demo`, which shows an “ImPlot3D (Web)” window when
+  ImPlot3D bindings + provider are available.
+- This is an early, experimental path planned for the 0.7.0 release train; API and build
+  steps may evolve. For production use, pin to a specific release and follow changes in
+  `docs/WASM.md`.
+
 ## Features
 
 - **Safe, idiomatic Rust API** - Type-safe wrappers over the C API

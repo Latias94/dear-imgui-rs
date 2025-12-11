@@ -9,6 +9,7 @@ struct BuildConfig {
     out_dir: PathBuf,
     target_os: String,
     target_env: String,
+    target_arch: String,
     docs_rs: bool,
 }
 
@@ -19,6 +20,7 @@ impl BuildConfig {
             out_dir: PathBuf::from(env::var("OUT_DIR").unwrap()),
             target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
             target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
+            target_arch: env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default(),
             docs_rs: env::var("DOCS_RS").is_ok(),
         }
     }
@@ -62,6 +64,25 @@ fn generate_bindings(
     imgui_src: &Path,
     cimgui_root: &Path,
 ) {
+    // For wasm32 targets, rely on pregenerated import-style bindings that import
+    // from the shared imgui-sys-v0 provider instead of running bindgen here.
+    if cfg.target_arch == "wasm32" {
+        if !cfg!(feature = "wasm") {
+            panic!(
+                "dear-imnodes-sys: building for wasm32 requires the `wasm` feature.\n\
+                 Enable it in your Cargo.toml: features = [\"wasm\"]"
+            );
+        }
+        if use_pregenerated_wasm_bindings(&cfg.out_dir) {
+            println!("cargo:warning=Using pregenerated wasm bindings for dear-imnodes-sys");
+            return;
+        }
+        panic!(
+            "dear-imnodes-sys: wasm32 target detected but src/wasm_bindings_pregenerated.rs not found.\n\
+             Run: cargo run -p xtask -- wasm-bindgen-imnodes imgui-sys-v0"
+        );
+    }
+
     let bindings = bindgen::Builder::default()
         .header(cimnodes_root.join("cimnodes.h").to_string_lossy())
         .header(
@@ -232,10 +253,16 @@ fn main() {
     } else {
         try_link_prebuilt_all(&cfg)
     };
-    if !cfg.docs_rs && !linked && env::var("IMNODES_SYS_SKIP_CC").is_err() {
-        build_with_cc(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
-    } else if cfg.docs_rs {
-        docsrs_build(&cfg);
+    if cfg.target_arch != "wasm32" {
+        if !cfg.docs_rs && !linked && env::var("IMNODES_SYS_SKIP_CC").is_err() {
+            build_with_cc(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
+        } else if cfg.docs_rs {
+            docsrs_build(&cfg);
+        }
+    } else {
+        println!(
+            "cargo:warning=Skipping native ImNodes build for wasm32 (using import-style wasm bindings)"
+        );
     }
 }
 
@@ -279,6 +306,33 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
             }
             Err(e) => {
                 println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
+                false
+            }
+        }
+    } else {
+        false
+    }
+}
+
+fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
+    let preg = Path::new("src").join("wasm_bindings_pregenerated.rs");
+    if preg.exists() {
+        match std::fs::read_to_string(&preg).and_then(|content| {
+            let sanitized = sanitize_bindings_string(&content);
+            std::fs::write(out_dir.join("bindings.rs"), sanitized)
+        }) {
+            Ok(()) => {
+                println!(
+                    "cargo:warning=Using pregenerated wasm bindings: {}",
+                    preg.display()
+                );
+                true
+            }
+            Err(e) => {
+                println!(
+                    "cargo:warning=Failed to write pregenerated wasm bindings: {}",
+                    e
+                );
                 false
             }
         }

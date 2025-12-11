@@ -38,15 +38,30 @@ Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
 |---------------------|---------|------------------------|------------------------------|----------------------------------------|
-| dear-implot         | 0.6.x   | 0.6.x                  | dear-implot-sys 0.6.x        |                                        |
-| dear-imnodes        | 0.6.x   | 0.6.x                  | dear-imnodes-sys 0.6.x       |                                        |
-| dear-imguizmo       | 0.6.x   | 0.6.x                  | dear-imguizmo-sys 0.6.x      |                                        |
+| dear-implot         | 0.6.x   | 0.6.x                  | dear-implot-sys 0.6.x        | 2D plotting                            |
+| dear-imnodes        | 0.6.x   | 0.6.x                  | dear-imnodes-sys 0.6.x       | Node editor                            |
+| dear-imguizmo       | 0.6.x   | 0.6.x                  | dear-imguizmo-sys 0.6.x      | 3D gizmo                               |
 | dear-file-browser   | 0.6.x   | 0.6.x                  | —                            | ImGui UI + native (rfd) backends       |
 | dear-implot3d       | 0.6.x   | 0.6.x                  | dear-implot3d-sys 0.6.x      | 3D plotting                            |
 | dear-imguizmo-quat  | 0.6.x   | 0.6.x                  | dear-imguizmo-quat-sys 0.6.x | Quaternion gizmo                       |
 | dear-imgui-reflect  | 0.6.x   | 0.6.x                  | —                            | Reflection-based UI helpers (pure Rust)|
 
 ## History
+
+Release Train 0.7 (upcoming)
+
+- Planned changes (subject to adjustment before release):
+  - Core + backends remain aligned with Dear ImGui v1.92.5 and the same wgpu/winit/glow/sdl3 baselines.
+  - Import-style WASM support (via `imgui-sys-v0` provider) for selected extension crates:
+    - `dear-implot` / `dear-implot-sys`: 2D plotting on wasm.
+    - `dear-imnodes` / `dear-imnodes-sys`: node editor on wasm.
+    - `dear-imguizmo` / `dear-imguizmo-sys`: 3D gizmo on wasm.
+    - `dear-imguizmo-quat` / `dear-imguizmo-quat-sys`: quaternion gizmo on wasm.
+    - `dear-implot3d` / `dear-implot3d-sys`: 3D plotting on wasm.
+  - New/updated `xtask` flows for building the wasm demo and import-style provider:
+    - `wasm-bindgen-*` commands for core + extensions (ImPlot, ImPlot3D, ImNodes, ImGuizmo, ImGuIZMO.quat).
+    - `web-demo [features]` to toggle which extensions are compiled into the web demo.
+    - `build-cimgui-provider` to build the shared `imgui-sys-v0` provider (Emscripten).
 
 Release Train 0.6 (current)
 
