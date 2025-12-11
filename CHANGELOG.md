@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core (`dear-imgui-sys`, `dear-imgui-rs`)
   - Optional `glam` integration so `glam::Vec2/Vec4` can be passed directly to drawing and coordinate-taking APIs.
+  - IO: mouse source/viewport helpers (`Io::add_mouse_source_event`, `Io::add_mouse_viewport_event`, `MouseSource`, `BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT`) to match latest Dear ImGui input model.
+  - IO, layout & style: optional `serde` support for core enums and flags (`Key`, `MouseButton`, `MouseCursor`, `MouseSource`, `InputTextFlags`, `ConfigFlags`, `BackendFlags`, `ViewportFlags`, `WindowFlags`, `TableFlags`, `TableColumnFlags`, `TableRowFlags`, `TableBgTarget`, `SortDirection`, `StyleColor`) behind the `serde` feature for easier hotkey, layout/table, and theme configuration persistence.
+  - Styling: a small, high-level theme configuration layer (`Theme`, `ThemePreset`, `ColorOverride`, `StyleTweaks`, `WindowTheme`, `TableTheme`) on top of `ImGuiStyle` so applications can define reusable color/rounding/spacing presets and serialize them when the `serde` feature is enabled.
+  - Multi-select: high-level helpers on top of `BeginMultiSelect`/`EndMultiSelect` (`MultiSelectFlags`, `Ui::multi_select_indexed`, `Ui::table_multi_select_indexed`, `Ui::multi_select_basic`, `Ui::is_item_toggled_selection`, `BasicSelection`) for list/table selection with ctrl/shift/box-select behavior.
 - New extension crate: `dear-imgui-reflect`
   - Derive-based helpers for generating ImGui editors for structs and enums (ImReflect-style auto UI).
 - `dear-imgui-winit`
@@ -20,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Import-style provider module `imgui-sys-v0` and `xtask` commands to build the core + selected extensions (ImPlot, ImPlot3D, ImNodes, ImGuizmo, ImGuizmo.quat) for `wasm32-unknown-unknown`.
 - Examples
   - Texture demos (WGPU, dear-app WGPU, Glow) now ship a clean gradient test image (`texture_clean.ppm`) alongside the existing JPEG, making texture sampling artifacts easier to inspect.
+  - `style_and_fonts` quickstart example now demonstrates the theme API with several ready-to-use presets (Dark/Light/Classic) plus styled themes (modern dark, Catppuccin Mocha, Darcula, Cherry) adapted from popular Dear ImGui community snippets (including ocornut/imgui#707), showing how to configure and switch custom themes in a single place.
 
 ### Changed
 

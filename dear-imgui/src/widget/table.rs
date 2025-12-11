@@ -41,6 +41,8 @@ use crate::draw::ImColor32;
 use crate::sys;
 use crate::ui::Ui;
 use crate::widget::{TableColumnFlags, TableFlags};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::ffi::CStr;
 
 /// Table column setup information
@@ -373,6 +375,7 @@ impl Ui {
 bitflags::bitflags! {
     /// Flags for table rows
     #[repr(transparent)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct TableRowFlags: i32 {
         /// No flags
         const NONE = 0;
@@ -381,9 +384,31 @@ bitflags::bitflags! {
     }
 }
 
+#[cfg(feature = "serde")]
+impl Serialize for TableRowFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for TableRowFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(TableRowFlags::from_bits_truncate(bits))
+    }
+}
+
 /// Target for table background colors.
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TableBgTarget {
     /// No background target
     None = sys::ImGuiTableBgTarget_None as i32,
@@ -398,6 +423,7 @@ pub enum TableBgTarget {
 /// Sorting direction for table columns.
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SortDirection {
     None = sys::ImGuiSortDirection_None as u8,
     Ascending = sys::ImGuiSortDirection_Ascending as u8,

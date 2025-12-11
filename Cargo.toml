@@ -45,6 +45,7 @@ keywords = ["imgui", "ui", "graphics", "docking", "multiview"]
 bitflags = "2.10"
 parking_lot = "0.12"
 cfg-if = "1.0"
+serde = { version = "1", features = ["derive"] }
 glam = "0.30"
 
 # Graphics and windowing

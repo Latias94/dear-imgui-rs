@@ -198,6 +198,25 @@ pub unsafe fn imvector_cast_mut<T, R>(raw: &mut R) -> &mut ImVector<T> {
     unsafe { &mut *(raw as *mut R as *mut ImVector<T>) }
 }
 
+/// Update internal hovered window and input capture flags.
+///
+/// This is a thin wrapper around Dear ImGui's internal
+/// `UpdateHoveredWindowAndCaptureFlags()` helper. It is intended for advanced
+/// platform backends that need to drive ImGui's hovering/capture logic
+/// manually (e.g. when aggregating input from multiple sources).
+///
+/// Most applications and backends do **not** need to call this directly.
+#[doc(alias = "UpdateHoveredWindowAndCaptureFlags")]
+pub fn update_hovered_window_and_capture_flags(mouse_pos: [f32; 2]) {
+    unsafe {
+        let pos = sys::ImVec2 {
+            x: mouse_pos[0],
+            y: mouse_pos[1],
+        };
+        sys::igUpdateHoveredWindowAndCaptureFlags(pos.into());
+    }
+}
+
 /// Marks a type as a transparent wrapper over a raw type
 pub trait RawWrapper {
     /// Wrapped raw type

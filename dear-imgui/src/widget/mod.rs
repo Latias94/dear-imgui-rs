@@ -26,6 +26,8 @@
 //! `selectable`, `slider`, `tab`, `table`, `text`, `tooltip`, `tree`.
 //!
 use crate::sys;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 pub mod button;
 pub mod color;
@@ -36,6 +38,7 @@ pub mod input;
 pub mod list_box;
 pub mod menu;
 pub mod misc;
+pub mod multi_select;
 pub mod plot;
 pub mod popup;
 pub mod progress;
@@ -61,6 +64,7 @@ pub use self::input::*;
 pub use self::list_box::*;
 pub use self::menu::*;
 pub use self::misc::*;
+pub use self::multi_select::*;
 pub use self::plot::*;
 pub use self::popup::*;
 pub use self::progress::*;
@@ -219,6 +223,27 @@ bitflags::bitflags! {
     }
 }
 
+#[cfg(feature = "serde")]
+impl Serialize for TableFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for TableFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(TableFlags::from_bits_truncate(bits))
+    }
+}
+
 bitflags::bitflags! {
     /// Flags for table columns
     #[repr(transparent)]
@@ -266,5 +291,26 @@ bitflags::bitflags! {
         const IS_SORTED = sys::ImGuiTableColumnFlags_IsSorted as i32;
         /// Status: is hovered by mouse
         const IS_HOVERED = sys::ImGuiTableColumnFlags_IsHovered as i32;
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for TableColumnFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for TableColumnFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(TableColumnFlags::from_bits_truncate(bits))
     }
 }

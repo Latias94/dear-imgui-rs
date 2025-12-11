@@ -47,6 +47,8 @@ use std::f32;
 
 use crate::sys;
 use crate::{Condition, Ui};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 pub(crate) mod child_window;
 pub(crate) mod content_region;
@@ -109,6 +111,27 @@ bitflags! {
         const NO_DECORATION = Self::NO_TITLE_BAR.bits() | Self::NO_RESIZE.bits() | Self::NO_SCROLLBAR.bits() | Self::NO_COLLAPSE.bits();
         /// Disable all user interactions
         const NO_INPUTS = Self::NO_MOUSE_INPUTS.bits() | Self::NO_NAV_INPUTS.bits();
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for WindowFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for WindowFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(WindowFlags::from_bits_truncate(bits))
     }
 }
 

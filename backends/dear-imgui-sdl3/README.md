@@ -1,156 +1,280 @@
-dear-imgui-sdl3
-================
+# dear-imgui-sdl3
 
-SDL3 平台后端封装，用于将 Dear ImGui 接入 SDL3 窗口系统。实现基于 upstream C++ 后端：
+SDL3 platform backend (with optional OpenGL3 renderer) for the `dear-imgui-rs`
+crate. This wraps the official Dear ImGui C++ backends:
 
-- `imgui_impl_sdl3.cpp`（平台层）
-- `imgui_impl_opengl3.cpp`（OpenGL3 渲染层）
+- `imgui_impl_sdl3.cpp` (platform layer)
+- `imgui_impl_opengl3.cpp` (OpenGL3 renderer)
 
-本 crate 主要用途：
+and exposes a small, Rust-friendly API that plugs into an existing
+`dear-imgui-rs::Context`.
 
-- 在 SDL3 窗口上驱动 Dear ImGui 平台事件（键盘/鼠标/多显示器/多视口）。
-- 在 OpenGL3 环境下渲染 Dear ImGui（可选）。
-- 为其它渲染后端（如 `dear-imgui-wgpu`）提供 SDL3 平台支持。
+Typical use cases:
 
-构建依赖
---------
+- Drive Dear ImGui input from an SDL3 window (keyboard/mouse/gamepad/IME).
+- Render Dear ImGui via the official OpenGL3 backend.
+- Use SDL3 only for the platform layer together with a Rust renderer
+  (e.g. `dear-imgui-glow` or `dear-imgui-wgpu`).
 
-1. 系统需要安装 SDL3 头文件和库：
+## Compatibility
 
-- **macOS（推荐 Homebrew）**
-  - `brew install sdl3`
-  - 头文件通常位于：`/opt/homebrew/include/SDL3/SDL.h`
-  - 默认情况下，本 crate 会：
-    - 优先使用 `pkg-config sdl3` 获取 include 路径；
-    - 若找不到 pkg-config 条目，再尝试 `/opt/homebrew/include` 等常用路径。
+| Item          | Version  |
+|---------------|----------|
+| Crate         | 0.6.x    |
+| dear-imgui-rs | 0.6.x    |
+| SDL3 crate    | 0.16.2   |
+| sdl3-sys      | 0.5      |
 
-- **Linux（Debian / Ubuntu 等）**
-  - 安装开发包（以发行版为准），例如：
-    - `sudo apt-get install libsdl3-dev`（或未来对应的包名）
-  - 头文件通常位于：`/usr/include/SDL3/SDL.h`
-  - 本 crate 会：
-    - 优先通过 `pkg-config sdl3` 获取 include 路径；
-    - 若 pkg-config 可用，则无需额外环境变量。
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md)
+for the full workspace matrix.
 
-- **Windows**
-  - 请通过以下方式之一安装 SDL3：
-    - 使用预编译二进制并配置好 include/lib 目录；
-    - 使用 vcpkg 等包管理器安装 SDL3，再通过 `sdl3-sys` 的说明配置工具链。
-  - 本 crate 只负责查找头文件路径；链接参数由 `sdl3-sys`/`sdl3` crates 负责。
+## Quick Start
 
-2. 依赖 crate
+Minimal SDL3 + OpenGL3 flow (single window):
 
-`backends/dear-imgui-sdl3/Cargo.toml` 中声明了：
+```rust,no_run
+use dear_imgui_rs::{Context, Condition};
+use dear_imgui_sdl3::{
+    enable_native_ime_ui, init_for_opengl, new_frame, render, sdl3_poll_event_ll,
+    process_sys_event,
+};
+use sdl3::{video::GLProfile, EventPump};
 
-- `sdl3 = "0.16.2"`
-- `sdl3-sys = "0.5"`
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // SDL3 initialization (simplified)
+    let sdl = sdl3::init()?;
+    let video = sdl.video()?;
 
-链接到 SDL3 动态库/静态库的工作由这些 crate 负责，本 crate 仅在 `build.rs` 中查找头文件用于编译 C++ 后端源文件。
+    // Recommended on IME-heavy platforms (Windows/Asia locales)
+    enable_native_ime_ui();
 
-环境变量（SDL3_INCLUDE_DIR）
----------------------------
+    // Configure GL context attributes
+    {
+        let gl_attr = video.gl_attr();
+        gl_attr.set_context_profile(GLProfile::Core);
+        gl_attr.set_context_version(3, 3);
+    }
 
-`build.rs` 中的 SDL3 头文件查找顺序：
+    let window = video
+        .window("Dear ImGui + SDL3 + OpenGL", 1280, 720)
+        .opengl()
+        .resizable()
+        .build()?;
+    let gl_context = window.gl_create_context()?;
+    window.gl_make_current(&gl_context)?;
 
-1. **显式指定：`SDL3_INCLUDE_DIR`**
+    // ImGui context
+    let mut imgui = Context::create();
 
-   如设置：
+    // Initialize SDL3 + OpenGL3 backends
+    init_for_opengl(&mut imgui, &window, &gl_context, "#version 150")?;
 
-   - macOS（Homebrew 自定义路径）：
+    let mut event_pump: EventPump = sdl.event_pump()?;
+    'main: loop {
+        // 1) Poll SDL3 events and feed ImGui
+        while let Some(event) = sdl3_poll_event_ll() {
+            if process_sys_event(&event) {
+                // ImGui consumed the event; continue if you do not need it.
+            }
 
-     ```bash
-     export SDL3_INCLUDE_DIR=/opt/homebrew/include
-     ```
+            // Handle your own events or quit logic as needed...
+        }
 
-   - Linux（手工安装到自定义前缀）：
+        // 2) Start a new frame for the SDL3 + OpenGL backends
+        new_frame(&mut imgui);
+        let ui = imgui.frame();
 
-     ```bash
-     export SDL3_INCLUDE_DIR=/opt/sdl3/include
-     ```
+        // 3) Build UI
+        ui.window("Hello")
+            .size([400.0, 300.0], Condition::FirstUseEver)
+            .build(|| {
+                ui.text("ImGui + SDL3 + OpenGL3");
+            });
 
-   - Windows（假设你的头文件在 `C:\libs\SDL3\include`）：
+        // 4) Render via OpenGL backend
+        let draw_data = imgui.render();
+        unsafe {
+            use sdl3::video::Window;
+            use sdl3::video::GLContext;
+            // Make context current if needed, clear framebuffer, etc.
+            // window.gl_make_current(&gl_context)?;
+        }
+        render(&draw_data);
+        window.gl_swap_window();
+    }
+}
+```
 
-     ```powershell
-     $env:SDL3_INCLUDE_DIR="C:\libs\SDL3\include"
-     ```
+APIs of interest (see `src/lib.rs` for full docs):
 
-   行为：
+- `init_for_opengl(&mut Context, &Window, &GLContext, &str)`:
+  initialize SDL3 platform + OpenGL3 renderer.
+- `init_platform_for_opengl(&mut Context, &Window, &GLContext)`:
+  initialize only the platform backend (for use with Rust OpenGL renderers).
+- `init_for_other(&mut Context, &Window)`:
+  initialize only the platform backend (for use with WGPU or other APIs).
+- `shutdown_for_opengl(&mut Context)` / `shutdown(&mut Context)`:
+  shut down the backends before destroying the ImGui context or window.
+- `new_frame(&mut Context)`:
+  begin a frame for SDL3 + OpenGL3.
+- `sdl3_new_frame(&mut Context)`:
+  begin a frame for SDL3 platform only.
+- `sdl3_poll_event_ll() -> Option<SDL_Event>` and
+  `process_sys_event(&SDL_Event) -> bool`:
+  low-level event polling/processing helpers.
+- `render(&DrawData)`:
+  render Dear ImGui draw data via the OpenGL3 backend.
+- `update_texture(&mut TextureData)`:
+  advanced helper that delegates texture updates to `ImGui_ImplOpenGL3_UpdateTexture`.
 
-   - `build.rs` 会将该目录加入 C/C++ include 路径；
-   - 期望在该目录下能找到 `SDL3/SDL.h`。
+## SDL3 & Build Requirements
 
-2. **pkg-config：`sdl3`**
+The crate depends on:
 
-   若未设置 `SDL3_INCLUDE_DIR`，`build.rs` 会尝试：
+- `sdl3` and `sdl3-sys` for SDL3 bindings.
+- A system SDL3 installation **or** a build-from-source configuration (OS-dependent).
 
-   ```bash
-   pkg-config --cflags sdl3
-   ```
+Build behavior is aligned with `Cargo.toml`:
 
-   - 成功时，从 pkg-config 的 `include_paths` 中添加头文件搜索路径；
-   - 适用于大多数 Linux 发行版和配置了 pkg-config 的 macOS 环境。
+- **Linux / Windows**
+  - The `sdl3` dependency is configured with `features = ["build-from-source"]`.
+  - This means SDL3 is downloaded and built via CMake and does **not** require
+    a pre-installed system SDL3 library.
+  - You still need a working C toolchain (compiler, linker, CMake).
 
-3. **常见默认路径**
+- **macOS**
+  - The crate expects a system SDL3 install (for example via Homebrew):
+    - `brew install sdl3`
+  - SDL3 headers are typically found under:
+    - `/opt/homebrew/include/SDL3/SDL.h` (Apple Silicon)
+    - `/usr/local/include/SDL3/SDL.h` (Intel / custom setups)
+  - Linking parameters are handled by `sdl3-sys` / `sdl3`; this crate only
+    needs the headers to build the C++ backend sources.
 
-   若以上两步都失败，`build.rs` 会尝试以下目录：
+### Header Search Order and `SDL3_INCLUDE_DIR`
 
-   - `/opt/homebrew/include`
-   - `/usr/local/include`
-   - `/opt/local/include`
+For cases where a system SDL3 is used, `build.rs` locates the headers in the
+following order:
 
-   并在其中查找 `SDL3/SDL.h`。
+1. `SDL3_INCLUDE_DIR` environment variable (highest priority).
+2. `pkg-config sdl3` (if available).
+3. A small set of common default paths (e.g. `/opt/homebrew/include`,
+   `/usr/local/include`, `/opt/local/include`).
 
-   这是为了兼容常见的 Homebrew / MacPorts 安装布局。
+**1. Explicit `SDL3_INCLUDE_DIR`**
 
-查找失败时的行为
-----------------
+Set this when SDL3 is installed in a non-standard location:
 
-如果上述步骤都没有找到有效的 SDL3 头文件，会直接 panic 并给出提示：
+- macOS (custom Homebrew prefix):
+
+  ```bash
+  export SDL3_INCLUDE_DIR=/opt/homebrew/include
+  ```
+
+- Linux (hand-built SDL3):
+
+  ```bash
+  export SDL3_INCLUDE_DIR=/opt/sdl3/include
+  ```
+
+- Windows (PowerShell, headers under `C:\libs\SDL3\include`):
+
+  ```powershell
+  $env:SDL3_INCLUDE_DIR="C:\libs\SDL3\include"
+  ```
+
+`build.rs` adds this directory to the C/C++ include path and expects to find
+`SDL3/SDL.h` under it.
+
+**2. `pkg-config sdl3`**
+
+If `SDL3_INCLUDE_DIR` is not set, the build script tries:
+
+```bash
+pkg-config --cflags sdl3
+```
+
+On success, the reported `include_paths` are added to the compiler flags. This
+is the preferred route for most Linux distributions and pkg-config-enabled
+macOS setups.
+
+**3. Fallback paths**
+
+If both the environment variable and pkg-config checks fail, `build.rs` tries
+a few common include roots (such as Homebrew / MacPorts locations) and looks
+for `SDL3/SDL.h` there.
+
+### When Headers Cannot Be Found
+
+If the build script cannot locate SDL3 headers, it will panic with a message
+similar to:
 
 > dear-imgui-sdl3: could not find SDL3 headers. \
 > Install SDL3 development files (e.g. `brew install sdl3`) \
 > or set SDL3_INCLUDE_DIR to the SDL3 include path.
 
-此时通常有两种解决方案：
+To fix this:
 
-1. 安装系统开发包（带头文件）并确认 `pkg-config sdl3` 正常工作；
-2. 手动设置 `SDL3_INCLUDE_DIR` 指向正确的 include 根目录。
+1. Install SDL3 development packages and verify `pkg-config sdl3` works, **or**
+2. Set `SDL3_INCLUDE_DIR` to the correct include root.
 
-使用示例
---------
+## IME and Gamepad Configuration
 
-### SDL3 + OpenGL3 多视口
+The underlying SDL3 ImGui backend supports IME and gamepad input. This crate
+exposes a couple of small helpers to configure them.
 
-```bash
-cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport
+### IME UI
+
+On platforms with heavy IME usage (e.g. Chinese/Japanese/Korean locales), it is
+recommended to enable the native IME UI before creating any SDL3 windows:
+
+```rust
+// Call this before creating SDL3 windows.
+dear_imgui_sdl3::enable_native_ime_ui();
 ```
 
-### SDL3 + WGPU（单窗口）
+This is a convenience wrapper over `SDL_HINT_IME_SHOW_UI`, and failures are
+treated as non-fatal.
 
-```bash
-cargo run -p dear-imgui-examples --bin sdl3_wgpu
+### Gamepad Mode
+
+By default, the SDL3 backend opens the first available gamepad and feeds its
+state into Dear ImGui (the upstream default behavior).
+
+You can switch to a mode where **all** detected gamepads are opened and merged:
+
+```rust
+use dear_imgui_sdl3::{set_gamepad_mode, GamepadMode};
+
+// After init_for_opengl/init_for_other/init_platform_for_opengl:
+set_gamepad_mode(GamepadMode::AutoAll);
 ```
 
-注意：目前 WebGPU 路线（包括 SDL3 + WGPU）沿用 upstream `imgui_impl_wgpu` 的设计，不开启多视口支持；多视口推荐使用 SDL3 + OpenGL3 或 winit + OpenGL 路线。
+This is useful for local multiplayer setups or testing environments.
 
-IME 与手柄配置
---------------
+## Examples
 
-- **IME 显示（中文输入法等）**
+The workspace includes several examples that use this backend:
 
-  官方后端要求在创建窗口前开启 `SDL_HINT_IME_SHOW_UI`：
+- SDL3 + OpenGL3, multi-viewport:
 
-  ```rust
-  // 在 SDL3 创建任何窗口之前调用
-  dear_imgui_sdl3::enable_native_ime_ui();
+  ```bash
+  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport
   ```
 
-- **手柄模式**
+- SDL3 + OpenGL3, multi-viewport (Glow renderer wrapper):
 
-  默认模式会自动打开第一个可用手柄，你也可以切换为“全部合并”模式：
-
-  ```rust
-  use dear_imgui_sdl3::{set_gamepad_mode, GamepadMode};
-
-  set_gamepad_mode(GamepadMode::AutoAll);
+  ```bash
+  cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport
   ```
+
+- SDL3 + WGPU, single-window:
+
+  ```bash
+  cargo run -p dear-imgui-examples --bin sdl3_wgpu
+  ```
+
+Note: multi-viewport support for WebGPU/WGPU follows the upstream
+`imgui_impl_wgpu` design and is currently **not** enabled; for multi-viewport
+use SDL3 + OpenGL3 or a winit + OpenGL route instead.
+

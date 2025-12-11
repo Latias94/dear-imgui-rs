@@ -321,6 +321,10 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                                             );
                                         }
                                         WindowEvent::CursorMoved { position, .. } => {
+                                            // Mark the hovered viewport for Dear ImGui.
+                                            imgui_ctx.io_mut().add_mouse_viewport_event(
+                                                dear_imgui_rs::Id::from((*vp).ID),
+                                            );
                                             // With multi-viewports, feed absolute/screen coordinates
                                             let pos_logical =
                                                 position.to_logical(window.scale_factor());
@@ -342,9 +346,14 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                                             }
                                         }
                                         WindowEvent::CursorLeft { .. } => {
-                                            imgui_ctx
-                                                .io_mut()
-                                                .add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                                            {
+                                                let io = imgui_ctx.io_mut();
+                                                io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                                                // Mouse left this platform window; clear hovered viewport.
+                                                io.add_mouse_viewport_event(
+                                                    dear_imgui_rs::Id::default(),
+                                                );
+                                            }
                                             return false;
                                         }
                                         WindowEvent::Focused(focused) => {

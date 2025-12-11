@@ -13,10 +13,13 @@
 )]
 use crate::sys;
 use bitflags::bitflags;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Mouse button identifier
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum MouseButton {
     /// Left mouse button
     Left = sys::ImGuiMouseButton_Left as i32,
@@ -33,6 +36,7 @@ pub enum MouseButton {
 /// Mouse cursor types
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum MouseCursor {
     /// No cursor
     None = sys::ImGuiMouseCursor_None,
@@ -56,9 +60,27 @@ pub enum MouseCursor {
     NotAllowed = sys::ImGuiMouseCursor_NotAllowed,
 }
 
+/// Source of mouse-like input events.
+///
+/// Backends can use this to mark whether a mouse event originates from a
+/// physical mouse, a touch screen, or a pen/stylus so Dear ImGui can
+/// correctly handle multiple input sources.
+#[repr(i32)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum MouseSource {
+    /// Events coming from a physical mouse
+    Mouse = sys::ImGuiMouseSource_Mouse as i32,
+    /// Events coming from a touch screen
+    TouchScreen = sys::ImGuiMouseSource_TouchScreen as i32,
+    /// Events coming from a pen or stylus
+    Pen = sys::ImGuiMouseSource_Pen as i32,
+}
+
 /// Key identifier for keyboard input
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Key {
     /// No key
     None = sys::ImGuiKey_None as i32,
@@ -288,6 +310,13 @@ impl From<MouseButton> for sys::ImGuiMouseButton {
     }
 }
 
+impl From<MouseSource> for sys::ImGuiMouseSource {
+    #[inline]
+    fn from(value: MouseSource) -> sys::ImGuiMouseSource {
+        value as sys::ImGuiMouseSource
+    }
+}
+
 impl From<Key> for sys::ImGuiKey {
     #[inline]
     fn from(value: Key) -> sys::ImGuiKey {
@@ -344,6 +373,27 @@ bitflags! {
         const CALLBACK_RESIZE = sys::ImGuiInputTextFlags_CallbackResize as i32;
         /// Callback on any edit (note that InputText() already returns true on edit)
         const CALLBACK_EDIT = sys::ImGuiInputTextFlags_CallbackEdit as i32;
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for InputTextFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for InputTextFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(InputTextFlags::from_bits_truncate(bits))
     }
 }
 
@@ -485,5 +535,14 @@ impl crate::Ui {
     #[doc(alias = "ResetMouseDragDelta")]
     pub fn reset_mouse_drag_delta(&self, button: MouseButton) {
         unsafe { sys::igResetMouseDragDelta(button as i32) }
+    }
+
+    /// Returns true if the last item toggled its selection state in a multi-select scope.
+    ///
+    /// This only makes sense when used between `BeginMultiSelect()` /
+    /// `EndMultiSelect()` (or helpers built on top of them).
+    #[doc(alias = "IsItemToggledSelection")]
+    pub fn is_item_toggled_selection(&self) -> bool {
+        unsafe { sys::igIsItemToggledSelection() }
     }
 }

@@ -23,6 +23,71 @@
 use bitflags::bitflags;
 
 use crate::sys;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "serde")]
+impl Serialize for ConfigFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for ConfigFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(ConfigFlags::from_bits_truncate(bits))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for BackendFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for BackendFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(BackendFlags::from_bits_truncate(bits))
+    }
+}
+
+#[cfg(all(feature = "serde", feature = "multi-viewport"))]
+impl Serialize for ViewportFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(all(feature = "serde", feature = "multi-viewport"))]
+impl<'de> Deserialize<'de> for ViewportFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(ViewportFlags::from_bits_truncate(bits))
+    }
+}
 
 bitflags! {
     /// Configuration flags
@@ -57,6 +122,9 @@ bitflags! {
         const HAS_MOUSE_CURSORS = sys::ImGuiBackendFlags_HasMouseCursors as i32;
         /// Backend supports `io.want_set_mouse_pos` requests to reposition the OS mouse position.
         const HAS_SET_MOUSE_POS = sys::ImGuiBackendFlags_HasSetMousePos as i32;
+        /// Backend can report which viewport the OS mouse is hovering via `add_mouse_viewport_event`
+        const HAS_MOUSE_HOVERED_VIEWPORT =
+            sys::ImGuiBackendFlags_HasMouseHoveredViewport as i32;
         /// Backend renderer supports DrawCmd::vtx_offset.
         const RENDERER_HAS_VTX_OFFSET = sys::ImGuiBackendFlags_RendererHasVtxOffset as i32;
         /// Backend renderer supports ImTextureData requests to create/update/destroy textures.
@@ -303,6 +371,29 @@ impl Io {
     pub fn add_mouse_wheel_event(&mut self, wheel: [f32; 2]) {
         unsafe {
             sys::ImGuiIO_AddMouseWheelEvent(&mut self.0 as *mut _, wheel[0], wheel[1]);
+        }
+    }
+
+    /// Add a mouse source event to the input queue.
+    ///
+    /// When the input source switches between mouse / touch screen / pen,
+    /// backends should call this before submitting other mouse events for
+    /// the frame.
+    pub fn add_mouse_source_event(&mut self, source: crate::input::MouseSource) {
+        unsafe {
+            sys::ImGuiIO_AddMouseSourceEvent(&mut self.0 as *mut _, source.into());
+        }
+    }
+
+    /// Queue the hovered viewport id for the current frame.
+    ///
+    /// When multi-viewport is enabled and the backend can reliably obtain
+    /// the ImGui viewport hovered by the OS mouse, it should set
+    /// `BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT` and call this once per
+    /// frame.
+    pub fn add_mouse_viewport_event(&mut self, viewport_id: crate::Id) {
+        unsafe {
+            sys::ImGuiIO_AddMouseViewportEvent(&mut self.0 as *mut _, viewport_id.raw());
         }
     }
 

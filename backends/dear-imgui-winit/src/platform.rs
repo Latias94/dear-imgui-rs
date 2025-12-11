@@ -129,6 +129,8 @@ impl WinitPlatform {
             // This matches Dear ImGui's guidance and avoids partially-enabled viewport
             // behavior when the renderer/platform callbacks are not fully wired.
             backend_flags.insert(BackendFlags::PLATFORM_HAS_VIEWPORTS);
+            // Backend can also report hovered viewport ids via `Io::add_mouse_viewport_event`.
+            backend_flags.insert(BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT);
             // We keep `HAS_SET_MOUSE_POS` flag: `prepare_render()` will avoid using it
             // whenever `ConfigFlags::VIEWPORTS_ENABLE` is actually set.
         }
@@ -323,6 +325,10 @@ impl WinitPlatform {
                         .config_flags()
                         .contains(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE)
                     {
+                        // Main window always maps to the main Dear ImGui viewport.
+                        imgui_ctx
+                            .io_mut()
+                            .add_mouse_viewport_event(dear_imgui_rs::Viewport::main().id().into());
                         // Feed absolute/screen coordinates using window's client-area origin (inner_position)
                         if let Ok(base) = window.inner_position() {
                             let sx = base.x as f64 + position.x;
@@ -343,9 +349,12 @@ impl WinitPlatform {
             // When cursor leaves the window, tell ImGui the mouse is unavailable so
             // software cursor (if enabled) won’t be drawn at the last position.
             WindowEvent::CursorLeft { .. } => {
-                imgui_ctx
-                    .io_mut()
-                    .add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                {
+                    let io = imgui_ctx.io_mut();
+                    io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                    // No Dear ImGui viewport is hovered anymore.
+                    io.add_mouse_viewport_event(dear_imgui_rs::Id::default());
+                }
                 false
             }
             WindowEvent::ModifiersChanged(modifiers) => {
