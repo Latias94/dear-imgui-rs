@@ -181,39 +181,23 @@ fn configure_global_reflect_settings() {
                 min: 0.0,
                 max: 100.0,
             },
-            speed: None,
             step: Some(1.0),
             step_fast: Some(10.0),
-            format: Some("%.0f".to_owned()),
-            log: false,
             clamp: true,
             always_clamp: true,
-            wrap_around: false,
-            no_round_to_format: false,
-            no_input: false,
-            clamp_on_input: false,
-            clamp_zero_range: false,
-            no_speed_tweaks: false,
-        };
+            ..NumericTypeSettings::default()
+        }
+        .with_float(0);
 
         // Demonstrate type-level defaults for f32: drag widgets with a small speed.
         *settings.numerics_f32_mut() = NumericTypeSettings {
             widget: NumericWidgetKind::Drag,
             range: NumericRange::None,
             speed: Some(0.1),
-            step: None,
-            step_fast: None,
-            format: Some("%.3f".to_owned()),
-            log: false,
-            clamp: false,
-            always_clamp: false,
-            wrap_around: false,
-            no_round_to_format: false,
-            no_input: false,
-            clamp_on_input: false,
-            clamp_zero_range: false,
             no_speed_tweaks: true,
-        };
+            ..NumericTypeSettings::default()
+        }
+        .with_float(3);
 
         // Use grid rendering for tuples to highlight TupleSettings.
         let tuples = settings.tuples_mut();
@@ -229,91 +213,20 @@ fn configure_global_reflect_settings() {
         // - color[1]: slider in [-1, 1]
         // - color[2]: drag with small speed
         // - color[3]: slider in [0, 1] but read-only
-        let color0 = NumericTypeSettings {
-            widget: NumericWidgetKind::Slider,
-            range: NumericRange::Explicit { min: 0.0, max: 1.0 },
-            speed: None,
-            step: None,
-            step_fast: None,
-            format: Some("%.3f".to_owned()),
-            log: false,
-            clamp: true,
-            always_clamp: true,
-            wrap_around: false,
-            no_round_to_format: false,
-            no_input: false,
-            clamp_on_input: false,
-            clamp_zero_range: false,
-            no_speed_tweaks: false,
-        };
         settings
             .for_member::<MapAndTupleDemo>("color[0]")
-            .numerics_f32 = Some(color0);
+            .numerics_f32_slider_0_to_1(3);
 
-        let color1 = NumericTypeSettings {
-            widget: NumericWidgetKind::Slider,
-            range: NumericRange::Explicit {
-                min: -1.0,
-                max: 1.0,
-            },
-            speed: None,
-            step: None,
-            step_fast: None,
-            format: Some("%.3f".to_owned()),
-            log: false,
-            clamp: true,
-            always_clamp: true,
-            wrap_around: false,
-            no_round_to_format: false,
-            no_input: false,
-            clamp_on_input: false,
-            clamp_zero_range: false,
-            no_speed_tweaks: false,
-        };
         settings
             .for_member::<MapAndTupleDemo>("color[1]")
-            .numerics_f32 = Some(color1);
+            .numerics_f32_slider_minus1_to_1(3);
 
-        let color2 = NumericTypeSettings {
-            widget: NumericWidgetKind::Drag,
-            range: NumericRange::None,
-            speed: Some(0.01),
-            step: None,
-            step_fast: None,
-            format: Some("%.4f".to_owned()),
-            log: false,
-            clamp: false,
-            always_clamp: false,
-            wrap_around: false,
-            no_round_to_format: false,
-            no_input: false,
-            clamp_on_input: false,
-            clamp_zero_range: false,
-            no_speed_tweaks: true,
-        };
         settings
             .for_member::<MapAndTupleDemo>("color[2]")
-            .numerics_f32 = Some(color2);
+            .numerics_f32_drag_with_speed(0.01, 4);
 
-        let color3 = NumericTypeSettings {
-            widget: NumericWidgetKind::Slider,
-            range: NumericRange::Explicit { min: 0.0, max: 1.0 },
-            speed: None,
-            step: None,
-            step_fast: None,
-            format: Some("%.2f".to_owned()),
-            log: false,
-            clamp: true,
-            always_clamp: true,
-            wrap_around: false,
-            no_round_to_format: false,
-            no_input: false,
-            clamp_on_input: false,
-            clamp_zero_range: false,
-            no_speed_tweaks: false,
-        };
         let color3_member = settings.for_member::<MapAndTupleDemo>("color[3]");
-        color3_member.numerics_f32 = Some(color3);
+        color3_member.numerics_f32_slider_0_to_1(2);
         color3_member.read_only = true;
     });
 }

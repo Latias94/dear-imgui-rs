@@ -2,6 +2,15 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Type, parse_macro_input, parse_quote};
 
+mod codegen;
+mod internal;
+mod parse;
+
+use crate::internal::{
+    FieldTypeKind, NumericTypeTag, NumericWidgetKind, classify_field_type, classify_numeric_type,
+};
+use crate::parse::{FieldAttrs, parse_field_attrs};
+
 /// Derive macro for [`dear_imgui_reflect::ImGuiReflect`].
 ///
 /// Currently supports:
@@ -29,89 +38,12 @@ pub fn derive_imgui_reflect(input: TokenStream) -> TokenStream {
 
     match input.data {
         Data::Struct(data) => derive_for_struct(ident, generics, data),
-        Data::Enum(data) => derive_for_enum(ident, generics, attrs, data),
+        Data::Enum(data) => codegen::derive_for_enum(ident, generics, attrs, data),
         Data::Union(u) => {
             syn::Error::new_spanned(u.union_token, "ImGuiReflect cannot be derived for unions")
                 .to_compile_error()
                 .into()
         }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum FieldTypeKind {
-    Bool,
-    Numeric,
-    String,
-    ImString,
-    Tuple,
-    Vec,
-    Array,
-    Map,
-    Other,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum NumericWidgetKind {
-    /// Use the default ImGuiValue implementation (no special widget).
-    Default,
-    /// Use an InputScalar-style widget with optional step/step_fast/format.
-    Input,
-    /// Use a Slider widget with required min/max and optional format/flags.
-    Slider,
-    /// Use a Drag widget with optional speed/range/format/flags.
-    Drag,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum NumericTypeTag {
-    I32,
-    U32,
-    F32,
-    F64,
-}
-
-fn classify_numeric_type(ty: &Type) -> Option<NumericTypeTag> {
-    if let Type::Path(tp) = ty {
-        if let Some(seg) = tp.path.segments.last() {
-            match seg.ident.to_string().as_str() {
-                "i32" => Some(NumericTypeTag::I32),
-                "u32" => Some(NumericTypeTag::U32),
-                "f32" => Some(NumericTypeTag::F32),
-                "f64" => Some(NumericTypeTag::F64),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-fn classify_field_type(ty: &Type) -> FieldTypeKind {
-    match ty {
-        Type::Tuple(_) => FieldTypeKind::Tuple,
-        Type::Array(_) => FieldTypeKind::Array,
-        Type::Path(tp) => {
-            if let Some(seg) = tp.path.segments.last() {
-                let ident = seg.ident.to_string();
-                match ident.as_str() {
-                    "bool" => FieldTypeKind::Bool,
-                    // Primitive numeric types we commonly care about
-                    "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
-                    | "usize" | "f32" | "f64" => FieldTypeKind::Numeric,
-                    "String" => FieldTypeKind::String,
-                    "ImString" => FieldTypeKind::ImString,
-                    "Vec" => FieldTypeKind::Vec,
-                    "HashMap" | "BTreeMap" => FieldTypeKind::Map,
-                    _ => FieldTypeKind::Other,
-                }
-            } else {
-                FieldTypeKind::Other
-            }
-        }
-        _ => FieldTypeKind::Other,
     }
 }
 
@@ -137,290 +69,58 @@ fn derive_for_struct(
     let mut default_range_types: Vec<Type> = Vec::new();
 
     for field in fields {
-        let field_ident = match field.ident {
-            Some(id) => id,
+        let field_ident = match &field.ident {
+            Some(id) => id.clone(),
             None => continue,
         };
 
-        let mut skip = false;
-        let mut label_override: Option<syn::LitStr> = None;
-        // Numeric configuration
-        let mut slider = false;
-        let mut slider_default_range = false;
-        let mut as_input = false;
-        let mut as_drag = false;
-        let mut min_expr: Option<syn::Expr> = None;
-        let mut max_expr: Option<syn::Expr> = None;
-        let mut format_str: Option<syn::LitStr> = None;
-        let mut fmt_hex = false;
-        let mut fmt_percentage = false;
-        let mut fmt_scientific = false;
-        let mut fmt_prefix: Option<syn::LitStr> = None;
-        let mut fmt_suffix: Option<syn::LitStr> = None;
-        let mut step_expr: Option<syn::Expr> = None;
-        let mut step_fast_expr: Option<syn::Expr> = None;
-        let mut speed_expr: Option<syn::Expr> = None;
-        let mut log_scale = false;
-        let mut clamp_manual = false;
-        let mut always_clamp_flag = false;
-        let mut wrap_around_flag = false;
-        let mut no_round_to_format = false;
-        let mut no_input = false;
-        let mut clamp_on_input = false;
-        let mut clamp_zero_range = false;
-        let mut no_speed_tweaks = false;
-        // Text configuration
-        let mut multiline = false;
-        let mut lines_expr: Option<syn::Expr> = None;
-        let mut hint_str: Option<syn::LitStr> = None;
-        let mut read_only = false;
-        let mut display_only = false;
-        let mut auto_resize = false;
-        let mut min_width_expr: Option<syn::Expr> = None;
-        // Tuple layout configuration
-        let mut tuple_render: Option<String> = None;
-        let mut tuple_dropdown = false;
-        let mut tuple_columns_expr: Option<syn::Expr> = None;
-        let mut tuple_min_width_expr: Option<syn::Expr> = None;
-        // Bool configuration
-        let mut bool_style: Option<String> = None;
-        let mut true_text: Option<syn::LitStr> = None;
-        let mut false_text: Option<syn::LitStr> = None;
+        let parsed: FieldAttrs = match parse_field_attrs(&field_ident, &field) {
+            Ok(attrs) => attrs,
+            Err(err) => return err.to_compile_error().into(),
+        };
 
-        for attr in field.attrs.iter().filter(|a| a.path().is_ident("imgui")) {
-            let res = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("skip") {
-                    skip = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("name") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    label_override = Some(lit);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("slider") {
-                    slider = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("slider_default_range") {
-                    slider_default_range = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("as_input") {
-                    as_input = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("as_drag") {
-                    as_drag = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("min") {
-                    let expr: syn::Expr = meta.value()?.parse()?;
-                    min_expr = Some(expr);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("max") {
-                    let expr: syn::Expr = meta.value()?.parse()?;
-                    max_expr = Some(expr);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("format") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    format_str = Some(lit);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("hex") {
-                    fmt_hex = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("percentage") {
-                    fmt_percentage = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("scientific") {
-                    fmt_scientific = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("prefix") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    fmt_prefix = Some(lit);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("suffix") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    fmt_suffix = Some(lit);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("step") {
-                    let expr: syn::Expr = meta.value()?.parse()?;
-                    step_expr = Some(expr);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("step_fast") {
-                    let expr: syn::Expr = meta.value()?.parse()?;
-                    step_fast_expr = Some(expr);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("speed") {
-                    let expr: syn::Expr = meta.value()?.parse()?;
-                    speed_expr = Some(expr);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("log") {
-                    log_scale = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("clamp") {
-                    clamp_manual = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("always_clamp") {
-                    always_clamp_flag = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("wrap_around") {
-                    wrap_around_flag = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("no_round_to_format") {
-                    no_round_to_format = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("no_input") {
-                    no_input = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("clamp_on_input") {
-                    clamp_on_input = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("clamp_zero_range") {
-                    clamp_zero_range = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("no_speed_tweaks") {
-                    no_speed_tweaks = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("multiline") {
-                    multiline = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("lines") {
-                    let expr: syn::Expr = meta.value()?.parse()?;
-                    lines_expr = Some(expr);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("hint") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    hint_str = Some(lit);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("read_only") {
-                    read_only = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("display_only") {
-                    display_only = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("auto_resize") {
-                    auto_resize = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("min_width") {
-                    let expr: syn::Expr = meta.value()?.parse()?;
-                    min_width_expr = Some(expr);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("bool_style") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    bool_style = Some(lit.value());
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("tuple_render") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    let v = lit.value();
-                    if v != "line" && v != "grid" {
-                        return Err(
-                            meta.error("imgui(tuple_render = ...) must be \"line\" or \"grid\"")
-                        );
-                    }
-                    tuple_render = Some(v);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("tuple_dropdown") {
-                    tuple_dropdown = true;
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("tuple_columns") {
-                    let expr: syn::Expr = meta.value()?.parse()?;
-                    tuple_columns_expr = Some(expr);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("tuple_min_width") {
-                    let expr: syn::Expr = meta.value()?.parse()?;
-                    tuple_min_width_expr = Some(expr);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("true_text") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    true_text = Some(lit);
-                    return Ok(());
-                }
-
-                if meta.path.is_ident("false_text") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    false_text = Some(lit);
-                    return Ok(());
-                }
-
-                // Ignore unknown keys for forward compatibility.
-                Ok(())
-            });
-
-            if let Err(err) = res {
-                return err.to_compile_error().into();
-            }
-        }
+        let FieldAttrs {
+            skip,
+            label_override,
+            slider,
+            slider_default_range,
+            as_input,
+            as_drag,
+            min_expr,
+            max_expr,
+            format_str,
+            fmt_hex,
+            fmt_percentage,
+            fmt_scientific,
+            fmt_prefix,
+            fmt_suffix,
+            step_expr,
+            step_fast_expr,
+            speed_expr,
+            log_scale,
+            clamp_manual,
+            always_clamp_flag,
+            wrap_around_flag,
+            no_round_to_format,
+            no_input,
+            clamp_on_input,
+            clamp_zero_range,
+            no_speed_tweaks,
+            multiline,
+            lines_expr,
+            hint_str,
+            read_only,
+            display_only,
+            auto_resize,
+            min_width_expr,
+            tuple_render,
+            tuple_dropdown,
+            tuple_columns_expr,
+            tuple_min_width_expr,
+            bool_style,
+            true_text,
+            false_text,
+        } = parsed;
 
         if skip {
             continue;
@@ -639,356 +339,48 @@ fn derive_for_struct(
         // Decide how to render this field based on attributes and type.
         let inner_stmt = match kind {
             FieldTypeKind::Bool => {
-                if bool_style.is_none() && true_text.is_none() && false_text.is_none() {
-                    // Use type-level defaults from ReflectSettings when no per-field
-                    // attributes are provided, mirroring ImReflect's type_settings<bool>.
-                    quote! {
-                        {
-                            let settings = ::dear_imgui_reflect::current_settings();
-                            let bool_settings: ::dear_imgui_reflect::BoolSettings = {
-                                if let Some(member) = settings.member::<Self>(#field_name_lit) {
-                                    if let Some(ref override_settings) = member.bools {
-                                        override_settings.clone()
-                                    } else {
-                                        settings.bools().clone()
-                                    }
-                                } else {
-                                    settings.bools().clone()
-                                }
-                            };
-                            match bool_settings.style {
-                                ::dear_imgui_reflect::BoolStyle::Checkbox => {
-                                    __changed |= ui.checkbox(#label, &mut self.#field_ident);
-                                }
-                                ::dear_imgui_reflect::BoolStyle::Button => {
-                                    let state_label = if self.#field_ident { "On" } else { "Off" };
-                                    let button_label = format!("{label}: {}", state_label);
-                                    if ui.button(&button_label) {
-                                        self.#field_ident = !self.#field_ident;
-                                        __changed = true;
-                                    }
-                                }
-                                ::dear_imgui_reflect::BoolStyle::Dropdown => {
-                                    let true_label = "True";
-                                    let false_label = "False";
-                                    let mut index: usize = if self.#field_ident { 1 } else { 0 };
-                                    let items = [false_label, true_label];
-                                    let local_changed =
-                                        ui.combo_simple_string(#label, &mut index, &items);
-                                    if local_changed {
-                                        self.#field_ident = index == 1;
-                                    }
-                                    __changed |= local_changed;
-                                }
-                                ::dear_imgui_reflect::BoolStyle::Radio => {
-                                    let true_label = "True";
-                                    let false_label = "False";
-                                    let mut local_changed = false;
-                                    let current = self.#field_ident;
-                                    if ui.radio_button_bool(true_label, current) {
-                                        self.#field_ident = true;
-                                        local_changed = true;
-                                    }
-                                    if ui.radio_button_bool(false_label, !current) {
-                                        self.#field_ident = false;
-                                        local_changed = true;
-                                    }
-                                    __changed |= local_changed;
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    let style = bool_style.as_deref().unwrap_or("checkbox");
-
-                    if style == "checkbox" {
-                        quote! {
-                            __changed |= ui.checkbox(#label, &mut self.#field_ident);
-                        }
-                    } else if style == "button" {
-                        let true_label = true_text
-                            .clone()
-                            .unwrap_or_else(|| syn::LitStr::new("On", field_ident.span()));
-                        let false_label = false_text
-                            .clone()
-                            .unwrap_or_else(|| syn::LitStr::new("Off", field_ident.span()));
-
-                        quote! {
-                            {
-                                let state_label = if self.#field_ident {
-                                    #true_label
-                                } else {
-                                    #false_label
-                                };
-                                let button_label = format!("{label}: {}", state_label);
-                                if ui.button(&button_label) {
-                                    self.#field_ident = !self.#field_ident;
-                                    __changed = true;
-                                }
-                            }
-                        }
-                    } else if style == "dropdown" {
-                        let true_label = true_text
-                            .clone()
-                            .unwrap_or_else(|| syn::LitStr::new("True", field_ident.span()));
-                        let false_label = false_text
-                            .clone()
-                            .unwrap_or_else(|| syn::LitStr::new("False", field_ident.span()));
-
-                        quote! {
-                            {
-                                let mut index: usize = if self.#field_ident { 1 } else { 0 };
-                                let items = [#false_label, #true_label];
-                                let local_changed = ui.combo_simple_string(#label, &mut index, &items);
-                                if local_changed {
-                                    self.#field_ident = index == 1;
-                                }
-                                __changed |= local_changed;
-                            }
-                        }
-                    } else {
-                        // "radio"
-                        let true_label = true_text
-                            .clone()
-                            .unwrap_or_else(|| syn::LitStr::new("True", field_ident.span()));
-                        let false_label = false_text
-                            .clone()
-                            .unwrap_or_else(|| syn::LitStr::new("False", field_ident.span()));
-
-                        quote! {
-                            {
-                                let mut local_changed = false;
-                                let current = self.#field_ident;
-                                if ui.radio_button_bool(#true_label, current) {
-                                    self.#field_ident = true;
-                                    local_changed = true;
-                                }
-                                if ui.radio_button_bool(#false_label, !current) {
-                                    self.#field_ident = false;
-                                    local_changed = true;
-                                }
-                                __changed |= local_changed;
-                            }
-                        }
-                    }
+                match codegen::gen_bool_field(
+                    &field_ident,
+                    &field_name_lit,
+                    &label,
+                    &bool_style,
+                    &true_text,
+                    &false_text,
+                ) {
+                    Ok(tokens) => tokens,
+                    Err(err) => return err.to_compile_error().into(),
                 }
             }
             FieldTypeKind::String => {
-                let width_prefix = if let Some(width) = min_width_expr.clone() {
-                    quote! {
-                        let __imgui_reflect_width = ui.push_item_width(#width as f32);
-                        let _ = &__imgui_reflect_width;
-                    }
-                } else if auto_resize {
-                    quote! {
-                        let __imgui_reflect_width = ui.push_item_width_text(&self.#field_ident);
-                        let _ = &__imgui_reflect_width;
-                    }
-                } else {
-                    quote! {}
-                };
-
-                if display_only {
-                    // Display-only String: show wrapped text with the label and a
-                    // simple tooltip on hover, instead of an editable input.
-                    quote! {
-                        {
-                            let text = &self.#field_ident;
-                            let display = format!("{}: {}", #label, text);
-                            ui.text_wrapped(&display);
-                            if ui.is_item_hovered() {
-                                ui.set_item_tooltip(text);
-                            }
-                        }
-                    }
-                } else if multiline {
-                    if hint_str.is_some() {
-                        return syn::Error::new(
-                            field_ident.span(),
-                            "imgui(hint) is not supported together with multiline",
-                        )
-                        .to_compile_error()
-                        .into();
-                    }
-
-                    // Multiline String
-                    let ro_stmt = if read_only {
-                        quote! { builder = builder.read_only(true); }
-                    } else {
-                        quote! {}
-                    };
-
-                    let size_expr = if auto_resize {
-                        quote!({
-                            let text = &self.#field_ident;
-                            let mut lines: usize = 1;
-                            for ch in text.chars() {
-                                if ch == '\n' {
-                                    lines += 1;
-                                }
-                            }
-                            let height = ui.text_line_height_with_spacing() * (lines as f32);
-                            [0.0, height]
-                        })
-                    } else if let Some(lines) = lines_expr.clone() {
-                        quote!({
-                            let height = ui.text_line_height_with_spacing() * (#lines as f32);
-                            [0.0, height]
-                        })
-                    } else {
-                        // ImGui default size (width from item width, height auto)
-                        quote!([0.0, 0.0])
-                    };
-
-                    quote! {
-                        {
-                            #width_prefix
-                            let size: [f32; 2] = #size_expr;
-                            let mut builder = ui.input_text_multiline(#label, &mut self.#field_ident, size);
-                            #ro_stmt
-                            __changed |= builder.build();
-                        }
-                    }
-                } else if hint_str.is_some() || read_only {
-                    let hint = hint_str.clone();
-                    let ro = read_only;
-                    let hint_stmt = if let Some(h) = hint {
-                        quote! { builder = builder.hint(::std::string::String::from(#h)); }
-                    } else {
-                        quote! {}
-                    };
-                    let ro_stmt = if ro {
-                        quote! { builder = builder.read_only(true); }
-                    } else {
-                        quote! {}
-                    };
-
-                    quote! {
-                        {
-                            #width_prefix
-                            let mut builder = ui.input_text(#label, &mut self.#field_ident);
-                            #hint_stmt
-                            #ro_stmt
-                            __changed |= builder.build();
-                        }
-                    }
-                } else {
-                    // Default String handling
-                    quote! {
-                        __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                            ui,
-                            #label,
-                            &mut self.#field_ident,
-                        );
-                    }
+                match codegen::gen_string_field(
+                    &field_ident,
+                    &label,
+                    multiline,
+                    display_only,
+                    read_only,
+                    auto_resize,
+                    &min_width_expr,
+                    &lines_expr,
+                    &hint_str,
+                ) {
+                    Ok(tokens) => tokens,
+                    Err(err) => return err.to_compile_error().into(),
                 }
             }
             FieldTypeKind::ImString => {
-                let width_prefix = if let Some(width) = min_width_expr.clone() {
-                    quote! {
-                        let __imgui_reflect_width = ui.push_item_width(#width as f32);
-                        let _ = &__imgui_reflect_width;
-                    }
-                } else if auto_resize {
-                    quote! {
-                        let __imgui_reflect_width = ui.push_item_width_text(&self.#field_ident);
-                        let _ = &__imgui_reflect_width;
-                    }
-                } else {
-                    quote! {}
-                };
-
-                if display_only {
-                    // Display-only ImString: show wrapped text with the label and
-                    // a simple tooltip on hover.
-                    quote! {
-                        {
-                            let text = self.#field_ident.as_ref();
-                            let display = format!("{}: {}", #label, text);
-                            ui.text_wrapped(&display);
-                            if ui.is_item_hovered() {
-                                ui.set_item_tooltip(text);
-                            }
-                        }
-                    }
-                } else if multiline {
-                    if hint_str.is_some() {
-                        return syn::Error::new(
-                            field_ident.span(),
-                            "imgui(hint) is not supported together with multiline",
-                        )
-                        .to_compile_error()
-                        .into();
-                    }
-
-                    let ro_stmt = if read_only {
-                        quote! { builder = builder.read_only(true); }
-                    } else {
-                        quote! {}
-                    };
-
-                    let size_expr = if auto_resize {
-                        quote!({
-                            let text = &self.#field_ident;
-                            let mut lines: usize = 1;
-                            for ch in text.chars() {
-                                if ch == '\n' {
-                                    lines += 1;
-                                }
-                            }
-                            let height = ui.text_line_height_with_spacing() * (lines as f32);
-                            [0.0, height]
-                        })
-                    } else if let Some(lines) = lines_expr.clone() {
-                        quote!({
-                            let height = ui.text_line_height_with_spacing() * (#lines as f32);
-                            [0.0, height]
-                        })
-                    } else {
-                        // ImGui default size (width from item width, height auto)
-                        quote!([0.0, 0.0])
-                    };
-
-                    quote! {
-                        {
-                            #width_prefix
-                            let size: [f32; 2] = #size_expr;
-                            let mut builder = ui.input_text_multiline_imstr(#label, &mut self.#field_ident, size);
-                            #ro_stmt
-                            __changed |= builder.build();
-                        }
-                    }
-                } else if hint_str.is_some() || read_only {
-                    let hint = hint_str.clone();
-                    let ro = read_only;
-                    let hint_stmt = if let Some(h) = hint {
-                        quote! { builder = builder.hint(::std::string::String::from(#h)); }
-                    } else {
-                        quote! {}
-                    };
-                    let ro_stmt = if ro {
-                        quote! { builder = builder.read_only(true); }
-                    } else {
-                        quote! {}
-                    };
-
-                    quote! {
-                        {
-                            #width_prefix
-                            let mut builder = ui.input_text_imstr(#label, &mut self.#field_ident);
-                            #hint_stmt
-                            #ro_stmt
-                            __changed |= builder.build();
-                        }
-                    }
-                } else {
-                    quote! {
-                        __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                            ui,
-                            #label,
-                            &mut self.#field_ident,
-                        );
-                    }
+                match codegen::gen_imstring_field(
+                    &field_ident,
+                    &label,
+                    multiline,
+                    display_only,
+                    read_only,
+                    auto_resize,
+                    &min_width_expr,
+                    &lines_expr,
+                    &hint_str,
+                ) {
+                    Ok(tokens) => tokens,
+                    Err(err) => return err.to_compile_error().into(),
                 }
             }
             FieldTypeKind::Numeric => {
@@ -3113,171 +2505,6 @@ fn derive_for_struct(
                     #(#field_stmts)*
                 }
                 __changed
-            }
-        }
-    };
-
-    expanded.into()
-}
-
-fn derive_for_enum(
-    ident: syn::Ident,
-    generics: syn::Generics,
-    attrs: Vec<syn::Attribute>,
-    data: syn::DataEnum,
-) -> TokenStream {
-    if data.variants.is_empty() {
-        return syn::Error::new_spanned(
-            ident,
-            "ImGuiReflect cannot be derived for enums with no variants",
-        )
-        .to_compile_error()
-        .into();
-    }
-
-    let mut enum_style: Option<String> = None;
-    for attr in attrs.iter().filter(|a| a.path().is_ident("imgui")) {
-        let res = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("enum_style") {
-                let lit: syn::LitStr = meta.value()?.parse()?;
-                enum_style = Some(lit.value());
-                return Ok(());
-            }
-            Ok(())
-        });
-
-        if let Err(err) = res {
-            return err.to_compile_error().into();
-        }
-    }
-
-    if let Some(ref style) = enum_style {
-        if style != "dropdown" && style != "radio" {
-            return syn::Error::new(
-                ident.span(),
-                "imgui(enum_style = ...) must be \"dropdown\" or \"radio\"",
-            )
-            .to_compile_error()
-            .into();
-        }
-    }
-
-    let mut labels: Vec<syn::LitStr> = Vec::new();
-    let mut to_index_arms = Vec::new();
-    let mut from_index_arms = Vec::new();
-    let mut radio_arms = Vec::new();
-
-    for (idx, var) in data.variants.iter().enumerate() {
-        let v_ident = &var.ident;
-
-        // Only support C-like enums (no fields).
-        match var.fields {
-            Fields::Unit => {}
-            _ => {
-                return syn::Error::new_spanned(
-                    v_ident,
-                    "ImGuiReflect currently supports only C-like enums (no payload)",
-                )
-                .to_compile_error()
-                .into();
-            }
-        }
-
-        let mut label_override: Option<syn::LitStr> = None;
-        for attr in var.attrs.iter().filter(|a| a.path().is_ident("imgui")) {
-            let res = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("name") {
-                    let lit: syn::LitStr = meta.value()?.parse()?;
-                    label_override = Some(lit);
-                    return Ok(());
-                }
-                Ok(())
-            });
-
-            if let Err(err) = res {
-                return err.to_compile_error().into();
-            }
-        }
-
-        let label_lit = if let Some(l) = label_override {
-            l
-        } else {
-            syn::LitStr::new(&v_ident.to_string(), v_ident.span())
-        };
-
-        labels.push(label_lit.clone());
-
-        let idx_lit = idx as u32;
-        to_index_arms.push(quote! {
-            if current == ::core::mem::discriminant(&Self::#v_ident) {
-                index = #idx_lit as usize;
-            }
-        });
-        from_index_arms.push(quote! { #idx_lit => Self::#v_ident });
-
-        radio_arms.push(quote! {
-            {
-                let active = index == #idx_lit as usize;
-                if ui.radio_button_bool(#label_lit, active) {
-                    index = #idx_lit as usize;
-                    changed = true;
-                }
-            }
-        });
-    }
-
-    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-
-    let body_dropdown = quote! {
-        let labels: &[&str] = &[#(#labels),*];
-
-        let current = ::core::mem::discriminant(self);
-        let mut index: usize = 0;
-        #(#to_index_arms)*
-
-        let mut changed = ui.combo_simple_string(label, &mut index, labels);
-        if changed {
-            let new_value = match index as u32 {
-                #(#from_index_arms,)*
-                _ => return false,
-            };
-            *self = new_value;
-        }
-        changed
-    };
-
-    let body_radio = quote! {
-        let current = ::core::mem::discriminant(self);
-        let mut index: usize = 0;
-        #(#to_index_arms)*
-
-        let mut changed = false;
-        #(#radio_arms)*
-
-        if changed {
-            let new_value = match index as u32 {
-                #(#from_index_arms,)*
-                _ => return false,
-            };
-            *self = new_value;
-        }
-        changed
-    };
-
-    let body = if enum_style.as_deref() == Some("radio") {
-        body_radio
-    } else {
-        body_dropdown
-    };
-
-    let expanded = quote! {
-        impl #impl_generics ::dear_imgui_reflect::ImGuiReflect for #ident #ty_generics #where_clause {
-            fn imgui_reflect(
-                &mut self,
-                ui: &::dear_imgui_reflect::imgui::Ui,
-                label: &str,
-            ) -> bool {
-                #body
             }
         }
     };

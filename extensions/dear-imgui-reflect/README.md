@@ -120,6 +120,7 @@ enum RenderMode {
   - Slider/drag flags: `log`, `wrap_around`, `clamp`, `always_clamp`, `no_input`, `no_round_to_format`, `clamp_on_input`, `clamp_zero_range`, `no_speed_tweaks`.
   - Formatting helpers: `format = "..."`, `hex`, `percentage`, `scientific`, `prefix = "..."`, `suffix = "..."`.
   - Type-level defaults via `ReflectSettings::numerics_*`.
+  - Numeric presets via `NumericTypeSettings` helpers such as `with_float`, `with_hex`, `slider_0_to_1`, `slider_minus1_to_1`, `drag_with_speed`, and `percentage_slider_0_to_1`.
 - **Booleans**
   - Styles: checkbox (default), button, radio, dropdown.
   - Per-field attributes: `bool_style = "checkbox|button|radio|dropdown"`, `true_text`, `false_text`.
@@ -356,23 +357,7 @@ struct ColorConfig {
 fn configure_color_tuple() {
     reflect::with_settings(|settings| {
         // color[0]: slider in [0, 1]
-        let slider01 = NumericTypeSettings {
-            widget: NumericWidgetKind::Slider,
-            range: NumericRange::Explicit { min: 0.0, max: 1.0 },
-            speed: None,
-            step: None,
-            step_fast: None,
-            format: Some("%.3f".to_owned()),
-            log: false,
-            clamp: true,
-            always_clamp: true,
-            wrap_around: false,
-            no_round_to_format: false,
-            no_input: false,
-            clamp_on_input: false,
-            clamp_zero_range: false,
-            no_speed_tweaks: false,
-        };
+        let slider01 = NumericTypeSettings::default().slider_0_to_1(3);
         settings
             .for_member::<ColorConfig>("color[0]")
             .numerics_f32 = Some(slider01.clone());
@@ -382,6 +367,23 @@ fn configure_color_tuple() {
             .for_member::<ColorConfig>("color[3]")
             .numerics_f32 = Some(slider01);
         settings.for_member::<ColorConfig>("color[3]").read_only = true;
+    });
+}
+```
+
+The same configuration can be expressed using `MemberSettings` helpers:
+
+```rust
+fn configure_color_tuple_with_helpers() {
+    reflect::with_settings(|settings| {
+        settings
+            .for_member::<ColorConfig>("color[0]")
+            .numerics_f32_slider_0_to_1(3);
+
+        settings
+            .for_member::<ColorConfig>("color[3]")
+            .numerics_f32_slider_0_to_1(3)
+            .read_only = true;
     });
 }
 ```
@@ -401,6 +403,36 @@ reflect::with_settings(|s| {
     tuples.min_width = Some(80.0);
 });
 ```
+
+## Numeric Presets (Type-level Helpers)
+
+`NumericTypeSettings` provides small helper methods to quickly configure
+common slider/drag patterns without writing out all fields:
+
+```rust
+use dear_imgui_reflect as reflect;
+use reflect::NumericTypeSettings;
+
+fn configure_numeric_presets() {
+    reflect::with_settings(|s| {
+        // f32 defaults: slider in [0, 1] with clamping and "%.3f" format
+        *s.numerics_f32_mut() = NumericTypeSettings::default()
+            .slider_0_to_1(3);
+
+        // f64 defaults: drag widget with explicit speed and "%.4f" format
+        *s.numerics_f64_mut() = NumericTypeSettings::default()
+            .drag_with_speed(0.01, 4);
+
+        // Per-member override: f32 tuple element as 0..1 percentage slider
+        s.for_member::<ColorConfig>("color[1]").numerics_f32 =
+            Some(NumericTypeSettings::default().percentage_slider_0_to_1(2));
+    });
+}
+```
+
+These presets are thin convenience wrappers over the `widget`, `range`,
+`speed`, `clamp`, and `format` fields and can be mixed with manual
+configuration when needed.
 
 ## glam / mint Integration
 
@@ -443,23 +475,8 @@ fn draw_debug_panel(ui: &reflect::imgui::Ui, state: &mut DebugState) {
     reflect::with_settings_scope(|| {
         // Temporarily change f32 default to drag slider in [0, 1]
         reflect::with_settings(|s| {
-            *s.numerics_f32_mut() = NumericTypeSettings {
-                widget: NumericWidgetKind::Slider,
-                range: NumericRange::Explicit { min: 0.0, max: 1.0 },
-                speed: None,
-                step: None,
-                step_fast: None,
-                format: Some("%.3f".to_owned()),
-                log: false,
-                clamp: true,
-                always_clamp: true,
-                wrap_around: false,
-                no_round_to_format: false,
-                no_input: false,
-                clamp_on_input: false,
-                clamp_zero_range: false,
-                no_speed_tweaks: false,
-            };
+            *s.numerics_f32_mut() =
+                NumericTypeSettings::default().slider_0_to_1(3);
         });
 
         ui.window("Debug").build(|| {
