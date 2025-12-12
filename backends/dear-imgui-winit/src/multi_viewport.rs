@@ -140,7 +140,8 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
         {
             // ImGui will use FramebufferScale when available, falling back to
             // DisplayFramebufferScale otherwise.
-            (*pio_sys).Platform_GetWindowFramebufferScale = Some(winit_get_window_framebuffer_scale);
+            (*pio_sys).Platform_GetWindowFramebufferScale =
+                Some(winit_get_window_framebuffer_scale);
         }
         #[cfg(target_os = "windows")]
         {
@@ -321,8 +322,13 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                                             }
                                         }
                                         WindowEvent::ScaleFactorChanged { .. } => {
-                                            // DPI/FramebufferScale will be refreshed on next frame
-                                            // via Platform_GetWindowDpiScale/FramebufferScale.
+                                            // Keep cached scales up-to-date immediately.
+                                            let scale = window.scale_factor() as f32;
+                                            if scale.is_finite() && scale > 0.0 {
+                                                (*vp).DpiScale = scale;
+                                                (*vp).FramebufferScale.x = scale;
+                                                (*vp).FramebufferScale.y = scale;
+                                            }
                                         }
                                         WindowEvent::CloseRequested => {
                                             (*vp).PlatformRequestClose = true;
@@ -1162,14 +1168,25 @@ unsafe extern "C" fn winit_get_window_dpi_scale(vp: *mut dear_imgui_rs::sys::ImG
     if vp.is_null() {
         return 1.0;
     }
-    let vp_ref = &*vp;
+    let vp_ref = &mut *vp;
     let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
+    let mut scale = 1.0f32;
     if let Some(vd) = vd_ptr.as_ref() {
         if let Some(window) = vd.window.as_ref() {
-            return window.scale_factor() as f32;
+            scale = window.scale_factor() as f32;
         }
     }
-    1.0
+    if !scale.is_finite() || scale <= 0.0 {
+        scale = 1.0;
+    }
+    // On Windows we keep Platform_GetWindowFramebufferScale disabled (ABI concerns).
+    // Keep the per-viewport cached framebuffer scale in sync via this callback.
+    #[cfg(target_os = "windows")]
+    {
+        vp_ref.FramebufferScale.x = scale;
+        vp_ref.FramebufferScale.y = scale;
+    }
+    scale
 }
 
 /// Get window work area insets (ImVec4: left, top, right, bottom)

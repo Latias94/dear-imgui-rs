@@ -21,6 +21,17 @@ impl GuizmoContext {
     pub fn begin_frame<'ui>(&self, _ui: &'ui Ui) -> GizmoUi<'ui> {
         unsafe {
             sys::ImGuizmo_SetImGuiContext(imgui_sys::igGetCurrentContext());
+            // ImGuizmo::BeginFrame() creates a helper ImGui window named "gizmo".
+            // When ImGui viewports are enabled, this helper window can accidentally
+            // get its own platform viewport on some backends, resulting in an extra
+            // OS window (often rendered as a black fullscreen window).
+            //
+            // Force the helper window to stay on the main viewport by setting the
+            // next-window viewport ID before calling into ImGuizmo.
+            let main_vp = imgui_sys::igGetMainViewport();
+            if !main_vp.is_null() {
+                imgui_sys::igSetNextWindowViewport((*main_vp).ID);
+            }
             sys::ImGuizmo_BeginFrame();
         }
         GizmoUi { _ui }

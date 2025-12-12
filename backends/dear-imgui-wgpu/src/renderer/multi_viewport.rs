@@ -64,9 +64,9 @@ pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn get_renderer<'a>() -> &'a mut WgpuRenderer {
+unsafe fn get_renderer<'a>() -> Option<&'a mut WgpuRenderer> {
     let ptr = RENDERER_PTR.load(Ordering::SeqCst) as *mut WgpuRenderer;
-    &mut *ptr
+    ptr.as_mut()
 }
 
 /// Helper to get or create per-viewport user data
@@ -244,8 +244,18 @@ pub unsafe extern "C" fn renderer_set_window_size(
         // Convert to physical pixels for WGPU surfaces using framebuffer scale.
         let vpm_ref = &*vp;
         let scale = vpm_ref.framebuffer_scale();
-        let new_w = (size.x * scale[0]).max(1.0).round() as u32;
-        let new_h = (size.y * scale[1]).max(1.0).round() as u32;
+        let sx = if scale[0].is_finite() && scale[0] > 0.0 {
+            scale[0]
+        } else {
+            1.0
+        };
+        let sy = if scale[1].is_finite() && scale[1] > 0.0 {
+            scale[1]
+        } else {
+            1.0
+        };
+        let new_w = (size.x * sx).max(1.0).round() as u32;
+        let new_h = (size.y * sy).max(1.0).round() as u32;
         if data.config.width != new_w || data.config.height != new_h {
             data.config.width = new_w;
             data.config.height = new_h;
@@ -260,9 +270,8 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
     if vp.is_null() {
         return;
     }
-    let renderer = match (get_renderer() as *mut WgpuRenderer).as_mut() {
-        Some(r) => r,
-        None => return,
+    let Some(renderer) = get_renderer() else {
+        return;
     };
     // Clone device/queue to avoid borrowing renderer during render
     let (device, queue) = match renderer.backend_data.as_ref() {

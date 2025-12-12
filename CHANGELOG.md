@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `dear-imgui-winit`
   - IME support for winit 0.30 (cursor area updates and enable/disable helpers) plus a new `ime_debug` example.
   - Convenience API `WinitPlatform::handle_window_event` for `ApplicationHandler`-style event loops.
+  - Native (pure-Rust) multi-viewport support for Winit + WGPU (platform windows/events in `dear-imgui-winit::multi_viewport`, renderer callbacks in `dear-imgui-wgpu::multi_viewport`).
+    Run with: `cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport`
 - WebAssembly (import-style, experimental)
   - Import-style provider module `imgui-sys-v0` and `xtask` commands to build the core + selected extensions (ImPlot, ImPlot3D, ImNodes, ImGuizmo, ImGuizmo.quat) for `wasm32-unknown-unknown`.
 - Examples
@@ -34,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Align several flag types (FreeType font loader flags, child window flags) with upstream Dear ImGui constants to reduce the risk of bit mismatches on future upgrades.
 - Extensions (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`, `dear-file-browser`)
   - Refresh bindings to the latest C APIs and tighten safe wrappers; includes making file-extension filters in the file browser case-insensitive.
+  - ImGuizmo: keep the internal helper window ("gizmo") on the main viewport when ImGui multi-viewport is enabled, preventing an extra black OS window on Windows (workaround for CedricGuillemet/ImGuizmo#378).
 
 - dear-imgui-wgpu
   - Unified internal error handling to use the shared `RendererError` type instead of ad-hoc `Result<_, String>` values in frame/texture paths, making GPU failures easier to diagnose.
@@ -45,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     See `wgpu_rtt_gameview` for a runtime sampler-switching demo.
   - Added a render-target format preflight when an adapter is provided, requiring the chosen
     `render_target_format` to be `RENDER_ATTACHMENT`-capable and blendable.
-  - **Breaking**: renamed the winit multi-viewport feature in `dear-imgui-wgpu` from `multi-viewport`
+  - **Breaking**: renamed the native Winit + WGPU multi-viewport feature in `dear-imgui-wgpu` from `multi-viewport`
     to `multi-viewport-winit`. The SDL3 route remains `multi-viewport-sdl3`.
   - Experimental native multi-viewport support for SDL3 + WGPU via `multi_viewport_sdl3`, with a new `sdl3_wgpu_multi_viewport` example.
     Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`

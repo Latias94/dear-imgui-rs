@@ -981,6 +981,12 @@ impl AppWindow {
             b: 0.3,
             a: 1.0,
         };
+        #[cfg(feature = "multi-viewport")]
+        if enable_viewports {
+            // Use the same clear color for secondary viewport OS windows to avoid
+            // jarring black flashes during platform-managed moves/resizes.
+            renderer.set_viewport_clear_color(clear_color);
+        }
 
         #[cfg(feature = "implot")]
         let plot_context = PlotContext::create(&context);
@@ -1132,7 +1138,9 @@ impl AppWindow {
                     self.surface_desc.width,
                     self.surface_desc.height,
                 )
-                .expect("Rendering failed");
+                .unwrap_or_else(|e| {
+                    eprintln!("ImGui render error: {:?}", e);
+                });
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
