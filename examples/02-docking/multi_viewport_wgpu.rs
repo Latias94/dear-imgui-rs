@@ -53,6 +53,16 @@ struct AppWindow {
     game_tex_id: TextureId,
 }
 
+impl Drop for AppWindow {
+    fn drop(&mut self) {
+        // Avoid ImGui's shutdown assertion by ensuring platform windows are destroyed before the
+        // context is dropped.
+        if self.enable_viewports {
+            winit_mvp::shutdown_multi_viewport_support();
+        }
+    }
+}
+
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         // Winit + WGPU multi-viewport is experimental.

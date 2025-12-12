@@ -201,6 +201,17 @@ struct ImguiState {
     plot_context: PlotContext,
 }
 
+impl Drop for ImguiState {
+    fn drop(&mut self) {
+        // Avoid ImGui's shutdown assertion by ensuring platform windows are destroyed before the
+        // context is dropped.
+        #[cfg(feature = "multi-viewport")]
+        if self.enable_viewports {
+            winit_mvp::shutdown_multi_viewport_support();
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct SceneVertex {

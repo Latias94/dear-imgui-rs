@@ -131,10 +131,21 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
             pio_sys,
             Some(winit_get_window_size_out_v2),
         );
-        // Enable framebuffer scale callback for proper HiDPI support.
-        // ImGui will use FramebufferScale when available, falling back to
-        // DisplayFramebufferScale otherwise.
-        (*pio_sys).Platform_GetWindowFramebufferScale = Some(winit_get_window_framebuffer_scale);
+        // Framebuffer scale callback.
+        //
+        // On MSVC, returning ImVec2 by value from a foreign callback can be ABI-fragile, so we
+        // keep this disabled on Windows for now and rely on Viewport::FramebufferScale and
+        // io.DisplayFramebufferScale instead.
+        #[cfg(not(target_os = "windows"))]
+        {
+            // ImGui will use FramebufferScale when available, falling back to
+            // DisplayFramebufferScale otherwise.
+            (*pio_sys).Platform_GetWindowFramebufferScale = Some(winit_get_window_framebuffer_scale);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            (*pio_sys).Platform_GetWindowFramebufferScale = None;
+        }
         (*pio_sys).Platform_GetWindowDpiScale = Some(winit_get_window_dpi_scale);
         (*pio_sys).Platform_GetWindowWorkAreaInsets = None;
         (*pio_sys).Platform_OnChangedViewport = Some(winit_on_changed_viewport);
