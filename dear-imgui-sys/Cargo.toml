@@ -2,7 +2,7 @@
 name = "dear-imgui-sys"
 version = "0.6.0"
 edition.workspace = true
-description = "Low level FFI bindings for Dear ImGui v1.92.5 with docking support"
+description = "Low-level FFI bindings to Dear ImGui v1.92.5 (docking branch) via cimgui (C API)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

@@ -259,22 +259,21 @@ The workspace includes several examples that use this backend:
 - SDL3 + OpenGL3, multi-viewport:
 
   ```bash
-  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport
+  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features "multi-viewport sdl3-backends"
   ```
 
 - SDL3 + OpenGL3, multi-viewport (Glow renderer wrapper):
 
   ```bash
-  cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport
+  cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features "multi-viewport sdl3-backends"
   ```
 
 - SDL3 + WGPU, single-window:
 
   ```bash
-  cargo run -p dear-imgui-examples --bin sdl3_wgpu
+  cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-backends
   ```
 
 Note: multi-viewport support for WebGPU/WGPU follows the upstream
 `imgui_impl_wgpu` design and is currently **not** enabled; for multi-viewport
 use SDL3 + OpenGL3 or a winit + OpenGL route instead.
-

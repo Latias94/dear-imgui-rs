@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL backends, and popular extensions (ImGuizmo, ImNodes, ImPlot).
+`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, file browser, reflection-based UI).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
@@ -88,38 +88,8 @@ cargo run --bin implot3d_basic --features implot3d
 
 # WebAssembly (WASM) web demo (import-style, ImGui + optional ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
 # Note: this import-style WASM path is developed on `main` and planned for the 0.7.0 release train.
-# 1) Generate pregenerated wasm bindings (Dear ImGui core + extensions)
-cargo run -p xtask -- wasm-bindgen imgui-sys-v0
-cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0
-cargo run -p xtask -- wasm-bindgen-implot3d imgui-sys-v0
-cargo run -p xtask -- wasm-bindgen-imnodes imgui-sys-v0
-cargo run -p xtask -- wasm-bindgen-imguizmo imgui-sys-v0
-cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0
-
-# 2) Build the main wasm + JS (examples-wasm/dear-imgui-web-demo)
-#    - core ImGui only:
-#      cargo run -p xtask -- web-demo
-#    - core ImGui + ImPlot demo:
-#      cargo run -p xtask -- web-demo implot
-#    - core ImGui + ImPlot3D demo:
-#      cargo run -p xtask -- web-demo implot3d
-#    - core ImGui + ImNodes demo:
-#      cargo run -p xtask -- web-demo imnodes
-#    - core ImGui + ImGuizmo demo:
-#      cargo run -p xtask -- web-demo imguizmo
-#    - core ImGui + ImGuIZMO.quat demo:
-#      cargo run -p xtask -- web-demo imguizmo-quat
-#    - core ImGui + ImPlot + ImPlot3D + ImNodes + ImGuizmo + ImGuIZMO.quat demos:
-#      cargo run -p xtask -- web-demo implot,implot3d,imnodes,imguizmo,imguizmo-quat
-
-# 3) Build the cimgui provider (Emscripten imgui-sys-v0 with ImGui + extensions)
-cargo run -p xtask -- build-cimgui-provider
-
-# 4) Serve and open in a browser
-python -m http.server -d target/web-demo 8080
-# Then open http://127.0.0.1:8080 and look for:
-# - "Hello, Dear ImGui (Web)" window (core demo)
-# - "ImPlot (Web)" window (when ImPlot bindings and provider are present)
+# For the full setup (bindings generation, web demo build, provider build, and troubleshooting),
+# see the "WebAssembly (WASM) support" section below and docs/WASM.md.
 
 # SDL3 backends (native)
 # SDL3 + OpenGL3 with official C++ backends (multi-viewport via imgui_impl_sdl3/imgui_impl_opengl3)

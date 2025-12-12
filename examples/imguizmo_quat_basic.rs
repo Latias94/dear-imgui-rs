@@ -1,7 +1,7 @@
 //! ImGuIZMO.quat basic demo (WGPU backend)
 //!
 //! Run:
-//!   cargo run -p dear-imgui-examples --features dear-imguizmo-quat --bin imguizmo_quat_basic
+//!   cargo run -p dear-imgui-examples --features imguizmo-quat --bin imguizmo_quat_basic
 
 use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;

@@ -91,14 +91,6 @@ ui.window("Open")
     });
 ```
 
-## Fonts (CJK/Emoji)
-
-Dear ImGui’s default font does not contain CJK glyphs or emoji. If your file
-system includes non-ASCII names (e.g., Chinese), load a font with the required
-glyphs into the font atlas during initialization. See `examples/style_and_fonts.rs`
-in this repository for a complete pattern. Enabling the `freetype` feature in
-`dear-imgui-rs` also improves text quality.
-
 ## WASM
 
 - Native: `rfd` uses the browser file picker and is the recommended way to access user files.

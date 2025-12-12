@@ -112,7 +112,9 @@ See `examples/implot3d_basic.rs` for a comprehensive demo that replicates the of
 
 Run with:
 ```bash
-cargo run -p dear-imgui-examples --bin implot3d_basic --features "dear-implot3d, dear-app/implot3d"
+cargo run -p dear-imgui-examples --bin implot3d_basic --features "implot3d"
+# If your workspace does not pre-enable the dear-app ImPlot3D add-on feature:
+# cargo run -p dear-imgui-examples --bin implot3d_basic --features "implot3d, dear-app/implot3d"
 ```
 
 ## Predefined Meshes

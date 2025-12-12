@@ -6,7 +6,7 @@ This document tracks compatibility across the workspace crates, upstream Dear Im
 
 - Unified release train: all `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
 - Current train: unified `v0.6.0` (use `version = "0.6"`).
-- Previous train: unified `v0.4.0` (use `version = "0.4"`).
+- Previous train: unified `v0.5.0` (use `version = "0.5"`).
 - Internal dependency constraints in this repo also pin to the unified minor (e.g., `0.5`). Mixing different minors across our crates is unsupported.
 - Exception: helper tooling like `tools/build-support` may follow an independent version and is not part of the unified train.
 

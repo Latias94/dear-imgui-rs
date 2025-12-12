@@ -2,7 +2,7 @@
 name = "dear-imgui-sdl3"
 version = "0.6.0"
 edition.workspace = true
-description = "SDL3 + OpenGL backend for Dear ImGui"
+description = "SDL3 platform backend with optional OpenGL3 renderer for dear-imgui-rs"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

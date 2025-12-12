@@ -230,6 +230,12 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_USE_CMAKE");
 
+    // docs.rs builds: prefer pregenerated bindings and skip native build logic
+    if cfg.docs_rs {
+        docsrs_build(&cfg);
+        return;
+    }
+
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimnodes_root = cfg.manifest_dir.join("third-party/cimnodes");
     if !imgui_src.exists() {
@@ -254,10 +260,8 @@ fn main() {
         try_link_prebuilt_all(&cfg)
     };
     if cfg.target_arch != "wasm32" {
-        if !cfg.docs_rs && !linked && env::var("IMNODES_SYS_SKIP_CC").is_err() {
+        if !linked && env::var("IMNODES_SYS_SKIP_CC").is_err() {
             build_with_cc(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
-        } else if cfg.docs_rs {
-            docsrs_build(&cfg);
         }
     } else {
         println!(

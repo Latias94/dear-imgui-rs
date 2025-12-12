@@ -2,7 +2,7 @@
 name = "dear-implot"
 version = "0.6.0"
 edition.workspace = true
-description = "High-level Rust bindings to ImPlot with Dear ImGui compatibility"
+description = "High-level Rust bindings to ImPlot with dear-imgui-rs integration"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

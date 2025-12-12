@@ -39,9 +39,7 @@ Environment variables:
 
 - ImPlot: `IMPLOT_SYS_LIB_DIR`, `IMPLOT_SYS_PREBUILT_URL`, `IMPLOT_SYS_SKIP_CC`.
 - ImGuizmo: `IMGUIZMO_SYS_LIB_DIR`, `IMGUIZMO_SYS_PREBUILT_URL`, `IMGUIZMO_SYS_SKIP_CC`.
-
 - ImNodes: `IMNODES_SYS_LIB_DIR`, `IMNODES_SYS_PREBUILT_URL`, `IMNODES_SYS_SKIP_CC`.
-
 - ImGuIZMO.quat: `IMGUIZMO_QUAT_SYS_LIB_DIR`, `IMGUIZMO_QUAT_SYS_PREBUILT_URL`, `IMGUIZMO_QUAT_SYS_SKIP_CC`.
 
 Optional toggles:
@@ -72,29 +70,23 @@ Guidance on build scripts, bitflags vs enums, and data interop (mint/glam):
 
 Examples are in the top-level `examples/` crate and are feature-gated per extension:
 
-- `implot_basic` -> `--features dear-implot`
-- `imguizmo_basic` -> `--features dear-imguizmo`
-- `imnodes_basic` -> `--features dear-imnodes`
+- `implot_basic` -> `--features implot`
+- `imguizmo_basic` -> `--features imguizmo`
+- `imnodes_basic` -> `--features imnodes`
 - `reflect_demo` -> `--features reflect`
+- `file_dialog_native` / `file_browser_imgui` -> `--features file-browser`
 
 Run:
 
-```
-cargo run --bin implot_basic --features dear-implot
-cargo run --bin imguizmo_basic --features dear-imguizmo
-cargo run --bin imnodes_basic --features dear-imnodes
-cargo run --bin reflect_demo --features reflect
+```bash
+cargo run -p dear-imgui-examples --bin implot_basic --features implot
+cargo run -p dear-imgui-examples --bin imguizmo_basic --features imguizmo
+cargo run -p dear-imgui-examples --bin imnodes_basic --features imnodes
+cargo run -p dear-imgui-examples --bin reflect_demo --features reflect
 
 # File Browser (new)
-
-- Native dialog (rfd):
+# Native dialog (rfd):
+cargo run -p dear-imgui-examples --bin file_dialog_native --features file-browser
+# ImGui browser (pure UI):
+cargo run -p dear-imgui-examples --bin file_browser_imgui --features file-browser
 ```
-cargo run -p dear-imgui-examples --features dear-file-browser --bin file_dialog_native
-```
-- ImGui browser (pure UI):
-```
-cargo run -p dear-imgui-examples --features dear-file-browser --bin file_browser_imgui
-```
-```
-
- 

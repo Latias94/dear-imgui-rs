@@ -4,13 +4,13 @@ Low-level Rust bindings for Dear ImGui via cimgui (C API) + bindgen.
 
 ## Overview
 
-This crate provides unsafe Rust bindings to Dear ImGui v1.92.3 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. By using cimgui's C interface instead of directly binding to the C++ API, we completely avoid C++ ABI compatibility issues while maintaining full access to Dear ImGui's functionality.
+This crate provides unsafe Rust bindings to Dear ImGui v1.92.5 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. By using cimgui's C interface instead of directly binding to the C++ API, we completely avoid C++ ABI compatibility issues while maintaining full access to Dear ImGui's functionality.
 
 ## Key Features
 
 - **cimgui C API**: Clean C interface eliminates C++ ABI issues across platforms and compilers
 - **Docking Support**: Full support for docking and multi-viewport features (multi-viewport WIP)
-- **Modern Dear ImGui**: Based on Dear ImGui v1.92.3 docking branch
+- **Modern Dear ImGui**: Based on Dear ImGui v1.92.5 docking branch
 - **Cross-platform**: Consistent builds on Windows (MSVC/MinGW), Linux, macOS, and WebAssembly
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for docs.rs and offline environments
@@ -107,42 +107,21 @@ python tools/update_submodule_and_bindings.py --branch docking_inter
 
 ## WebAssembly Support
 
-This crate provides WebAssembly support through the `wasm` feature, enabling Dear ImGui to run in web browsers.
+WebAssembly support for Dear ImGui in this workspace follows the same **import-style** design used by the high-level `dear-imgui-rs` crate:
 
-### Quick Start
+- Rust code links against a WASM import module named `imgui-sys-v0` that provides the cimgui (C API) implementation.
+- The main application (Rust + winit + wgpu) targets `wasm32-unknown-unknown` and uses `wasm-bindgen`.
+- A separate provider module (`imgui-sys-v0`) is built once (currently via Emscripten) and contains Dear ImGui + cimgui and, optionally, selected extensions.
 
-```bash
-# Install WASM target
-rustup target add wasm32-unknown-unknown
+The `dear-imgui-sys` crate participates in this flow via its `wasm` feature, but end users typically interact with it indirectly through:
 
-# Build for WASM
-cargo build --target wasm32-unknown-unknown --features wasm
-```
+- `dear-imgui-rs` with the `wasm` feature enabled.
+- The `xtask` commands (`wasm-bindgen`, `web-demo`, `build-cimgui-provider`) that wire the main module and provider together.
 
-### Usage
+For a complete, up-to-date guide (including required tools, commands, and troubleshooting), see:
 
-```toml
-[dependencies]
-dear-imgui-sys = { version = "0.2", features = ["wasm"] }
-```
-
-### WASM-Specific Behavior
-
-When targeting WebAssembly, this crate automatically:
-
-- Uses pregenerated bindings to avoid requiring a C compiler in the browser environment
-- Disables file system and OS-specific functions (`IMGUI_DISABLE_FILE_FUNCTIONS`, etc.)
-- Configures Dear ImGui for the WASM environment
-
-### Rendering
-
-The sys crate provides only the Dear ImGui API bindings. For actual rendering in WASM, you'll need:
-
-- A WebGL-based renderer (see `dear-imgui-wgpu` for WASM support)
-- Integration with your web application framework
-- JavaScript interop for handling browser events
-
-**Note**: This crate focuses on providing type-safe bindings. Rendering integration depends on your chosen graphics backend.
+- `docs/WASM.md` in this repository.
+- The `examples-wasm` crate (`examples-wasm/dear-imgui-web-demo`), which demonstrates the web demo setup.
 
 ## Basic Usage
 
@@ -192,8 +171,8 @@ This crate uses [cimgui](https://github.com/cimgui/cimgui) as the C API layer:
 
 ### Version Information
 
-- **Dear ImGui Version**: v1.92.3 (docking branch)
-- **cimgui Version**: Latest compatible with Dear ImGui v1.92.3
+- **Dear ImGui Version**: v1.92.5 (docking branch)
+- **cimgui Version**: Latest compatible with Dear ImGui v1.92.5
 - **Supported Features**: Docking, multi-viewport (WIP), FreeType font rendering
 
 ### Environment Variables

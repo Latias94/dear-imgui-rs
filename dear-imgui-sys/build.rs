@@ -118,11 +118,10 @@ fn main() {
                 build_with_cc_cfg(&cfg);
             }
         }
-    } else if !linked_prebuilt {
-        if env::var("IMGUI_SYS_SKIP_CC").is_ok() {
-            println!("cargo:warning=Skipping C/C++ build due to IMGUI_SYS_SKIP_CC");
-        }
-        println!("cargo:warning=WASM target is not supported.");
+    } else if !linked_prebuilt && env::var("IMGUI_SYS_SKIP_CC").is_ok() {
+        println!(
+            "cargo:warning=IMGUI_SYS_SKIP_CC is set but no prebuilt dear_imgui library was linked; the Rust build will likely fail at link time."
+        );
     }
 
     // Export include paths/defines for extensions
