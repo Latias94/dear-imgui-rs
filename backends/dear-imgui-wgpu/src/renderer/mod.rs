@@ -19,6 +19,8 @@ use crate::{
     WgpuBackendData, WgpuInitInfo, WgpuTextureManager,
 };
 use dear_imgui_rs::{BackendFlags, Context, render::DrawData};
+#[cfg(feature = "mv-log")]
+use std::sync::{Mutex, OnceLock};
 use wgpu::*;
 
 // Debug logging helper (off by default). Enable by building this crate with
@@ -47,7 +49,7 @@ pub struct WgpuRenderer {
     /// Gamma mode: automatic (by format), force linear (1.0), or force 2.2
     gamma_mode: GammaMode,
     /// Clear color used for secondary viewports (multi-viewport mode)
-    #[cfg(feature = "multi-viewport")]
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     viewport_clear_color: Color,
 }
 
@@ -63,10 +65,16 @@ impl WgpuRenderer {
     ///
     /// # Example
     /// ```rust,no_run
+    /// use dear_imgui_rs::Context;
     /// use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
     ///
+    /// # fn main() -> Result<(), dear_imgui_wgpu::RendererError> {
+    /// # let (device, queue) = todo!("initialize a WGPU Device/Queue");
+    /// # let surface_format = wgpu::TextureFormat::Bgra8UnormSrgb;
+    /// # let mut imgui_context = Context::create();
     /// let init_info = WgpuInitInfo::new(device, queue, surface_format);
     /// let mut renderer = WgpuRenderer::new(init_info, &mut imgui_context)?;
+    /// # Ok(()) }
     /// ```
     pub fn new(init_info: WgpuInitInfo, imgui_ctx: &mut Context) -> RendererResult<Self> {
         // Native and wasm experimental path: fully configure context, including font atlas.
@@ -94,11 +102,17 @@ impl WgpuRenderer {
     ///
     /// # Example
     /// ```rust,no_run
+    /// use dear_imgui_rs::Context;
     /// use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
     ///
+    /// # fn main() -> Result<(), dear_imgui_wgpu::RendererError> {
+    /// # let (device, queue) = todo!("initialize a WGPU Device/Queue");
+    /// # let surface_format = wgpu::TextureFormat::Bgra8UnormSrgb;
+    /// # let mut imgui_context = Context::create();
     /// let mut renderer = WgpuRenderer::empty();
     /// let init_info = WgpuInitInfo::new(device, queue, surface_format);
     /// renderer.init_with_context(init_info, &mut imgui_context)?;
+    /// # Ok(()) }
     /// ```
     pub fn empty() -> Self {
         Self {
@@ -108,7 +122,7 @@ impl WgpuRenderer {
             default_texture: None,
             font_texture_id: None,
             gamma_mode: GammaMode::Auto,
-            #[cfg(feature = "multi-viewport")]
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: Color::BLACK,
         }
     }
@@ -119,6 +133,26 @@ impl WgpuRenderer {
     pub fn init(&mut self, init_info: WgpuInitInfo) -> RendererResult<()> {
         // Create backend data
         let mut backend_data = WgpuBackendData::new(init_info);
+
+        // Preflight: ensure the render target format is render-attachable and blendable.
+        // The ImGui pipeline always uses alpha blending; non-blendable formats will
+        // fail validation later with less actionable errors.
+        let fmt = backend_data.render_target_format;
+        if let Some(adapter) = backend_data.adapter.as_ref() {
+            let fmt_features = adapter.get_texture_format_features(fmt);
+            if !fmt_features
+                .allowed_usages
+                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+                || !fmt_features
+                    .flags
+                    .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
+            {
+                return Err(RendererError::InvalidRenderState(format!(
+                    "Render target format {:?} is not suitable for ImGui WGPU renderer (requires RENDER_ATTACHMENT + BLENDABLE). allowed_usages={:?} flags={:?}",
+                    fmt, fmt_features.allowed_usages, fmt_features.flags
+                )));
+            }
+        }
 
         // Initialize render resources
         backend_data
@@ -194,19 +228,27 @@ impl WgpuRenderer {
     /// This color is used as the load/clear color when rendering ImGui-created
     /// platform windows via `RenderPlatformWindowsDefault`. It is independent
     /// from whatever clear color your main swapchain uses.
-    #[cfg(feature = "multi-viewport")]
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub fn set_viewport_clear_color(&mut self, color: Color) {
         self.viewport_clear_color = color;
     }
 
     /// Get current clear color for secondary viewports.
-    #[cfg(feature = "multi-viewport")]
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub fn viewport_clear_color(&self) -> Color {
         self.viewport_clear_color
     }
 
     /// Configure Dear ImGui context with WGPU backend capabilities
     pub fn configure_imgui_context(&self, imgui_context: &mut Context) {
+        let should_set_name = imgui_context.io().backend_renderer_name().is_none();
+        if should_set_name {
+            let _ = imgui_context.set_renderer_name(Some(format!(
+                "dear-imgui-wgpu {}",
+                env!("CARGO_PKG_VERSION")
+            )));
+        }
+
         let io = imgui_context.io_mut();
         let mut flags = io.backend_flags();
 
@@ -216,14 +258,13 @@ impl WgpuRenderer {
         // We can honor ImGuiPlatformIO::Textures[] requests during render.
         flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
 
-        #[cfg(feature = "multi-viewport")]
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
         {
             // We can render additional platform windows
             flags.insert(BackendFlags::RENDERER_HAS_VIEWPORTS);
         }
 
         io.set_backend_flags(flags);
-        // Note: Dear ImGui doesn't expose set_backend_renderer_name in the Rust bindings yet
     }
 
     /// Prepare font atlas for rendering
@@ -418,15 +459,6 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
-        mvlog!(
-            "[wgpu-mv] render_draw_data: valid={} lists={} fb_scale=({:.2},{:.2}) disp=({:.1},{:.1})",
-            draw_data.valid(),
-            draw_data.draw_lists_count(),
-            draw_data.framebuffer_scale()[0],
-            draw_data.framebuffer_scale()[1],
-            draw_data.display_size()[0],
-            draw_data.display_size()[1]
-        );
         // Early out if nothing to draw (avoid binding/drawing without buffers)
         let mut total_vtx_count = 0usize;
         let mut total_idx_count = 0usize;
@@ -435,7 +467,6 @@ impl WgpuRenderer {
             total_idx_count += dl.idx_buffer().len();
         }
         if total_vtx_count == 0 || total_idx_count == 0 {
-            mvlog!("[wgpu-mv] no vertices/indices; skipping render");
             return Ok(());
         }
 
@@ -450,7 +481,6 @@ impl WgpuRenderer {
             return Ok(());
         }
 
-        mvlog!("[wgpu-mv] handle_texture_updates");
         self.texture_manager.handle_texture_updates(
             draw_data,
             &backend_data.device,
@@ -459,12 +489,9 @@ impl WgpuRenderer {
         );
 
         // Advance to next frame
-        mvlog!("[wgpu-mv] next_frame before: {}", backend_data.frame_index);
         backend_data.next_frame();
-        mvlog!("[wgpu-mv] next_frame after: {}", backend_data.frame_index);
 
         // Prepare frame resources
-        mvlog!("[wgpu-mv] prepare_frame_resources");
         Self::prepare_frame_resources_static(draw_data, backend_data)?;
 
         // Compute gamma based on renderer mode
@@ -475,7 +502,6 @@ impl WgpuRenderer {
         };
 
         // Setup render state
-        mvlog!("[wgpu-mv] setup_render_state");
         Self::setup_render_state_static(draw_data, render_pass, backend_data, gamma)?;
         // Override viewport to the provided framebuffer size to avoid partial viewport issues
         render_pass.set_viewport(0.0, 0.0, fb_width as f32, fb_height as f32, 0.0, 1.0);
@@ -488,7 +514,6 @@ impl WgpuRenderer {
             let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
 
             // Create a temporary render state structure
-            mvlog!("[wgpu-mv] create render_state");
             let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
 
             // Set the render state pointer
@@ -539,14 +564,39 @@ impl WgpuRenderer {
         fb_height: u32,
         advance_frame: bool,
     ) -> RendererResult<()> {
-        mvlog!(
-            "[wgpu-mv] render_draw_data(with_fb) lists={} override_fb=({}, {}) disp=({:.1},{:.1})",
-            draw_data.draw_lists_count(),
-            fb_width,
-            fb_height,
-            draw_data.display_size()[0],
-            draw_data.display_size()[1]
-        );
+        // Log only when the override framebuffer size doesn't match the draw data scale.
+        // This helps diagnose HiDPI/viewport scaling issues without spamming per-frame traces.
+        #[cfg(feature = "mv-log")]
+        {
+            static LAST_MISMATCH: OnceLock<Mutex<Option<(u32, u32, u32, u32, bool)>>> =
+                OnceLock::new();
+            let last = LAST_MISMATCH.get_or_init(|| Mutex::new(None));
+            let expected_w = (draw_data.display_size()[0] * draw_data.framebuffer_scale()[0])
+                .round()
+                .max(0.0) as u32;
+            let expected_h = (draw_data.display_size()[1] * draw_data.framebuffer_scale()[1])
+                .round()
+                .max(0.0) as u32;
+            if expected_w != fb_width || expected_h != fb_height {
+                let key = (expected_w, expected_h, fb_width, fb_height, advance_frame);
+                let mut guard = last.lock().unwrap();
+                if *guard != Some(key) {
+                    mvlog!(
+                        "[wgpu-mv] fb mismatch expected=({}, {}) override=({}, {}) disp=({:.1},{:.1}) fb_scale=({:.2},{:.2}) main={}",
+                        expected_w,
+                        expected_h,
+                        fb_width,
+                        fb_height,
+                        draw_data.display_size()[0],
+                        draw_data.display_size()[1],
+                        draw_data.framebuffer_scale()[0],
+                        draw_data.framebuffer_scale()[1],
+                        advance_frame
+                    );
+                    *guard = Some(key);
+                }
+            }
+        }
         let total_vtx_count: usize = draw_data.draw_lists().map(|dl| dl.vtx_buffer().len()).sum();
         let total_idx_count: usize = draw_data.draw_lists().map(|dl| dl.idx_buffer().len()).sum();
         if total_vtx_count == 0 || total_idx_count == 0 {
@@ -588,6 +638,25 @@ impl WgpuRenderer {
                 &mut render_state as *mut _ as *mut std::ffi::c_void;
 
             // Reuse core routine but clamp scissor by overriding framebuffer bounds.
+            // Extract common bind group handles up front to avoid borrowing conflicts with render_resources.
+            let device = backend_data.device.clone();
+            let (common_layout, uniform_buffer, default_common_bg) = {
+                let ub = backend_data
+                    .render_resources
+                    .uniform_buffer()
+                    .ok_or_else(|| {
+                        RendererError::InvalidRenderState(
+                            "Uniform buffer not initialized".to_string(),
+                        )
+                    })?;
+                (
+                    ub.bind_group_layout().clone(),
+                    ub.buffer().clone(),
+                    ub.bind_group().clone(),
+                )
+            };
+            let mut current_sampler_id: Option<u64> = None;
+
             let mut global_idx_offset: u32 = 0;
             let mut global_vtx_offset: i32 = 0;
             let clip_off = draw_data.display_pos();
@@ -606,38 +675,40 @@ impl WgpuRenderer {
                             raw_cmd,
                         } => {
                             // Texture bind group resolution mirrors render_draw_lists_static
-                            let texture_bind_group = {
-                                // Resolve effective ImTextureID using raw_cmd (modern texture path)
-                                let tex_id = dear_imgui_rs::sys::ImDrawCmd_GetTexID(
-                                    raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
-                                ) as u64;
-                                if tex_id == 0 {
-                                    if let Some(default_tex) = &self.default_texture {
-                                        backend_data
-                                            .render_resources
-                                            .get_or_create_image_bind_group(
-                                                &backend_data.device,
-                                                0,
-                                                default_tex,
-                                            )?
-                                            .clone()
+                            // Resolve effective ImTextureID using raw_cmd (modern texture path)
+                            let tex_id = dear_imgui_rs::sys::ImDrawCmd_GetTexID(
+                                raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
+                            ) as u64;
+
+                            // Switch common bind group (sampler) if this texture uses a custom sampler.
+                            let desired_sampler_id = if tex_id == 0 {
+                                None
+                            } else {
+                                self.texture_manager.custom_sampler_id_for_texture(tex_id)
+                            };
+                            if desired_sampler_id != current_sampler_id {
+                                if let Some(sampler_id) = desired_sampler_id {
+                                    if let Some(bg0) = self
+                                        .texture_manager
+                                        .get_or_create_common_bind_group_for_sampler(
+                                            &device,
+                                            &common_layout,
+                                            &uniform_buffer,
+                                            sampler_id,
+                                        )
+                                    {
+                                        render_pass.set_bind_group(0, &bg0, &[]);
                                     } else {
-                                        return Err(RendererError::InvalidRenderState(
-                                            "Default texture not available".to_string(),
-                                        ));
+                                        render_pass.set_bind_group(0, &default_common_bg, &[]);
                                     }
-                                } else if let Some(wgpu_texture) =
-                                    self.texture_manager.get_texture(tex_id)
-                                {
-                                    backend_data
-                                        .render_resources
-                                        .get_or_create_image_bind_group(
-                                            &backend_data.device,
-                                            tex_id,
-                                            &wgpu_texture.texture_view,
-                                        )?
-                                        .clone()
-                                } else if let Some(default_tex) = &self.default_texture {
+                                } else {
+                                    render_pass.set_bind_group(0, &default_common_bg, &[]);
+                                }
+                                current_sampler_id = desired_sampler_id;
+                            }
+
+                            let texture_bind_group = if tex_id == 0 {
+                                if let Some(default_tex) = &self.default_texture {
                                     backend_data
                                         .render_resources
                                         .get_or_create_image_bind_group(
@@ -648,9 +719,33 @@ impl WgpuRenderer {
                                         .clone()
                                 } else {
                                     return Err(RendererError::InvalidRenderState(
-                                        "Texture not found and no default texture".to_string(),
+                                        "Default texture not available".to_string(),
                                     ));
                                 }
+                            } else if let Some(wgpu_texture) =
+                                self.texture_manager.get_texture(tex_id)
+                            {
+                                backend_data
+                                    .render_resources
+                                    .get_or_create_image_bind_group(
+                                        &backend_data.device,
+                                        tex_id,
+                                        &wgpu_texture.texture_view,
+                                    )?
+                                    .clone()
+                            } else if let Some(default_tex) = &self.default_texture {
+                                backend_data
+                                    .render_resources
+                                    .get_or_create_image_bind_group(
+                                        &backend_data.device,
+                                        0,
+                                        default_tex,
+                                    )?
+                                    .clone()
+                            } else {
+                                return Err(RendererError::InvalidRenderState(
+                                    "Texture not found and no default texture".to_string(),
+                                ));
                             };
                             render_pass.set_bind_group(1, &texture_bind_group, &[]);
 
@@ -689,6 +784,7 @@ impl WgpuRenderer {
                                 backend_data,
                                 gamma,
                             )?;
+                            current_sampler_id = None;
                         }
                         dear_imgui_rs::render::DrawCmd::RawCallback { .. } => {
                             // Unsupported raw callbacks; skip.
@@ -752,9 +848,13 @@ impl WgpuRenderer {
 mod draw;
 mod external_textures;
 mod font_atlas;
-#[cfg(feature = "multi-viewport")]
+#[cfg(feature = "multi-viewport-winit")]
 pub mod multi_viewport;
+#[cfg(feature = "multi-viewport-sdl3")]
+pub mod multi_viewport_sdl3;
 mod pipeline;
+#[cfg(feature = "multi-viewport-sdl3")]
+mod sdl3_raw_window_handle;
 
 impl Default for WgpuRenderer {
     fn default() -> Self {

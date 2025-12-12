@@ -17,18 +17,37 @@ reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
 multi-viewport = [
     "dear-imgui-rs/multi-viewport",
     "dear-imgui-winit/multi-viewport",
-    "dear-imgui-wgpu/multi-viewport",
+    "dear-imgui-wgpu/multi-viewport-winit",
     "dear-imgui-sdl3/multi-viewport",
     "dear-imgui-glow/multi-viewport",
 ]
-### SDL3 backends (platform + renderers)
+
+# Enable WGPU multi-viewport when using the SDL3 platform backend (native only).
+# This is separate from `multi-viewport` because the wgpu crate cannot enable both
+# winit and SDL3 multi-viewport routes simultaneously.
+sdl3-wgpu-multi-viewport = [
+    "sdl3-platform",
+    "dear-imgui-rs/multi-viewport",
+    "dear-imgui-sdl3/multi-viewport",
+    "dear-imgui-wgpu/multi-viewport-sdl3",
+]
+### SDL3 platform (window + events)
 ###
 ### This feature gates SDL3-related dependencies so that examples which do not
 ### use SDL3 (e.g. `game_engine_docking`) do not pay the cost of building SDL3
 ### or its C dependencies (CMake, SDKs, etc.).
-sdl3-backends = [
+sdl3-platform = [
     "dep:sdl3",
     "dep:dear-imgui-sdl3",
+]
+
+# Legacy alias kept for older commands.
+sdl3-backends = ["sdl3-platform"]
+
+# SDL3 + official OpenGL3 renderer backend.
+sdl3-opengl3 = [
+    "sdl3-platform",
+    "dear-imgui-sdl3/opengl3-renderer",
 ]
 
 [[bin]]
@@ -91,17 +110,22 @@ required-features = ["multi-viewport"]
 [[bin]]
 name = "sdl3_opengl_multi_viewport"
 path = "02-docking/sdl3_opengl_multi_viewport.rs"
-required-features = ["multi-viewport", "sdl3-backends"]
+required-features = ["multi-viewport", "sdl3-opengl3"]
 
 [[bin]]
 name = "sdl3_glow_multi_viewport"
 path = "02-docking/sdl3_glow_multi_viewport.rs"
-required-features = ["multi-viewport", "sdl3-backends"]
+required-features = ["multi-viewport", "sdl3-platform"]
 
 [[bin]]
 name = "sdl3_wgpu"
 path = "01-renderers/sdl3_wgpu.rs"
-required-features = ["sdl3-backends"]
+required-features = ["sdl3-platform"]
+
+[[bin]]
+name = "sdl3_wgpu_multi_viewport"
+path = "02-docking/sdl3_wgpu_multi_viewport.rs"
+required-features = ["sdl3-wgpu-multi-viewport"]
 
 [[bin]]
 name = "wgpu_textures"

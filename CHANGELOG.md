@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core (`dear-imgui-sys`, `dear-imgui-rs`)
   - Optional `glam` integration so `glam::Vec2/Vec4` can be passed directly to drawing and coordinate-taking APIs.
   - IO: mouse source/viewport helpers (`Io::add_mouse_source_event`, `Io::add_mouse_viewport_event`, `MouseSource`, `BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT`) to match latest Dear ImGui input model.
+  - IO: expanded safe `Io` accessors for common configuration and backend fields (e.g. ini/log filenames read-only, `UserData` and backend user data pointers, key repeat and mouse thresholds, backend names).
   - IO, layout & style: optional `serde` support for core enums and flags (`Key`, `MouseButton`, `MouseCursor`, `MouseSource`, `InputTextFlags`, `ConfigFlags`, `BackendFlags`, `ViewportFlags`, `WindowFlags`, `TableFlags`, `TableColumnFlags`, `TableRowFlags`, `TableBgTarget`, `SortDirection`, `StyleColor`) behind the `serde` feature for easier hotkey, layout/table, and theme configuration persistence.
   - Styling: a small, high-level theme configuration layer (`Theme`, `ThemePreset`, `ColorOverride`, `StyleTweaks`, `WindowTheme`, `TableTheme`) on top of `ImGuiStyle` so applications can define reusable color/rounding/spacing presets and serialize them when the `serde` feature is enabled.
   - Multi-select: high-level helpers on top of `BeginMultiSelect`/`EndMultiSelect` (`MultiSelectFlags`, `Ui::multi_select_indexed`, `Ui::table_multi_select_indexed`, `Ui::multi_select_basic`, `Ui::is_item_toggled_selection`, `BasicSelection`) for list/table selection with ctrl/shift/box-select behavior.
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Examples
   - Texture demos (WGPU, dear-app WGPU, Glow) now ship a clean gradient test image (`texture_clean.ppm`) alongside the existing JPEG, making texture sampling artifacts easier to inspect.
   - `style_and_fonts` quickstart example now demonstrates the theme API with several ready-to-use presets (Dark/Light/Classic) plus styled themes (modern dark, Catppuccin Mocha, Darcula, Cherry) adapted from popular Dear ImGui community snippets (including ocornut/imgui#707), showing how to configure and switch custom themes in a single place.
+    Run with: `cargo run -p dear-imgui-examples --bin style_and_fonts`
 
 ### Changed
 
@@ -38,6 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Simplified pipeline/bind group layout wiring so the render pipeline now reuses the layouts owned by `RenderResources`/`UniformBuffer`, avoiding duplicated layout definitions and potential mismatches.
   - Tightened texture/bind group lifetime coupling: when ImGui textures are created, updated, or destroyed via the 1.92+ texture system, any cached image bind groups are invalidated and rebuilt on demand.
   - Minor internal cleanups (logging feature flag for multi-viewport traces, dead-code reductions) to keep the backend warning-free on newer Rust toolchains.
+  - Added optional per-external-texture custom samplers. New APIs:
+    `register_external_texture_with_sampler` and `update_external_texture_sampler`.
+    See `wgpu_rtt_gameview` for a runtime sampler-switching demo.
+  - Added a render-target format preflight when an adapter is provided, requiring the chosen
+    `render_target_format` to be `RENDER_ATTACHMENT`-capable and blendable.
+  - **Breaking**: renamed the winit multi-viewport feature in `dear-imgui-wgpu` from `multi-viewport`
+    to `multi-viewport-winit`. The SDL3 route remains `multi-viewport-sdl3`.
+  - Experimental native multi-viewport support for SDL3 + WGPU via `multi_viewport_sdl3`, with a new `sdl3_wgpu_multi_viewport` example.
+    Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
+
+- dear-imgui-sdl3
+  - **Breaking**: the official OpenGL3 renderer backend is now opt-in behind the `opengl3-renderer` feature (SDL3 platform-only by default).
+    - SDL3 + OpenGL3 multi-viewport example:
+      - `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
 
 - dear-app
   - Render loop now performs basic GPU/surface loss recovery: if a frame render returns a fatal GPU error, dear-app tears down the existing `AppWindow` and attempts to recreate the WGPU device/surface/renderer stack using the same `RunnerConfig`/add-ons.
@@ -55,9 +71,9 @@ Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new
     - Thin, safe wrapper around upstream `imgui_impl_sdl3.cpp` + `imgui_impl_opengl3.cpp`.
     - Provides SDL3 platform integration for Dear ImGui and OpenGL3 rendering.
     - Includes an SDL3 + OpenGL3 multi-viewport example:
-      - `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport`
+      - `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
     - SDL3 + WGPU is supported via the Rust WGPU backend (`dear-imgui-wgpu`) with a basic example:
-      - `cargo run -p dear-imgui-examples --bin sdl3_wgpu`
+      - `cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform`
       - Multi-viewport remains **disabled** for WebGPU, matching upstream `imgui_impl_wgpu` which does not yet support multi-viewport.
   - `dear-imgui-glow`:
     - Experimental multi-viewport support mirroring the upstream OpenGL3 renderer backend:
@@ -67,7 +83,7 @@ Upgrade to Dear ImGui v1.92.5 (docking branch), adjust FFI and safe APIs for new
     - When combined with SDL3 platform backend, provides a pure-Rust SDL3 + Glow multi-viewport stack:
       - New helper `dear-imgui-sdl3::init_platform_for_opengl` to initialize only the SDL3 platform backend (no C++ OpenGL3 renderer).
       - New example using SDL3 + Glow multi-viewport:
-        - `cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-backends`
+        - `cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-platform`
 
 - dear-imgui-rs 0.6.0
   - New drag/drop flag `DragDropFlags::ACCEPT_DRAW_AS_HOVERED`, wrapping `ImGuiDragDropFlags_AcceptDrawAsHovered`.

@@ -2,7 +2,7 @@ use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
-use std::{sync::Arc, time::Instant};
+use std::{borrow::Cow, num::NonZeroU64, sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -12,6 +12,13 @@ use winit::{
     window::Window,
 };
 
+#[cfg(feature = "multi-viewport")]
+use dear_imgui_wgpu::multi_viewport as wgpu_mvp;
+#[cfg(feature = "multi-viewport")]
+use dear_imgui_winit::multi_viewport as winit_mvp;
+#[cfg(feature = "multi-viewport")]
+use winit::event::Event;
+
 // Optional extensions - only imported if features are enabled
 #[cfg(feature = "implot")]
 use dear_implot::{LinePlot, Plot, PlotContext, PlotUi};
@@ -19,20 +26,59 @@ use dear_implot::{LinePlot, Plot, PlotContext, PlotUi};
 #[cfg(feature = "imguizmo")]
 use dear_imguizmo::{GuizmoExt, Mode, Operation};
 
-#[cfg(feature = "imguizmo")]
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3, Vec4};
+
+#[derive(Clone)]
+struct SceneEntity {
+    name: String,
+    position: [f32; 3],
+    rotation_deg: [f32; 3],
+    scale: [f32; 3],
+}
+
+impl SceneEntity {
+    fn cube(name: impl Into<String>, position: [f32; 3]) -> Self {
+        Self {
+            name: name.into(),
+            position,
+            rotation_deg: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        }
+    }
+
+    fn model_matrix(&self) -> Mat4 {
+        let translation = Vec3::from_array(self.position);
+        let scale = Vec3::from_array(self.scale);
+        let rotation = Quat::from_euler(
+            glam::EulerRot::XYZ,
+            self.rotation_deg[0].to_radians(),
+            self.rotation_deg[1].to_radians(),
+            self.rotation_deg[2].to_radians(),
+        );
+        Mat4::from_scale_rotation_translation(scale, rotation, translation)
+    }
+
+    #[cfg(feature = "imguizmo")]
+    fn set_from_matrix(&mut self, model: Mat4) {
+        let (scale, rotation, translation) = model.to_scale_rotation_translation();
+        self.position = translation.to_array();
+        self.scale = scale.to_array();
+        let euler = rotation.to_euler(glam::EulerRot::XYZ);
+        self.rotation_deg = [
+            euler.0.to_degrees(),
+            euler.1.to_degrees(),
+            euler.2.to_degrees(),
+        ];
+    }
+}
 
 /// Game engine state with various panels
 struct GameEngineState {
     // Scene hierarchy
-    selected_entity: Option<String>,
-    entities: Vec<String>,
+    selected_entity: Option<usize>,
+    entities: Vec<SceneEntity>,
 
     // Inspector properties
-    transform_position: [f32; 3],
-    transform_rotation: [f32; 3],
-    transform_scale: [f32; 3],
-
     // Console logs
     console_logs: Vec<String>,
     console_input: dear_imgui_rs::ImString,
@@ -41,9 +87,7 @@ struct GameEngineState {
     current_folder: String,
     assets: Vec<String>,
     asset_search: dear_imgui_rs::ImString,
-
-    // Demo: zero-copy text buffers (ImString)
-    title_imstr: dear_imgui_rs::ImString,
+    project_columns: usize,
 
     // Viewport settings
     viewport_size: [f32; 2],
@@ -69,17 +113,12 @@ struct GameEngineState {
     gizmo_operation: Operation,
     #[cfg(feature = "imguizmo")]
     gizmo_mode: Mode,
-    #[cfg(feature = "imguizmo")]
-    object_matrix: Mat4,
-    #[cfg(feature = "imguizmo")]
+
+    // Orbit camera for the Scene View (available in all builds)
     camera_view: Mat4,
-    #[cfg(feature = "imguizmo")]
     camera_proj: Mat4,
-    #[cfg(feature = "imguizmo")]
     camera_distance: f32,
-    #[cfg(feature = "imguizmo")]
     camera_y_angle: f32,
-    #[cfg(feature = "imguizmo")]
     camera_x_angle: f32,
 }
 
@@ -88,18 +127,9 @@ impl Default for GameEngineState {
         Self {
             selected_entity: None,
             entities: vec![
-                "Main Camera".to_string(),
-                "Directional Light".to_string(),
-                "Player".to_string(),
-                "Ground".to_string(),
-                "Building_01".to_string(),
-                "Building_02".to_string(),
-                "Tree_01".to_string(),
-                "Tree_02".to_string(),
+                SceneEntity::cube("Cube", [0.0, 0.5, 0.0]),
+                SceneEntity::cube("Cube (2)", [1.5, 0.5, 0.0]),
             ],
-            transform_position: [0.0, 0.0, 0.0],
-            transform_rotation: [0.0, 0.0, 0.0],
-            transform_scale: [1.0, 1.0, 1.0],
             console_logs: vec![
                 "[INFO] Game engine initialized".to_string(),
                 "[INFO] Renderer started".to_string(),
@@ -119,7 +149,7 @@ impl Default for GameEngineState {
                 "player_controller.cs".to_string(),
             ],
             asset_search: dear_imgui_rs::ImString::new(""),
-            title_imstr: dear_imgui_rs::ImString::new("Untitled"),
+            project_columns: 4,
             viewport_size: [800.0, 600.0],
             show_wireframe: false,
             show_grid: true,
@@ -135,26 +165,19 @@ impl Default for GameEngineState {
             gizmo_operation: Operation::TRANSLATE,
             #[cfg(feature = "imguizmo")]
             gizmo_mode: Mode::Local,
-            #[cfg(feature = "imguizmo")]
-            object_matrix: Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0)),
-            #[cfg(feature = "imguizmo")]
             camera_view: Mat4::look_at_rh(
                 Vec3::new(5.0, 5.0, 5.0), // eye
                 Vec3::new(0.0, 0.0, 0.0), // target
                 Vec3::new(0.0, 1.0, 0.0), // up
             ),
-            #[cfg(feature = "imguizmo")]
             camera_proj: Mat4::perspective_rh(
                 45.0_f32.to_radians(), // fov
                 800.0 / 600.0,         // aspect
                 0.1,                   // near
                 100.0,                 // far
             ),
-            #[cfg(feature = "imguizmo")]
             camera_distance: 8.66, // sqrt(5^2 + 5^2 + 5^2)
-            #[cfg(feature = "imguizmo")]
             camera_y_angle: 45.0_f32.to_radians(),
-            #[cfg(feature = "imguizmo")]
             camera_x_angle: 35.26_f32.to_radians(), // atan(1/sqrt(2))
         }
     }
@@ -164,22 +187,627 @@ struct ImguiState {
     context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
+    #[allow(dead_code)] // Only used when the multi-viewport feature is enabled.
+    enable_viewports: bool,
     clear_color: wgpu::Color,
     last_frame: Instant,
     game_state: GameEngineState,
+    scene_renderer: SimpleSceneRenderer,
+    scene_view_rtt: ViewRtt,
+    game_view_rtt: ViewRtt,
     dockspace_id: u32,
     first_frame: bool,
     #[cfg(feature = "implot")]
     plot_context: PlotContext,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SceneVertex {
+    position: [f32; 3],
+    normal: [f32; 3],
+    color: [f32; 3],
+}
+
+impl SceneVertex {
+    const ATTRIBS: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3];
+
+    fn layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SceneVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SceneUniform {
+    view_proj: [[f32; 4]; 4],
+    model: [[f32; 4]; 4],
+}
+
+struct SimpleSceneRenderer {
+    grid_pipeline: wgpu::RenderPipeline,
+    cube_pipeline: wgpu::RenderPipeline,
+    grid_vertex_buffer: wgpu::Buffer,
+    grid_vertex_count: u32,
+    cube_vertex_buffer: wgpu::Buffer,
+    cube_index_buffer: wgpu::Buffer,
+    cube_index_count: u32,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
+    uniform_stride: u64,
+    max_objects: usize,
+}
+
+impl SimpleSceneRenderer {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        use wgpu::util::DeviceExt;
+
+        let depth_format = wgpu::TextureFormat::Depth24Plus;
+
+        let shader_src = r#"
+	struct SceneUniform {
+	    view_proj: mat4x4<f32>,
+	    model: mat4x4<f32>,
+	};
+@group(0) @binding(0)
+var<uniform> u: SceneUniform;
+
+	struct VsIn {
+	    @location(0) pos: vec3<f32>,
+	    @location(1) normal: vec3<f32>,
+	    @location(2) color: vec3<f32>,
+	};
+	struct VsOut {
+	    @builtin(position) pos: vec4<f32>,
+	    @location(0) world_normal: vec3<f32>,
+	    @location(1) color: vec3<f32>,
+	};
+
+	@vertex
+	fn vs_main(v: VsIn) -> VsOut {
+	    var o: VsOut;
+	    let world_pos = u.model * vec4<f32>(v.pos, 1.0);
+	    o.pos = u.view_proj * world_pos;
+	    o.world_normal = (u.model * vec4<f32>(v.normal, 0.0)).xyz;
+	    o.color = v.color;
+	    return o;
+	}
+
+	@fragment
+	fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
+	    // Minimal directional lighting for the cube. Grid uses a zero normal to opt out.
+	    let n_len2 = dot(i.world_normal, i.world_normal);
+	    if (n_len2 < 1e-6) {
+	        return vec4<f32>(i.color, 1.0);
+	    }
+
+	    let n = normalize(i.world_normal);
+	    let light_dir = normalize(vec3<f32>(-0.6, -1.0, -0.3));
+	    let ambient = 0.25;
+	    let diff = max(dot(n, -light_dir), 0.0);
+	    let lit = i.color * (ambient + diff);
+	    return vec4<f32>(lit, 1.0);
+	}
+	"#;
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("simple_scene_shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_src)),
+        });
+
+        let uniform_alignment = device.limits().min_uniform_buffer_offset_alignment as u64;
+        let uniform_size = std::mem::size_of::<SceneUniform>() as u64;
+        let uniform_stride =
+            (uniform_size + uniform_alignment - 1) / uniform_alignment * uniform_alignment;
+        let max_objects = 128usize;
+
+        let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("simple_scene_uniform_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(uniform_size),
+                },
+                count: None,
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("simple_scene_pipeline_layout"),
+            bind_group_layouts: &[&uniform_layout],
+            push_constant_ranges: &[],
+        });
+
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("simple_scene_uniform_buffer"),
+            size: uniform_stride * max_objects as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("simple_scene_uniform_bg"),
+            layout: &uniform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &uniform_buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(uniform_size),
+                }),
+            }],
+        });
+
+        let depth_state_grid = wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: false,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: Default::default(),
+            bias: Default::default(),
+        };
+        let depth_state_cube = wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: Default::default(),
+            bias: Default::default(),
+        };
+
+        let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("simple_scene_grid_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[SceneVertex::layout()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_state_grid),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let cube_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("simple_scene_cube_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[SceneVertex::layout()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_state_cube),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        // Grid vertices on XZ plane.
+        let mut grid_vertices: Vec<SceneVertex> = Vec::new();
+        let grid_half = 5;
+        let grid_color = [0.35, 0.37, 0.40];
+        for i in -grid_half..=grid_half {
+            let f = i as f32;
+            // Lines parallel to X (varying Z)
+            grid_vertices.push(SceneVertex {
+                position: [-grid_half as f32, 0.0, f],
+                normal: [0.0, 0.0, 0.0],
+                color: grid_color,
+            });
+            grid_vertices.push(SceneVertex {
+                position: [grid_half as f32, 0.0, f],
+                normal: [0.0, 0.0, 0.0],
+                color: grid_color,
+            });
+            // Lines parallel to Z (varying X)
+            grid_vertices.push(SceneVertex {
+                position: [f, 0.0, -grid_half as f32],
+                normal: [0.0, 0.0, 0.0],
+                color: grid_color,
+            });
+            grid_vertices.push(SceneVertex {
+                position: [f, 0.0, grid_half as f32],
+                normal: [0.0, 0.0, 0.0],
+                color: grid_color,
+            });
+        }
+        let grid_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("simple_scene_grid_vb"),
+            contents: bytemuck::cast_slice(&grid_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        // Cube mesh (unit cube centered at origin) with per-face normals for lighting.
+        let cube_color = [0.80, 0.20, 0.80];
+        let cube_vertices: [SceneVertex; 24] = [
+            // back (z-)
+            SceneVertex {
+                position: [-0.5, -0.5, -0.5],
+                normal: [0.0, 0.0, -1.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [-0.5, 0.5, -0.5],
+                normal: [0.0, 0.0, -1.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, 0.5, -0.5],
+                normal: [0.0, 0.0, -1.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, -0.5, -0.5],
+                normal: [0.0, 0.0, -1.0],
+                color: cube_color,
+            },
+            // front (z+)
+            SceneVertex {
+                position: [-0.5, -0.5, 0.5],
+                normal: [0.0, 0.0, 1.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, -0.5, 0.5],
+                normal: [0.0, 0.0, 1.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, 0.5, 0.5],
+                normal: [0.0, 0.0, 1.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [-0.5, 0.5, 0.5],
+                normal: [0.0, 0.0, 1.0],
+                color: cube_color,
+            },
+            // left (x-)
+            SceneVertex {
+                position: [-0.5, -0.5, -0.5],
+                normal: [-1.0, 0.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [-0.5, -0.5, 0.5],
+                normal: [-1.0, 0.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [-0.5, 0.5, 0.5],
+                normal: [-1.0, 0.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [-0.5, 0.5, -0.5],
+                normal: [-1.0, 0.0, 0.0],
+                color: cube_color,
+            },
+            // right (x+)
+            SceneVertex {
+                position: [0.5, -0.5, -0.5],
+                normal: [1.0, 0.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, 0.5, -0.5],
+                normal: [1.0, 0.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, 0.5, 0.5],
+                normal: [1.0, 0.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, -0.5, 0.5],
+                normal: [1.0, 0.0, 0.0],
+                color: cube_color,
+            },
+            // top (y+)
+            SceneVertex {
+                position: [-0.5, 0.5, -0.5],
+                normal: [0.0, 1.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [-0.5, 0.5, 0.5],
+                normal: [0.0, 1.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, 0.5, 0.5],
+                normal: [0.0, 1.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, 0.5, -0.5],
+                normal: [0.0, 1.0, 0.0],
+                color: cube_color,
+            },
+            // bottom (y-)
+            SceneVertex {
+                position: [-0.5, -0.5, -0.5],
+                normal: [0.0, -1.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, -0.5, -0.5],
+                normal: [0.0, -1.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [0.5, -0.5, 0.5],
+                normal: [0.0, -1.0, 0.0],
+                color: cube_color,
+            },
+            SceneVertex {
+                position: [-0.5, -0.5, 0.5],
+                normal: [0.0, -1.0, 0.0],
+                color: cube_color,
+            },
+        ];
+        // CCW winding for front faces (FrontFace::Ccw + back-face culling).
+        let cube_indices: [u16; 36] = [
+            0, 1, 2, 0, 2, 3, // back
+            4, 5, 6, 4, 6, 7, // front
+            8, 9, 10, 8, 10, 11, // left
+            12, 13, 14, 12, 14, 15, // right
+            16, 17, 18, 16, 18, 19, // top
+            20, 21, 22, 20, 22, 23, // bottom
+        ];
+        let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("simple_scene_cube_vb"),
+            contents: bytemuck::cast_slice(&cube_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let cube_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("simple_scene_cube_ib"),
+            contents: bytemuck::cast_slice(&cube_indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        Self {
+            grid_pipeline,
+            cube_pipeline,
+            grid_vertex_buffer,
+            grid_vertex_count: grid_vertices.len() as u32,
+            cube_vertex_buffer,
+            cube_index_buffer,
+            cube_index_count: cube_indices.len() as u32,
+            uniform_buffer,
+            uniform_bind_group,
+            uniform_stride,
+            max_objects,
+        }
+    }
+
+    fn render(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        queue: &wgpu::Queue,
+        view_proj: Mat4,
+        models: &[Mat4],
+        show_grid: bool,
+    ) {
+        let uniform_size = std::mem::size_of::<SceneUniform>() as usize;
+        let object_count = models.len() + if show_grid { 1 } else { 0 };
+        if object_count == 0 {
+            return;
+        }
+        assert!(
+            object_count <= self.max_objects,
+            "too many scene objects for this example"
+        );
+
+        let mut uniform_bytes = vec![0u8; self.uniform_stride as usize * object_count];
+        let mut write_uniform = |index: usize, model: Mat4| {
+            let uniform = SceneUniform {
+                view_proj: view_proj.to_cols_array_2d(),
+                model: model.to_cols_array_2d(),
+            };
+            let start = index * self.uniform_stride as usize;
+            uniform_bytes[start..start + uniform_size]
+                .copy_from_slice(bytemuck::bytes_of(&uniform));
+        };
+
+        let mut base = 0usize;
+        if show_grid {
+            write_uniform(0, Mat4::IDENTITY);
+            base = 1;
+        }
+        for (i, model) in models.iter().copied().enumerate() {
+            write_uniform(base + i, model);
+        }
+        queue.write_buffer(&self.uniform_buffer, 0, &uniform_bytes);
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("simple_scene_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.10,
+                        g: 0.18,
+                        b: 0.35,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        if show_grid {
+            pass.set_bind_group(0, &self.uniform_bind_group, &[0]);
+            pass.set_pipeline(&self.grid_pipeline);
+            pass.set_vertex_buffer(0, self.grid_vertex_buffer.slice(..));
+            pass.draw(0..self.grid_vertex_count, 0..1);
+        }
+
+        pass.set_pipeline(&self.cube_pipeline);
+        pass.set_vertex_buffer(0, self.cube_vertex_buffer.slice(..));
+        pass.set_index_buffer(self.cube_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        for i in 0..models.len() {
+            let idx = i + if show_grid { 1 } else { 0 };
+            let offset_bytes = (idx as u64 * self.uniform_stride) as u32;
+            pass.set_bind_group(0, &self.uniform_bind_group, &[offset_bytes]);
+            pass.draw_indexed(0..self.cube_index_count, 0, 0..1);
+        }
+    }
+}
+
+struct ViewRtt {
+    #[allow(dead_code)] // Keep the texture alive; the view alone doesn't own it.
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    #[allow(dead_code)] // Keep the depth texture alive for the depth view.
+    depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+    texture_id: TextureId,
+    #[allow(dead_code)] // Fixed-size RTT for this example.
+    size: (u32, u32),
+}
+
+impl ViewRtt {
+    fn create(
+        device: &wgpu::Device,
+        renderer: &mut WgpuRenderer,
+        format: wgpu::TextureFormat,
+        sampler: &wgpu::Sampler,
+        label: &str,
+    ) -> Self {
+        let size = (512, 512);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(&format!("{label}_depth")),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth24Plus,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let id64 = renderer.register_external_texture_with_sampler(&texture, &view, sampler);
+        let texture_id = TextureId::from(id64);
+
+        Self {
+            texture,
+            view,
+            depth_texture,
+            depth_view,
+            texture_id,
+            size,
+        }
+    }
+
+    fn render_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scene_renderer: &SimpleSceneRenderer,
+        queue: &wgpu::Queue,
+        view: Mat4,
+        proj: Mat4,
+        models: &[Mat4],
+        show_grid: bool,
+    ) {
+        let view_proj = proj * view;
+        scene_renderer.render(
+            encoder,
+            &self.view,
+            &self.depth_view,
+            queue,
+            view_proj,
+            models,
+            show_grid,
+        );
+    }
+}
+
 struct AppWindow {
+    instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     window: Arc<Window>,
     surface_desc: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
-    hidpi_factor: f64,
     imgui: Option<ImguiState>,
 }
 
@@ -197,20 +825,18 @@ impl AppWindow {
 
         let window = {
             let version = env!("CARGO_PKG_VERSION");
-            let size = LogicalSize::new(1600.0, 900.0); // Larger window for game engine UI
+            let initial_size = LogicalSize::new(1600.0, 900.0); // Larger window for game engine UI
 
             Arc::new(
                 event_loop
                     .create_window(
                         Window::default_attributes()
                             .with_title(format!("Game Engine Docking Demo - dear-imgui {version}"))
-                            .with_inner_size(size),
+                            .with_inner_size(initial_size),
                     )
                     .expect("Failed to create window"),
             )
         };
-
-        let hidpi_factor = window.scale_factor();
 
         let surface = instance.create_surface(window.clone()).unwrap();
 
@@ -227,7 +853,7 @@ impl AppWindow {
         }))
         .expect("Failed to create device");
 
-        let size = LogicalSize::new(1600.0, 900.0); // Larger window for game engine UI
+        let size = window.inner_size();
         // Pick an sRGB surface format when available for consistent visuals
         let caps = surface.get_capabilities(&adapter);
         let preferred_srgb = [
@@ -254,12 +880,13 @@ impl AppWindow {
         surface.configure(&device, &surface_desc);
 
         Self {
+            instance,
+            adapter,
             device,
             queue,
             window,
             surface_desc,
             surface,
-            hidpi_factor,
             imgui: None,
         }
     }
@@ -271,11 +898,25 @@ impl AppWindow {
             .set_ini_filename::<std::path::PathBuf>(None)
             .unwrap();
 
-        // Enable docking (multi-viewport disabled in this project)
+        let enable_viewports = cfg!(feature = "multi-viewport")
+            && cfg!(any(
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "linux"
+            ));
+        #[cfg(feature = "multi-viewport")]
+        if enable_viewports {
+            context.enable_multi_viewport();
+        }
+
+        // Enable docking
         let io = context.io_mut();
         let mut cf = io.config_flags();
         cf.insert(ConfigFlags::DOCKING_ENABLE);
         io.set_config_flags(cf);
+        // Prevent click-drag in content from moving windows. This avoids accidental viewport window
+        // moves when interacting with scene gizmos in multi-viewport mode.
+        io.set_config_windows_move_from_title_bar_only(true);
 
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(
@@ -289,11 +930,39 @@ impl AppWindow {
             self.device.clone(),
             self.queue.clone(),
             self.surface_desc.format,
-        );
+        )
+        .with_instance(self.instance.clone())
+        .with_adapter(self.adapter.clone());
         let mut renderer =
             WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
         // Unify visuals (sRGB): auto gamma by format
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
+
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("view_rtt_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let scene_renderer = SimpleSceneRenderer::new(&self.device, self.surface_desc.format);
+        let scene_view_rtt = ViewRtt::create(
+            &self.device,
+            &mut renderer,
+            self.surface_desc.format,
+            &sampler,
+            "scene_view_rtt",
+        );
+        let game_view_rtt = ViewRtt::create(
+            &self.device,
+            &mut renderer,
+            self.surface_desc.format,
+            &sampler,
+            "game_view_rtt",
+        );
 
         let clear_color = wgpu::Color {
             r: 0.1,
@@ -309,9 +978,13 @@ impl AppWindow {
             context,
             platform,
             renderer,
+            enable_viewports,
             clear_color,
             last_frame: Instant::now(),
             game_state: GameEngineState::default(),
+            scene_renderer,
+            scene_view_rtt,
+            game_view_rtt,
             dockspace_id: 0,
             first_frame: true,
             #[cfg(feature = "implot")]
@@ -358,8 +1031,16 @@ impl AppWindow {
         render_hierarchy(ui, &mut imgui.game_state);
         render_project(ui, &mut imgui.game_state);
         render_inspector(ui, &mut imgui.game_state);
-        render_scene_view(ui, &mut imgui.game_state);
-        render_game_view(ui, &mut imgui.game_state);
+        render_scene_view(
+            ui,
+            &mut imgui.game_state,
+            Some(imgui.scene_view_rtt.texture_id),
+        );
+        render_game_view(
+            ui,
+            &mut imgui.game_state,
+            Some(imgui.game_view_rtt.texture_id),
+        );
         render_console(ui, &mut imgui.game_state);
         render_asset_browser(ui, &mut imgui.game_state);
 
@@ -376,7 +1057,6 @@ impl AppWindow {
         imgui
             .platform
             .prepare_render(&mut imgui.context, &self.window);
-
         let draw_data = imgui.context.render();
 
         let mut encoder = self
@@ -384,6 +1064,37 @@ impl AppWindow {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
+
+        let models: Vec<Mat4> = imgui
+            .game_state
+            .entities
+            .iter()
+            .map(|e| e.model_matrix())
+            .collect();
+
+        // Scene View uses the orbit camera updated by the UI.
+        imgui.scene_view_rtt.render_into(
+            &mut encoder,
+            &imgui.scene_renderer,
+            &self.queue,
+            imgui.game_state.camera_view,
+            imgui.game_state.camera_proj,
+            &models,
+            imgui.game_state.show_grid,
+        );
+
+        // Game View uses a fixed, slightly tilted runtime camera.
+        let game_view = Mat4::look_at_rh(Vec3::new(3.0, 3.0, 3.0), Vec3::ZERO, Vec3::Y);
+        let game_proj = Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 0.1, 100.0);
+        imgui.game_view_rtt.render_into(
+            &mut encoder,
+            &imgui.scene_renderer,
+            &self.queue,
+            game_view,
+            game_proj,
+            &models,
+            imgui.game_state.show_grid,
+        );
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -404,12 +1115,23 @@ impl AppWindow {
 
             imgui
                 .renderer
-                .render_draw_data(draw_data, &mut render_pass)
+                .render_draw_data_with_fb_size(
+                    draw_data,
+                    &mut render_pass,
+                    self.surface_desc.width,
+                    self.surface_desc.height,
+                )
                 .expect("Rendering failed");
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
+
+        #[cfg(feature = "multi-viewport")]
+        if imgui.enable_viewports {
+            imgui.context.update_platform_windows();
+            imgui.context.render_platform_windows_default();
+        }
 
         // Handle deferred actions (safe after frame is rendered)
         if actions.reset_layout {
@@ -417,11 +1139,25 @@ impl AppWindow {
         }
         if actions.load_ini {
             if let Ok(s) = std::fs::read_to_string("examples/02-docking/game_engine_docking.ini") {
-                imgui.context.load_ini_settings(&s);
-                imgui
-                    .game_state
-                    .console_logs
-                    .push("[INFO] Layout loaded from INI".to_string());
+                let target = {
+                    let vp = dear_imgui_rs::Viewport::main();
+                    let ws = vp.work_size();
+                    (ws[0], ws[1])
+                };
+                if let Some(base) = detect_base_size_from_ini(&s) {
+                    let scaled = scale_ini_for_target(&s, base, target);
+                    imgui.context.load_ini_settings(&scaled);
+                    imgui.game_state.console_logs.push(format!(
+                        "[INFO] Layout loaded from INI (scaled {:.0}x{:.0} -> {:.0}x{:.0})",
+                        base.0, base.1, target.0, target.1
+                    ));
+                } else {
+                    imgui.context.load_ini_settings(&s);
+                    imgui
+                        .game_state
+                        .console_logs
+                        .push("[INFO] Layout loaded from INI".to_string());
+                }
             } else {
                 imgui.game_state.console_logs.push(
                     "[WARNING] Failed to read examples/02-docking/game_engine_docking.ini"
@@ -449,9 +1185,18 @@ impl AppWindow {
     }
 }
 
+impl App {
+    fn exit(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(mut window) = self.window.take() {
+            window.imgui = None;
+        }
+        event_loop.exit();
+    }
+}
+
 /// Setup the initial docking layout - Unity-style game engine layout
 fn setup_initial_docking_layout(dockspace_id: dear_imgui_rs::Id) {
-    use dear_imgui_rs::{DockBuilder, Id, SplitDirection};
+    use dear_imgui_rs::{DockBuilder, SplitDirection};
 
     println!("Setting up initial docking layout...");
 
@@ -613,6 +1358,9 @@ fn extract_pair_with_span(line: &str, key: &str) -> Option<(i32, i32, usize, usi
     let start = kpos + key.len();
     let bytes = line.as_bytes();
     let mut i = start;
+    if i < bytes.len() && bytes[i] as char == '-' {
+        i += 1;
+    }
     while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
         i += 1;
     }
@@ -621,6 +1369,9 @@ fn extract_pair_with_span(line: &str, key: &str) -> Option<(i32, i32, usize, usi
     }
     let x_str = &line[start..i];
     let mut j = i + 1;
+    if j < bytes.len() && bytes[j] as char == '-' {
+        j += 1;
+    }
     while j < bytes.len() && (bytes[j] as char).is_ascii_digit() {
         j += 1;
     }
@@ -673,20 +1424,30 @@ fn render_main_menu_bar(ui: &Ui, game_state: &mut GameEngineState) -> MenuAction
 
         ui.menu("GameObject", || {
             if ui.menu_item("Create Empty") {
-                game_state.entities.push("GameObject".to_string());
+                let idx = game_state.entities.len() + 1;
+                let name = format!("GameObject ({idx})");
+                let pos = [idx as f32 * 0.5, 0.5, 0.0];
+                game_state.entities.push(SceneEntity::cube(name, pos));
                 game_state
                     .console_logs
                     .push("[INFO] Empty GameObject created".to_string());
             }
             ui.menu("3D Object", || {
                 if ui.menu_item("Cube") {
-                    game_state.entities.push("Cube".to_string());
+                    let idx = game_state.entities.len() + 1;
+                    let name = format!("Cube ({idx})");
+                    let pos = [idx as f32 * 0.5, 0.5, 0.0];
+                    game_state.entities.push(SceneEntity::cube(name, pos));
                 }
                 if ui.menu_item("Sphere") {
-                    game_state.entities.push("Sphere".to_string());
+                    game_state
+                        .console_logs
+                        .push("[INFO] Sphere is not implemented in this example".to_string());
                 }
                 if ui.menu_item("Plane") {
-                    game_state.entities.push("Plane".to_string());
+                    game_state
+                        .console_logs
+                        .push("[INFO] Plane is not implemented in this example".to_string());
                 }
             });
         });
@@ -741,23 +1502,23 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
             ui.separator();
 
             // Entity list with hierarchy (filter by search query)
-            let mut selected_entity = None;
-            let entity_to_duplicate: Option<String> = None;
-            let entity_to_delete: Option<String> = None;
+            let mut selected_entity: Option<usize> = None;
+            let mut entity_to_duplicate: Option<usize> = None;
+            let mut entity_to_delete: Option<usize> = None;
 
             let query = game_state.hierarchy_search.to_str().to_lowercase();
-            for entity in game_state.entities.iter() {
-                if !query.is_empty() && !entity.to_lowercase().contains(&query) {
+            for (idx, entity) in game_state.entities.iter().enumerate() {
+                if !query.is_empty() && !entity.name.to_lowercase().contains(&query) {
                     continue;
                 }
-                let is_selected = game_state.selected_entity.as_ref() == Some(entity);
+                let is_selected = game_state.selected_entity == Some(idx);
 
                 // Add hierarchy indentation and icons
-                let icon = if entity.contains("Camera") {
+                let icon = if entity.name.contains("Camera") {
                     "[C]"
-                } else if entity.contains("Light") {
+                } else if entity.name.contains("Light") {
                     "[L]"
-                } else if entity.contains("Mesh") {
+                } else if entity.name.contains("Mesh") {
                     "[M]"
                 } else {
                     "[O]"
@@ -766,61 +1527,61 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
                 ui.text(icon);
                 ui.same_line();
 
-                if ui.selectable_config(entity).selected(is_selected).build() {
-                    selected_entity = Some(entity.clone());
+                if ui
+                    .selectable_config(&entity.name)
+                    .selected(is_selected)
+                    .build()
+                {
+                    selected_entity = Some(idx);
                 }
 
-                // Right-click context menu - temporarily disabled for debugging
-                // if let Some(_popup) = ui.begin_popup_context_item() {
-                //     if ui.menu_item("Create Empty Child") {
-                //         entity_to_duplicate = Some(format!("{} - Child", entity));
-                //     }
-                //     ui.separator();
-                //     if ui.menu_item("Duplicate") {
-                //         entity_to_duplicate = Some(entity.clone());
-                //     }
-                //     if ui.menu_item("Delete") {
-                //         entity_to_delete = Some(entity.clone());
-                //     }
-                //     ui.separator();
-                //     if ui.menu_item("Rename") {
-                //         // TODO: Implement rename functionality
-                //     }
-                //     // popup.end() is called automatically by Drop
-                // }
+                // Right-click context menu for entities
+                if let Some(_popup) = ui.begin_popup_context_item() {
+                    if ui.menu_item("Create Empty Child") {
+                        entity_to_duplicate = Some(idx);
+                    }
+                    ui.separator();
+                    if ui.menu_item("Duplicate") {
+                        entity_to_duplicate = Some(idx);
+                    }
+                    if ui.menu_item("Delete") {
+                        entity_to_delete = Some(idx);
+                    }
+                    ui.separator();
+                    if ui.menu_item("Rename") {
+                        game_state
+                            .console_logs
+                            .push("[INFO] Rename is not implemented in this example".to_string());
+                    }
+                }
             }
 
             // Handle actions outside the loop
-            if let Some(entity) = selected_entity {
-                game_state.selected_entity = Some(entity.clone());
-                // Update inspector with selected entity data
-                match entity.as_str() {
-                    "Player" => {
-                        game_state.transform_position = [5.0, 0.0, 3.0];
-                        game_state.transform_rotation = [0.0, 45.0, 0.0];
-                    }
-                    "Main Camera" => {
-                        game_state.transform_position = [0.0, 10.0, -10.0];
-                        game_state.transform_rotation = [15.0, 0.0, 0.0];
-                    }
-                    _ => {
-                        game_state.transform_position = [0.0, 0.0, 0.0];
-                        game_state.transform_rotation = [0.0, 0.0, 0.0];
-                    }
+            if let Some(idx) = selected_entity {
+                game_state.selected_entity = Some(idx);
+            }
+
+            if let Some(idx) = entity_to_duplicate {
+                if let Some(src) = game_state.entities.get(idx).cloned() {
+                    let mut copy = src;
+                    copy.name = format!("{} (Copy)", copy.name);
+                    game_state.entities.push(copy);
                 }
             }
 
-            if let Some(entity) = entity_to_duplicate {
-                game_state.entities.push(format!("{} (Copy)", entity));
-            }
+            if let Some(idx) = entity_to_delete {
+                if idx < game_state.entities.len() {
+                    let name = game_state.entities[idx].name.clone();
+                    game_state
+                        .console_logs
+                        .push(format!("[INFO] {} deleted", name));
+                    game_state.entities.remove(idx);
 
-            if let Some(entity) = entity_to_delete {
-                game_state
-                    .console_logs
-                    .push(format!("[INFO] {} deleted", entity));
-                game_state.entities.retain(|e| e != &entity);
-                if game_state.selected_entity.as_ref() == Some(&entity) {
-                    game_state.selected_entity = None;
+                    match game_state.selected_entity {
+                        Some(sel) if sel == idx => game_state.selected_entity = None,
+                        Some(sel) if sel > idx => game_state.selected_entity = Some(sel - 1),
+                        _ => {}
+                    }
                 }
             }
 
@@ -828,13 +1589,17 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
 
             // Create buttons
             if ui.button("Create Empty") {
-                let new_entity = format!("GameObject ({})", game_state.entities.len() + 1);
-                game_state.entities.push(new_entity);
+                let idx = game_state.entities.len() + 1;
+                let name = format!("GameObject ({idx})");
+                let pos = [idx as f32 * 0.5, 0.5, 0.0];
+                game_state.entities.push(SceneEntity::cube(name, pos));
             }
             ui.same_line();
             if ui.button("Create Cube") {
-                let new_entity = format!("Cube ({})", game_state.entities.len() + 1);
-                game_state.entities.push(new_entity);
+                let idx = game_state.entities.len() + 1;
+                let name = format!("Cube ({idx})");
+                let pos = [idx as f32 * 0.5, 0.5, 0.0];
+                game_state.entities.push(SceneEntity::cube(name, pos));
             }
         });
 }
@@ -859,13 +1624,12 @@ fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
             ui.separator();
 
             // Asset grid view
-            let mut columns = 4;
             if ui.button("List View") {
-                columns = 1;
+                game_state.project_columns = 1;
             }
             ui.same_line();
             if ui.button("Grid View") {
-                columns = 4;
+                game_state.project_columns = 4;
             }
             ui.same_line();
             ui.text("Search:");
@@ -881,7 +1645,7 @@ fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
                 if !aquery.is_empty() && !asset.to_lowercase().contains(&aquery) {
                     continue;
                 }
-                if i % columns != 0 {
+                if i % game_state.project_columns != 0 {
                     ui.same_line();
                 }
 
@@ -899,20 +1663,26 @@ fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
 
                 ui.button(format!("{}\n{}", icon, asset));
 
-                // Right-click context menu - temporarily disabled for testing
-                // if let Some(popup) = ui.begin_popup_context_item() {
-                //     if ui.menu_item("Import") {
-                //         game_state.console_logs.push(format!("[INFO] Importing {}", asset));
-                //     }
-                //     if ui.menu_item("Delete") {
-                //         game_state.console_logs.push(format!("[INFO] Deleted {}", asset));
-                //     }
-                //     ui.separator();
-                //     if ui.menu_item("Show in Explorer") {
-                //         game_state.console_logs.push(format!("[INFO] Opening {}", asset));
-                //     }
-                //     popup.end();
-                // }
+                // Right-click context menu for assets
+                if let Some(popup) = ui.begin_popup_context_item() {
+                    if ui.menu_item("Import") {
+                        game_state
+                            .console_logs
+                            .push(format!("[INFO] Importing {}", asset));
+                    }
+                    if ui.menu_item("Delete") {
+                        game_state
+                            .console_logs
+                            .push(format!("[INFO] Deleted {}", asset));
+                    }
+                    ui.separator();
+                    if ui.menu_item("Show in Explorer") {
+                        game_state
+                            .console_logs
+                            .push(format!("[INFO] Opening {}", asset));
+                    }
+                    popup.end();
+                }
             }
 
             ui.separator();
@@ -931,8 +1701,14 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
     ui.window("Inspector")
         .size([350.0, 500.0], Condition::FirstUseEver)
         .build(|| {
-            if let Some(ref selected) = game_state.selected_entity {
-                ui.text(format!("Selected: {}", selected));
+            if let Some(selected_idx) = game_state.selected_entity {
+                let Some(entity) = game_state.entities.get_mut(selected_idx) else {
+                    game_state.selected_entity = None;
+                    ui.text("No object selected");
+                    return;
+                };
+
+                ui.text(format!("Selected: {}", entity.name));
                 ui.separator();
 
                 // Transform component
@@ -951,20 +1727,20 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
                     let mut pos_changed = ui
                         .drag_float_config("##pos_x")
                         .speed(0.1)
-                        .build(ui, &mut game_state.transform_position[0]);
+                        .build(ui, &mut entity.position[0]);
                     ui.same_line();
                     ui.set_next_item_width(input_width);
                     pos_changed = ui
                         .drag_float_config("##pos_y")
                         .speed(0.1)
-                        .build(ui, &mut game_state.transform_position[1])
+                        .build(ui, &mut entity.position[1])
                         || pos_changed;
                     ui.same_line();
                     ui.set_next_item_width(input_width);
                     pos_changed = ui
                         .drag_float_config("##pos_z")
                         .speed(0.1)
-                        .build(ui, &mut game_state.transform_position[2])
+                        .build(ui, &mut entity.position[2])
                         || pos_changed;
 
                     // Rotation
@@ -974,20 +1750,20 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
                     let mut rot_changed = ui
                         .drag_float_config("##rot_x")
                         .speed(1.0)
-                        .build(ui, &mut game_state.transform_rotation[0]);
+                        .build(ui, &mut entity.rotation_deg[0]);
                     ui.same_line();
                     ui.set_next_item_width(input_width);
                     rot_changed = ui
                         .drag_float_config("##rot_y")
                         .speed(1.0)
-                        .build(ui, &mut game_state.transform_rotation[1])
+                        .build(ui, &mut entity.rotation_deg[1])
                         || rot_changed;
                     ui.same_line();
                     ui.set_next_item_width(input_width);
                     rot_changed = ui
                         .drag_float_config("##rot_z")
                         .speed(1.0)
-                        .build(ui, &mut game_state.transform_rotation[2])
+                        .build(ui, &mut entity.rotation_deg[2])
                         || rot_changed;
 
                     // Scale
@@ -997,36 +1773,23 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
                     let mut scale_changed = ui
                         .drag_float_config("##scale_x")
                         .speed(0.01)
-                        .build(ui, &mut game_state.transform_scale[0]);
+                        .build(ui, &mut entity.scale[0]);
                     ui.same_line();
                     ui.set_next_item_width(input_width);
                     scale_changed = ui
                         .drag_float_config("##scale_y")
                         .speed(0.01)
-                        .build(ui, &mut game_state.transform_scale[1])
+                        .build(ui, &mut entity.scale[1])
                         || scale_changed;
                     ui.same_line();
                     ui.set_next_item_width(input_width);
                     scale_changed = ui
                         .drag_float_config("##scale_z")
                         .speed(0.01)
-                        .build(ui, &mut game_state.transform_scale[2])
+                        .build(ui, &mut entity.scale[2])
                         || scale_changed;
 
-                    // Update object_matrix when transform changes in inspector
-                    #[cfg(feature = "imguizmo")]
-                    if pos_changed || rot_changed || scale_changed {
-                        let translation = Vec3::from_array(game_state.transform_position);
-                        let rotation = Quat::from_euler(
-                            glam::EulerRot::XYZ,
-                            game_state.transform_rotation[0].to_radians(),
-                            game_state.transform_rotation[1].to_radians(),
-                            game_state.transform_rotation[2].to_radians(),
-                        );
-                        let scale = Vec3::from_array(game_state.transform_scale);
-                        game_state.object_matrix =
-                            Mat4::from_scale_rotation_translation(scale, rotation, translation);
-                    }
+                    let _ = (pos_changed, rot_changed, scale_changed);
                 }
 
                 // Renderer component (example)
@@ -1043,7 +1806,7 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
                 }
 
                 // Collider component (example)
-                if selected == "Player"
+                if entity.name.contains("Cube")
                     && ui.collapsing_header("Box Collider", TreeNodeFlags::empty())
                 {
                     let mut is_trigger = false;
@@ -1084,9 +1847,116 @@ fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
         });
 }
 
+fn update_orbit_camera(game_state: &mut GameEngineState, aspect: f32) {
+    game_state.camera_proj =
+        Mat4::perspective_rh(45.0_f32.to_radians(), aspect.max(0.01), 0.1, 100.0);
+
+    let eye = Vec3::new(
+        game_state.camera_distance
+            * game_state.camera_y_angle.cos()
+            * game_state.camera_x_angle.cos(),
+        game_state.camera_distance * game_state.camera_x_angle.sin(),
+        game_state.camera_distance
+            * game_state.camera_y_angle.sin()
+            * game_state.camera_x_angle.cos(),
+    );
+    game_state.camera_view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+}
+
+fn ray_from_screen_rect(
+    mouse_pos: [f32; 2],
+    rect_min: [f32; 2],
+    rect_size: [f32; 2],
+    view: Mat4,
+    proj: Mat4,
+) -> Option<(Vec3, Vec3)> {
+    if rect_size[0] <= 0.0 || rect_size[1] <= 0.0 {
+        return None;
+    }
+
+    let u = (mouse_pos[0] - rect_min[0]) / rect_size[0];
+    let v = (mouse_pos[1] - rect_min[1]) / rect_size[1];
+    if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+        return None;
+    }
+
+    let ndc_x = u * 2.0 - 1.0;
+    let ndc_y = 1.0 - v * 2.0;
+
+    let inv_vp = (proj * view).inverse();
+    let near = inv_vp * Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
+    let far = inv_vp * Vec4::new(ndc_x, ndc_y, 1.0, 1.0);
+    let near = near.truncate() / near.w;
+    let far = far.truncate() / far.w;
+
+    let dir = (far - near).normalize();
+    Some((near, dir))
+}
+
+fn ray_aabb_intersect(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
+    let inv_dir = Vec3::new(1.0 / dir.x, 1.0 / dir.y, 1.0 / dir.z);
+
+    let mut tmin = (min.x - origin.x) * inv_dir.x;
+    let mut tmax = (max.x - origin.x) * inv_dir.x;
+    if tmin > tmax {
+        std::mem::swap(&mut tmin, &mut tmax);
+    }
+
+    let mut tymin = (min.y - origin.y) * inv_dir.y;
+    let mut tymax = (max.y - origin.y) * inv_dir.y;
+    if tymin > tymax {
+        std::mem::swap(&mut tymin, &mut tymax);
+    }
+    if tmin > tymax || tymin > tmax {
+        return None;
+    }
+    tmin = tmin.max(tymin);
+    tmax = tmax.min(tymax);
+
+    let mut tzmin = (min.z - origin.z) * inv_dir.z;
+    let mut tzmax = (max.z - origin.z) * inv_dir.z;
+    if tzmin > tzmax {
+        std::mem::swap(&mut tzmin, &mut tzmax);
+    }
+    if tmin > tzmax || tzmin > tmax {
+        return None;
+    }
+    tmin = tmin.max(tzmin);
+    tmax = tmax.min(tzmax);
+
+    if tmax < 0.0 {
+        return None;
+    }
+    Some(if tmin >= 0.0 { tmin } else { tmax })
+}
+
+fn pick_cube_entity(entities: &[SceneEntity], ray_origin: Vec3, ray_dir: Vec3) -> Option<usize> {
+    let mut best: Option<(usize, f32)> = None;
+    for (idx, entity) in entities.iter().enumerate() {
+        let inv_model = entity.model_matrix().inverse();
+        let o4 = inv_model * Vec4::new(ray_origin.x, ray_origin.y, ray_origin.z, 1.0);
+        let d4 = inv_model * Vec4::new(ray_dir.x, ray_dir.y, ray_dir.z, 0.0);
+        let o = o4.truncate();
+        let d = d4.truncate();
+
+        let min = Vec3::splat(-0.5);
+        let max = Vec3::splat(0.5);
+        let Some(t) = ray_aabb_intersect(o, d, min, max) else {
+            continue;
+        };
+
+        match best {
+            None => best = Some((idx, t)),
+            Some((_, best_t)) if t < best_t => best = Some((idx, t)),
+            _ => {}
+        }
+    }
+    best.map(|(idx, _)| idx)
+}
+
 /// Render the Scene View (Unity-style editor view)
 #[cfg(feature = "imguizmo")]
-fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
+fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState, scene_tex_id: Option<TextureId>) {
     ui.window("Scene View")
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
@@ -1139,104 +2009,70 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
 
             // Scene view area
             let content_region = ui.content_region_avail();
-            game_state.viewport_size = [content_region[0], content_region[1]];
 
-            // Only draw if we have a valid canvas size
             if content_region[0] > 0.0 && content_region[1] > 0.0 {
+                let side = content_region[0].min(content_region[1]).max(64.0);
+                let canvas_size = [side, side];
+                game_state.viewport_size = canvas_size;
+
                 let canvas_pos = ui.cursor_screen_pos();
-                let canvas_size = content_region;
+                if let Some(tex_id) = scene_tex_id {
+                    ui.image(tex_id, canvas_size);
+                } else {
+                    ui.text("No scene render texture registered");
+                }
 
-                // Update camera aspect ratio
                 let aspect = canvas_size[0] / canvas_size[1];
-                game_state.camera_proj =
-                    Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 100.0);
+                update_orbit_camera(game_state, aspect);
 
-                // Update camera view from angles
-                let eye = Vec3::new(
-                    game_state.camera_distance
-                        * game_state.camera_y_angle.cos()
-                        * game_state.camera_x_angle.cos(),
-                    game_state.camera_distance * game_state.camera_x_angle.sin(),
-                    game_state.camera_distance
-                        * game_state.camera_y_angle.sin()
-                        * game_state.camera_x_angle.cos(),
-                );
-                game_state.camera_view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
-
-                // Draw scene background
                 let draw_list = ui.get_window_draw_list();
-                draw_list
-                    .add_rect(
-                        canvas_pos,
-                        [
-                            canvas_pos[0] + canvas_size[0],
-                            canvas_pos[1] + canvas_size[1],
-                        ],
-                        [0.15, 0.15, 0.15, 1.0],
-                    )
-                    .filled(true)
-                    .build();
+                let image_min = ui.item_rect_min();
+                let image_max = ui.item_rect_max();
+                let image_size = [image_max[0] - image_min[0], image_max[1] - image_min[1]];
 
-                // Setup ImGuizmo viewport
+                if ui.is_item_hovered() && ui.is_item_clicked() {
+                    if let Some((ray_origin, ray_dir)) = ray_from_screen_rect(
+                        ui.mouse_pos(),
+                        image_min,
+                        image_size,
+                        game_state.camera_view,
+                        game_state.camera_proj,
+                    ) {
+                        game_state.selected_entity =
+                            pick_cube_entity(&game_state.entities, ray_origin, ray_dir);
+                    }
+                }
+
+                // Setup ImGuizmo viewport for overlay gizmos.
                 let giz = ui.guizmo();
                 giz.set_drawlist_window();
                 giz.set_rect(canvas_pos[0], canvas_pos[1], canvas_size[0], canvas_size[1]);
 
-                // Draw grid using ImGuizmo
-                if game_state.show_grid {
-                    let identity = Mat4::IDENTITY;
-                    giz.draw_grid(
-                        &game_state.camera_view,
-                        &game_state.camera_proj,
-                        &identity,
-                        100.0,
-                    );
-                }
-
-                // Draw and manipulate object if selected
-                if game_state.selected_entity.is_some() {
-                    // Draw cube
-                    giz.draw_cubes(
-                        &game_state.camera_view,
-                        &game_state.camera_proj,
-                        &[game_state.object_matrix],
-                    );
-
-                    // Manipulate object
-                    let _used = giz
-                        .manipulate_config(
-                            &game_state.camera_view,
-                            &game_state.camera_proj,
-                            &mut game_state.object_matrix,
-                        )
-                        .operation(game_state.gizmo_operation)
-                        .mode(game_state.gizmo_mode)
-                        .build();
-
-                    // Sync transform with inspector
-                    if giz.is_using() {
-                        let (scale, rotation, translation) =
-                            game_state.object_matrix.to_scale_rotation_translation();
-                        game_state.transform_position = translation.to_array();
-                        game_state.transform_scale = scale.to_array();
-                        let euler = rotation.to_euler(glam::EulerRot::XYZ);
-                        game_state.transform_rotation = [
-                            euler.0.to_degrees(),
-                            euler.1.to_degrees(),
-                            euler.2.to_degrees(),
-                        ];
+                if let Some(selected_idx) = game_state.selected_entity {
+                    if let Some(entity) = game_state.entities.get_mut(selected_idx) {
+                        let mut model = entity.model_matrix();
+                        let used = giz
+                            .manipulate_config(
+                                &game_state.camera_view,
+                                &game_state.camera_proj,
+                                &mut model,
+                            )
+                            .operation(game_state.gizmo_operation)
+                            .mode(game_state.gizmo_mode)
+                            .build();
+                        if used {
+                            entity.set_from_matrix(model);
+                        }
                     }
                 } else {
-                    // Show hint (centered text)
                     let text = "Select an object in Hierarchy to manipulate";
                     let text_pos = [
-                        canvas_pos[0] + canvas_size[0] * 0.5 - 150.0, // Approximate center
+                        canvas_pos[0] + canvas_size[0] * 0.5 - 150.0,
                         canvas_pos[1] + canvas_size[1] * 0.5,
                     ];
                     draw_list.add_text(text_pos, [0.5, 0.5, 0.5, 1.0], text);
                 }
 
-                // Scene info
                 ui.text(format!(
                     "Scene Size: {:.0}x{:.0}",
                     canvas_size[0], canvas_size[1]
@@ -1249,7 +2085,7 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
 
 /// Render the Scene View (Unity-style editor view) - No ImGuizmo version
 #[cfg(not(feature = "imguizmo"))]
-fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
+fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState, scene_tex_id: Option<TextureId>) {
     ui.window("Scene View")
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
@@ -1286,82 +2122,38 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
 
             // Scene view area
             let content_region = ui.content_region_avail();
-            game_state.viewport_size = [content_region[0], content_region[1]];
 
-            // Only draw if we have a valid canvas size
             if content_region[0] > 0.0 && content_region[1] > 0.0 {
-                let draw_list = ui.get_window_draw_list();
-                let canvas_pos = ui.cursor_screen_pos();
-                let canvas_size = content_region;
+                let side = content_region[0].min(content_region[1]).max(64.0);
+                let canvas_size = [side, side];
+                game_state.viewport_size = canvas_size;
 
-                // Draw scene background
-                draw_list
-                    .add_rect(
-                        canvas_pos,
-                        [
-                            canvas_pos[0] + canvas_size[0],
-                            canvas_pos[1] + canvas_size[1],
-                        ],
-                        [0.15, 0.15, 0.15, 1.0],
-                    )
-                    .filled(true)
-                    .build();
+                if let Some(tex_id) = scene_tex_id {
+                    ui.image(tex_id, canvas_size);
+                } else {
+                    ui.text("No scene render texture registered");
+                }
 
-                // Draw grid if enabled
-                if game_state.show_grid {
-                    let grid_step = 50.0;
-                    let grid_color = [0.3, 0.3, 0.3, 0.8];
+                let aspect = canvas_size[0] / canvas_size[1];
+                update_orbit_camera(game_state, aspect);
 
-                    // Vertical lines
-                    let mut x = canvas_pos[0];
-                    while x < canvas_pos[0] + canvas_size[0] {
-                        draw_list
-                            .add_line(
-                                [x, canvas_pos[1]],
-                                [x, canvas_pos[1] + canvas_size[1]],
-                                grid_color,
-                            )
-                            .thickness(1.0)
-                            .build();
-                        x += grid_step;
-                    }
+                let image_min = ui.item_rect_min();
+                let image_max = ui.item_rect_max();
+                let image_size = [image_max[0] - image_min[0], image_max[1] - image_min[1]];
 
-                    // Horizontal lines
-                    let mut y = canvas_pos[1];
-                    while y < canvas_pos[1] + canvas_size[1] {
-                        draw_list
-                            .add_line(
-                                [canvas_pos[0], y],
-                                [canvas_pos[0] + canvas_size[0], y],
-                                grid_color,
-                            )
-                            .thickness(1.0)
-                            .build();
-                        y += grid_step;
+                if ui.is_item_hovered() && ui.is_item_clicked() {
+                    if let Some((ray_origin, ray_dir)) = ray_from_screen_rect(
+                        ui.mouse_pos(),
+                        image_min,
+                        image_size,
+                        game_state.camera_view,
+                        game_state.camera_proj,
+                    ) {
+                        game_state.selected_entity =
+                            pick_cube_entity(&game_state.entities, ray_origin, ray_dir);
                     }
                 }
 
-                // Draw scene objects
-                draw_list
-                    .add_rect(
-                        [canvas_pos[0] + 100.0, canvas_pos[1] + 100.0],
-                        [canvas_pos[0] + 150.0, canvas_pos[1] + 150.0],
-                        [1.0, 0.5, 0.2, 1.0],
-                    )
-                    .filled(true)
-                    .build();
-
-                draw_list
-                    .add_circle(
-                        [canvas_pos[0] + 200.0, canvas_pos[1] + 200.0],
-                        30.0,
-                        [0.2, 1.0, 0.5, 1.0],
-                    )
-                    .filled(true)
-                    .num_segments(32)
-                    .build();
-
-                // Scene info
                 ui.text(format!(
                     "Scene Size: {:.0}x{:.0}",
                     canvas_size[0], canvas_size[1]
@@ -1374,7 +2166,7 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState) {
 }
 
 /// Render the Game View (Unity-style play view)
-fn render_game_view(ui: &Ui, game_state: &mut GameEngineState) {
+fn render_game_view(ui: &Ui, game_state: &mut GameEngineState, game_tex_id: Option<TextureId>) {
     ui.window("Game View")
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
@@ -1421,39 +2213,15 @@ fn render_game_view(ui: &Ui, game_state: &mut GameEngineState) {
             let content_region = ui.content_region_avail();
 
             if content_region[0] > 0.0 && content_region[1] > 0.0 {
-                let draw_list = ui.get_window_draw_list();
-                let canvas_pos = ui.cursor_screen_pos();
-                let canvas_size = content_region;
-
-                // Draw game background
-                draw_list
-                    .add_rect(
-                        canvas_pos,
-                        [
-                            canvas_pos[0] + canvas_size[0],
-                            canvas_pos[1] + canvas_size[1],
-                        ],
-                        [0.1, 0.2, 0.4, 1.0],
-                    )
-                    .filled(true)
-                    .build();
-
-                // Draw game objects (different from scene view)
-                draw_list
-                    .add_rect(
-                        [canvas_pos[0] + 120.0, canvas_pos[1] + 120.0],
-                        [canvas_pos[0] + 170.0, canvas_pos[1] + 170.0],
-                        [0.8, 0.2, 0.8, 1.0],
-                    )
-                    .filled(true)
-                    .build();
-
-                // Game info
-                ui.text(format!(
-                    "Game Size: {:.0}x{:.0}",
-                    canvas_size[0], canvas_size[1]
-                ));
-                ui.text("FPS: 60 | Frame: 1234");
+                if let Some(tex_id) = game_tex_id {
+                    let side = content_region[0].min(content_region[1]).max(64.0);
+                    let size = [side, side];
+                    ui.image(tex_id, size);
+                    ui.text(format!("Game View RT: {:.0}x{:.0}", size[0], size[1]));
+                } else {
+                    ui.text("No game render texture registered");
+                }
+                ui.text(format!("FPS: {:.1}", ui.io().framerate()));
             } else {
                 ui.text("Game view too small to render");
             }
@@ -1624,17 +2392,21 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
                     }
                 }
 
-                // Right-click context menu - temporarily disabled for testing
-                // if let Some(_popup) = ui.begin_popup_context_item() {
-                //     if ui.menu_item("Import") {
-                //         game_state.console_logs.push(format!("[INFO] Importing {}", asset));
-                //     }
-                //     if ui.menu_item("Delete") {
-                //         game_state.console_logs.push(format!("[WARNING] Deleted {}", asset));
-                //     }
-                //     ui.separator();
-                //     ui.menu_item("Properties");
-                // }
+                // Right-click context menu for asset browser items
+                if let Some(_popup) = ui.begin_popup_context_item() {
+                    if ui.menu_item("Import") {
+                        game_state
+                            .console_logs
+                            .push(format!("[INFO] Importing {}", asset));
+                    }
+                    if ui.menu_item("Delete") {
+                        game_state
+                            .console_logs
+                            .push(format!("[WARNING] Deleted {}", asset));
+                    }
+                    ui.separator();
+                    ui.menu_item("Properties");
+                }
             }
         });
 }
@@ -1777,62 +2549,79 @@ impl ApplicationHandler for App {
             window.window.request_redraw();
             self.window = Some(window);
             println!("Window created successfully");
+            #[cfg(feature = "multi-viewport")]
+            {
+                if let Some(app) = self.window.as_mut() {
+                    if let Some(imgui) = app.imgui.as_mut() {
+                        if imgui.enable_viewports {
+                            // Install platform (winit) viewport handlers first.
+                            winit_mvp::init_multi_viewport_support(&mut imgui.context, &app.window);
+                            // Then install renderer viewport callbacks.
+                            wgpu_mvp::enable(&mut imgui.renderer, &mut imgui.context);
+                        }
+                    }
+                }
+            }
         }
     }
 
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
+        window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        // Handle exit events first to avoid borrowing issues
-        match event {
-            WindowEvent::CloseRequested => {
+        let Some(main_id) = self.window.as_ref().map(|w| w.window.id()) else {
+            return;
+        };
+        let is_main_window = window_id == main_id;
+
+        match &event {
+            WindowEvent::CloseRequested if is_main_window => {
                 println!("Close requested");
-                // Clean up resources before exiting
-                if let Some(mut window) = self.window.take() {
-                    // Explicitly drop ImGui context first
-                    window.imgui = None;
-                    // Then drop the window
-                    drop(window);
-                }
-                event_loop.exit();
+                self.exit(event_loop);
                 return;
             }
-            WindowEvent::KeyboardInput { ref event, .. } => {
-                if event.logical_key == Key::Named(NamedKey::Escape) {
-                    println!("Escape pressed, exiting");
-                    // Clean up resources before exiting
-                    if let Some(mut window) = self.window.take() {
-                        // Explicitly drop ImGui context first
-                        window.imgui = None;
-                        // Then drop the window
-                        drop(window);
-                    }
-                    event_loop.exit();
-                    return;
-                }
+            WindowEvent::KeyboardInput { event, .. }
+                if is_main_window && event.logical_key == Key::Named(NamedKey::Escape) =>
+            {
+                println!("Escape pressed, exiting");
+                self.exit(event_loop);
+                return;
             }
             _ => {}
         }
 
-        let window = match self.window.as_mut() {
-            Some(window) => window,
-            None => return,
+        let Some(window) = self.window.as_mut() else {
+            return;
         };
 
-        // Handle platform events first (window-local path)
+        // Route input to main + secondary windows when multi-viewport is enabled.
+        #[cfg(feature = "multi-viewport")]
+        {
+            let full: Event<()> = Event::WindowEvent {
+                window_id,
+                event: event.clone(),
+            };
+            let imgui = window.imgui.as_mut().unwrap();
+            let _ = winit_mvp::handle_event_with_multi_viewport(
+                &mut imgui.platform,
+                &mut imgui.context,
+                &window.window,
+                &full,
+            );
+        }
+        #[cfg(not(feature = "multi-viewport"))]
         {
             let imgui = window.imgui.as_mut().unwrap();
-            imgui
+            let _ = imgui
                 .platform
                 .handle_window_event(&mut imgui.context, &window.window, &event);
         }
 
         match event {
             WindowEvent::Resized(physical_size) => {
-                if physical_size.width > 0 && physical_size.height > 0 {
+                if is_main_window && physical_size.width > 0 && physical_size.height > 0 {
                     window.surface_desc.width = physical_size.width;
                     window.surface_desc.height = physical_size.height;
                     window
@@ -1841,35 +2630,60 @@ impl ApplicationHandler for App {
                     window.window.request_redraw();
                 }
             }
-            WindowEvent::RedrawRequested => {
-                let render_result = window.render();
-                match render_result {
-                    Ok(_) => {}
-                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        eprintln!("Surface lost/outdated, reconfiguring");
+            WindowEvent::ScaleFactorChanged { .. } => {
+                if is_main_window {
+                    let size = window.window.inner_size();
+                    if size.width > 0 && size.height > 0 {
+                        window.surface_desc.width = size.width;
+                        window.surface_desc.height = size.height;
                         window
                             .surface
                             .configure(&window.device, &window.surface_desc);
-                    }
-                    Err(wgpu::SurfaceError::OutOfMemory) => {
-                        eprintln!("OutOfMemory");
-                        event_loop.exit();
-                    }
-                    Err(wgpu::SurfaceError::Timeout) => {
-                        eprintln!("Surface timeout");
-                    }
-                    Err(wgpu::SurfaceError::Other) => {
-                        eprintln!("Other surface error occurred");
+                        window.window.request_redraw();
                     }
                 }
-                // Request next frame
-                window.window.request_redraw();
+            }
+            WindowEvent::RedrawRequested => {
+                if is_main_window {
+                    #[cfg(feature = "multi-viewport")]
+                    let _el_guard = if window
+                        .imgui
+                        .as_ref()
+                        .map(|i| i.enable_viewports)
+                        .unwrap_or(false)
+                    {
+                        Some(winit_mvp::set_event_loop_for_frame(event_loop))
+                    } else {
+                        None
+                    };
+
+                    let render_result = window.render();
+                    match render_result {
+                        Ok(_) => {}
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            eprintln!("Surface lost/outdated, reconfiguring");
+                            window
+                                .surface
+                                .configure(&window.device, &window.surface_desc);
+                        }
+                        Err(wgpu::SurfaceError::OutOfMemory) => {
+                            eprintln!("OutOfMemory");
+                            event_loop.exit();
+                        }
+                        Err(wgpu::SurfaceError::Timeout) => {
+                            eprintln!("Surface timeout");
+                        }
+                        Err(wgpu::SurfaceError::Other) => {
+                            eprintln!("Other surface error occurred");
+                        }
+                    }
+                    window.window.request_redraw();
+                }
             }
             _ => {}
         }
 
-        // Check input capture after handling events
-        {
+        if is_main_window {
             let imgui = window.imgui.as_mut().unwrap();
             if !imgui.context.io().want_capture_mouse()
                 && !imgui.context.io().want_capture_keyboard()

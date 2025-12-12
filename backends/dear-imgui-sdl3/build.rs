@@ -4,6 +4,10 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=wrapper.cpp");
+    println!("cargo:rerun-if-changed=backends/imgui_impl_sdl3.cpp");
+    println!("cargo:rerun-if-changed=backends/imgui_impl_sdl3.h");
+    println!("cargo:rerun-if-changed=backends/imgui_impl_opengl3.cpp");
+    println!("cargo:rerun-if-changed=backends/imgui_impl_opengl3.h");
 
     // Upstream Dear ImGui core headers (imgui.h etc.) are provided by dear-imgui-sys.
     // We vend the backend sources (imgui_impl_sdl3/imgui_impl_opengl3) directly in this
@@ -103,9 +107,14 @@ fn main() {
         );
     }
 
-    // Backend sources: SDL3 platform + OpenGL3 renderer (vendored copies).
+    // Backend sources: SDL3 platform backend (vendored copy).
     build.file(local_backends.join("imgui_impl_sdl3.cpp"));
-    build.file(local_backends.join("imgui_impl_opengl3.cpp"));
+
+    // Optional OpenGL3 renderer backend.
+    if cfg!(feature = "opengl3-renderer") {
+        build.define("DEAR_IMGUI_SDL3_OPENGL3_RENDERER", None);
+        build.file(local_backends.join("imgui_impl_opengl3.cpp"));
+    }
 
     // C wrappers used by Rust FFI (see wrapper.cpp).
     build.file("wrapper.cpp");

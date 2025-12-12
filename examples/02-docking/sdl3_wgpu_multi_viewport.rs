@@ -1,36 +1,35 @@
-//! SDL3 + WGPU renderer example (single window, no multi-viewport).
+//! SDL3 + WGPU multi-viewport example (native only).
 //!
 //! This demonstrates driving Dear ImGui with:
 //! - SDL3 for window + events
-//! - WGPU for rendering
 //! - Official SDL3 platform backend (via `dear-imgui-sdl3`)
-//! - Rust WGPU renderer backend (`dear-imgui-wgpu`)
+//! - Rust WGPU renderer backend (`dear-imgui-wgpu`) with SDL3 multi-viewport callbacks
 //!
 //! Run with:
-//!   cargo run -p dear-imgui-examples --bin sdl3_wgpu
-//!
-//! For native multi-viewport, see `sdl3_wgpu_multi_viewport.rs` and run with:
 //!   cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
+//!
+//! Notes:
+//! - This is experimental and intended for native desktop targets.
+//! - WebGPU/wasm multi-viewport is not supported.
 
 use std::error::Error;
 use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
-use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::video::{SwapInterval, WindowPos};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Enable native IME UI before creating any SDL3 windows (recommended for IME-heavy locales).
+    const ENABLE_VIEWPORTS: bool = true;
+
     imgui_sdl3_backend::enable_native_ime_ui();
 
-    // Initialize SDL3 (video + events).
     let sdl = sdl3::init()?;
     let video = sdl.video()?;
 
-    // Create a basic window (no GL context needed for WGPU).
     let main_scale = video
         .get_primary_display()?
         .get_content_scale()
@@ -38,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut window = video
         .window(
-            "Dear ImGui SDL3 + WGPU",
+            "Dear ImGui SDL3 + WGPU (multi-viewport)",
             (1200.0 * main_scale) as u32,
             (720.0 * main_scale) as u32,
         )
@@ -51,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Disable vsync at SDL level (WGPU present mode controls timing).
     let _ = video.gl_set_swap_interval(SwapInterval::Immediate);
 
-    // Initialize WGPU instance, surface, device and queue.
+    // WGPU instance/surface/device/queue.
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
         ..Default::default()
@@ -75,7 +74,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (device, queue) =
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
 
-    // Configure surface using the window's backing pixel size.
     let (width, height) = window.size_in_pixels();
     let caps = surface.get_capabilities(&adapter);
     let preferred_srgb = [
@@ -104,56 +102,57 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut imgui = Context::create();
     imgui.set_ini_filename(None::<String>)?;
 
-    // Enable basic navigation and scale style/fonts using the display scale.
     {
         let io = imgui.io_mut();
         let mut flags = io.config_flags();
-        flags.insert(ConfigFlags::NAV_ENABLE_KEYBOARD);
-        flags.insert(ConfigFlags::NAV_ENABLE_GAMEPAD);
+        flags.insert(ConfigFlags::DOCKING_ENABLE);
+        if ENABLE_VIEWPORTS {
+            flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
+        }
         io.set_config_flags(flags);
 
         let style = imgui.style_mut();
         style.set_font_scale_dpi(main_scale);
     }
 
-    // Initialize SDL3 platform backend (for "other" renderer).
+    if ENABLE_VIEWPORTS {
+        imgui.enable_multi_viewport();
+    }
+
+    // SDL3 platform backend only.
     imgui_sdl3_backend::init_for_other(&mut imgui, &window)?;
-    // Use AutoAll so all connected gamepads are merged into ImGui's gamepad state.
     imgui_sdl3_backend::set_gamepad_mode(GamepadMode::AutoAll);
 
-    // Initialize WGPU renderer backend.
-    let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format);
+    // WGPU renderer backend (provide instance/adapter for per-viewport surfaces).
+    let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
+        .with_instance(instance.clone())
+        .with_adapter(adapter.clone());
     let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
+    renderer.set_gamma_mode(GammaMode::Auto);
+
+    if ENABLE_VIEWPORTS {
+        dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut imgui);
+    }
 
     let mut last_frame = Instant::now();
     let mut show_demo = true;
 
-    loop {
-        // Handle events (both for ImGui via SDL3 backend and our own logic).
+    'main: loop {
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-            // Feed ImGui SDL3 backend.
             let _ = imgui_sdl3_backend::process_sys_event(&raw);
 
-            // Convert to high-level Event for application logic.
             let event = Event::from_ll(raw);
             match event {
-                Event::Quit { .. } => {
-                    imgui_sdl3_backend::shutdown(&mut imgui);
-                    return Ok(());
-                }
+                Event::Quit { .. } => break 'main,
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } => {
-                    imgui_sdl3_backend::shutdown(&mut imgui);
-                    return Ok(());
-                }
+                } => break 'main,
                 Event::Window {
                     win_event: sdl3::event::WindowEvent::PixelSizeChanged(_, _),
                     window_id,
                     ..
                 } if window_id == window.id() => {
-                    // Reconfigure WGPU surface when window pixel size changes.
                     let (w, h) = window.size_in_pixels();
                     if w > 0 && h > 0 {
                         surface_config.width = w;
@@ -165,26 +164,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        // Update delta time.
         let now = Instant::now();
         let dt = (now - last_frame).as_secs_f32();
         last_frame = now;
         imgui.io_mut().set_delta_time(dt);
 
-        // Start a new ImGui frame.
         imgui_sdl3_backend::sdl3_new_frame(&mut imgui);
         let ui = imgui.frame();
 
-        // Basic UI: show demo window and a small control window.
-        ui.window("SDL3 + WGPU")
-            .size([400.0, 200.0], Condition::FirstUseEver)
+        ui.dockspace_over_main_viewport();
+
+        ui.window("SDL3 + WGPU (multi-viewport)")
+            .size([420.0, 260.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("Dear ImGui running on SDL3 + WGPU");
+                ui.text("Drag ImGui windows outside to spawn OS windows.");
                 ui.separator();
                 ui.checkbox("Show demo window", &mut show_demo);
-
-                ui.text("Gamepad: SDL3 backend in AutoAll mode (all controllers merged)");
-
+                ui.text("Gamepad: SDL3 backend in AutoAll mode.");
                 ui.text(format!(
                     "Application average {:.3} ms/frame ({:.1} FPS)",
                     1000.0 / ui.io().framerate(),
@@ -198,34 +194,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let draw_data = imgui.render();
 
-        // Acquire next frame from the WGPU surface.
         let frame = match surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 surface.configure(&device, &surface_config);
                 continue;
             }
-            Err(wgpu::SurfaceError::Timeout) => {
-                continue;
-            }
-            Err(e) => {
-                imgui_sdl3_backend::shutdown(&mut imgui);
-                return Err(Box::new(e));
-            }
+            Err(wgpu::SurfaceError::Timeout) => continue,
+            Err(e) => return Err(Box::new(e)),
         };
 
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Record ImGui draw calls into WGPU command buffer.
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("sdl3_wgpu_encoder"),
+            label: Some("sdl3_wgpu_mv_encoder"),
         });
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("sdl3_wgpu_render_pass"),
+                label: Some("sdl3_wgpu_mv_render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -256,5 +245,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         queue.submit(std::iter::once(encoder.finish()));
         frame.present();
+
+        if ENABLE_VIEWPORTS {
+            let io_flags = imgui.io().config_flags();
+            if io_flags.contains(ConfigFlags::VIEWPORTS_ENABLE) {
+                imgui.update_platform_windows();
+                imgui.render_platform_windows_default();
+            }
+        }
     }
+
+    imgui_sdl3_backend::shutdown(&mut imgui);
+    Ok(())
 }

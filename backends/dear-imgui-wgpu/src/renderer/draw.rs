@@ -1,7 +1,15 @@
 // Renderer draw helpers: frame resources, setup state, draw lists traversal
 
 use super::*;
-use dear_imgui_rs::render::DrawData;
+use dear_imgui_rs::render::{DrawData, DrawIdx};
+
+// ImGui index type is currently u16 in dear-imgui-rs, but keep this derived so
+// future upgrades to u32 require fewer backend changes.
+const IMGUI_INDEX_FORMAT: wgpu::IndexFormat = if std::mem::size_of::<DrawIdx>() == 2 {
+    wgpu::IndexFormat::Uint16
+} else {
+    wgpu::IndexFormat::Uint32
+};
 
 impl WgpuRenderer {
     /// Prepare frame resources (buffers)
@@ -9,7 +17,6 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         backend_data: &mut WgpuBackendData,
     ) -> RendererResult<()> {
-        mvlog!("[wgpu-mv] totals start");
         // Calculate total vertex and index counts
         let mut total_vtx_count = 0;
         let mut total_idx_count = 0;
@@ -17,11 +24,6 @@ impl WgpuRenderer {
             total_vtx_count += draw_list.vtx_buffer().len();
             total_idx_count += draw_list.idx_buffer().len();
         }
-        mvlog!(
-            "[wgpu-mv] totals vtx={} idx={}",
-            total_vtx_count,
-            total_idx_count
-        );
 
         if total_vtx_count == 0 || total_idx_count == 0 {
             return Ok(());
@@ -92,7 +94,7 @@ impl WgpuRenderer {
             frame_resources.index_buffer(),
         ) {
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.set_index_buffer(index_buffer.slice(..), IMGUI_INDEX_FORMAT);
         }
 
         Ok(())
@@ -114,15 +116,24 @@ impl WgpuRenderer {
         let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
         let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
 
-        let mut list_i = 0usize;
+        // Extract common bind group handles up front to avoid borrowing conflicts with render_resources.
+        let device = backend_data.device.clone();
+        let (common_layout, uniform_buffer, default_common_bg) = {
+            let ub = backend_data
+                .render_resources
+                .uniform_buffer()
+                .ok_or_else(|| {
+                    RendererError::InvalidRenderState("Uniform buffer not initialized".to_string())
+                })?;
+            (
+                ub.bind_group_layout().clone(),
+                ub.buffer().clone(),
+                ub.bind_group().clone(),
+            )
+        };
+        let mut current_sampler_id: Option<u64> = None; // None = default sampler
+
         for draw_list in draw_data.draw_lists() {
-            mvlog!(
-                "[wgpu-mv] list[{}]: vtx={} idx={} cmds~?",
-                list_i,
-                draw_list.vtx_buffer().len(),
-                draw_list.idx_buffer().len()
-            );
-            let mut cmd_i = 0usize;
             for cmd in draw_list.commands() {
                 match cmd {
                     dear_imgui_rs::render::DrawCmd::Elements {
@@ -130,44 +141,41 @@ impl WgpuRenderer {
                         cmd_params,
                         raw_cmd,
                     } => {
-                        mvlog!(
-                            "[wgpu-mv] list[{}] cmd[{}]: count={} tex=?",
-                            list_i,
-                            cmd_i,
-                            count
-                        );
                         // Resolve effective ImTextureID now (after texture updates)
-                        let texture_bind_group = {
-                            let tex_id = unsafe {
-                                dear_imgui_rs::sys::ImDrawCmd_GetTexID(
-                                    raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
-                                )
-                            } as u64;
-                            if tex_id == 0 {
-                                if let Some(default_tex) = default_texture {
-                                    backend_data
-                                        .render_resources
-                                        .get_or_create_image_bind_group(
-                                            &backend_data.device,
-                                            0,
-                                            default_tex,
-                                        )?
-                                        .clone()
+                        let tex_id = unsafe {
+                            dear_imgui_rs::sys::ImDrawCmd_GetTexID(
+                                raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
+                            )
+                        } as u64;
+
+                        // Switch common bind group (sampler) if this texture uses a custom sampler.
+                        let desired_sampler_id = if tex_id == 0 {
+                            None
+                        } else {
+                            texture_manager.custom_sampler_id_for_texture(tex_id)
+                        };
+                        if desired_sampler_id != current_sampler_id {
+                            if let Some(sampler_id) = desired_sampler_id {
+                                if let Some(bg0) = texture_manager
+                                    .get_or_create_common_bind_group_for_sampler(
+                                        &device,
+                                        &common_layout,
+                                        &uniform_buffer,
+                                        sampler_id,
+                                    )
+                                {
+                                    render_pass.set_bind_group(0, &bg0, &[]);
                                 } else {
-                                    return Err(RendererError::InvalidRenderState(
-                                        "Default texture not available".to_string(),
-                                    ));
+                                    render_pass.set_bind_group(0, &default_common_bg, &[]);
                                 }
-                            } else if let Some(wgpu_texture) = texture_manager.get_texture(tex_id) {
-                                backend_data
-                                    .render_resources
-                                    .get_or_create_image_bind_group(
-                                        &backend_data.device,
-                                        tex_id,
-                                        wgpu_texture.view(),
-                                    )?
-                                    .clone()
-                            } else if let Some(default_tex) = default_texture {
+                            } else {
+                                render_pass.set_bind_group(0, &default_common_bg, &[]);
+                            }
+                            current_sampler_id = desired_sampler_id;
+                        }
+
+                        let texture_bind_group = if tex_id == 0 {
+                            if let Some(default_tex) = default_texture {
                                 backend_data
                                     .render_resources
                                     .get_or_create_image_bind_group(
@@ -178,9 +186,31 @@ impl WgpuRenderer {
                                     .clone()
                             } else {
                                 return Err(RendererError::InvalidRenderState(
-                                    "Texture not found and no default texture".to_string(),
+                                    "Default texture not available".to_string(),
                                 ));
                             }
+                        } else if let Some(wgpu_texture) = texture_manager.get_texture(tex_id) {
+                            backend_data
+                                .render_resources
+                                .get_or_create_image_bind_group(
+                                    &backend_data.device,
+                                    tex_id,
+                                    wgpu_texture.view(),
+                                )?
+                                .clone()
+                        } else if let Some(default_tex) = default_texture {
+                            backend_data
+                                .render_resources
+                                .get_or_create_image_bind_group(
+                                    &backend_data.device,
+                                    0,
+                                    default_tex,
+                                )?
+                                .clone()
+                        } else {
+                            return Err(RendererError::InvalidRenderState(
+                                "Texture not found and no default texture".to_string(),
+                            ));
                         };
 
                         render_pass.set_bind_group(1, &texture_bind_group, &[]);
@@ -221,6 +251,7 @@ impl WgpuRenderer {
                             backend_data,
                             gamma,
                         )?;
+                        current_sampler_id = None;
                     }
                     dear_imgui_rs::render::DrawCmd::RawCallback { .. } => {
                         tracing::warn!(
@@ -229,12 +260,10 @@ impl WgpuRenderer {
                         );
                     }
                 }
-                cmd_i += 1;
             }
 
             global_idx_offset += draw_list.idx_buffer().len() as u32;
             global_vtx_offset += draw_list.vtx_buffer().len() as i32;
-            list_i += 1;
         }
 
         Ok(())

@@ -6,10 +6,12 @@
 //! # Features
 //!
 //! - **Modern texture management**: Full integration with Dear ImGui's ImTextureData system
+//! - **External textures**: Register existing `wgpu::Texture` resources for UI display,
+//!   with optional per-texture custom samplers.
 //! - **Gamma correction**: Automatic sRGB format detection and gamma correction
 //! - **Multi-frame buffering**: Support for multiple frames in flight
 //! - **Device object management**: Helpers to recreate device objects (pipelines/buffers/textures) after loss
-//! - **Multi-viewport support**: Support for multiple windows (feature-gated)
+//! - **Multi-viewport support**: Support for multiple windows (feature-gated via `multi-viewport-winit` for winit or `multi-viewport-sdl3` for SDL3 on native targets)
 //!
 //! # Example
 //!
@@ -61,8 +63,15 @@ pub use texture::*;
 pub use uniforms::*;
 
 // Re-export multi-viewport helpers when enabled
-#[cfg(feature = "multi-viewport")]
+#[cfg(feature = "multi-viewport-winit")]
 pub use renderer::multi_viewport;
+#[cfg(feature = "multi-viewport-sdl3")]
+pub use renderer::multi_viewport_sdl3;
+
+#[cfg(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+compile_error!(
+    "Enable either `multi-viewport-winit` (winit) or `multi-viewport-sdl3` (SDL3), not both."
+);
 
 /// Gamma correction mode for the WGPU renderer
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -23,7 +23,7 @@ Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.6.x   | wgpu = 27              | WebGPU renderer (multi-viewport: experimental, winit only) |
+| dear-imgui-wgpu   | 0.6.x   | wgpu = 27              | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
 | dear-imgui-glow   | 0.6.x   | glow = 0.16            | OpenGL renderer (winit/glutin) |
 | dear-imgui-winit  | 0.6.x   | winit = 0.30.12        | Winit platform backend |
 | dear-imgui-sdl3   | 0.6.x   | sdl3 = 0.16, sdl3-sys  | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
@@ -84,14 +84,14 @@ Release Train 0.6 (current)
   - Multi-viewport support has experimental code paths in `dear-imgui-winit` + `dear-imgui-wgpu`, but is **not supported** in 0.6.x.
   - The `multi_viewport_wgpu` example is provided strictly as a **testbed** and is known to be unstable on some platforms (especially macOS/winit).
   - Do not rely on winit + WGPU multi-viewport for production use in this release train.
-- SDL3 + OpenGL3:
-  - Supported via `dear-imgui-sdl3` (C++ `imgui_impl_sdl3.cpp` + `imgui_impl_opengl3.cpp`).
-  - Multi-viewport: **supported** using the upstream SDL3 + OpenGL3 backend behaviour.
-  - Example: `sdl3_opengl_multi_viewport` (`cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport`).
-- SDL3 + WGPU:
-  - Supported via SDL3 platform backend (`dear-imgui-sdl3`) + Rust WGPU renderer (`dear-imgui-wgpu`).
-  - A single-window example is provided: `sdl3_wgpu` (`cargo run -p dear-imgui-examples --bin sdl3_wgpu`).
-  - Multi-viewport for WebGPU remains **disabled** on this route, matching upstream `imgui_impl_wgpu` which currently does not implement multi-viewport.
+  - SDL3 + OpenGL3:
+    - Supported via `dear-imgui-sdl3` (C++ `imgui_impl_sdl3.cpp` + `imgui_impl_opengl3.cpp`).
+    - Multi-viewport: **supported** using the upstream SDL3 + OpenGL3 backend behaviour.
+    - Example: `sdl3_opengl_multi_viewport` (`cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`).
+  - SDL3 + WGPU:
+    - Supported via SDL3 platform backend (`dear-imgui-sdl3`) + Rust WGPU renderer (`dear-imgui-wgpu`).
+    - A single-window example is provided: `sdl3_wgpu` (`cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform`).
+    - Multi-viewport for WebGPU remains **disabled** on this route, matching upstream `imgui_impl_wgpu` which currently does not implement multi-viewport.
 
 Release Train 0.5 (previous)
 

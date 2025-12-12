@@ -16,6 +16,30 @@ Typical use cases:
 - Use SDL3 only for the platform layer together with a Rust renderer
   (e.g. `dear-imgui-glow` or `dear-imgui-wgpu`).
 
+## Notes
+
+- This crate assumes a single Dear ImGui context and a single SDL3 event pump. The upstream
+  SDL3 backend notes that multi-context usage is not well tested and may be dysfunctional.
+- The vendored SDL3 backend sources currently include a few compatibility branches for
+  SDL 3.1.x preview APIs; these will be removed once SDL3 stabilizes.
+
+## Features
+
+- `opengl3-renderer`: builds and exposes the official C++ OpenGL3 renderer backend.
+- `multi-viewport`: enables multi-viewport helpers (requires `dear-imgui-rs/multi-viewport`).
+
+Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
+
+```toml
+dear-imgui-sdl3 = { version = "0.6", default-features = false }
+```
+
+Enable the official OpenGL3 renderer:
+
+```toml
+dear-imgui-sdl3 = { version = "0.6", features = ["opengl3-renderer"] }
+```
+
 ## Compatibility
 
 | Item          | Version  |
@@ -109,10 +133,17 @@ APIs of interest (see `src/lib.rs` for full docs):
 
 - `init_for_opengl(&mut Context, &Window, &GLContext, &str)`:
   initialize SDL3 platform + OpenGL3 renderer.
+- `init_for_opengl_default(&mut Context, &Window, &GLContext)`:
+  initialize SDL3 platform + OpenGL3 renderer using the upstream default GLSL version.
 - `init_platform_for_opengl(&mut Context, &Window, &GLContext)`:
   initialize only the platform backend (for use with Rust OpenGL renderers).
 - `init_for_other(&mut Context, &Window)`:
   initialize only the platform backend (for use with WGPU or other APIs).
+- `init_for_vulkan(&mut Context, &Window)` / `init_for_metal(&mut Context, &Window)` /
+  `init_for_d3d(&mut Context, &Window)` / `init_for_sdl_gpu(&mut Context, &Window)`:
+  initialize the SDL3 platform backend for specific renderer families (use `init_for_vulkan` for Vulkan multi-viewport support).
+- `unsafe init_for_sdl_renderer(&mut Context, &Window, *mut SDL_Renderer)`:
+  initialize SDL3 platform backend for SDL_Renderer-based renderers.
 - `shutdown_for_opengl(&mut Context)` / `shutdown(&mut Context)`:
   shut down the backends before destroying the ImGui context or window.
 - `new_frame(&mut Context)`:
@@ -126,6 +157,8 @@ APIs of interest (see `src/lib.rs` for full docs):
   render Dear ImGui draw data via the OpenGL3 backend.
 - `update_texture(&mut TextureData)`:
   advanced helper that delegates texture updates to `ImGui_ImplOpenGL3_UpdateTexture`.
+- `create_device_objects()` / `destroy_device_objects()`:
+  advanced OpenGL3 helpers mirroring upstream device object management.
 
 ## SDL3 & Build Requirements
 
@@ -252,28 +285,52 @@ set_gamepad_mode(GamepadMode::AutoAll);
 
 This is useful for local multiplayer setups or testing environments.
 
+For advanced use cases, you can also opt into **manual** gamepad selection by
+providing raw `SDL_Gamepad*` handles opened by your application:
+
+```rust
+// Safety: gamepads must be valid, opened SDL_Gamepad pointers.
+unsafe {
+    dear_imgui_sdl3::set_gamepad_mode_manual(&[gamepad1, gamepad2]);
+}
+```
+
 ## Examples
 
 The workspace includes several examples that use this backend:
 
+Multi-viewport status on SDL3:
+
+- **SDL3 + OpenGL3**: multi-viewport is provided by the upstream C++ backends and
+  considered stable for desktop use.
+- **SDL3 + Glow**: multi-viewport is experimental but functional on native targets.
+- **SDL3 + WGPU**: multi-viewport is experimental on native targets; WebGPU/wasm is
+  single-window to match upstream `imgui_impl_wgpu`.
+
 - SDL3 + OpenGL3, multi-viewport:
 
   ```bash
-  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features "multi-viewport sdl3-backends"
+  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features "multi-viewport sdl3-opengl3"
   ```
 
 - SDL3 + OpenGL3, multi-viewport (Glow renderer wrapper):
 
   ```bash
-  cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features "multi-viewport sdl3-backends"
+  cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features "multi-viewport sdl3-platform"
   ```
 
 - SDL3 + WGPU, single-window:
 
   ```bash
-  cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-backends
+  cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform
   ```
 
-Note: multi-viewport support for WebGPU/WGPU follows the upstream
-`imgui_impl_wgpu` design and is currently **not** enabled; for multi-viewport
-use SDL3 + OpenGL3 or a winit + OpenGL route instead.
+- SDL3 + WGPU, multi-viewport (experimental, native only):
+
+  ```bash
+  cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
+  ```
+
+Note: WGPU multi-viewport support is experimental and only available on native targets
+via `dear-imgui-wgpu/multi-viewport-sdl3`. WebGPU/wasm remains single-window to match
+upstream `imgui_impl_wgpu`.

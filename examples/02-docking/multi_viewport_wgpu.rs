@@ -19,6 +19,8 @@
 //! Known limitations:
 //! - Multi-viewport functionality may have bugs or incomplete features
 //! - Not recommended for production use
+//! - Secondary OS windows are enabled only on desktop native targets
+//!   (Windows/macOS/Linux); Linux is currently untested.
 
 use dear_imgui_rs::{Condition, Context, TextureId};
 use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
@@ -42,20 +44,25 @@ struct AppWindow {
     imgui: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
-    last_frame: Instant,
+    start_time: Instant,
     enable_viewports: bool,
     // Offscreen "game view" texture and view
-    game_tex: wgpu::Texture,
+    // Keep the texture alive; the view alone doesn't own the resource.
+    _game_tex: wgpu::Texture,
     game_tex_view: wgpu::TextureView,
     game_tex_id: TextureId,
 }
 
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
-        // For now, winit + WGPU multi-viewport is not considered supported on macOS.
-        // We still allow building this example, but avoid creating secondary OS windows
-        // on macOS to reduce the chance of platform crashes.
-        let enable_viewports = !cfg!(target_os = "macos");
+        // Winit + WGPU multi-viewport is experimental.
+        // Enabled by default on desktop native targets; tested on Windows/macOS.
+        // Linux is enabled but currently untested.
+        let enable_viewports = cfg!(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux"
+        ));
 
         // Create WGPU instance first (also used by renderer for per-viewport surfaces)
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
@@ -156,9 +163,9 @@ impl AppWindow {
             imgui,
             platform,
             renderer,
-            last_frame: Instant::now(),
+            start_time: Instant::now(),
             enable_viewports,
-            game_tex,
+            _game_tex: game_tex,
             game_tex_view,
             game_tex_id,
         };
@@ -175,9 +182,7 @@ impl AppWindow {
     }
 
     fn redraw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let dt = self.last_frame.elapsed().as_secs_f32();
-        self.last_frame = Instant::now();
-        self.imgui.io_mut().set_delta_time(dt);
+        // Delta time is set by the platform backend in `prepare_frame()`.
 
         let frame = match self.surface.get_current_texture() {
             Ok(f) => f,
@@ -204,7 +209,7 @@ impl AppWindow {
                     label: Some("mvw_game_view_encoder"),
                 });
 
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mvw_game_view_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &self.game_tex_view,
@@ -212,7 +217,7 @@ impl AppWindow {
                     ops: wgpu::Operations {
                         // Simple animated clear: color changes over time.
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: (self.last_frame.elapsed().as_secs_f32().sin() * 0.5 + 0.5) as f64,
+                            r: (self.start_time.elapsed().as_secs_f32().sin() * 0.5 + 0.5) as f64,
                             g: 0.2,
                             b: 0.4,
                             a: 1.0,
@@ -248,7 +253,7 @@ impl AppWindow {
                     ui.text("Multi-viewport is disabled on this platform (winit + WGPU).");
                     ui.separator();
                     ui.text("Use the SDL3 + OpenGL example for a stable multi-viewport demo:");
-                    ui.text("  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport");
+                    ui.text("  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features \"multi-viewport sdl3-opengl3\"");
                 }
             });
 
@@ -336,12 +341,7 @@ struct App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         match AppWindow::new(event_loop) {
-            Ok(mut win) => {
-                // Allow Dear ImGui to create windows using the event loop
-                if win.enable_viewports {
-                    winit_mvp::set_event_loop(event_loop);
-                }
-
+            Ok(win) => {
                 // Place the window struct first so its address is stable
                 win.window.request_redraw();
                 self.window = Some(win);
@@ -351,7 +351,7 @@ impl ApplicationHandler for App {
                     dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui);
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 event_loop.exit();
             }
         }
@@ -374,6 +374,8 @@ impl ApplicationHandler for App {
             return;
         };
 
+        let is_main_window = window_id == app.window.id();
+
         let full: Event<()> = Event::WindowEvent {
             window_id,
             event: event.clone(),
@@ -388,17 +390,36 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => {
-                event_loop.exit();
+                // Only exit when the main application window is closed.
+                if is_main_window {
+                    event_loop.exit();
+                }
             }
             WindowEvent::Resized(size) => {
-                app.resize(size);
+                // Only reconfigure the main WGPU surface for the main window.
+                if is_main_window {
+                    app.resize(size);
+                }
             }
             WindowEvent::ScaleFactorChanged { .. } => {
-                app.resize(app.window.inner_size());
+                if is_main_window {
+                    app.resize(app.window.inner_size());
+                }
             }
             WindowEvent::RedrawRequested => {
-                if let Err(e) = app.redraw() {}
-                app.window.request_redraw();
+                // We drive rendering from the main window. Secondary viewport windows are
+                // rendered via ImGui's platform callbacks during `app.redraw()`.
+                if is_main_window {
+                    // ImGui may create secondary OS windows during `update_platform_windows()`.
+                    // Provide the current `ActiveEventLoop` for the duration of this callback.
+                    let _el_guard = if app.enable_viewports {
+                        Some(winit_mvp::set_event_loop_for_frame(event_loop))
+                    } else {
+                        None
+                    };
+                    if let Err(_e) = app.redraw() {}
+                    app.window.request_redraw();
+                }
             }
             _ => {}
         }

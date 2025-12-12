@@ -1096,6 +1096,9 @@ version = "0.6.0"
 dependencies = [
  "bytemuck",
  "dear-imgui-rs",
+ "objc2 0.6.3",
+ "raw-window-handle",
+ "sdl3-sys",
  "thiserror 2.0.17",
  "tracing",
  "wgpu",

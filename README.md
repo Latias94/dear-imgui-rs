@@ -93,11 +93,17 @@ cargo run --bin implot3d_basic --features implot3d
 
 # SDL3 backends (native)
 # SDL3 + OpenGL3 with official C++ backends (multi-viewport via imgui_impl_sdl3/imgui_impl_opengl3)
-cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport
+cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3
 # SDL3 + Glow (experimental multi-viewport using Rust Glow renderer)
-cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-backends
-# SDL3 + WGPU (single-window; multi-viewport is intentionally disabled for WebGPU)
-cargo run -p dear-imgui-examples --bin sdl3_wgpu
+cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-platform
+# SDL3 + WGPU (single-window)
+cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform
+# SDL3 + WGPU (experimental multi-viewport, native only)
+cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
+
+# winit + WGPU (experimental multi-viewport testbed, native only)
+# Enabled on Windows/macOS/Linux; tested on Windows/macOS, Linux untested.
+cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport
 ```
 
 Tip: The ImNodes example includes multiple tabs (Hello, Multi-Editor, Style, Advanced Style, Save/Load, Color Editor, Shader Graph, MiniMap Callback).
@@ -218,7 +224,7 @@ Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.6.x   | wgpu = 27         | WebGPU renderer (multi-viewport: experimental, winit only) |
+| dear-imgui-wgpu  | 0.6.x   | wgpu = 27         | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
 | dear-imgui-glow  | 0.6.x   | glow = 0.16       | OpenGL renderer (winit/glutin) |
 | dear-imgui-winit | 0.6.x   | winit = 0.30.12   | Winit platform backend         |
 | dear-imgui-sdl3  | 0.6.x   | sdl3 = 0.16       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
@@ -348,10 +354,22 @@ For more details and troubleshooting, see `docs/WASM.md`.
 
 - **Multi-viewport support**
   - **SDL3 + OpenGL3**: supported via upstream C++ backends (`imgui_impl_sdl3` + `imgui_impl_opengl3`).
-    - Example: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport`
-  - **winit + WGPU**: experimental only; not supported for production use.
-    - Test example: `cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport`
-  - **SDL3 + WGPU**: single-window only; multi-viewport intentionally disabled to match upstream `imgui_impl_wgpu`.
+    - Example: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
+  - **winit + WGPU**: experimental only; not supported for production use (feature `dear-imgui-wgpu/multi-viewport-winit`).
+    - Native only, enabled on Windows/macOS/Linux. Linux is currently untested.
+	    - To use in your own app, enable:
+	      - `dear-imgui-rs/multi-viewport`
+	      - `dear-imgui-winit/multi-viewport`
+	      - `dear-imgui-wgpu/multi-viewport-winit`
+	      and call `Context::enable_multi_viewport()`.
+	    - Test example: `cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport`
+	    - Editor-style docking example also supports this mode:
+	      `cargo run -p dear-imgui-examples --bin game_engine_docking --features multi-viewport`
+  - **winit + OpenGL (glow/glutin)**: no official multi-viewport stack at the moment.
+    Use SDL3 + OpenGL3 / SDL3 + Glow if you need multi-viewport OpenGL.
+  - **SDL3 + WGPU**: experimental multi-viewport on native via Rust WGPU renderer + SDL3 platform backend; wasm/WebGPU remains single-window.
+    - Example (native multi-viewport): `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
+    - Example (single window): `cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform`
 - **WebAssembly (WASM)**: Supported via the import-style build described above; some features
   (clipboard, raw draw callbacks, multi-viewport) remain disabled on wasm.
 

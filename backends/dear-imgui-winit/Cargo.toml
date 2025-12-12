@@ -29,3 +29,5 @@ web-sys = { workspace = true, features = [
 default = []
 # Enable multi-viewport support (WIP). Declared to silence cfg warnings; kept off by default.
 multi-viewport = ["dear-imgui-rs/multi-viewport"]
+# Debug logging for multi-viewport paths (see mvlog! macro in src/multi_viewport.rs).
+mv-log = []

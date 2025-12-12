@@ -14,6 +14,9 @@ pub struct ViewportWgpuData {
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub pending_frame: Option<wgpu::SurfaceTexture>,
+    // Last values we logged for this viewport (to avoid per-frame spam).
+    pub last_log_display_size: [f32; 2],
+    pub last_log_fb_scale: [f32; 2],
 }
 
 static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
@@ -23,7 +26,6 @@ struct GlobalHandles {
     instance: Option<wgpu::Instance>,
     adapter: Option<wgpu::Adapter>,
     device: wgpu::Device,
-    queue: wgpu::Queue,
     render_target_format: wgpu::TextureFormat,
 }
 
@@ -56,18 +58,19 @@ pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
             instance: backend.instance.clone(),
             adapter: backend.adapter.clone(),
             device: backend.device.clone(),
-            queue: backend.queue.clone(),
             render_target_format: backend.render_target_format,
         });
     }
 }
 
+#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn get_renderer<'a>() -> &'a mut WgpuRenderer {
     let ptr = RENDERER_PTR.load(Ordering::SeqCst) as *mut WgpuRenderer;
     &mut *ptr
 }
 
 /// Helper to get or create per-viewport user data
+#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn viewport_user_data_mut<'a>(vp: *mut Viewport) -> Option<&'a mut ViewportWgpuData> {
     let vpm = &mut *vp;
     let data = vpm.renderer_user_data();
@@ -79,6 +82,7 @@ unsafe fn viewport_user_data_mut<'a>(vp: *mut Viewport) -> Option<&'a mut Viewpo
 }
 
 /// Renderer: create per-viewport resources (surface + config)
+#[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
     if vp.is_null() {
         return;
@@ -125,7 +129,7 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
     let height = size.height.max(1);
 
     #[cfg(not(target_arch = "wasm32"))]
-    let mut config = {
+    let config = {
         // Prefer the renderer's main format if the surface supports it; otherwise, bail out gracefully
         if let Some(adapter) = &global.adapter {
             let caps = surface.get_capabilities(adapter);
@@ -195,12 +199,15 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
             surface,
             config,
             pending_frame: None,
+            last_log_display_size: [0.0, 0.0],
+            last_log_fb_scale: [0.0, 0.0],
         };
         vpm.set_renderer_user_data(Box::into_raw(Box::new(data)) as *mut c_void);
     }
 }
 
 /// Renderer: destroy per-viewport resources
+#[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe extern "C" fn renderer_destroy_window(vp: *mut Viewport) {
     if vp.is_null() {
         return;
@@ -215,6 +222,7 @@ pub unsafe extern "C" fn renderer_destroy_window(vp: *mut Viewport) {
 }
 
 /// Renderer: notify new size
+#[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe extern "C" fn renderer_set_window_size(
     vp: *mut Viewport,
     size: dear_imgui_rs::sys::ImVec2,
@@ -232,11 +240,12 @@ pub unsafe extern "C" fn renderer_set_window_size(
         None => return,
     };
     if let Some(data) = viewport_user_data_mut(vp) {
-        // Convert ImGui logical size to physical pixels using framebuffer scale
+        // Winit multi-viewport uses logical screen coordinates for viewport sizes.
+        // Convert to physical pixels for WGPU surfaces using framebuffer scale.
         let vpm_ref = &*vp;
         let scale = vpm_ref.framebuffer_scale();
-        let new_w = (size.x * scale[0]).max(1.0) as u32;
-        let new_h = (size.y * scale[1]).max(1.0) as u32;
+        let new_w = (size.x * scale[0]).max(1.0).round() as u32;
+        let new_h = (size.y * scale[1]).max(1.0).round() as u32;
         if data.config.width != new_w || data.config.height != new_h {
             data.config.width = new_w;
             data.config.height = new_h;
@@ -246,11 +255,11 @@ pub unsafe extern "C" fn renderer_set_window_size(
 }
 
 /// Renderer: render viewport draw data into its surface
+#[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: *mut c_void) {
     if vp.is_null() {
         return;
     }
-    mvlog!("[wgpu-mv] Renderer_RenderWindow");
     let renderer = match (get_renderer() as *mut WgpuRenderer).as_mut() {
         Some(r) => r,
         None => return,
@@ -271,19 +280,42 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
     // returns a valid ImDrawData pointer for each viewport being rendered.
     let draw_data: &dear_imgui_rs::render::DrawData =
         unsafe { dear_imgui_rs::render::DrawData::from_raw(&*raw_dd) };
-    mvlog!(
-        "[wgpu-mv] draw_data: valid={} lists={} fb_scale=({:.2},{:.2}) disp=({:.1},{:.1})",
-        draw_data.valid(),
-        draw_data.draw_lists_count(),
-        draw_data.framebuffer_scale()[0],
-        draw_data.framebuffer_scale()[1],
-        draw_data.display_size()[0],
-        draw_data.display_size()[1]
-    );
-
-    mvlog!("[wgpu-mv] retrieving viewport user data");
     if let Some(data) = unsafe { viewport_user_data_mut(vp) } {
-        mvlog!("[wgpu-mv] have viewport user data; acquiring surface frame");
+        // Targeted debug log: only print on size/scale change or mismatch.
+        #[cfg(feature = "mv-log")]
+        {
+            let disp = draw_data.display_size();
+            let fb_scale = draw_data.framebuffer_scale();
+            let expected_w = (disp[0] * fb_scale[0]).round().max(0.0) as u32;
+            let expected_h = (disp[1] * fb_scale[1]).round().max(0.0) as u32;
+            let cfg_w = data.config.width;
+            let cfg_h = data.config.height;
+            let mismatch = expected_w != cfg_w || expected_h != cfg_h;
+            let disp_changed = (disp[0] - data.last_log_display_size[0]).abs() > 0.5
+                || (disp[1] - data.last_log_display_size[1]).abs() > 0.5;
+            let scale_changed = (fb_scale[0] - data.last_log_fb_scale[0]).abs() > 0.01
+                || (fb_scale[1] - data.last_log_fb_scale[1]).abs() > 0.01;
+            if mismatch || disp_changed || scale_changed {
+                mvlog!(
+                    "[wgpu-mv] vp={} disp=({:.1},{:.1}) fb_scale=({:.2},{:.2}) expected_fb=({},{}) cfg_fb=({},{}) mismatch={}",
+                    (&*vp).id(),
+                    disp[0],
+                    disp[1],
+                    fb_scale[0],
+                    fb_scale[1],
+                    expected_w,
+                    expected_h,
+                    cfg_w,
+                    cfg_h,
+                    mismatch
+                );
+                data.last_log_display_size = disp;
+                data.last_log_fb_scale = fb_scale;
+            }
+        }
+
+        let fb_w = data.config.width;
+        let fb_h = data.config.height;
         // Acquire frame with basic recovery on Outdated/Lost/Timeout
         let frame = match data.surface.get_current_texture() {
             Ok(f) => f,
@@ -314,17 +346,14 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                 return;
             }
         };
-        mvlog!("[wgpu-mv] acquired frame; creating view");
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         // Encode commands and render (catch panics to avoid crashing the whole app)
-        mvlog!("[wgpu-mv] creating command encoder");
         let render_block = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("dear-imgui-wgpu::viewport-encoder"),
             });
-            mvlog!("[wgpu-mv] begin_render_pass start");
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("dear-imgui-wgpu::viewport-pass"),
@@ -341,30 +370,19 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                     occlusion_query_set: None,
                     timestamp_writes: None,
                 });
-                mvlog!("[wgpu-mv] begin_render_pass ok");
-                mvlog!("[wgpu-mv] about to render_draw_data for viewport");
                 // Reuse existing draw path with explicit framebuffer size override, but do
                 // not advance frame index: we already advanced it for the main window.
-                if let Some(vd) = viewport_user_data_mut(vp) {
-                    let fb_w = vd.config.width;
-                    let fb_h = vd.config.height;
-                    if let Err(e) = renderer.render_draw_data_with_fb_size_ex(
-                        &draw_data,
-                        &mut render_pass,
-                        fb_w,
-                        fb_h,
-                        false,
-                    ) {
-                        eprintln!("[wgpu-mv] render_draw_data(with_fb) error: {:?}", e);
-                    }
-                } else if let Err(e) = renderer.render_draw_data(&draw_data, &mut render_pass) {
-                    eprintln!("[wgpu-mv] render_draw_data error: {:?}", e);
+                if let Err(e) = renderer.render_draw_data_with_fb_size_ex(
+                    &draw_data,
+                    &mut render_pass,
+                    fb_w,
+                    fb_h,
+                    false,
+                ) {
+                    eprintln!("[wgpu-mv] render_draw_data(with_fb) error: {:?}", e);
                 }
-                mvlog!("[wgpu-mv] finished render_draw_data");
             }
-            mvlog!("[wgpu-mv] submitting queue");
             queue.submit(std::iter::once(encoder.finish()));
-            mvlog!("[wgpu-mv] submit ok");
         }));
         if render_block.is_err() {
             eprintln!(
@@ -373,16 +391,15 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
             return;
         }
         data.pending_frame = Some(frame);
-        mvlog!("[wgpu-mv] submitted and stored pending frame");
     }
 }
 
 /// Renderer: present frame for viewport surface
+#[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *mut c_void) {
     if vp.is_null() {
         return;
     }
-    mvlog!("[wgpu-mv] Renderer_SwapBuffers");
     if let Some(data) = viewport_user_data_mut(vp) {
         if let Some(frame) = data.pending_frame.take() {
             frame.present();
@@ -391,6 +408,7 @@ pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *
 }
 
 // Raw sys-platform wrappers to avoid typed trampolines
+#[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe extern "C" fn platform_render_window_sys(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     arg: *mut c_void,
@@ -401,6 +419,7 @@ pub unsafe extern "C" fn platform_render_window_sys(
     renderer_render_window(vp as *mut Viewport, arg);
 }
 
+#[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe extern "C" fn platform_swap_buffers_sys(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     arg: *mut c_void,

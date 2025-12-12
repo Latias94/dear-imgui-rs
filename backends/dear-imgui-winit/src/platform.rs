@@ -329,10 +329,18 @@ impl WinitPlatform {
                         imgui_ctx
                             .io_mut()
                             .add_mouse_viewport_event(dear_imgui_rs::Viewport::main().id().into());
-                        // Feed absolute/screen coordinates using window's client-area origin (inner_position)
-                        if let Ok(base) = window.inner_position() {
-                            let sx = base.x as f64 + position.x;
-                            let sy = base.y as f64 + position.y;
+                        // Feed absolute/screen coordinates in logical pixels, matching io.DisplaySize.
+                        let scale = window.scale_factor();
+                        let pos_logical = position.to_logical::<f64>(scale);
+                        if let Ok(base_phys) = window.inner_position() {
+                            let base_logical = base_phys.to_logical::<f64>(scale);
+                            let sx = base_logical.x + pos_logical.x;
+                            let sy = base_logical.y + pos_logical.y;
+                            return events::handle_cursor_moved([sx, sy], imgui_ctx);
+                        } else if let Ok(base_phys) = window.outer_position() {
+                            let base_logical = base_phys.to_logical::<f64>(scale);
+                            let sx = base_logical.x + pos_logical.x;
+                            let sy = base_logical.y + pos_logical.y;
                             return events::handle_cursor_moved([sx, sy], imgui_ctx);
                         }
                     }
@@ -384,6 +392,32 @@ impl WinitPlatform {
         self.last_frame = now;
 
         imgui_ctx.io_mut().set_delta_time(delta_s);
+
+        // In multi-viewport mode, keep DisplaySize/FramebufferScale in sync every frame.
+        // This matches upstream backends (SDL/GLFW) and avoids stale or spurious DPI
+        // changes affecting the main viewport after platform windows are moved.
+        #[cfg(feature = "multi-viewport")]
+        {
+            if imgui_ctx
+                .io()
+                .config_flags()
+                .contains(ConfigFlags::VIEWPORTS_ENABLE)
+            {
+                let winit_scale = window.scale_factor();
+                let hidpi = match self.hidpi_mode {
+                    HiDpiMode::Default => winit_scale,
+                    HiDpiMode::Locked(factor) => factor,
+                    HiDpiMode::Rounded => winit_scale.round(),
+                };
+                self.hidpi_factor = hidpi;
+
+                let logical_size = window.inner_size().to_logical(winit_scale);
+                let logical_size = self.scale_size_from_winit(window, logical_size);
+                let io = imgui_ctx.io_mut();
+                io.set_display_size([logical_size.width as f32, logical_size.height as f32]);
+                io.set_display_framebuffer_scale([hidpi as f32, hidpi as f32]);
+            }
+        }
 
         // If backend supports setting mouse pos and ImGui requests it, honor it
         // Skip when multi-viewports are enabled (no global cursor set in winit)

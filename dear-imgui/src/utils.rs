@@ -166,13 +166,13 @@ impl crate::ui::Ui {
     /// Returns the mouse wheel delta
     #[doc(alias = "GetIO")]
     pub fn get_mouse_wheel(&self) -> f32 {
-        unsafe { (*sys::igGetIO_Nil()).MouseWheel }
+        self.io().mouse_wheel()
     }
 
     /// Returns the horizontal mouse wheel delta
     #[doc(alias = "GetIO")]
     pub fn get_mouse_wheel_h(&self) -> f32 {
-        unsafe { (*sys::igGetIO_Nil()).MouseWheelH }
+        self.io().mouse_wheel_h()
     }
 
     /// Returns `true` if any mouse button is down

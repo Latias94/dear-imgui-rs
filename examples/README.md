@@ -28,6 +28,7 @@ Quick picks:
   - With ImPlot (FPS graph): `cargo run --bin game_engine_docking --features implot`
   - With ImGuizmo (3D gizmo): `cargo run --bin game_engine_docking --features imguizmo`
   - With all extensions: `cargo run --bin game_engine_docking --features "implot,imguizmo"`
+  - With experimental multi-viewport (winit + WGPU, native only): `cargo run --bin game_engine_docking --features multi-viewport`
 - Docking minimal: `cargo run --bin dockspace_minimal`
 - WGPU minimal: `cargo run --bin wgpu_basic`
 - OpenGL + textures: `cargo run --bin glow_textures`
@@ -67,8 +68,9 @@ This is the intended organization.
 - 01-renderers (single-file, backend topics)
   - `glow_textures.rs`: modern texture system (register/update).
   - `wgpu_textures.rs`: CPU-updated texture registered in WGPU backend.
-  - `sdl3_wgpu.rs`: SDL3 window + WGPU renderer (single window, no multi-viewport; uses official SDL3 platform backend).
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-backends`
+  - `sdl3_wgpu.rs`: SDL3 window + WGPU renderer (single window; uses official SDL3 platform backend).
+    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform`
+    - For native multi-viewport, see `sdl3_wgpu_multi_viewport.rs` below.
 
 - 02-docking
   - `dockspace_minimal.rs`: enable docking + a simple dockspace.
@@ -76,16 +78,23 @@ This is the intended organization.
     - Menu already includes: Reset to Unity Layout, Save INI, Load INI.
     - Optional extensions: `--features implot` (FPS graph), `--features imguizmo` (3D gizmo manipulation).
     - Note: INI path is relative to the process CWD; see INI section below.
-  - `multi_viewport_wgpu.rs`: **Experimental test example only** - multi-viewport support is not production-ready.
+  - `multi_viewport_wgpu.rs`: **Experimental test example only** - winit + WGPU multi-viewport support is not production-ready.
     - Run with: `cargo run --bin multi_viewport_wgpu --features multi-viewport`
-    - ⚠️ This is a work-in-progress test example for development purposes only.
-    - ⚠️ Multi-viewport functionality may have bugs or incomplete features.
+    - Native only, enabled on Windows/macOS/Linux; tested on Windows/macOS, Linux untested.
+    - The examples feature `multi-viewport` enables the required backend features:
+      `dear-imgui-winit/multi-viewport` + `dear-imgui-wgpu/multi-viewport-winit`.
+    - Important pattern: only the main window should drive WGPU rendering and surface resize;
+      secondary viewport windows are rendered via ImGui platform/renderer callbacks.
   - `sdl3_opengl_multi_viewport.rs`: SDL3 + OpenGL3 multi-viewport example using official C++ backends.
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features "multi-viewport sdl3-backends"`
+    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
     - Shows how to combine SDL3 platform backend with OpenGL renderer, including a simple "Game View" texture inside an ImGui window that can be dragged across OS windows.
+    - Relies on the official OpenGL3 renderer in `dear-imgui-sdl3` (feature `opengl3-renderer`).
   - `sdl3_glow_multi_viewport.rs`: SDL3 + Glow multi-viewport example using Rust Glow renderer backend.
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features "multi-viewport sdl3-backends"`
+    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-platform`
     - Uses SDL3 platform backend for window/GL context management and `dear-imgui-glow` for rendering all viewports.
+  - `sdl3_wgpu_multi_viewport.rs`: SDL3 + WGPU multi-viewport example (experimental, native only) using Rust WGPU renderer backend.
+    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
+    - Uses SDL3 platform backend for window management and `dear-imgui-wgpu` to render all viewports.
 
 - 03-extensions (feature-gated)
   - ImPlot: `implot_basic.rs`.

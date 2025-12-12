@@ -4,10 +4,11 @@
 //! - SDL3 window + GL context for platform and multi-viewport management
 //! - Rust Glow renderer backend (`dear-imgui-glow`)
 //! - the high-level `dear-imgui-rs` API.
+//! - Does not use the official OpenGL3 renderer (`dear-imgui-sdl3/opengl3-renderer`).
 //!
 //! Run with:
 //!   cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport \
-//!       --features multi-viewport,sdl3-backends
+//!       --features multi-viewport,sdl3-platform
 
 use std::error::Error;
 use std::time::Instant;

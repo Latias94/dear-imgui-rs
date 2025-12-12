@@ -364,6 +364,14 @@ impl GlowRenderer {
 
     /// Configure the ImGui context for this renderer (static version)
     fn configure_imgui_context_static(imgui_context: &mut ImGuiContext) {
+        let should_set_name = imgui_context.io().backend_renderer_name().is_none();
+        if should_set_name {
+            let _ = imgui_context.set_renderer_name(Some(format!(
+                "dear-imgui-glow {}",
+                env!("CARGO_PKG_VERSION")
+            )));
+        }
+
         let io = imgui_context.io_mut();
 
         // Set backend capabilities

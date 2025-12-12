@@ -4,7 +4,6 @@
 use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
-use pollster::block_on;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;
@@ -12,7 +11,7 @@ use wgpu::TextureUsages;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::WindowEvent,
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, NamedKey},
     window::{Window, WindowId},
@@ -41,6 +40,7 @@ impl OffscreenRtt {
         renderer: &mut WgpuRenderer,
         size: (u32, u32),
         format: wgpu::TextureFormat,
+        sampler: &wgpu::Sampler,
     ) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen-rtt"),
@@ -58,13 +58,7 @@ impl OffscreenRtt {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let id64 =
-            renderer
-                .texture_manager_mut()
-                .register_texture(dear_imgui_wgpu::WgpuTexture::new(
-                    texture.clone(),
-                    view.clone(),
-                ));
+        let id64 = renderer.register_external_texture_with_sampler(&texture, &view, sampler);
         let texture_id = dear_imgui_rs::TextureId::from(id64);
 
         Self {
@@ -81,13 +75,12 @@ impl OffscreenRtt {
         renderer: &mut WgpuRenderer,
         size: (u32, u32),
         format: wgpu::TextureFormat,
+        sampler: &wgpu::Sampler,
     ) {
         // Destroy old registration
-        renderer
-            .texture_manager_mut()
-            .destroy_texture(self.texture_id);
+        renderer.unregister_texture(self.texture_id.id());
 
-        let new_self = OffscreenRtt::create(device, renderer, size, format);
+        let new_self = OffscreenRtt::create(device, renderer, size, format, sampler);
         *self = new_self;
     }
 }
@@ -218,6 +211,9 @@ struct AppWindow {
     imgui: ImguiState,
     rtt: OffscreenRtt,
     offscreen_pipeline: wgpu::RenderPipeline,
+    linear_sampler: wgpu::Sampler,
+    nearest_sampler: wgpu::Sampler,
+    use_nearest_sampler: bool,
 }
 
 #[derive(Default)]
@@ -253,8 +249,31 @@ impl AppWindow {
         let mut renderer = WgpuRenderer::new(init_info, &mut context)?;
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
+        // Two samplers to demonstrate runtime switching.
+        let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("rtt_linear_sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("rtt_nearest_sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let use_nearest_sampler = false;
+
         // Create offscreen RTT at initial size
-        let rtt = OffscreenRtt::create(&device, &mut renderer, (640, 360), surface_desc.format);
+        let rtt = OffscreenRtt::create(
+            &device,
+            &mut renderer,
+            (640, 360),
+            surface_desc.format,
+            &linear_sampler,
+        );
 
         // Create a simple pipeline that draws a procedural grid and a triangle
         let offscreen_pipeline = create_offscreen_pipeline(&device, surface_desc.format);
@@ -275,6 +294,9 @@ impl AppWindow {
             imgui,
             rtt,
             offscreen_pipeline,
+            linear_sampler,
+            nearest_sampler,
+            use_nearest_sampler,
         })
     }
 
@@ -302,11 +324,17 @@ impl AppWindow {
             (logical.height as f32 * 0.5).max(1.0) as u32,
         );
         if target != self.rtt.size {
+            let sampler_for_rtt = if self.use_nearest_sampler {
+                &self.nearest_sampler
+            } else {
+                &self.linear_sampler
+            };
             self.rtt.recreate(
                 &self.device,
                 &mut self.imgui.renderer,
                 target,
                 self.surface_desc.format,
+                sampler_for_rtt,
             );
         }
 
@@ -346,15 +374,32 @@ impl AppWindow {
             self.queue.submit(Some(encoder.finish()));
         }
 
-        // Begin frame
-        self.imgui
-            .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
-        let ui = self.imgui.context.frame();
+        // Begin frame. Split ImguiState borrows so we can update the renderer
+        // (e.g. sampler switching) while UI is alive.
+        let (context, platform, renderer) = (
+            &mut self.imgui.context,
+            &mut self.imgui.platform,
+            &mut self.imgui.renderer,
+        );
+        platform.prepare_frame(&self.window, context);
+        let ui = context.frame();
+
+        let sampler_label = if self.use_nearest_sampler {
+            "Nearest"
+        } else {
+            "Linear"
+        };
+        let mut want_toggle_sampler = false;
 
         ui.window("Game View (RTT)")
             .size([640.0, 400.0], Condition::FirstUseEver)
             .build(|| {
+                ui.text(format!("Sampling: {} (press 'F' to toggle)", sampler_label));
+                if ui.button("Toggle Sampler") {
+                    want_toggle_sampler = true;
+                }
+                ui.separator();
+
                 let avail = ui.content_region_avail();
                 let avail_w = avail[0].max(1.0);
                 let avail_h = avail[1].max(1.0);
@@ -386,6 +431,16 @@ impl AppWindow {
                 ui.image(self.rtt.texture_id, [disp_w, disp_h]);
             });
 
+        if want_toggle_sampler {
+            self.use_nearest_sampler = !self.use_nearest_sampler;
+            let sampler = if self.use_nearest_sampler {
+                &self.nearest_sampler
+            } else {
+                &self.linear_sampler
+            };
+            let _ = renderer.update_external_texture_sampler(self.rtt.texture_id.id(), sampler);
+        }
+
         // Render to swapchain
         let frame = self.surface.get_current_texture()?;
         let view = frame
@@ -397,10 +452,8 @@ impl AppWindow {
                 label: Some("Main Encoder"),
             });
 
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window);
-        let draw_data = self.imgui.context.render();
+        platform.prepare_render_with_ui(&ui, &self.window);
+        let draw_data = context.render();
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -423,10 +476,8 @@ impl AppWindow {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            self.imgui.renderer.new_frame()?;
-            self.imgui
-                .renderer
-                .render_draw_data(&draw_data, &mut rpass)?;
+            renderer.new_frame()?;
+            renderer.render_draw_data(&draw_data, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -480,8 +531,26 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.logical_key == Key::Named(NamedKey::Escape) {
-                    event_loop.exit();
+                if event.state == ElementState::Pressed && !event.repeat {
+                    match &event.logical_key {
+                        Key::Named(NamedKey::Escape) => {
+                            event_loop.exit();
+                        }
+                        Key::Character(s) if s.as_str().eq_ignore_ascii_case("f") => {
+                            window.use_nearest_sampler = !window.use_nearest_sampler;
+                            let sampler = if window.use_nearest_sampler {
+                                &window.nearest_sampler
+                            } else {
+                                &window.linear_sampler
+                            };
+                            let _ = window.imgui.renderer.update_external_texture_sampler(
+                                window.rtt.texture_id.id(),
+                                sampler,
+                            );
+                            window.window.request_redraw();
+                        }
+                        _ => {}
+                    }
                 }
             }
             WindowEvent::RedrawRequested => {

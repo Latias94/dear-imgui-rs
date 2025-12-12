@@ -4,9 +4,10 @@
 //! - SDL3 window + GL context
 //! - official C++ backends: imgui_impl_sdl3.cpp + imgui_impl_opengl3.cpp
 //! - the high-level `dear-imgui-rs` API.
+//! - Requires `dear-imgui-sdl3` feature `opengl3-renderer`.
 //!
 //! Run with:
-//!   cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport
+//!   cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3
 
 use std::error::Error;
 use std::time::Instant;

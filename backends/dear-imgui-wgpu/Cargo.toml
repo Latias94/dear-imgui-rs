@@ -17,11 +17,15 @@ bytemuck = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
 winit = { workspace = true, optional = true }
+sdl3-sys = { version = "0.5", optional = true }
+raw-window-handle = { workspace = true, optional = true }
 
 [features]
 default = []
-# Enable multi-viewport support
-multi-viewport = ["dear-imgui-rs/multi-viewport", "dep:winit"]
+# Enable multi-viewport support with the winit platform backend.
+multi-viewport-winit = ["dear-imgui-rs/multi-viewport", "dep:winit"]
+# Enable multi-viewport support with SDL3 platform backend (native only)
+multi-viewport-sdl3 = ["dear-imgui-rs/multi-viewport", "dep:sdl3-sys", "dep:raw-window-handle", "dep:objc2"]
 # Debug logging for multi-viewport paths (see mvlog! macro)
 mv-log = []
 # Enable WebGL support for WASM
@@ -29,3 +33,6 @@ webgl = ["wgpu/webgl"]
 webgpu = ["wgpu/webgpu"]
 # Experimental: enable wasm font-atlas access for testing
 wasm-font-atlas-experimental = ["dear-imgui-rs/wasm-font-atlas-experimental"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }

@@ -39,8 +39,8 @@
 //!
 //! let mut platform = WinitPlatform::new(&mut imgui_ctx);
 //!
-//! // In your event loop:
-//! // multi_viewport::set_event_loop(&event_loop);
+//! // In your event loop callback (before updating platform windows):
+//! // let _guard = multi_viewport::set_event_loop_for_frame(event_loop);
 //! // multi_viewport::init_multi_viewport_support(&mut imgui_ctx, &window);
 //! # }
 //! ```

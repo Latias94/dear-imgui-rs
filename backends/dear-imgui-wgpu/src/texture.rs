@@ -89,12 +89,26 @@ impl WgpuTexture {
 ///
 /// This manages the mapping between Dear ImGui texture IDs and WGPU textures,
 /// similar to the ImageBindGroups storage in the C++ implementation.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct WgpuTextureManager {
     /// Map from texture ID to WGPU texture
     textures: HashMap<u64, WgpuTexture>,
     /// Next available texture ID
     next_id: u64,
+    /// Custom samplers registered for external textures (sampler_id -> sampler)
+    custom_samplers: HashMap<u64, Sampler>,
+    /// Mapping from texture_id -> sampler_id for per-texture custom sampling
+    custom_sampler_by_texture: HashMap<u64, u64>,
+    /// Cached common bind groups (uniform buffer + sampler) per sampler_id
+    common_bind_groups: HashMap<u64, BindGroup>,
+    /// Next available sampler ID
+    next_sampler_id: u64,
+}
+
+impl Default for WgpuTextureManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WgpuTextureManager {
@@ -273,6 +287,10 @@ impl WgpuTextureManager {
         Self {
             textures: HashMap::new(),
             next_id: 1, // Start from 1, 0 is reserved for null texture
+            custom_samplers: HashMap::new(),
+            custom_sampler_by_texture: HashMap::new(),
+            common_bind_groups: HashMap::new(),
+            next_sampler_id: 1, // Start from 1, 0 means "default sampler"
         }
     }
 
@@ -306,6 +324,94 @@ impl WgpuTextureManager {
         if id >= self.next_id {
             self.next_id = id + 1;
         }
+    }
+
+    /// Associate a custom sampler with a texture id (used by external textures).
+    ///
+    /// Returns the internal sampler_id assigned to this sampler.
+    pub(crate) fn set_custom_sampler_for_texture(
+        &mut self,
+        texture_id: u64,
+        sampler: Sampler,
+    ) -> u64 {
+        let sampler_id = self.next_sampler_id;
+        self.next_sampler_id += 1;
+        self.custom_samplers.insert(sampler_id, sampler);
+        self.custom_sampler_by_texture
+            .insert(texture_id, sampler_id);
+        // Invalidate any cached common bind group for this sampler id (defensive).
+        self.common_bind_groups.remove(&sampler_id);
+        sampler_id
+    }
+
+    /// Update or set a custom sampler for an existing texture.
+    ///
+    /// If the texture already has a custom sampler association, we replace the sampler
+    /// in place (keeping the sampler_id stable) and invalidate the cached common bind group.
+    /// If there is no association yet, we create one.
+    ///
+    /// Returns false if the texture_id is not registered.
+    pub(crate) fn update_custom_sampler_for_texture(
+        &mut self,
+        texture_id: u64,
+        sampler: Sampler,
+    ) -> bool {
+        if !self.textures.contains_key(&texture_id) {
+            return false;
+        }
+        if let Some(sampler_id) = self.custom_sampler_by_texture.get(&texture_id).copied() {
+            self.custom_samplers.insert(sampler_id, sampler);
+            self.common_bind_groups.remove(&sampler_id);
+        } else {
+            self.set_custom_sampler_for_texture(texture_id, sampler);
+        }
+        true
+    }
+
+    /// Get the custom sampler id for a texture (if any).
+    pub(crate) fn custom_sampler_id_for_texture(&self, texture_id: u64) -> Option<u64> {
+        self.custom_sampler_by_texture.get(&texture_id).copied()
+    }
+
+    /// Remove any custom sampler association for a texture.
+    pub(crate) fn clear_custom_sampler_for_texture(&mut self, texture_id: u64) {
+        if let Some(sampler_id) = self.custom_sampler_by_texture.remove(&texture_id) {
+            // Drop cached bind group so next use rebuilds it.
+            self.common_bind_groups.remove(&sampler_id);
+        }
+    }
+
+    /// Get or create a common bind group (uniform buffer + sampler) for the given sampler id.
+    ///
+    /// The bind group uses the same uniform buffer but swaps the sampler, allowing
+    /// per-texture sampling without changing the pipeline layout.
+    pub(crate) fn get_or_create_common_bind_group_for_sampler(
+        &mut self,
+        device: &Device,
+        common_layout: &BindGroupLayout,
+        uniform_buffer: &Buffer,
+        sampler_id: u64,
+    ) -> Option<BindGroup> {
+        if let Some(bg) = self.common_bind_groups.get(&sampler_id) {
+            return Some(bg.clone());
+        }
+        let sampler = self.custom_samplers.get(&sampler_id)?;
+        let bg = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Dear ImGui Common Bind Group (custom sampler)"),
+            layout: common_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+        self.common_bind_groups.insert(sampler_id, bg.clone());
+        Some(bg)
     }
 
     /// Destroy a texture by ID
@@ -352,6 +458,11 @@ impl WgpuTextureManager {
     pub fn clear(&mut self) {
         self.textures.clear();
         self.next_id = 1;
+        self.custom_sampler_by_texture.clear();
+        self.common_bind_groups.clear();
+        // Keep samplers around? Clear to avoid holding stale handles after device loss.
+        self.custom_samplers.clear();
+        self.next_sampler_id = 1;
     }
 }
 
@@ -683,6 +794,7 @@ impl WgpuTextureManager {
                         let internal_id = imgui_tex_id.id();
                         // Remove from texture cache and any associated bind groups
                         self.remove_texture(internal_id);
+                        self.clear_custom_sampler_for_texture(internal_id);
                         render_resources.remove_image_bind_group(internal_id);
                         texture_data.set_status(TextureStatus::Destroyed);
                     }

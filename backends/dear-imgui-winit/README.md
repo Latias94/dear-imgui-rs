@@ -149,11 +149,26 @@ This backend sets (when appropriate):
 
 For diagnostics, the backend also sets `BackendPlatformName` to `"dear-imgui-winit {version}"`.
 
-## Multi-Viewport (WIP)
+## Multi-Viewport (Experimental)
 
-Multi-viewport support is being implemented behind a `multi-viewport` feature,
-but is not enabled by default yet. Expect changes and incomplete coverage while
-the feature stabilizes. Follow the examples and docs once it’s marked stable.
+Multi-viewport support is available behind the `multi-viewport` feature and is
+**experimental**. It follows the upstream backend split:
+
+- The winit platform layer (`dear-imgui-winit/multi-viewport`) owns OS windows and
+  routes events for secondary viewports.
+- A renderer backend must also opt into viewports (e.g. `dear-imgui-wgpu/multi-viewport-winit`)
+  to create per-viewport render targets and draw them.
+
+Current support matrix:
+
+- **winit + WGPU**: experimental native multi-viewport, exercised by the
+  `multi_viewport_wgpu` example.
+  - Enabled on Windows/macOS/Linux; tested on Windows/macOS, Linux untested.
+  - Example:
+    `cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport`
+- **winit + OpenGL (glow/glutin)**: no official multi-viewport stack yet.
+  If you need multi-viewport OpenGL today, use the SDL3 routes
+  (`sdl3_opengl_multi_viewport` or `sdl3_glow_multi_viewport`).
 
 ## Notes & Differences vs imgui-rs
 
