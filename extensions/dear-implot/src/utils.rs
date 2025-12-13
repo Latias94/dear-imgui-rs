@@ -253,13 +253,13 @@ pub fn show_metrics_window(open: &mut bool) {
 
 /// Get current plot position (top-left) in pixels
 pub fn get_plot_pos() -> [f32; 2] {
-    let out = unsafe { sys::ImPlot_GetPlotPos() };
+    let out = unsafe { crate::compat_ffi::ImPlot_GetPlotPos() };
     [out.x, out.y]
 }
 
 /// Get current plot size in pixels
 pub fn get_plot_size() -> [f32; 2] {
-    let out = unsafe { sys::ImPlot_GetPlotSize() };
+    let out = unsafe { crate::compat_ffi::ImPlot_GetPlotSize() };
     [out.x, out.y]
 }
 

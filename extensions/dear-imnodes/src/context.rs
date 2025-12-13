@@ -71,7 +71,7 @@ impl EditorContext {
 
     pub fn get_panning(&self) -> [f32; 2] {
         unsafe { sys::imnodes_EditorContextSet(self.raw) };
-        let out = unsafe { sys::imnodes_EditorContextGetPanning() };
+        let out = unsafe { crate::compat_ffi::imnodes_EditorContextGetPanning() };
         [out.x, out.y]
     }
 
@@ -605,11 +605,11 @@ impl<'ui> NodeEditor<'ui> {
         }
     }
     pub fn get_node_pos_screen(&self, node_id: i32) -> [f32; 2] {
-        let out = unsafe { sys::imnodes_GetNodeScreenSpacePos(node_id) };
+        let out = unsafe { crate::compat_ffi::imnodes_GetNodeScreenSpacePos(node_id) };
         [out.x, out.y]
     }
     pub fn get_node_pos_editor(&self, node_id: i32) -> [f32; 2] {
-        let out = unsafe { sys::imnodes_GetNodeEditorSpacePos(node_id) };
+        let out = unsafe { crate::compat_ffi::imnodes_GetNodeEditorSpacePos(node_id) };
         [out.x, out.y]
     }
 
@@ -621,7 +621,7 @@ impl<'ui> NodeEditor<'ui> {
         unsafe { sys::imnodes_SnapNodeToGrid(node_id) }
     }
     pub fn get_node_dimensions(&self, node_id: i32) -> [f32; 2] {
-        let out = unsafe { sys::imnodes_GetNodeDimensions(node_id) };
+        let out = unsafe { crate::compat_ffi::imnodes_GetNodeDimensions(node_id) };
         [out.x, out.y]
     }
 

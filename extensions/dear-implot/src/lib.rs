@@ -39,6 +39,22 @@
 
 use dear_implot_sys as sys;
 
+// Bindgen output for `dear-implot-sys` can fluctuate between historical
+// out-parameter signatures and the newer return-by-value signatures depending
+// on which generated `OUT_DIR` file rust-analyzer happens to index.
+//
+// Keep the wrapper crate stable by calling a local extern declaration for the
+// specific APIs we expose.
+#[allow(non_snake_case)]
+pub(crate) mod compat_ffi {
+    use super::sys;
+
+    unsafe extern "C" {
+        pub fn ImPlot_GetPlotPos() -> sys::ImVec2;
+        pub fn ImPlot_GetPlotSize() -> sys::ImVec2;
+    }
+}
+
 // Re-export essential types
 pub use dear_imgui_rs::{Context, Ui};
 pub use sys::{ImPlotPoint, ImPlotRange, ImPlotRect};
