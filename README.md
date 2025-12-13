@@ -126,17 +126,17 @@ cargo run --bin file_browser_imgui --features file-browser
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.6"
+dear-imgui-rs = "0.7"
 # Choose a backend + platform integration
-dear-imgui-wgpu = "0.6"   # or dear-imgui-glow
-dear-imgui-winit = "0.6"
+dear-imgui-wgpu = "0.7"   # or dear-imgui-glow
+dear-imgui-winit = "0.7"
 ```
 
 ### Application Runner (Recommended for Quick Start)
 
 ```toml
 [dependencies]
-dear-app = "0.6"  # Includes dear-imgui-rs, wgpu backend, and docking support
+dear-app = "0.7"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```
 
 ### Extensions
@@ -144,21 +144,21 @@ dear-app = "0.6"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```toml
 [dependencies]
 # Plotting
-dear-implot = "0.6"      # 2D plotting
-dear-implot3d = "0.6"    # 3D plotting
+dear-implot = "0.7"      # 2D plotting
+dear-implot3d = "0.7"    # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo = "0.6"         # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat = "0.6"    # Quaternion-based gizmo
+dear-imguizmo = "0.7"         # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = "0.7"    # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = "0.6"
+dear-imnodes = "0.7"
 
 # File Browser
-dear-file-browser = "0.6"  # Native dialogs + ImGui file browser
+dear-file-browser = "0.7"  # Native dialogs + ImGui file browser
 
 # Reflection-based UI helpers
-dear-imgui-reflect = "0.6"
+dear-imgui-reflect = "0.7"
 ```
 
 ### Reflection-based UI (dear-imgui-reflect)
@@ -217,35 +217,35 @@ Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.6.x   | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.6.x   | Binds Dear ImGui v1.92.5 (docking branch) |
+| dear-imgui-rs   | 0.7.x   | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.7.x   | Binds Dear ImGui v1.92.5 (docking branch) |
 
 Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.6.x   | wgpu = 27         | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
-| dear-imgui-glow  | 0.6.x   | glow = 0.16       | OpenGL renderer (winit/glutin) |
-| dear-imgui-winit | 0.6.x   | winit = 0.30.12   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.6.x   | sdl3 = 0.16       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
+| dear-imgui-wgpu  | 0.7.x   | wgpu = 27         | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
+| dear-imgui-glow  | 0.7.x   | glow = 0.16       | OpenGL renderer (winit/glutin) |
+| dear-imgui-winit | 0.7.x   | winit = 0.30.12   | Winit platform backend         |
+| dear-imgui-sdl3  | 0.7.x   | sdl3 = 0.16       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
 
 Application Runner
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.6.x   | 0.6.x                  | App runner (docking, themes, add-ons)            |
+| dear-app  | 0.7.x   | 0.7.x                  | App runner (docking, themes, add-ons)            |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.6.x   | 0.6.x                  | dear-implot-sys 0.6.x       | 2D plotting                            |
-| dear-imnodes        | 0.6.x   | 0.6.x                  | dear-imnodes-sys 0.6.x      | Node editor                            |
-| dear-imguizmo       | 0.6.x   | 0.6.x                  | dear-imguizmo-sys 0.6.x     | 3D gizmo + GraphEditor                 |
-| dear-file-browser   | 0.6.x   | 0.6.x                  | —                           | ImGui UI + native (rfd) backends       |
-| dear-implot3d       | 0.6.x   | 0.6.x                  | dear-implot3d-sys 0.6.x     | 3D plotting                            |
-| dear-imguizmo-quat  | 0.6.x   | 0.6.x                  | dear-imguizmo-quat-sys 0.6.x| Quaternion gizmo                       |
-| dear-imgui-reflect  | 0.6.x   | 0.6.x                  | —                           | Reflection-based UI helpers (pure Rust)|
+| dear-implot         | 0.7.x   | 0.7.x                  | dear-implot-sys 0.7.x       | 2D plotting                            |
+| dear-imnodes        | 0.7.x   | 0.7.x                  | dear-imnodes-sys 0.7.x      | Node editor                            |
+| dear-imguizmo       | 0.7.x   | 0.7.x                  | dear-imguizmo-sys 0.7.x     | 3D gizmo + GraphEditor                 |
+| dear-file-browser   | 0.7.x   | 0.7.x                  | —                           | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.7.x   | 0.7.x                  | dear-implot3d-sys 0.7.x     | 3D plotting                            |
+| dear-imguizmo-quat  | 0.7.x   | 0.7.x                  | dear-imguizmo-quat-sys 0.7.x| Quaternion gizmo                       |
+| dear-imgui-reflect  | 0.7.x   | 0.7.x                  | —                           | Reflection-based UI helpers (pure Rust)|
 
 Maintenance rules
 
@@ -302,7 +302,7 @@ Status:
   multi-viewport remain disabled on wasm for safety.
 - Font atlas access on wasm is available behind an experimental feature flag.
 - Import-style WASM bindings and the `xtask wasm-bindgen-*` / `web-demo` / `build-cimgui-provider`
-  helpers are developed on `main` and planned for the 0.7.0 release train; for 0.6.x on crates.io,
+  helpers are developed on `main` and shipped in the 0.7.0 release train; for 0.6.x on crates.io,
   use a git dependency on this repository if you need these flows.
 
 Prerequisites:

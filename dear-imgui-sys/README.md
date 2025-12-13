@@ -129,10 +129,10 @@ This is a low-level sys crate providing unsafe FFI bindings. Most users should u
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.6"
+dear-imgui-sys = "0.7"
 
 # Enable features as needed
-dear-imgui-sys = { version = "0.6", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "0.7", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)

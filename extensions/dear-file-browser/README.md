@@ -19,8 +19,8 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.6.x   |
-| dear-imgui-rs | 0.6.x   |
+| Crate         | 0.7.x   |
+| dear-imgui-rs | 0.7.x   |
 
 ## Features
 

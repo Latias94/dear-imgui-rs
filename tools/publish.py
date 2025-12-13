@@ -6,7 +6,7 @@ This script publishes all crates in the correct dependency order, ensuring that
 dependencies are published before their dependents.
 
 Publishing Order:
-1. Core: dear-imgui-sys → dear-imgui-rs
+1. Core: dear-imgui-sys -> dear-imgui-rs
 2. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-sdl3
 3. Extensions (sys): dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys,
                      dear-implot3d-sys, dear-imguizmo-quat-sys
@@ -103,22 +103,22 @@ def print_header(msg: str):
 
 def print_info(msg: str):
     """Print an info message."""
-    print(f"{Colors.OKBLUE}ℹ {msg}{Colors.ENDC}")
+    print(f"{Colors.OKBLUE}INFO: {msg}{Colors.ENDC}")
 
 
 def print_success(msg: str):
     """Print a success message."""
-    print(f"{Colors.OKGREEN}✓ {msg}{Colors.ENDC}")
+    print(f"{Colors.OKGREEN}OK: {msg}{Colors.ENDC}")
 
 
 def print_warning(msg: str):
     """Print a warning message."""
-    print(f"{Colors.WARNING}⚠ {msg}{Colors.ENDC}")
+    print(f"{Colors.WARNING}WARN: {msg}{Colors.ENDC}")
 
 
 def print_error(msg: str):
     """Print an error message."""
-    print(f"{Colors.FAIL}✗ {msg}{Colors.ENDC}", file=sys.stderr)
+    print(f"{Colors.FAIL}ERR: {msg}{Colors.ENDC}", file=sys.stderr)
 
 
 def run_command(cmd: List[str], cwd: Optional[Path] = None, dry_run: bool = False, capture: bool = False) -> int:

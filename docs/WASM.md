@@ -4,7 +4,7 @@ This project supports compiling Dear ImGui + backends to WebAssembly using an im
 
 ## Quick start
 
-- Status: the import-style WASM path is developed on `main` and planned for the 0.7.0 release train. For crates.io releases prior to 0.7, these bindings and `xtask` flows are available only when depending on this repository directly (e.g. via a git dependency).
+- Status: the import-style WASM path is developed on `main` and shipped in the 0.7.0 release train. For crates.io releases prior to 0.7, these bindings and `xtask` flows are available only when depending on this repository directly (e.g. via a git dependency).
 
 - Prerequisites
   - `rustup target add wasm32-unknown-unknown`

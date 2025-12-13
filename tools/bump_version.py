@@ -62,19 +62,19 @@ class Colors:
 
 
 def print_info(msg: str):
-    print(f"ℹ {msg}")
+    print(f"INFO: {msg}")
 
 
 def print_success(msg: str):
-    print(f"{Colors.OKGREEN}✓ {msg}{Colors.ENDC}")
+    print(f"{Colors.OKGREEN}OK: {msg}{Colors.ENDC}")
 
 
 def print_warning(msg: str):
-    print(f"{Colors.WARNING}⚠ {msg}{Colors.ENDC}")
+    print(f"{Colors.WARNING}WARN: {msg}{Colors.ENDC}")
 
 
 def print_error(msg: str):
-    print(f"{Colors.FAIL}✗ {msg}{Colors.ENDC}", file=sys.stderr)
+    print(f"{Colors.FAIL}ERR: {msg}{Colors.ENDC}", file=sys.stderr)
 
 
 def validate_version(version: str) -> bool:
@@ -124,7 +124,7 @@ def update_cargo_toml(
     )
     new_content, count1 = pattern1.subn(r'\g<1>' + new_version + r'\g<2>', content)
     if count1 > 0:
-        changes.append(f"Updated package version: {old_version} → {new_version}")
+        changes.append(f"Updated package version: {old_version} -> {new_version}")
         content = new_content
     
     # Pattern 2: Dependency version with path
@@ -141,7 +141,7 @@ def update_cargo_toml(
     )
     new_content, count2 = pattern2.subn(r'\g<1>' + new_minor + r'\g<2>', content)
     if count2 > 0:
-        changes.append(f"Updated {count2} dependency version(s): {old_minor} → {new_minor}")
+        changes.append(f"Updated {count2} dependency version(s): {old_minor} -> {new_minor}")
         content = new_content
     
     # Pattern 3: Workspace dependency version

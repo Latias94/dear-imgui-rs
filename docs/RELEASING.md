@@ -89,7 +89,7 @@ These checks generate/use bindings only and won’t build/link native code.
 
 > **Tip**: Use the automated publishing script for easier workflow:
 > ```bash
-> python tools/tasks.py release-prep 0.6.0  # Prepare release
+> python tools/tasks.py release-prep 0.7.0  # Prepare release
 > python tools/tasks.py publish             # Publish all crates
 > ```
 > See [PUBLISHING.md](./PUBLISHING.md) for details.

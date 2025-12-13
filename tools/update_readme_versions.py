@@ -53,19 +53,19 @@ class Colors:
 
 
 def print_info(msg: str):
-    print(f"ℹ {msg}")
+    print(f"INFO: {msg}")
 
 
 def print_success(msg: str):
-    print(f"{Colors.OKGREEN}✓ {msg}{Colors.ENDC}")
+    print(f"{Colors.OKGREEN}OK: {msg}{Colors.ENDC}")
 
 
 def print_warning(msg: str):
-    print(f"{Colors.WARNING}⚠ {msg}{Colors.ENDC}")
+    print(f"{Colors.WARNING}WARN: {msg}{Colors.ENDC}")
 
 
 def print_error(msg: str):
-    print(f"{Colors.FAIL}✗ {msg}{Colors.ENDC}", file=sys.stderr)
+    print(f"{Colors.FAIL}ERR: {msg}{Colors.ENDC}", file=sys.stderr)
 
 
 def get_current_version(repo_root: Path) -> Optional[str]:
@@ -122,7 +122,7 @@ def update_readme(
     )
     new_content, count1 = pattern1.subn(r'\g<1>' + new_minor + r'\g<2>', content)
     if count1 > 0:
-        changes.append(f"Updated {count1} compatibility table entr{'y' if count1 == 1 else 'ies'}: {old_minor}.x → {new_minor}.x")
+        changes.append(f"Updated {count1} compatibility table entr{'y' if count1 == 1 else 'ies'}: {old_minor}.x -> {new_minor}.x")
         content = new_content
     
     # Pattern 2: Cargo.toml dependency examples like 'dear-imgui-rs = "0.4"'
@@ -132,7 +132,7 @@ def update_readme(
     )
     new_content, count2 = pattern2.subn(r'\g<1>' + new_minor + r'\g<2>', content)
     if count2 > 0:
-        changes.append(f"Updated {count2} dependency example(s): {old_minor} → {new_minor}")
+        changes.append(f"Updated {count2} dependency example(s): {old_minor} -> {new_minor}")
         content = new_content
     
     # Pattern 3: Cargo.toml dependency with version key like 'version = "0.4"'
@@ -142,7 +142,7 @@ def update_readme(
     )
     new_content, count3 = pattern3.subn(r'\g<1>' + new_minor + r'\g<2>', content)
     if count3 > 0:
-        changes.append(f"Updated {count3} version specification(s): {old_minor} → {new_minor}")
+        changes.append(f"Updated {count3} version specification(s): {old_minor} -> {new_minor}")
         content = new_content
     
     if content == original_content:

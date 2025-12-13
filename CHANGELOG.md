@@ -5,7 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 0.7.0
+## [0.7.0] - 2025-12-13
+
+Unified release train bump to 0.7.0 with Rust-side API improvements and backend updates.
+Upstream Dear ImGui/cimgui version is unchanged in this release (still Dear ImGui v1.92.5 docking, same as 0.6.0).
+
+### Highlights
+
+- Experimental native multi-viewport for Winit + WGPU (`dear-imgui-winit::multi_viewport`, `dear-imgui-wgpu::multi_viewport`) with `multi_viewport_wgpu` example.
+- Theme API + optional `serde` support for core enums/flags to make layouts/themes easier to persist.
+- Multi-select helpers for list/table selection (`Ui::multi_select_*`, `Ui::table_multi_select_indexed`).
+- New extension crate `dear-imgui-reflect` for derive-based editors (ImReflect-style auto UI).
+- `dear-imgui-wgpu` renderer improvements: unified errors, pipeline layout reuse, tighter texture lifetime handling, and per-texture custom samplers.
+- `dear-app` GPU recovery: attempts a full rebuild on fatal WGPU errors.
+- WebAssembly import-style provider module `imgui-sys-v0` plus `xtask` commands to build the core + selected extensions.
+
+### Breaking Changes
+
+- `dear-imgui-wgpu`: removed `multi-viewport` feature; use `multi-viewport-winit` (Winit route) or `multi-viewport-sdl3` (SDL3 route).
+- `dear-imgui-sdl3`: official OpenGL3 renderer is now opt-in behind `opengl3-renderer` (SDL3 platform-only by default).
+  - Example: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
 
 ### Added
 
@@ -37,7 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extensions (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`, `dear-file-browser`)
   - Refresh bindings to the latest C APIs and tighten safe wrappers; includes making file-extension filters in the file browser case-insensitive.
   - ImGuizmo: keep the internal helper window ("gizmo") on the main viewport when ImGui multi-viewport is enabled, preventing an extra black OS window on Windows (workaround for CedricGuillemet/ImGuizmo#378).
-
 - dear-imgui-wgpu
   - Unified internal error handling to use the shared `RendererError` type instead of ad-hoc `Result<_, String>` values in frame/texture paths, making GPU failures easier to diagnose.
   - Simplified pipeline/bind group layout wiring so the render pipeline now reuses the layouts owned by `RenderResources`/`UniformBuffer`, avoiding duplicated layout definitions and potential mismatches.
@@ -48,15 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     See `wgpu_rtt_gameview` for a runtime sampler-switching demo.
   - Added a render-target format preflight when an adapter is provided, requiring the chosen
     `render_target_format` to be `RENDER_ATTACHMENT`-capable and blendable.
-  - **Breaking**: renamed the native Winit + WGPU multi-viewport feature in `dear-imgui-wgpu` from `multi-viewport`
-    to `multi-viewport-winit`. The SDL3 route remains `multi-viewport-sdl3`.
   - Experimental native multi-viewport support for SDL3 + WGPU via `multi_viewport_sdl3`, with a new `sdl3_wgpu_multi_viewport` example.
     Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
-
-- dear-imgui-sdl3
-  - **Breaking**: the official OpenGL3 renderer backend is now opt-in behind the `opengl3-renderer` feature (SDL3 platform-only by default).
-    - SDL3 + OpenGL3 multi-viewport example:
-      - `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
 
 - dear-app
   - Render loop now performs basic GPU/surface loss recovery: if a frame render returns a fatal GPU error, dear-app tears down the existing `AppWindow` and attempts to recreate the WGPU device/surface/renderer stack using the same `RunnerConfig`/add-ons.

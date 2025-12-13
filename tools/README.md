@@ -12,11 +12,11 @@ The workspace uses a **unified release train** model where all crates share the 
 
 ```bash
 # All-in-one command to prepare a release
-python tools/tasks.py release-prep 0.6.0
+python tools/tasks.py release-prep 0.7.0
 ```
 
 This will:
-1. Bump version to 0.6.0 across all crates
+1. Bump version to 0.7.0 across all crates
 2. Update pregenerated bindings for -sys crates
 3. Run tests
 4. Run pre-publish validation checks
@@ -42,7 +42,7 @@ Convenient shortcuts for common tasks.
 python tools/tasks.py check
 
 # Bump version
-python tools/tasks.py bump 0.6.0
+python tools/tasks.py bump 0.7.0
 
 # Update pregenerated bindings
 python tools/tasks.py bindings
@@ -60,7 +60,7 @@ python tools/tasks.py doc
 python tools/tasks.py clean
 
 # All-in-one release preparation
-python tools/tasks.py release-prep 0.6.0
+python tools/tasks.py release-prep 0.7.0
 ```
 
 ### 2. `publish.py` - Publishing Script
@@ -97,19 +97,19 @@ Updates version numbers across all crates and README files.
 
 ```bash
 # Bump to a specific version (updates Cargo.toml and README files)
-python tools/bump_version.py 0.6.0
+python tools/bump_version.py 0.7.0
 
 # Dry run (show what would change)
-python tools/bump_version.py 0.6.0 --dry-run
+python tools/bump_version.py 0.7.0 --dry-run
 
 # Specify old version manually
-python tools/bump_version.py 0.6.0 --old-version 0.5.0
+python tools/bump_version.py 0.7.0 --old-version 0.6.0
 
 # Bump only specific crates
-python tools/bump_version.py 0.6.0 --crates dear-imgui-sys,dear-imgui-rs
+python tools/bump_version.py 0.7.0 --crates dear-imgui-sys,dear-imgui-rs
 
 # Skip README updates
-python tools/bump_version.py 0.6.0 --skip-readme
+python tools/bump_version.py 0.7.0 --skip-readme
 ```
 
 **Note**: This script now automatically updates README files in addition to Cargo.toml files.
@@ -127,12 +127,12 @@ python tools/pre_publish_check.py --skip-git-check --skip-doc-check
 ```
 
 **Checks performed:**
-- ✓ Version consistency across all crates
-- ✓ Pregenerated bindings exist for -sys crates
-- ✓ Git working tree is clean
-- ✓ Cargo.lock is up-to-date
-- ✓ Documentation builds in offline mode
-- ✓ Tests pass
+- Version consistency across all crates
+- Pregenerated bindings exist for -sys crates
+- Git working tree is clean
+- Cargo.lock is up-to-date
+- Documentation builds in offline mode
+- Tests pass
 
 ### 5. `update_submodule_and_bindings.py` - Bindings Generation
 
@@ -182,13 +182,13 @@ Updates version numbers in README files (compatibility tables and examples).
 
 ```bash
 # Update to a specific version
-python tools/update_readme_versions.py 0.6.0
+python tools/update_readme_versions.py 0.7.0
 
 # Dry run (show what would change)
-python tools/update_readme_versions.py 0.6.0 --dry-run
+python tools/update_readme_versions.py 0.7.0 --dry-run
 
 # Specify old version manually
-python tools/update_readme_versions.py 0.6.0 --old-version 0.5.0
+python tools/update_readme_versions.py 0.7.0 --old-version 0.6.0
 ```
 
 **Note**: This script is automatically called by `bump_version.py`, so you usually don't need to run it manually.
@@ -199,7 +199,7 @@ python tools/update_readme_versions.py 0.6.0 --old-version 0.5.0
 
 ```bash
 # 1. Prepare release (bump version, update bindings, test, check)
-python tools/tasks.py release-prep 0.6.0
+python tools/tasks.py release-prep 0.7.0
 
 # 2. Review changes
 git diff
@@ -211,16 +211,16 @@ git diff
 
 # 4. Commit changes
 git add -A
-git commit -m "chore: prepare release v0.6.0"
+git commit -m "chore: prepare release v0.7.0"
 
 # 5. Publish (dry run first)
 python tools/tasks.py publish --dry-run
 python tools/tasks.py publish
 
 # 6. Tag and push
-git tag -a v0.6.0 -m "Release v0.6.0"
+git tag -a v0.7.0 -m "Release v0.7.0"
 git push origin main
-git push origin v0.6.0
+git push origin v0.7.0
 
 # 7. Create GitHub release
 # Go to GitHub and create a release from the tag
@@ -236,7 +236,7 @@ python tools/update_submodule_and_bindings.py \
   --profile release
 
 # 2. Bump version
-python tools/bump_version.py 0.6.0
+python tools/bump_version.py 0.7.0
 
 # 3. Update Cargo.lock
 cargo update
@@ -254,16 +254,16 @@ python tools/pre_publish_check.py
 
 # 7. Commit changes
 git add -A
-git commit -m "chore: prepare release v0.6.0"
+git commit -m "chore: prepare release v0.7.0"
 
 # 8. Publish
 python tools/publish.py --dry-run  # Dry run first
 python tools/publish.py            # Actual publish
 
 # 9. Tag and push
-git tag -a v0.6.0 -m "Release v0.6.0"
+git tag -a v0.7.0 -m "Release v0.7.0"
 git push origin main
-git push origin v0.6.0
+git push origin v0.7.0
 
 # 10. Create GitHub release
 ```

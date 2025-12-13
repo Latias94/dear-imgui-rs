@@ -201,12 +201,12 @@ path = "reflect_demo.rs"
 required-features = ["reflect"]
 
 [dependencies]
-dear-imgui-rs = { path = "../dear-imgui", version = "0.6" }
-dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.6" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.6" }
-dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.6" }
-dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.6", optional = true }
-dear-app = { path = "../dear-app", version = "0.6" }
+dear-imgui-rs = { path = "../dear-imgui", version = "0.7" }
+dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.7" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.7" }
+dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.7" }
+dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.7", optional = true }
+dear-app = { path = "../dear-app", version = "0.7" }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
