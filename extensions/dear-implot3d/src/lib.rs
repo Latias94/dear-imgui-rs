@@ -38,6 +38,7 @@
 //! - Builder pattern: Fluent API for configuring plots
 //! - Type-safe flags: Using `bitflags!` for compile-time safety
 
+use dear_imgui_rs::sys as imgui_sys;
 use dear_imgui_rs::texture::TextureRef;
 pub use dear_imgui_rs::{Context, Ui};
 use dear_implot3d_sys as sys;
@@ -51,6 +52,64 @@ pub use style::*;
 pub use ui_ext::*;
 pub mod meshes;
 pub mod plots;
+
+trait ImVec2Ctor {
+    fn from_xy(x: f32, y: f32) -> Self;
+}
+
+impl ImVec2Ctor for sys::ImVec2_c {
+    fn from_xy(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
+
+impl ImVec2Ctor for imgui_sys::ImVec2_c {
+    fn from_xy(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
+
+#[inline]
+fn imvec2<T: ImVec2Ctor>(x: f32, y: f32) -> T {
+    T::from_xy(x, y)
+}
+
+trait ImVec4Ctor {
+    fn from_xyzw(x: f32, y: f32, z: f32, w: f32) -> Self;
+}
+
+impl ImVec4Ctor for sys::ImVec4_c {
+    fn from_xyzw(x: f32, y: f32, z: f32, w: f32) -> Self {
+        Self { x, y, z, w }
+    }
+}
+
+impl ImVec4Ctor for imgui_sys::ImVec4_c {
+    fn from_xyzw(x: f32, y: f32, z: f32, w: f32) -> Self {
+        Self { x, y, z, w }
+    }
+}
+
+#[inline]
+fn imvec4<T: ImVec4Ctor>(x: f32, y: f32, z: f32, w: f32) -> T {
+    T::from_xyzw(x, y, z, w)
+}
+
+#[allow(non_snake_case)]
+mod compat_ffi {
+    use super::{imgui_sys, sys};
+
+    unsafe extern "C" {
+        pub fn ImPlot3D_PlotToPixels_double(x: f64, y: f64, z: f64) -> imgui_sys::ImVec2_c;
+        pub fn ImPlot3D_GetPlotRectPos() -> imgui_sys::ImVec2_c;
+        pub fn ImPlot3D_GetPlotRectSize() -> imgui_sys::ImVec2_c;
+        pub fn ImPlot3D_NextColormapColor() -> imgui_sys::ImVec4_c;
+        pub fn ImPlot3D_GetColormapColor(
+            idx: ::std::os::raw::c_int,
+            cmap: sys::ImPlot3DColormap,
+        ) -> imgui_sys::ImVec4_c;
+    }
+}
 
 // Debug-only: enforce BeginPlot/Setup/Plot call ordering
 #[cfg(debug_assertions)]
@@ -895,10 +954,7 @@ impl Plot3DBuilder {
             }
             sys::ImPlot3D_BeginPlot(
                 title_c.as_ptr(),
-                sys::ImVec2_c {
-                    x: size[0],
-                    y: size[1],
-                },
+                imvec2(size[0], size[1]),
                 self.flags.bits() as i32,
             )
         };
@@ -1227,20 +1283,9 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
                     y: self.axis_v[1] as f64,
                     z: self.axis_v[2] as f64,
                 },
-                sys::ImVec2_c {
-                    x: self.uv0[0],
-                    y: self.uv0[1],
-                },
-                sys::ImVec2_c {
-                    x: self.uv1[0],
-                    y: self.uv1[1],
-                },
-                sys::ImVec4_c {
-                    x: self.tint[0],
-                    y: self.tint[1],
-                    z: self.tint[2],
-                    w: self.tint[3],
-                },
+                imvec2(self.uv0[0], self.uv0[1]),
+                imvec2(self.uv1[0], self.uv1[1]),
+                imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
                 self.flags.bits() as i32,
             );
         }
@@ -1306,28 +1351,11 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
                     y: self.p3[1] as f64,
                     z: self.p3[2] as f64,
                 },
-                sys::ImVec2_c {
-                    x: self.uv0[0],
-                    y: self.uv0[1],
-                },
-                sys::ImVec2_c {
-                    x: self.uv1[0],
-                    y: self.uv1[1],
-                },
-                sys::ImVec2_c {
-                    x: self.uv2[0],
-                    y: self.uv2[1],
-                },
-                sys::ImVec2_c {
-                    x: self.uv3[0],
-                    y: self.uv3[1],
-                },
-                sys::ImVec4_c {
-                    x: self.tint[0],
-                    y: self.tint[1],
-                    z: self.tint[2],
-                    w: self.tint[3],
-                },
+                imvec2(self.uv0[0], self.uv0[1]),
+                imvec2(self.uv1[0], self.uv1[1]),
+                imvec2(self.uv2[0], self.uv2[1]),
+                imvec2(self.uv3[0], self.uv3[1]),
+                imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
                 self.flags.bits() as i32,
             );
         }
@@ -1566,17 +1594,14 @@ impl<'ui> Plot3DUi<'ui> {
                 y as f64,
                 z as f64,
                 angle as f64,
-                sys::ImVec2_c {
-                    x: pix_offset[0],
-                    y: pix_offset[1],
-                },
+                imvec2(pix_offset[0], pix_offset[1]),
             )
         }
     }
 
     pub fn plot_to_pixels(&self, point: [f32; 3]) -> [f32; 2] {
         unsafe {
-            let out = sys::ImPlot3D_PlotToPixels_double(
+            let out = compat_ffi::ImPlot3D_PlotToPixels_double(
                 point[0] as f64,
                 point[1] as f64,
                 point[2] as f64,
@@ -1591,14 +1616,14 @@ impl<'ui> Plot3DUi<'ui> {
 
     pub fn get_frame_pos(&self) -> [f32; 2] {
         unsafe {
-            let out = sys::ImPlot3D_GetPlotRectPos();
+            let out = compat_ffi::ImPlot3D_GetPlotRectPos();
             [out.x, out.y]
         }
     }
 
     pub fn get_frame_size(&self) -> [f32; 2] {
         unsafe {
-            let out = sys::ImPlot3D_GetPlotRectSize();
+            let out = compat_ffi::ImPlot3D_GetPlotRectSize();
             [out.x, out.y]
         }
     }

@@ -21,15 +21,7 @@ pub fn style_colors_auto() {
 #[inline]
 pub fn push_style_color(idx: i32, col: [f32; 4]) {
     unsafe {
-        sys::ImPlot3D_PushStyleColor_Vec4(
-            idx,
-            sys::ImVec4_c {
-                x: col[0],
-                y: col[1],
-                z: col[2],
-                w: col[3],
-            },
-        );
+        sys::ImPlot3D_PushStyleColor_Vec4(idx, crate::imvec4(col[0], col[1], col[2], col[3]));
     }
 }
 #[inline]
@@ -52,15 +44,7 @@ pub fn push_style_var_i32(idx: i32, val: i32) {
 /// Push a style variable (Vec2 variant)
 #[inline]
 pub fn push_style_var_vec2(idx: i32, val: [f32; 2]) {
-    unsafe {
-        sys::ImPlot3D_PushStyleVar_Vec2(
-            idx,
-            sys::ImVec2_c {
-                x: val[0],
-                y: val[1],
-            },
-        )
-    }
+    unsafe { sys::ImPlot3D_PushStyleVar_Vec2(idx, crate::imvec2(val[0], val[1])) }
 }
 
 /// Pop style variable(s)
@@ -71,31 +55,13 @@ pub fn pop_style_var(count: i32) {
 
 #[inline]
 pub fn set_next_line_style(col: [f32; 4], weight: f32) {
-    unsafe {
-        sys::ImPlot3D_SetNextLineStyle(
-            sys::ImVec4_c {
-                x: col[0],
-                y: col[1],
-                z: col[2],
-                w: col[3],
-            },
-            weight,
-        )
-    }
+    unsafe { sys::ImPlot3D_SetNextLineStyle(crate::imvec4(col[0], col[1], col[2], col[3]), weight) }
 }
 
 #[inline]
 pub fn set_next_fill_style(col: [f32; 4], alpha_mod: f32) {
     unsafe {
-        sys::ImPlot3D_SetNextFillStyle(
-            sys::ImVec4_c {
-                x: col[0],
-                y: col[1],
-                z: col[2],
-                w: col[3],
-            },
-            alpha_mod,
-        )
+        sys::ImPlot3D_SetNextFillStyle(crate::imvec4(col[0], col[1], col[2], col[3]), alpha_mod)
     }
 }
 
@@ -111,19 +77,9 @@ pub fn set_next_marker_style(
         sys::ImPlot3D_SetNextMarkerStyle(
             marker as i32,
             size,
-            sys::ImVec4_c {
-                x: fill[0],
-                y: fill[1],
-                z: fill[2],
-                w: fill[3],
-            },
+            crate::imvec4(fill[0], fill[1], fill[2], fill[3]),
             weight,
-            sys::ImVec4_c {
-                x: outline[0],
-                y: outline[1],
-                z: outline[2],
-                w: outline[3],
-            },
+            crate::imvec4(outline[0], outline[1], outline[2], outline[3]),
         )
     }
 }
@@ -229,7 +185,7 @@ pub fn set_style_colormap_by_name(name: &str) {
 pub fn get_colormap_color(idx: i32) -> [f32; 4] {
     unsafe {
         // Pass -1 for "current" colormap (upstream convention)
-        let out = sys::ImPlot3D_GetColormapColor(idx, -1);
+        let out = crate::compat_ffi::ImPlot3D_GetColormapColor(idx, (-1) as sys::ImPlot3DColormap);
         [out.x, out.y, out.z, out.w]
     }
 }
@@ -237,7 +193,7 @@ pub fn get_colormap_color(idx: i32) -> [f32; 4] {
 /// Get next colormap color (advances internal counter)
 pub fn next_colormap_color() -> [f32; 4] {
     unsafe {
-        let out = sys::ImPlot3D_NextColormapColor();
+        let out = crate::compat_ffi::ImPlot3D_NextColormapColor();
         [out.x, out.y, out.z, out.w]
     }
 }

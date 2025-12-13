@@ -9,6 +9,14 @@ fn main() {
     println!("cargo:rerun-if-changed=backends/imgui_impl_opengl3.cpp");
     println!("cargo:rerun-if-changed=backends/imgui_impl_opengl3.h");
 
+    // The upstream SDL3 backend uses Win32 APIs (e.g. GetWindowLong/SetWindowLong) on Windows.
+    if env::var("CARGO_CFG_TARGET_OS")
+        .map(|os| os == "windows")
+        .unwrap_or(false)
+    {
+        println!("cargo:rustc-link-lib=user32");
+    }
+
     // Upstream Dear ImGui core headers (imgui.h etc.) are provided by dear-imgui-sys.
     // We vend the backend sources (imgui_impl_sdl3/imgui_impl_opengl3) directly in this
     // crate to avoid relying on dear-imgui-sys packaging internal backends sources.
