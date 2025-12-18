@@ -1,6 +1,6 @@
 [package]
 name = "dear-imnodes"
-version = "0.7.0"
+version = "0.7.1"
 edition.workspace = true
 description = "Safe, idiomatic Rust bindings for ImNodes (node editor for Dear ImGui)"
 license.workspace = true

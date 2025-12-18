@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-reflect"
-version = "0.7.0"
+version = "0.7.1"
 edition.workspace = true
 description = "Reflection-based UI helpers for dear-imgui-rs (auto-generate ImGui widgets for Rust structs)"
 license.workspace = true

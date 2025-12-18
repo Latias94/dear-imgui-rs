@@ -28,7 +28,7 @@ dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.7" }
 dear-implot = { path = "../extensions/dear-implot", version = "0.7", optional = true, features = ["wasm"] }
 dear-implot3d = { path = "../extensions/dear-implot3d", version = "0.7", optional = true, features = ["wasm"] }
 dear-imnodes = { path = "../extensions/dear-imnodes", version = "0.7", optional = true, features = ["wasm"] }
-dear-imguizmo = { path = "../extensions/dear-imguizmo", version = "0.7", optional = true, features = ["wasm"] }
+dear-imguizmo = { path = "../extensions/dear-imguizmo", version = "0.8", optional = true, features = ["wasm"] }
 dear-imguizmo-quat = { path = "../extensions/dear-imguizmo-quat", version = "0.7", optional = true, features = ["wasm"] }
 wgpu = { workspace = true }
 winit = { workspace = true }
