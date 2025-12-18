@@ -478,7 +478,7 @@ fn create_scene_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("quat-scene-pipeline-layout"),
         bind_group_layouts: &[&bind_layout],
-        push_constant_ranges: &[],
+        immediate_size: 0,
     });
 
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -517,7 +517,7 @@ fn create_scene_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> 
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     });
 
