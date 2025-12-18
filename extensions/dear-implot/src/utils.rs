@@ -1,6 +1,6 @@
 // Utility functions for ImPlot
 
-use crate::{XAxis, YAxis, sys};
+use crate::{XAxis, YAxis, compat_ffi, sys};
 
 /// Check if the plot area is hovered
 pub fn is_plot_hovered() -> bool {
@@ -196,7 +196,7 @@ pub fn annotation_text(
         y: pixel_offset[1],
     };
     let c = CString::new(text).expect("text contained NUL");
-    unsafe { sys::ImPlot_Annotation_Str0(x, y, col, off, clamp, c.as_ptr()) }
+    unsafe { compat_ffi::ImPlot_Annotation_Str0(x, y, col, off, clamp, c.as_ptr()) }
 }
 
 /// Tag the X axis at position x with a tick-like mark
@@ -219,7 +219,7 @@ pub fn tag_x_text(x: f64, color: [f32; 4], text: &str) {
         w: color[3],
     };
     let c = CString::new(text).expect("text contained NUL");
-    unsafe { sys::ImPlot_TagX_Str0(x, col, c.as_ptr()) }
+    unsafe { compat_ffi::ImPlot_TagX_Str0(x, col, c.as_ptr()) }
 }
 
 /// Tag the Y axis at position y with a tick-like mark
@@ -242,7 +242,7 @@ pub fn tag_y_text(y: f64, color: [f32; 4], text: &str) {
         w: color[3],
     };
     let c = CString::new(text).expect("text contained NUL");
-    unsafe { sys::ImPlot_TagY_Str0(y, col, c.as_ptr()) }
+    unsafe { compat_ffi::ImPlot_TagY_Str0(y, col, c.as_ptr()) }
 }
 
 /// Get the current plot limits for specific axes
