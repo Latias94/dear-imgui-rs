@@ -117,7 +117,7 @@ impl AppWindow {
         // Set initial display size before creating platform
         {
             let io = context.io_mut();
-            io.set_display_size([1280.0, 720.0]);
+            io.set_display_size([size.width as f32, size.height as f32]);
             io.set_display_framebuffer_scale([1.0, 1.0]);
         }
 
@@ -280,8 +280,6 @@ impl AppWindow {
 
         #[cfg(feature = "implot")]
         {
-            use dear_implot::ImPlotExt;
-
             ui.window("ImPlot (Web)")
                 .size([480.0, 320.0], Condition::FirstUseEver)
                 .build(|| {
@@ -435,6 +433,7 @@ impl AppWindow {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             self.imgui
