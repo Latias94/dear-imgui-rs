@@ -164,7 +164,7 @@ fn create_offscreen_pipeline(
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Offscreen Pipeline Layout"),
         bind_group_layouts: &[],
-        push_constant_ranges: &[],
+        immediate_size: 0,
     });
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -197,7 +197,7 @@ fn create_offscreen_pipeline(
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }
@@ -254,14 +254,14 @@ impl AppWindow {
             label: Some("rtt_linear_sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("rtt_nearest_sampler"),
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
         let use_nearest_sampler = false;
@@ -365,6 +365,7 @@ impl AppWindow {
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 });
                 // Fullscreen triangle with procedural grid + filled triangle in FS
                 rpass.set_pipeline(&self.offscreen_pipeline);
@@ -475,6 +476,7 @@ impl AppWindow {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             renderer.new_frame()?;
             renderer.render_draw_data(&draw_data, &mut rpass)?;

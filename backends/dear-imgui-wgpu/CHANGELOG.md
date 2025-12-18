@@ -6,3 +6,6 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Bump `wgpu` to v28 (requires Rust 1.92+).

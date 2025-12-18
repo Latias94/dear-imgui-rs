@@ -46,7 +46,7 @@ impl RenderResources {
             address_mode_w: AddressMode::ClampToEdge, // matches WGPUAddressMode_ClampToEdge
             mag_filter: FilterMode::Linear,           // matches WGPUFilterMode_Linear
             min_filter: FilterMode::Linear,           // matches WGPUFilterMode_Linear
-            mipmap_filter: FilterMode::Linear,        // matches WGPUMipmapFilterMode_Linear
+            mipmap_filter: MipmapFilterMode::Linear,  // matches WGPUMipmapFilterMode_Linear
             anisotropy_clamp: 1,                      // matches maxAnisotropy = 1
             ..Default::default()
         });

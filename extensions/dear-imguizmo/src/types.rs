@@ -89,6 +89,10 @@ pub enum DrawListTarget {
 pub enum GuizmoId<'a> {
     Int(i32),
     Str(&'a str),
+    /// A non-NUL-terminated byte slice, passed via the `str_begin/str_end` C API.
+    ///
+    /// This allows IDs containing interior NUL bytes and avoids `CString` allocation.
+    Bytes(&'a [u8]),
     Ptr(*const std::ffi::c_void),
 }
 impl From<i32> for GuizmoId<'_> {
@@ -99,6 +103,11 @@ impl From<i32> for GuizmoId<'_> {
 impl<'a> From<&'a str> for GuizmoId<'a> {
     fn from(s: &'a str) -> Self {
         GuizmoId::Str(s)
+    }
+}
+impl<'a> From<&'a [u8]> for GuizmoId<'a> {
+    fn from(bytes: &'a [u8]) -> Self {
+        GuizmoId::Bytes(bytes)
     }
 }
 impl<T> From<*const T> for GuizmoId<'_> {

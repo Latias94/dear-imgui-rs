@@ -333,7 +333,7 @@ var<uniform> u: SceneUniform;
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("simple_scene_pipeline_layout"),
             bind_group_layouts: &[&uniform_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -398,7 +398,7 @@ var<uniform> u: SceneUniform;
             },
             depth_stencil: Some(depth_state_grid),
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -430,7 +430,7 @@ var<uniform> u: SceneUniform;
             },
             depth_stencil: Some(depth_state_cube),
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -701,6 +701,7 @@ var<uniform> u: SceneUniform;
             }),
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
 
         if show_grid {
@@ -956,7 +957,7 @@ impl AppWindow {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let scene_renderer = SimpleSceneRenderer::new(&self.device, self.surface_desc.format);
@@ -1128,6 +1129,7 @@ impl AppWindow {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             imgui

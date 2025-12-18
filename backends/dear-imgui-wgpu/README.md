@@ -36,7 +36,7 @@ renderer.render_draw_data(&imgui.render(), &mut render_pass)?;
 |-----------------|---------|
 | Crate           | 0.7.x   |
 | dear-imgui-rs   | 0.7.x   |
-| wgpu            | 27      |
+| wgpu            | 27 (0.7.x), 28 (trunk / 0.8.0+) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 

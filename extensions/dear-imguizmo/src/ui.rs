@@ -126,6 +126,32 @@ impl<'ui> GizmoUi<'ui> {
         }
     }
 
+    /// Set an alternative ImGui window to consider hovered for ImGuizmo interactions.
+    ///
+    /// This corresponds to `ImGuizmo::SetAlternativeWindow(ImGuiWindow*)`.
+    ///
+    /// Notes:
+    /// - `window_name` must match the exact ImGui window name (including any `###id` suffix).
+    /// - Returns `true` if the window was found; otherwise clears the alternative window and returns `false`.
+    pub fn set_alternative_window_by_name(&self, window_name: &str) -> bool {
+        let c = CString::new(window_name).expect("window_name contained NUL");
+        let window = unsafe { imgui_sys::igFindWindowByName(c.as_ptr()) } as *mut sys::ImGuiWindow;
+        unsafe { sys::ImGuizmo_SetAlternativeWindow(window) };
+        !window.is_null()
+    }
+
+    /// Clear the alternative hovered window for ImGuizmo.
+    pub fn clear_alternative_window(&self) {
+        unsafe { sys::ImGuizmo_SetAlternativeWindow(std::ptr::null_mut()) }
+    }
+
+    /// Unsafe: set a raw `ImGuiWindow*` as ImGuizmo's alternative hovered window.
+    ///
+    /// Prefer `set_alternative_window_by_name` unless you are already working with internal ImGui window pointers.
+    pub unsafe fn set_alternative_window_raw(&self, window: *mut sys::ImGuiWindow) {
+        sys::ImGuizmo_SetAlternativeWindow(window)
+    }
+
     /// Unsafe: set a raw ImGui drawlist pointer for ImGuizmo to render into.
     ///
     /// Prefer using `set_drawlist_*` safe variants. Only use this when you
@@ -299,6 +325,13 @@ impl<'ui> GizmoUi<'ui> {
                     let c = CString::new(s).expect("string contained NUL");
                     sys::ImGuizmo_PushID_Str(c.as_ptr())
                 }
+                GuizmoId::Bytes(bytes) => {
+                    let range = bytes.as_ptr_range();
+                    sys::ImGuizmo_PushID_StrStr(
+                        range.start as *const std::os::raw::c_char,
+                        range.end as *const std::os::raw::c_char,
+                    )
+                }
                 GuizmoId::Ptr(p) => sys::ImGuizmo_PushID_Ptr(p),
             }
         }
@@ -308,10 +341,24 @@ impl<'ui> GizmoUi<'ui> {
     pub fn push_id_str(&self, id: &str) -> IdToken<'ui> {
         self.push_id(GuizmoId::Str(id))
     }
+    /// Push an ID using a non-NUL-terminated byte slice (ImGuizmo `str_begin/str_end` form).
+    pub fn push_id_bytes<'a>(&self, bytes: &'a [u8]) -> IdToken<'ui> {
+        self.push_id(GuizmoId::Bytes(bytes))
+    }
     /// Obtain a hashed ID value following ImGuizmo's ID scheme.
     pub fn get_id_str(&self, id: &str) -> imgui_sys::ImGuiID {
         let c = CString::new(id).expect("string contained NUL");
         unsafe { sys::ImGuizmo_GetID_Str(c.as_ptr()) }
+    }
+    /// Obtain a hashed ID value using a non-NUL-terminated byte slice (ImGuizmo `str_begin/str_end` form).
+    pub fn get_id_bytes(&self, bytes: &[u8]) -> imgui_sys::ImGuiID {
+        let range = bytes.as_ptr_range();
+        unsafe {
+            sys::ImGuizmo_GetID_StrStr(
+                range.start as *const std::os::raw::c_char,
+                range.end as *const std::os::raw::c_char,
+            )
+        }
     }
 
     /// Obtain a hashed ID from a pointer following ImGuizmo's ID scheme.

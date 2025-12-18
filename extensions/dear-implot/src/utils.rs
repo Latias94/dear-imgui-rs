@@ -173,6 +173,32 @@ pub fn annotation_point(
     unsafe { sys::ImPlot_Annotation_Bool(x, y, col, off, clamp, round) }
 }
 
+/// Draw a text annotation at (x,y) using the non-variadic `ImPlot_Annotation_Str0` API.
+///
+/// This avoids calling the C variadic (`...`) entrypoint, which is not supported on some targets
+/// (e.g. wasm32 via import-style bindings).
+pub fn annotation_text(
+    x: f64,
+    y: f64,
+    color: [f32; 4],
+    pixel_offset: [f32; 2],
+    clamp: bool,
+    text: &str,
+) {
+    let col = sys::ImVec4_c {
+        x: color[0],
+        y: color[1],
+        z: color[2],
+        w: color[3],
+    };
+    let off = sys::ImVec2_c {
+        x: pixel_offset[0],
+        y: pixel_offset[1],
+    };
+    let c = CString::new(text).expect("text contained NUL");
+    unsafe { sys::ImPlot_Annotation_Str0(x, y, col, off, clamp, c.as_ptr()) }
+}
+
 /// Tag the X axis at position x with a tick-like mark
 pub fn tag_x(x: f64, color: [f32; 4], round: bool) {
     let col = sys::ImVec4_c {
@@ -184,6 +210,18 @@ pub fn tag_x(x: f64, color: [f32; 4], round: bool) {
     unsafe { sys::ImPlot_TagX_Bool(x, col, round) }
 }
 
+/// Tag the X axis at position x with a text label using the non-variadic `ImPlot_TagX_Str0` API.
+pub fn tag_x_text(x: f64, color: [f32; 4], text: &str) {
+    let col = sys::ImVec4_c {
+        x: color[0],
+        y: color[1],
+        z: color[2],
+        w: color[3],
+    };
+    let c = CString::new(text).expect("text contained NUL");
+    unsafe { sys::ImPlot_TagX_Str0(x, col, c.as_ptr()) }
+}
+
 /// Tag the Y axis at position y with a tick-like mark
 pub fn tag_y(y: f64, color: [f32; 4], round: bool) {
     let col = sys::ImVec4_c {
@@ -193,6 +231,18 @@ pub fn tag_y(y: f64, color: [f32; 4], round: bool) {
         w: color[3],
     };
     unsafe { sys::ImPlot_TagY_Bool(y, col, round) }
+}
+
+/// Tag the Y axis at position y with a text label using the non-variadic `ImPlot_TagY_Str0` API.
+pub fn tag_y_text(y: f64, color: [f32; 4], text: &str) {
+    let col = sys::ImVec4_c {
+        x: color[0],
+        y: color[1],
+        z: color[2],
+        w: color[3],
+    };
+    let c = CString::new(text).expect("text contained NUL");
+    unsafe { sys::ImPlot_TagY_Str0(y, col, c.as_ptr()) }
 }
 
 /// Get the current plot limits for specific axes
@@ -394,3 +444,4 @@ pub fn drag_line_y(
         held,
     }
 }
+use std::ffi::CString;

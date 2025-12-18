@@ -46,6 +46,12 @@ Extensions
 | dear-imguizmo-quat  | 0.7.x   | 0.7.x                  | dear-imguizmo-quat-sys 0.7.x | Quaternion gizmo                       |
 | dear-imgui-reflect  | 0.7.x   | 0.7.x                  | —                            | Reflection-based UI helpers (pure Rust)|
 
+## Trunk (Unreleased)
+
+- Target release train: `0.8.0` (unreleased).
+- Minimum supported Rust: 1.92 (required by `wgpu` 28).
+- External dependencies baseline: wgpu 28, winit 0.30.12, glow 0.16, sdl3 0.16.
+
 ## History
 
 Release Train 0.7 (current)

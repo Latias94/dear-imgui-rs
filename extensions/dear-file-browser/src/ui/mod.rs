@@ -81,7 +81,7 @@ impl FileBrowserState {
     /// state.click_action = dear_file_browser::ClickAction::Select; // or Navigate
     /// state.breadcrumbs_max_segments = 6;   // compress deep paths
     /// // Filters are case-insensitive and extension names shouldn't include dots
-    /// state.set_filters(vec![FileFilter::from(("Images", &["png", "jpg", "jpeg"]))]);
+    /// state.set_filters(vec![FileFilter::from(("Images", &["png", "jpg", "jpeg"][..]))]);
     ///
     /// ui.window("File Browser").build(|| {
     ///     if let Some(res) = ui.file_browser().show(&mut state) {

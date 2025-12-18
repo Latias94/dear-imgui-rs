@@ -185,8 +185,8 @@ impl FileDialog {
     /// ```
     /// use dear_file_browser::{FileDialog, DialogMode};
     /// let d = FileDialog::new(DialogMode::OpenFile)
-    ///     .filter(("Images", &["png", "jpg"]))
-    ///     .filter(("Rust", &["rs"]))
+    ///     .filter(("Images", &["png", "jpg"][..]))
+    ///     .filter(("Rust", &["rs"][..]))
     ///     .show_hidden(true);
     /// ```
     pub fn filter<F: Into<FileFilter>>(mut self, filter: F) -> Self {
@@ -202,7 +202,7 @@ impl FileDialog {
     /// ```
     /// use dear_file_browser::{FileDialog, DialogMode, FileFilter};
     /// let filters = vec![
-    ///     FileFilter::from(("Images", &["png", "jpg", "jpeg"]))
+    ///     FileFilter::from(("Images", &["png", "jpg", "jpeg"][..]))
     /// ];
     /// let d = FileDialog::new(DialogMode::OpenFiles)
     ///     .filters(filters)

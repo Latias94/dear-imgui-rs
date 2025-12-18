@@ -113,6 +113,7 @@ fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, c
         .clang_arg(format!("-I{}", cimplot_root.display()))
         .clang_arg(format!("-I{}", cimplot_root.join("implot").display()))
         .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .clang_arg("-DCIMGUI_VARGS0")
         .clang_arg("-x")
         .clang_arg("c++")
         .clang_arg("-std=c++17")
@@ -210,6 +211,7 @@ fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgu
     if cfg.is_msvc() {
         build.define("IMGUI_USE_WCHAR32", None);
     }
+    build.define("CIMGUI_VARGS0", None);
     build.include(imgui_src);
     build.include(cimgui_root);
     build.include(cimplot_root);
@@ -400,6 +402,7 @@ fn build_with_cmake(cfg: &BuildConfig, cimplot_root: &Path) -> bool {
     println!("cargo:warning=Building cimplot with CMake");
     let mut c = cmake::Config::new(cimplot_root);
     c.define("IMGUI_STATIC", "ON");
+    c.cxxflag("-DCIMGUI_VARGS0");
     let profile = env::var("PROFILE").unwrap_or_else(|_| "release".into());
     let cmake_profile = if cfg.is_msvc() && cfg.is_windows() && profile == "debug" {
         "RelWithDebInfo"

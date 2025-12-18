@@ -18,10 +18,10 @@
 //! use glow::HasContext;
 //!
 //! // Initialize your OpenGL context and Dear ImGui context
-//! let gl = glow::Context::from_loader_function(|s| {
+//! let gl = unsafe { glow::Context::from_loader_function(|s| {
 //!     // Your OpenGL loader function
 //!     std::ptr::null()
-//! });
+//! }) };
 //! let mut imgui = Context::create();
 //!
 //! // Create the renderer (simple usage)

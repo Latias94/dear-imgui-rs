@@ -377,6 +377,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                     })],
                     depth_stencil_attachment: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                     timestamp_writes: None,
                 });
                 // Reuse existing draw path with explicit framebuffer size override, but do

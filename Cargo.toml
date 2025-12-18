@@ -33,6 +33,7 @@ exclude = [
 
 [workspace.package]
 edition = "2024"
+rust-version = "1.92"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Latias94/dear-imgui-rs"
 homepage = "https://github.com/Latias94/dear-imgui-rs"
@@ -49,7 +50,7 @@ serde = { version = "1", features = ["derive"] }
 glam = "0.30"
 
 # Graphics and windowing
-wgpu = "27.0"
+wgpu = "28.0"
 winit = "0.30.12"
 glow = "0.16"
 glutin = "0.32"

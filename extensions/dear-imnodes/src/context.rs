@@ -33,6 +33,17 @@ impl Context {
     pub fn set_as_current(&self) {
         unsafe { sys::imnodes_SetCurrentContext(self.raw) };
     }
+
+    /// Return the raw pointer for this context.
+    pub fn as_raw(&self) -> *mut sys::ImNodesContext {
+        self.raw
+    }
+
+    /// Get the currently active ImNodes context.
+    pub fn current_raw() -> Option<std::ptr::NonNull<sys::ImNodesContext>> {
+        let ptr = unsafe { sys::imnodes_GetCurrentContext() };
+        std::ptr::NonNull::new(ptr)
+    }
 }
 
 impl Drop for Context {

@@ -10131,6 +10131,17 @@ unsafe extern "C" {
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
+    pub fn ImPlot_Annotation_Str0(
+        x: f64,
+        y: f64,
+        col: ImVec4_c,
+        pix_offset: ImVec2_c,
+        clamp: bool,
+        fmt: *const ::std::os::raw::c_char,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
     pub fn ImPlot_AnnotationV(
         x: f64,
         y: f64,
@@ -10151,6 +10162,10 @@ unsafe extern "C" {
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
+    pub fn ImPlot_TagX_Str0(x: f64, col: ImVec4_c, fmt: *const ::std::os::raw::c_char);
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
     pub fn ImPlot_TagXV(x: f64, col: ImVec4_c, fmt: *const ::std::os::raw::c_char, args: va_list);
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
@@ -10160,6 +10175,10 @@ unsafe extern "C" {
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
     pub fn ImPlot_TagY_Str(y: f64, col: ImVec4_c, fmt: *const ::std::os::raw::c_char, ...);
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_TagY_Str0(y: f64, col: ImVec4_c, fmt: *const ::std::os::raw::c_char);
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {

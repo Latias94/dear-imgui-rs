@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Extensions
+  - `dear-implot`: add non-variadic text helpers for annotations/tags (avoids calling C `...`, useful for import-style WASM).
+  - `dear-imguizmo`: expose safe alternative-window helpers and byte-slice ID helpers (`str_begin/str_end` form).
+  - `dear-imnodes`: expose accessors for the current/raw context pointer.
+
+### Changed
+
+- `dear-imgui-wgpu`: bump `wgpu` to v28 (requires Rust 1.92+).
+
 ## [0.7.0] - 2025-12-13
 
 Unified release train bump to 0.7.0 with Rust-side API improvements and backend updates.

@@ -62,8 +62,12 @@ impl GlowRenderer {
     /// # Example
     /// ```rust,no_run
     /// use dear_imgui_glow::GlowRenderer;
+    /// # use dear_imgui_glow::glow;
+    /// # use dear_imgui_rs::Context as ImGuiContext;
     ///
-    /// let mut renderer = GlowRenderer::new(gl_context, &mut imgui_context)?;
+    /// # let gl_context = unsafe { glow::Context::from_loader_function(|_| std::ptr::null()) };
+    /// # let mut imgui_context = ImGuiContext::create();
+    /// let mut renderer = GlowRenderer::new(gl_context, &mut imgui_context).unwrap();
     /// ```
     pub fn new(gl: glow::Context, imgui_context: &mut ImGuiContext) -> InitResult<Self> {
         let texture_map = Box::new(SimpleTextureMap::default());
@@ -83,13 +87,17 @@ impl GlowRenderer {
     /// # Example
     /// ```rust,no_run
     /// use dear_imgui_glow::{GlowRenderer, SimpleTextureMap};
+    /// # use dear_imgui_glow::glow;
+    /// # use dear_imgui_rs::Context as ImGuiContext;
     ///
     /// let texture_map = Box::new(SimpleTextureMap::default());
+    /// # let gl_context = unsafe { glow::Context::from_loader_function(|_| std::ptr::null()) };
+    /// # let mut imgui_context = ImGuiContext::create();
     /// let mut renderer = GlowRenderer::with_texture_map(
     ///     Some(gl_context),
     ///     &mut imgui_context,
     ///     texture_map
-    /// )?;
+    /// ).unwrap();
     /// ```
     pub fn with_texture_map(
         gl: Option<glow::Context>,
@@ -120,13 +128,17 @@ impl GlowRenderer {
     /// # Example
     /// ```rust,no_run
     /// use dear_imgui_glow::{GlowRenderer, SimpleTextureMap};
+    /// # use dear_imgui_glow::glow;
+    /// # use dear_imgui_rs::Context as ImGuiContext;
     ///
     /// let texture_map = Box::new(SimpleTextureMap::default());
+    /// # let gl_context = unsafe { glow::Context::from_loader_function(|_| std::ptr::null()) };
+    /// # let mut imgui_context = ImGuiContext::create();
     /// let mut renderer = GlowRenderer::with_external_context(
     ///     &gl_context,
     ///     &mut imgui_context,
     ///     texture_map
-    /// )?;
+    /// ).unwrap();
     /// ```
     pub fn with_external_context(
         gl: &Context,

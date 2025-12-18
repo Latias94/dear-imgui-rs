@@ -22,12 +22,13 @@
 //!
 //! ```no_run
 //! use dear_imgui_reflect as reflect;
+//! use reflect::ImGuiReflectExt;
 //!
 //! #[derive(reflect::ImGuiReflect, Default)]
 //! struct Player {
 //!     #[imgui(slider, min = 0.0, max = 100.0)]
 //!     health: f32,
-//!     #[imgui(multiline, lines = 3, hint = "Notes about this player")]
+//!     #[imgui(multiline, lines = 3)]
 //!     notes: String,
 //!     inventory: Vec<String>,
 //! }
@@ -93,8 +94,8 @@
 //!         s.vec_mut().reorderable = false;
 //!
 //!         // Use a 0..1 slider for all f32 values by default.
-//!         s.numerics_f32_mut()
-//!             .slider_0_to_1(2); // "%.2f"
+//!         let f32_settings = s.numerics_f32().clone().slider_0_to_1(2); // "%.2f"
+//!         *s.numerics_f32_mut() = f32_settings;
 //!     });
 //! }
 //! ```
@@ -211,7 +212,7 @@
 //!             // Left side: list of enemies with selection.
 //!             ui.child_window("EnemyList")
 //!                 .size([200.0, 0.0])
-//!                 .build(|| {
+//!                 .build(ui, || {
 //!                     for (i, enemy) in self.enemies.iter().enumerate() {
 //!                         let label = format!("{i}: {}", enemy.name);
 //!                         if ui.selectable_config(&label)
@@ -228,7 +229,7 @@
 //!             // Right side: reflected editor for the selected enemy.
 //!             ui.child_window("EnemyInspector")
 //!                 .size([0.0, 0.0])
-//!                 .build(|| {
+//!                 .build(ui, || {
 //!                     if let Some(enemy) = self.enemies.get_mut(self.selected) {
 //!                         ui.input_reflect("Enemy", enemy);
 //!                     } else {
