@@ -8,6 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Reduce disk usage in CI (helps avoid "No space left on device" from LLVM/rustc).
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-Cdebuginfo=0"
 
 jobs:
   build:
@@ -21,7 +24,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -61,7 +68,7 @@ jobs:
         run: choco install -y llvm cmake
 
       - name: Build workspace (native)
-        run: cargo build --workspace
+        run: cargo build --workspace --exclude dear-imgui-examples --exclude dear-imgui-web-demo --exclude xtask
         env:
           # Prefer CMake path on Windows (auto-detects VS/SDK)
           IMGUI_SYS_USE_CMAKE: ${{ runner.os == 'Windows' && '1' || '' }}
@@ -71,14 +78,11 @@ jobs:
           IMNODES_SYS_FORCE_BUILD: "1"
           IMGUIZMO_SYS_FORCE_BUILD: "1"
 
-      - name: Build examples with extensions
-        run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect"
-
       - name: Build dear-app with all add-ons
         run: cargo build -p dear-app --features "implot imnodes implot3d"
 
-      - name: Build examples (ImPlot3D + ImGuIZMO.quat)
-        run: cargo build -p dear-imgui-examples --features "implot3d imguizmo-quat"
+      - name: Build examples (all extensions)
+        run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat"
 
   publish-check:
     name: Package check (ubuntu)
@@ -87,7 +91,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -135,7 +143,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

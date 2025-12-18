@@ -63,8 +63,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
           ref: ${{ inputs.tag || inputs.branch || github.ref }}
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

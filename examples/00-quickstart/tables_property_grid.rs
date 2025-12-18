@@ -189,7 +189,7 @@ impl AppWindow {
                     .headers(true)
                     .build(|ui| {
                         // Helper: one row with label left and editor right
-                        let mut row = |label: &str, f: &mut dyn FnMut(&Ui)| {
+                        let row = |label: &str, f: &mut dyn FnMut(&Ui)| {
                             ui.table_next_row();
                             ui.table_set_column_index(0);
                             ui.text(label);
