@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-sdl3"
-version = "0.7.0"
+version = "0.7.1"
 edition.workspace = true
 description = "SDL3 platform backend with optional OpenGL3 renderer for dear-imgui-rs"
 license.workspace = true

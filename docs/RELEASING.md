@@ -35,7 +35,7 @@ Key flags:
 Examples
 - dear-imgui-sys only (update submodule + pregenerate, Release):
 ```
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys \
   --submodules update \
   --cimgui-branch docking_inter \
@@ -44,7 +44,7 @@ python tools/update_submodule_and_bindings.py \
 
 - All 4 -sys crates (update all submodules + pregenerate, Release):
 ```
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates all --submodules update --profile release \
   --cimgui-branch docking_inter \
   --cimplot-branch master \
@@ -54,7 +54,7 @@ python tools/update_submodule_and_bindings.py \
 
 - Regenerate pregenerated bindings only (no submodule changes):
 ```
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates dear-implot-sys,dear-imnodes-sys \
   --submodules skip --profile debug
 ```
@@ -89,8 +89,8 @@ These checks generate/use bindings only and won’t build/link native code.
 
 > **Tip**: Use the automated publishing script for easier workflow:
 > ```bash
-> python tools/tasks.py release-prep 0.7.0  # Prepare release
-> python tools/tasks.py publish             # Publish all crates
+> python3 tools/tasks.py release-prep 0.7.1  # Prepare release
+> python3 tools/tasks.py publish             # Publish all crates
 > ```
 > See [PUBLISHING.md](./PUBLISHING.md) for details.
 
@@ -102,7 +102,7 @@ Manual workflow:
 git add -A
 git commit -m "chore(sys): update third-party and pregenerated bindings"
 ```
-3) Tag and publish crates (or use `python tools/publish.py`):
+3) Tag and publish crates (or use `python3 tools/publish.py`):
 ```
 cargo publish -p dear-imgui-sys
 cargo publish -p dear-implot-sys

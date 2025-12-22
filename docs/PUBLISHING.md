@@ -46,7 +46,7 @@ Before publishing, ensure:
 
 - [ ] Pregenerated bindings are up-to-date for `-sys` crates
   ```bash
-  python tools/update_submodule_and_bindings.py --crates all --profile release
+  python3 tools/update_submodule_and_bindings.py --crates all --profile release
   ```
 
 - [ ] Verify `-sys` crates build in docs.rs offline mode
@@ -83,7 +83,7 @@ Use the `tools/publish.py` script to publish all crates in the correct dependenc
 First, do a dry run to see what would be published:
 
 ```bash
-python tools/publish.py --dry-run
+python3 tools/publish.py --dry-run
 ```
 
 This will show you:
@@ -96,7 +96,7 @@ This will show you:
 Once you've verified the dry run output:
 
 ```bash
-python tools/publish.py
+python3 tools/publish.py
 ```
 
 The script will:
@@ -110,22 +110,22 @@ The script will:
 
 **Publish specific crates:**
 ```bash
-python tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
+python3 tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
 ```
 
 **Skip verification (faster, but not recommended):**
 ```bash
-python tools/publish.py --no-verify
+python3 tools/publish.py --no-verify
 ```
 
 **Adjust wait time between publishes:**
 ```bash
-python tools/publish.py --wait 60  # Wait 60 seconds instead of default 30
+python3 tools/publish.py --wait 60  # Wait 60 seconds instead of default 30
 ```
 
 **Resume from a specific crate:**
 ```bash
-python tools/publish.py --start-from dear-implot-sys
+python3 tools/publish.py --start-from dear-implot-sys
 ```
 
 This is useful if publishing was interrupted and you want to continue from where it stopped.
@@ -254,7 +254,7 @@ If publishing fails for a crate:
 2. **Fix the issue**: Update Cargo.toml or fix the code
 3. **Resume publishing**: Use `--start-from` to continue from the failed crate
    ```bash
-   python tools/publish.py --start-from dear-implot-sys
+   python3 tools/publish.py --start-from dear-implot-sys
    ```
 
 ### Dependency Version Mismatch
@@ -281,7 +281,7 @@ If docs.rs fails to build a `-sys` crate:
 
 3. If bindings are missing or outdated, regenerate them:
    ```bash
-   python tools/update_submodule_and_bindings.py --crates dear-imgui-sys --profile release
+   python3 tools/update_submodule_and_bindings.py --crates dear-imgui-sys --profile release
    ```
 
 ## Version Bump Checklist

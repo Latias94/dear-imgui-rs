@@ -57,6 +57,7 @@ ui.window("Hello")
       if ui.button("Click me") { println!("clicked"); }
   });
 // Rendering is done by a backend (e.g. dear-imgui-wgpu or dear-imgui-glow)
+// Tip: pass `.opened(&mut open)` if you want a title-bar close button (X).
 
 // Tip: For fallible creation, use `Context::try_create()`
 ```
@@ -87,7 +88,7 @@ cargo run --bin reflect_demo --features reflect
 cargo run --bin implot3d_basic --features implot3d
 
 # WebAssembly (WASM) web demo (import-style, ImGui + optional ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
-# Note: this import-style WASM path is developed on `main` and planned for the 0.7.0 release train.
+# Note: this import-style WASM path is developed on `main` and shipped in the 0.7.x release train.
 # For the full setup (bindings generation, web demo build, provider build, and troubleshooting),
 # see the "WebAssembly (WASM) support" section below and docs/WASM.md.
 
@@ -302,7 +303,7 @@ Status:
   multi-viewport remain disabled on wasm for safety.
 - Font atlas access on wasm is available behind an experimental feature flag.
 - Import-style WASM bindings and the `xtask wasm-bindgen-*` / `web-demo` / `build-cimgui-provider`
-  helpers are developed on `main` and shipped in the 0.7.0 release train; for 0.6.x on crates.io,
+  helpers are developed on `main` and shipped in the 0.7.x release train; for 0.6.x on crates.io,
   use a git dependency on this repository if you need these flows.
 
 Prerequisites:

@@ -12,11 +12,11 @@ The workspace uses a **unified release train** model where all crates share the 
 
 ```bash
 # All-in-one command to prepare a release
-python tools/tasks.py release-prep 0.7.0
+python3 tools/tasks.py release-prep 0.7.1
 ```
 
 This will:
-1. Bump version to 0.7.0 across all crates
+1. Bump version to 0.7.1 across all crates
 2. Update pregenerated bindings for -sys crates
 3. Run tests
 4. Run pre-publish validation checks
@@ -25,10 +25,10 @@ This will:
 
 ```bash
 # Dry run first (recommended)
-python tools/tasks.py publish --dry-run
+python3 tools/tasks.py publish --dry-run
 
 # Actual publish
-python tools/tasks.py publish
+python3 tools/tasks.py publish
 ```
 
 ## Available Scripts
@@ -39,28 +39,28 @@ Convenient shortcuts for common tasks.
 
 ```bash
 # Run pre-publish checks
-python tools/tasks.py check
+python3 tools/tasks.py check
 
 # Bump version
-python tools/tasks.py bump 0.7.0
+python3 tools/tasks.py bump 0.7.1
 
 # Update pregenerated bindings
-python tools/tasks.py bindings
+python3 tools/tasks.py bindings
 
 # Publish crates
-python tools/tasks.py publish
+python3 tools/tasks.py publish
 
 # Run tests
-python tools/tasks.py test
+python3 tools/tasks.py test
 
 # Build documentation
-python tools/tasks.py doc
+python3 tools/tasks.py doc
 
 # Clean build artifacts
-python tools/tasks.py clean
+python3 tools/tasks.py clean
 
 # All-in-one release preparation
-python tools/tasks.py release-prep 0.7.0
+python3 tools/tasks.py release-prep 0.7.1
 ```
 
 ### 2. `publish.py` - Publishing Script
@@ -69,19 +69,19 @@ Publishes all crates in the correct dependency order.
 
 ```bash
 # Dry run (show what would be published)
-python tools/publish.py --dry-run
+python3 tools/publish.py --dry-run
 
 # Publish all crates
-python tools/publish.py
+python3 tools/publish.py
 
 # Publish specific crates
-python tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
+python3 tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
 
 # Resume from a specific crate
-python tools/publish.py --start-from dear-implot-sys
+python3 tools/publish.py --start-from dear-implot-sys
 
 # Adjust wait time between publishes
-python tools/publish.py --wait 60
+python3 tools/publish.py --wait 60
 ```
 
 **Publishing Order:**
@@ -97,19 +97,19 @@ Updates version numbers across all crates and README files.
 
 ```bash
 # Bump to a specific version (updates Cargo.toml and README files)
-python tools/bump_version.py 0.7.0
+python3 tools/bump_version.py 0.7.1
 
 # Dry run (show what would change)
-python tools/bump_version.py 0.7.0 --dry-run
+python3 tools/bump_version.py 0.7.1 --dry-run
 
 # Specify old version manually
-python tools/bump_version.py 0.7.0 --old-version 0.6.0
+python3 tools/bump_version.py 0.7.1 --old-version 0.7.0
 
 # Bump only specific crates
-python tools/bump_version.py 0.7.0 --crates dear-imgui-sys,dear-imgui-rs
+python3 tools/bump_version.py 0.7.1 --crates dear-imgui-sys,dear-imgui-rs
 
 # Skip README updates
-python tools/bump_version.py 0.7.0 --skip-readme
+python3 tools/bump_version.py 0.7.1 --skip-readme
 ```
 
 **Note**: This script now automatically updates README files in addition to Cargo.toml files.
@@ -120,10 +120,10 @@ Runs pre-publish validation checks.
 
 ```bash
 # Run all checks
-python tools/pre_publish_check.py
+python3 tools/pre_publish_check.py
 
 # Skip specific checks
-python tools/pre_publish_check.py --skip-git-check --skip-doc-check
+python3 tools/pre_publish_check.py --skip-git-check --skip-doc-check
 ```
 
 **Checks performed:**
@@ -140,26 +140,26 @@ Updates third-party submodules and regenerates pregenerated bindings for `-sys` 
 
 ```bash
 # Update all submodules and regenerate native bindings (all -sys crates)
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates all \
   --submodules update \
   --profile release
 
 # Regenerate bindings only (no submodule updates)
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates all \
   --submodules skip \
   --profile release
 
 # Update specific crate (e.g. dear-imgui-sys only)
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys \
   --submodules update \
   --profile release
 
 # Additionally generate WASM pregenerated bindings:
 # - Core ImGui only (dear-imgui-sys, import module = imgui-sys-v0)
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys \
   --submodules skip \
   --profile release \
@@ -167,7 +167,7 @@ python tools/update_submodule_and_bindings.py \
   --wasm-import imgui-sys-v0
 
 # - Core ImGui + selected extensions (ImPlot, ImPlot3D, ImNodes, ImGuizmo, ImGuIZMO.quat)
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys,dear-implot-sys,dear-implot3d-sys,dear-imnodes-sys,dear-imguizmo-sys,dear-imguizmo-quat-sys \
   --submodules skip \
   --profile release \
@@ -182,13 +182,13 @@ Updates version numbers in README files (compatibility tables and examples).
 
 ```bash
 # Update to a specific version
-python tools/update_readme_versions.py 0.7.0
+python3 tools/update_readme_versions.py 0.7.1
 
 # Dry run (show what would change)
-python tools/update_readme_versions.py 0.7.0 --dry-run
+python3 tools/update_readme_versions.py 0.7.1 --dry-run
 
 # Specify old version manually
-python tools/update_readme_versions.py 0.7.0 --old-version 0.6.0
+python3 tools/update_readme_versions.py 0.7.1 --old-version 0.7.0
 ```
 
 **Note**: This script is automatically called by `bump_version.py`, so you usually don't need to run it manually.
@@ -199,7 +199,7 @@ python tools/update_readme_versions.py 0.7.0 --old-version 0.6.0
 
 ```bash
 # 1. Prepare release (bump version, update bindings, test, check)
-python tools/tasks.py release-prep 0.7.0
+python3 tools/tasks.py release-prep 0.7.1
 
 # 2. Review changes
 git diff
@@ -211,16 +211,16 @@ git diff
 
 # 4. Commit changes
 git add -A
-git commit -m "chore: prepare release v0.7.0"
+git commit -m "chore: prepare release v0.7.1"
 
 # 5. Publish (dry run first)
-python tools/tasks.py publish --dry-run
-python tools/tasks.py publish
+python3 tools/tasks.py publish --dry-run
+python3 tools/tasks.py publish
 
 # 6. Tag and push
-git tag -a v0.7.0 -m "Release v0.7.0"
+git tag -a v0.7.1 -m "Release v0.7.1"
 git push origin main
-git push origin v0.7.0
+git push origin v0.7.1
 
 # 7. Create GitHub release
 # Go to GitHub and create a release from the tag
@@ -230,13 +230,13 @@ git push origin v0.7.0
 
 ```bash
 # 1. Update submodules and bindings
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates all \
   --submodules update \
   --profile release
 
 # 2. Bump version
-python tools/bump_version.py 0.7.0
+python3 tools/bump_version.py 0.7.1
 
 # 3. Update Cargo.lock
 cargo update
@@ -245,7 +245,7 @@ cargo update
 cargo test --workspace
 
 # 5. Run pre-publish checks
-python tools/pre_publish_check.py
+python3 tools/pre_publish_check.py
 
 # 6. Update documentation
 # - CHANGELOG.md
@@ -254,16 +254,16 @@ python tools/pre_publish_check.py
 
 # 7. Commit changes
 git add -A
-git commit -m "chore: prepare release v0.7.0"
+git commit -m "chore: prepare release v0.7.1"
 
 # 8. Publish
-python tools/publish.py --dry-run  # Dry run first
-python tools/publish.py            # Actual publish
+python3 tools/publish.py --dry-run  # Dry run first
+python3 tools/publish.py            # Actual publish
 
 # 9. Tag and push
-git tag -a v0.7.0 -m "Release v0.7.0"
+git tag -a v0.7.1 -m "Release v0.7.1"
 git push origin main
-git push origin v0.7.0
+git push origin v0.7.1
 
 # 10. Create GitHub release
 ```
@@ -273,7 +273,7 @@ git push origin v0.7.0
 ### Update Bindings After Upstream Changes
 
 ```bash
-python tools/update_submodule_and_bindings.py \
+python3 tools/update_submodule_and_bindings.py \
   --crates all \
   --submodules update \
   --profile release \
@@ -310,14 +310,14 @@ If publishing fails partway through:
 
 ```bash
 # Resume from the failed crate
-python tools/publish.py --start-from dear-implot-sys
+python3 tools/publish.py --start-from dear-implot-sys
 ```
 
 ### Publish Only Specific Crates
 
 ```bash
 # Publish only backends
-python tools/publish.py --crates dear-imgui-winit,dear-imgui-wgpu,dear-imgui-glow,dear-imgui-sdl3
+python3 tools/publish.py --crates dear-imgui-winit,dear-imgui-wgpu,dear-imgui-glow,dear-imgui-sdl3
 ```
 
 ## Requirements
@@ -349,14 +349,14 @@ chmod +x tools/*.py
 The script will detect this and ask if you want to skip. If you need to republish:
 ```bash
 cargo yank --vers 0.4.0 dear-imgui-sys
-python tools/publish.py --start-from dear-imgui-sys
+python3 tools/publish.py --start-from dear-imgui-sys
 ```
 
 ### docs.rs Build Failures
 
 Ensure pregenerated bindings are up-to-date:
 ```bash
-python tools/update_submodule_and_bindings.py --crates all --profile release
+python3 tools/update_submodule_and_bindings.py --crates all --profile release
 ```
 
 Then verify locally:

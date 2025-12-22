@@ -39,6 +39,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+Tip: pass `.opened(&mut open)` if you want a title-bar close button (X), and stop submitting the window when `open == false`.
+
 Builder with add-ons and docking/theme presets:
 
 ```rust

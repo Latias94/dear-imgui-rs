@@ -139,6 +139,7 @@ impl<'de> Deserialize<'de> for WindowFlags {
 pub struct Window<'ui> {
     ui: &'ui Ui,
     name: String,
+    opened: Option<&'ui mut bool>,
     flags: WindowFlags,
     size: Option<[f32; 2]>,
     size_condition: Condition,
@@ -158,6 +159,7 @@ impl<'ui> Window<'ui> {
         Self {
             ui,
             name: name.into(),
+            opened: None,
             flags: WindowFlags::empty(),
             size: None,
             size_condition: Condition::Always,
@@ -175,6 +177,19 @@ impl<'ui> Window<'ui> {
     /// Sets window flags
     pub fn flags(mut self, flags: WindowFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Controls whether the window is open (adds a title-bar close button).
+    ///
+    /// In Dear ImGui, a window is "closed" by the user by toggling the `p_open` boolean.
+    /// When the close button (X) is pressed, `opened` will be set to `false`.
+    ///
+    /// Note: as an immediate-mode UI, you should stop submitting this window when
+    /// `*opened == false` (typically by guarding the `window(...).build(...)` call).
+    #[doc(alias = "Begin")]
+    pub fn opened(mut self, opened: &'ui mut bool) -> Self {
+        self.opened = Some(opened);
         self
     }
 
@@ -286,13 +301,18 @@ impl<'ui> Window<'ui> {
         }
 
         // Begin the window
-        let mut open = true;
+        let mut opened = self.opened;
+        let opened_ptr: *mut bool = match opened.as_deref_mut() {
+            Some(opened) => opened as *mut bool,
+            None => std::ptr::null_mut(),
+        };
         let result =
-            unsafe { crate::sys::igBegin(name_cstr.as_ptr(), &mut open, self.flags.bits()) };
+            unsafe { crate::sys::igBegin(name_cstr.as_ptr(), opened_ptr, self.flags.bits()) };
+        let is_open = opened.map_or(true, |opened| *opened);
 
         // IMPORTANT: According to ImGui documentation, Begin/End calls must be balanced.
         // If Begin returns false, we need to call End immediately and return None.
-        if result && open {
+        if result && is_open {
             Some(WindowToken {
                 _phantom: std::marker::PhantomData,
             })

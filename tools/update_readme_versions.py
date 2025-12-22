@@ -7,13 +7,13 @@ compatibility tables and installation examples.
 
 Usage:
   # Update to a specific version
-  python tools/update_readme_versions.py 0.5.0
+  python3 tools/update_readme_versions.py 0.5.0
 
   # Dry run (show what would be changed)
-  python tools/update_readme_versions.py 0.5.0 --dry-run
+  python3 tools/update_readme_versions.py 0.5.0 --dry-run
 
   # Specify old version manually
-  python tools/update_readme_versions.py 0.5.0 --old-version 0.4.0
+  python3 tools/update_readme_versions.py 0.5.0 --old-version 0.4.0
 
 Requirements:
   - Python 3.7+

@@ -117,4 +117,37 @@ impl<T: AsRef<str>> ListBox<T> {
         }
         result
     }
+
+    /// Builds a simple list box for choosing from a slice of values using an `i32` index.
+    ///
+    /// This is useful when you want to represent \"no selection\" with `-1`, matching Dear ImGui's
+    /// list-box patterns that use an `int*` index.
+    pub fn build_simple_i32<V, L>(
+        self,
+        ui: &Ui,
+        current_item: &mut i32,
+        items: &[V],
+        label_fn: &L,
+    ) -> bool
+    where
+        for<'b> L: Fn(&'b V) -> Cow<'b, str>,
+    {
+        let mut result = false;
+        let lb = self;
+        if let Some(_cb) = lb.begin(ui) {
+            for (idx, item) in items.iter().enumerate() {
+                if idx > i32::MAX as usize {
+                    break;
+                }
+                let idx_i32 = idx as i32;
+                let text = label_fn(item);
+                let selected = idx_i32 == *current_item;
+                if ui.selectable_config(&text).selected(selected).build() {
+                    *current_item = idx_i32;
+                    result = true;
+                }
+            }
+        }
+        result
+    }
 }

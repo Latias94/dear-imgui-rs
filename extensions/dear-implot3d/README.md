@@ -61,7 +61,7 @@ Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` enables the `implot3d` feature when
   you pass `implot3d` to `xtask web-demo`, which shows an “ImPlot3D (Web)” window when
   ImPlot3D bindings + provider are available.
-- This is an early, experimental path planned for the 0.7.0 release train; API and build
+- This is an early, experimental path shipped in the 0.7.x release train; API and build
   steps may evolve. For production use, pin to a specific release and follow changes in
   `docs/WASM.md`.
 

@@ -1,6 +1,6 @@
 [package]
 name = "dear-imguizmo-sys"
-version = "0.7.0"
+version = "0.7.1"
 edition.workspace = true
 description = "Low-level FFI bindings for ImGuizmo via cimguizmo (C API)"
 license.workspace = true

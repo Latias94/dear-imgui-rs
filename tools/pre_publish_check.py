@@ -10,10 +10,10 @@ This script performs various checks to ensure the workspace is ready for publish
 - Documentation builds successfully
 
 Usage:
-  python tools/pre_publish_check.py
+  python3 tools/pre_publish_check.py
 
   # Skip specific checks
-  python tools/pre_publish_check.py --skip-git-check --skip-doc-check
+  python3 tools/pre_publish_check.py --skip-git-check --skip-doc-check
 
 Requirements:
   - Python 3.7+
@@ -211,7 +211,7 @@ def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
         print_success("All -sys crates have pregenerated bindings")
         return True, []
     else:
-        print_error("Run: python tools/update_submodule_and_bindings.py --crates all --profile release")
+        print_error("Run: python3 tools/update_submodule_and_bindings.py --crates all --profile release")
         return False, errors
 
 
@@ -390,8 +390,8 @@ def main() -> int:
         print()
         print("Next steps:")
         print("  1. Review changes one more time")
-        print("  2. Run: python tools/publish.py --dry-run")
-        print("  3. Run: python tools/publish.py")
+        print("  2. Run: python3 tools/publish.py --dry-run")
+        print("  3. Run: python3 tools/publish.py")
         return 0
     else:
         print()

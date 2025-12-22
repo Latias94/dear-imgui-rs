@@ -5,7 +5,7 @@ This document tracks compatibility across the workspace crates, upstream Dear Im
 ## Versioning Policy
 
 - Unified release train: all `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current train: unified `v0.7.0` (use `version = "0.7"`).
+- Current train: unified `v0.7.1` (use `version = "0.7"`).
 - Previous train: unified `v0.5.0` (use `version = "0.5"`).
 - Internal dependency constraints in this repo also pin to the unified minor (e.g., `0.5`). Mixing different minors across our crates is unsupported.
 - Exception: helper tooling like `tools/build-support` may follow an independent version and is not part of the unified train.
@@ -23,7 +23,7 @@ Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.7.x   | wgpu = 27              | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
+| dear-imgui-wgpu   | 0.7.x   | wgpu = 28              | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
 | dear-imgui-glow   | 0.7.x   | glow = 0.16            | OpenGL renderer (winit/glutin) |
 | dear-imgui-winit  | 0.7.x   | winit = 0.30.12        | Winit platform backend |
 | dear-imgui-sdl3   | 0.7.x   | sdl3 = 0.16, sdl3-sys  | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |

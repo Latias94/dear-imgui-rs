@@ -15,6 +15,8 @@
 //!
 use std::fmt;
 
+use crate::sys;
+
 /// RGBA color with 32-bit floating point components
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -92,6 +94,35 @@ impl Color {
             self.a + (other.a - self.a) * t,
         )
     }
+
+    /// Convert RGB to HSV using Dear ImGui semantics (h in [0, 1]).
+    ///
+    /// Note: this differs from [`Color::to_hsv`], which returns hue in degrees.
+    #[doc(alias = "ColorConvertRGBtoHSV")]
+    pub fn to_hsv01(self) -> (f32, f32, f32) {
+        let mut h = 0.0;
+        let mut s = 0.0;
+        let mut v = 0.0;
+        unsafe {
+            sys::igColorConvertRGBtoHSV(self.r, self.g, self.b, &mut h, &mut s, &mut v);
+        }
+        (h, s, v)
+    }
+
+    /// Convert HSV to RGB using Dear ImGui semantics (h in [0, 1]).
+    ///
+    /// Note: this differs from [`Color::from_hsv`], which expects hue in degrees.
+    #[doc(alias = "ColorConvertHSVtoRGB")]
+    pub fn from_hsv01(h: f32, s: f32, v: f32) -> Self {
+        let mut r = 0.0;
+        let mut g = 0.0;
+        let mut b = 0.0;
+        unsafe {
+            sys::igColorConvertHSVtoRGB(h, s, v, &mut r, &mut g, &mut b);
+        }
+        Self::rgb(r, g, b)
+    }
+
     pub fn to_hsv(self) -> (f32, f32, f32) {
         let max = self.r.max(self.g).max(self.b);
         let min = self.r.min(self.g).min(self.b);

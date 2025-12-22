@@ -102,7 +102,7 @@ cp target/debug/build/dear-imgui-sys-*/out/bindings.rs dear-imgui-sys/src/bindin
 Or use the provided update script:
 
 ```bash
-python tools/update_submodule_and_bindings.py --branch docking_inter
+python3 tools/update_submodule_and_bindings.py --branch docking_inter
 ```
 
 ## WebAssembly Support

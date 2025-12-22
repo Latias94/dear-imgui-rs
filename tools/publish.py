@@ -17,19 +17,19 @@ Publishing Order:
 
 Usage:
   # Dry run (show what would be published)
-  python tools/publish.py --dry-run
+  python3 tools/publish.py --dry-run
 
   # Publish all crates
-  python tools/publish.py
+  python3 tools/publish.py
 
   # Publish specific crates
-  python tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
+  python3 tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
 
   # Skip verification (faster but not recommended)
-  python tools/publish.py --no-verify
+  python3 tools/publish.py --no-verify
 
   # Wait longer between publishes (for crates.io to index)
-  python tools/publish.py --wait 60
+  python3 tools/publish.py --wait 60
 
 Requirements:
   - cargo in PATH

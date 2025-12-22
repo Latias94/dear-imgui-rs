@@ -7,13 +7,13 @@ the unified release train model where all crates share the same version.
 
 Usage:
   # Bump to a specific version
-  python tools/bump_version.py 0.6.0
+  python3 tools/bump_version.py 0.6.0
 
   # Dry run (show what would be changed)
-  python tools/bump_version.py 0.6.0 --dry-run
+  python3 tools/bump_version.py 0.6.0 --dry-run
 
   # Bump only specific crates
-  python tools/bump_version.py 0.6.0 --crates dear-imgui-sys,dear-imgui-rs
+  python3 tools/bump_version.py 0.6.0 --crates dear-imgui-sys,dear-imgui-rs
 
 Requirements:
   - Python 3.7+

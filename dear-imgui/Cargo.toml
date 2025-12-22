@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-rs"
-version = "0.7.0"
+version = "0.7.1"
 edition.workspace = true
 description = "High-level Rust bindings to Dear ImGui v1.92.5 with docking, WGPU/GL backends, and extensions (ImPlot/ImPlot3D, ImNodes, ImGuizmo, file browser, reflection-based UI)"
 license.workspace = true

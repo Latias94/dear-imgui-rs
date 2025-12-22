@@ -25,21 +25,21 @@ WASM pregenerated bindings:
 
 Usage examples:
   - Update cimgui and regenerate bindings for dear-imgui-sys (Debug):
-      python tools/update_submodule_and_bindings.py --crates dear-imgui-sys \
+      python3 tools/update_submodule_and_bindings.py --crates dear-imgui-sys \
         --submodules update
 
   - Update all submodules to specific branches and pregen bindings (Release):
-      python tools/update_submodule_and_bindings.py --crates all --profile release \
+      python3 tools/update_submodule_and_bindings.py --crates all --profile release \
         --submodules update \
         --cimgui-branch docking_inter --cimplot-branch master \
         --cimnodes-branch master --cimguizmo-branch master
 
   - Only regenerate pregenerated bindings without touching submodules:
-      python tools/update_submodule_and_bindings.py --crates dear-implot-sys,dear-imnodes-sys \
+      python3 tools/update_submodule_and_bindings.py --crates dear-implot-sys,dear-imnodes-sys \
         --submodules skip
 
   - Dry-run (print commands only):
-      python tools/update_submodule_and_bindings.py --crates all --dry-run
+      python3 tools/update_submodule_and_bindings.py --crates all --dry-run
 
 Requirements:
   - git, cargo in PATH

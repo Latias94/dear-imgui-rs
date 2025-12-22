@@ -5,7 +5,7 @@ Task runner for dear-imgui-rs workspace.
 This script provides convenient shortcuts for common development and release tasks.
 
 Usage:
-  python tools/tasks.py <task> [options]
+  python3 tools/tasks.py <task> [options]
 
 Available tasks:
   check           - Run pre-publish validation checks
@@ -17,10 +17,10 @@ Available tasks:
   clean           - Clean build artifacts
 
 Examples:
-  python tools/tasks.py check
-  python tools/tasks.py bump 0.5.0
-  python tools/tasks.py bindings
-  python tools/tasks.py publish --dry-run
+  python3 tools/tasks.py check
+  python3 tools/tasks.py bump 0.7.1
+  python3 tools/tasks.py bindings
+  python3 tools/tasks.py publish --dry-run
 """
 
 import argparse
@@ -52,7 +52,7 @@ def run_command(cmd: List[str], cwd=None, quiet: bool = False) -> int:
 
 def task_check(args, repo_root: Path) -> int:
     """Run pre-publish validation checks."""
-    cmd = ["python", "tools/pre_publish_check.py"]
+    cmd = [sys.executable, "tools/pre_publish_check.py"]
     
     if args.skip_git:
         cmd.append("--skip-git-check")
@@ -68,10 +68,10 @@ def task_bump(args, repo_root: Path) -> int:
     """Bump version across workspace."""
     if not args.version:
         print("Error: version argument required", file=sys.stderr)
-        print("Usage: python tools/tasks.py bump <version>")
+        print("Usage: python3 tools/tasks.py bump <version>")
         return 1
     
-    cmd = ["python", "tools/bump_version.py", args.version]
+    cmd = [sys.executable, "tools/bump_version.py", args.version]
     
     if args.dry_run:
         cmd.append("--dry-run")
@@ -83,7 +83,7 @@ def task_bump(args, repo_root: Path) -> int:
 
 def task_bindings(args, repo_root: Path) -> int:
     """Update pregenerated bindings."""
-    cmd = ["python", "tools/update_submodule_and_bindings.py"]
+    cmd = [sys.executable, "tools/update_submodule_and_bindings.py"]
     
     if args.crates:
         cmd.extend(["--crates", args.crates])
@@ -105,7 +105,7 @@ def task_bindings(args, repo_root: Path) -> int:
 
 def task_publish(args, repo_root: Path) -> int:
     """Publish crates to crates.io."""
-    cmd = ["python", "tools/publish.py"]
+    cmd = [sys.executable, "tools/publish.py"]
     
     if args.dry_run:
         cmd.append("--dry-run")
@@ -161,7 +161,7 @@ def task_release_prep(args, repo_root: Path) -> int:
     """Prepare for release (all-in-one)."""
     if not args.version:
         print("Error: version argument required", file=sys.stderr)
-        print("Usage: python tools/tasks.py release-prep <version>")
+        print("Usage: python3 tools/tasks.py release-prep <version>")
         return 1
     
     print("\n" + "=" * 80)
@@ -193,7 +193,7 @@ def task_release_prep(args, repo_root: Path) -> int:
     print("  2. Update CHANGELOG.md")
     print("  3. Update README.md and docs/COMPATIBILITY.md")
     print("  4. Commit: git add -A && git commit -m 'chore: prepare release v" + args.version + "'")
-    print("  5. Publish: python tools/tasks.py publish")
+    print("  5. Publish: python3 tools/tasks.py publish")
     print()
     
     return 0
@@ -283,4 +283,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
