@@ -22,9 +22,9 @@ the ergonomics of `dear-implot`.
 
 | Item               | Version |
 |--------------------|---------|
-| Crate              | 0.7.x   |
-| dear-imgui-rs      | 0.7.x   |
-| dear-implot3d-sys  | 0.7.x   |
+| Crate              | 0.8.x   |
+| dear-imgui-rs      | 0.8.x   |
+| dear-implot3d-sys  | 0.8.x   |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 

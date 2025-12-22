@@ -7,18 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Extensions
-  - `dear-implot`: add non-variadic text helpers for annotations/tags (avoids calling C `...`, useful for import-style WASM).
-  - `dear-imguizmo`: expose safe alternative-window helpers and byte-slice ID helpers (`str_begin/str_end` form).
-  - `dear-imnodes`: expose accessors for the current/raw context pointer.
-
-### Changed
-
-- `dear-imgui-wgpu`: bump `wgpu` to v28 (requires Rust 1.92+).
-
-## [0.7.1] - 2025-12-21
+## [0.8.0] - 2025-12-22
 
 ### Added
 
@@ -26,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Color::to_hsv01` / `Color::from_hsv01`: helpers that match Dear ImGui's HSV semantics (h in `[0, 1]`).
   - ImGui-style `i32` index variants for optional selection (`-1` as no selection):
     `Ui::combo_i32`, `Ui::combo_simple_string_i32`, `ListBox::build_simple_i32`.
+
+- Extensions
+  - `dear-implot`: add non-variadic text helpers for annotations/tags (avoids calling C `...`, useful for import-style WASM).
+  - `dear-imguizmo`: expose safe alternative-window helpers and byte-slice ID helpers (`str_begin/str_end` form).
+  - `dear-imnodes`: expose accessors for the current/raw context pointer.
 
 ### Fixed
 
@@ -39,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core (`dear-imgui-rs`)
   - `ui.window(...).build(...)` only shows a close button when `opened(...)` is provided (matches upstream Dear ImGui behavior).
+- `dear-imgui-wgpu`: bump `wgpu` to v28 (requires Rust 1.92+).
 
 ## [0.7.0] - 2025-12-13
 

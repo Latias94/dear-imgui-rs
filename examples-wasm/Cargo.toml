@@ -22,14 +22,14 @@ imguizmo = ["dep:dear-imguizmo"]
 imguizmo-quat = ["dep:dear-imguizmo-quat"]
 
 [dependencies]
-dear-imgui-rs = { path = "../dear-imgui", version = "0.7", features = ["wasm"] }
-dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.7" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.7" }
-dear-implot = { path = "../extensions/dear-implot", version = "0.7", optional = true, features = ["wasm"] }
-dear-implot3d = { path = "../extensions/dear-implot3d", version = "0.7", optional = true, features = ["wasm"] }
-dear-imnodes = { path = "../extensions/dear-imnodes", version = "0.7", optional = true, features = ["wasm"] }
-dear-imguizmo = { path = "../extensions/dear-imguizmo", version = "0.7", optional = true, features = ["wasm"] }
-dear-imguizmo-quat = { path = "../extensions/dear-imguizmo-quat", version = "0.7", optional = true, features = ["wasm"] }
+dear-imgui-rs = { path = "../dear-imgui", version = "0.8", features = ["wasm"] }
+dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.8" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.8" }
+dear-implot = { path = "../extensions/dear-implot", version = "0.8", optional = true, features = ["wasm"] }
+dear-implot3d = { path = "../extensions/dear-implot3d", version = "0.8", optional = true, features = ["wasm"] }
+dear-imnodes = { path = "../extensions/dear-imnodes", version = "0.8", optional = true, features = ["wasm"] }
+dear-imguizmo = { path = "../extensions/dear-imguizmo", version = "0.8", optional = true, features = ["wasm"] }
+dear-imguizmo-quat = { path = "../extensions/dear-imguizmo-quat", version = "0.8", optional = true, features = ["wasm"] }
 wgpu = { workspace = true }
 winit = { workspace = true }
 instant = { version = "0.1", features = ["wasm-bindgen"] }
