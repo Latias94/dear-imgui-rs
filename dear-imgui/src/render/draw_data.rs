@@ -524,8 +524,6 @@ impl Drop for OwnedDrawData {
                             sys::ImDrawList_destroy(ptr);
                         }
                     }
-                    // Free the CmdLists array storage
-                    sys::igMemFree((*self.draw_data).CmdLists.Data as *mut std::ffi::c_void);
                 }
 
                 // Destroy the ImDrawData itself
