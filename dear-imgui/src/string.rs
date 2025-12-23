@@ -339,3 +339,53 @@ pub type ImStr<'a> = Cow<'a, str>;
 macro_rules! im_str {
     ($e:expr) => {{ $crate::ImString::new($e) }};
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    #[test]
+    fn ui_buffer_push_appends_nul() {
+        let mut buf = UiBuffer::new(1024);
+        let start = buf.push("abc");
+        assert_eq!(start, 0);
+        assert_eq!(&buf.buffer, b"abc\0");
+    }
+
+    #[test]
+    #[should_panic(expected = "null byte")]
+    fn ui_buffer_rejects_interior_nul() {
+        let mut buf = UiBuffer::new(1024);
+        let _ = buf.push("a\0b");
+    }
+
+    #[test]
+    fn tls_scratch_txt_is_nul_terminated() {
+        let ptr = tls_scratch_txt("hello");
+        let s = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
+        assert_eq!(s, "hello");
+    }
+
+    #[test]
+    fn tls_scratch_txt_two_returns_two_valid_strings() {
+        let (a_ptr, b_ptr) = tls_scratch_txt_two("a", "bcd");
+        let a = unsafe { CStr::from_ptr(a_ptr) }.to_str().unwrap();
+        let b = unsafe { CStr::from_ptr(b_ptr) }.to_str().unwrap();
+        assert_eq!(a, "a");
+        assert_eq!(b, "bcd");
+    }
+
+    #[test]
+    #[should_panic(expected = "null byte")]
+    fn imstring_new_rejects_interior_nul() {
+        let _ = ImString::new("a\0b");
+    }
+
+    #[test]
+    #[should_panic(expected = "null byte")]
+    fn imstring_push_str_rejects_interior_nul() {
+        let mut s = ImString::new("a");
+        s.push_str("b\0c");
+    }
+}

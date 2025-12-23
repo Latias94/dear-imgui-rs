@@ -321,3 +321,22 @@ impl Ui {
         TextFilter::new_with_filter(label, filter)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_filter_build_and_pass_filter_work() {
+        let _ctx = crate::Context::create();
+
+        let mut filter = TextFilter::new("Search");
+        filter.build();
+        assert!(filter.pass_filter("anything"));
+
+        let mut filter = TextFilter::new_with_filter("Search", "abc");
+        filter.build();
+        assert!(filter.pass_filter("xxabcxx"));
+        assert!(!filter.pass_filter("xxdefxx"));
+    }
+}
