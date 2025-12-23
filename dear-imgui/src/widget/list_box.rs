@@ -7,6 +7,14 @@ use std::borrow::Cow;
 use crate::Ui;
 use crate::sys;
 
+/// # List Box Widgets
+impl Ui {
+    /// Constructs a new list box builder.
+    pub fn list_box_config<T: AsRef<str>>(&self, label: T) -> ListBox<T> {
+        ListBox::new(label)
+    }
+}
+
 /// Builder for a list box widget
 #[derive(Clone, Debug)]
 #[must_use]

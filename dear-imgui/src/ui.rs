@@ -20,7 +20,6 @@ use crate::string::UiBuffer;
 use crate::sys;
 use crate::texture::TextureRef;
 use std::cell::UnsafeCell;
-use std::ffi::CString;
 
 /// Represents the Dear ImGui user interface for one frame
 #[derive(Debug)]
@@ -129,8 +128,10 @@ impl Ui {
     /// for widgets or dockspaces inside the current window/scope.
     #[doc(alias = "GetID")]
     pub fn get_id(&self, label: &str) -> Id {
-        let c = CString::new(label).expect("label contained null byte");
-        unsafe { Id::from(sys::igGetID_Str(c.as_ptr())) }
+        if label.contains('\0') {
+            panic!("label contained null byte");
+        }
+        unsafe { Id::from(sys::igGetID_Str(self.scratch_txt(label))) }
     }
 
     /// Access to the current window's draw list

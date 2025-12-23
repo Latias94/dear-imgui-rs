@@ -63,6 +63,18 @@ impl Ui {
         unsafe { sys::igBeginColumns(self.scratch_txt(id), count, flags.bits()) }
     }
 
+    /// Begin columns layout with advanced flags and return a token that ends columns on drop.
+    #[doc(alias = "BeginColumns")]
+    pub fn begin_columns_token(
+        &self,
+        id: impl AsRef<str>,
+        count: i32,
+        flags: OldColumnFlags,
+    ) -> ColumnsToken<'_> {
+        self.begin_columns(id, count, flags);
+        ColumnsToken { ui: self }
+    }
+
     /// End columns layout.
     #[doc(alias = "EndColumns")]
     pub fn end_columns(&self) {
@@ -227,5 +239,17 @@ impl Ui {
 
         let new_width = (total_width * percentage) / 100.0;
         self.set_column_width(column_index, new_width);
+    }
+}
+
+/// Token representing an active columns layout.
+#[must_use]
+pub struct ColumnsToken<'ui> {
+    ui: &'ui Ui,
+}
+
+impl Drop for ColumnsToken<'_> {
+    fn drop(&mut self) {
+        self.ui.end_columns();
     }
 }

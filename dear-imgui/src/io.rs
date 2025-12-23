@@ -309,11 +309,21 @@ impl Io {
         }
     }
 
+    /// Check if a mouse button is down (typed).
+    pub fn mouse_down_button(&self, button: crate::input::MouseButton) -> bool {
+        self.mouse_down(button as i32 as usize)
+    }
+
     /// Set mouse button state
     pub fn set_mouse_down(&mut self, button: usize, down: bool) {
         if button < 5 {
             self.0.MouseDown[button] = down;
         }
+    }
+
+    /// Set mouse button state (typed).
+    pub fn set_mouse_down_button(&mut self, button: crate::input::MouseButton, down: bool) {
+        self.set_mouse_down(button as i32 as usize, down);
     }
 
     /// Check if imgui wants to capture mouse input
