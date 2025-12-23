@@ -43,6 +43,7 @@
     clippy::as_conversions
 )]
 use bitflags::bitflags;
+use std::borrow::Cow;
 use std::f32;
 
 use crate::sys;
@@ -138,7 +139,7 @@ impl<'de> Deserialize<'de> for WindowFlags {
 /// Represents a window that can be built
 pub struct Window<'ui> {
     ui: &'ui Ui,
-    name: String,
+    name: Cow<'ui, str>,
     opened: Option<&'ui mut bool>,
     flags: WindowFlags,
     size: Option<[f32; 2]>,
@@ -155,7 +156,7 @@ pub struct Window<'ui> {
 
 impl<'ui> Window<'ui> {
     /// Creates a new window builder
-    pub fn new(ui: &'ui Ui, name: impl Into<String>) -> Self {
+    pub fn new(ui: &'ui Ui, name: impl Into<Cow<'ui, str>>) -> Self {
         Self {
             ui,
             name: name.into(),
@@ -244,9 +245,9 @@ impl<'ui> Window<'ui> {
 
     /// Begins the window and returns a token
     fn begin(self) -> Option<WindowToken<'ui>> {
-        use std::ffi::CString;
-
-        let name_cstr = CString::new(self.name).ok()?;
+        let name = self.name;
+        assert!(!name.contains('\0'), "window name contained null byte");
+        let name_ptr = self.ui.scratch_txt(name);
 
         // Set window properties before beginning
         if let Some(size) = self.size {
@@ -306,8 +307,7 @@ impl<'ui> Window<'ui> {
             Some(opened) => opened as *mut bool,
             None => std::ptr::null_mut(),
         };
-        let result =
-            unsafe { crate::sys::igBegin(name_cstr.as_ptr(), opened_ptr, self.flags.bits()) };
+        let result = unsafe { crate::sys::igBegin(name_ptr, opened_ptr, self.flags.bits()) };
         let is_open = opened.map_or(true, |opened| *opened);
 
         // IMPORTANT: According to ImGui documentation, Begin/End calls must be balanced.

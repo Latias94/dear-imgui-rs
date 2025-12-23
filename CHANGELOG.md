@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Color::to_hsv01` / `Color::from_hsv01`: helpers that match Dear ImGui's HSV semantics (h in `[0, 1]`).
   - ImGui-style `i32` index variants for optional selection (`-1` as no selection):
     `Ui::combo_i32`, `Ui::combo_simple_string_i32`, `ListBox::build_simple_i32`.
+  - Menu items: shortcut-free and shortcut variants to avoid `None::<&str>` turbofish:
+    `Ui::menu_item_toggle_no_shortcut`, `Ui::menu_item_toggle_with_shortcut`,
+    `Ui::menu_item_enabled_selected_no_shortcut`, `Ui::menu_item_enabled_selected_with_shortcut`.
+  - `Io::mouse_down_button` / `Io::set_mouse_down_button`: typed `MouseButton` helpers for `Io::MouseDown`.
+  - Legacy columns: `Ui::begin_columns_token` (RAII `ColumnsToken` ends columns on drop).
+  - `Ui::list_box_config`: convenience constructor for `ListBox`.
 
 - Extensions
   - `dear-implot`: add non-variadic text helpers for annotations/tags (avoids calling C `...`, useful for import-style WASM).
@@ -33,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core (`dear-imgui-rs`)
   - `ui.window(...).build(...)` only shows a close button when `opened(...)` is provided (matches upstream Dear ImGui behavior).
+  - `Ui::get_id` uses the internal scratch buffer instead of allocating a `CString`.
+  - `Ui::window` now accepts `Into<Cow<'_, str>>` and avoids per-frame string allocation for borrowed names.
 - `dear-imgui-wgpu`: bump `wgpu` to v28 (requires Rust 1.92+).
 
 ## [0.7.0] - 2025-12-13
