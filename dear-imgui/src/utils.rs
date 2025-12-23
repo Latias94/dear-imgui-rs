@@ -131,6 +131,9 @@ impl crate::ui::Ui {
     pub fn get_key_name(&self, key: Key) -> &str {
         unsafe {
             let name_ptr = sys::igGetKeyName(key.into());
+            if name_ptr.is_null() {
+                return "Unknown";
+            }
             let c_str = std::ffi::CStr::from_ptr(name_ptr);
             c_str.to_str().unwrap_or("Unknown")
         }
@@ -220,6 +223,9 @@ impl crate::ui::Ui {
     pub fn style_color_name(&self, style_color: StyleColor) -> &'static str {
         unsafe {
             let name_ptr = sys::igGetStyleColorName(style_color as sys::ImGuiCol);
+            if name_ptr.is_null() {
+                return "Unknown";
+            }
             let c_str = std::ffi::CStr::from_ptr(name_ptr);
             c_str.to_str().unwrap_or("Unknown")
         }

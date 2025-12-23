@@ -205,8 +205,10 @@ impl PlatformIo {
     ///
     /// # Safety
     ///
-    /// The caller must ensure that the pointer is valid and points to a valid
-    /// `ImGuiPlatformIO` structure.
+    /// The caller must ensure that:
+    /// - `raw` is non-null and points to a valid `ImGuiPlatformIO`.
+    /// - The platform IO outlives the returned reference (e.g. it belongs to the
+    ///   currently active ImGui context).
     pub(crate) unsafe fn from_raw(raw: *const sys::ImGuiPlatformIO) -> &'static Self {
         unsafe { &*(raw as *const Self) }
     }
@@ -215,8 +217,11 @@ impl PlatformIo {
     ///
     /// # Safety
     ///
-    /// The caller must ensure that the pointer is valid and points to a valid
-    /// `ImGuiPlatformIO` structure, and that no other references exist.
+    /// The caller must ensure that:
+    /// - `raw` is non-null and points to a valid `ImGuiPlatformIO`.
+    /// - The platform IO outlives the returned reference (e.g. it belongs to the
+    ///   currently active ImGui context).
+    /// - No other references (shared or mutable) to the same platform IO are alive.
     pub unsafe fn from_raw_mut(raw: *mut sys::ImGuiPlatformIO) -> &'static mut Self {
         unsafe { &mut *(raw as *mut Self) }
     }
@@ -750,16 +755,25 @@ impl PlatformIo {
     pub fn textures(&self) -> crate::render::draw_data::TextureIterator<'_> {
         unsafe {
             let vector = &self.raw.Textures;
-            crate::render::draw_data::TextureIterator::new(
-                vector.Data,
-                vector.Data.add(vector.Size as usize),
-            )
+            if vector.Size <= 0 || vector.Data.is_null() {
+                crate::render::draw_data::TextureIterator::new(std::ptr::null(), std::ptr::null())
+            } else {
+                crate::render::draw_data::TextureIterator::new(
+                    vector.Data,
+                    vector.Data.add(vector.Size as usize),
+                )
+            }
         }
     }
 
     /// Get the number of textures managed by the platform
     pub fn textures_count(&self) -> usize {
-        self.raw.Textures.Size as usize
+        let vector = &self.raw.Textures;
+        if vector.Size <= 0 || vector.Data.is_null() {
+            0
+        } else {
+            vector.Size as usize
+        }
     }
 
     /// Get a specific texture by index
@@ -768,6 +782,9 @@ impl PlatformIo {
     pub fn texture(&self, index: usize) -> Option<&crate::texture::TextureData> {
         unsafe {
             let vector = &self.raw.Textures;
+            if vector.Data.is_null() {
+                return None;
+            }
             if index >= vector.Size as usize {
                 return None;
             }
@@ -785,6 +802,9 @@ impl PlatformIo {
     pub fn texture_mut(&mut self, index: usize) -> Option<&mut crate::texture::TextureData> {
         unsafe {
             let vector = &self.raw.Textures;
+            if vector.Data.is_null() {
+                return None;
+            }
             if index >= vector.Size as usize {
                 return None;
             }
@@ -852,15 +872,22 @@ impl Viewport {
     pub fn main() -> &'static Self {
         // SAFETY: With an active ImGui context, `igGetMainViewport()` returns
         // a valid pointer to the global main viewport that lives for the
-        // duration of the context. We expose it as a shared reference.
-        unsafe { Self::from_raw(sys::igGetMainViewport() as *const sys::ImGuiViewport) }
+        // duration of the context. Note that the returned reference is only
+        // valid while the corresponding ImGui context remains alive.
+        let ptr = unsafe { sys::igGetMainViewport() } as *const sys::ImGuiViewport;
+        if ptr.is_null() {
+            panic!("Viewport::main() requires an active ImGui context");
+        }
+        unsafe { Self::from_raw(ptr) }
     }
     /// Get a reference to the viewport from a raw pointer
     ///
     /// # Safety
     ///
-    /// The caller must ensure that the pointer is valid and points to a valid
-    /// `ImGuiViewport` structure.
+    /// The caller must ensure that:
+    /// - `raw` is non-null and points to a valid `ImGuiViewport`.
+    /// - The viewport outlives the returned reference (e.g. it belongs to the
+    ///   currently active ImGui context).
     pub(crate) unsafe fn from_raw(raw: *const sys::ImGuiViewport) -> &'static Self {
         unsafe { &*(raw as *const Self) }
     }
@@ -869,8 +896,11 @@ impl Viewport {
     ///
     /// # Safety
     ///
-    /// The caller must ensure that the pointer is valid and points to a valid
-    /// `ImGuiViewport` structure, and that no other references exist.
+    /// The caller must ensure that:
+    /// - `raw` is non-null and points to a valid `ImGuiViewport`.
+    /// - The viewport outlives the returned reference (e.g. it belongs to the
+    ///   currently active ImGui context).
+    /// - No other references (shared or mutable) to the same viewport are alive.
     pub unsafe fn from_raw_mut(raw: *mut sys::ImGuiViewport) -> &'static mut Self {
         unsafe { &mut *(raw as *mut Self) }
     }
@@ -1100,6 +1130,30 @@ impl Viewport {
     pub fn set_framebuffer_scale(&mut self, scale: [f32; 2]) {
         self.raw.FramebufferScale.x = scale[0];
         self.raw.FramebufferScale.y = scale[1];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_io_textures_empty_is_safe() {
+        let mut raw: sys::ImGuiPlatformIO = unsafe { std::mem::zeroed() };
+
+        raw.Textures.Size = 0;
+        raw.Textures.Data = std::ptr::null_mut();
+        let pio = PlatformIo { raw };
+        assert_eq!(pio.textures().count(), 0);
+        assert_eq!(pio.textures_count(), 0);
+
+        let mut raw: sys::ImGuiPlatformIO = unsafe { std::mem::zeroed() };
+        raw.Textures.Size = 1;
+        raw.Textures.Data = std::ptr::null_mut();
+        let pio = PlatformIo { raw };
+        assert_eq!(pio.textures().count(), 0);
+        assert_eq!(pio.textures_count(), 0);
+        assert!(pio.texture(0).is_none());
     }
 }
 

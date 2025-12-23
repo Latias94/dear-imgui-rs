@@ -97,7 +97,11 @@ impl DrawData {
                 TextureIterator::new(std::ptr::null(), std::ptr::null())
             } else {
                 let vector = &*self.textures;
-                TextureIterator::new(vector.data, vector.data.add(vector.size as usize))
+                if vector.size <= 0 || vector.data.is_null() {
+                    TextureIterator::new(std::ptr::null(), std::ptr::null())
+                } else {
+                    TextureIterator::new(vector.data, vector.data.add(vector.size as usize))
+                }
             }
         }
     }
@@ -108,7 +112,12 @@ impl DrawData {
             if self.textures.is_null() {
                 0
             } else {
-                (*self.textures).size as usize
+                let vector = &*self.textures;
+                if vector.size <= 0 || vector.data.is_null() {
+                    0
+                } else {
+                    vector.size as usize
+                }
             }
         }
     }
@@ -122,6 +131,9 @@ impl DrawData {
                 return None;
             }
             let vector = &*self.textures;
+            if vector.data.is_null() {
+                return None;
+            }
             if index >= vector.size as usize {
                 return None;
             }
@@ -142,6 +154,9 @@ impl DrawData {
                 return None;
             }
             let vector = &*self.textures;
+            if vector.data.is_null() {
+                return None;
+            }
             if index >= vector.size as usize {
                 return None;
             }
@@ -432,7 +447,7 @@ impl OwnedDrawData {
     #[inline]
     pub fn draw_data(&self) -> Option<&DrawData> {
         if !self.draw_data.is_null() {
-            Some(unsafe { std::mem::transmute::<&sys::ImDrawData, &DrawData>(&*self.draw_data) })
+            Some(unsafe { &*(self.draw_data as *const DrawData) })
         } else {
             None
         }
@@ -568,3 +583,50 @@ impl<'a> Iterator for TextureIterator<'a> {
 }
 
 impl<'a> std::iter::FusedIterator for TextureIterator<'a> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draw_data_textures_empty_is_safe() {
+        let mut textures_vec: crate::internal::ImVector<*mut sys::ImTextureData> =
+            crate::internal::ImVector::default();
+
+        let draw_data = DrawData {
+            valid: false,
+            cmd_lists_count: 0,
+            total_idx_count: 0,
+            total_vtx_count: 0,
+            cmd_lists: crate::internal::ImVector::default(),
+            display_pos: [0.0, 0.0],
+            display_size: [0.0, 0.0],
+            framebuffer_scale: [1.0, 1.0],
+            owner_viewport: std::ptr::null_mut(),
+            textures: &mut textures_vec,
+        };
+
+        assert_eq!(draw_data.textures().count(), 0);
+        assert_eq!(draw_data.textures_count(), 0);
+
+        let mut textures_vec: crate::internal::ImVector<*mut sys::ImTextureData> =
+            crate::internal::ImVector::default();
+        textures_vec.size = 1;
+        textures_vec.data = std::ptr::null_mut();
+        let draw_data = DrawData {
+            valid: false,
+            cmd_lists_count: 0,
+            total_idx_count: 0,
+            total_vtx_count: 0,
+            cmd_lists: crate::internal::ImVector::default(),
+            display_pos: [0.0, 0.0],
+            display_size: [0.0, 0.0],
+            framebuffer_scale: [1.0, 1.0],
+            owner_viewport: std::ptr::null_mut(),
+            textures: &mut textures_vec,
+        };
+        assert_eq!(draw_data.textures().count(), 0);
+        assert_eq!(draw_data.textures_count(), 0);
+        assert!(draw_data.texture(0).is_none());
+    }
+}

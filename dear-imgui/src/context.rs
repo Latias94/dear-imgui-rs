@@ -341,6 +341,9 @@ impl Context {
 
         unsafe {
             let io = sys::igGetIO_Nil();
+            if io.is_null() {
+                panic!("igGetIO_Nil() returned null");
+            }
             let ptr = self
                 .renderer_name
                 .as_ref()
@@ -359,6 +362,9 @@ impl Context {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             let pio = sys::igGetPlatformIO_Nil();
+            if pio.is_null() {
+                panic!("igGetPlatformIO_Nil() returned null");
+            }
             crate::platform_io::PlatformIo::from_raw_mut(pio)
         }
     }
@@ -562,11 +568,18 @@ impl Context {
     pub fn save_ini_settings(&mut self, buf: &mut String) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let data_ptr = sys::igSaveIniSettingsToMemory(ptr::null_mut());
-            if !data_ptr.is_null() {
-                let data = std::ffi::CStr::from_ptr(data_ptr);
-                buf.push_str(&data.to_string_lossy());
+            let mut out_ini_size: usize = 0;
+            let data_ptr = sys::igSaveIniSettingsToMemory(&mut out_ini_size as *mut usize);
+            if data_ptr.is_null() || out_ini_size == 0 {
+                return;
             }
+
+            let mut bytes =
+                std::slice::from_raw_parts(data_ptr as *const u8, out_ini_size as usize);
+            if bytes.last() == Some(&0) {
+                bytes = &bytes[..bytes.len().saturating_sub(1)];
+            }
+            buf.push_str(&String::from_utf8_lossy(bytes));
         }
     }
 

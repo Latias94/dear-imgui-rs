@@ -189,6 +189,10 @@ impl Io {
         unsafe {
             // Note: our bindings expose igGetIO_Nil which resolves against the
             // current context. Keep using _Nil variant until regular symbol is exported.
+            //
+            // SAFETY: `igGetIO_Nil()` returns a pointer owned by the currently active
+            // ImGui context. The returned reference must not be used after the context
+            // is destroyed or when another context becomes current.
             let io_ptr = sys::igGetIO_Nil();
             &mut *(io_ptr as *mut Self)
         }

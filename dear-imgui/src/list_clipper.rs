@@ -43,6 +43,9 @@ impl ListClipper {
     pub fn begin(self, ui: &Ui) -> ListClipperToken<'_> {
         unsafe {
             let ptr = sys::ImGuiListClipper_ImGuiListClipper();
+            if ptr.is_null() {
+                panic!("ImGuiListClipper_ImGuiListClipper() returned null");
+            }
             sys::ImGuiListClipper_Begin(ptr, self.items_count, self.items_height);
             ListClipperToken::new(ui, ptr)
         }

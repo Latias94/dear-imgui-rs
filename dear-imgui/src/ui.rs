@@ -32,6 +32,10 @@ impl Ui {
     /// Returns a reference to the main Dear ImGui viewport (safe wrapper)
     ///
     /// Same viewport used by `dockspace_over_main_viewport()`.
+    ///
+    /// Note: while the return type is `&'static Viewport`, the underlying pointer
+    /// is owned by the currently active ImGui context and must not be used after
+    /// the context is destroyed.
     #[doc(alias = "GetMainViewport")]
     pub fn main_viewport(&self) -> &'static crate::platform_io::Viewport {
         crate::platform_io::Viewport::main()

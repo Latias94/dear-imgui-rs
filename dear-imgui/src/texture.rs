@@ -314,6 +314,9 @@ impl TextureData {
         // Initialize via ImGui constructor to inherit default changes safely
         let raw = unsafe {
             let p = sys::ImTextureData_ImTextureData();
+            if p.is_null() {
+                panic!("ImTextureData_ImTextureData() returned null");
+            }
             let v = *p;
             sys::ImTextureData_destroy(p);
             v

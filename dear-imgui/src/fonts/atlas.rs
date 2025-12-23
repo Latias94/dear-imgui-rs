@@ -47,6 +47,9 @@ impl FontLoader {
         // Initialize via ImGui constructor to future-proof defaults
         let mut raw = unsafe {
             let p = sys::ImFontLoader_ImFontLoader();
+            if p.is_null() {
+                panic!("ImFontLoader_ImFontLoader() returned null");
+            }
             let v = *p;
             sys::ImFontLoader_destroy(p);
             v
@@ -144,6 +147,9 @@ impl SharedFontAtlas {
     pub fn create() -> SharedFontAtlas {
         unsafe {
             let raw_atlas = sys::ImFontAtlas_ImFontAtlas();
+            if raw_atlas.is_null() {
+                panic!("ImFontAtlas_ImFontAtlas() returned null");
+            }
             SharedFontAtlas(Rc::new(raw_atlas))
         }
     }
@@ -178,6 +184,9 @@ impl FontAtlas {
     pub fn new() -> Self {
         unsafe {
             let raw = sys::ImFontAtlas_ImFontAtlas();
+            if raw.is_null() {
+                panic!("ImFontAtlas_ImFontAtlas() returned null");
+            }
             Self {
                 raw,
                 owned: true,
@@ -590,9 +599,24 @@ impl Drop for FontAtlas {
 // ImGui context and is not thread-safe to move/share across threads.
 
 /// Font configuration for loading fonts with v1.92+ features
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FontConfig {
     raw: sys::ImFontConfig,
+    glyph_exclude_ranges: Option<Vec<sys::ImWchar>>,
+}
+
+impl Clone for FontConfig {
+    fn clone(&self) -> Self {
+        let mut raw = self.raw;
+        let glyph_exclude_ranges = self.glyph_exclude_ranges.clone();
+        if let Some(ref ranges) = glyph_exclude_ranges {
+            raw.GlyphExcludeRanges = ranges.as_ptr();
+        }
+        Self {
+            raw,
+            glyph_exclude_ranges,
+        }
+    }
 }
 
 impl FontConfig {
@@ -602,9 +626,15 @@ impl FontConfig {
         // (e.g., RasterizerDensity defaults to 1.0f which avoids assertions).
         unsafe {
             let cfg = sys::ImFontConfig_ImFontConfig();
+            if cfg.is_null() {
+                panic!("ImFontConfig_ImFontConfig() returned null");
+            }
             let raw = *cfg;
             sys::ImFontConfig_destroy(cfg);
-            Self { raw }
+            Self {
+                raw,
+                glyph_exclude_ranges: None,
+            }
         }
     }
 
@@ -639,7 +669,25 @@ impl FontConfig {
     ///
     /// Useful when merging fonts to avoid overlapping glyphs.
     pub fn glyph_exclude_ranges(mut self, ranges: &[u32]) -> Self {
-        self.raw.GlyphExcludeRanges = ranges.as_ptr() as *const sys::ImWchar;
+        if ranges.is_empty() {
+            self.raw.GlyphExcludeRanges = ptr::null();
+            self.glyph_exclude_ranges = None;
+            return self;
+        }
+
+        let mut converted: Vec<sys::ImWchar> = Vec::with_capacity(ranges.len() + 1);
+        for &v in ranges {
+            let v = sys::ImWchar::try_from(v).unwrap_or_else(|_| {
+                panic!("glyph_exclude_ranges value out of range for ImWchar (u16): {v:#x}")
+            });
+            converted.push(v);
+        }
+        if converted.last().copied() != Some(0) {
+            converted.push(0);
+        }
+
+        self.raw.GlyphExcludeRanges = converted.as_ptr();
+        self.glyph_exclude_ranges = Some(converted);
         self
     }
 
@@ -732,6 +780,27 @@ impl FontConfig {
 impl Default for FontConfig {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn font_config_glyph_exclude_ranges_converts_and_terminates() {
+        let cfg = FontConfig::new().glyph_exclude_ranges(&[0x41]);
+        assert!(!cfg.raw.GlyphExcludeRanges.is_null());
+        unsafe {
+            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(0), 0x41 as sys::ImWchar);
+            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(1), 0);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "glyph_exclude_ranges value out of range")]
+    fn font_config_glyph_exclude_ranges_rejects_out_of_range() {
+        let _ = FontConfig::new().glyph_exclude_ranges(&[0x1_0000]);
     }
 }
 
