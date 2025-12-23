@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Core (`dear-imgui-rs`)
+  - Managed textures: `TextureData::set_status(Destroyed)` now clears `TexID`/`BackendUserData` to match Dear ImGui's texture contract and avoid asserts.
+- Backends
+  - `dear-imgui-wgpu`: keep existing GPU texture and mark status `OK` when a `WantUpdates` upload fails (avoids invalid `TexID` during the same frame).
+
 ## [0.8.0] - 2025-12-22
 
 ### Added

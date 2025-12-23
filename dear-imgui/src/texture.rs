@@ -416,6 +416,13 @@ impl TextureData {
     /// This should only be called by renderer backends after handling a request.
     pub fn set_status(&mut self, status: TextureStatus) {
         unsafe {
+            // When marking a texture as destroyed, Dear ImGui expects the backend to clear any
+            // backend bindings (TexID/BackendUserData). Otherwise ImGui will assert when
+            // processing the texture list.
+            if status == TextureStatus::Destroyed {
+                sys::ImTextureData_SetTexID(self.as_raw_mut(), 0 as sys::ImTextureID);
+                (*self.as_raw_mut()).BackendUserData = std::ptr::null_mut();
+            }
             sys::ImTextureData_SetStatus(self.as_raw_mut(), status.into());
         }
     }

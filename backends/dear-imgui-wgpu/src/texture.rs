@@ -767,8 +767,9 @@ impl WgpuTextureManager {
                             )
                             .is_err()
                         {
-                            // If update fails, mark as destroyed
-                            texture_data.set_status(TextureStatus::Destroyed);
+                            // If update fails, keep the existing GPU texture and mark OK to avoid a retry storm.
+                            // We cannot clear TexID here because draw commands in this frame may still reference it.
+                            texture_data.set_status(TextureStatus::OK);
                         } else {
                             texture_data.set_status(TextureStatus::OK);
                         }
