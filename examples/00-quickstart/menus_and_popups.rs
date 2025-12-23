@@ -180,8 +180,8 @@ impl AppWindow {
             });
 
             ui.menu("View", || {
-                ui.menu_item_toggle("Status Bar", None::<&str>, &mut self.status_bar, true);
-                ui.menu_item_toggle("Dark Theme", None::<&str>, &mut self.theme_dark, true);
+                ui.menu_item_toggle_no_shortcut("Status Bar", &mut self.status_bar, true);
+                ui.menu_item_toggle_no_shortcut("Dark Theme", &mut self.theme_dark, true);
             });
 
             ui.menu("Help", || {
@@ -205,8 +205,7 @@ impl AppWindow {
                             ui.open_popup("RenameDoc");
                         }
                         let has_sel = self.selected.is_some();
-                        if ui.menu_item_enabled_selected("Delete...", None::<&str>, false, has_sel)
-                        {
+                        if ui.menu_item_enabled_selected_no_shortcut("Delete...", false, has_sel) {
                             self.confirm_delete_open = true;
                             ui.open_popup("ConfirmDelete");
                         }
@@ -241,7 +240,7 @@ impl AppWindow {
                         ui.close_current_popup();
                     }
                     let has_sel = self.selected.is_some();
-                    if ui.menu_item_enabled_selected("Duplicate", None::<&str>, false, has_sel) {
+                    if ui.menu_item_enabled_selected_no_shortcut("Duplicate", false, has_sel) {
                         if let Some(i) = self.selected {
                             let name = format!("{} Copy", self.sections[i]);
                             self.sections.push(name);
@@ -250,7 +249,7 @@ impl AppWindow {
                         ui.close_current_popup();
                     }
                     ui.separator();
-                    if ui.menu_item_enabled_selected("Delete", None::<&str>, false, has_sel) {
+                    if ui.menu_item_enabled_selected_no_shortcut("Delete", false, has_sel) {
                         if let Some(i) = self.selected {
                             self.sections.remove(i);
                             if self.sections.is_empty() {

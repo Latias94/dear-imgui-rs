@@ -125,11 +125,11 @@ fn main() {
                     _m.end();
                 }
                 if let Some(_m) = ui.begin_menu("Windows") {
-                    ui.menu_item_toggle("Main View", None::<&str>, &mut state.show_main, true);
-                    ui.menu_item_toggle("Command", None::<&str>, &mut state.show_command, true);
-                    ui.menu_item_toggle("Command 2", None::<&str>, &mut state.show_command2, true);
-                    ui.menu_item_toggle("Misc", None::<&str>, &mut state.show_misc, true);
-                    ui.menu_item_toggle("Logs", None::<&str>, &mut state.show_logs, true);
+                    ui.menu_item_toggle_no_shortcut("Main View", &mut state.show_main, true);
+                    ui.menu_item_toggle_no_shortcut("Command", &mut state.show_command, true);
+                    ui.menu_item_toggle_no_shortcut("Command 2", &mut state.show_command2, true);
+                    ui.menu_item_toggle_no_shortcut("Misc", &mut state.show_misc, true);
+                    ui.menu_item_toggle_no_shortcut("Logs", &mut state.show_logs, true);
                     _m.end();
                 }
                 _mb.end();
@@ -190,23 +190,22 @@ fn main() {
                             let mut no_central =
                                 new_flags.contains(DockFlags::NO_DOCKING_OVER_CENTRAL_NODE);
 
-                            if ui.menu_item_toggle("NoSplit", None::<&str>, &mut no_split, true) {
+                            if ui.menu_item_toggle_no_shortcut("NoSplit", &mut no_split, true) {
                                 if no_split {
                                     new_flags |= DockFlags::NO_DOCKING_SPLIT;
                                 } else {
                                     new_flags.remove(DockFlags::NO_DOCKING_SPLIT);
                                 }
                             }
-                            if ui.menu_item_toggle("NoResize", None::<&str>, &mut no_resize, true) {
+                            if ui.menu_item_toggle_no_shortcut("NoResize", &mut no_resize, true) {
                                 if no_resize {
                                     new_flags |= DockFlags::NO_RESIZE;
                                 } else {
                                     new_flags.remove(DockFlags::NO_RESIZE);
                                 }
                             }
-                            if ui.menu_item_toggle(
+                            if ui.menu_item_toggle_no_shortcut(
                                 "AutoHideTabBar",
-                                None::<&str>,
                                 &mut auto_hide,
                                 true,
                             ) {
@@ -216,9 +215,8 @@ fn main() {
                                     new_flags.remove(DockFlags::AUTO_HIDE_TAB_BAR);
                                 }
                             }
-                            if ui.menu_item_toggle(
+                            if ui.menu_item_toggle_no_shortcut(
                                 "NoDockingOverCentral",
-                                None::<&str>,
                                 &mut no_central,
                                 true,
                             ) {
