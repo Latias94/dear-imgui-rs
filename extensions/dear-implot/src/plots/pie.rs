@@ -116,6 +116,9 @@ impl<'a> Plot for PieChartPlot<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.values.len()) else {
+            return;
+        };
         with_plot_str_slice_with_opt(
             &self.label_ids,
             self.label_fmt,
@@ -123,7 +126,7 @@ impl<'a> Plot for PieChartPlot<'a> {
                 sys::ImPlot_PlotPieChart_doublePtrStr(
                     label_ptrs.as_ptr(),
                     self.values.as_ptr(),
-                    self.values.len() as i32,
+                    count,
                     self.center_x,
                     self.center_y,
                     self.radius,
@@ -243,6 +246,9 @@ impl<'a> Plot for PieChartPlotF32<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.values.len()) else {
+            return;
+        };
         with_plot_str_slice_with_opt(
             &self.label_ids,
             self.label_fmt,
@@ -250,7 +256,7 @@ impl<'a> Plot for PieChartPlotF32<'a> {
                 sys::ImPlot_PlotPieChart_FloatPtrStr(
                     label_ptrs.as_ptr(),
                     self.values.as_ptr(),
-                    self.values.len() as i32,
+                    count,
                     self.center_x,
                     self.center_y,
                     self.radius,

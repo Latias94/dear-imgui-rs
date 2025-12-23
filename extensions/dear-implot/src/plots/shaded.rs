@@ -64,12 +64,15 @@ impl<'a> Plot for ShadedPlot<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.x_data.len()) else {
+            return;
+        };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotShaded_doublePtrdoublePtrInt(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
-                self.x_data.len() as i32,
+                count,
                 self.y_ref,
                 self.flags.bits() as sys::ImPlotShadedFlags,
                 self.offset,
@@ -123,6 +126,9 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.x_data.len()) else {
+            return;
+        };
 
         // Note: This would require a different wrapper function for shaded between two lines
         // For now, we'll use the single line version with the first Y data
@@ -132,7 +138,7 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
                 self.x_data.as_ptr(),
                 self.y1_data.as_ptr(),
                 self.y2_data.as_ptr(),
-                self.x_data.len() as i32,
+                count,
                 self.flags.bits() as sys::ImPlotShadedFlags,
                 0,
                 std::mem::size_of::<f64>() as i32,
@@ -190,6 +196,9 @@ impl<'a> Plot for SimpleShadedPlot<'a> {
         if self.values.is_empty() {
             return;
         }
+        let Ok(count) = i32::try_from(self.values.len()) else {
+            return;
+        };
 
         // Create temporary X data
         let x_data: Vec<f64> = (0..self.values.len())
@@ -201,7 +210,7 @@ impl<'a> Plot for SimpleShadedPlot<'a> {
                 label_ptr,
                 x_data.as_ptr(),
                 self.values.as_ptr(),
-                self.values.len() as i32,
+                count,
                 self.y_ref,
                 0, // flags
                 0,

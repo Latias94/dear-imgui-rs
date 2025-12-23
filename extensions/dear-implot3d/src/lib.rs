@@ -55,6 +55,10 @@ pub mod plots;
 
 use std::borrow::Cow;
 
+fn len_i32(len: usize) -> Option<i32> {
+    i32::try_from(len).ok()
+}
+
 trait ImVec2Ctor {
     fn from_xy(x: f32, y: f32) -> Self;
 }
@@ -409,6 +413,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -420,7 +427,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 0,
                 stride_bytes,
@@ -442,6 +449,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -457,7 +467,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 offset,
                 stride_bytes,
@@ -477,6 +487,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -488,7 +501,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 0,
                 stride_bytes,
@@ -510,6 +523,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -525,7 +541,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 offset,
                 stride_bytes,
@@ -545,6 +561,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -556,7 +575,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 0,
                 stride_bytes,
@@ -578,6 +597,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -593,7 +615,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 offset,
                 stride_bytes,
@@ -613,6 +635,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -624,7 +649,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 0,
                 stride_bytes,
@@ -646,6 +671,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -661,7 +689,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 offset,
                 stride_bytes,
@@ -681,6 +709,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -692,7 +723,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 0,
                 stride_bytes,
@@ -713,6 +744,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -728,7 +762,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 offset,
                 stride_bytes,
@@ -748,6 +782,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -759,7 +796,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 0,
                 stride_bytes,
@@ -780,6 +817,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -795,7 +835,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 offset,
                 stride_bytes,
@@ -815,6 +855,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -826,7 +869,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 0,
                 stride_bytes,
@@ -847,6 +890,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -862,7 +908,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 offset,
                 stride_bytes,
@@ -882,6 +928,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -893,7 +942,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 0,
                 stride_bytes,
@@ -914,6 +963,9 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
+        let Some(count) = len_i32(xs.len()) else {
+            return;
+        };
         let label = label.as_ref();
         if label.contains('\0') {
             return;
@@ -929,7 +981,7 @@ impl<'ui> Plot3DUi<'ui> {
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
-                xs.len() as i32,
+                count,
                 flags.bits() as i32,
                 offset,
                 stride_bytes,
@@ -1099,9 +1151,18 @@ impl<'ui> Surface3DBuilder<'ui> {
         self
     }
     pub fn plot(self) {
-        let x_count = self.xs.len() as i32;
-        let y_count = self.ys.len() as i32;
-        let expected = (x_count as usize) * (y_count as usize);
+        let x_count = match i32::try_from(self.xs.len()) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let y_count = match i32::try_from(self.ys.len()) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let expected = match self.xs.len().checked_mul(self.ys.len()) {
+            Some(v) => v,
+            None => return,
+        };
         if self.zs.len() != expected {
             return;
         }
@@ -1533,6 +1594,9 @@ impl<'ui> Plot3DUi<'ui> {
         unsafe { sys::ImPlot3D_SetupAxisZoomConstraints(axis as i32, z_min, z_max) }
     }
 
+    /// Setup axis ticks using explicit positions and optional labels.
+    ///
+    /// If `labels` is provided, it must have the same length as `values`.
     pub fn setup_axis_ticks_values(
         &self,
         axis: Axis3D,
@@ -1541,8 +1605,13 @@ impl<'ui> Plot3DUi<'ui> {
         keep_default: bool,
     ) {
         debug_before_setup();
-        let n_ticks = values.len() as i32;
+        let Some(n_ticks) = len_i32(values.len()) else {
+            return;
+        };
         if let Some(lbls) = labels {
+            if lbls.len() != values.len() {
+                return;
+            }
             let cleaned: Vec<&str> = lbls
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
@@ -1700,8 +1769,12 @@ impl<'ui> Mesh3DBuilder<'ui> {
     pub fn plot(self) {
         // SAFETY: ImPlot3DPoint has (x,y,z) floats; we transmute from [[f32;3]] for FFI call
         // Layout compatibility assumed; if upstream changes, this needs revisiting.
-        let vtx_count = self.vertices.len() as i32;
-        let idx_count = self.indices.len() as i32;
+        let Some(vtx_count) = len_i32(self.vertices.len()) else {
+            return;
+        };
+        let Some(idx_count) = len_i32(self.indices.len()) else {
+            return;
+        };
         let label = self.label.as_ref();
         let label = if label.contains('\0') { "mesh" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {

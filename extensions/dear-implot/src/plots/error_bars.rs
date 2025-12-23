@@ -80,13 +80,16 @@ impl<'a> Plot for ErrorBarsPlot<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.x_data.len()) else {
+            return;
+        };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrInt(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.err_data.as_ptr(),
-                self.x_data.len() as i32,
+                count,
                 self.flags.bits() as i32,
                 self.offset,
                 self.stride,
@@ -163,6 +166,9 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.x_data.len()) else {
+            return;
+        };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrdoublePtr(
                 label_ptr,
@@ -170,7 +176,7 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
                 self.y_data.as_ptr(),
                 self.err_neg.as_ptr(),
                 self.err_pos.as_ptr(),
-                self.x_data.len() as i32,
+                count,
                 self.flags.bits() as i32,
                 0,
                 std::mem::size_of::<f64>() as i32,
@@ -235,6 +241,9 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.values.len()) else {
+            return;
+        };
 
         // Create temporary X data
         let x_data: Vec<f64> = (0..self.values.len())
@@ -247,7 +256,7 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
                 x_data.as_ptr(),
                 self.values.as_ptr(),
                 self.errors.as_ptr(),
-                self.values.len() as i32,
+                count,
                 0, // flags
                 0,
                 std::mem::size_of::<f64>() as i32,

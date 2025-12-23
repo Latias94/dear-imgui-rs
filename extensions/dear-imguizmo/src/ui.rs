@@ -84,11 +84,18 @@ impl<'ui> GizmoUi<'ui> {
     }
 
     pub fn draw_cubes<T: Mat4Like>(&self, view: &T, projection: &T, matrices: &[T]) {
-        let count = matrices.len() as i32;
+        let count = match i32::try_from(matrices.len()) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
         if count == 0 {
             return;
         }
-        let mut flat: Vec<f32> = Vec::with_capacity((count as usize) * 16);
+        let cap = match matrices.len().checked_mul(16) {
+            Some(v) => v,
+            None => return,
+        };
+        let mut flat: Vec<f32> = Vec::with_capacity(cap);
         for m in matrices {
             flat.extend_from_slice(&m.to_cols_array());
         }

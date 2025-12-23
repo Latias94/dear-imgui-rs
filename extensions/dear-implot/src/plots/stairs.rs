@@ -64,12 +64,15 @@ impl<'a> StairsPlot<'a> {
 
     /// Plot the stairs
     pub fn plot(self) {
+        let Ok(count) = i32::try_from(self.x_data.len()) else {
+            return;
+        };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotStairs_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
-                self.x_data.len() as i32,
+                count,
                 self.flags.bits() as i32,
                 self.offset,
                 self.stride,
@@ -141,12 +144,15 @@ impl<'a> StairsPlotF32<'a> {
 
     /// Plot the stairs
     pub fn plot(self) {
+        let Ok(count) = i32::try_from(self.x_data.len()) else {
+            return;
+        };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotStairs_FloatPtrFloatPtr(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
-                self.x_data.len() as i32,
+                count,
                 self.flags.bits() as i32,
                 0,
                 std::mem::size_of::<f32>() as i32,
@@ -226,6 +232,9 @@ impl<'a> SimpleStairsPlot<'a> {
 
     /// Plot the stairs
     pub fn plot(self) {
+        let Ok(count) = i32::try_from(self.y_data.len()) else {
+            return;
+        };
         // Generate x data
         let x_data: Vec<f64> = (0..self.y_data.len())
             .map(|i| self.x_start + i as f64 * self.x_scale)
@@ -236,7 +245,7 @@ impl<'a> SimpleStairsPlot<'a> {
                 label_ptr,
                 x_data.as_ptr(),
                 self.y_data.as_ptr(),
-                self.y_data.len() as i32,
+                count,
                 self.flags.bits() as i32,
                 0,
                 std::mem::size_of::<f64>() as i32,

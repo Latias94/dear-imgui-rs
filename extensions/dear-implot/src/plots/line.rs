@@ -55,13 +55,16 @@ impl<'a> Plot for LinePlot<'a> {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
+        let Ok(count) = i32::try_from(self.x_data.len()) else {
+            return;
+        };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotLine_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
-                self.x_data.len() as i32,
+                count,
                 self.flags.bits() as i32,
                 self.offset,
                 self.stride,
@@ -111,6 +114,9 @@ impl<'a> Plot for SimpleLinePlot<'a> {
         if self.values.is_empty() {
             return;
         }
+        let Ok(count) = i32::try_from(self.values.len()) else {
+            return;
+        };
 
         // For simple line plots, we use the single-array version
         // This would require a wrapper function in the sys crate
@@ -124,7 +130,7 @@ impl<'a> Plot for SimpleLinePlot<'a> {
                 label_ptr,
                 x_data.as_ptr(),
                 self.values.as_ptr(),
-                self.values.len() as i32,
+                count,
                 0,
                 0,
                 std::mem::size_of::<f64>() as i32,

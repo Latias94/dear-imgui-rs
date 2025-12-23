@@ -73,12 +73,15 @@ impl<'a> Plot for BarPlot<'a> {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
+        let Ok(count) = i32::try_from(self.values.len()) else {
+            return;
+        };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotBars_doublePtrInt(
                 label_ptr,
                 self.values.as_ptr(),
-                self.values.len() as i32,
+                count,
                 self.bar_size,
                 self.shift,
                 self.flags.bits() as i32,
@@ -137,13 +140,16 @@ impl<'a> Plot for PositionalBarPlot<'a> {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
+        let Ok(count) = i32::try_from(self.y_data.len()) else {
+            return;
+        };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotBars_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
-                self.y_data.len() as i32,
+                count,
                 self.bar_size,
                 self.flags.bits() as i32,
                 0,

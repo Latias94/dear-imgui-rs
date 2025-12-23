@@ -56,11 +56,14 @@ impl<'a> Plot for InfLinesPlot<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.positions.len()) else {
+            return;
+        };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotInfLines_doublePtr(
                 label_ptr,
                 self.positions.as_ptr(),
-                self.positions.len() as i32,
+                count,
                 self.flags.bits() as i32,
                 self.offset,
                 self.stride,

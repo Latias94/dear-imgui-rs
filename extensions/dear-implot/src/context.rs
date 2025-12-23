@@ -152,6 +152,10 @@ impl<'ui> PlotUi<'ui> {
         if x_data.len() != y_data.len() {
             return; // Data length mismatch
         }
+        let count = match i32::try_from(x_data.len()) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
 
         let label = if label.contains('\0') { "" } else { label };
         with_scratch_txt(label, |ptr| unsafe {
@@ -159,7 +163,7 @@ impl<'ui> PlotUi<'ui> {
                 ptr,
                 x_data.as_ptr(),
                 y_data.as_ptr(),
-                x_data.len() as i32,
+                count,
                 0,
                 0,
                 0,
@@ -172,6 +176,10 @@ impl<'ui> PlotUi<'ui> {
         if x_data.len() != y_data.len() {
             return; // Data length mismatch
         }
+        let count = match i32::try_from(x_data.len()) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
 
         let label = if label.contains('\0') { "" } else { label };
         with_scratch_txt(label, |ptr| unsafe {
@@ -179,7 +187,7 @@ impl<'ui> PlotUi<'ui> {
                 ptr,
                 x_data.as_ptr(),
                 y_data.as_ptr(),
-                x_data.len() as i32,
+                count,
                 0,
                 0,
                 0,
@@ -408,7 +416,9 @@ impl<'ui> PlotUi<'ui> {
         unsafe { sys::ImPlot_SetNextAxisToFit(axis as sys::ImAxis) }
     }
 
-    /// Setup ticks with explicit positions and optional labels for an X axis
+    /// Setup ticks with explicit positions and optional labels for an X axis.
+    ///
+    /// If `labels` is provided, it must have the same length as `values`.
     pub fn setup_x_axis_ticks_positions(
         &self,
         axis: XAxis,
@@ -416,19 +426,25 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        let count = match i32::try_from(values.len()) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
         if let Some(labels) = labels {
+            if labels.len() != values.len() {
+                return;
+            }
             let cleaned: Vec<&str> = labels
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
             with_scratch_txt_slice(&cleaned, |ptrs| {
-                let raw: Vec<*const i8> = ptrs.iter().map(|&p| p as *const i8).collect();
                 unsafe {
                     sys::ImPlot_SetupAxisTicks_doublePtr(
                         axis as sys::ImAxis,
                         values.as_ptr(),
-                        values.len() as i32,
-                        raw.as_ptr(),
+                        count,
+                        ptrs.as_ptr() as *const *const i8,
                         keep_default,
                     )
                 }
@@ -438,7 +454,7 @@ impl<'ui> PlotUi<'ui> {
                 sys::ImPlot_SetupAxisTicks_doublePtr(
                     axis as sys::ImAxis,
                     values.as_ptr(),
-                    values.len() as i32,
+                    count,
                     std::ptr::null(),
                     keep_default,
                 )
@@ -446,7 +462,9 @@ impl<'ui> PlotUi<'ui> {
         }
     }
 
-    /// Setup ticks with explicit positions and optional labels for a Y axis
+    /// Setup ticks with explicit positions and optional labels for a Y axis.
+    ///
+    /// If `labels` is provided, it must have the same length as `values`.
     pub fn setup_y_axis_ticks_positions(
         &self,
         axis: YAxis,
@@ -454,19 +472,25 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        let count = match i32::try_from(values.len()) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
         if let Some(labels) = labels {
+            if labels.len() != values.len() {
+                return;
+            }
             let cleaned: Vec<&str> = labels
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
             with_scratch_txt_slice(&cleaned, |ptrs| {
-                let raw: Vec<*const i8> = ptrs.iter().map(|&p| p as *const i8).collect();
                 unsafe {
                     sys::ImPlot_SetupAxisTicks_doublePtr(
                         axis as sys::ImAxis,
                         values.as_ptr(),
-                        values.len() as i32,
-                        raw.as_ptr(),
+                        count,
+                        ptrs.as_ptr() as *const *const i8,
                         keep_default,
                     )
                 }
@@ -476,7 +500,7 @@ impl<'ui> PlotUi<'ui> {
                 sys::ImPlot_SetupAxisTicks_doublePtr(
                     axis as sys::ImAxis,
                     values.as_ptr(),
-                    values.len() as i32,
+                    count,
                     std::ptr::null(),
                     keep_default,
                 )
@@ -484,7 +508,9 @@ impl<'ui> PlotUi<'ui> {
         }
     }
 
-    /// Setup ticks on a range with tick count and optional labels for an X axis
+    /// Setup ticks on a range with tick count and optional labels for an X axis.
+    ///
+    /// If `labels` is provided, it must have length `n_ticks`.
     pub fn setup_x_axis_ticks_range(
         &self,
         axis: XAxis,
@@ -494,20 +520,28 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        if n_ticks <= 0 {
+            return;
+        }
         if let Some(labels) = labels {
+            let Ok(ticks_usize) = usize::try_from(n_ticks) else {
+                return;
+            };
+            if labels.len() != ticks_usize {
+                return;
+            }
             let cleaned: Vec<&str> = labels
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
             with_scratch_txt_slice(&cleaned, |ptrs| {
-                let raw: Vec<*const i8> = ptrs.iter().map(|&p| p as *const i8).collect();
                 unsafe {
                     sys::ImPlot_SetupAxisTicks_double(
                         axis as sys::ImAxis,
                         v_min,
                         v_max,
                         n_ticks,
-                        raw.as_ptr(),
+                        ptrs.as_ptr() as *const *const i8,
                         keep_default,
                     )
                 }
@@ -526,7 +560,9 @@ impl<'ui> PlotUi<'ui> {
         }
     }
 
-    /// Setup ticks on a range with tick count and optional labels for a Y axis
+    /// Setup ticks on a range with tick count and optional labels for a Y axis.
+    ///
+    /// If `labels` is provided, it must have length `n_ticks`.
     pub fn setup_y_axis_ticks_range(
         &self,
         axis: YAxis,
@@ -536,20 +572,28 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        if n_ticks <= 0 {
+            return;
+        }
         if let Some(labels) = labels {
+            let Ok(ticks_usize) = usize::try_from(n_ticks) else {
+                return;
+            };
+            if labels.len() != ticks_usize {
+                return;
+            }
             let cleaned: Vec<&str> = labels
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
             with_scratch_txt_slice(&cleaned, |ptrs| {
-                let raw: Vec<*const i8> = ptrs.iter().map(|&p| p as *const i8).collect();
                 unsafe {
                     sys::ImPlot_SetupAxisTicks_double(
                         axis as sys::ImAxis,
                         v_min,
                         v_max,
                         n_ticks,
-                        raw.as_ptr(),
+                        ptrs.as_ptr() as *const *const i8,
                         keep_default,
                     )
                 }

@@ -154,8 +154,9 @@ pub fn pop_colormap(count: i32) {
 /// Add a custom colormap from a vector of colors
 pub fn add_colormap(name: &str, colors: &[sys::ImVec4], qualitative: bool) -> sys::ImPlotColormap {
     assert!(!name.contains('\0'), "colormap name contained NUL");
+    let count = i32::try_from(colors.len()).expect("colormap contained too many colors");
     with_scratch_txt(name, |ptr| unsafe {
-        sys::ImPlot_AddColormap_Vec4Ptr(ptr, colors.as_ptr(), colors.len() as i32, qualitative)
+        sys::ImPlot_AddColormap_Vec4Ptr(ptr, colors.as_ptr(), count, qualitative)
             as sys::ImPlotColormap
     })
 }

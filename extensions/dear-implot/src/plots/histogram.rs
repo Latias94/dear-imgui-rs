@@ -101,6 +101,9 @@ impl<'a> Plot for HistogramPlot<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.values.len()) else {
+            return;
+        };
 
         let range = if let Some(range) = &self.range {
             *range
@@ -112,7 +115,7 @@ impl<'a> Plot for HistogramPlot<'a> {
             sys::ImPlot_PlotHistogram_doublePtr(
                 label_ptr,
                 self.values.as_ptr(),
-                self.values.len() as i32,
+                count,
                 self.bins,
                 self.bar_scale,
                 range,
@@ -214,6 +217,9 @@ impl<'a> Plot for Histogram2DPlot<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(count) = i32::try_from(self.x_values.len()) else {
+            return;
+        };
 
         let range = if let Some(range) = &self.range {
             *range
@@ -229,7 +235,7 @@ impl<'a> Plot for Histogram2DPlot<'a> {
                 label_ptr,
                 self.x_values.as_ptr(),
                 self.y_values.as_ptr(),
-                self.x_values.len() as i32,
+                count,
                 self.x_bins,
                 self.y_bins,
                 range,

@@ -248,8 +248,10 @@ impl GlowRenderer {
                     // Prepare pixel buffer as RGBA8
                     let rgba_pixels: Option<Vec<u8>> = match bpp {
                         4 => {
-                            let size = (width as usize) * (height as usize) * 4;
-                            Some(std::slice::from_raw_parts(px_ptr, size).to_vec())
+                            (width as usize)
+                                .checked_mul(height as usize)
+                                .and_then(|v| v.checked_mul(4))
+                                .map(|size| std::slice::from_raw_parts(px_ptr, size).to_vec())
                         }
                         1 => {
                             // NOTE(opt): For Alpha8 fonts/textures we currently expand to RGBA8 (white RGB + alpha)
@@ -259,13 +261,17 @@ impl GlowRenderer {
                             // - Upload as RED/ALPHA/LUMINANCE depending on platform, then set swizzle to (1,1,1,R)
                             //   so sampling returns vec4(1,1,1,alpha) without duplicating data to 4 channels.
                             // - Requires feature/extension gating and fallback to RGBA path for older GL/ES/WebGL.
-                            let size = (width as usize) * (height as usize);
-                            let src = std::slice::from_raw_parts(px_ptr, size);
-                            let mut out = Vec::with_capacity(size * 4);
-                            for &a in src.iter() {
-                                out.extend_from_slice(&[255, 255, 255, a]);
-                            }
-                            Some(out)
+                            (width as usize)
+                                .checked_mul(height as usize)
+                                .and_then(|size| {
+                                    let cap = size.checked_mul(4)?;
+                                    let src = std::slice::from_raw_parts(px_ptr, size);
+                                    let mut out = Vec::with_capacity(cap);
+                                    for &a in src.iter() {
+                                        out.extend_from_slice(&[255, 255, 255, a]);
+                                    }
+                                    Some(out)
+                                })
                         }
                         _ => None,
                     };
@@ -1179,16 +1185,48 @@ impl GlowRenderer {
                 continue;
             }
 
-            let row_stride = (width as usize) * bpp;
-            let needed = (rw * rh * 4) as usize;
+            let rw = rw.min(width - rx);
+            let rh = rh.min(height - ry);
+            if rw == 0 || rh == 0 {
+                continue;
+            }
+
+            let row_stride = (width as usize).checked_mul(bpp).unwrap_or(0);
+            if row_stride == 0 {
+                continue;
+            }
+
+            let needed = (rw as usize)
+                .checked_mul(rh as usize)
+                .and_then(|v| v.checked_mul(4))
+                .unwrap_or(0);
+            if needed == 0 {
+                continue;
+            }
             if sub_rgba.capacity() < needed {
                 sub_rgba.reserve(needed - sub_rgba.capacity());
             }
             sub_rgba.clear();
 
             for row in 0..(rh as usize) {
-                let src_row_start = ((ry as usize + row) * row_stride) + (rx as usize) * bpp;
-                let src = &pixels[src_row_start..src_row_start + (rw as usize) * bpp];
+                let src_row_start = match (ry as usize + row)
+                    .checked_mul(row_stride)
+                    .and_then(|v| v.checked_add((rx as usize).saturating_mul(bpp)))
+                {
+                    Some(v) => v,
+                    None => break,
+                };
+                let src_row_len = match (rw as usize).checked_mul(bpp) {
+                    Some(v) => v,
+                    None => break,
+                };
+                let Some(src_end) = src_row_start.checked_add(src_row_len) else {
+                    break;
+                };
+                if src_end > pixels.len() {
+                    break;
+                }
+                let src = &pixels[src_row_start..src_end];
 
                 match texture_data.format() {
                     dear_imgui_rs::TextureFormat::RGBA32 => {
