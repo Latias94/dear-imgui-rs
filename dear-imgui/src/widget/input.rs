@@ -345,7 +345,11 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     }
 
                     let im = &mut *user_data;
-                    let requested = (*data).BufSize as usize;
+                    let requested_i32 = (*data).BufSize;
+                    if requested_i32 < 0 {
+                        return;
+                    }
+                    let requested = requested_i32 as usize;
                     if im.0.len() < requested {
                         im.0.resize(requested, 0);
                     }
@@ -560,7 +564,11 @@ where
                 let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
                 match event_flag {
                     InputTextFlags::CALLBACK_RESIZE => unsafe {
-                        let requested = (*data).BufSize as usize;
+                        let requested_i32 = (*data).BufSize;
+                        if requested_i32 < 0 {
+                            return 0;
+                        }
+                        let requested = requested_i32 as usize;
                         let s = &mut *user.container;
                         debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
                         if requested > s.capacity() {
@@ -728,7 +736,11 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
                     }
 
                     let im = &mut *user_data;
-                    let requested = (*data).BufSize as usize;
+                    let requested_i32 = (*data).BufSize;
+                    if requested_i32 < 0 {
+                        return;
+                    }
+                    let requested = requested_i32 as usize;
                     if im.0.len() < requested {
                         im.0.resize(requested, 0);
                     }
@@ -821,23 +833,50 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
         }
 
         extern "C" fn callback_router(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-            let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
-            match event_flag {
-                InputTextFlags::CALLBACK_RESIZE => unsafe {
-                    let requested = (*data).BufSize as usize;
-                    let s = &mut *(&mut *((*data).UserData as *mut UserData)).container;
-                    debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
-                    if requested > s.capacity() {
-                        let old_cap = s.capacity();
-                        let additional = requested.saturating_sub(s.len());
-                        s.reserve(additional);
-                        zero_string_new_capacity(s, old_cap);
-                        (*data).Buf = s.as_mut_ptr() as *mut _;
-                        (*data).BufDirty = true;
+            if data.is_null() {
+                return 0;
+            }
+
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+                let event_flag = InputTextFlags::from_bits_truncate((*data).EventFlag);
+                match event_flag {
+                    InputTextFlags::CALLBACK_RESIZE => {
+                        let user_ptr = (*data).UserData as *mut UserData;
+                        if user_ptr.is_null() {
+                            return 0;
+                        }
+                        let requested_i32 = (*data).BufSize;
+                        if requested_i32 < 0 {
+                            return 0;
+                        }
+                        let requested = requested_i32 as usize;
+
+                        let user = &mut *user_ptr;
+                        if user.container.is_null() {
+                            return 0;
+                        }
+                        let s = &mut *user.container;
+                        debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
+                        if requested > s.capacity() {
+                            let old_cap = s.capacity();
+                            let additional = requested.saturating_sub(s.len());
+                            s.reserve(additional);
+                            zero_string_new_capacity(s, old_cap);
+                            (*data).Buf = s.as_mut_ptr() as *mut _;
+                            (*data).BufDirty = true;
+                        }
+                        0
                     }
-                    0
-                },
-                _ => 0,
+                    _ => 0,
+                }
+            }));
+
+            match res {
+                Ok(v) => v,
+                Err(_) => {
+                    eprintln!("dear-imgui-rs: panic in multiline InputText resize callback");
+                    std::process::abort();
+                }
             }
         }
 
@@ -954,7 +993,11 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                 let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
                 match event_flag {
                     InputTextFlags::CALLBACK_RESIZE => unsafe {
-                        let requested = (*data).BufSize as usize;
+                        let requested_i32 = (*data).BufSize;
+                        if requested_i32 < 0 {
+                            return 0;
+                        }
+                        let requested = requested_i32 as usize;
                         let s = &mut *user.container;
                         debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
                         if requested > s.capacity() {
@@ -1508,37 +1551,45 @@ impl InputTextCallbackHandler for PassthroughCallback {}
 
 /// This is our default callback function that routes ImGui callbacks to our trait methods.
 extern "C" fn callback(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-    let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
-    let buffer_ptr = unsafe { (*data).UserData as *mut String };
+    if data.is_null() {
+        return 0;
+    }
 
-    // Handle different callback types
-    match event_flag {
-        InputTextFlags::CALLBACK_RESIZE => {
-            unsafe {
-                let requested_size = (*data).BufSize as usize;
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        let event_flag = InputTextFlags::from_bits_truncate((*data).EventFlag);
+        let buffer_ptr = (*data).UserData as *mut String;
+
+        if buffer_ptr.is_null() {
+            return;
+        }
+
+        match event_flag {
+            InputTextFlags::CALLBACK_RESIZE => {
+                let requested_i32 = (*data).BufSize;
+                if requested_i32 < 0 {
+                    return;
+                }
+                let requested_size = requested_i32 as usize;
                 let buffer = &mut *buffer_ptr;
 
-                // Confirm that we ARE working with our string
                 debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
 
                 if requested_size > buffer.capacity() {
-                    let additional_bytes = requested_size - buffer.len();
-
-                    // Reserve more data
+                    let additional_bytes = requested_size.saturating_sub(buffer.len());
                     buffer.reserve(additional_bytes);
 
                     (*data).Buf = buffer.as_mut_ptr() as *mut _;
                     (*data).BufDirty = true;
                 }
             }
+            _ => {}
         }
-        _ => {
-            // For other callbacks, we need the actual callback handler
-            // This will only work for non-PassthroughCallback types
-            // PassthroughCallback should never trigger these callbacks
-        }
-    }
+    }));
 
+    if res.is_err() {
+        eprintln!("dear-imgui-rs: panic in legacy InputText callback");
+        std::process::abort();
+    }
     0
 }
 

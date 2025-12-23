@@ -1010,7 +1010,7 @@ impl PlatformIo {
     pub fn texture(&self, index: usize) -> Option<&crate::texture::TextureData> {
         unsafe {
             let vector = &self.raw.Textures;
-            if vector.Data.is_null() {
+            if vector.Size <= 0 || vector.Data.is_null() {
                 return None;
             }
             if index >= vector.Size as usize {
@@ -1030,7 +1030,7 @@ impl PlatformIo {
     pub fn texture_mut(&mut self, index: usize) -> Option<&mut crate::texture::TextureData> {
         unsafe {
             let vector = &self.raw.Textures;
-            if vector.Data.is_null() {
+            if vector.Size <= 0 || vector.Data.is_null() {
                 return None;
             }
             if index >= vector.Size as usize {

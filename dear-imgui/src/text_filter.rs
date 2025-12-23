@@ -32,6 +32,8 @@
 use crate::{Ui, sys};
 use std::ffi::CString;
 use std::ptr;
+use std::os::raw::c_char;
+use std::ops::Range;
 
 /// Helper to parse and apply text filters
 ///
@@ -217,28 +219,22 @@ impl TextFilter {
         unsafe { sys::ImGuiTextFilter_PassFilter(self.raw, text_ptr, ptr::null()) }
     }
 
-    /// Returns true if the text range matches the filter.
+    /// Returns true if a substring range matches the filter.
     ///
-    /// This version allows you to specify both start and end pointers for the text.
+    /// This is the safe Rust equivalent of `PassFilter(text, text_end)` in Dear ImGui,
+    /// where `text_end` points somewhere inside the same buffer as `text`.
     ///
-    /// # Arguments
-    /// * `start` - The start of the text to test
-    /// * `end` - The end of the text to test
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # use dear_imgui_rs::*;
-    /// let mut filter = TextFilter::new_with_filter(
-    ///     "Search",
-    ///     "test"
-    /// );
-    /// filter.build();
-    ///
-    /// assert!(filter.pass_filter_with_end("test", " string"));
-    /// ```
-    pub fn pass_filter_with_end(&self, start: &str, end: &str) -> bool {
-        let (start_ptr, end_ptr) = crate::string::tls_scratch_txt_two(start, end);
+    /// `range` is in bytes and must lie on UTF-8 char boundaries.
+    pub fn pass_filter_range(&self, text: &str, range: Range<usize>) -> bool {
+        if range.start > range.end || range.end > text.len() {
+            return false;
+        }
+        if !text.is_char_boundary(range.start) || !text.is_char_boundary(range.end) {
+            return false;
+        }
+
+        let start_ptr = unsafe { text.as_ptr().add(range.start) as *const c_char };
+        let end_ptr = unsafe { text.as_ptr().add(range.end) as *const c_char };
         unsafe { sys::ImGuiTextFilter_PassFilter(self.raw, start_ptr, end_ptr) }
     }
 
@@ -325,9 +321,15 @@ impl Ui {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Dear ImGui maintains a single global "current context". Tests that create
+    // a context must be serialized to avoid `ContextAlreadyActive`.
+    static TEST_CTX_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn text_filter_build_and_pass_filter_work() {
+        let _lock = TEST_CTX_LOCK.lock().unwrap();
         let _ctx = crate::Context::create();
 
         let mut filter = TextFilter::new("Search");
@@ -338,5 +340,35 @@ mod tests {
         filter.build();
         assert!(filter.pass_filter("xxabcxx"));
         assert!(!filter.pass_filter("xxdefxx"));
+    }
+
+    #[test]
+    fn pass_filter_range_validates_bounds_and_char_boundaries() {
+        let _lock = TEST_CTX_LOCK.lock().unwrap();
+        let _ctx = crate::Context::create();
+
+        let mut filter = TextFilter::new_with_filter("Search", "test");
+        filter.build();
+
+        let start = 2usize;
+        let end = 1usize;
+        assert!(!filter.pass_filter_range("abc", start..end));
+        assert!(!filter.pass_filter_range("abc", 0..4));
+        assert!(!filter.pass_filter_range("é", 1..2));
+    }
+
+    #[test]
+    fn pass_filter_range_matches_full_string() {
+        let _lock = TEST_CTX_LOCK.lock().unwrap();
+        let _ctx = crate::Context::create();
+
+        let mut filter = TextFilter::new_with_filter("Search", "test");
+        filter.build();
+
+        let text = "hello test world";
+        assert_eq!(
+            filter.pass_filter(text),
+            filter.pass_filter_range(text, 0..text.len())
+        );
     }
 }

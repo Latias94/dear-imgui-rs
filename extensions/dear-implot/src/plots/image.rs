@@ -120,9 +120,8 @@ impl<'ui> crate::PlotUi<'ui> {
         bounds_min: sys::ImPlotPoint,
         bounds_max: sys::ImPlotPoint,
     ) -> Result<(), PlotError> {
-        // dear_imgui_rs::TextureId is a transparent wrapper; cast to sys::ImTextureID via `id()` then transmute
-        // This is a common interop pattern across imgui backends.
-        let raw: sys::ImTextureID = unsafe { std::mem::transmute(texture.id()) };
+        // ImTextureID is ImU64 in the shared dear-imgui-sys bindings.
+        let raw: sys::ImTextureID = texture.id();
         self.plot_image(label, raw, bounds_min, bounds_max)
     }
 }

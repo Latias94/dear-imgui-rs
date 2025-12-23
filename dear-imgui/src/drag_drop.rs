@@ -348,9 +348,14 @@ impl<'ui> DragDropTarget<'ui> {
             None
         } else {
             let inner = unsafe { *inner };
+            let size = if inner.DataSize <= 0 || inner.Data.is_null() {
+                0
+            } else {
+                inner.DataSize as usize
+            };
             Some(DragDropPayload {
                 data: inner.Data,
-                size: inner.DataSize as usize,
+                size,
                 preview: inner.Preview,
                 delivery: inner.Delivery,
             })

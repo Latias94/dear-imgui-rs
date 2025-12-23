@@ -250,20 +250,38 @@ pub fn show_metrics_window_with_flag(p_open: &mut bool) {
 /// let plot_ui = plot3d_ctx.get_plot_ui(&ui);
 /// ```
 pub struct Plot3DContext {
-    owned: bool,
+    raw: *mut sys::ImPlot3DContext,
 }
 
 impl Plot3DContext {
-    /// Create a new ImPlot3D context
+    /// Try to create a new ImPlot3D context.
     ///
     /// This should be called once after creating your ImGui context.
-    pub fn create(_imgui: &Context) -> Self {
+    pub fn try_create(_imgui: &Context) -> dear_imgui_rs::ImGuiResult<Self> {
         unsafe {
             let ctx = sys::ImPlot3D_CreateContext();
-            // Ensure our new context is set as current even if another existed
+            if ctx.is_null() {
+                return Err(dear_imgui_rs::ImGuiError::context_creation(
+                    "ImPlot3D_CreateContext returned null",
+                ));
+            }
+
+            // Ensure our new context is set as current even if another existed.
             sys::ImPlot3D_SetCurrentContext(ctx);
+            Ok(Self { raw: ctx })
         }
-        Self { owned: true }
+    }
+
+    /// Create a new ImPlot3D context (panics on error).
+    pub fn create(imgui: &Context) -> Self {
+        Self::try_create(imgui).expect("Failed to create ImPlot3D context")
+    }
+
+    /// Set this context as the current ImPlot3D context.
+    pub fn set_as_current(&self) {
+        unsafe {
+            sys::ImPlot3D_SetCurrentContext(self.raw);
+        }
     }
 
     /// Get a raw pointer to the current ImPlot3D style
@@ -285,10 +303,15 @@ impl Plot3DContext {
 
 impl Drop for Plot3DContext {
     fn drop(&mut self) {
-        if self.owned {
-            unsafe {
-                sys::ImPlot3D_DestroyContext(std::ptr::null_mut());
+        if self.raw.is_null() {
+            return;
+        }
+
+        unsafe {
+            if sys::ImPlot3D_GetCurrentContext() == self.raw {
+                sys::ImPlot3D_SetCurrentContext(std::ptr::null_mut());
             }
+            sys::ImPlot3D_DestroyContext(self.raw);
         }
     }
 }

@@ -120,7 +120,10 @@ thread_local! {
 
 /// Creates a temporary, NUL-terminated C string pointer backed by a thread-local scratch buffer.
 ///
-/// The returned pointer is only valid until the next call on the same thread.
+/// The returned pointer is only valid until the next scratch-string call on the same thread.
+///
+/// This API is **not re-entrant**: any nested call to `tls_scratch_txt`/`with_scratch_txt` (or `Ui::scratch_txt`)
+/// on the same thread will overwrite the backing buffer and invalidate previously returned pointers.
 pub(crate) fn tls_scratch_txt(txt: impl AsRef<str>) -> *const c_char {
     TLS_SCRATCH.with(|buf| buf.borrow_mut().scratch_txt(txt))
 }
@@ -128,7 +131,7 @@ pub(crate) fn tls_scratch_txt(txt: impl AsRef<str>) -> *const c_char {
 /// Calls `f` with a temporary, NUL-terminated C string pointer backed by a thread-local scratch buffer.
 ///
 /// The pointer is only valid for the duration of the call (and will be overwritten by subsequent
-/// scratch-string operations on the same thread).
+/// scratch-string operations on the same thread). Like [`tls_scratch_txt`], this is not re-entrant.
 pub fn with_scratch_txt<R>(txt: impl AsRef<str>, f: impl FnOnce(*const c_char) -> R) -> R {
     TLS_SCRATCH.with(|buf| {
         let mut buf = buf.borrow_mut();

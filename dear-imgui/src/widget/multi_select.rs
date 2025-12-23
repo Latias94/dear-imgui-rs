@@ -94,7 +94,14 @@ impl BasicSelection {
 
     /// Return the number of selected items.
     pub fn len(&self) -> usize {
-        unsafe { (*self.raw).Size as usize }
+        unsafe {
+            let size = (*self.raw).Size;
+            if size <= 0 {
+                0
+            } else {
+                size as usize
+            }
+        }
     }
 
     /// Returns true if the selection is empty.

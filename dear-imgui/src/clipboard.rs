@@ -61,6 +61,9 @@ pub(crate) unsafe extern "C" fn get_clipboard_text(
 ) -> *const c_char {
     let result = std::panic::catch_unwind(|| {
         let user_data = unsafe { (*crate::sys::igGetPlatformIO_Nil()).Platform_ClipboardUserData };
+        if user_data.is_null() {
+            return ptr::null();
+        }
 
         let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
         match ctx.backend.get() {
@@ -83,6 +86,9 @@ pub(crate) unsafe extern "C" fn set_clipboard_text(
 ) {
     let result = std::panic::catch_unwind(|| {
         let user_data = unsafe { (*crate::sys::igGetPlatformIO_Nil()).Platform_ClipboardUserData };
+        if user_data.is_null() {
+            return;
+        }
 
         let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
         if text.is_null() {
