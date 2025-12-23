@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Core (`dear-imgui-rs`)
+  - InputText (String-backed): avoid undefined behavior when trimming at NUL by zero-initializing spare capacity, including during ImGui resize callbacks.
+  - Deprecated glyph ranges: fix `GlyphRangesBuilder::add_ranges` to pass the correct `ImWchar` layout, and free internal `ImVector_ImWchar` buffers; add `Drop` for the underlying C++ builder.
+
 ## [0.8.0] - 2025-12-22
 
 ### Added

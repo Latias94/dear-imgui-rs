@@ -39,6 +39,27 @@ use std::ffi::{c_int, c_void};
 use std::marker::PhantomData;
 use std::ptr;
 
+fn zero_string_spare_capacity(buf: &mut String) {
+    let len = buf.len();
+    let cap = buf.capacity();
+    if cap > len {
+        unsafe {
+            let dst = buf.as_mut_ptr().add(len);
+            ptr::write_bytes(dst, 0, cap - len);
+        }
+    }
+}
+
+fn zero_string_new_capacity(buf: &mut String, old_cap: usize) {
+    let new_cap = buf.capacity();
+    if new_cap > old_cap {
+        unsafe {
+            let dst = buf.as_mut_ptr().add(old_cap);
+            ptr::write_bytes(dst, 0, new_cap - old_cap);
+        }
+    }
+}
+
 /// # Input Widgets
 impl Ui {
     /// Creates a single-line text input widget builder.
@@ -496,6 +517,8 @@ where
 
         // Ensure temporary NUL terminator
         self.buf.push('\0');
+        // Ensure any uninitialized bytes are set to NUL so trimming does not read UB.
+        zero_string_spare_capacity(self.buf);
         let capacity = self.buf.capacity();
         let buf_ptr = self.buf.as_mut_ptr() as *mut std::os::raw::c_char;
 
@@ -516,8 +539,10 @@ where
                     let s = &mut *user.container;
                     debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
                     if requested > s.capacity() {
+                        let old_cap = s.capacity();
                         let additional = requested.saturating_sub(s.len());
                         s.reserve(additional);
+                        zero_string_new_capacity(s, old_cap);
                         (*data).Buf = s.as_mut_ptr() as *mut _;
                         (*data).BufDirty = true;
                     }
@@ -737,6 +762,8 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
 
         // Ensure a NUL terminator and use String's capacity directly
         self.buf.push('\0');
+        // Ensure any uninitialized bytes are set to NUL so trimming does not read UB.
+        zero_string_spare_capacity(self.buf);
         let capacity = self.buf.capacity();
         let buf_ptr = self.buf.as_mut_ptr() as *mut std::os::raw::c_char;
 
@@ -753,8 +780,10 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
                     let s = &mut *(&mut *((*data).UserData as *mut UserData)).container;
                     debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
                     if requested > s.capacity() {
+                        let old_cap = s.capacity();
                         let additional = requested.saturating_sub(s.len());
                         s.reserve(additional);
+                        zero_string_new_capacity(s, old_cap);
                         (*data).Buf = s.as_mut_ptr() as *mut _;
                         (*data).BufDirty = true;
                     }
@@ -846,6 +875,8 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
 
         // Ensure NUL terminator
         self.buf.push('\0');
+        // Ensure any uninitialized bytes are set to NUL so trimming does not read UB.
+        zero_string_spare_capacity(self.buf);
         let capacity = self.buf.capacity();
         let buf_ptr = self.buf.as_mut_ptr() as *mut std::os::raw::c_char;
 
@@ -866,8 +897,10 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                     let s = &mut *user.container;
                     debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
                     if requested > s.capacity() {
+                        let old_cap = s.capacity();
                         let additional = requested.saturating_sub(s.len());
                         s.reserve(additional);
+                        zero_string_new_capacity(s, old_cap);
                         (*data).Buf = s.as_mut_ptr() as *mut _;
                         (*data).BufDirty = true;
                     }

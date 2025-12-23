@@ -37,9 +37,11 @@ impl GlyphRangesBuilder {
     /// Creates a new glyph ranges builder
     pub fn new() -> Self {
         unsafe {
-            Self {
-                raw: sys::ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder(),
+            let raw = sys::ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder();
+            if raw.is_null() {
+                panic!("ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder() returned null");
             }
+            Self { raw }
         }
     }
 
@@ -56,27 +58,35 @@ impl GlyphRangesBuilder {
     /// Add a range of characters
     #[doc(alias = "AddRanges")]
     pub fn add_ranges(&mut self, ranges: &[u32]) {
-        unsafe {
-            sys::ImFontGlyphRangesBuilder_AddRanges(
-                self.raw,
-                ranges.as_ptr() as *const sys::ImWchar,
+        let mut tmp: Vec<sys::ImWchar> = Vec::with_capacity(ranges.len());
+        for &v in ranges {
+            assert!(
+                v <= u32::from(u16::MAX),
+                "glyph range value {v:#X} exceeded ImWchar16 max (0xFFFF)"
             );
+            tmp.push(v as sys::ImWchar);
         }
+        unsafe { sys::ImFontGlyphRangesBuilder_AddRanges(self.raw, tmp.as_ptr()) };
     }
 
     /// Build the final ranges array
     #[doc(alias = "BuildRanges")]
     pub fn build_ranges(&mut self) -> Vec<u32> {
         unsafe {
-            let mut out_ranges = std::mem::zeroed::<sys::ImVector_ImWchar>();
+            let mut out_ranges = std::mem::MaybeUninit::<sys::ImVector_ImWchar>::uninit();
+            sys::ImVector_ImWchar_Init(out_ranges.as_mut_ptr());
+            let mut out_ranges = out_ranges.assume_init();
             sys::ImFontGlyphRangesBuilder_BuildRanges(self.raw, &mut out_ranges);
 
             // Convert ImVector to Vec
             let len = out_ranges.Size as usize;
-            let mut result = Vec::with_capacity(len);
-            for i in 0..len {
-                result.push(*out_ranges.Data.add(i) as u32);
+            let mut result: Vec<u32> = Vec::with_capacity(len);
+            if len > 0 && !out_ranges.Data.is_null() {
+                for i in 0..len {
+                    result.push(*out_ranges.Data.add(i) as u32);
+                }
             }
+            sys::ImVector_ImWchar_UnInit(&mut out_ranges);
             result
         }
     }
@@ -85,6 +95,29 @@ impl GlyphRangesBuilder {
 impl Default for GlyphRangesBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for GlyphRangesBuilder {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.raw.is_null() {
+                sys::ImFontGlyphRangesBuilder_destroy(self.raw);
+                self.raw = std::ptr::null_mut();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "exceeded ImWchar16 max")]
+    fn add_ranges_rejects_non_bmp_codepoints() {
+        let mut b = GlyphRangesBuilder::new();
+        b.add_ranges(&[0x1_0000, 0]);
     }
 }
 

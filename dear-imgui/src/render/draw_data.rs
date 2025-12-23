@@ -49,11 +49,11 @@ impl RawWrapper for DrawData {
     type Raw = sys::ImDrawData;
 
     unsafe fn raw(&self) -> &Self::Raw {
-        unsafe { std::mem::transmute(self) }
+        unsafe { <Self as RawCast<Self::Raw>>::raw(self) }
     }
 
     unsafe fn raw_mut(&mut self) -> &mut Self::Raw {
-        unsafe { std::mem::transmute(self) }
+        unsafe { <Self as RawCast<Self::Raw>>::raw_mut(self) }
     }
 }
 
