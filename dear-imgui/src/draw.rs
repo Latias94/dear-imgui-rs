@@ -161,13 +161,6 @@ bitflags! {
 pub struct DrawList(*mut sys::ImDrawList);
 
 impl DrawList {
-    /// Create DrawList from raw pointer (crate-internal)
-    ///
-    /// Safety: caller must ensure pointer validity for returned lifetime.
-    pub(crate) unsafe fn from_raw(ptr: *mut sys::ImDrawList) -> Self {
-        Self(ptr)
-    }
-
     /// Get command buffer as slice
     unsafe fn cmd_buffer(&self) -> &[sys::ImDrawCmd] {
         unsafe {
@@ -1208,11 +1201,14 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Insert a raw draw callback.
     ///
-    /// Safety: The callback must be an `extern "C"` function compatible with `ImDrawCallback`.
-    /// The provided `userdata` must remain valid until the draw list is executed by the renderer.
-    /// If you allocate memory and store its pointer in `userdata`, you are responsible for reclaiming it
-    /// from within the callback or otherwise ensuring no leaks occur. Note that callbacks are only invoked
-    /// if the draw list is actually rendered.
+    /// # Safety
+    ///
+    /// - `callback` must be an `extern "C"` function compatible with `ImDrawCallback` and must not unwind
+    ///   across the FFI boundary.
+    /// - `userdata` must remain valid until the draw list is executed by the renderer.
+    /// - If you allocate memory and store its pointer in `userdata`, you are responsible for reclaiming it
+    ///   from within the callback or otherwise ensuring no leaks occur. Note that callbacks are only invoked
+    ///   if the draw list is actually rendered.
     #[doc(alias = "AddCallback")]
     pub unsafe fn add_callback(
         &self,

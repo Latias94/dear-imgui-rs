@@ -653,10 +653,10 @@ fn build_web_demo(features: Option<&str>) -> Result<()> {
                 }
             }
             // Last resort: search globally for the marker
-            if insert_at.is_none() {
-                if let Some(global_rel) = code.find("const imports = {};") {
-                    insert_at = Some(global_rel + "const imports = {};".len());
-                }
+            if insert_at.is_none()
+                && let Some(global_rel) = code.find("const imports = {};")
+            {
+                insert_at = Some(global_rel + "const imports = {};".len());
             }
 
             if let Some(pos) = insert_at {

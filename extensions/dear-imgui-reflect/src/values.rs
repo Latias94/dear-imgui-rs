@@ -573,19 +573,14 @@ mod glam_impls {
             // ImGui uses row-major visual layout; convert 16-element column-major
             // storage into four row slices for editing.
             for row in 0..4 {
-                let mut row_vals = [
-                    cols[0 * 4 + row],
-                    cols[1 * 4 + row],
-                    cols[2 * 4 + row],
-                    cols[3 * 4 + row],
-                ];
+                let mut row_vals = [cols[row], cols[4 + row], cols[8 + row], cols[12 + row]];
                 let row_label = format!("{label} [{row}]");
                 let row_changed = ui.input_float4(&row_label, &mut row_vals).build();
                 if row_changed {
-                    cols[0 * 4 + row] = row_vals[0];
-                    cols[1 * 4 + row] = row_vals[1];
-                    cols[2 * 4 + row] = row_vals[2];
-                    cols[3 * 4 + row] = row_vals[3];
+                    cols[row] = row_vals[0];
+                    cols[4 + row] = row_vals[1];
+                    cols[8 + row] = row_vals[2];
+                    cols[12 + row] = row_vals[3];
                 }
                 changed |= row_changed;
             }

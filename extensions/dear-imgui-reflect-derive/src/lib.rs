@@ -145,15 +145,15 @@ fn derive_for_struct(
         if matches!(kind, FieldTypeKind::Numeric) {
             // Determine whether this numeric type is integral or floating-point.
             let (mut is_float, mut is_int) = (false, false);
-            if let Type::Path(tp) = &ty {
-                if let Some(seg) = tp.path.segments.last() {
-                    let ident = seg.ident.to_string();
-                    match ident.as_str() {
-                        "f32" | "f64" => is_float = true,
-                        "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
-                        | "usize" => is_int = true,
-                        _ => {}
-                    }
+            if let Type::Path(tp) = &ty
+                && let Some(seg) = tp.path.segments.last()
+            {
+                let ident = seg.ident.to_string();
+                match ident.as_str() {
+                    "f32" | "f64" => is_float = true,
+                    "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
+                    | "usize" => is_int = true,
+                    _ => {}
                 }
             }
 
@@ -307,15 +307,18 @@ fn derive_for_struct(
             .into();
         }
 
-        if let Some(ref style) = bool_style {
-            if style != "checkbox" && style != "button" && style != "radio" && style != "dropdown" {
-                return syn::Error::new(
-                    field_ident.span(),
-                    "imgui(bool_style = ...) must be \"checkbox\", \"button\", \"radio\" or \"dropdown\"",
-                )
-                .to_compile_error()
-                .into();
-            }
+        if let Some(ref style) = bool_style
+            && style != "checkbox"
+            && style != "button"
+            && style != "radio"
+            && style != "dropdown"
+        {
+            return syn::Error::new(
+                field_ident.span(),
+                "imgui(bool_style = ...) must be \"checkbox\", \"button\", \"radio\" or \"dropdown\"",
+            )
+            .to_compile_error()
+            .into();
         }
 
         let label = if let Some(lit) = label_override {
@@ -555,15 +558,15 @@ fn derive_for_struct(
                         || fmt_suffix.is_some()
                     {
                         let (mut is_float_ty, mut is_int_ty) = (false, false);
-                        if let Type::Path(tp) = &ty {
-                            if let Some(seg) = tp.path.segments.last() {
-                                let ident = seg.ident.to_string();
-                                match ident.as_str() {
-                                    "f32" | "f64" => is_float_ty = true,
-                                    "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16"
-                                    | "u32" | "u64" | "usize" => is_int_ty = true,
-                                    _ => {}
-                                }
+                        if let Type::Path(tp) = &ty
+                            && let Some(seg) = tp.path.segments.last()
+                        {
+                            let ident = seg.ident.to_string();
+                            match ident.as_str() {
+                                "f32" | "f64" => is_float_ty = true,
+                                "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32"
+                                | "u64" | "usize" => is_int_ty = true,
+                                _ => {}
                             }
                         }
 

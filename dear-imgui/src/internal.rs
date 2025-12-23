@@ -128,7 +128,7 @@ impl<T> ImVector<T> {
     /// Returns the vector as a slice
     #[inline]
     pub fn as_slice(&self) -> &[T] {
-        if self.size == 0 || self.data.is_null() {
+        if self.size <= 0 || self.data.is_null() {
             &[]
         } else {
             unsafe { slice::from_raw_parts(self.data, self.size as usize) }
@@ -138,7 +138,7 @@ impl<T> ImVector<T> {
     /// Returns the vector as a mutable slice
     #[inline]
     pub fn as_slice_mut(&mut self) -> &mut [T] {
-        if self.size == 0 || self.data.is_null() {
+        if self.size <= 0 || self.data.is_null() {
             &mut []
         } else {
             unsafe { slice::from_raw_parts_mut(self.data, self.size as usize) }
@@ -148,13 +148,17 @@ impl<T> ImVector<T> {
     /// Returns the number of elements in the vector
     #[inline]
     pub fn len(&self) -> usize {
-        self.size as usize
+        if self.size <= 0 {
+            0
+        } else {
+            self.size as usize
+        }
     }
 
     /// Returns true if the vector is empty
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.size == 0
+        self.size <= 0
     }
 }
 

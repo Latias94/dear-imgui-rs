@@ -428,7 +428,16 @@ impl TextureData {
         if self.raw.Pixels.is_null() {
             None
         } else {
-            let size = (self.width() * self.height() * self.bytes_per_pixel()) as usize;
+            let width = self.width();
+            let height = self.height();
+            let bytes_per_pixel = self.bytes_per_pixel();
+            if width <= 0 || height <= 0 || bytes_per_pixel <= 0 {
+                return None;
+            }
+
+            let size = (width as usize)
+                .checked_mul(height as usize)?
+                .checked_mul(bytes_per_pixel as usize)?;
             unsafe {
                 Some(std::slice::from_raw_parts(
                     self.raw.Pixels as *const u8,
@@ -466,15 +475,36 @@ impl TextureData {
     ///
     /// Returns None if no pixel data is available or coordinates are out of bounds.
     pub fn pixels_at(&self, x: i32, y: i32) -> Option<&[u8]> {
-        if self.raw.Pixels.is_null() || x < 0 || y < 0 || x >= self.width() || y >= self.height() {
+        let width = self.width();
+        let height = self.height();
+        let bytes_per_pixel = self.bytes_per_pixel();
+        if self.raw.Pixels.is_null()
+            || width <= 0
+            || height <= 0
+            || bytes_per_pixel <= 0
+            || x < 0
+            || y < 0
+            || x >= width
+            || y >= height
+        {
             None
         } else {
-            let offset = (x + y * self.width()) * self.bytes_per_pixel();
-            let remaining_size = ((self.width() - x) + (self.height() - y - 1) * self.width())
-                * self.bytes_per_pixel();
+            let width_usize = width as usize;
+            let x_usize = x as usize;
+            let y_usize = y as usize;
+            let bpp_usize = bytes_per_pixel as usize;
+
+            let total_size = width_usize
+                .checked_mul(height as usize)?
+                .checked_mul(bpp_usize)?;
+
+            let offset_px = y_usize.checked_mul(width_usize)?.checked_add(x_usize)?;
+            let offset_bytes = offset_px.checked_mul(bpp_usize)?;
+            let remaining_size = total_size.checked_sub(offset_bytes)?;
+
             unsafe {
-                let ptr = (self.raw.Pixels as *const u8).add(offset as usize);
-                Some(std::slice::from_raw_parts(ptr, remaining_size as usize))
+                let ptr = (self.raw.Pixels as *const u8).add(offset_bytes);
+                Some(std::slice::from_raw_parts(ptr, remaining_size))
             }
         }
     }

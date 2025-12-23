@@ -114,6 +114,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(deprecated)]
     #[should_panic(expected = "exceeded ImWchar16 max")]
     fn add_ranges_rejects_non_bmp_codepoints() {
         let mut b = GlyphRangesBuilder::new();

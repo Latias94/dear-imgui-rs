@@ -245,7 +245,16 @@ impl PlatformIo {
         self.raw.Platform_CreateWindow = callback;
     }
 
-    /// Set platform create window callback (typed Viewport). Unsafe due to FFI pointer cast.
+    /// Set platform create window callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// If `callback` is `Some`, it must be safe for Dear ImGui to call it through a C ABI:
+    /// - It must not unwind across the FFI boundary.
+    /// - The `Viewport` pointer is only valid for the duration of the call and must not be stored.
+    /// - The callback must uphold Dear ImGui's `Platform_CreateWindow` contract.
+    ///
+    /// Note: the typed callback is stored in a global slot shared by all ImGui contexts.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_create_window(
         &mut self,
@@ -267,7 +276,11 @@ impl PlatformIo {
         self.raw.Platform_DestroyWindow = callback;
     }
 
-    /// Set platform destroy window callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform destroy window callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_destroy_window(
         &mut self,
@@ -289,7 +302,11 @@ impl PlatformIo {
         self.raw.Platform_ShowWindow = callback;
     }
 
-    /// Set platform show window callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform show window callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_show_window(
         &mut self,
@@ -311,7 +328,11 @@ impl PlatformIo {
         self.raw.Platform_SetWindowPos = callback;
     }
 
-    /// Set platform set window position callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform set window position callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_set_window_pos(
         &mut self,
@@ -334,7 +355,11 @@ impl PlatformIo {
         self.raw.Platform_GetWindowPos = callback;
     }
 
-    /// Set platform get window position callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform get window position callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_pos(
         &mut self,
@@ -357,7 +382,11 @@ impl PlatformIo {
         self.raw.Platform_SetWindowSize = callback;
     }
 
-    /// Set platform set window size callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform set window size callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_set_window_size(
         &mut self,
@@ -380,7 +409,11 @@ impl PlatformIo {
         self.raw.Platform_GetWindowSize = callback;
     }
 
-    /// Set platform get window size callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform get window size callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_size(
         &mut self,
@@ -403,7 +436,11 @@ impl PlatformIo {
         self.raw.Platform_SetWindowFocus = callback;
     }
 
-    /// Set platform set window focus callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform set window focus callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_set_window_focus(
         &mut self,
@@ -425,7 +462,11 @@ impl PlatformIo {
         self.raw.Platform_GetWindowFocus = callback;
     }
 
-    /// Set platform get window focus callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform get window focus callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_focus(
         &mut self,
@@ -448,7 +489,11 @@ impl PlatformIo {
         self.raw.Platform_GetWindowMinimized = callback;
     }
 
-    /// Set platform get window minimized callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform get window minimized callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_minimized(
         &mut self,
@@ -471,7 +516,11 @@ impl PlatformIo {
         self.raw.Platform_SetWindowTitle = callback;
     }
 
-    /// Set platform set window title callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform set window title callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_set_window_title(
         &mut self,
@@ -494,7 +543,11 @@ impl PlatformIo {
         self.raw.Platform_SetWindowAlpha = callback;
     }
 
-    /// Set platform set window alpha callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform set window alpha callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_set_window_alpha(
         &mut self,
@@ -517,7 +570,11 @@ impl PlatformIo {
         self.raw.Platform_UpdateWindow = callback;
     }
 
-    /// Set platform update window callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform update window callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_update_window(
         &mut self,
@@ -539,7 +596,11 @@ impl PlatformIo {
         self.raw.Platform_RenderWindow = callback;
     }
 
-    /// Set platform render window callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform render window callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_render_window(
         &mut self,
@@ -562,7 +623,11 @@ impl PlatformIo {
         self.raw.Platform_SwapBuffers = callback;
     }
 
-    /// Set platform swap buffers callback (typed). Unsafe due to FFI pointer cast.
+    /// Set platform swap buffers callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_swap_buffers(
         &mut self,
@@ -585,7 +650,12 @@ impl PlatformIo {
         self.raw.Renderer_CreateWindow = callback;
     }
 
-    /// Set renderer create window callback (typed). Unsafe due to FFI pointer cast.
+    /// Set renderer create window callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// Same requirements as [`Self::set_platform_create_window`], but for Dear ImGui's
+    /// `Renderer_CreateWindow` callback.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_renderer_create_window(
         &mut self,
@@ -607,7 +677,11 @@ impl PlatformIo {
         self.raw.Renderer_DestroyWindow = callback;
     }
 
-    /// Set renderer destroy window callback (typed). Unsafe due to FFI pointer cast.
+    /// Set renderer destroy window callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_renderer_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_renderer_destroy_window(
         &mut self,
@@ -629,7 +703,11 @@ impl PlatformIo {
         self.raw.Renderer_SetWindowSize = callback;
     }
 
-    /// Set renderer set window size callback (typed). Unsafe due to FFI pointer cast.
+    /// Set renderer set window size callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_renderer_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_renderer_set_window_size(
         &mut self,
@@ -652,7 +730,11 @@ impl PlatformIo {
         self.raw.Renderer_RenderWindow = callback;
     }
 
-    /// Set renderer render window callback (typed). Unsafe due to FFI pointer cast.
+    /// Set renderer render window callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_renderer_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_renderer_render_window(
         &mut self,
@@ -675,7 +757,11 @@ impl PlatformIo {
         self.raw.Renderer_SwapBuffers = callback;
     }
 
-    /// Set renderer swap buffers callback (typed). Unsafe due to FFI pointer cast.
+    /// Set renderer swap buffers callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_renderer_create_window`].
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_renderer_swap_buffers(
         &mut self,

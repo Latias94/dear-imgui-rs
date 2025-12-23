@@ -208,12 +208,11 @@ fn append_headers_only(
 ) -> Result<(), Box<dyn std::error::Error>> {
     fn excluded(path: &Path, exclude_dirs: &[&str]) -> bool {
         for comp in path.components() {
-            if let std::path::Component::Normal(os) = comp {
-                if let Some(name) = os.to_str()
-                    && exclude_dirs.iter().any(|e| e == &name)
-                {
-                    return true;
-                }
+            if let std::path::Component::Normal(os) = comp
+                && let Some(name) = os.to_str()
+                && exclude_dirs.iter().any(|e| e == &name)
+            {
+                return true;
             }
         }
         false

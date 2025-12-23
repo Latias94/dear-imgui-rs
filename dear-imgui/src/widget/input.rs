@@ -1366,6 +1366,23 @@ impl TextCallbackData {
     /// [push_str]: Self::push_str
     pub unsafe fn str_as_bytes_mut(&mut self) -> &mut [u8] {
         unsafe {
+            assert!(
+                !(*(self.0)).Buf.is_null(),
+                "internal imgui error: Buf was null"
+            );
+            assert!(
+                (*(self.0)).BufTextLen >= 0,
+                "internal imgui error: BufTextLen was negative"
+            );
+            assert!(
+                (*(self.0)).BufSize >= 0,
+                "internal imgui error: BufSize was negative"
+            );
+            assert!(
+                (*(self.0)).BufTextLen <= (*(self.0)).BufSize,
+                "internal imgui error: BufTextLen exceeded BufSize"
+            );
+
             let str = std::str::from_utf8_mut(std::slice::from_raw_parts_mut(
                 (*(self.0)).Buf as *const _ as *mut _,
                 (*(self.0)).BufTextLen as usize,

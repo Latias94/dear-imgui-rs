@@ -513,9 +513,6 @@ impl DockBuilder {
                 }
                 // Free the buffer allocated by ImGui (ImVector uses ImGui::MemAlloc)
                 sys::igMemFree(out.Data as *mut c_void);
-                out.Data = std::ptr::null_mut();
-                out.Size = 0;
-                out.Capacity = 0;
             }
         }
         result

@@ -35,15 +35,16 @@ pub fn derive_for_enum(
         }
     }
 
-    if let Some(ref style) = enum_style {
-        if style != "dropdown" && style != "radio" {
-            return syn::Error::new(
-                ident.span(),
-                "imgui(enum_style = ...) must be \"dropdown\" or \"radio\"",
-            )
-            .to_compile_error()
-            .into();
-        }
+    if let Some(ref style) = enum_style
+        && style != "dropdown"
+        && style != "radio"
+    {
+        return syn::Error::new(
+            ident.span(),
+            "imgui(enum_style = ...) must be \"dropdown\" or \"radio\"",
+        )
+        .to_compile_error()
+        .into();
     }
 
     let mut labels: Vec<syn::LitStr> = Vec::new();
@@ -316,6 +317,7 @@ pub fn gen_bool_field(
 
 /// Generates code for `String` fields, including multiline, hints, read-only,
 /// display-only, and auto-resize behavior.
+#[allow(clippy::too_many_arguments)]
 pub fn gen_string_field(
     field_ident: &Ident,
     label: &TokenStream2,
@@ -434,6 +436,7 @@ pub fn gen_string_field(
 
 /// Generates code for `ImString` fields, mirroring the behavior of `String`
 /// but using ImString-specific input widgets.
+#[allow(clippy::too_many_arguments)]
 pub fn gen_imstring_field(
     field_ident: &Ident,
     label: &TokenStream2,

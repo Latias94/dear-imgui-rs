@@ -68,11 +68,6 @@ pub use renderer::multi_viewport;
 #[cfg(feature = "multi-viewport-sdl3")]
 pub use renderer::multi_viewport_sdl3;
 
-#[cfg(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-compile_error!(
-    "Enable either `multi-viewport-winit` (winit) or `multi-viewport-sdl3` (SDL3), not both."
-);
-
 /// Gamma correction mode for the WGPU renderer
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GammaMode {

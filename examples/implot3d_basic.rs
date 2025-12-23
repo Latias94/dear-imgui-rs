@@ -847,7 +847,7 @@ fn demo_tick_labels(ui: &Ui, plot_ui: &Plot3DUi) {
     if let Some(_tok) = plot_ui.begin_plot("##Ticks").build() {
         plot_ui.setup_axes_limits(2.0, 5.0, 0.0, 1.0, 0.0, 1.0, Plot3DCond::Once);
         if custom_ticks {
-            let pi = 3.14f64;
+            let pi = std::f64::consts::PI;
             let letters_ticks = [0.0f64, 0.2, 0.4, 0.6, 0.8, 1.0];
             let pi_lbl = ["PI"];
             let letters_lbl = ["A", "B", "C", "D", "E", "F"];

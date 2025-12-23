@@ -413,12 +413,5 @@ impl Ui {
     }
 }
 
-impl crate::Condition {
-    /// Converts the condition to ImGui's internal representation
-    pub(crate) fn as_imgui_cond(self) -> sys::ImGuiCond {
-        self as i32
-    }
-}
-
 // Re-export DockNodeFlags for convenience
 pub use DockNodeFlags as DockFlags;

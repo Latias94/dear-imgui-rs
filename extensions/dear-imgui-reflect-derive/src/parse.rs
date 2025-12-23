@@ -286,9 +286,7 @@ pub fn parse_field_attrs(_field_ident: &Ident, field: &Field) -> Result<FieldAtt
             Ok(())
         });
 
-        if let Err(err) = res {
-            return Err(err);
-        }
+        res?;
     }
 
     // For now there is no additional validation that depends only on attributes
