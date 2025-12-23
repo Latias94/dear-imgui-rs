@@ -1405,43 +1405,50 @@ pub mod multi_viewport {
             return;
         }
 
-        let renderer = match get_renderer() {
-            Some(r) => r,
-            None => return,
-        };
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let renderer = match get_renderer() {
+                Some(r) => r,
+                None => return,
+            };
 
-        // We currently only support the common case where GlowRenderer owns the
-        // GL context. If the context is externally managed, the application
-        // should render viewports by calling `render_with_context` manually.
-        let gl_rc = match renderer.gl_context() {
-            Some(rc) => rc.clone(),
-            None => return,
-        };
-        let gl = &*gl_rc;
+            // We currently only support the common case where GlowRenderer owns the
+            // GL context. If the context is externally managed, the application
+            // should render viewports by calling `render_with_context` manually.
+            let gl_rc = match renderer.gl_context() {
+                Some(rc) => rc.clone(),
+                None => return,
+            };
+            let gl = &*gl_rc;
 
-        // Safety: viewport was checked for null above.
-        let vp_ref = unsafe { &*viewport };
+            // Safety: viewport was checked for null above.
+            let vp_ref = unsafe { &*viewport };
 
-        // Clear the viewport if needed using Dear ImGui's ViewportFlags.
-        let flags = ViewportFlags::from_bits_truncate(vp_ref.Flags);
-        if !flags.contains(ViewportFlags::NO_RENDERER_CLEAR) {
-            let c = renderer.viewport_clear_color;
-            unsafe {
-                gl.clear_color(c[0], c[1], c[2], c[3]);
-                gl.clear(glow::COLOR_BUFFER_BIT);
+            // Clear the viewport if needed using Dear ImGui's ViewportFlags.
+            let flags = ViewportFlags::from_bits_truncate(vp_ref.Flags);
+            if !flags.contains(ViewportFlags::NO_RENDERER_CLEAR) {
+                let c = renderer.viewport_clear_color;
+                unsafe {
+                    gl.clear_color(c[0], c[1], c[2], c[3]);
+                    gl.clear(glow::COLOR_BUFFER_BIT);
+                }
             }
-        }
 
-        // Render the draw data for this viewport, if present.
-        if !vp_ref.DrawData.is_null() {
-            // Safety: DrawData pointer is owned by Dear ImGui for the duration
-            // of this callback.
-            let raw_dd: &sys::ImDrawData = unsafe { &*vp_ref.DrawData };
-            let draw_data: &DrawData = unsafe { DrawData::from_raw(raw_dd) };
+            // Render the draw data for this viewport, if present.
+            if !vp_ref.DrawData.is_null() {
+                // Safety: DrawData pointer is owned by Dear ImGui for the duration
+                // of this callback.
+                let raw_dd: &sys::ImDrawData = unsafe { &*vp_ref.DrawData };
+                let draw_data: &DrawData = unsafe { DrawData::from_raw(raw_dd) };
 
-            if let Err(err) = renderer.render_with_context(gl, draw_data) {
-                eprintln!("dear-imgui-glow: error rendering viewport: {:?}", err);
+                if let Err(err) = renderer.render_with_context(gl, draw_data) {
+                    eprintln!("dear-imgui-glow: error rendering viewport: {:?}", err);
+                }
             }
+        }));
+
+        if res.is_err() {
+            eprintln!("dear-imgui-glow: panic in Renderer_RenderWindow callback");
+            std::process::abort();
         }
     }
 }

@@ -26,9 +26,11 @@ pub struct Sdl3SurfaceTarget {
     window: *mut sdl3_sys::video::SDL_Window,
 }
 
-// SAFETY: This type only contains a raw SDL_Window pointer and is used
-// synchronously to create a WGPU surface on the main thread. The caller must
-// ensure the underlying SDL window remains valid for the lifetime of the surface.
+// SAFETY: wgpu requires surface targets to be Send+Sync. This type only stores a raw
+// `SDL_Window*` and is expected to be used solely as an ephemeral adapter for
+// `wgpu::Instance::create_surface` on the thread that owns/operates the SDL window.
+// The caller must ensure the underlying SDL window remains alive and that SDL's
+// threading rules are upheld when using this type.
 unsafe impl Send for Sdl3SurfaceTarget {}
 unsafe impl Sync for Sdl3SurfaceTarget {}
 
@@ -116,7 +118,8 @@ impl HasWindowHandle for Sdl3SurfaceTarget {
                 return Err(HandleError::Unavailable);
             }
 
-            let handle = AppKitWindowHandle::new(NonNull::new_unchecked(ns_view.cast()));
+            let ns_view = NonNull::new(ns_view.cast()).ok_or(HandleError::Unavailable)?;
+            let handle = AppKitWindowHandle::new(ns_view);
             Ok(WindowHandle::borrow_raw(RawWindowHandle::AppKit(handle)))
         }
 

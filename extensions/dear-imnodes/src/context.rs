@@ -217,9 +217,16 @@ impl<'ui> NodeEditor<'ui> {
         callback: &mut F,
     ) {
         unsafe extern "C" fn trampoline(node_id: i32, user: *mut c_void) {
-            unsafe {
+            if user.is_null() {
+                return;
+            }
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
                 let closure = &mut *(user as *mut &mut dyn FnMut(i32));
                 (closure)(node_id);
+            }));
+            if res.is_err() {
+                eprintln!("dear-imnodes: panic in minimap callback");
+                std::process::abort();
             }
         }
         let mut cb_obj: &mut dyn FnMut(i32) = callback;

@@ -429,7 +429,8 @@ impl FontAtlas {
                 while *ptr.add(len) != 0 {
                     len += 1;
                 }
-                std::slice::from_raw_parts(ptr, len)
+                // Include the terminating 0 sentinel.
+                std::slice::from_raw_parts(ptr, len + 1)
             }
         }
     }

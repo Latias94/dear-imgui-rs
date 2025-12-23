@@ -24,7 +24,7 @@ unsafe extern "C" fn imgui_winit_set_ime_data(
 ) {
     use dear_imgui_rs::sys::{ImGuiPlatformImeData, ImGuiViewport};
 
-    unsafe {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         if viewport.is_null() || data.is_null() {
             return;
         }
@@ -68,6 +68,10 @@ unsafe extern "C" fn imgui_winit_set_ime_data(
         let size = LogicalSize::new(line_h, line_h);
 
         window.set_ime_cursor_area(pos, size);
+    }));
+    if res.is_err() {
+        eprintln!("dear-imgui-winit: panic in Platform_SetImeDataFn");
+        std::process::abort();
     }
 }
 

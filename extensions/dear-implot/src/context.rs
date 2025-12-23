@@ -701,7 +701,13 @@ unsafe extern "C" fn formatter_thunk(
     }
     // Safety: ImPlot passes back the same pointer we provided in `AxisFormatterToken::new`.
     let holder = unsafe { &*(user_data as *const FormatterHolder) };
-    let s = (holder.func)(value);
+    let s = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (holder.func)(value))) {
+        Ok(v) => v,
+        Err(_) => {
+            eprintln!("dear-implot: panic in axis formatter callback");
+            std::process::abort();
+        }
+    };
     let bytes = s.as_bytes();
     let max = (size - 1).max(0) as usize;
     let n = bytes.len().min(max);
@@ -761,16 +767,34 @@ unsafe extern "C" fn transform_forward_thunk(
     value: f64,
     user_data: *mut std::os::raw::c_void,
 ) -> f64 {
+    if user_data.is_null() {
+        return value;
+    }
     let holder = unsafe { &*(user_data as *const TransformHolder) };
-    (holder.forward)(value)
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (holder.forward)(value))) {
+        Ok(v) => v,
+        Err(_) => {
+            eprintln!("dear-implot: panic in axis transform (forward) callback");
+            std::process::abort();
+        }
+    }
 }
 
 unsafe extern "C" fn transform_inverse_thunk(
     value: f64,
     user_data: *mut std::os::raw::c_void,
 ) -> f64 {
+    if user_data.is_null() {
+        return value;
+    }
     let holder = unsafe { &*(user_data as *const TransformHolder) };
-    (holder.inverse)(value)
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (holder.inverse)(value))) {
+        Ok(v) => v,
+        Err(_) => {
+            eprintln!("dear-implot: panic in axis transform (inverse) callback");
+            std::process::abort();
+        }
+    }
 }
 
 /// Token that represents an active plot

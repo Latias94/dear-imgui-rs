@@ -1291,12 +1291,24 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
         _parent_list: *const sys::ImDrawList,
         cmd: *const sys::ImDrawCmd,
     ) {
+        if cmd.is_null() {
+            return;
+        }
         // Access mutable ImDrawCmd to retrieve and clear user data
         let cmd = unsafe { &mut *(cmd as *mut sys::ImDrawCmd) };
+        if cmd.UserCallbackData.is_null() {
+            return;
+        }
+        if cmd.UserCallbackDataOffset != 0 {
+            eprintln!("dear-imgui-rs: unexpected UserCallbackDataOffset != 0");
+            std::process::abort();
+        }
+        if cmd.UserCallbackDataSize as usize != std::mem::size_of::<F>() {
+            eprintln!("dear-imgui-rs: unexpected UserCallbackDataSize mismatch");
+            std::process::abort();
+        }
         // Compute pointer to our boxed closure (respect offset if ever used)
-        let data_ptr = unsafe {
-            (cmd.UserCallbackData as *mut u8).add(cmd.UserCallbackDataOffset as usize) as *mut F
-        };
+        let data_ptr = cmd.UserCallbackData as *mut F;
         if data_ptr.is_null() {
             return;
         }
@@ -1305,7 +1317,13 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
         cmd.UserCallbackDataSize = 0;
         cmd.UserCallbackDataOffset = 0;
         let cb = unsafe { Box::from_raw(data_ptr) };
-        cb();
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            cb();
+        }));
+        if res.is_err() {
+            eprintln!("dear-imgui-rs: panic in DrawList callback");
+            std::process::abort();
+        }
     }
 }
 

@@ -334,9 +334,17 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
         let user_ptr = self.buf as *mut ImString as *mut c_void;
 
         extern "C" fn resize_cb_imstr(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-            unsafe {
+            if data.is_null() {
+                return 0;
+            }
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
                 if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
-                    let im = &mut *((*data).UserData as *mut ImString);
+                    let user_data = (*data).UserData as *mut ImString;
+                    if user_data.is_null() {
+                        return;
+                    }
+
+                    let im = &mut *user_data;
                     let requested = (*data).BufSize as usize;
                     if im.0.len() < requested {
                         im.0.resize(requested, 0);
@@ -344,6 +352,10 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     (*data).Buf = im.as_mut_ptr();
                     (*data).BufDirty = true;
                 }
+            }));
+            if res.is_err() {
+                eprintln!("dear-imgui-rs: panic in ImString resize callback");
+                std::process::abort();
             }
             0
         }
@@ -531,59 +543,83 @@ where
         extern "C" fn callback_router<T: InputTextCallbackHandler>(
             data: *mut sys::ImGuiInputTextCallbackData,
         ) -> c_int {
-            let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
-            let user = unsafe { &mut *((*data).UserData as *mut UserData<T>) };
-            match event_flag {
-                InputTextFlags::CALLBACK_RESIZE => unsafe {
-                    let requested = (*data).BufSize as usize;
-                    let s = &mut *user.container;
-                    debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
-                    if requested > s.capacity() {
-                        let old_cap = s.capacity();
-                        let additional = requested.saturating_sub(s.len());
-                        s.reserve(additional);
-                        zero_string_new_capacity(s, old_cap);
-                        (*data).Buf = s.as_mut_ptr() as *mut _;
-                        (*data).BufDirty = true;
+            if data.is_null() {
+                return 0;
+            }
+
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let user_ptr = unsafe { (*data).UserData as *mut UserData<T> };
+                if user_ptr.is_null() {
+                    return 0;
+                }
+                let user = unsafe { &mut *user_ptr };
+                if user.container.is_null() {
+                    return 0;
+                }
+
+                let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
+                match event_flag {
+                    InputTextFlags::CALLBACK_RESIZE => unsafe {
+                        let requested = (*data).BufSize as usize;
+                        let s = &mut *user.container;
+                        debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
+                        if requested > s.capacity() {
+                            let old_cap = s.capacity();
+                            let additional = requested.saturating_sub(s.len());
+                            s.reserve(additional);
+                            zero_string_new_capacity(s, old_cap);
+                            (*data).Buf = s.as_mut_ptr() as *mut _;
+                            (*data).BufDirty = true;
+                        }
+                        0
+                    },
+                    InputTextFlags::CALLBACK_COMPLETION => {
+                        let info = unsafe { TextCallbackData::new(data) };
+                        user.handler.on_completion(info);
+                        0
                     }
-                    0
-                },
-                InputTextFlags::CALLBACK_COMPLETION => {
-                    let info = unsafe { TextCallbackData::new(data) };
-                    user.handler.on_completion(info);
-                    0
-                }
-                InputTextFlags::CALLBACK_HISTORY => {
-                    let key = unsafe { (*data).EventKey };
-                    let dir = if key == sys::ImGuiKey_UpArrow {
-                        HistoryDirection::Up
-                    } else {
-                        HistoryDirection::Down
-                    };
-                    let info = unsafe { TextCallbackData::new(data) };
-                    user.handler.on_history(dir, info);
-                    0
-                }
-                InputTextFlags::CALLBACK_ALWAYS => {
-                    let info = unsafe { TextCallbackData::new(data) };
-                    user.handler.on_always(info);
-                    0
-                }
-                InputTextFlags::CALLBACK_EDIT => {
-                    let info = unsafe { TextCallbackData::new(data) };
-                    user.handler.on_edit(info);
-                    0
-                }
-                InputTextFlags::CALLBACK_CHAR_FILTER => {
-                    let ch =
-                        unsafe { std::char::from_u32((*data).EventChar as u32).unwrap_or('\0') };
-                    let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
-                    unsafe {
-                        (*data).EventChar = new_ch as u16;
+                    InputTextFlags::CALLBACK_HISTORY => {
+                        let key = unsafe { (*data).EventKey };
+                        let dir = if key == sys::ImGuiKey_UpArrow {
+                            HistoryDirection::Up
+                        } else {
+                            HistoryDirection::Down
+                        };
+                        let info = unsafe { TextCallbackData::new(data) };
+                        user.handler.on_history(dir, info);
+                        0
                     }
-                    0
+                    InputTextFlags::CALLBACK_ALWAYS => {
+                        let info = unsafe { TextCallbackData::new(data) };
+                        user.handler.on_always(info);
+                        0
+                    }
+                    InputTextFlags::CALLBACK_EDIT => {
+                        let info = unsafe { TextCallbackData::new(data) };
+                        user.handler.on_edit(info);
+                        0
+                    }
+                    InputTextFlags::CALLBACK_CHAR_FILTER => {
+                        let ch = unsafe {
+                            std::char::from_u32((*data).EventChar as u32).unwrap_or('\0')
+                        };
+                        let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
+                        let new_ch_u16 = u16::try_from(new_ch).unwrap_or(0);
+                        unsafe {
+                            (*data).EventChar = new_ch_u16;
+                        }
+                        0
+                    }
+                    _ => 0,
                 }
-                _ => 0,
+            }));
+
+            match res {
+                Ok(v) => v,
+                Err(_) => {
+                    eprintln!("dear-imgui-rs: panic in InputText callback");
+                    std::process::abort();
+                }
             }
         }
 
@@ -681,9 +717,17 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
         let size_vec: sys::ImVec2 = self.size.into();
 
         extern "C" fn resize_cb_imstr(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-            unsafe {
+            if data.is_null() {
+                return 0;
+            }
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
                 if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
-                    let im = &mut *((*data).UserData as *mut ImString);
+                    let user_data = (*data).UserData as *mut ImString;
+                    if user_data.is_null() {
+                        return;
+                    }
+
+                    let im = &mut *user_data;
                     let requested = (*data).BufSize as usize;
                     if im.0.len() < requested {
                         im.0.resize(requested, 0);
@@ -691,6 +735,10 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
                     (*data).Buf = im.as_mut_ptr();
                     (*data).BufDirty = true;
                 }
+            }));
+            if res.is_err() {
+                eprintln!("dear-imgui-rs: panic in ImString multiline resize callback");
+                std::process::abort();
             }
             0
         }
@@ -889,59 +937,83 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
         extern "C" fn callback_router<T: InputTextCallbackHandler>(
             data: *mut sys::ImGuiInputTextCallbackData,
         ) -> c_int {
-            let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
-            let user = unsafe { &mut *((*data).UserData as *mut UserData<T>) };
-            match event_flag {
-                InputTextFlags::CALLBACK_RESIZE => unsafe {
-                    let requested = (*data).BufSize as usize;
-                    let s = &mut *user.container;
-                    debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
-                    if requested > s.capacity() {
-                        let old_cap = s.capacity();
-                        let additional = requested.saturating_sub(s.len());
-                        s.reserve(additional);
-                        zero_string_new_capacity(s, old_cap);
-                        (*data).Buf = s.as_mut_ptr() as *mut _;
-                        (*data).BufDirty = true;
+            if data.is_null() {
+                return 0;
+            }
+
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let user_ptr = unsafe { (*data).UserData as *mut UserData<T> };
+                if user_ptr.is_null() {
+                    return 0;
+                }
+                let user = unsafe { &mut *user_ptr };
+                if user.container.is_null() {
+                    return 0;
+                }
+
+                let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
+                match event_flag {
+                    InputTextFlags::CALLBACK_RESIZE => unsafe {
+                        let requested = (*data).BufSize as usize;
+                        let s = &mut *user.container;
+                        debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
+                        if requested > s.capacity() {
+                            let old_cap = s.capacity();
+                            let additional = requested.saturating_sub(s.len());
+                            s.reserve(additional);
+                            zero_string_new_capacity(s, old_cap);
+                            (*data).Buf = s.as_mut_ptr() as *mut _;
+                            (*data).BufDirty = true;
+                        }
+                        0
+                    },
+                    InputTextFlags::CALLBACK_COMPLETION => {
+                        let info = unsafe { TextCallbackData::new(data) };
+                        user.handler.on_completion(info);
+                        0
                     }
-                    0
-                },
-                InputTextFlags::CALLBACK_COMPLETION => {
-                    let info = unsafe { TextCallbackData::new(data) };
-                    user.handler.on_completion(info);
-                    0
-                }
-                InputTextFlags::CALLBACK_HISTORY => {
-                    let key = unsafe { (*data).EventKey };
-                    let dir = if key == sys::ImGuiKey_UpArrow {
-                        HistoryDirection::Up
-                    } else {
-                        HistoryDirection::Down
-                    };
-                    let info = unsafe { TextCallbackData::new(data) };
-                    user.handler.on_history(dir, info);
-                    0
-                }
-                InputTextFlags::CALLBACK_ALWAYS => {
-                    let info = unsafe { TextCallbackData::new(data) };
-                    user.handler.on_always(info);
-                    0
-                }
-                InputTextFlags::CALLBACK_EDIT => {
-                    let info = unsafe { TextCallbackData::new(data) };
-                    user.handler.on_edit(info);
-                    0
-                }
-                InputTextFlags::CALLBACK_CHAR_FILTER => {
-                    let ch =
-                        unsafe { std::char::from_u32((*data).EventChar as u32).unwrap_or('\0') };
-                    let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
-                    unsafe {
-                        (*data).EventChar = new_ch as u16;
+                    InputTextFlags::CALLBACK_HISTORY => {
+                        let key = unsafe { (*data).EventKey };
+                        let dir = if key == sys::ImGuiKey_UpArrow {
+                            HistoryDirection::Up
+                        } else {
+                            HistoryDirection::Down
+                        };
+                        let info = unsafe { TextCallbackData::new(data) };
+                        user.handler.on_history(dir, info);
+                        0
                     }
-                    0
+                    InputTextFlags::CALLBACK_ALWAYS => {
+                        let info = unsafe { TextCallbackData::new(data) };
+                        user.handler.on_always(info);
+                        0
+                    }
+                    InputTextFlags::CALLBACK_EDIT => {
+                        let info = unsafe { TextCallbackData::new(data) };
+                        user.handler.on_edit(info);
+                        0
+                    }
+                    InputTextFlags::CALLBACK_CHAR_FILTER => {
+                        let ch = unsafe {
+                            std::char::from_u32((*data).EventChar as u32).unwrap_or('\0')
+                        };
+                        let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
+                        let new_ch_u16 = u16::try_from(new_ch).unwrap_or(0);
+                        unsafe {
+                            (*data).EventChar = new_ch_u16;
+                        }
+                        0
+                    }
+                    _ => 0,
                 }
-                _ => 0,
+            }));
+
+            match res {
+                Ok(v) => v,
+                Err(_) => {
+                    eprintln!("dear-imgui-rs: panic in InputText multiline callback");
+                    std::process::abort();
+                }
             }
         }
 
@@ -1334,7 +1406,7 @@ impl TextCallbackData {
 
     /// Insert text at the given position
     pub fn insert_chars(&mut self, pos: usize, text: &str) {
-        let text_ptr = crate::string::tls_scratch_txt(text);
+        let text_ptr = text.as_ptr() as *const std::os::raw::c_char;
         unsafe {
             sys::ImGuiInputTextCallbackData_InsertChars(
                 self.0,
