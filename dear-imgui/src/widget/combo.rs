@@ -128,6 +128,56 @@ impl Ui {
         result
     }
 
+    /// Builds a simple combo box using an `i32` index (ImGui-style).
+    ///
+    /// This is useful when you want to represent "no selection" with `-1`, matching Dear ImGui's
+    /// `Combo()` API.
+    #[doc(alias = "Combo")]
+    pub fn combo_i32<V, L>(
+        &self,
+        label: impl AsRef<str>,
+        current_item: &mut i32,
+        items: &[V],
+        label_fn: L,
+    ) -> bool
+    where
+        for<'b> L: Fn(&'b V) -> Cow<'b, str>,
+    {
+        let label_fn = &label_fn;
+        let mut result = false;
+
+        let preview_value = if *current_item >= 0 {
+            items.get(*current_item as usize).map(|v| label_fn(v))
+        } else {
+            None
+        };
+
+        if let Some(combo_token) = self.begin_combo(
+            label,
+            preview_value.as_ref().map(|s| s.as_ref()).unwrap_or(""),
+        ) {
+            for (idx, item) in items.iter().enumerate() {
+                if idx > i32::MAX as usize {
+                    break;
+                }
+                let idx_i32 = idx as i32;
+                let is_selected = idx_i32 == *current_item;
+                if is_selected {
+                    self.set_item_default_focus();
+                }
+
+                let clicked = self.selectable(label_fn(item).as_ref());
+                if clicked {
+                    *current_item = idx_i32;
+                    result = true;
+                }
+            }
+            combo_token.end();
+        }
+
+        result
+    }
+
     /// Builds a simple combo box for choosing from a slice of strings
     #[doc(alias = "Combo")]
     pub fn combo_simple_string(
@@ -137,6 +187,17 @@ impl Ui {
         items: &[impl AsRef<str>],
     ) -> bool {
         self.combo(label, current_item, items, |s| Cow::Borrowed(s.as_ref()))
+    }
+
+    /// Builds a simple combo box for choosing from a slice of strings using an `i32` index.
+    #[doc(alias = "Combo")]
+    pub fn combo_simple_string_i32(
+        &self,
+        label: impl AsRef<str>,
+        current_item: &mut i32,
+        items: &[impl AsRef<str>],
+    ) -> bool {
+        self.combo_i32(label, current_item, items, |s| Cow::Borrowed(s.as_ref()))
     }
 
     /// Sets the default focus for the next item

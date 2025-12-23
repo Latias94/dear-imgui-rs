@@ -156,7 +156,7 @@ impl Ui {
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dockspace_over_main_viewport_with_flags(
-    ///     0,
+    ///     0.into(),
     ///     DockNodeFlags::PASSTHRU_CENTRAL_NODE
     /// );
     /// ```
@@ -221,7 +221,7 @@ impl Ui {
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let dockspace_id = ui.dock_space_with_class(
-    ///     0,
+    ///     0.into(),
     ///     [800.0, 600.0],
     ///     DockNodeFlags::NO_DOCKING_SPLIT,
     ///     Some(&WindowClass::new(1))
@@ -272,7 +272,7 @@ impl Ui {
     /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
-    /// let dockspace_id = ui.dock_space(0, [800.0, 600.0]);
+    /// let dockspace_id = ui.dock_space(0.into(), [800.0, 600.0]);
     /// ```
     #[doc(alias = "DockSpace")]
     pub fn dock_space(&self, id: Id, size: [f32; 2]) -> Id {
@@ -375,8 +375,8 @@ impl Ui {
     /// # let ui = ctx.frame();
     /// ui.window("My Window").build(|| {
     ///     let dock_id = ui.get_window_dock_id();
-    ///     if dock_id != 0 {
-    ///         ui.text(format!("This window is docked with ID: {}", dock_id));
+    ///     if dock_id.raw() != 0 {
+    ///         ui.text(format!("This window is docked with ID: {}", dock_id.raw()));
     ///     } else {
     ///         ui.text("This window is not docked");
     ///     }

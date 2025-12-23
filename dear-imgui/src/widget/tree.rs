@@ -84,6 +84,22 @@ impl Ui {
         let label_ptr = self.scratch_txt(label);
         unsafe { sys::igCollapsingHeader_TreeNodeFlags(label_ptr, flags.bits()) }
     }
+
+    /// Creates a collapsing header widget with a visibility tracking variable.
+    ///
+    /// Passing `visible` enables a close button on the header. When clicked, ImGui will set
+    /// `*visible = false`. As with other immediate-mode widgets, you should stop submitting the
+    /// header when `*visible == false`.
+    #[doc(alias = "CollapsingHeader")]
+    pub fn collapsing_header_with_visible(
+        &self,
+        label: impl AsRef<str>,
+        visible: &mut bool,
+        flags: TreeNodeFlags,
+    ) -> bool {
+        let label_ptr = self.scratch_txt(label);
+        unsafe { sys::igCollapsingHeader_BoolPtr(label_ptr, visible as *mut bool, flags.bits()) }
+    }
 }
 
 /// Builder for a tree node widget

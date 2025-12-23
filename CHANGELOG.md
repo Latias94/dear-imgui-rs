@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2025-12-23
+
+This is a **core-only** patch release: only `dear-imgui-rs` is updated to `0.7.1`.
+All other workspace crates remain at `0.7.0`.
+
+### Added
+
+- Core (`dear-imgui-rs`)
+  - `Color::to_hsv01` / `Color::from_hsv01`: helpers that match Dear ImGui's HSV semantics (h in `[0, 1]`).
+  - ImGui-style `i32` index variants for optional selection (`-1` as no selection):
+    `Ui::combo_i32`, `Ui::combo_simple_string_i32`, `ListBox::build_simple_i32`.
+
+### Fixed
+
+- Core (`dear-imgui-rs`)
+  - Windows: expose ImGui `p_open` via `Window::opened(&mut bool)` so the title-bar close button (X) can toggle window state.
+  - Popups/headers: expose the corresponding `bool*` variants via
+    `Ui::begin_modal_popup_with_opened`, `Ui::modal_popup_with_opened`, `Ui::collapsing_header_with_visible`.
+  - Selectables: `Selectable::build_with_ref` now uses ImGui's `Selectable(..., bool*)` variant for closer upstream behavior parity.
+
+### Changed
+
+- Core (`dear-imgui-rs`)
+  - `ui.window(...).build(...)` only shows a close button when `opened(...)` is provided (matches upstream Dear ImGui behavior).
+
 ## [0.7.0] - 2025-12-13
 
 Unified release train bump to 0.7.0 with Rust-side API improvements and backend updates.

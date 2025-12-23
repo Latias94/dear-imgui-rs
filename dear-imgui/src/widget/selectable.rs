@@ -157,11 +157,17 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
 
     /// Builds the selectable using a mutable reference to selected state.
     pub fn build_with_ref(self, selected: &mut bool) -> bool {
-        if self.selected(*selected).build() {
-            *selected = !*selected;
-            true
-        } else {
-            false
+        let size_vec = sys::ImVec2 {
+            x: self.size[0],
+            y: self.size[1],
+        };
+        unsafe {
+            sys::igSelectable_BoolPtr(
+                self.ui.scratch_txt(self.label),
+                selected as *mut bool,
+                self.flags.bits(),
+                size_vec,
+            )
         }
     }
 }

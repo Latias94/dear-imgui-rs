@@ -96,6 +96,32 @@ impl Ui {
         }
     }
 
+    /// Creates a modal popup with an opened-state tracking variable.
+    ///
+    /// Passing `opened` enables the title-bar close button (X). When clicked, ImGui will set
+    /// `*opened = false` and close the popup.
+    ///
+    /// Notes:
+    /// - You still need to call [`open_popup`](Self::open_popup) once to open the modal.
+    /// - To pass window flags, use [`begin_modal_popup_config`](Self::begin_modal_popup_config).
+    #[doc(alias = "BeginPopupModal")]
+    pub fn begin_modal_popup_with_opened(
+        &self,
+        name: impl AsRef<str>,
+        opened: &mut bool,
+    ) -> Option<ModalPopupToken<'_>> {
+        let name_ptr = self.scratch_txt(name);
+        let opened_ptr = opened as *mut bool;
+        let render =
+            unsafe { sys::igBeginPopupModal(name_ptr, opened_ptr, WindowFlags::empty().bits()) };
+
+        if render {
+            Some(ModalPopupToken::new(self))
+        } else {
+            None
+        }
+    }
+
     /// Creates a modal popup builder.
     pub fn begin_modal_popup_config<'a>(&'a self, name: &'a str) -> ModalPopup<'a> {
         ModalPopup {
@@ -114,6 +140,23 @@ impl Ui {
         F: FnOnce() -> R,
     {
         self.begin_modal_popup(name).map(|_token| f())
+    }
+
+    /// Creates a modal popup with an opened-state tracking variable and runs a closure to
+    /// construct the contents.
+    ///
+    /// Returns the result of the closure if the popup is open.
+    pub fn modal_popup_with_opened<F, R>(
+        &self,
+        name: impl AsRef<str>,
+        opened: &mut bool,
+        f: F,
+    ) -> Option<R>
+    where
+        F: FnOnce() -> R,
+    {
+        self.begin_modal_popup_with_opened(name, opened)
+            .map(|_token| f())
     }
 
     /// Closes the current popup.

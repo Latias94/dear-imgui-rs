@@ -226,7 +226,7 @@ impl DockBuilder {
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// let node_id = DockBuilder::add_node(0, DockNodeFlags::NO_RESIZE);
+    /// let node_id = DockBuilder::add_node(0.into(), DockNodeFlags::NO_RESIZE);
     /// ```
     #[doc(alias = "DockBuilderAddNode")]
     pub fn add_node(node_id: Id, flags: crate::DockNodeFlags) -> Id {
@@ -243,7 +243,7 @@ impl DockBuilder {
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// DockBuilder::remove_node(123);
+    /// DockBuilder::remove_node(123.into());
     /// ```
     #[doc(alias = "DockBuilderRemoveNode")]
     pub fn remove_node(node_id: Id) {
@@ -261,7 +261,7 @@ impl DockBuilder {
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// DockBuilder::remove_node_docked_windows(123, true);
+    /// DockBuilder::remove_node_docked_windows(123.into(), true);
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeDockedWindows")]
     pub fn remove_node_docked_windows(node_id: Id, clear_settings_refs: bool) {
@@ -278,7 +278,7 @@ impl DockBuilder {
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// DockBuilder::remove_node_child_nodes(123);
+    /// DockBuilder::remove_node_child_nodes(123.into());
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeChildNodes")]
     pub fn remove_node_child_nodes(node_id: Id) {
@@ -296,7 +296,7 @@ impl DockBuilder {
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// DockBuilder::set_node_pos(123, [100.0, 50.0]);
+    /// DockBuilder::set_node_pos(123.into(), [100.0, 50.0]);
     /// ```
     #[doc(alias = "DockBuilderSetNodePos")]
     pub fn set_node_pos(node_id: Id, pos: [f32; 2]) {
@@ -320,7 +320,7 @@ impl DockBuilder {
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// DockBuilder::set_node_size(123, [800.0, 600.0]);
+    /// DockBuilder::set_node_size(123.into(), [800.0, 600.0]);
     /// ```
     #[doc(alias = "DockBuilderSetNodeSize")]
     pub fn set_node_size(node_id: Id, size: [f32; 2]) {
@@ -416,7 +416,7 @@ impl DockBuilder {
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// DockBuilder::dock_window("My Tool", 123);
+    /// DockBuilder::dock_window("My Tool", 123.into());
     /// ```
     #[doc(alias = "DockBuilderDockWindow")]
     pub fn dock_window(window_name: &str, node_id: Id) {
@@ -536,7 +536,7 @@ impl DockBuilder {
     /// ```no_run
     /// # use dear_imgui_rs::*;
     /// // ... create layout ...
-    /// let dockspace_id = 1; // placeholder dockspace id for example
+    /// let dockspace_id: Id = 1.into(); // placeholder dockspace id for example
     /// DockBuilder::finish(dockspace_id);
     /// ```
     #[doc(alias = "DockBuilderFinish")]
