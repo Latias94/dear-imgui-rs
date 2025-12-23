@@ -25,7 +25,7 @@
 )]
 use crate::sys;
 use crate::{Ui, WindowFlags};
-use std::ffi::CString;
+use std::borrow::Cow;
 
 bitflags::bitflags! {
     /// Configuration flags for child windows
@@ -56,7 +56,7 @@ bitflags::bitflags! {
 
 /// Represents a child window that can be built
 pub struct ChildWindow<'ui> {
-    name: String,
+    name: Cow<'ui, str>,
     size: [f32; 2],
     child_flags: ChildFlags,
     flags: WindowFlags,
@@ -65,7 +65,7 @@ pub struct ChildWindow<'ui> {
 
 impl<'ui> ChildWindow<'ui> {
     /// Creates a new child window builder
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<Cow<'ui, str>>) -> Self {
         Self {
             name: name.into(),
             size: [0.0, 0.0],
@@ -111,8 +111,8 @@ impl<'ui> ChildWindow<'ui> {
     }
 
     /// Begins the child window and returns a token
-    fn begin(self, _ui: &'ui Ui) -> Option<ChildWindowToken<'ui>> {
-        let name_cstr = CString::new(self.name).ok()?;
+    fn begin(self, ui: &'ui Ui) -> Option<ChildWindowToken<'ui>> {
+        let name_ptr = ui.scratch_txt(self.name);
 
         let result = unsafe {
             let size_vec = sys::ImVec2 {
@@ -120,7 +120,7 @@ impl<'ui> ChildWindow<'ui> {
                 y: self.size[1],
             };
             sys::igBeginChild_Str(
-                name_cstr.as_ptr(),
+                name_ptr,
                 size_vec,
                 self.child_flags.bits() as i32,
                 self.flags.bits(),
@@ -160,7 +160,7 @@ impl<'ui> Drop for ChildWindowToken<'ui> {
 
 impl Ui {
     /// Creates a child window builder
-    pub fn child_window(&self, name: impl Into<String>) -> ChildWindow<'_> {
+    pub fn child_window<'ui>(&'ui self, name: impl Into<Cow<'ui, str>>) -> ChildWindow<'ui> {
         ChildWindow::new(name)
     }
 }

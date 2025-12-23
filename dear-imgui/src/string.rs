@@ -104,6 +104,10 @@ impl UiBuffer {
     /// Pushes a new scratch sheet text and return the byte index where the sub-string
     /// starts.
     pub fn push(&mut self, txt: impl AsRef<str>) -> usize {
+        assert!(
+            !txt.as_ref().contains('\0'),
+            "string contained null byte"
+        );
         let len = self.buffer.len();
         self.buffer.extend(txt.as_ref().as_bytes());
         self.buffer.push(b'\0');
