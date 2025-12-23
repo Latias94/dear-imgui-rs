@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Popups/headers: expose the corresponding `bool*` variants via
     `Ui::begin_modal_popup_with_opened`, `Ui::modal_popup_with_opened`, `Ui::collapsing_header_with_visible`.
   - Selectables: `Selectable::build_with_ref` now uses ImGui's `Selectable(..., bool*)` variant for closer upstream behavior parity.
+  - `TextFilter`: fix a leak by calling `ImGuiTextFilter_destroy` on drop; also avoid per-call allocations in `draw*`/`pass_filter*`.
+  - Clipboard: handle non-UTF8 clipboard payloads without panicking (lossy conversion).
 
 ### Changed
 
@@ -41,6 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ui.window(...).build(...)` only shows a close button when `opened(...)` is provided (matches upstream Dear ImGui behavior).
   - `Ui::get_id` uses the internal scratch buffer instead of allocating a `CString`.
   - `Ui::window` now accepts `Into<Cow<'_, str>>` and avoids per-frame string allocation for borrowed names.
+  - Avoid per-frame allocations for common builder labels/IDs by storing `Cow<'_, str>`:
+    `Button`, `InputText*`, `InputInt/Float/Double`, `PlotLines/Histogram`, `ColorEdit/Picker/Button`,
+    `ImageButton`, `ProgressBar`, `TableBuilder`/`ColumnBuilder`.
+  - Non-`Ui` string entrypoints also use the shared scratch strategy where applicable:
+    `DockBuilder::dock_window`, `DockBuilder::copy_window_settings`, and `TextCallbackData::insert_chars`.
+  - `ImString` now rejects interior NUL bytes in safe constructors/mutators (`new`, `push_str`).
 - `dear-imgui-wgpu`: bump `wgpu` to v28 (requires Rust 1.92+).
 
 ## [0.7.0] - 2025-12-13

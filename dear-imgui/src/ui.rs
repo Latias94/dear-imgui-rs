@@ -128,9 +128,6 @@ impl Ui {
     /// for widgets or dockspaces inside the current window/scope.
     #[doc(alias = "GetID")]
     pub fn get_id(&self, label: &str) -> Id {
-        if label.contains('\0') {
-            panic!("label contained null byte");
-        }
         unsafe { Id::from(sys::igGetID_Str(self.scratch_txt(label))) }
     }
 

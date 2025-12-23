@@ -65,7 +65,7 @@ pub(crate) unsafe extern "C" fn get_clipboard_text(
         let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
         match ctx.backend.get() {
             Some(text) => {
-                ctx.last_value = CString::new(text).unwrap();
+                ctx.last_value = CString::new(text).expect("clipboard text contained null byte");
                 ctx.last_value.as_ptr()
             }
             None => ptr::null(),
@@ -85,8 +85,8 @@ pub(crate) unsafe extern "C" fn set_clipboard_text(
         let user_data = unsafe { (*crate::sys::igGetPlatformIO_Nil()).Platform_ClipboardUserData };
 
         let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
-        let text = unsafe { CStr::from_ptr(text) }.to_owned();
-        ctx.backend.set(text.to_str().unwrap());
+        let text = unsafe { CStr::from_ptr(text) }.to_string_lossy();
+        ctx.backend.set(text.as_ref());
     });
     result.unwrap_or_else(|_| {
         eprintln!("Clipboard setter panicked");

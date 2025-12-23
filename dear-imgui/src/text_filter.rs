@@ -10,7 +10,7 @@
 //! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
-//! let mut filter = TextFilter::new("Search".to_string());
+//! let mut filter = TextFilter::new("Search");
 //!
 //! // Draw the filter input
 //! filter.draw();
@@ -30,6 +30,7 @@
 //! - `word1,-word2` - Include items containing "word1" but NOT "word2"
 
 use crate::{Ui, sys};
+use std::ffi::CString;
 use std::ptr;
 
 /// Helper to parse and apply text filters
@@ -53,7 +54,7 @@ use std::ptr;
 /// );
 /// ```
 pub struct TextFilter {
-    id: String,
+    label: CString,
     raw: *mut sys::ImGuiTextFilter,
 }
 
@@ -69,10 +70,10 @@ impl TextFilter {
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// let filter = TextFilter::new("Search".to_string());
+    /// let filter = TextFilter::new("Search");
     /// ```
-    pub fn new(label: String) -> Self {
-        Self::new_with_filter(label, String::new())
+    pub fn new(label: impl Into<String>) -> Self {
+        Self::new_with_filter(label, "")
     }
 
     /// Creates a new TextFilter with a custom filter pattern.
@@ -86,17 +87,16 @@ impl TextFilter {
     /// ```no_run
     /// # use dear_imgui_rs::*;
     /// let filter = TextFilter::new_with_filter(
-    ///     "Search".to_string(),
-    ///     "include,-exclude".to_string()
+    ///     "Search",
+    ///     "include,-exclude"
     /// );
     /// ```
-    pub fn new_with_filter(label: String, filter: String) -> Self {
-        let filter_cstr = format!("{}\0", filter);
+    pub fn new_with_filter(label: impl Into<String>, filter: impl AsRef<str>) -> Self {
+        let label = CString::new(label.into()).expect("TextFilter label contained null byte");
+        let filter_ptr = crate::string::tls_scratch_txt(filter);
         unsafe {
-            let raw = sys::ImGuiTextFilter_ImGuiTextFilter(
-                filter_cstr.as_ptr() as *const std::os::raw::c_char
-            );
-            Self { id: label, raw }
+            let raw = sys::ImGuiTextFilter_ImGuiTextFilter(filter_ptr);
+            Self { label, raw }
         }
     }
 
@@ -136,7 +136,7 @@ impl TextFilter {
     /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
-    /// let mut filter = TextFilter::new("Search".to_string());
+    /// let mut filter = TextFilter::new("Search");
     ///
     /// if filter.draw() {
     ///     println!("Filter was modified!");
@@ -159,21 +159,14 @@ impl TextFilter {
     /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
-    /// let mut filter = TextFilter::new("Search".to_string());
+    /// let mut filter = TextFilter::new("Search");
     ///
     /// if filter.draw_with_size(200.0) {
     ///     println!("Filter was modified!");
     /// }
     /// ```
     pub fn draw_with_size(&mut self, width: f32) -> bool {
-        let label_cstr = format!("{}\0", self.id);
-        unsafe {
-            sys::ImGuiTextFilter_Draw(
-                self.raw,
-                label_cstr.as_ptr() as *const std::os::raw::c_char,
-                width,
-            )
-        }
+        unsafe { sys::ImGuiTextFilter_Draw(self.raw, self.label.as_ptr(), width) }
     }
 
     /// Returns true if the filter is not empty.
@@ -184,12 +177,12 @@ impl TextFilter {
     ///
     /// ```no_run
     /// # use dear_imgui_rs::*;
-    /// let empty_filter = TextFilter::new("Search".to_string());
+    /// let empty_filter = TextFilter::new("Search");
     /// assert!(!empty_filter.is_active());
     ///
     /// let active_filter = TextFilter::new_with_filter(
-    ///     "Search".to_string(),
-    ///     "test".to_string()
+    ///     "Search",
+    ///     "test"
     /// );
     /// assert!(active_filter.is_active());
     /// ```
@@ -211,8 +204,8 @@ impl TextFilter {
     /// ```no_run
     /// # use dear_imgui_rs::*;
     /// let mut filter = TextFilter::new_with_filter(
-    ///     "Search".to_string(),
-    ///     "test".to_string()
+    ///     "Search",
+    ///     "test"
     /// );
     /// filter.build();
     ///
@@ -220,14 +213,8 @@ impl TextFilter {
     /// assert!(!filter.pass_filter("example string"));
     /// ```
     pub fn pass_filter(&self, text: &str) -> bool {
-        let text_cstr = format!("{}\0", text);
-        unsafe {
-            sys::ImGuiTextFilter_PassFilter(
-                self.raw,
-                text_cstr.as_ptr() as *const std::os::raw::c_char,
-                ptr::null(),
-            )
-        }
+        let text_ptr = crate::string::tls_scratch_txt(text);
+        unsafe { sys::ImGuiTextFilter_PassFilter(self.raw, text_ptr, ptr::null()) }
     }
 
     /// Returns true if the text range matches the filter.
@@ -243,23 +230,16 @@ impl TextFilter {
     /// ```no_run
     /// # use dear_imgui_rs::*;
     /// let mut filter = TextFilter::new_with_filter(
-    ///     "Search".to_string(),
-    ///     "test".to_string()
+    ///     "Search",
+    ///     "test"
     /// );
     /// filter.build();
     ///
     /// assert!(filter.pass_filter_with_end("test", " string"));
     /// ```
     pub fn pass_filter_with_end(&self, start: &str, end: &str) -> bool {
-        let start_cstr = format!("{}\0", start);
-        let end_cstr = format!("{}\0", end);
-        unsafe {
-            sys::ImGuiTextFilter_PassFilter(
-                self.raw,
-                start_cstr.as_ptr() as *const std::os::raw::c_char,
-                end_cstr.as_ptr() as *const std::os::raw::c_char,
-            )
-        }
+        let (start_ptr, end_ptr) = crate::string::tls_scratch_txt_two(start, end);
+        unsafe { sys::ImGuiTextFilter_PassFilter(self.raw, start_ptr, end_ptr) }
     }
 
     /// Clears the filter pattern.
@@ -271,8 +251,8 @@ impl TextFilter {
     /// ```no_run
     /// # use dear_imgui_rs::*;
     /// let mut filter = TextFilter::new_with_filter(
-    ///     "Search".to_string(),
-    ///     "test".to_string()
+    ///     "Search",
+    ///     "test"
     /// );
     ///
     /// assert!(filter.is_active());
@@ -285,6 +265,12 @@ impl TextFilter {
             (*self.raw).InputBuf[0] = 0;
             sys::ImGuiTextFilter_Build(self.raw);
         }
+    }
+}
+
+impl Drop for TextFilter {
+    fn drop(&mut self) {
+        unsafe { sys::ImGuiTextFilter_destroy(self.raw) }
     }
 }
 
@@ -302,9 +288,9 @@ impl Ui {
     /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
-    /// let filter = ui.text_filter("Search".to_string());
+    /// let filter = ui.text_filter("Search");
     /// ```
-    pub fn text_filter(&self, label: String) -> TextFilter {
+    pub fn text_filter(&self, label: impl Into<String>) -> TextFilter {
         TextFilter::new(label)
     }
 
@@ -323,11 +309,15 @@ impl Ui {
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
     /// let filter = ui.text_filter_with_filter(
-    ///     "Search".to_string(),
-    ///     "include,-exclude".to_string()
+    ///     "Search",
+    ///     "include,-exclude"
     /// );
     /// ```
-    pub fn text_filter_with_filter(&self, label: String, filter: String) -> TextFilter {
+    pub fn text_filter_with_filter(
+        &self,
+        label: impl Into<String>,
+        filter: impl AsRef<str>,
+    ) -> TextFilter {
         TextFilter::new_with_filter(label, filter)
     }
 }

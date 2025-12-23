@@ -420,8 +420,8 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderDockWindow")]
     pub fn dock_window(window_name: &str, node_id: Id) {
-        let c_name = CString::new(window_name).expect("Window name contained null byte");
-        unsafe { sys::igDockBuilderDockWindow(c_name.as_ptr(), node_id.into()) }
+        let window_name_ptr = crate::string::tls_scratch_txt(window_name);
+        unsafe { sys::igDockBuilderDockWindow(window_name_ptr, node_id.into()) }
     }
 
     // Removed raw-pointer central-node getter in favor of lifetime-scoped accessor.
@@ -455,9 +455,8 @@ impl DockBuilder {
     /// Copies persistent window docking settings from `src_name` to `dst_name`.
     #[doc(alias = "DockBuilderCopyWindowSettings")]
     pub fn copy_window_settings(src_name: &str, dst_name: &str) {
-        let c_src = CString::new(src_name).expect("Source name contained null byte");
-        let c_dst = CString::new(dst_name).expect("Destination name contained null byte");
-        unsafe { sys::igDockBuilderCopyWindowSettings(c_src.as_ptr(), c_dst.as_ptr()) }
+        let (src_ptr, dst_ptr) = crate::string::tls_scratch_txt_two(src_name, dst_name);
+        unsafe { sys::igDockBuilderCopyWindowSettings(src_ptr, dst_ptr) }
     }
 
     /// Copies a dockspace layout with explicit window name remapping.

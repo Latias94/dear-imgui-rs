@@ -21,6 +21,7 @@
 //! ```
 //!
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::fmt;
 use std::ops::{Deref, Index, RangeFull};
 use std::os::raw::c_char;
@@ -104,16 +105,32 @@ impl UiBuffer {
     /// Pushes a new scratch sheet text and return the byte index where the sub-string
     /// starts.
     pub fn push(&mut self, txt: impl AsRef<str>) -> usize {
-        assert!(
-            !txt.as_ref().contains('\0'),
-            "string contained null byte"
-        );
+        assert!(!txt.as_ref().contains('\0'), "string contained null byte");
         let len = self.buffer.len();
         self.buffer.extend(txt.as_ref().as_bytes());
         self.buffer.push(b'\0');
 
         len
     }
+}
+
+thread_local! {
+    static TLS_SCRATCH: RefCell<UiBuffer> = RefCell::new(UiBuffer::new(1024));
+}
+
+/// Creates a temporary, NUL-terminated C string pointer backed by a thread-local scratch buffer.
+///
+/// The returned pointer is only valid until the next call on the same thread.
+pub(crate) fn tls_scratch_txt(txt: impl AsRef<str>) -> *const c_char {
+    TLS_SCRATCH.with(|buf| buf.borrow_mut().scratch_txt(txt))
+}
+
+/// Same as [`tls_scratch_txt`] but returns two pointers that stay valid together.
+pub(crate) fn tls_scratch_txt_two(
+    txt_0: impl AsRef<str>,
+    txt_1: impl AsRef<str>,
+) -> (*const c_char, *const c_char) {
+    TLS_SCRATCH.with(|buf| buf.borrow_mut().scratch_txt_two(txt_0, txt_1))
 }
 
 /// A UTF-8 encoded, growable, implicitly nul-terminated string.
@@ -123,8 +140,10 @@ pub struct ImString(pub(crate) Vec<u8>);
 impl ImString {
     /// Creates a new `ImString` from an existing string.
     pub fn new<T: Into<String>>(value: T) -> ImString {
+        let value = value.into();
+        assert!(!value.contains('\0'), "ImString contained null byte");
         unsafe {
-            let mut s = ImString::from_utf8_unchecked(value.into().into_bytes());
+            let mut s = ImString::from_utf8_unchecked(value.into_bytes());
             s.refresh_len();
             s
         }
@@ -178,6 +197,7 @@ impl ImString {
     /// Appends a given string slice to the end of this `ImString`
     #[inline]
     pub fn push_str(&mut self, string: &str) {
+        assert!(!string.contains('\0'), "ImString contained null byte");
         self.0.pop();
         self.0.extend(string.bytes());
         self.0.push(b'\0');
