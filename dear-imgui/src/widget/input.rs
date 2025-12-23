@@ -1757,6 +1757,10 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
     ///
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
+        let count = match i32::try_from(self.values.len()) {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
         unsafe {
             let (one, two) = self
                 .ui
@@ -1766,7 +1770,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
                 one,
                 T::KIND as i32,
                 self.values.as_mut_ptr() as *mut c_void,
-                self.values.len() as i32,
+                count,
                 self.step
                     .as_ref()
                     .map(|step| step as *const T)
@@ -2081,6 +2085,45 @@ impl<'ui, 'p, L: AsRef<str>> InputInt4<'ui, 'p, L> {
                 self.value.as_mut_ptr(),
                 self.flags.bits() as i32,
             )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_string_spare_capacity_writes_nul_bytes() {
+        let mut s = String::with_capacity(16);
+        s.push_str("abc");
+        let len = s.len();
+        let cap = s.capacity();
+
+        zero_string_spare_capacity(&mut s);
+
+        unsafe {
+            let bytes = std::slice::from_raw_parts(s.as_ptr(), cap);
+            assert_eq!(&bytes[..len], b"abc");
+            assert!(bytes[len..].iter().all(|&b| b == 0));
+        }
+    }
+
+    #[test]
+    fn zero_string_new_capacity_writes_new_region() {
+        let mut s = String::with_capacity(4);
+        s.push_str("abc");
+        let old_cap = s.capacity();
+
+        s.reserve(64);
+        let new_cap = s.capacity();
+        assert!(new_cap > old_cap);
+
+        zero_string_new_capacity(&mut s, old_cap);
+
+        unsafe {
+            let tail = std::slice::from_raw_parts(s.as_ptr().add(old_cap), new_cap - old_cap);
+            assert!(tail.iter().all(|&b| b == 0));
         }
     }
 }

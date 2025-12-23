@@ -477,9 +477,13 @@ impl DockBuilder {
         }
         let ptrs: Vec<*const i8> = cstrings.iter().map(|s| s.as_ptr()).collect();
         let mut boxed: Box<[*const i8]> = ptrs.into_boxed_slice();
+        let boxed_len_i32 = match i32::try_from(boxed.len()) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
         let mut vec_in = sys::ImVector_const_charPtr {
-            Size: boxed.len() as i32,
-            Capacity: boxed.len() as i32,
+            Size: boxed_len_i32,
+            Capacity: boxed_len_i32,
             Data: boxed.as_mut_ptr(),
         };
         unsafe {

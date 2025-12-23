@@ -1183,11 +1183,15 @@ impl<'ui> DrawListMut<'ui> {
         for p in points.iter().copied() {
             buf.push(p.into());
         }
+        let count = match i32::try_from(buf.len()) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
         unsafe {
             sys::ImDrawList_AddConcavePolyFilled(
                 self.draw_list,
                 buf.as_ptr(),
-                buf.len() as i32,
+                count,
                 col.into().into(),
             )
         }
@@ -1849,12 +1853,16 @@ impl<'ui> Polyline<'ui> {
 
     /// Draw the line on the window
     pub fn build(self) {
+        let count = match i32::try_from(self.points.len()) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
         if self.filled {
             unsafe {
                 sys::ImDrawList_AddConvexPolyFilled(
                     self.draw_list.draw_list,
                     self.points.as_ptr() as *const sys::ImVec2,
-                    self.points.len() as i32,
+                    count,
                     self.color.into(),
                 )
             }
@@ -1863,7 +1871,7 @@ impl<'ui> Polyline<'ui> {
                 sys::ImDrawList_AddPolyline(
                     self.draw_list.draw_list,
                     self.points.as_ptr() as *const sys::ImVec2,
-                    self.points.len() as i32,
+                    count,
                     self.color.into(),
                     sys::ImDrawFlags::default(),
                     self.thickness,

@@ -44,6 +44,8 @@ impl UiBuffer {
     }
 
     /// Internal method to push a single text to our scratch buffer.
+    ///
+    /// Note: any interior NUL bytes (`'\0'`) will be replaced with `?` to preserve C string semantics.
     pub fn scratch_txt(&mut self, txt: impl AsRef<str>) -> *const std::os::raw::c_char {
         self.refresh_buffer();
 
@@ -105,9 +107,15 @@ impl UiBuffer {
     /// Pushes a new scratch sheet text and return the byte index where the sub-string
     /// starts.
     pub fn push(&mut self, txt: impl AsRef<str>) -> usize {
-        assert!(!txt.as_ref().contains('\0'), "string contained null byte");
+        let txt = txt.as_ref();
         let len = self.buffer.len();
-        self.buffer.extend(txt.as_ref().as_bytes());
+        let bytes = txt.as_bytes();
+        if bytes.contains(&0) {
+            self.buffer
+                .extend(bytes.iter().map(|&b| if b == 0 { b'?' } else { b }));
+        } else {
+            self.buffer.extend(bytes);
+        }
         self.buffer.push(b'\0');
 
         len
@@ -470,10 +478,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "null byte")]
-    fn ui_buffer_rejects_interior_nul() {
+    fn ui_buffer_sanitizes_interior_nul() {
         let mut buf = UiBuffer::new(1024);
-        let _ = buf.push("a\0b");
+        let ptr = buf.scratch_txt("a\0b");
+        let s = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
+        assert_eq!(s, "a?b");
     }
 
     #[test]

@@ -253,7 +253,9 @@ impl FontAtlas {
     /// Add a font to the atlas using FontSource
     #[doc(alias = "AddFont")]
     pub fn add_font(&mut self, font_sources: &[FontSource<'_>]) -> crate::fonts::FontId {
-        let (head, tail) = font_sources.split_first().unwrap();
+        let Some((head, tail)) = font_sources.split_first() else {
+            panic!("FontAtlas::add_font requires at least one FontSource");
+        };
         let font_id = self.add_font_internal(head, false);
         for font in tail {
             self.add_font_internal(font, true);
@@ -371,6 +373,7 @@ impl FontAtlas {
         font_cfg: Option<&FontConfig>,
         glyph_ranges: Option<&[sys::ImWchar]>,
     ) -> Option<&mut Font> {
+        let font_data_len = i32::try_from(font_data.len()).ok()?;
         unsafe {
             let cfg_ptr = font_cfg.map_or(ptr::null(), |cfg| cfg.raw());
             let ranges_ptr = glyph_ranges.map_or(ptr::null(), |ranges| ranges.as_ptr());
@@ -378,7 +381,7 @@ impl FontAtlas {
             let font_ptr = sys::ImFontAtlas_AddFontFromMemoryTTF(
                 self.raw,
                 font_data.as_ptr() as *mut std::os::raw::c_void,
-                font_data.len() as i32,
+                font_data_len,
                 size_pixels,
                 cfg_ptr,
                 ranges_ptr,

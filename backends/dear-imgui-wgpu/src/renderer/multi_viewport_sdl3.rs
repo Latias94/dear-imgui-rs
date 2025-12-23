@@ -63,9 +63,10 @@ pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
     }
 }
 
-unsafe fn get_renderer<'a>() -> &'a mut WgpuRenderer {
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn get_renderer<'a>() -> Option<&'a mut WgpuRenderer> {
     let ptr = RENDERER_PTR.load(Ordering::SeqCst) as *mut WgpuRenderer;
-    unsafe { &mut *ptr }
+    ptr.as_mut()
 }
 
 unsafe fn viewport_user_data_mut<'a>(vp: *mut Viewport) -> Option<&'a mut ViewportWgpuData> {
@@ -87,6 +88,10 @@ fn sdl_window_id_from_viewport(vp: &Viewport) -> Option<sdl3_sys::video::SDL_Win
     }
 }
 
+fn clamp_i32_pixels_to_u32(pixels: i32) -> u32 {
+    if pixels > 0 { pixels as u32 } else { 1 }
+}
+
 /// Renderer: create per-viewport resources (surface + config)
 ///
 /// # Safety
@@ -105,13 +110,13 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
             None => return,
         };
 
-        let vpm = unsafe { &mut *vp };
+        let vpm = &mut *vp;
         let window_id = match sdl_window_id_from_viewport(vpm) {
             Some(id) => id,
             None => return,
         };
 
-        let target = match unsafe { Sdl3SurfaceTarget::from_window_id(window_id) } {
+        let target = match Sdl3SurfaceTarget::from_window_id(window_id) {
             Some(t) => t,
             None => return,
         };
@@ -121,25 +126,37 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
             None => return,
         };
 
-        let surface = match instance.create_surface(&target) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("[wgpu-mv-sdl3] create_surface error: {:?}", e);
-                return;
+        let surface: wgpu::Surface<'static> = {
+            // SAFETY: the underlying SDL window and display remain valid for the lifetime of the
+            // corresponding ImGui viewport, and Dear ImGui calls `Renderer_DestroyWindow` before
+            // the platform destroys the window. Therefore the raw handles remain valid until this
+            // surface is dropped.
+            let surface_target = match wgpu::SurfaceTargetUnsafe::from_window(&target) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("[wgpu-mv-sdl3] create_surface handle error: {:?}", e);
+                    return;
+                }
+            };
+            match instance.create_surface_unsafe(surface_target) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[wgpu-mv-sdl3] create_surface error: {:?}", e);
+                    return;
+                }
             }
         };
-        let surface: wgpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
 
         // Query initial pixel size from SDL3.
         let mut w: i32 = 0;
         let mut h: i32 = 0;
         let raw_window = target.raw_window();
-        let ok = unsafe { sdl3_sys::video::SDL_GetWindowSizeInPixels(raw_window, &mut w, &mut h) };
+        let ok = sdl3_sys::video::SDL_GetWindowSizeInPixels(raw_window, &mut w, &mut h);
         if !ok {
             return;
         }
-        let width = (w as u32).max(1);
-        let height = (h as u32).max(1);
+        let width = clamp_i32_pixels_to_u32(w);
+        let height = clamp_i32_pixels_to_u32(h);
 
         let config = if let Some(adapter) = &global.adapter {
             let caps = surface.get_capabilities(adapter);
@@ -259,8 +276,18 @@ pub unsafe extern "C" fn renderer_set_window_size(
         if let Some(data) = viewport_user_data_mut(vp) {
             let vpm_ref = &*vp;
             let scale = vpm_ref.framebuffer_scale();
-            let new_w = (size.x * scale[0]).max(1.0) as u32;
-            let new_h = (size.y * scale[1]).max(1.0) as u32;
+            let sx = if scale[0].is_finite() && scale[0] > 0.0 {
+                scale[0]
+            } else {
+                1.0
+            };
+            let sy = if scale[1].is_finite() && scale[1] > 0.0 {
+                scale[1]
+            } else {
+                1.0
+            };
+            let new_w = (size.x * sx).max(1.0).round() as u32;
+            let new_h = (size.y * sy).max(1.0).round() as u32;
             if data.config.width != new_w || data.config.height != new_h {
                 data.config.width = new_w;
                 data.config.height = new_h;
@@ -287,9 +314,8 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         mvlog!("[wgpu-mv-sdl3] Renderer_RenderWindow");
 
-        let renderer = match (get_renderer() as *mut WgpuRenderer).as_mut() {
-            Some(r) => r,
-            None => return,
+        let Some(renderer) = get_renderer() else {
+            return;
         };
         let (device, queue) = match renderer.backend_data.as_ref() {
             Some(b) => (b.device.clone(), b.queue.clone()),
@@ -310,20 +336,16 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                 Ok(f) => f,
                 Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Lost) => {
                     // Reconfigure from actual SDL3 pixel size and retry next frame.
-                    if let Some(window_id) = sdl_window_id_from_viewport(unsafe { &*vp }) {
-                        if let Some(target) =
-                            unsafe { Sdl3SurfaceTarget::from_window_id(window_id) }
-                        {
+                    if let Some(window_id) = sdl_window_id_from_viewport(&*vp) {
+                        if let Some(target) = Sdl3SurfaceTarget::from_window_id(window_id) {
                             let raw_window = target.raw_window();
                             let mut w: i32 = 0;
                             let mut h: i32 = 0;
-                            if unsafe {
-                                sdl3_sys::video::SDL_GetWindowSizeInPixels(
-                                    raw_window, &mut w, &mut h,
-                                )
-                            } {
-                                let w = (w as u32).max(1);
-                                let h = (h as u32).max(1);
+                            if sdl3_sys::video::SDL_GetWindowSizeInPixels(
+                                raw_window, &mut w, &mut h,
+                            ) {
+                                let w = clamp_i32_pixels_to_u32(w);
+                                let h = clamp_i32_pixels_to_u32(h);
                                 data.config.width = w;
                                 data.config.height = h;
                                 data.surface.configure(&device, &data.config);
@@ -365,7 +387,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                         timestamp_writes: None,
                     });
 
-                    if let Some(vd) = unsafe { viewport_user_data_mut(vp) } {
+                    if let Some(vd) = viewport_user_data_mut(vp) {
                         let fb_w = vd.config.width;
                         let fb_h = vd.config.height;
                         if let Err(e) = renderer.render_draw_data_with_fb_size_ex(

@@ -620,6 +620,10 @@ impl Ui {
             unsafe { sys::igTableAngledHeadersRow() }
             return;
         }
+        let count = match i32::try_from(headers.len()) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
         let mut data: Vec<sys::ImGuiTableHeaderData> = Vec::with_capacity(headers.len());
         for h in headers {
             data.push(sys::ImGuiTableHeaderData {
@@ -630,13 +634,7 @@ impl Ui {
             });
         }
         unsafe {
-            sys::igTableAngledHeadersRowEx(
-                row_id,
-                angle,
-                max_label_width,
-                data.as_ptr(),
-                data.len() as i32,
-            );
+            sys::igTableAngledHeadersRowEx(row_id, angle, max_label_width, data.as_ptr(), count);
         }
     }
 

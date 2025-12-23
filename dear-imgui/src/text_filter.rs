@@ -31,9 +31,9 @@
 
 use crate::{Ui, sys};
 use std::ffi::CString;
-use std::ptr;
-use std::os::raw::c_char;
 use std::ops::Range;
+use std::os::raw::c_char;
+use std::ptr;
 
 /// Helper to parse and apply text filters
 ///

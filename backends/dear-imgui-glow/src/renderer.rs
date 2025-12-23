@@ -247,12 +247,10 @@ impl GlowRenderer {
                 if !px_ptr.is_null() && width > 0 && height > 0 {
                     // Prepare pixel buffer as RGBA8
                     let rgba_pixels: Option<Vec<u8>> = match bpp {
-                        4 => {
-                            (width as usize)
-                                .checked_mul(height as usize)
-                                .and_then(|v| v.checked_mul(4))
-                                .map(|size| std::slice::from_raw_parts(px_ptr, size).to_vec())
-                        }
+                        4 => (width as usize)
+                            .checked_mul(height as usize)
+                            .and_then(|v| v.checked_mul(4))
+                            .map(|size| std::slice::from_raw_parts(px_ptr, size).to_vec()),
                         1 => {
                             // NOTE(opt): For Alpha8 fonts/textures we currently expand to RGBA8 (white RGB + alpha)
                             // for maximum compatibility across GL/ES/WebGL.

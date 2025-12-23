@@ -344,8 +344,13 @@ pub fn update_imgui_texture(
             texture
         } else {
             // Update existing texture
-            let texture =
-                glow::NativeTexture(std::num::NonZeroU32::new(texture_id.id() as u32).unwrap());
+            let texture_u32 = u32::try_from(texture_id.id()).map_err(|_| {
+                InitError::Generic("TextureId is out of range for OpenGL".to_string())
+            })?;
+            let texture_nz = std::num::NonZeroU32::new(texture_u32).ok_or_else(|| {
+                InitError::Generic("TextureId must be non-zero for OpenGL".to_string())
+            })?;
+            let texture = glow::NativeTexture(texture_nz);
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             gl.tex_image_2d(
                 glow::TEXTURE_2D,

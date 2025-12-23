@@ -68,7 +68,18 @@ pub(crate) unsafe extern "C" fn get_clipboard_text(
         let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
         match ctx.backend.get() {
             Some(text) => {
-                ctx.last_value = CString::new(text).expect("clipboard text contained null byte");
+                ctx.last_value = match CString::new(text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let mut bytes = e.into_vec();
+                        for b in &mut bytes {
+                            if *b == 0 {
+                                *b = b'?';
+                            }
+                        }
+                        CString::new(bytes).expect("sanitized clipboard text contained null byte")
+                    }
+                };
                 ctx.last_value.as_ptr()
             }
             None => ptr::null(),

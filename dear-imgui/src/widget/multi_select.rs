@@ -96,11 +96,7 @@ impl BasicSelection {
     pub fn len(&self) -> usize {
         unsafe {
             let size = (*self.raw).Size;
-            if size <= 0 {
-                0
-            } else {
-                size as usize
-            }
+            if size <= 0 { 0 } else { size as usize }
         }
     }
 

@@ -98,6 +98,15 @@ mod trampolines {
     }
 
     #[inline]
+    pub(super) fn store_cb<T: Copy>(m: &Mutex<Option<T>>, cb: Option<T>) {
+        let mut g = match m.lock() {
+            Ok(g) => g,
+            Err(poison) => poison.into_inner(),
+        };
+        *g = cb;
+    }
+
+    #[inline]
     fn abort_if_panicked<T>(ctx: &str, res: Result<T, Box<dyn std::any::Any + Send>>) -> T {
         match res {
             Ok(v) => v,
@@ -403,7 +412,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport)>,
     ) {
         use trampolines::*;
-        *PLATFORM_CREATE_WINDOW_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_CREATE_WINDOW_CB, callback);
         self.set_platform_create_window_raw(callback.map(|_| {
             trampolines::platform_create_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
         }));
@@ -429,7 +438,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport)>,
     ) {
         use trampolines::*;
-        *PLATFORM_DESTROY_WINDOW_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_DESTROY_WINDOW_CB, callback);
         self.set_platform_destroy_window_raw(callback.map(|_| {
             trampolines::platform_destroy_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
         }));
@@ -455,7 +464,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport)>,
     ) {
         use trampolines::*;
-        *PLATFORM_SHOW_WINDOW_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_SHOW_WINDOW_CB, callback);
         self.set_platform_show_window_raw(callback.map(|_| {
             trampolines::platform_show_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
         }));
@@ -481,7 +490,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>,
     ) {
         use trampolines::*;
-        *PLATFORM_SET_WINDOW_POS_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_SET_WINDOW_POS_CB, callback);
         self.set_platform_set_window_pos_raw(callback.map(|_| {
             trampolines::platform_set_window_pos
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)
@@ -508,7 +517,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
     ) {
         use trampolines::*;
-        *PLATFORM_GET_WINDOW_POS_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_GET_WINDOW_POS_CB, callback);
         self.set_platform_get_window_pos_raw(callback.map(|_| {
             trampolines::platform_get_window_pos
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2
@@ -535,7 +544,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>,
     ) {
         use trampolines::*;
-        *PLATFORM_SET_WINDOW_SIZE_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_SET_WINDOW_SIZE_CB, callback);
         self.set_platform_set_window_size_raw(callback.map(|_| {
             trampolines::platform_set_window_size
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)
@@ -562,7 +571,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
     ) {
         use trampolines::*;
-        *PLATFORM_GET_WINDOW_SIZE_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_GET_WINDOW_SIZE_CB, callback);
         self.set_platform_get_window_size_raw(callback.map(|_| {
             trampolines::platform_get_window_size
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2
@@ -589,7 +598,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport)>,
     ) {
         use trampolines::*;
-        *PLATFORM_SET_WINDOW_FOCUS_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_SET_WINDOW_FOCUS_CB, callback);
         self.set_platform_set_window_focus_raw(callback.map(|_| {
             trampolines::platform_set_window_focus as unsafe extern "C" fn(*mut sys::ImGuiViewport)
         }));
@@ -615,7 +624,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> bool>,
     ) {
         use trampolines::*;
-        *PLATFORM_GET_WINDOW_FOCUS_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_GET_WINDOW_FOCUS_CB, callback);
         self.set_platform_get_window_focus_raw(callback.map(|_| {
             trampolines::platform_get_window_focus
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport) -> bool
@@ -642,7 +651,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> bool>,
     ) {
         use trampolines::*;
-        *PLATFORM_GET_WINDOW_MINIMIZED_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_GET_WINDOW_MINIMIZED_CB, callback);
         self.set_platform_get_window_minimized_raw(callback.map(|_| {
             trampolines::platform_get_window_minimized
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport) -> bool
@@ -669,7 +678,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport, *const c_char)>,
     ) {
         use trampolines::*;
-        *PLATFORM_SET_WINDOW_TITLE_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_SET_WINDOW_TITLE_CB, callback);
         self.set_platform_set_window_title_raw(callback.map(|_| {
             trampolines::platform_set_window_title
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport, *const c_char)
@@ -696,7 +705,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport, f32)>,
     ) {
         use trampolines::*;
-        *PLATFORM_SET_WINDOW_ALPHA_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_SET_WINDOW_ALPHA_CB, callback);
         self.set_platform_set_window_alpha_raw(callback.map(|_| {
             trampolines::platform_set_window_alpha
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport, f32)
@@ -723,7 +732,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport)>,
     ) {
         use trampolines::*;
-        *PLATFORM_UPDATE_WINDOW_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_UPDATE_WINDOW_CB, callback);
         self.set_platform_update_window_raw(callback.map(|_| {
             trampolines::platform_update_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
         }));
@@ -749,7 +758,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
     ) {
         use trampolines::*;
-        *PLATFORM_RENDER_WINDOW_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_RENDER_WINDOW_CB, callback);
         self.set_platform_render_window_raw(callback.map(|_| {
             trampolines::platform_render_window
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
@@ -776,7 +785,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
     ) {
         use trampolines::*;
-        *PLATFORM_SWAP_BUFFERS_CB.lock().unwrap() = callback;
+        store_cb(&PLATFORM_SWAP_BUFFERS_CB, callback);
         self.set_platform_swap_buffers_raw(callback.map(|_| {
             trampolines::platform_swap_buffers
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
@@ -804,7 +813,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport)>,
     ) {
         use trampolines::*;
-        *RENDERER_CREATE_WINDOW_CB.lock().unwrap() = callback;
+        store_cb(&RENDERER_CREATE_WINDOW_CB, callback);
         self.set_renderer_create_window_raw(callback.map(|_| {
             trampolines::renderer_create_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
         }));
@@ -830,7 +839,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport)>,
     ) {
         use trampolines::*;
-        *RENDERER_DESTROY_WINDOW_CB.lock().unwrap() = callback;
+        store_cb(&RENDERER_DESTROY_WINDOW_CB, callback);
         self.set_renderer_destroy_window_raw(callback.map(|_| {
             trampolines::renderer_destroy_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
         }));
@@ -856,7 +865,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>,
     ) {
         use trampolines::*;
-        *RENDERER_SET_WINDOW_SIZE_CB.lock().unwrap() = callback;
+        store_cb(&RENDERER_SET_WINDOW_SIZE_CB, callback);
         self.set_renderer_set_window_size_raw(callback.map(|_| {
             trampolines::renderer_set_window_size
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)
@@ -883,7 +892,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
     ) {
         use trampolines::*;
-        *RENDERER_RENDER_WINDOW_CB.lock().unwrap() = callback;
+        store_cb(&RENDERER_RENDER_WINDOW_CB, callback);
         self.set_renderer_render_window_raw(callback.map(|_| {
             trampolines::renderer_render_window
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
@@ -910,7 +919,7 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
     ) {
         use trampolines::*;
-        *RENDERER_SWAP_BUFFERS_CB.lock().unwrap() = callback;
+        store_cb(&RENDERER_SWAP_BUFFERS_CB, callback);
         self.set_renderer_swap_buffers_raw(callback.map(|_| {
             trampolines::renderer_swap_buffers
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)

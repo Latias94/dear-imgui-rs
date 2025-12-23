@@ -438,16 +438,14 @@ impl<'ui> PlotUi<'ui> {
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
-            with_scratch_txt_slice(&cleaned, |ptrs| {
-                unsafe {
-                    sys::ImPlot_SetupAxisTicks_doublePtr(
-                        axis as sys::ImAxis,
-                        values.as_ptr(),
-                        count,
-                        ptrs.as_ptr() as *const *const i8,
-                        keep_default,
-                    )
-                }
+            with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
+                sys::ImPlot_SetupAxisTicks_doublePtr(
+                    axis as sys::ImAxis,
+                    values.as_ptr(),
+                    count,
+                    ptrs.as_ptr() as *const *const i8,
+                    keep_default,
+                )
             })
         } else {
             unsafe {
@@ -484,16 +482,14 @@ impl<'ui> PlotUi<'ui> {
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
-            with_scratch_txt_slice(&cleaned, |ptrs| {
-                unsafe {
-                    sys::ImPlot_SetupAxisTicks_doublePtr(
-                        axis as sys::ImAxis,
-                        values.as_ptr(),
-                        count,
-                        ptrs.as_ptr() as *const *const i8,
-                        keep_default,
-                    )
-                }
+            with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
+                sys::ImPlot_SetupAxisTicks_doublePtr(
+                    axis as sys::ImAxis,
+                    values.as_ptr(),
+                    count,
+                    ptrs.as_ptr() as *const *const i8,
+                    keep_default,
+                )
             })
         } else {
             unsafe {
@@ -534,17 +530,15 @@ impl<'ui> PlotUi<'ui> {
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
-            with_scratch_txt_slice(&cleaned, |ptrs| {
-                unsafe {
-                    sys::ImPlot_SetupAxisTicks_double(
-                        axis as sys::ImAxis,
-                        v_min,
-                        v_max,
-                        n_ticks,
-                        ptrs.as_ptr() as *const *const i8,
-                        keep_default,
-                    )
-                }
+            with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
+                sys::ImPlot_SetupAxisTicks_double(
+                    axis as sys::ImAxis,
+                    v_min,
+                    v_max,
+                    n_ticks,
+                    ptrs.as_ptr() as *const *const i8,
+                    keep_default,
+                )
             })
         } else {
             unsafe {
@@ -586,17 +580,15 @@ impl<'ui> PlotUi<'ui> {
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
-            with_scratch_txt_slice(&cleaned, |ptrs| {
-                unsafe {
-                    sys::ImPlot_SetupAxisTicks_double(
-                        axis as sys::ImAxis,
-                        v_min,
-                        v_max,
-                        n_ticks,
-                        ptrs.as_ptr() as *const *const i8,
-                        keep_default,
-                    )
-                }
+            with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
+                sys::ImPlot_SetupAxisTicks_double(
+                    axis as sys::ImAxis,
+                    v_min,
+                    v_max,
+                    n_ticks,
+                    ptrs.as_ptr() as *const *const i8,
+                    keep_default,
+                )
             })
         } else {
             unsafe {

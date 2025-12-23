@@ -110,7 +110,9 @@ impl RenderResources {
             self.image_bind_groups.insert(texture_id, bind_group);
         }
 
-        Ok(self.image_bind_groups.get(&texture_id).unwrap())
+        self.image_bind_groups.get(&texture_id).ok_or_else(|| {
+            RendererError::InvalidRenderState("Image bind group missing after creation".to_string())
+        })
     }
 
     /// Remove an image bind group

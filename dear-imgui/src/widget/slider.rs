@@ -126,6 +126,10 @@ where
     ///
     /// Returns true if any slider value was changed.
     pub fn build_array(self, values: &mut [Data]) -> bool {
+        let count = match i32::try_from(values.len()) {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
         unsafe {
             let (label, display_format) = self
                 .ui
@@ -135,7 +139,7 @@ where
                 label,
                 Data::KIND as i32,
                 values.as_mut_ptr() as *mut c_void,
-                values.len() as i32,
+                count,
                 &self.min as *const Data as *const c_void,
                 &self.max as *const Data as *const c_void,
                 display_format,

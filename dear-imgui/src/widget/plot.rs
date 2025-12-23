@@ -106,6 +106,10 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
 
     /// Builds the plot lines widget
     pub fn build(self) {
+        let count = match i32::try_from(self.values.len()) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let overlay_ptr = self
             .overlay_text
@@ -117,7 +121,7 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
             sys::igPlotLines_FloatPtr(
                 label_ptr,
                 self.values.as_ptr(),
-                self.values.len() as i32,
+                count,
                 self.values_offset,
                 overlay_ptr,
                 self.scale_min,
@@ -190,6 +194,10 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
 
     /// Builds the plot histogram widget
     pub fn build(self) {
+        let count = match i32::try_from(self.values.len()) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let overlay_ptr = self
             .overlay_text
@@ -201,7 +209,7 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
             sys::igPlotHistogram_FloatPtr(
                 label_ptr,
                 self.values.as_ptr(),
-                self.values.len() as i32,
+                count,
                 self.values_offset,
                 overlay_ptr,
                 self.scale_min,

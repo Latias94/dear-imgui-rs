@@ -239,9 +239,26 @@ impl WgpuRenderer {
                         );
 
                         // Draw
-                        let start_index = cmd_params.idx_offset as u32 + global_idx_offset;
-                        let end_index = start_index + count as u32;
-                        let vertex_offset = (cmd_params.vtx_offset as i32) + global_vtx_offset;
+                        let Ok(count_u32) = u32::try_from(count) else {
+                            continue;
+                        };
+                        let Ok(idx_offset_u32) = u32::try_from(cmd_params.idx_offset) else {
+                            continue;
+                        };
+                        let Some(start_index) = idx_offset_u32.checked_add(global_idx_offset)
+                        else {
+                            continue;
+                        };
+                        let Some(end_index) = start_index.checked_add(count_u32) else {
+                            continue;
+                        };
+                        let Ok(vtx_offset_i32) = i32::try_from(cmd_params.vtx_offset) else {
+                            continue;
+                        };
+                        let Some(vertex_offset) = vtx_offset_i32.checked_add(global_vtx_offset)
+                        else {
+                            continue;
+                        };
                         render_pass.draw_indexed(start_index..end_index, vertex_offset, 0..1);
                     }
                     dear_imgui_rs::render::DrawCmd::ResetRenderState => {
@@ -262,8 +279,17 @@ impl WgpuRenderer {
                 }
             }
 
-            global_idx_offset += draw_list.idx_buffer().len() as u32;
-            global_vtx_offset += draw_list.vtx_buffer().len() as i32;
+            let idx_len_u32 = u32::try_from(draw_list.idx_buffer().len())
+                .map_err(|_| RendererError::Generic("index buffer too large".to_string()))?;
+            global_idx_offset = global_idx_offset.checked_add(idx_len_u32).ok_or_else(|| {
+                RendererError::Generic("index buffer offset overflow".to_string())
+            })?;
+
+            let vtx_len_i32 = i32::try_from(draw_list.vtx_buffer().len())
+                .map_err(|_| RendererError::Generic("vertex buffer too large".to_string()))?;
+            global_vtx_offset = global_vtx_offset.checked_add(vtx_len_i32).ok_or_else(|| {
+                RendererError::Generic("vertex buffer offset overflow".to_string())
+            })?;
         }
 
         Ok(())

@@ -37,21 +37,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Ui::begin_modal_popup_with_opened`, `Ui::modal_popup_with_opened`, `Ui::collapsing_header_with_visible`.
   - Selectables: `Selectable::build_with_ref` now uses ImGui's `Selectable(..., bool*)` variant for closer upstream behavior parity.
   - `TextFilter`: fix a leak by calling `ImGuiTextFilter_destroy` on drop; avoid per-call allocations; add `pass_filter_range` with correct `text_end` semantics.
-  - Clipboard: handle non-UTF8 clipboard payloads without panicking (lossy conversion) and guard against missing clipboard user data.
+  - Clipboard: handle non-UTF8 clipboard payloads without panicking (lossy conversion), sanitize interior NUL bytes, and guard against missing clipboard user data.
+  - Scratch C strings: sanitize interior NUL bytes (`'\0'` → `?`) instead of panicking when building temporary C string pointers.
   - Rendering draw lists: handle null vertex/index buffers defensively when constructing slices at the FFI boundary.
   - InputText (String-backed): avoid undefined behavior when trimming at NUL by zero-initializing spare capacity, including during ImGui resize callbacks.
   - Deprecated glyph ranges: fix `GlyphRangesBuilder::add_ranges` to pass the correct `ImWchar` layout, and free internal `ImVector_ImWchar` buffers; add `Drop` for the underlying C++ builder.
   - Dynamic fonts: fix `FontConfig::glyph_exclude_ranges` to pass the correct `ImWchar` layout (and now owns the converted ranges buffer, ensuring it is NUL-terminated).
-  - Managed textures: avoid null pointer arithmetic when iterating `DrawData::textures()` / `PlatformIo::textures()` on empty lists.
+  - Managed textures: avoid null pointer arithmetic when iterating `DrawData::textures()` / `PlatformIo::textures()` on empty lists; make `DrawData::texture{,_mut}` robust to negative vector sizes.
   - Font atlases: `FontAtlas::get_glyph_ranges_default` includes the terminating `0` sentinel.
+  - `PlatformIo`: typed callback setters no longer panic if the internal callback mutex is poisoned.
   - `OwnedDrawData`: avoid double-free by letting `ImDrawData` own and free its `CmdLists` storage (we still destroy the cloned `ImDrawList` payloads).
   - `Context::save_ini_settings`: read the returned settings blob using `out_ini_size` instead of relying on NUL termination.
   - `Ui::get_key_name` / `Ui::style_color_name`: handle null pointers defensively at the FFI boundary.
   - Additional FFI hardening: treat negative `ImVector` sizes as empty, guard `TextureData::pixels*` against invalid dimensions/overflow, validate `InputTextCallbackData::str_as_bytes_mut` buffer bounds before creating slices, and prevent unwinding across FFI (panic → abort).
 - Extensions
+  - `dear-implot`: fix `MultiAxisPlot` axis setup (Y1 is now configurable) and remove a potential panic when keeping axis labels alive.
   - `dear-implot3d`: keep tick label pointers alive for `setup_axis_ticks_*` calls (avoids passing dangling pointers to C).
   - `dear-implot3d`: destroy the correct context pointer on drop (no reliance on "current context").
   - `dear-implot`: avoid `transmute` when passing `dear-imgui-rs::TextureId` to `ImTextureID`.
+  - `dear-imgui-glow`: validate `TextureId` range when updating existing OpenGL textures (avoid truncation/panic).
+  - `dear-imgui-wgpu`: avoid `transmute` for `wgpu::Surface` lifetimes in multi-viewport backends, harden draw offsets against integer overflow, and avoid panicking when retrieving cached bind groups.
 
 ### Changed
 

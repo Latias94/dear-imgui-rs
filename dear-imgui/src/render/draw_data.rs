@@ -79,7 +79,7 @@ impl DrawData {
     /// Returns the number of draw lists included in the draw data.
     #[inline]
     pub fn draw_lists_count(&self) -> usize {
-        self.cmd_lists_count.try_into().unwrap()
+        unsafe { self.cmd_lists().len() }
     }
 
     /// Returns an iterator over the textures that need to be updated
@@ -131,10 +131,11 @@ impl DrawData {
                 return None;
             }
             let vector = &*self.textures;
-            if vector.data.is_null() {
+            let size = usize::try_from(vector.size).ok()?;
+            if size == 0 || vector.data.is_null() {
                 return None;
             }
-            if index >= vector.size as usize {
+            if index >= size {
                 return None;
             }
             let texture_ptr = *vector.data.add(index);
@@ -154,10 +155,11 @@ impl DrawData {
                 return None;
             }
             let vector = &*self.textures;
-            if vector.data.is_null() {
+            let size = usize::try_from(vector.size).ok()?;
+            if size == 0 || vector.data.is_null() {
                 return None;
             }
-            if index >= vector.size as usize {
+            if index >= size {
                 return None;
             }
             let texture_ptr = *vector.data.add(index);

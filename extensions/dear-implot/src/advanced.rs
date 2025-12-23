@@ -191,47 +191,33 @@ impl<'a> MultiAxisPlot<'a> {
         let success = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), size_vec, 0) };
 
         if success {
-            // Setup additional Y-axes
+            let mut axis_labels: Vec<CString> = Vec::new();
+
+            // Setup Y-axes (Y1..), matching `token.set_y_axis(0..)` convention.
             for (i, axis_config) in self.y_axes.iter().enumerate() {
-                if i > 0 {
-                    // Skip the first axis (it's the default)
-                    let label_cstr = if let Some(label) = axis_config.label {
-                        Some(
-                            CString::new(label)
-                                .map_err(|e| PlotError::StringConversion(e.to_string()))?,
-                        )
-                    } else {
-                        None
-                    };
+                let label_ptr = if let Some(label) = axis_config.label {
+                    let cstr = CString::new(label)
+                        .map_err(|e| PlotError::StringConversion(e.to_string()))?;
+                    let ptr = cstr.as_ptr();
+                    axis_labels.push(cstr);
+                    ptr
+                } else {
+                    std::ptr::null()
+                };
 
-                    let label_ptr = label_cstr
-                        .as_ref()
-                        .map(|cstr| cstr.as_ptr())
-                        .unwrap_or(std::ptr::null());
+                unsafe {
+                    let axis_enum = (i as i32) + 3; // ImAxis_Y1 = 3
+                    sys::ImPlot_SetupAxis(axis_enum, label_ptr, axis_config.flags.bits() as i32);
 
-                    unsafe {
-                        let axis_enum = (i as i32) + 3; // ImAxis_Y1 = 3
-                        sys::ImPlot_SetupAxis(
-                            axis_enum,
-                            label_ptr,
-                            axis_config.flags.bits() as i32,
-                        );
-
-                        if let Some((min, max)) = axis_config.range {
-                            sys::ImPlot_SetupAxisLimits(axis_enum, min, max, 0);
-                        }
+                    if let Some((min, max)) = axis_config.range {
+                        sys::ImPlot_SetupAxisLimits(axis_enum, min, max, 0);
                     }
                 }
             }
 
             Ok(MultiAxisToken {
                 _title: title_cstr,
-                _axis_labels: self
-                    .y_axes
-                    .into_iter()
-                    .filter_map(|config| config.label)
-                    .map(|label| CString::new(label).unwrap())
-                    .collect(),
+                _axis_labels: axis_labels,
                 _phantom: PhantomData,
             })
         } else {

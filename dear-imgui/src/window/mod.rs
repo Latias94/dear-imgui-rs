@@ -246,7 +246,6 @@ impl<'ui> Window<'ui> {
     /// Begins the window and returns a token
     fn begin(self) -> Option<WindowToken<'ui>> {
         let name = self.name;
-        assert!(!name.contains('\0'), "window name contained null byte");
         let name_ptr = self.ui.scratch_txt(name);
 
         // Set window properties before beginning

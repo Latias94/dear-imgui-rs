@@ -116,15 +116,26 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
         };
 
         #[cfg(not(target_arch = "wasm32"))]
-        let surface = match instance.create_surface(window) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("[wgpu-mv] create_surface error: {:?}", e);
-                return;
+        let surface: wgpu::Surface<'static> = {
+            // SAFETY: the underlying OS window (from ImGui PlatformHandle) is guaranteed by the
+            // platform backend to outlive the corresponding ImGui viewport, and Dear ImGui calls
+            // `Renderer_DestroyWindow` before the platform destroys the window. Therefore the raw
+            // window/display handles remain valid for the lifetime of this surface.
+            let target = match wgpu::SurfaceTargetUnsafe::from_window(window) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("[wgpu-mv] create_surface handle error: {:?}", e);
+                    return;
+                }
+            };
+            match instance.create_surface_unsafe(target) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[wgpu-mv] create_surface error: {:?}", e);
+                    return;
+                }
             }
         };
-        // Extend surface lifetime to 'static by tying it to backend-owned instance
-        let surface: wgpu::Surface<'static> = std::mem::transmute(surface);
 
         #[cfg(not(target_arch = "wasm32"))]
         let size = window.inner_size();

@@ -192,6 +192,10 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
     ///
     /// Returns true if any slider value was changed
     pub fn build_array(self, ui: &Ui, values: &mut [T]) -> bool {
+        let count = match i32::try_from(values.len()) {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
         unsafe {
             let (one, two) = ui.scratch_txt_with_opt(self.label, self.display_format);
 
@@ -199,7 +203,7 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
                 one,
                 T::KIND as i32,
                 values.as_mut_ptr() as *mut c_void,
-                values.len() as i32,
+                count,
                 self.speed,
                 self.min
                     .as_ref()
