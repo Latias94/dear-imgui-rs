@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Core (`dear-imgui-rs`)
-  - Managed textures: `TextureData::set_status(Destroyed)` now clears `TexID`/`BackendUserData` to match Dear ImGui's texture contract and avoid asserts.
-- Backends
-  - `dear-imgui-wgpu`: keep existing GPU texture and mark status `OK` when a `WantUpdates` upload fails (avoids invalid `TexID` during the same frame).
-
 ## [0.8.0] - 2025-12-22
 
 ### Added
@@ -52,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Dynamic fonts: fix `FontConfig::glyph_exclude_ranges` to pass the correct `ImWchar` layout (and now owns the converted ranges buffer, ensuring it is NUL-terminated).
   - Managed textures: avoid null pointer arithmetic when iterating `DrawData::textures()` / `PlatformIo::textures()` on empty lists; make `DrawData::texture{,_mut}` robust to negative vector sizes.
   - Managed textures: fix `ImTextureData` ownership by introducing `OwnedTextureData` (C++ constructed/destroyed) and making `TextureData::new()` return it; use `ImTextureData_SetStatus`/`ImTextureData_SetTexID` to preserve ImGui's internal state machine.
+  - Managed textures: `TextureData::set_status(Destroyed)` now clears `TexID`/`BackendUserData` to match Dear ImGui's texture contract and avoid asserts.
   - Font atlases: `FontAtlas::get_glyph_ranges_default` includes the terminating `0` sentinel.
   - `PlatformIo`: typed callback setters no longer panic if the internal callback mutex is poisoned.
   - `OwnedDrawData`: avoid double-free by letting `ImDrawData` own and free its `CmdLists` storage (we still destroy the cloned `ImDrawList` payloads).
@@ -65,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-implot`: avoid `transmute` when passing `dear-imgui-rs::TextureId` to `ImTextureID`.
   - `dear-imgui-glow`: validate `TextureId` range when updating existing OpenGL textures (avoid truncation/panic).
   - `dear-imgui-wgpu`: avoid `transmute` for `wgpu::Surface` lifetimes in multi-viewport backends, harden draw offsets against integer overflow, and avoid panicking when retrieving cached bind groups.
+  - `dear-imgui-wgpu`: keep existing GPU texture and mark status `OK` when a `WantUpdates` upload fails (avoids invalid `TexID` during the same frame).
 
 ### Changed
 
