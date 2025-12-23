@@ -1,7 +1,7 @@
 //! Texture management for Dear ImGui
 
 use crate::{GlTexture, InitError, InitResult};
-use dear_imgui_rs::{TextureData, TextureFormat, TextureId, TextureStatus};
+use dear_imgui_rs::{OwnedTextureData, TextureData, TextureFormat, TextureId, TextureStatus};
 use glow::{Context, HasContext};
 use std::collections::HashMap;
 
@@ -48,7 +48,7 @@ pub trait TextureMap {
 #[derive(Default)]
 pub struct SimpleTextureMap {
     textures: HashMap<TextureId, GlTexture>,
-    texture_data: HashMap<TextureId, TextureData>,
+    texture_data: HashMap<TextureId, OwnedTextureData>,
     next_id: usize,
 }
 
@@ -82,14 +82,10 @@ impl TextureMap for SimpleTextureMap {
         self.next_id += 1;
         let texture_id = TextureId::new(self.next_id as u64);
 
-        let mut boxed = TextureData::new();
-
-        boxed.create(format, width, height);
-
-        boxed.set_tex_id(texture_id);
-        boxed.set_status(TextureStatus::OK);
-
-        let texture_data = *boxed;
+        let mut texture_data = TextureData::new();
+        texture_data.create(format, width, height);
+        texture_data.set_tex_id(texture_id);
+        texture_data.set_status(TextureStatus::OK);
 
         self.textures.insert(texture_id, gl_texture);
         self.texture_data.insert(texture_id, texture_data);
@@ -113,11 +109,11 @@ impl TextureMap for SimpleTextureMap {
     }
 
     fn get_texture_data(&self, texture_id: TextureId) -> Option<&TextureData> {
-        self.texture_data.get(&texture_id)
+        self.texture_data.get(&texture_id).map(AsRef::as_ref)
     }
 
     fn get_texture_data_mut(&mut self, texture_id: TextureId) -> Option<&mut TextureData> {
-        self.texture_data.get_mut(&texture_id)
+        self.texture_data.get_mut(&texture_id).map(AsMut::as_mut)
     }
 }
 
@@ -148,7 +144,9 @@ impl SimpleTextureMap {
 
     /// Iterate over all texture data
     pub fn texture_data_iter(&self) -> impl Iterator<Item = (&TextureId, &TextureData)> {
-        self.texture_data.iter()
+        self.texture_data
+            .iter()
+            .map(|(id, texture_data)| (id, texture_data.as_ref()))
     }
 }
 

@@ -6,6 +6,7 @@
 
 use crate::sys;
 use std::ffi::c_void;
+use std::ptr::NonNull;
 
 /// Simple texture ID for backward compatibility
 ///
@@ -282,6 +283,74 @@ impl From<TextureRect> for sys::ImTextureRect {
     }
 }
 
+/// Owned texture data managed by Dear ImGui.
+///
+/// This owns an `ImTextureData` instance allocated by Dear ImGui (C++) and will
+/// destroy it on drop. It dereferences to [`TextureData`] so you can call the
+/// same APIs as on borrowed texture data (e.g. items returned by
+/// `DrawData::textures()`).
+pub struct OwnedTextureData {
+    raw: NonNull<sys::ImTextureData>,
+}
+
+impl OwnedTextureData {
+    /// Create a new empty texture data object (C++ constructed).
+    pub fn new() -> Self {
+        let raw = unsafe { sys::ImTextureData_ImTextureData() };
+        let raw = NonNull::new(raw).expect("ImTextureData_ImTextureData() returned null");
+        Self { raw }
+    }
+
+    /// Leak the underlying `ImTextureData*` without destroying it.
+    pub fn into_raw(self) -> *mut sys::ImTextureData {
+        let raw = self.raw.as_ptr();
+        std::mem::forget(self);
+        raw
+    }
+
+    /// Take ownership of a raw `ImTextureData*`.
+    ///
+    /// # Safety
+    /// - `raw` must be a valid pointer returned by `ImTextureData_ImTextureData()`.
+    /// - The caller must ensure no other owner will call `ImTextureData_destroy(raw)`.
+    pub unsafe fn from_raw_owned(raw: *mut sys::ImTextureData) -> Self {
+        let raw = NonNull::new(raw).expect("raw ImTextureData pointer was null");
+        Self { raw }
+    }
+}
+
+impl Drop for OwnedTextureData {
+    fn drop(&mut self) {
+        unsafe { sys::ImTextureData_destroy(self.raw.as_ptr()) }
+    }
+}
+
+impl std::ops::Deref for OwnedTextureData {
+    type Target = TextureData;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*(self.raw.as_ptr() as *const TextureData) }
+    }
+}
+
+impl std::ops::DerefMut for OwnedTextureData {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *(self.raw.as_ptr() as *mut TextureData) }
+    }
+}
+
+impl AsRef<TextureData> for OwnedTextureData {
+    fn as_ref(&self) -> &TextureData {
+        self
+    }
+}
+
+impl AsMut<TextureData> for OwnedTextureData {
+    fn as_mut(&mut self) -> &mut TextureData {
+        self
+    }
+}
+
 /// Texture data managed by Dear ImGui
 ///
 /// This is a wrapper around ImTextureData that provides safe access to
@@ -289,7 +358,7 @@ impl From<TextureRect> for sys::ImTextureRect {
 /// to create, update, and destroy textures.
 ///
 /// Lifecycle & Backend Flow (ImGui 1.92+)
-/// - Create an instance (e.g. via `TextureData::new()` + `create()`)
+/// - Create an instance (e.g. via `OwnedTextureData::new()` + `create()`)
 /// - Mutate pixels, set flags/rects (e.g. call `set_data()` or directly write `Pixels` then
 ///   set `UpdateRect`), and set status to `WantCreate`/`WantUpdates`.
 /// - When you pass `&mut TextureData` to any widget/draw call, Dear ImGui will place this
@@ -298,31 +367,21 @@ impl From<TextureRect> for sys::ImTextureRect {
 ///   create/update/destroy operations, then updates status to `OK`/`Destroyed`.
 /// - You can also set/get a `TexID` (e.g., GPU handle) via `set_tex_id()/tex_id()` after creation.
 ///
-/// Lifetime Note: If using the managed path, you must keep `TextureData` alive at least until the
-/// end of the frame where it is referenced by UI calls. Prefer owning containers like `Box`/`Arc`.
+/// Lifetime Note: If using the managed path, you must keep the underlying `ImTextureData` alive at
+/// least until the end of the frame where it is referenced by UI calls. If you create textures
+/// yourself, use [`OwnedTextureData`] to ensure the object is correctly constructed and destroyed
+/// by the C++ side.
 #[repr(transparent)]
 pub struct TextureData {
     raw: sys::ImTextureData,
 }
 
 impl TextureData {
-    /// Create a new empty texture data
+    /// Create a new owned texture data object.
     ///
-    /// This creates a new TextureData instance with default values.
-    /// The texture will be in Destroyed status and needs to be created with `create()`.
-    pub fn new() -> Box<Self> {
-        // Initialize via ImGui constructor to inherit default changes safely
-        let raw = unsafe {
-            let p = sys::ImTextureData_ImTextureData();
-            if p.is_null() {
-                panic!("ImTextureData_ImTextureData() returned null");
-            }
-            let v = *p;
-            sys::ImTextureData_destroy(p);
-            v
-        };
-        let raw_data = Box::new(raw);
-        unsafe { Box::from_raw(Box::into_raw(raw_data) as *mut Self) }
+    /// This is kept for convenience. Prefer [`OwnedTextureData::new()`] for clarity.
+    pub fn new() -> OwnedTextureData {
+        OwnedTextureData::new()
     }
 
     /// Create a new texture data from raw pointer (crate-internal)
@@ -356,7 +415,9 @@ impl TextureData {
     ///
     /// This should only be called by renderer backends after handling a request.
     pub fn set_status(&mut self, status: TextureStatus) {
-        self.raw.Status = status.into();
+        unsafe {
+            sys::ImTextureData_SetStatus(self.as_raw_mut(), status.into());
+        }
     }
 
     /// Get the backend user data
@@ -378,7 +439,9 @@ impl TextureData {
     ///
     /// This should only be called by renderer backends after creating or destroying the texture.
     pub fn set_tex_id(&mut self, tex_id: TextureId) {
-        self.raw.TexID = tex_id.id() as sys::ImTextureID;
+        unsafe {
+            sys::ImTextureData_SetTexID(self.as_raw_mut(), tex_id.id() as sys::ImTextureID);
+        }
     }
 
     /// Get the texture format
@@ -571,7 +634,7 @@ impl TextureData {
                 w: (*raw).Width.clamp(0, u16::MAX as i32) as u16,
                 h: (*raw).Height.clamp(0, u16::MAX as i32) as u16,
             };
-            (*raw).Status = sys::ImTextureStatus_WantUpdates;
+            sys::ImTextureData_SetStatus(raw, sys::ImTextureStatus_WantUpdates);
         }
     }
 

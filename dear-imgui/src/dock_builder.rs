@@ -508,12 +508,14 @@ impl DockBuilder {
         }
         let mut result: Vec<(Id, Id)> = Vec::new();
         unsafe {
-            if !out.Data.is_null() && out.Size > 0 {
-                let len = out.Size as usize;
-                let slice_ids = slice::from_raw_parts(out.Data, len);
-                // Interpret as pairs
-                for pair in slice_ids.chunks_exact(2) {
-                    result.push((Id::from(pair[0]), Id::from(pair[1])));
+            if !out.Data.is_null() {
+                if out.Size > 0 {
+                    let len = out.Size as usize;
+                    let slice_ids = slice::from_raw_parts(out.Data, len);
+                    // Interpret as pairs
+                    for pair in slice_ids.chunks_exact(2) {
+                        result.push((Id::from(pair[0]), Id::from(pair[1])));
+                    }
                 }
                 // Free the buffer allocated by ImGui (ImVector uses ImGui::MemAlloc)
                 sys::igMemFree(out.Data as *mut c_void);

@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Deprecated glyph ranges: fix `GlyphRangesBuilder::add_ranges` to pass the correct `ImWchar` layout, and free internal `ImVector_ImWchar` buffers; add `Drop` for the underlying C++ builder.
   - Dynamic fonts: fix `FontConfig::glyph_exclude_ranges` to pass the correct `ImWchar` layout (and now owns the converted ranges buffer, ensuring it is NUL-terminated).
   - Managed textures: avoid null pointer arithmetic when iterating `DrawData::textures()` / `PlatformIo::textures()` on empty lists; make `DrawData::texture{,_mut}` robust to negative vector sizes.
+  - Managed textures: fix `ImTextureData` ownership by introducing `OwnedTextureData` (C++ constructed/destroyed) and making `TextureData::new()` return it; use `ImTextureData_SetStatus`/`ImTextureData_SetTexID` to preserve ImGui's internal state machine.
   - Font atlases: `FontAtlas::get_glyph_ranges_default` includes the terminating `0` sentinel.
   - `PlatformIo`: typed callback setters no longer panic if the internal callback mutex is poisoned.
   - `OwnedDrawData`: avoid double-free by letting `ImDrawData` own and free its `CmdLists` storage (we still destroy the cloned `ImDrawList` payloads).
@@ -124,6 +125,7 @@ Upstream Dear ImGui/cimgui version is unchanged in this release (still Dear ImGu
 
 - dear-imgui-rs
   - Align several flag types (FreeType font loader flags, child window flags) with upstream Dear ImGui constants to reduce the risk of bit mismatches on future upgrades.
+  - Managed textures: `TextureData::new()` now returns `OwnedTextureData` to ensure correct C++ construction/destruction (and thus correct pixel buffer cleanup on drop).
 - Extensions (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`, `dear-file-browser`)
   - Refresh bindings to the latest C APIs and tighten safe wrappers; includes making file-extension filters in the file browser case-insensitive.
   - ImGuizmo: keep the internal helper window ("gizmo") on the main viewport when ImGui multi-viewport is enabled, preventing an extra black OS window on Windows (workaround for CedricGuillemet/ImGuizmo#378).

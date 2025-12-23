@@ -30,7 +30,6 @@
 //! - `word1,-word2` - Include items containing "word1" but NOT "word2"
 
 use crate::{Ui, sys};
-use std::ffi::CString;
 use std::ops::Range;
 use std::os::raw::c_char;
 use std::ptr;
@@ -56,7 +55,7 @@ use std::ptr;
 /// );
 /// ```
 pub struct TextFilter {
-    label: CString,
+    label: String,
     raw: *mut sys::ImGuiTextFilter,
 }
 
@@ -94,10 +93,13 @@ impl TextFilter {
     /// );
     /// ```
     pub fn new_with_filter(label: impl Into<String>, filter: impl AsRef<str>) -> Self {
-        let label = CString::new(label.into()).expect("TextFilter label contained null byte");
+        let label = label.into();
         let filter_ptr = crate::string::tls_scratch_txt(filter);
         unsafe {
             let raw = sys::ImGuiTextFilter_ImGuiTextFilter(filter_ptr);
+            if raw.is_null() {
+                panic!("ImGuiTextFilter_ImGuiTextFilter() returned null");
+            }
             Self { label, raw }
         }
     }
@@ -168,7 +170,8 @@ impl TextFilter {
     /// }
     /// ```
     pub fn draw_with_size(&mut self, width: f32) -> bool {
-        unsafe { sys::ImGuiTextFilter_Draw(self.raw, self.label.as_ptr(), width) }
+        let label_ptr = crate::string::tls_scratch_txt(&self.label);
+        unsafe { sys::ImGuiTextFilter_Draw(self.raw, label_ptr, width) }
     }
 
     /// Returns true if the filter is not empty.

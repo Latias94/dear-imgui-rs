@@ -13,8 +13,8 @@ use std::{path::PathBuf, time::Instant};
 use wgpu as wgpu_rs;
 
 struct TexDemoState {
-    img_tex: Box<dear_imgui_rs::texture::TextureData>,
-    photo_tex: Option<Box<dear_imgui_rs::texture::TextureData>>,
+    img_tex: dear_imgui_rs::texture::OwnedTextureData,
+    photo_tex: Option<dear_imgui_rs::texture::OwnedTextureData>,
     tex_size: (u32, u32),
     frame: u32,
     last_ui: Instant,
@@ -63,7 +63,7 @@ impl TexDemoState {
         }
     }
 
-    fn maybe_load_photo_texture() -> Option<Box<dear_imgui_rs::texture::TextureData>> {
+    fn maybe_load_photo_texture() -> Option<dear_imgui_rs::texture::OwnedTextureData> {
         // Prefer the shared gradient test image; fall back to the original JPEG
         // asset to keep behavior reasonable if the gradient is missing.
         let asset_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");

@@ -31,8 +31,8 @@ struct AppWindow {
     surface: wgpu::Surface<'static>,
     imgui: ImguiState,
     // Texture demo state (managed by ImGui modern texture system)
-    img_tex: Box<dear_imgui_rs::texture::TextureData>,
-    photo_tex: Option<Box<dear_imgui_rs::texture::TextureData>>,
+    img_tex: dear_imgui_rs::texture::OwnedTextureData,
+    photo_tex: Option<dear_imgui_rs::texture::OwnedTextureData>,
     tex_size: (u32, u32),
     frame: u32,
 }
@@ -150,7 +150,7 @@ impl AppWindow {
         })
     }
 
-    fn maybe_load_photo_texture() -> Option<Box<dear_imgui_rs::texture::TextureData>> {
+    fn maybe_load_photo_texture() -> Option<dear_imgui_rs::texture::OwnedTextureData> {
         // Prefer a clean, low-frequency gradient test image; fall back to the
         // original JPEG if the gradient asset is missing.
         let asset_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
