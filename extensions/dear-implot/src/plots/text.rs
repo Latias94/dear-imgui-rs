@@ -1,6 +1,6 @@
 //! Text plot implementation
 
-use super::{PlotData, PlotError, safe_cstring};
+use super::{PlotData, PlotError, with_plot_str};
 use crate::TextFlags;
 use crate::sys;
 
@@ -53,27 +53,29 @@ impl<'a> TextPlot<'a> {
         if self.text.is_empty() {
             return Err(PlotError::InvalidData("Text cannot be empty".to_string()));
         }
+        if self.text.contains('\0') {
+            return Err(PlotError::StringConversion(
+                "text contained null byte".to_string(),
+            ));
+        }
         Ok(())
     }
 
     /// Plot the text
     pub fn plot(self) {
-        let text_cstring = safe_cstring(self.text);
-
         let pix_offset = sys::ImVec2_c {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
         };
-
-        unsafe {
+        let _ = with_plot_str(self.text, |text_ptr| unsafe {
             sys::ImPlot_PlotText(
-                text_cstring.as_ptr(),
+                text_ptr,
                 self.x,
                 self.y,
                 pix_offset,
                 self.flags.bits() as i32,
             );
-        }
+        });
     }
 }
 
@@ -236,27 +238,29 @@ impl FormattedTextPlot {
         if self.text.is_empty() {
             return Err(PlotError::InvalidData("Text cannot be empty".to_string()));
         }
+        if self.text.contains('\0') {
+            return Err(PlotError::StringConversion(
+                "text contained null byte".to_string(),
+            ));
+        }
         Ok(())
     }
 
     /// Plot the formatted text
     pub fn plot(self) {
-        let text_cstring = safe_cstring(&self.text);
-
         let pix_offset = sys::ImVec2_c {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
         };
-
-        unsafe {
+        let _ = with_plot_str(&self.text, |text_ptr| unsafe {
             sys::ImPlot_PlotText(
-                text_cstring.as_ptr(),
+                text_ptr,
                 self.x,
                 self.y,
                 pix_offset,
                 self.flags.bits() as i32,
             );
-        }
+        });
     }
 }
 

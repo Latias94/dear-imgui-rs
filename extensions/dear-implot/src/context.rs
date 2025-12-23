@@ -1,5 +1,7 @@
 use crate::{AxisFlags, PlotCond, XAxis, YAxis, sys};
-use dear_imgui_rs::{Context as ImGuiContext, Ui};
+use dear_imgui_rs::{
+    Context as ImGuiContext, Ui, with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_two,
+};
 use dear_imgui_sys as imgui_sys;
 
 /// ImPlot context that manages the plotting state
@@ -110,10 +112,11 @@ impl<'ui> PlotUi<'ui> {
     /// Returns a PlotToken if the plot was successfully started.
     /// The plot will be automatically ended when the token is dropped.
     pub fn begin_plot(&self, title: &str) -> Option<PlotToken<'_>> {
-        let title_cstr = std::ffi::CString::new(title).ok()?;
-
         let size = sys::ImVec2_c { x: -1.0, y: 0.0 };
-        let started = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), size, 0) };
+        if title.contains('\0') {
+            return None;
+        }
+        let started = with_scratch_txt(title, |ptr| unsafe { sys::ImPlot_BeginPlot(ptr, size, 0) });
 
         if started {
             Some(PlotToken::new())
@@ -124,13 +127,16 @@ impl<'ui> PlotUi<'ui> {
 
     /// Begin a plot with custom size
     pub fn begin_plot_with_size(&self, title: &str, size: [f32; 2]) -> Option<PlotToken<'_>> {
-        let title_cstr = std::ffi::CString::new(title).ok()?;
-
         let plot_size = sys::ImVec2_c {
             x: size[0],
             y: size[1],
         };
-        let started = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), plot_size, 0) };
+        if title.contains('\0') {
+            return None;
+        }
+        let started = with_scratch_txt(title, |ptr| unsafe {
+            sys::ImPlot_BeginPlot(ptr, plot_size, 0)
+        });
 
         if started {
             Some(PlotToken::new())
@@ -147,11 +153,10 @@ impl<'ui> PlotUi<'ui> {
             return; // Data length mismatch
         }
 
-        let label_cstr = std::ffi::CString::new(label).unwrap_or_default();
-
-        unsafe {
+        let label = if label.contains('\0') { "" } else { label };
+        with_scratch_txt(label, |ptr| unsafe {
             sys::ImPlot_PlotLine_doublePtrdoublePtr(
-                label_cstr.as_ptr(),
+                ptr,
                 x_data.as_ptr(),
                 y_data.as_ptr(),
                 x_data.len() as i32,
@@ -159,7 +164,7 @@ impl<'ui> PlotUi<'ui> {
                 0,
                 0,
             );
-        }
+        })
     }
 
     /// Plot a scatter plot with the given label and data
@@ -168,11 +173,10 @@ impl<'ui> PlotUi<'ui> {
             return; // Data length mismatch
         }
 
-        let label_cstr = std::ffi::CString::new(label).unwrap_or_default();
-
-        unsafe {
+        let label = if label.contains('\0') { "" } else { label };
+        with_scratch_txt(label, |ptr| unsafe {
             sys::ImPlot_PlotScatter_doublePtrdoublePtr(
-                label_cstr.as_ptr(),
+                ptr,
                 x_data.as_ptr(),
                 y_data.as_ptr(),
                 x_data.len() as i32,
@@ -180,7 +184,7 @@ impl<'ui> PlotUi<'ui> {
                 0,
                 0,
             );
-        }
+        })
     }
 
     /// Check if the plot area is hovered
@@ -212,33 +216,43 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup a specific X axis
     pub fn setup_x_axis(&self, axis: XAxis, label: Option<&str>, flags: AxisFlags) {
-        let label_cstr = label.and_then(|s| std::ffi::CString::new(s).ok());
-        let ptr = label_cstr
-            .as_ref()
-            .map(|c| c.as_ptr())
-            .unwrap_or(std::ptr::null());
-        unsafe {
-            sys::ImPlot_SetupAxis(
-                axis as sys::ImAxis,
-                ptr,
-                flags.bits() as sys::ImPlotAxisFlags,
-            )
+        let label = label.filter(|s| !s.contains('\0'));
+        match label {
+            Some(label) => with_scratch_txt(label, |ptr| unsafe {
+                sys::ImPlot_SetupAxis(
+                    axis as sys::ImAxis,
+                    ptr,
+                    flags.bits() as sys::ImPlotAxisFlags,
+                )
+            }),
+            None => unsafe {
+                sys::ImPlot_SetupAxis(
+                    axis as sys::ImAxis,
+                    std::ptr::null(),
+                    flags.bits() as sys::ImPlotAxisFlags,
+                )
+            },
         }
     }
 
     /// Setup a specific Y axis
     pub fn setup_y_axis(&self, axis: YAxis, label: Option<&str>, flags: AxisFlags) {
-        let label_cstr = label.and_then(|s| std::ffi::CString::new(s).ok());
-        let ptr = label_cstr
-            .as_ref()
-            .map(|c| c.as_ptr())
-            .unwrap_or(std::ptr::null());
-        unsafe {
-            sys::ImPlot_SetupAxis(
-                axis as sys::ImAxis,
-                ptr,
-                flags.bits() as sys::ImPlotAxisFlags,
-            )
+        let label = label.filter(|s| !s.contains('\0'));
+        match label {
+            Some(label) => with_scratch_txt(label, |ptr| unsafe {
+                sys::ImPlot_SetupAxis(
+                    axis as sys::ImAxis,
+                    ptr,
+                    flags.bits() as sys::ImPlotAxisFlags,
+                )
+            }),
+            None => unsafe {
+                sys::ImPlot_SetupAxis(
+                    axis as sys::ImAxis,
+                    std::ptr::null(),
+                    flags.bits() as sys::ImPlotAxisFlags,
+                )
+            },
         }
     }
 
@@ -276,17 +290,44 @@ impl<'ui> PlotUi<'ui> {
         x_flags: AxisFlags,
         y_flags: AxisFlags,
     ) {
-        let x_c = x_label.and_then(|s| std::ffi::CString::new(s).ok());
-        let y_c = y_label.and_then(|s| std::ffi::CString::new(s).ok());
-        let xp = x_c.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
-        let yp = y_c.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
-        unsafe {
-            sys::ImPlot_SetupAxes(
-                xp,
-                yp,
-                x_flags.bits() as sys::ImPlotAxisFlags,
-                y_flags.bits() as sys::ImPlotAxisFlags,
-            )
+        let x_label = x_label.filter(|s| !s.contains('\0'));
+        let y_label = y_label.filter(|s| !s.contains('\0'));
+
+        match (x_label, y_label) {
+            (Some(x_label), Some(y_label)) => {
+                with_scratch_txt_two(x_label, y_label, |xp, yp| unsafe {
+                    sys::ImPlot_SetupAxes(
+                        xp,
+                        yp,
+                        x_flags.bits() as sys::ImPlotAxisFlags,
+                        y_flags.bits() as sys::ImPlotAxisFlags,
+                    )
+                })
+            }
+            (Some(x_label), None) => with_scratch_txt(x_label, |xp| unsafe {
+                sys::ImPlot_SetupAxes(
+                    xp,
+                    std::ptr::null(),
+                    x_flags.bits() as sys::ImPlotAxisFlags,
+                    y_flags.bits() as sys::ImPlotAxisFlags,
+                )
+            }),
+            (None, Some(y_label)) => with_scratch_txt(y_label, |yp| unsafe {
+                sys::ImPlot_SetupAxes(
+                    std::ptr::null(),
+                    yp,
+                    x_flags.bits() as sys::ImPlotAxisFlags,
+                    y_flags.bits() as sys::ImPlotAxisFlags,
+                )
+            }),
+            (None, None) => unsafe {
+                sys::ImPlot_SetupAxes(
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    x_flags.bits() as sys::ImPlotAxisFlags,
+                    y_flags.bits() as sys::ImPlotAxisFlags,
+                )
+            },
         }
     }
 
@@ -375,23 +416,23 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
-        let cstrs: Option<Vec<std::ffi::CString>> = labels.map(|ls| {
-            ls.iter()
-                .map(|&s| std::ffi::CString::new(s).unwrap_or_default())
-                .collect()
-        });
-        // To keep lifetimes, allocate a temp Vec if labels present
-        if let Some(vec) = cstrs {
-            let raw: Vec<*const i8> = vec.iter().map(|c| c.as_ptr()).collect();
-            unsafe {
-                sys::ImPlot_SetupAxisTicks_doublePtr(
-                    axis as sys::ImAxis,
-                    values.as_ptr(),
-                    values.len() as i32,
-                    raw.as_ptr(),
-                    keep_default,
-                )
-            }
+        if let Some(labels) = labels {
+            let cleaned: Vec<&str> = labels
+                .iter()
+                .map(|&s| if s.contains('\0') { "" } else { s })
+                .collect();
+            with_scratch_txt_slice(&cleaned, |ptrs| {
+                let raw: Vec<*const i8> = ptrs.iter().map(|&p| p as *const i8).collect();
+                unsafe {
+                    sys::ImPlot_SetupAxisTicks_doublePtr(
+                        axis as sys::ImAxis,
+                        values.as_ptr(),
+                        values.len() as i32,
+                        raw.as_ptr(),
+                        keep_default,
+                    )
+                }
+            })
         } else {
             unsafe {
                 sys::ImPlot_SetupAxisTicks_doublePtr(
@@ -413,22 +454,23 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
-        let cstrs: Option<Vec<std::ffi::CString>> = labels.map(|ls| {
-            ls.iter()
-                .map(|&s| std::ffi::CString::new(s).unwrap_or_default())
-                .collect()
-        });
-        if let Some(cstrs) = cstrs {
-            let raw: Vec<*const i8> = cstrs.iter().map(|c| c.as_ptr()).collect();
-            unsafe {
-                sys::ImPlot_SetupAxisTicks_doublePtr(
-                    axis as sys::ImAxis,
-                    values.as_ptr(),
-                    values.len() as i32,
-                    raw.as_ptr(),
-                    keep_default,
-                )
-            }
+        if let Some(labels) = labels {
+            let cleaned: Vec<&str> = labels
+                .iter()
+                .map(|&s| if s.contains('\0') { "" } else { s })
+                .collect();
+            with_scratch_txt_slice(&cleaned, |ptrs| {
+                let raw: Vec<*const i8> = ptrs.iter().map(|&p| p as *const i8).collect();
+                unsafe {
+                    sys::ImPlot_SetupAxisTicks_doublePtr(
+                        axis as sys::ImAxis,
+                        values.as_ptr(),
+                        values.len() as i32,
+                        raw.as_ptr(),
+                        keep_default,
+                    )
+                }
+            })
         } else {
             unsafe {
                 sys::ImPlot_SetupAxisTicks_doublePtr(
@@ -452,23 +494,24 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
-        let cstrs: Option<Vec<std::ffi::CString>> = labels.map(|ls| {
-            ls.iter()
-                .map(|&s| std::ffi::CString::new(s).unwrap_or_default())
-                .collect()
-        });
-        if let Some(cstrs) = cstrs {
-            let raw: Vec<*const i8> = cstrs.iter().map(|c| c.as_ptr()).collect();
-            unsafe {
-                sys::ImPlot_SetupAxisTicks_double(
-                    axis as sys::ImAxis,
-                    v_min,
-                    v_max,
-                    n_ticks,
-                    raw.as_ptr(),
-                    keep_default,
-                )
-            }
+        if let Some(labels) = labels {
+            let cleaned: Vec<&str> = labels
+                .iter()
+                .map(|&s| if s.contains('\0') { "" } else { s })
+                .collect();
+            with_scratch_txt_slice(&cleaned, |ptrs| {
+                let raw: Vec<*const i8> = ptrs.iter().map(|&p| p as *const i8).collect();
+                unsafe {
+                    sys::ImPlot_SetupAxisTicks_double(
+                        axis as sys::ImAxis,
+                        v_min,
+                        v_max,
+                        n_ticks,
+                        raw.as_ptr(),
+                        keep_default,
+                    )
+                }
+            })
         } else {
             unsafe {
                 sys::ImPlot_SetupAxisTicks_double(
@@ -493,23 +536,24 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
-        let cstrs: Option<Vec<std::ffi::CString>> = labels.map(|ls| {
-            ls.iter()
-                .map(|&s| std::ffi::CString::new(s).unwrap_or_default())
-                .collect()
-        });
-        if let Some(cstrs) = cstrs {
-            let raw: Vec<*const i8> = cstrs.iter().map(|c| c.as_ptr()).collect();
-            unsafe {
-                sys::ImPlot_SetupAxisTicks_double(
-                    axis as sys::ImAxis,
-                    v_min,
-                    v_max,
-                    n_ticks,
-                    raw.as_ptr(),
-                    keep_default,
-                )
-            }
+        if let Some(labels) = labels {
+            let cleaned: Vec<&str> = labels
+                .iter()
+                .map(|&s| if s.contains('\0') { "" } else { s })
+                .collect();
+            with_scratch_txt_slice(&cleaned, |ptrs| {
+                let raw: Vec<*const i8> = ptrs.iter().map(|&p| p as *const i8).collect();
+                unsafe {
+                    sys::ImPlot_SetupAxisTicks_double(
+                        axis as sys::ImAxis,
+                        v_min,
+                        v_max,
+                        n_ticks,
+                        raw.as_ptr(),
+                        keep_default,
+                    )
+                }
+            })
         } else {
             unsafe {
                 sys::ImPlot_SetupAxisTicks_double(
@@ -526,16 +570,22 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup tick label format string for a specific X axis
     pub fn setup_x_axis_format(&self, axis: XAxis, fmt: &str) {
-        if let Ok(c) = std::ffi::CString::new(fmt) {
-            unsafe { sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, c.as_ptr()) }
+        if fmt.contains('\0') {
+            return;
         }
+        with_scratch_txt(fmt, |ptr| unsafe {
+            sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, ptr)
+        })
     }
 
     /// Setup tick label format string for a specific Y axis
     pub fn setup_y_axis_format(&self, axis: YAxis, fmt: &str) {
-        if let Ok(c) = std::ffi::CString::new(fmt) {
-            unsafe { sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, c.as_ptr()) }
+        if fmt.contains('\0') {
+            return;
         }
+        with_scratch_txt(fmt, |ptr| unsafe {
+            sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, ptr)
+        })
     }
 
     /// Setup scale for a specific X axis (pass sys::ImPlotScale variant)
@@ -650,7 +700,7 @@ unsafe extern "C" fn formatter_thunk(
         return 0;
     }
     // Safety: ImPlot passes back the same pointer we provided in `AxisFormatterToken::new`.
-    let holder = &*(user_data as *const FormatterHolder);
+    let holder = unsafe { &*(user_data as *const FormatterHolder) };
     let s = (holder.func)(value);
     let bytes = s.as_bytes();
     let max = (size - 1).max(0) as usize;

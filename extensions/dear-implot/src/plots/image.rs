@@ -1,6 +1,6 @@
 //! Image plot implementation
 
-use super::{Plot, PlotError, safe_cstring};
+use super::{Plot, PlotError, with_plot_str_or_empty};
 use crate::{ImageFlags, sys};
 
 /// Plot an image in plot coordinates using an ImTextureID
@@ -58,7 +58,6 @@ impl<'a> Plot for ImagePlot<'a> {
         if self.validate().is_err() {
             return;
         }
-        let label_c = safe_cstring(self.label);
         let uv0 = sys::ImVec2_c {
             x: self.uv0[0],
             y: self.uv0[1],
@@ -78,9 +77,9 @@ impl<'a> Plot for ImagePlot<'a> {
             _TexData: std::ptr::null_mut(),
             _TexID: self.tex_id,
         };
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotImage(
-                label_c.as_ptr(),
+                label_ptr,
                 tex_ref,
                 self.bounds_min,
                 self.bounds_max,
@@ -89,7 +88,7 @@ impl<'a> Plot for ImagePlot<'a> {
                 tint,
                 self.flags.bits() as i32,
             )
-        }
+        })
     }
 
     fn label(&self) -> &str {

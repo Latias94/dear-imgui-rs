@@ -1,6 +1,6 @@
 //! Pie chart plot implementation
 
-use super::{Plot, PlotError, safe_cstring};
+use super::{Plot, PlotError, with_plot_str_slice_with_opt};
 use crate::PieChartFlags;
 use crate::sys;
 
@@ -116,37 +116,23 @@ impl<'a> Plot for PieChartPlot<'a> {
         if self.validate().is_err() {
             return;
         }
-
-        // Convert label strings to CStrings
-        let label_cstrs: Vec<_> = self
-            .label_ids
-            .iter()
-            .map(|&label| safe_cstring(label))
-            .collect();
-
-        // Create array of pointers to C strings
-        let label_ptrs: Vec<*const std::os::raw::c_char> =
-            label_cstrs.iter().map(|cstr| cstr.as_ptr()).collect();
-
-        let label_fmt_cstr = self.label_fmt.map(safe_cstring);
-        let label_fmt_ptr = label_fmt_cstr
-            .as_ref()
-            .map(|cstr| cstr.as_ptr())
-            .unwrap_or(std::ptr::null());
-
-        unsafe {
-            sys::ImPlot_PlotPieChart_doublePtrStr(
-                label_ptrs.as_ptr(),
-                self.values.as_ptr(),
-                self.values.len() as i32,
-                self.center_x,
-                self.center_y,
-                self.radius,
-                label_fmt_ptr,
-                self.angle0,
-                self.flags.bits() as i32,
-            );
-        }
+        with_plot_str_slice_with_opt(
+            &self.label_ids,
+            self.label_fmt,
+            |label_ptrs, label_fmt_ptr| unsafe {
+                sys::ImPlot_PlotPieChart_doublePtrStr(
+                    label_ptrs.as_ptr(),
+                    self.values.as_ptr(),
+                    self.values.len() as i32,
+                    self.center_x,
+                    self.center_y,
+                    self.radius,
+                    label_fmt_ptr,
+                    self.angle0,
+                    self.flags.bits() as i32,
+                );
+            },
+        )
     }
 
     fn label(&self) -> &str {
@@ -257,35 +243,23 @@ impl<'a> Plot for PieChartPlotF32<'a> {
         if self.validate().is_err() {
             return;
         }
-
-        let label_cstrs: Vec<_> = self
-            .label_ids
-            .iter()
-            .map(|&label| safe_cstring(label))
-            .collect();
-
-        let label_ptrs: Vec<*const std::os::raw::c_char> =
-            label_cstrs.iter().map(|cstr| cstr.as_ptr()).collect();
-
-        let label_fmt_cstr = self.label_fmt.map(safe_cstring);
-        let label_fmt_ptr = label_fmt_cstr
-            .as_ref()
-            .map(|cstr| cstr.as_ptr())
-            .unwrap_or(std::ptr::null());
-
-        unsafe {
-            sys::ImPlot_PlotPieChart_FloatPtrStr(
-                label_ptrs.as_ptr(),
-                self.values.as_ptr(),
-                self.values.len() as i32,
-                self.center_x,
-                self.center_y,
-                self.radius,
-                label_fmt_ptr,
-                self.angle0,
-                self.flags.bits() as i32,
-            );
-        }
+        with_plot_str_slice_with_opt(
+            &self.label_ids,
+            self.label_fmt,
+            |label_ptrs, label_fmt_ptr| unsafe {
+                sys::ImPlot_PlotPieChart_FloatPtrStr(
+                    label_ptrs.as_ptr(),
+                    self.values.as_ptr(),
+                    self.values.len() as i32,
+                    self.center_x,
+                    self.center_y,
+                    self.radius,
+                    label_fmt_ptr,
+                    self.angle0,
+                    self.flags.bits() as i32,
+                );
+            },
+        )
     }
 
     fn label(&self) -> &str {

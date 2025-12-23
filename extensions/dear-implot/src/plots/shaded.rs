@@ -1,6 +1,6 @@
 //! Shaded area plot implementation
 
-use super::{Plot, PlotError, safe_cstring, validate_data_lengths};
+use super::{Plot, PlotError, validate_data_lengths, with_plot_str_or_empty};
 use crate::{ShadedFlags, sys};
 
 /// Builder for shaded area plots
@@ -64,12 +64,9 @@ impl<'a> Plot for ShadedPlot<'a> {
         if self.validate().is_err() {
             return;
         }
-
-        let label_cstr = safe_cstring(self.label);
-
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotShaded_doublePtrdoublePtrInt(
-                label_cstr.as_ptr(),
+                label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
@@ -78,7 +75,7 @@ impl<'a> Plot for ShadedPlot<'a> {
                 self.offset,
                 self.stride,
             );
-        }
+        })
     }
 
     fn label(&self) -> &str {
@@ -127,13 +124,11 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
             return;
         }
 
-        let label_cstr = safe_cstring(self.label);
-
         // Note: This would require a different wrapper function for shaded between two lines
         // For now, we'll use the single line version with the first Y data
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotShaded_doublePtrdoublePtrdoublePtr(
-                label_cstr.as_ptr(),
+                label_ptr,
                 self.x_data.as_ptr(),
                 self.y1_data.as_ptr(),
                 self.y2_data.as_ptr(),
@@ -142,7 +137,7 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
                 0,
                 std::mem::size_of::<f64>() as i32,
             );
-        }
+        })
     }
 
     fn label(&self) -> &str {
@@ -196,16 +191,14 @@ impl<'a> Plot for SimpleShadedPlot<'a> {
             return;
         }
 
-        let label_cstr = safe_cstring(self.label);
-
         // Create temporary X data
         let x_data: Vec<f64> = (0..self.values.len())
             .map(|i| self.x_start + i as f64 * self.x_scale)
             .collect();
 
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotShaded_doublePtrdoublePtrInt(
-                label_cstr.as_ptr(),
+                label_ptr,
                 x_data.as_ptr(),
                 self.values.as_ptr(),
                 self.values.len() as i32,
@@ -214,7 +207,7 @@ impl<'a> Plot for SimpleShadedPlot<'a> {
                 0,
                 std::mem::size_of::<f64>() as i32,
             );
-        }
+        })
     }
 
     fn label(&self) -> &str {

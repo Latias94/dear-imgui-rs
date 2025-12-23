@@ -20,6 +20,9 @@ pub mod stairs;
 pub mod stems;
 pub mod text;
 
+use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_slice_with_opt};
+use std::os::raw::c_char;
+
 // Re-export all plot types for convenience
 pub use bar::*;
 pub use bar_groups::*;
@@ -124,15 +127,38 @@ pub fn validate_data_lengths<T, U>(data1: &[T], data2: &[U]) -> Result<(), PlotE
     Ok(())
 }
 
-/// Helper function to create a CString safely
-/// This follows the pattern used in dear-imgui for safe string conversion
-pub fn safe_cstring(s: &str) -> std::ffi::CString {
-    // Remove any null bytes from the string to prevent CString creation errors
-    let cleaned = s.replace('\0', "");
-    std::ffi::CString::new(cleaned).unwrap_or_else(|_| {
-        // If there's still an error, create an empty string
-        std::ffi::CString::new("").unwrap()
-    })
+pub(crate) fn with_plot_str<R>(s: &str, f: impl FnOnce(*const c_char) -> R) -> Option<R> {
+    if s.contains('\0') {
+        None
+    } else {
+        Some(with_scratch_txt(s, f))
+    }
+}
+
+pub(crate) fn with_plot_str_or_empty<R>(s: &str, f: impl FnOnce(*const c_char) -> R) -> R {
+    let s = if s.contains('\0') { "" } else { s };
+    with_scratch_txt(s, f)
+}
+
+pub(crate) fn with_plot_str_slice<R>(txts: &[&str], f: impl FnOnce(&[*const c_char]) -> R) -> R {
+    let cleaned: Vec<&str> = txts
+        .iter()
+        .map(|&s| if s.contains('\0') { "" } else { s })
+        .collect();
+    with_scratch_txt_slice(&cleaned, f)
+}
+
+pub(crate) fn with_plot_str_slice_with_opt<R>(
+    txts: &[&str],
+    txt_opt: Option<&str>,
+    f: impl FnOnce(&[*const c_char], *const c_char) -> R,
+) -> R {
+    let cleaned: Vec<&str> = txts
+        .iter()
+        .map(|&s| if s.contains('\0') { "" } else { s })
+        .collect();
+    let txt_opt = txt_opt.filter(|s| !s.contains('\0'));
+    with_scratch_txt_slice_with_opt(&cleaned, txt_opt, f)
 }
 
 /// Universal plot builder that can create any plot type

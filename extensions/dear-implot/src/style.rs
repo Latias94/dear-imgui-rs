@@ -1,6 +1,7 @@
 // Style and theming for plots
 
 use crate::sys;
+use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_two};
 
 /// Style variables that can be modified
 #[repr(i32)]
@@ -152,15 +153,11 @@ pub fn pop_colormap(count: i32) {
 
 /// Add a custom colormap from a vector of colors
 pub fn add_colormap(name: &str, colors: &[sys::ImVec4], qualitative: bool) -> sys::ImPlotColormap {
-    let name_cstr = std::ffi::CString::new(name).unwrap();
-    unsafe {
-        sys::ImPlot_AddColormap_Vec4Ptr(
-            name_cstr.as_ptr(),
-            colors.as_ptr(),
-            colors.len() as i32,
-            qualitative,
-        ) as sys::ImPlotColormap
-    }
+    assert!(!name.contains('\0'), "colormap name contained NUL");
+    with_scratch_txt(name, |ptr| unsafe {
+        sys::ImPlot_AddColormap_Vec4Ptr(ptr, colors.as_ptr(), colors.len() as i32, qualitative)
+            as sys::ImPlotColormap
+    })
 }
 
 // Style editor / selectors and input-map helpers
@@ -172,20 +169,24 @@ pub fn show_style_editor() {
 
 /// Show the ImPlot style selector combo; returns true if selection changed
 pub fn show_style_selector(label: &str) -> bool {
-    let c = std::ffi::CString::new(label).unwrap_or_default();
-    unsafe { sys::ImPlot_ShowStyleSelector(c.as_ptr()) }
+    let label = if label.contains('\0') { "" } else { label };
+    with_scratch_txt(label, |ptr| unsafe { sys::ImPlot_ShowStyleSelector(ptr) })
 }
 
 /// Show the ImPlot colormap selector combo; returns true if selection changed
 pub fn show_colormap_selector(label: &str) -> bool {
-    let c = std::ffi::CString::new(label).unwrap_or_default();
-    unsafe { sys::ImPlot_ShowColormapSelector(c.as_ptr()) }
+    let label = if label.contains('\0') { "" } else { label };
+    with_scratch_txt(label, |ptr| unsafe {
+        sys::ImPlot_ShowColormapSelector(ptr)
+    })
 }
 
 /// Show the ImPlot input-map selector combo; returns true if selection changed
 pub fn show_input_map_selector(label: &str) -> bool {
-    let c = std::ffi::CString::new(label).unwrap_or_default();
-    unsafe { sys::ImPlot_ShowInputMapSelector(c.as_ptr()) }
+    let label = if label.contains('\0') { "" } else { label };
+    with_scratch_txt(label, |ptr| unsafe {
+        sys::ImPlot_ShowInputMapSelector(ptr)
+    })
 }
 
 /// Map input to defaults
@@ -208,13 +209,13 @@ pub fn colormap_scale(
     height: f32,
     cmap: Option<sys::ImPlotColormap>,
 ) {
-    let c = std::ffi::CString::new(label).unwrap_or_default();
+    let label = if label.contains('\0') { "" } else { label };
     let size = sys::ImVec2_c { x: 0.0, y: height };
     let fmt_ptr: *const i8 = std::ptr::null();
     let flags: i32 = 0; // ImPlotColormapScaleFlags_None
-    unsafe {
+    with_scratch_txt(label, |ptr| unsafe {
         sys::ImPlot_ColormapScale(
-            c.as_ptr(),
+            ptr,
             scale_min,
             scale_max,
             size,
@@ -222,7 +223,7 @@ pub fn colormap_scale(
             flags,
             cmap.unwrap_or(0),
         )
-    }
+    })
 }
 
 /// Draw a colormap slider; returns true if selection changed
@@ -233,29 +234,39 @@ pub fn colormap_slider(
     format: Option<&str>,
     cmap: sys::ImPlotColormap,
 ) -> bool {
-    let c = std::ffi::CString::new(label).unwrap_or_default();
-    let fmt_c = format.and_then(|s| std::ffi::CString::new(s).ok());
-    let fmt_ptr = fmt_c
-        .as_ref()
-        .map(|cs| cs.as_ptr())
-        .unwrap_or(std::ptr::null());
-    unsafe {
-        sys::ImPlot_ColormapSlider(
-            c.as_ptr(),
-            t as *mut f32,
-            out_color as *mut sys::ImVec4,
-            fmt_ptr,
-            cmap,
-        )
+    let label = if label.contains('\0') { "" } else { label };
+    let format = format.filter(|s| !s.contains('\0'));
+
+    match format {
+        Some(fmt) => with_scratch_txt_two(label, fmt, |label_ptr, fmt_ptr| unsafe {
+            sys::ImPlot_ColormapSlider(
+                label_ptr,
+                t as *mut f32,
+                out_color as *mut sys::ImVec4,
+                fmt_ptr,
+                cmap,
+            )
+        }),
+        None => with_scratch_txt(label, |label_ptr| unsafe {
+            sys::ImPlot_ColormapSlider(
+                label_ptr,
+                t as *mut f32,
+                out_color as *mut sys::ImVec4,
+                std::ptr::null(),
+                cmap,
+            )
+        }),
     }
 }
 
 /// Draw a colormap picker button; returns true if clicked
 pub fn colormap_button(label: &str, size: [f32; 2], cmap: sys::ImPlotColormap) -> bool {
-    let c = std::ffi::CString::new(label).unwrap_or_default();
+    let label = if label.contains('\0') { "" } else { label };
     let sz = sys::ImVec2_c {
         x: size[0],
         y: size[1],
     };
-    unsafe { sys::ImPlot_ColormapButton(c.as_ptr(), sz, cmap) }
+    with_scratch_txt(label, |ptr| unsafe {
+        sys::ImPlot_ColormapButton(ptr, sz, cmap)
+    })
 }

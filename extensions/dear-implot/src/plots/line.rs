@@ -1,6 +1,6 @@
 //! Line plot implementation
 
-use super::{Plot, PlotError, safe_cstring, validate_data_lengths};
+use super::{Plot, PlotError, validate_data_lengths, with_plot_str_or_empty};
 use crate::{LineFlags, sys};
 
 /// Builder for line plots with extensive customization options
@@ -56,11 +56,9 @@ impl<'a> Plot for LinePlot<'a> {
             return; // Skip plotting if data is invalid
         }
 
-        let label_cstr = safe_cstring(self.label);
-
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotLine_doublePtrdoublePtr(
-                label_cstr.as_ptr(),
+                label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
@@ -68,7 +66,7 @@ impl<'a> Plot for LinePlot<'a> {
                 self.offset,
                 self.stride,
             );
-        }
+        })
     }
 
     fn label(&self) -> &str {
@@ -114,8 +112,6 @@ impl<'a> Plot for SimpleLinePlot<'a> {
             return;
         }
 
-        let label_cstr = safe_cstring(self.label);
-
         // For simple line plots, we use the single-array version
         // This would require a wrapper function in the sys crate
         // For now, we'll create temporary X data
@@ -123,9 +119,9 @@ impl<'a> Plot for SimpleLinePlot<'a> {
             .map(|i| self.x_start + i as f64 * self.x_scale)
             .collect();
 
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotLine_doublePtrdoublePtr(
-                label_cstr.as_ptr(),
+                label_ptr,
                 x_data.as_ptr(),
                 self.values.as_ptr(),
                 self.values.len() as i32,
@@ -133,7 +129,7 @@ impl<'a> Plot for SimpleLinePlot<'a> {
                 0,
                 std::mem::size_of::<f64>() as i32,
             );
-        }
+        })
     }
 
     fn label(&self) -> &str {

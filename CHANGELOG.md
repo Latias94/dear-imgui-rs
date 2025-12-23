@@ -7,27 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Core (`dear-imgui-rs`)
-  - `with_scratch_txt`, `with_scratch_txt_two`, `with_scratch_txt_three`: closure-based helpers for building temporary NUL-terminated C string pointers without allocating.
-
-### Changed
-
-- Core (`dear-imgui-rs`)
-  - Remove `Viewport::main()` (returned `&'static Viewport`); use `Ui::main_viewport()` or `Context::main_viewport()` to get a viewport reference tied to the caller's lifetime.
-
-### Fixed
-
-- Core (`dear-imgui-rs`)
-  - InputText (String-backed): avoid undefined behavior when trimming at NUL by zero-initializing spare capacity, including during ImGui resize callbacks.
-  - Deprecated glyph ranges: fix `GlyphRangesBuilder::add_ranges` to pass the correct `ImWchar` layout, and free internal `ImVector_ImWchar` buffers; add `Drop` for the underlying C++ builder.
-  - Dynamic fonts: fix `FontConfig::glyph_exclude_ranges` to pass the correct `ImWchar` layout (and now owns the converted ranges buffer, ensuring it is NUL-terminated).
-  - Managed textures: avoid null pointer arithmetic when iterating `DrawData::textures()` / `PlatformIo::textures()` on empty lists.
-  - `OwnedDrawData`: avoid double-free by letting `ImDrawData` own and free its `CmdLists` storage (we still destroy the cloned `ImDrawList` payloads).
-  - `Context::save_ini_settings`: read the returned settings blob using `out_ini_size` instead of relying on NUL termination.
-  - `Ui::get_key_name` / `Ui::style_color_name`: handle null pointers defensively at the FFI boundary.
-
 ## [0.8.0] - 2025-12-22
 
 ### Added
@@ -42,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Io::mouse_down_button` / `Io::set_mouse_down_button`: typed `MouseButton` helpers for `Io::MouseDown`.
   - Legacy columns: `Ui::begin_columns_token` (RAII `ColumnsToken` ends columns on drop).
   - `Ui::list_box_config`: convenience constructor for `ListBox`.
+  - Scratch C string helpers (no allocation): `with_scratch_txt`, `with_scratch_txt_two`, `with_scratch_txt_three`,
+    `with_scratch_txt_slice`, `with_scratch_txt_slice_with_opt`.
 
 - Extensions
   - `dear-implot`: add non-variadic text helpers for annotations/tags (avoids calling C `...`, useful for import-style WASM).
@@ -57,10 +38,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Selectables: `Selectable::build_with_ref` now uses ImGui's `Selectable(..., bool*)` variant for closer upstream behavior parity.
   - `TextFilter`: fix a leak by calling `ImGuiTextFilter_destroy` on drop; also avoid per-call allocations in `draw*`/`pass_filter*`.
   - Clipboard: handle non-UTF8 clipboard payloads without panicking (lossy conversion).
+  - InputText (String-backed): avoid undefined behavior when trimming at NUL by zero-initializing spare capacity, including during ImGui resize callbacks.
+  - Deprecated glyph ranges: fix `GlyphRangesBuilder::add_ranges` to pass the correct `ImWchar` layout, and free internal `ImVector_ImWchar` buffers; add `Drop` for the underlying C++ builder.
+  - Dynamic fonts: fix `FontConfig::glyph_exclude_ranges` to pass the correct `ImWchar` layout (and now owns the converted ranges buffer, ensuring it is NUL-terminated).
+  - Managed textures: avoid null pointer arithmetic when iterating `DrawData::textures()` / `PlatformIo::textures()` on empty lists.
+  - `OwnedDrawData`: avoid double-free by letting `ImDrawData` own and free its `CmdLists` storage (we still destroy the cloned `ImDrawList` payloads).
+  - `Context::save_ini_settings`: read the returned settings blob using `out_ini_size` instead of relying on NUL termination.
+  - `Ui::get_key_name` / `Ui::style_color_name`: handle null pointers defensively at the FFI boundary.
 
 ### Changed
 
 - Core (`dear-imgui-rs`)
+  - Remove `Viewport::main()` (returned `&'static Viewport`); use `Ui::main_viewport()` or `Context::main_viewport()` to get a viewport reference tied to the caller's lifetime.
   - `ui.window(...).build(...)` only shows a close button when `opened(...)` is provided (matches upstream Dear ImGui behavior).
   - `Ui::get_id` uses the internal scratch buffer instead of allocating a `CString`.
   - `Ui::window` now accepts `Into<Cow<'_, str>>` and avoids per-frame string allocation for borrowed names.
@@ -71,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `DockBuilder::dock_window`, `DockBuilder::copy_window_settings`, and `TextCallbackData::insert_chars`.
   - `ImString` now rejects interior NUL bytes in safe constructors/mutators (`new`, `push_str`).
 - `dear-imgui-wgpu`: bump `wgpu` to v28 (requires Rust 1.92+).
+- `dear-implot`: avoid per-call `CString` allocations in most label/title APIs by using the shared scratch string helpers.
 
 ## [0.7.0] - 2025-12-13
 

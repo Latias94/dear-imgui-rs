@@ -1,9 +1,8 @@
 //! Bar groups plot implementation
 
-use super::{PlotData, PlotError, safe_cstring};
+use super::{PlotData, PlotError, with_plot_str_slice};
 use crate::BarGroupsFlags;
 use crate::sys;
-use std::ffi::CString;
 
 /// Builder for bar groups plots with extensive customization options
 pub struct BarGroupsPlot<'a> {
@@ -99,16 +98,7 @@ impl<'a> BarGroupsPlot<'a> {
 
     /// Plot the bar groups
     pub fn plot(self) {
-        // Convert labels to CString pointers
-        let label_cstrings: Vec<CString> = self
-            .label_ids
-            .iter()
-            .map(|&label| safe_cstring(label))
-            .collect();
-
-        let label_ptrs: Vec<*const i8> = label_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
-
-        unsafe {
+        with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
             sys::ImPlot_PlotBarGroups_doublePtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
@@ -118,7 +108,7 @@ impl<'a> BarGroupsPlot<'a> {
                 self.shift,
                 self.flags.bits() as i32,
             );
-        }
+        })
     }
 }
 
@@ -220,16 +210,7 @@ impl<'a> BarGroupsPlotF32<'a> {
 
     /// Plot the bar groups
     pub fn plot(self) {
-        // Convert labels to CString pointers
-        let label_cstrings: Vec<CString> = self
-            .label_ids
-            .iter()
-            .map(|&label| safe_cstring(label))
-            .collect();
-
-        let label_ptrs: Vec<*const i8> = label_cstrings.iter().map(|cstr| cstr.as_ptr()).collect();
-
-        unsafe {
+        with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
             sys::ImPlot_PlotBarGroups_FloatPtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
@@ -239,7 +220,7 @@ impl<'a> BarGroupsPlotF32<'a> {
                 self.shift,
                 self.flags.bits() as i32,
             );
-        }
+        })
     }
 }
 

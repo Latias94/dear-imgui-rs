@@ -1,6 +1,7 @@
 // Utility functions for ImPlot
 
 use crate::{XAxis, YAxis, compat_ffi, sys};
+use dear_imgui_rs::with_scratch_txt;
 
 /// Check if the plot area is hovered
 pub fn is_plot_hovered() -> bool {
@@ -14,8 +15,10 @@ pub fn is_subplots_hovered() -> bool {
 
 /// Check if a legend entry is hovered
 pub fn is_legend_entry_hovered(label: &str) -> bool {
-    let c = std::ffi::CString::new(label).unwrap_or_default();
-    unsafe { sys::ImPlot_IsLegendEntryHovered(c.as_ptr()) }
+    let label = if label.contains('\0') { "" } else { label };
+    with_scratch_txt(label, |ptr| unsafe {
+        sys::ImPlot_IsLegendEntryHovered(ptr)
+    })
 }
 
 /// Get the mouse position in plot coordinates
@@ -195,8 +198,10 @@ pub fn annotation_text(
         x: pixel_offset[0],
         y: pixel_offset[1],
     };
-    let c = CString::new(text).expect("text contained NUL");
-    unsafe { compat_ffi::ImPlot_Annotation_Str0(x, y, col, off, clamp, c.as_ptr()) }
+    assert!(!text.contains('\0'), "text contained NUL");
+    with_scratch_txt(text, |ptr| unsafe {
+        compat_ffi::ImPlot_Annotation_Str0(x, y, col, off, clamp, ptr)
+    })
 }
 
 /// Tag the X axis at position x with a tick-like mark
@@ -218,8 +223,10 @@ pub fn tag_x_text(x: f64, color: [f32; 4], text: &str) {
         z: color[2],
         w: color[3],
     };
-    let c = CString::new(text).expect("text contained NUL");
-    unsafe { compat_ffi::ImPlot_TagX_Str0(x, col, c.as_ptr()) }
+    assert!(!text.contains('\0'), "text contained NUL");
+    with_scratch_txt(text, |ptr| unsafe {
+        compat_ffi::ImPlot_TagX_Str0(x, col, ptr)
+    })
 }
 
 /// Tag the Y axis at position y with a tick-like mark
@@ -241,8 +248,10 @@ pub fn tag_y_text(y: f64, color: [f32; 4], text: &str) {
         z: color[2],
         w: color[3],
     };
-    let c = CString::new(text).expect("text contained NUL");
-    unsafe { compat_ffi::ImPlot_TagY_Str0(y, col, c.as_ptr()) }
+    assert!(!text.contains('\0'), "text contained NUL");
+    with_scratch_txt(text, |ptr| unsafe {
+        compat_ffi::ImPlot_TagY_Str0(y, col, ptr)
+    })
 }
 
 /// Get the current plot limits for specific axes
@@ -444,4 +453,3 @@ pub fn drag_line_y(
         held,
     }
 }
-use std::ffi::CString;

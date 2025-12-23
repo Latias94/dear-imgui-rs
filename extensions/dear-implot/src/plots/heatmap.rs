@@ -1,7 +1,8 @@
 //! Heatmap plot implementation
 
-use super::{Plot, PlotError, safe_cstring};
+use super::{Plot, PlotError, with_plot_str_or_empty};
 use crate::{HeatmapFlags, sys};
+use dear_imgui_rs::with_scratch_txt_two;
 
 /// Builder for heatmap plots with extensive customization options
 pub struct HeatmapPlot<'a> {
@@ -110,28 +111,43 @@ impl<'a> Plot for HeatmapPlot<'a> {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
-
-        let label_cstr = safe_cstring(self.label);
-
-        let label_fmt_cstr = self.label_fmt.map(safe_cstring);
-        let label_fmt_ptr = label_fmt_cstr
-            .as_ref()
-            .map(|cstr| cstr.as_ptr())
-            .unwrap_or(std::ptr::null());
-
-        unsafe {
-            sys::ImPlot_PlotHeatmap_doublePtr(
-                label_cstr.as_ptr(),
-                self.values.as_ptr(),
-                self.rows,
-                self.cols,
-                self.scale_min,
-                self.scale_max,
-                label_fmt_ptr,
-                self.bounds_min,
-                self.bounds_max,
-                self.flags.bits() as i32,
-            );
+        let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
+        match label_fmt {
+            Some(label_fmt) => {
+                let label = if self.label.contains('\0') {
+                    ""
+                } else {
+                    self.label
+                };
+                with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
+                    sys::ImPlot_PlotHeatmap_doublePtr(
+                        label_ptr,
+                        self.values.as_ptr(),
+                        self.rows,
+                        self.cols,
+                        self.scale_min,
+                        self.scale_max,
+                        label_fmt_ptr,
+                        self.bounds_min,
+                        self.bounds_max,
+                        self.flags.bits() as i32,
+                    );
+                })
+            }
+            None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                sys::ImPlot_PlotHeatmap_doublePtr(
+                    label_ptr,
+                    self.values.as_ptr(),
+                    self.rows,
+                    self.cols,
+                    self.scale_min,
+                    self.scale_max,
+                    std::ptr::null(),
+                    self.bounds_min,
+                    self.bounds_max,
+                    self.flags.bits() as i32,
+                );
+            }),
         }
     }
 
@@ -232,28 +248,43 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
         if self.validate().is_err() {
             return;
         }
-
-        let label_cstr = safe_cstring(self.label);
-
-        let label_fmt_cstr = self.label_fmt.map(safe_cstring);
-        let label_fmt_ptr = label_fmt_cstr
-            .as_ref()
-            .map(|cstr| cstr.as_ptr())
-            .unwrap_or(std::ptr::null());
-
-        unsafe {
-            sys::ImPlot_PlotHeatmap_FloatPtr(
-                label_cstr.as_ptr(),
-                self.values.as_ptr(),
-                self.rows,
-                self.cols,
-                self.scale_min,
-                self.scale_max,
-                label_fmt_ptr,
-                self.bounds_min,
-                self.bounds_max,
-                self.flags.bits() as i32,
-            );
+        let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
+        match label_fmt {
+            Some(label_fmt) => {
+                let label = if self.label.contains('\0') {
+                    ""
+                } else {
+                    self.label
+                };
+                with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
+                    sys::ImPlot_PlotHeatmap_FloatPtr(
+                        label_ptr,
+                        self.values.as_ptr(),
+                        self.rows,
+                        self.cols,
+                        self.scale_min,
+                        self.scale_max,
+                        label_fmt_ptr,
+                        self.bounds_min,
+                        self.bounds_max,
+                        self.flags.bits() as i32,
+                    );
+                })
+            }
+            None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                sys::ImPlot_PlotHeatmap_FloatPtr(
+                    label_ptr,
+                    self.values.as_ptr(),
+                    self.rows,
+                    self.cols,
+                    self.scale_min,
+                    self.scale_max,
+                    std::ptr::null(),
+                    self.bounds_min,
+                    self.bounds_max,
+                    self.flags.bits() as i32,
+                );
+            }),
         }
     }
 

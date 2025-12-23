@@ -1,6 +1,6 @@
 //! Bar plot implementation
 
-use super::{Plot, PlotError, safe_cstring};
+use super::{Plot, PlotError, with_plot_str_or_empty};
 use crate::{BarsFlags, sys};
 
 /// Builder for bar plots with customization options
@@ -74,11 +74,9 @@ impl<'a> Plot for BarPlot<'a> {
             return; // Skip plotting if data is invalid
         }
 
-        let label_cstr = safe_cstring(self.label);
-
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotBars_doublePtrInt(
-                label_cstr.as_ptr(),
+                label_ptr,
                 self.values.as_ptr(),
                 self.values.len() as i32,
                 self.bar_size,
@@ -87,7 +85,7 @@ impl<'a> Plot for BarPlot<'a> {
                 self.offset,
                 self.stride,
             );
-        }
+        })
     }
 
     fn label(&self) -> &str {
@@ -140,11 +138,9 @@ impl<'a> Plot for PositionalBarPlot<'a> {
             return; // Skip plotting if data is invalid
         }
 
-        let label_cstr = safe_cstring(self.label);
-
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotBars_doublePtrdoublePtr(
-                label_cstr.as_ptr(),
+                label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.y_data.len() as i32,
@@ -153,7 +149,7 @@ impl<'a> Plot for PositionalBarPlot<'a> {
                 0,
                 std::mem::size_of::<f64>() as i32,
             );
-        }
+        })
     }
 
     fn label(&self) -> &str {

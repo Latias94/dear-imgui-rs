@@ -181,6 +181,71 @@ pub fn with_scratch_txt_three<R>(
     })
 }
 
+/// Calls `f` with a list of temporary, NUL-terminated C string pointers backed by a thread-local scratch buffer.
+///
+/// The pointers are only valid for the duration of the call (and will be overwritten by subsequent
+/// scratch-string operations on the same thread).
+pub fn with_scratch_txt_slice<R>(txts: &[&str], f: impl FnOnce(&[*const c_char]) -> R) -> R {
+    TLS_SCRATCH.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.refresh_buffer();
+
+        let total_bytes: usize = txts.iter().map(|s| s.len() + 1).sum();
+        buf.buffer.reserve(total_bytes);
+
+        let mut offsets: Vec<usize> = Vec::with_capacity(txts.len());
+        for &s in txts {
+            offsets.push(buf.push(s));
+        }
+
+        let mut ptrs: Vec<*const c_char> = Vec::with_capacity(txts.len());
+        for off in offsets {
+            ptrs.push(unsafe { buf.offset(off) });
+        }
+
+        f(&ptrs)
+    })
+}
+
+/// Calls `f` with a list of temporary, NUL-terminated C string pointers and one optional pointer backed by
+/// a thread-local scratch buffer.
+///
+/// The returned pointers are only valid for the duration of the call (and will be overwritten by subsequent
+/// scratch-string operations on the same thread).
+pub fn with_scratch_txt_slice_with_opt<R>(
+    txts: &[&str],
+    txt_opt: Option<&str>,
+    f: impl FnOnce(&[*const c_char], *const c_char) -> R,
+) -> R {
+    TLS_SCRATCH.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.refresh_buffer();
+
+        let total_bytes: usize = txts.iter().map(|s| s.len() + 1).sum::<usize>()
+            + txt_opt.map(|s| s.len() + 1).unwrap_or(0);
+        buf.buffer.reserve(total_bytes);
+
+        let mut offsets: Vec<usize> = Vec::with_capacity(txts.len());
+        for &s in txts {
+            offsets.push(buf.push(s));
+        }
+
+        let opt_off = txt_opt.map(|s| buf.push(s));
+
+        let mut ptrs: Vec<*const c_char> = Vec::with_capacity(txts.len());
+        for off in offsets {
+            ptrs.push(unsafe { buf.offset(off) });
+        }
+
+        let opt_ptr = match opt_off {
+            Some(off) => unsafe { buf.offset(off) },
+            None => std::ptr::null(),
+        };
+
+        f(&ptrs, opt_ptr)
+    })
+}
+
 /// A UTF-8 encoded, growable, implicitly nul-terminated string.
 #[derive(Clone, Hash, Ord, Eq, PartialOrd, PartialEq)]
 pub struct ImString(pub(crate) Vec<u8>);

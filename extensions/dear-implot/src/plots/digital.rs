@@ -1,6 +1,6 @@
 //! Digital plot implementation
 
-use super::{PlotData, PlotError, safe_cstring, validate_data_lengths};
+use super::{PlotData, PlotError, validate_data_lengths, with_plot_str_or_empty};
 use crate::DigitalFlags;
 use crate::sys;
 
@@ -59,11 +59,9 @@ impl<'a> DigitalPlot<'a> {
 
     /// Plot the digital signal
     pub fn plot(self) {
-        let label_cstring = safe_cstring(self.label);
-
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotDigital_doublePtr(
-                label_cstring.as_ptr(),
+                label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
@@ -71,7 +69,7 @@ impl<'a> DigitalPlot<'a> {
                 self.offset,
                 self.stride,
             );
-        }
+        })
     }
 }
 
@@ -126,11 +124,9 @@ impl<'a> DigitalPlotF32<'a> {
 
     /// Plot the digital signal
     pub fn plot(self) {
-        let label_cstring = safe_cstring(self.label);
-
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotDigital_FloatPtr(
-                label_cstring.as_ptr(),
+                label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.x_data.len() as i32,
@@ -138,7 +134,7 @@ impl<'a> DigitalPlotF32<'a> {
                 0,
                 std::mem::size_of::<f32>() as i32,
             );
-        }
+        })
     }
 }
 
@@ -206,11 +202,9 @@ impl<'a> SimpleDigitalPlot<'a> {
             .map(|i| self.x_start + i as f64 * self.x_scale)
             .collect();
 
-        let label_cstring = safe_cstring(self.label);
-
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotDigital_doublePtr(
-                label_cstring.as_ptr(),
+                label_ptr,
                 x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.y_data.len() as i32,
@@ -218,7 +212,7 @@ impl<'a> SimpleDigitalPlot<'a> {
                 0,
                 std::mem::size_of::<f64>() as i32,
             );
-        }
+        })
     }
 }
 
@@ -280,11 +274,9 @@ impl<'a> BooleanDigitalPlot<'a> {
             .map(|&b| if b { 1.0 } else { 0.0 })
             .collect();
 
-        let label_cstring = safe_cstring(self.label);
-
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotDigital_doublePtr(
-                label_cstring.as_ptr(),
+                label_ptr,
                 self.x_data.as_ptr(),
                 y_data_f64.as_ptr(),
                 self.x_data.len() as i32,
@@ -292,7 +284,7 @@ impl<'a> BooleanDigitalPlot<'a> {
                 0,
                 std::mem::size_of::<f64>() as i32,
             );
-        }
+        })
     }
 }
 

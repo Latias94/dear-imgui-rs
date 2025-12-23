@@ -1,6 +1,6 @@
 //! Histogram plot implementation
 
-use super::{Plot, PlotError, safe_cstring};
+use super::{Plot, PlotError, with_plot_str_or_empty};
 use crate::sys;
 use crate::{BinMethod, HistogramFlags};
 
@@ -102,17 +102,15 @@ impl<'a> Plot for HistogramPlot<'a> {
             return;
         }
 
-        let label_cstr = safe_cstring(self.label);
-
         let range = if let Some(range) = &self.range {
             *range
         } else {
             sys::ImPlotRange { Min: 0.0, Max: 0.0 }
         };
 
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotHistogram_doublePtr(
-                label_cstr.as_ptr(),
+                label_ptr,
                 self.values.as_ptr(),
                 self.values.len() as i32,
                 self.bins,
@@ -120,7 +118,7 @@ impl<'a> Plot for HistogramPlot<'a> {
                 range,
                 self.flags.bits() as i32,
             );
-        }
+        })
     }
 
     fn label(&self) -> &str {
@@ -217,8 +215,6 @@ impl<'a> Plot for Histogram2DPlot<'a> {
             return;
         }
 
-        let label_cstr = safe_cstring(self.label);
-
         let range = if let Some(range) = &self.range {
             *range
         } else {
@@ -228,9 +224,9 @@ impl<'a> Plot for Histogram2DPlot<'a> {
             }
         };
 
-        unsafe {
+        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             sys::ImPlot_PlotHistogram2D_doublePtr(
-                label_cstr.as_ptr(),
+                label_ptr,
                 self.x_values.as_ptr(),
                 self.y_values.as_ptr(),
                 self.x_values.len() as i32,
@@ -239,7 +235,7 @@ impl<'a> Plot for Histogram2DPlot<'a> {
                 range,
                 self.flags.bits() as i32,
             );
-        }
+        })
     }
 
     fn label(&self) -> &str {
