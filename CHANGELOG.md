@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Selectables: `Selectable::build_with_ref` now uses ImGui's `Selectable(..., bool*)` variant for closer upstream behavior parity.
   - `TextFilter`: fix a leak by calling `ImGuiTextFilter_destroy` on drop; also avoid per-call allocations in `draw*`/`pass_filter*`.
   - Clipboard: handle non-UTF8 clipboard payloads without panicking (lossy conversion).
+  - Rendering draw lists: handle null vertex/index buffers defensively when constructing slices at the FFI boundary.
   - InputText (String-backed): avoid undefined behavior when trimming at NUL by zero-initializing spare capacity, including during ImGui resize callbacks.
   - Deprecated glyph ranges: fix `GlyphRangesBuilder::add_ranges` to pass the correct `ImWchar` layout, and free internal `ImVector_ImWchar` buffers; add `Drop` for the underlying C++ builder.
   - Dynamic fonts: fix `FontConfig::glyph_exclude_ranges` to pass the correct `ImWchar` layout (and now owns the converted ranges buffer, ensuring it is NUL-terminated).
@@ -55,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ui.window(...).build(...)` only shows a close button when `opened(...)` is provided (matches upstream Dear ImGui behavior).
   - `Ui::get_id` uses the internal scratch buffer instead of allocating a `CString`.
   - `Ui::window` now accepts `Into<Cow<'_, str>>` and avoids per-frame string allocation for borrowed names.
+  - `InputText::hint` now accepts `Into<Cow<'_, str>>`, matching label ergonomics and avoiding type changes when passing owned `String`s.
   - Avoid per-frame allocations for common builder labels/IDs by storing `Cow<'_, str>`:
     `Button`, `InputText*`, `InputInt/Float/Double`, `PlotLines/Histogram`, `ColorEdit/Picker/Button`,
     `ImageButton`, `ProgressBar`, `TableBuilder`/`ColumnBuilder`.

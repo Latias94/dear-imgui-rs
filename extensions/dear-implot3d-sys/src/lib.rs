@@ -9,6 +9,7 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 #![allow(unnecessary_transmutes)]
+#![allow(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::all)]
 #![allow(unpredictable_function_pointer_comparisons)]
 

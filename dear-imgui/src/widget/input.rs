@@ -406,14 +406,14 @@ impl<'ui, 'p, L, H, T> InputText<'ui, 'p, L, H, T> {
     }
 
     /// Sets a hint text
-    pub fn hint<H2: AsRef<str>>(self, hint: H2) -> InputText<'ui, 'p, L, H2, T> {
+    pub fn hint(self, hint: impl Into<Cow<'ui, str>>) -> InputText<'ui, 'p, L, Cow<'ui, str>, T> {
         InputText {
             ui: self.ui,
             label: self.label,
             buf: self.buf,
             flags: self.flags,
             capacity_hint: self.capacity_hint,
-            hint: Some(hint),
+            hint: Some(hint.into()),
             callback_handler: self.callback_handler,
             _phantom: PhantomData,
         }

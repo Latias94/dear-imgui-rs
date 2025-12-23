@@ -284,6 +284,9 @@ impl DrawList {
     pub fn vtx_buffer(&self) -> &[DrawVert] {
         unsafe {
             let vtx_buffer = &self.0.VtxBuffer;
+            if vtx_buffer.Size <= 0 || vtx_buffer.Data.is_null() {
+                return &[];
+            }
             slice::from_raw_parts(vtx_buffer.Data as *const DrawVert, vtx_buffer.Size as usize)
         }
     }
@@ -292,6 +295,9 @@ impl DrawList {
     pub fn idx_buffer(&self) -> &[DrawIdx] {
         unsafe {
             let idx_buffer = &self.0.IdxBuffer;
+            if idx_buffer.Size <= 0 || idx_buffer.Data.is_null() {
+                return &[];
+            }
             slice::from_raw_parts(idx_buffer.Data, idx_buffer.Size as usize)
         }
     }
