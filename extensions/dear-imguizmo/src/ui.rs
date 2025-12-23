@@ -1,7 +1,6 @@
 use dear_imgui_rs::Ui;
 use dear_imgui_sys as imgui_sys;
 use dear_imguizmo_sys as sys;
-use std::ffi::CString;
 
 use crate::mat::Mat4Like;
 use crate::style::Style;
@@ -134,10 +133,12 @@ impl<'ui> GizmoUi<'ui> {
     /// - `window_name` must match the exact ImGui window name (including any `###id` suffix).
     /// - Returns `true` if the window was found; otherwise clears the alternative window and returns `false`.
     pub fn set_alternative_window_by_name(&self, window_name: &str) -> bool {
-        let c = CString::new(window_name).expect("window_name contained NUL");
-        let window = unsafe { imgui_sys::igFindWindowByName(c.as_ptr()) } as *mut sys::ImGuiWindow;
-        unsafe { sys::ImGuizmo_SetAlternativeWindow(window) };
-        !window.is_null()
+        assert!(!window_name.contains('\0'), "window_name contained NUL");
+        dear_imgui_rs::with_scratch_txt(window_name, |ptr| {
+            let window = unsafe { imgui_sys::igFindWindowByName(ptr) } as *mut sys::ImGuiWindow;
+            unsafe { sys::ImGuizmo_SetAlternativeWindow(window) };
+            !window.is_null()
+        })
     }
 
     /// Clear the alternative hovered window for ImGuizmo.
@@ -149,7 +150,7 @@ impl<'ui> GizmoUi<'ui> {
     ///
     /// Prefer `set_alternative_window_by_name` unless you are already working with internal ImGui window pointers.
     pub unsafe fn set_alternative_window_raw(&self, window: *mut sys::ImGuiWindow) {
-        sys::ImGuizmo_SetAlternativeWindow(window)
+        unsafe { sys::ImGuizmo_SetAlternativeWindow(window) }
     }
 
     /// Unsafe: set a raw ImGui drawlist pointer for ImGuizmo to render into.
@@ -158,7 +159,7 @@ impl<'ui> GizmoUi<'ui> {
     /// have a valid `*mut ImDrawList` whose lifetime is at least the duration
     /// of the current frame.
     pub unsafe fn set_drawlist_raw(&self, drawlist: *mut imgui_sys::ImDrawList) {
-        sys::ImGuizmo_SetDrawlist(drawlist)
+        unsafe { sys::ImGuizmo_SetDrawlist(drawlist) }
     }
 
     /// Manipulate using the currently bound draw list.
@@ -322,8 +323,8 @@ impl<'ui> GizmoUi<'ui> {
             match id {
                 GuizmoId::Int(i) => sys::ImGuizmo_PushID_Int(i),
                 GuizmoId::Str(s) => {
-                    let c = CString::new(s).expect("string contained NUL");
-                    sys::ImGuizmo_PushID_Str(c.as_ptr())
+                    assert!(!s.contains('\0'), "string contained NUL");
+                    dear_imgui_rs::with_scratch_txt(s, |ptr| sys::ImGuizmo_PushID_Str(ptr));
                 }
                 GuizmoId::Bytes(bytes) => {
                     let range = bytes.as_ptr_range();
@@ -347,8 +348,8 @@ impl<'ui> GizmoUi<'ui> {
     }
     /// Obtain a hashed ID value following ImGuizmo's ID scheme.
     pub fn get_id_str(&self, id: &str) -> imgui_sys::ImGuiID {
-        let c = CString::new(id).expect("string contained NUL");
-        unsafe { sys::ImGuizmo_GetID_Str(c.as_ptr()) }
+        assert!(!id.contains('\0'), "string contained NUL");
+        dear_imgui_rs::with_scratch_txt(id, |ptr| unsafe { sys::ImGuizmo_GetID_Str(ptr) })
     }
     /// Obtain a hashed ID value using a non-NUL-terminated byte slice (ImGuizmo `str_begin/str_end` form).
     pub fn get_id_bytes(&self, bytes: &[u8]) -> imgui_sys::ImGuiID {

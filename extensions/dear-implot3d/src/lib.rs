@@ -53,6 +53,8 @@ pub use ui_ext::*;
 pub mod meshes;
 pub mod plots;
 
+use std::borrow::Cow;
+
 trait ImVec2Ctor {
     fn from_xy(x: f32, y: f32) -> Self;
 }
@@ -1054,7 +1056,7 @@ impl<'ui> Plot3DUi<'ui> {
 /// Surface (grid) plot builder (f32 variant)
 pub struct Surface3DBuilder<'ui> {
     ui: &'ui Plot3DUi<'ui>,
-    label: std::ffi::CString,
+    label: Cow<'ui, str>,
     xs: &'ui [f32],
     ys: &'ui [f32],
     zs: &'ui [f32],
@@ -1080,9 +1082,15 @@ impl<'ui> Surface3DBuilder<'ui> {
         if self.zs.len() != expected {
             return;
         }
-        unsafe {
+        let label = self.label.as_ref();
+        let label = if label.contains('\0') {
+            "surface"
+        } else {
+            label
+        };
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotSurface_FloatPtr(
-                self.label.as_ptr(),
+                label_ptr,
                 self.xs.as_ptr(),
                 self.ys.as_ptr(),
                 self.zs.as_ptr(),
@@ -1094,24 +1102,22 @@ impl<'ui> Surface3DBuilder<'ui> {
                 0,
                 0,
             );
-        }
+        })
     }
 }
 
 impl<'ui> Plot3DUi<'ui> {
     /// Start a surface plot (f32)
-    pub fn surface_f32<S: AsRef<str>>(
+    pub fn surface_f32(
         &'ui self,
-        label: S,
+        label: impl Into<Cow<'ui, str>>,
         xs: &'ui [f32],
         ys: &'ui [f32],
         zs: &'ui [f32],
     ) -> Surface3DBuilder<'ui> {
-        let label_c = std::ffi::CString::new(label.as_ref())
-            .unwrap_or_else(|_| std::ffi::CString::new("surface").unwrap());
         Surface3DBuilder {
             ui: self,
-            label: label_c,
+            label: label.into(),
             xs,
             ys,
             zs,
@@ -1238,7 +1244,7 @@ impl<'ui> Plot3DUi<'ui> {
 /// Image by axes builder
 pub struct Image3DByAxesBuilder<'ui> {
     _ui: &'ui Plot3DUi<'ui>,
-    label: std::ffi::CString,
+    label: Cow<'ui, str>,
     tex_ref: sys::ImTextureRef_c,
     center: [f32; 3],
     axis_u: [f32; 3],
@@ -1264,10 +1270,12 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
         self
     }
     pub fn plot(self) {
-        unsafe {
+        let label = self.label.as_ref();
+        let label = if label.contains('\0') { "image" } else { label };
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
             sys::ImPlot3D_PlotImage_Vec2(
-                self.label.as_ptr(),
+                label_ptr,
                 self.tex_ref,
                 sys::ImPlot3DPoint_c {
                     x: self.center[0] as f64,
@@ -1289,14 +1297,14 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
                 imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
                 self.flags.bits() as i32,
             );
-        }
+        })
     }
 }
 
 /// Image by corners builder
 pub struct Image3DByCornersBuilder<'ui> {
     _ui: &'ui Plot3DUi<'ui>,
-    label: std::ffi::CString,
+    label: Cow<'ui, str>,
     tex_ref: sys::ImTextureRef_c,
     p0: [f32; 3],
     p1: [f32; 3],
@@ -1327,10 +1335,12 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
         self
     }
     pub fn plot(self) {
-        unsafe {
+        let label = self.label.as_ref();
+        let label = if label.contains('\0') { "image" } else { label };
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
             sys::ImPlot3D_PlotImage_Plot3DPoInt(
-                self.label.as_ptr(),
+                label_ptr,
                 self.tex_ref,
                 sys::ImPlot3DPoint_c {
                     x: self.p0[0] as f64,
@@ -1359,22 +1369,20 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
                 imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
                 self.flags.bits() as i32,
             );
-        }
+        })
     }
 }
 
 impl<'ui> Plot3DUi<'ui> {
     /// Image oriented by center and axes
-    pub fn image_by_axes<S: AsRef<str>, T: Into<TextureRef>>(
+    pub fn image_by_axes<T: Into<TextureRef>>(
         &'ui self,
-        label: S,
+        label: impl Into<Cow<'ui, str>>,
         tex: T,
         center: [f32; 3],
         axis_u: [f32; 3],
         axis_v: [f32; 3],
     ) -> Image3DByAxesBuilder<'ui> {
-        let label_c = std::ffi::CString::new(label.as_ref())
-            .unwrap_or_else(|_| std::ffi::CString::new("image").unwrap());
         let tr = tex.into().raw();
         let tex_ref = sys::ImTextureRef_c {
             _TexData: tr._TexData as *mut sys::ImTextureData,
@@ -1383,7 +1391,7 @@ impl<'ui> Plot3DUi<'ui> {
         debug_before_plot();
         Image3DByAxesBuilder {
             _ui: self,
-            label: label_c,
+            label: label.into(),
             tex_ref,
             center,
             axis_u,
@@ -1396,17 +1404,15 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     /// Image by 4 corner points (p0..p3)
-    pub fn image_by_corners<S: AsRef<str>, T: Into<TextureRef>>(
+    pub fn image_by_corners<T: Into<TextureRef>>(
         &'ui self,
-        label: S,
+        label: impl Into<Cow<'ui, str>>,
         tex: T,
         p0: [f32; 3],
         p1: [f32; 3],
         p2: [f32; 3],
         p3: [f32; 3],
     ) -> Image3DByCornersBuilder<'ui> {
-        let label_c = std::ffi::CString::new(label.as_ref())
-            .unwrap_or_else(|_| std::ffi::CString::new("image").unwrap());
         let tr = tex.into().raw();
         let tex_ref = sys::ImTextureRef_c {
             _TexData: tr._TexData as *mut sys::ImTextureData,
@@ -1415,7 +1421,7 @@ impl<'ui> Plot3DUi<'ui> {
         debug_before_plot();
         Image3DByCornersBuilder {
             _ui: self,
-            label: label_c,
+            label: label.into(),
             tex_ref,
             p0,
             p1,
@@ -1513,24 +1519,30 @@ impl<'ui> Plot3DUi<'ui> {
     ) {
         debug_before_setup();
         let n_ticks = values.len() as i32;
-        let labels_ptr = if let Some(lbls) = labels {
-            let c_labels: Vec<std::ffi::CString> = lbls
+        if let Some(lbls) = labels {
+            let cleaned: Vec<&str> = lbls
                 .iter()
-                .map(|s| std::ffi::CString::new(*s).unwrap_or_default())
+                .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
-            let ptrs: Vec<*const i8> = c_labels.iter().map(|cs| cs.as_ptr()).collect();
-            ptrs.as_ptr()
+            dear_imgui_rs::with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
+                sys::ImPlot3D_SetupAxisTicks_doublePtr(
+                    axis as i32,
+                    values.as_ptr(),
+                    n_ticks,
+                    ptrs.as_ptr(),
+                    keep_default,
+                )
+            });
         } else {
-            std::ptr::null()
-        };
-        unsafe {
-            sys::ImPlot3D_SetupAxisTicks_doublePtr(
-                axis as i32,
-                values.as_ptr(),
-                n_ticks,
-                labels_ptr,
-                keep_default,
-            )
+            unsafe {
+                sys::ImPlot3D_SetupAxisTicks_doublePtr(
+                    axis as i32,
+                    values.as_ptr(),
+                    n_ticks,
+                    std::ptr::null(),
+                    keep_default,
+                )
+            };
         }
     }
 
@@ -1544,25 +1556,32 @@ impl<'ui> Plot3DUi<'ui> {
         keep_default: bool,
     ) {
         debug_before_setup();
-        let labels_ptr = if let Some(lbls) = labels {
-            let c_labels: Vec<std::ffi::CString> = lbls
+        if let Some(lbls) = labels {
+            let cleaned: Vec<&str> = lbls
                 .iter()
-                .map(|s| std::ffi::CString::new(*s).unwrap_or_default())
+                .map(|&s| if s.contains('\0') { "" } else { s })
                 .collect();
-            let ptrs: Vec<*const i8> = c_labels.iter().map(|cs| cs.as_ptr()).collect();
-            ptrs.as_ptr()
+            dear_imgui_rs::with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
+                sys::ImPlot3D_SetupAxisTicks_double(
+                    axis as i32,
+                    v_min,
+                    v_max,
+                    n_ticks,
+                    ptrs.as_ptr(),
+                    keep_default,
+                )
+            });
         } else {
-            std::ptr::null()
-        };
-        unsafe {
-            sys::ImPlot3D_SetupAxisTicks_double(
-                axis as i32,
-                v_min,
-                v_max,
-                n_ticks,
-                labels_ptr,
-                keep_default,
-            )
+            unsafe {
+                sys::ImPlot3D_SetupAxisTicks_double(
+                    axis as i32,
+                    v_min,
+                    v_max,
+                    n_ticks,
+                    std::ptr::null(),
+                    keep_default,
+                )
+            };
         }
     }
 
@@ -1644,7 +1663,7 @@ impl<'ui> Plot3DUi<'ui> {
 /// Mesh plot builder
 pub struct Mesh3DBuilder<'ui> {
     _ui: &'ui Plot3DUi<'ui>,
-    label: std::ffi::CString,
+    label: Cow<'ui, str>,
     vertices: &'ui [[f32; 3]],
     indices: &'ui [u32],
     flags: Mesh3DFlags,
@@ -1660,34 +1679,34 @@ impl<'ui> Mesh3DBuilder<'ui> {
         // Layout compatibility assumed; if upstream changes, this needs revisiting.
         let vtx_count = self.vertices.len() as i32;
         let idx_count = self.indices.len() as i32;
-        unsafe {
+        let label = self.label.as_ref();
+        let label = if label.contains('\0') { "mesh" } else { label };
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
             let vtx_ptr = self.vertices.as_ptr() as *const sys::ImPlot3DPoint;
             sys::ImPlot3D_PlotMesh(
-                self.label.as_ptr(),
+                label_ptr,
                 vtx_ptr,
                 self.indices.as_ptr(),
                 vtx_count,
                 idx_count,
                 self.flags.bits() as i32,
             );
-        }
+        })
     }
 }
 
 impl<'ui> Plot3DUi<'ui> {
     /// Start a mesh plot from vertices (x,y,z) and triangle indices
-    pub fn mesh<S: AsRef<str>>(
+    pub fn mesh(
         &'ui self,
-        label: S,
+        label: impl Into<Cow<'ui, str>>,
         vertices: &'ui [[f32; 3]],
         indices: &'ui [u32],
     ) -> Mesh3DBuilder<'ui> {
-        let label_c = std::ffi::CString::new(label.as_ref())
-            .unwrap_or_else(|_| std::ffi::CString::new("mesh").unwrap());
         Mesh3DBuilder {
             _ui: self,
-            label: label_c,
+            label: label.into(),
             vertices,
             indices,
             flags: Mesh3DFlags::NONE,

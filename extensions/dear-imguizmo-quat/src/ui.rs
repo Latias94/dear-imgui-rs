@@ -1,12 +1,16 @@
-use std::ffi::CString;
-
 use dear_imgui_rs::Ui;
 use dear_imguizmo_quat_sys as sys;
+use std::os::raw::c_char;
 
 use crate::types::{
     Mode, Modifiers, QuatLike, Vec3Like, Vec4Like, from_sys_quat, from_sys_vec3, from_sys_vec4,
     modifiers_to_sys, to_sys_quat, to_sys_vec3, to_sys_vec4,
 };
+
+fn with_label_ptr<R>(label: &str, f: impl FnOnce(*const c_char) -> R) -> R {
+    assert!(!label.contains('\0'), "label contained NUL");
+    dear_imgui_rs::with_scratch_txt(label, f)
+}
 
 /// Lightweight handle to call ImGuIZMO.quat functions within a Ui frame
 #[derive(Clone, Copy)]
@@ -187,11 +191,10 @@ impl<'ui> GizmoQuatUi<'ui> {
 
     /// Gizmo with quaternion for axes rotation
     pub fn gizmo3d_quat<Q: QuatLike>(&self, label: &str, q: &mut Q, size: f32, mode: Mode) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut sq = to_sys_quat(q);
-        let used = unsafe {
-            sys::iggizmo3D_quatPtrFloat(c.as_ptr(), &mut sq as *mut _, size, mode.bits())
-        };
+        let used = with_label_ptr(label, |label_ptr| unsafe {
+            sys::iggizmo3D_quatPtrFloat(label_ptr, &mut sq as *mut _, size, mode.bits())
+        });
         from_sys_quat(q, sq);
         used
     }
@@ -205,18 +208,17 @@ impl<'ui> GizmoQuatUi<'ui> {
         size: f32,
         mode: Mode,
     ) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut sq = to_sys_quat(q);
         let mut sl = to_sys_quat(light);
-        let used = unsafe {
+        let used = with_label_ptr(label, |label_ptr| unsafe {
             sys::iggizmo3D_quatPtrquatPtr(
-                c.as_ptr(),
+                label_ptr,
                 &mut sq as *mut _,
                 &mut sl as *mut _,
                 size,
                 mode.bits(),
             )
-        };
+        });
         from_sys_quat(q, sq);
         from_sys_quat(light, sl);
         used
@@ -231,18 +233,17 @@ impl<'ui> GizmoQuatUi<'ui> {
         size: f32,
         mode: Mode,
     ) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut sq = to_sys_quat(q);
         let mut sv = to_sys_vec4(v);
-        let used = unsafe {
+        let used = with_label_ptr(label, |label_ptr| unsafe {
             sys::iggizmo3D_quatPtrvec4Ptr(
-                c.as_ptr(),
+                label_ptr,
                 &mut sq as *mut _,
                 &mut sv as *mut _,
                 size,
                 mode.bits(),
             )
-        };
+        });
         from_sys_quat(q, sq);
         from_sys_vec4(v, sv);
         used
@@ -257,18 +258,17 @@ impl<'ui> GizmoQuatUi<'ui> {
         size: f32,
         mode: Mode,
     ) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut sq = to_sys_quat(q);
         let mut sv = to_sys_vec3(v);
-        let used = unsafe {
+        let used = with_label_ptr(label, |label_ptr| unsafe {
             sys::iggizmo3D_quatPtrvec3Ptr(
-                c.as_ptr(),
+                label_ptr,
                 &mut sq as *mut _,
                 &mut sv as *mut _,
                 size,
                 mode.bits(),
             )
-        };
+        });
         from_sys_quat(q, sq);
         from_sys_vec3(v, sv);
         used
@@ -283,18 +283,17 @@ impl<'ui> GizmoQuatUi<'ui> {
         size: f32,
         mode: Mode,
     ) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut svm = to_sys_vec3(vm);
         let mut sq = to_sys_quat(q);
-        let used = unsafe {
+        let used = with_label_ptr(label, |label_ptr| unsafe {
             sys::iggizmo3D_vec3PtrquatPtrFloat(
-                c.as_ptr(),
+                label_ptr,
                 &mut svm as *mut _,
                 &mut sq as *mut _,
                 size,
                 mode.bits(),
             )
-        };
+        });
         from_sys_vec3(vm, svm);
         from_sys_quat(q, sq);
         used
@@ -309,18 +308,17 @@ impl<'ui> GizmoQuatUi<'ui> {
         size: f32,
         mode: Mode,
     ) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut svm = to_sys_vec3(vm);
         let mut sv4 = to_sys_vec4(v);
-        let used = unsafe {
+        let used = with_label_ptr(label, |label_ptr| unsafe {
             sys::iggizmo3D_vec3Ptrvec4Ptr(
-                c.as_ptr(),
+                label_ptr,
                 &mut svm as *mut _,
                 &mut sv4 as *mut _,
                 size,
                 mode.bits(),
             )
-        };
+        });
         from_sys_vec3(vm, svm);
         from_sys_vec4(v, sv4);
         used
@@ -335,18 +333,17 @@ impl<'ui> GizmoQuatUi<'ui> {
         size: f32,
         mode: Mode,
     ) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut svm = to_sys_vec3(vm);
         let mut sv3 = to_sys_vec3(v);
-        let used = unsafe {
+        let used = with_label_ptr(label, |label_ptr| unsafe {
             sys::iggizmo3D_vec3Ptrvec3Ptr(
-                c.as_ptr(),
+                label_ptr,
                 &mut svm as *mut _,
                 &mut sv3 as *mut _,
                 size,
                 mode.bits(),
             )
-        };
+        });
         from_sys_vec3(vm, svm);
         from_sys_vec3(v, sv3);
         used
@@ -362,20 +359,19 @@ impl<'ui> GizmoQuatUi<'ui> {
         size: f32,
         mode: Mode,
     ) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut svm = to_sys_vec3(vm);
         let mut sq = to_sys_quat(q);
         let mut sql = to_sys_quat(ql);
-        let used = unsafe {
+        let used = with_label_ptr(label, |label_ptr| unsafe {
             sys::iggizmo3D_vec3PtrquatPtrquatPtr(
-                c.as_ptr(),
+                label_ptr,
                 &mut svm as *mut _,
                 &mut sq as *mut _,
                 &mut sql as *mut _,
                 size,
                 mode.bits(),
             )
-        };
+        });
         from_sys_vec3(vm, svm);
         from_sys_quat(q, sq);
         from_sys_quat(ql, sql);
@@ -392,20 +388,19 @@ impl<'ui> GizmoQuatUi<'ui> {
         size: f32,
         mode: Mode,
     ) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut svm = to_sys_vec3(vm);
         let mut sq = to_sys_quat(q);
         let mut sv4 = to_sys_vec4(v);
-        let used = unsafe {
+        let used = with_label_ptr(label, |label_ptr| unsafe {
             sys::iggizmo3D_vec3PtrquatPtrvec4Ptr(
-                c.as_ptr(),
+                label_ptr,
                 &mut svm as *mut _,
                 &mut sq as *mut _,
                 &mut sv4 as *mut _,
                 size,
                 mode.bits(),
             )
-        };
+        });
         from_sys_vec3(vm, svm);
         from_sys_quat(q, sq);
         from_sys_vec4(v, sv4);
@@ -422,20 +417,19 @@ impl<'ui> GizmoQuatUi<'ui> {
         size: f32,
         mode: Mode,
     ) -> bool {
-        let c = CString::new(label).expect("label contained NUL");
         let mut svm = to_sys_vec3(vm);
         let mut sq = to_sys_quat(q);
         let mut sv3 = to_sys_vec3(v);
-        let used = unsafe {
+        let used = with_label_ptr(label, |label_ptr| unsafe {
             sys::iggizmo3D_vec3PtrquatPtrvec3Ptr(
-                c.as_ptr(),
+                label_ptr,
                 &mut svm as *mut _,
                 &mut sq as *mut _,
                 &mut sv3 as *mut _,
                 size,
                 mode.bits(),
             )
-        };
+        });
         from_sys_vec3(vm, svm);
         from_sys_quat(q, sq);
         from_sys_vec3(v, sv3);

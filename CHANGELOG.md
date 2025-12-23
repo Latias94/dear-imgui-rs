@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `OwnedDrawData`: avoid double-free by letting `ImDrawData` own and free its `CmdLists` storage (we still destroy the cloned `ImDrawList` payloads).
   - `Context::save_ini_settings`: read the returned settings blob using `out_ini_size` instead of relying on NUL termination.
   - `Ui::get_key_name` / `Ui::style_color_name`: handle null pointers defensively at the FFI boundary.
+- Extensions
+  - `dear-implot3d`: keep tick label pointers alive for `setup_axis_ticks_*` calls (avoids passing dangling pointers to C).
 
 ### Changed
 
@@ -60,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `DockBuilder::dock_window`, `DockBuilder::copy_window_settings`, and `TextCallbackData::insert_chars`.
   - `ImString` now rejects interior NUL bytes in safe constructors/mutators (`new`, `push_str`).
 - `dear-imgui-wgpu`: bump `wgpu` to v28 (requires Rust 1.92+).
-- `dear-implot`: avoid per-call `CString` allocations in most label/title APIs by using the shared scratch string helpers.
+- Extensions: avoid per-call `CString` allocations in most label/text/title APIs by using the shared scratch string helpers (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`).
 
 ## [0.7.0] - 2025-12-13
 

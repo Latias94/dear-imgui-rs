@@ -127,14 +127,26 @@ impl EditorContext {
 
     /// Save this editor's state directly to an INI file
     pub fn save_state_to_ini_file(&self, file_name: &str) {
-        let c = std::ffi::CString::new(file_name).unwrap_or_default();
-        unsafe { sys::imnodes_SaveEditorStateToIniFile(self.raw, c.as_ptr()) }
+        let file_name = if file_name.contains('\0') {
+            ""
+        } else {
+            file_name
+        };
+        dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
+            sys::imnodes_SaveEditorStateToIniFile(self.raw, ptr)
+        })
     }
 
     /// Load this editor's state from an INI file
     pub fn load_state_from_ini_file(&self, file_name: &str) {
-        let c = std::ffi::CString::new(file_name).unwrap_or_default();
-        unsafe { sys::imnodes_LoadEditorStateFromIniFile(self.raw, c.as_ptr()) }
+        let file_name = if file_name.contains('\0') {
+            ""
+        } else {
+            file_name
+        };
+        dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
+            sys::imnodes_LoadEditorStateFromIniFile(self.raw, ptr)
+        })
     }
 }
 
@@ -744,15 +756,26 @@ impl PostEditor {
     }
     /// Save/Load current editor state to/from INI file
     pub fn save_state_to_ini_file(&self, file_name: &str) {
-        let c = std::ffi::CString::new(file_name).unwrap_or_default();
-        // Safety: `CString` guarantees a NUL-terminated string for the
-        // duration of the call; ImNodes reads it as a const char*.
-        unsafe { sys::imnodes_SaveCurrentEditorStateToIniFile(c.as_ptr()) }
+        let file_name = if file_name.contains('\0') {
+            ""
+        } else {
+            file_name
+        };
+        // Safety: ImNodes reads a NUL-terminated string for the duration of the call.
+        dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
+            sys::imnodes_SaveCurrentEditorStateToIniFile(ptr)
+        })
     }
     pub fn load_state_from_ini_file(&self, file_name: &str) {
-        let c = std::ffi::CString::new(file_name).unwrap_or_default();
+        let file_name = if file_name.contains('\0') {
+            ""
+        } else {
+            file_name
+        };
         // Safety: see `save_state_to_ini_file`.
-        unsafe { sys::imnodes_LoadCurrentEditorStateFromIniFile(c.as_ptr()) }
+        dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
+            sys::imnodes_LoadCurrentEditorStateFromIniFile(ptr)
+        })
     }
     /// Selection helpers per id
     pub fn select_node(&self, node_id: i32) {
