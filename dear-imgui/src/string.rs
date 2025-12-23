@@ -490,6 +490,58 @@ mod tests {
     }
 
     #[test]
+    fn with_scratch_txt_slice_returns_sequential_pointers() {
+        with_scratch_txt_slice(&["a", "bc", "def"], |ptrs| {
+            assert_eq!(ptrs.len(), 3);
+
+            let a = unsafe { CStr::from_ptr(ptrs[0]) }.to_str().unwrap();
+            let b = unsafe { CStr::from_ptr(ptrs[1]) }.to_str().unwrap();
+            let c = unsafe { CStr::from_ptr(ptrs[2]) }.to_str().unwrap();
+            assert_eq!(a, "a");
+            assert_eq!(b, "bc");
+            assert_eq!(c, "def");
+
+            let ab = (ptrs[1] as usize) - (ptrs[0] as usize);
+            let bc = (ptrs[2] as usize) - (ptrs[1] as usize);
+            assert_eq!(ab, "a".len() + 1);
+            assert_eq!(bc, "bc".len() + 1);
+        });
+    }
+
+    #[test]
+    fn with_scratch_txt_slice_with_opt_returns_null_for_none() {
+        with_scratch_txt_slice_with_opt(&["a", "bc"], None, |ptrs, opt_ptr| {
+            assert_eq!(ptrs.len(), 2);
+            assert!(opt_ptr.is_null());
+
+            let a = unsafe { CStr::from_ptr(ptrs[0]) }.to_str().unwrap();
+            let b = unsafe { CStr::from_ptr(ptrs[1]) }.to_str().unwrap();
+            assert_eq!(a, "a");
+            assert_eq!(b, "bc");
+        });
+    }
+
+    #[test]
+    fn with_scratch_txt_slice_with_opt_appends_opt_string() {
+        with_scratch_txt_slice_with_opt(&["a", "bc"], Some("fmt"), |ptrs, opt_ptr| {
+            assert_eq!(ptrs.len(), 2);
+            assert!(!opt_ptr.is_null());
+
+            let a = unsafe { CStr::from_ptr(ptrs[0]) }.to_str().unwrap();
+            let b = unsafe { CStr::from_ptr(ptrs[1]) }.to_str().unwrap();
+            let fmt = unsafe { CStr::from_ptr(opt_ptr) }.to_str().unwrap();
+            assert_eq!(a, "a");
+            assert_eq!(b, "bc");
+            assert_eq!(fmt, "fmt");
+
+            let ab = (ptrs[1] as usize) - (ptrs[0] as usize);
+            let bf = (opt_ptr as usize) - (ptrs[1] as usize);
+            assert_eq!(ab, "a".len() + 1);
+            assert_eq!(bf, "bc".len() + 1);
+        });
+    }
+
+    #[test]
     #[should_panic(expected = "null byte")]
     fn imstring_new_rejects_interior_nul() {
         let _ = ImString::new("a\0b");
