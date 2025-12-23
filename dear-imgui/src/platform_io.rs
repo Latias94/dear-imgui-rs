@@ -209,7 +209,7 @@ impl PlatformIo {
     /// - `raw` is non-null and points to a valid `ImGuiPlatformIO`.
     /// - The platform IO outlives the returned reference (e.g. it belongs to the
     ///   currently active ImGui context).
-    pub(crate) unsafe fn from_raw(raw: *const sys::ImGuiPlatformIO) -> &'static Self {
+    pub(crate) unsafe fn from_raw<'a>(raw: *const sys::ImGuiPlatformIO) -> &'a Self {
         unsafe { &*(raw as *const Self) }
     }
 
@@ -222,7 +222,7 @@ impl PlatformIo {
     /// - The platform IO outlives the returned reference (e.g. it belongs to the
     ///   currently active ImGui context).
     /// - No other references (shared or mutable) to the same platform IO are alive.
-    pub unsafe fn from_raw_mut(raw: *mut sys::ImGuiPlatformIO) -> &'static mut Self {
+    pub unsafe fn from_raw_mut<'a>(raw: *mut sys::ImGuiPlatformIO) -> &'a mut Self {
         unsafe { &mut *(raw as *mut Self) }
     }
 
@@ -864,22 +864,6 @@ pub struct Viewport {
 }
 
 impl Viewport {
-    /// Returns a reference to the main Dear ImGui viewport (safe wrapper)
-    ///
-    /// This is the same viewport used by `Ui::dockspace_over_main_viewport()`.
-    /// Requires an active ImGui context.
-    #[doc(alias = "GetMainViewport")]
-    pub fn main() -> &'static Self {
-        // SAFETY: With an active ImGui context, `igGetMainViewport()` returns
-        // a valid pointer to the global main viewport that lives for the
-        // duration of the context. Note that the returned reference is only
-        // valid while the corresponding ImGui context remains alive.
-        let ptr = unsafe { sys::igGetMainViewport() } as *const sys::ImGuiViewport;
-        if ptr.is_null() {
-            panic!("Viewport::main() requires an active ImGui context");
-        }
-        unsafe { Self::from_raw(ptr) }
-    }
     /// Get a reference to the viewport from a raw pointer
     ///
     /// # Safety
@@ -888,7 +872,7 @@ impl Viewport {
     /// - `raw` is non-null and points to a valid `ImGuiViewport`.
     /// - The viewport outlives the returned reference (e.g. it belongs to the
     ///   currently active ImGui context).
-    pub(crate) unsafe fn from_raw(raw: *const sys::ImGuiViewport) -> &'static Self {
+    pub(crate) unsafe fn from_raw<'a>(raw: *const sys::ImGuiViewport) -> &'a Self {
         unsafe { &*(raw as *const Self) }
     }
 
@@ -901,7 +885,7 @@ impl Viewport {
     /// - The viewport outlives the returned reference (e.g. it belongs to the
     ///   currently active ImGui context).
     /// - No other references (shared or mutable) to the same viewport are alive.
-    pub unsafe fn from_raw_mut(raw: *mut sys::ImGuiViewport) -> &'static mut Self {
+    pub unsafe fn from_raw_mut<'a>(raw: *mut sys::ImGuiViewport) -> &'a mut Self {
         unsafe { &mut *(raw as *mut Self) }
     }
 

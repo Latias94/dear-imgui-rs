@@ -384,8 +384,11 @@ pub const HAS_WASM: bool = sys::HAS_WASM;
 pub fn dear_imgui_version() -> &'static str {
     unsafe {
         let version_ptr = sys::igGetVersion();
-
-        let bytes = std::ffi::CStr::from_ptr(version_ptr).to_bytes();
-        std::str::from_utf8_unchecked(bytes)
+        if version_ptr.is_null() {
+            return "Unknown";
+        }
+        std::ffi::CStr::from_ptr(version_ptr)
+            .to_str()
+            .unwrap_or("Unknown")
     }
 }

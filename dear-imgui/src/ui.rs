@@ -33,12 +33,17 @@ impl Ui {
     ///
     /// Same viewport used by `dockspace_over_main_viewport()`.
     ///
-    /// Note: while the return type is `&'static Viewport`, the underlying pointer
-    /// is owned by the currently active ImGui context and must not be used after
-    /// the context is destroyed.
+    /// The returned reference is owned by the currently active ImGui context and
+    /// must not be used after the context is destroyed.
     #[doc(alias = "GetMainViewport")]
-    pub fn main_viewport(&self) -> &'static crate::platform_io::Viewport {
-        crate::platform_io::Viewport::main()
+    pub fn main_viewport(&self) -> &crate::platform_io::Viewport {
+        unsafe {
+            let ptr = sys::igGetMainViewport();
+            if ptr.is_null() {
+                panic!("Ui::main_viewport() requires an active ImGui context");
+            }
+            crate::platform_io::Viewport::from_raw(ptr as *const sys::ImGuiViewport)
+        }
     }
     /// Creates a new Ui instance
     ///
@@ -518,6 +523,9 @@ impl Ui {
     pub fn get_version(&self) -> &str {
         unsafe {
             let version_ptr = sys::igGetVersion();
+            if version_ptr.is_null() {
+                return "Unknown";
+            }
             let c_str = std::ffi::CStr::from_ptr(version_ptr);
             c_str.to_str().unwrap_or("Unknown")
         }

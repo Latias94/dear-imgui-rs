@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Core (`dear-imgui-rs`)
+  - `with_scratch_txt`, `with_scratch_txt_two`, `with_scratch_txt_three`: closure-based helpers for building temporary NUL-terminated C string pointers without allocating.
+
+### Changed
+
+- Core (`dear-imgui-rs`)
+  - Remove `Viewport::main()` (returned `&'static Viewport`); use `Ui::main_viewport()` or `Context::main_viewport()` to get a viewport reference tied to the caller's lifetime.
+
 ### Fixed
 
 - Core (`dear-imgui-rs`)

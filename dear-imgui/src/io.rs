@@ -184,20 +184,6 @@ bitflags! {
 pub struct Io(sys::ImGuiIO);
 
 impl Io {
-    /// Creates a new Io instance from the current context
-    pub(crate) fn from_raw() -> &'static mut Self {
-        unsafe {
-            // Note: our bindings expose igGetIO_Nil which resolves against the
-            // current context. Keep using _Nil variant until regular symbol is exported.
-            //
-            // SAFETY: `igGetIO_Nil()` returns a pointer owned by the currently active
-            // ImGui context. The returned reference must not be used after the context
-            // is destroyed or when another context becomes current.
-            let io_ptr = sys::igGetIO_Nil();
-            &mut *(io_ptr as *mut Self)
-        }
-    }
-
     /// Main display size in pixels
     pub fn display_size(&self) -> [f32; 2] {
         [self.0.DisplaySize.x, self.0.DisplaySize.y]

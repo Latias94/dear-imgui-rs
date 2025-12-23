@@ -369,6 +369,22 @@ impl Context {
         }
     }
 
+    /// Returns a reference to the main Dear ImGui viewport.
+    ///
+    /// The returned reference is owned by the currently active ImGui context and
+    /// must not be used after the context is destroyed.
+    #[doc(alias = "GetMainViewport")]
+    pub fn main_viewport(&mut self) -> &crate::platform_io::Viewport {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            let ptr = sys::igGetMainViewport();
+            if ptr.is_null() {
+                panic!("Context::main_viewport() requires an active ImGui context");
+            }
+            crate::platform_io::Viewport::from_raw(ptr as *const sys::ImGuiViewport)
+        }
+    }
+
     /// Enable multi-viewport support flags
     #[cfg(feature = "multi-viewport")]
     pub fn enable_multi_viewport(&mut self) {

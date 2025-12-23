@@ -384,14 +384,14 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = std::mem::size_of::<f32>() as i32;
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotLine_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -400,7 +400,7 @@ impl<'ui> Plot3DUi<'ui> {
                 0,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Raw line plot (f32) with offset/stride
@@ -417,18 +417,18 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f32>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotLine_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -437,7 +437,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Convenience: plot a simple 3D line (f64)
@@ -452,14 +452,14 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = std::mem::size_of::<f64>() as i32;
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotLine_doublePtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -468,7 +468,7 @@ impl<'ui> Plot3DUi<'ui> {
                 0,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Raw line plot (f64) with offset/stride
@@ -485,18 +485,18 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f64>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotLine_doublePtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -505,7 +505,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Convenience: plot a 3D scatter (f32)
@@ -520,14 +520,14 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = std::mem::size_of::<f32>() as i32;
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotScatter_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -536,7 +536,7 @@ impl<'ui> Plot3DUi<'ui> {
                 0,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Raw scatter plot (f32) with offset/stride
@@ -553,18 +553,18 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f32>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotScatter_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -573,7 +573,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Convenience: plot a 3D scatter (f64)
@@ -588,14 +588,14 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = std::mem::size_of::<f64>() as i32;
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotScatter_doublePtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -604,7 +604,7 @@ impl<'ui> Plot3DUi<'ui> {
                 0,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Raw scatter plot (f64) with offset/stride
@@ -621,18 +621,18 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f64>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotScatter_doublePtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -641,7 +641,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Convenience: plot triangles from interleaved xyz arrays (count must be multiple of 3)
@@ -656,14 +656,14 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = std::mem::size_of::<f32>() as i32;
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotTriangle_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -672,7 +672,7 @@ impl<'ui> Plot3DUi<'ui> {
                 0,
                 stride_bytes,
             );
-        }
+        })
     }
 
     pub fn plot_triangles_f32_raw<S: AsRef<str>>(
@@ -688,18 +688,18 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f32>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotTriangle_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -708,7 +708,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Convenience: plot quads from interleaved xyz arrays (count must be multiple of 4)
@@ -723,14 +723,14 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = std::mem::size_of::<f32>() as i32;
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotQuad_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -739,7 +739,7 @@ impl<'ui> Plot3DUi<'ui> {
                 0,
                 stride_bytes,
             );
-        }
+        })
     }
 
     pub fn plot_quads_f32_raw<S: AsRef<str>>(
@@ -755,18 +755,18 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f32>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotQuad_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -775,7 +775,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Convenience: plot triangles from interleaved xyz arrays (f64)
@@ -790,14 +790,14 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = std::mem::size_of::<f64>() as i32;
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotTriangle_doublePtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -806,7 +806,7 @@ impl<'ui> Plot3DUi<'ui> {
                 0,
                 stride_bytes,
             );
-        }
+        })
     }
 
     pub fn plot_triangles_f64_raw<S: AsRef<str>>(
@@ -822,18 +822,18 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f64>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotTriangle_doublePtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -842,7 +842,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Convenience: plot quads from interleaved xyz arrays (f64)
@@ -857,14 +857,14 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = std::mem::size_of::<f64>() as i32;
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotQuad_doublePtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -873,7 +873,7 @@ impl<'ui> Plot3DUi<'ui> {
                 0,
                 stride_bytes,
             );
-        }
+        })
     }
 
     pub fn plot_quads_f64_raw<S: AsRef<str>>(
@@ -889,18 +889,18 @@ impl<'ui> Plot3DUi<'ui> {
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f64>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotQuad_doublePtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
@@ -909,7 +909,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 }
 
@@ -939,25 +939,26 @@ impl Plot3DBuilder {
         self
     }
     pub fn build(self) -> Option<Plot3DToken> {
-        let title_c = std::ffi::CString::new(self.title).ok()?;
+        if self.title.contains('\0') {
+            return None;
+        }
+        let title = self.title;
         let size = self.size.unwrap_or([0.0, 0.0]);
-        let ok = unsafe {
+        let ok = dear_imgui_rs::with_scratch_txt(&title, |title_ptr| unsafe {
             // Defensive: ensure style.Colormap is in range before plotting
             let style = sys::ImPlot3D_GetStyle();
             if !style.is_null() {
                 let count = sys::ImPlot3D_GetColormapCount();
-                if count > 0 {
-                    if (*style).Colormap < 0 || (*style).Colormap >= count {
-                        (*style).Colormap = 0;
-                    }
+                if count > 0 && ((*style).Colormap < 0 || (*style).Colormap >= count) {
+                    (*style).Colormap = 0;
                 }
             }
             sys::ImPlot3D_BeginPlot(
-                title_c.as_ptr(),
+                title_ptr,
                 imvec2(size[0], size[1]),
                 self.flags.bits() as i32,
             )
-        };
+        });
         if ok {
             debug_begin_plot();
             Some(Plot3DToken)
@@ -1155,18 +1156,18 @@ impl<'ui> Plot3DUi<'ui> {
             }
         }
 
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f32>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotSurface_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs_flat.as_ptr(),
                 ys_flat.as_ptr(),
                 zs.as_ptr(),
@@ -1178,7 +1179,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 
     /// Plot a surface with already flattened per-vertex X/Y arrays (no internal allocation)
@@ -1207,18 +1208,18 @@ impl<'ui> Plot3DUi<'ui> {
         if xs_flat.len() != expected || ys_flat.len() != expected || zs.len() != expected {
             return;
         }
-        let label_c = match std::ffi::CString::new(label.as_ref()) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let label = label.as_ref();
+        if label.contains('\0') {
+            return;
+        }
         let stride_bytes = if stride == 0 {
             std::mem::size_of::<f32>() as i32
         } else {
             stride
         };
-        unsafe {
+        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotSurface_FloatPtr(
-                label_c.as_ptr(),
+                label_ptr,
                 xs_flat.as_ptr(),
                 ys_flat.as_ptr(),
                 zs.as_ptr(),
@@ -1230,7 +1231,7 @@ impl<'ui> Plot3DUi<'ui> {
                 offset,
                 stride_bytes,
             );
-        }
+        })
     }
 }
 
@@ -1442,25 +1443,34 @@ impl<'ui> Plot3DUi<'ui> {
         z_flags: Axis3DFlags,
     ) {
         debug_before_setup();
-        let cx = std::ffi::CString::new(x_label).unwrap_or_default();
-        let cy = std::ffi::CString::new(y_label).unwrap_or_default();
-        let cz = std::ffi::CString::new(z_label).unwrap_or_default();
-        unsafe {
-            sys::ImPlot3D_SetupAxes(
-                cx.as_ptr(),
-                cy.as_ptr(),
-                cz.as_ptr(),
-                x_flags.bits() as i32,
-                y_flags.bits() as i32,
-                z_flags.bits() as i32,
-            )
+        if x_label.contains('\0') || y_label.contains('\0') || z_label.contains('\0') {
+            return;
         }
+        dear_imgui_rs::with_scratch_txt_three(
+            x_label,
+            y_label,
+            z_label,
+            |x_ptr, y_ptr, z_ptr| unsafe {
+                sys::ImPlot3D_SetupAxes(
+                    x_ptr,
+                    y_ptr,
+                    z_ptr,
+                    x_flags.bits() as i32,
+                    y_flags.bits() as i32,
+                    z_flags.bits() as i32,
+                )
+            },
+        )
     }
 
     pub fn setup_axis(&self, axis: Axis3D, label: &str, flags: Axis3DFlags) {
         debug_before_setup();
-        let c = std::ffi::CString::new(label).unwrap_or_default();
-        unsafe { sys::ImPlot3D_SetupAxis(axis as i32, c.as_ptr(), flags.bits() as i32) }
+        if label.contains('\0') {
+            return;
+        }
+        dear_imgui_rs::with_scratch_txt(label, |ptr| unsafe {
+            sys::ImPlot3D_SetupAxis(axis as i32, ptr, flags.bits() as i32)
+        })
     }
 
     pub fn setup_axis_limits(&self, axis: Axis3D, min: f64, max: f64, cond: Plot3DCond) {
@@ -1585,18 +1595,20 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn plot_text(&self, text: &str, x: f32, y: f32, z: f32, angle: f32, pix_offset: [f32; 2]) {
-        let c_text = std::ffi::CString::new(text).unwrap_or_default();
-        unsafe {
+        if text.contains('\0') {
+            return;
+        }
+        dear_imgui_rs::with_scratch_txt(text, |text_ptr| unsafe {
             debug_before_plot();
             sys::ImPlot3D_PlotText(
-                c_text.as_ptr(),
+                text_ptr,
                 x as f64,
                 y as f64,
                 z as f64,
                 angle as f64,
                 imvec2(pix_offset[0], pix_offset[1]),
             )
-        }
+        })
     }
 
     pub fn plot_to_pixels(&self, point: [f32; 3]) -> [f32; 2] {

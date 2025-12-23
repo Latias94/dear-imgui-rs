@@ -90,8 +90,7 @@ pub fn push_colormap_index(cmap_index: i32) {
 }
 #[inline]
 pub fn push_colormap_name(name: &str) {
-    let c = std::ffi::CString::new(name).unwrap_or_default();
-    unsafe { sys::ImPlot3D_PushColormap_Str(c.as_ptr()) }
+    dear_imgui_rs::with_scratch_txt(name, |ptr| unsafe { sys::ImPlot3D_PushColormap_Str(ptr) })
 }
 #[inline]
 pub fn pop_colormap(count: i32) {
@@ -168,8 +167,10 @@ pub fn set_style_colormap_index(index: i32) {
 /// Look up a colormap index by its name; returns -1 if not found
 #[inline]
 pub fn colormap_index_by_name(name: &str) -> i32 {
-    let c = std::ffi::CString::new(name).unwrap_or_default();
-    unsafe { sys::ImPlot3D_GetColormapIndex(c.as_ptr()) }
+    if name.contains('\0') {
+        return -1;
+    }
+    dear_imgui_rs::with_scratch_txt(name, |ptr| unsafe { sys::ImPlot3D_GetColormapIndex(ptr) })
 }
 
 /// Convenience: set default colormap by name (no-op if name is invalid)

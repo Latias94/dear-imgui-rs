@@ -125,12 +125,60 @@ pub(crate) fn tls_scratch_txt(txt: impl AsRef<str>) -> *const c_char {
     TLS_SCRATCH.with(|buf| buf.borrow_mut().scratch_txt(txt))
 }
 
+/// Calls `f` with a temporary, NUL-terminated C string pointer backed by a thread-local scratch buffer.
+///
+/// The pointer is only valid for the duration of the call (and will be overwritten by subsequent
+/// scratch-string operations on the same thread).
+pub fn with_scratch_txt<R>(txt: impl AsRef<str>, f: impl FnOnce(*const c_char) -> R) -> R {
+    TLS_SCRATCH.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        let ptr = buf.scratch_txt(txt);
+        f(ptr)
+    })
+}
+
 /// Same as [`tls_scratch_txt`] but returns two pointers that stay valid together.
 pub(crate) fn tls_scratch_txt_two(
     txt_0: impl AsRef<str>,
     txt_1: impl AsRef<str>,
 ) -> (*const c_char, *const c_char) {
     TLS_SCRATCH.with(|buf| buf.borrow_mut().scratch_txt_two(txt_0, txt_1))
+}
+
+/// Calls `f` with two temporary, NUL-terminated C string pointers backed by a thread-local scratch buffer.
+///
+/// Both pointers are valid together for the duration of the call (and will be overwritten by
+/// subsequent scratch-string operations on the same thread).
+pub fn with_scratch_txt_two<R>(
+    txt_0: impl AsRef<str>,
+    txt_1: impl AsRef<str>,
+    f: impl FnOnce(*const c_char, *const c_char) -> R,
+) -> R {
+    TLS_SCRATCH.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        let (a, b) = buf.scratch_txt_two(txt_0, txt_1);
+        f(a, b)
+    })
+}
+
+/// Calls `f` with three temporary, NUL-terminated C string pointers backed by a thread-local scratch buffer.
+///
+/// All pointers are valid together for the duration of the call (and will be overwritten by
+/// subsequent scratch-string operations on the same thread).
+pub fn with_scratch_txt_three<R>(
+    txt_0: impl AsRef<str>,
+    txt_1: impl AsRef<str>,
+    txt_2: impl AsRef<str>,
+    f: impl FnOnce(*const c_char, *const c_char, *const c_char) -> R,
+) -> R {
+    TLS_SCRATCH.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.refresh_buffer();
+        let o0 = buf.push(txt_0);
+        let o1 = buf.push(txt_1);
+        let o2 = buf.push(txt_2);
+        unsafe { f(buf.offset(o0), buf.offset(o1), buf.offset(o2)) }
+    })
 }
 
 /// A UTF-8 encoded, growable, implicitly nul-terminated string.

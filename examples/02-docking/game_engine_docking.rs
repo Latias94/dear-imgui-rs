@@ -1036,7 +1036,12 @@ impl AppWindow {
         let dock_id_struct = ui.get_id("MainDockSpace");
         imgui.dockspace_id = dock_id_struct.into();
         if imgui.first_frame {
-            setup_initial_docking_layout(dear_imgui_rs::Id::from(imgui.dockspace_id));
+            let vp = ui.main_viewport();
+            setup_initial_docking_layout(
+                dear_imgui_rs::Id::from(imgui.dockspace_id),
+                vp.work_pos(),
+                vp.work_size(),
+            );
             imgui.first_frame = false;
         }
         let _ = ui.dockspace_over_main_viewport_with_flags(
@@ -1156,12 +1161,17 @@ impl AppWindow {
 
         // Handle deferred actions (safe after frame is rendered)
         if actions.reset_layout {
-            setup_initial_docking_layout(dear_imgui_rs::Id::from(imgui.dockspace_id));
+            let vp = imgui.context.main_viewport();
+            setup_initial_docking_layout(
+                dear_imgui_rs::Id::from(imgui.dockspace_id),
+                vp.work_pos(),
+                vp.work_size(),
+            );
         }
         if actions.load_ini {
             if let Ok(s) = std::fs::read_to_string("examples/02-docking/game_engine_docking.ini") {
                 let target = {
-                    let vp = dear_imgui_rs::Viewport::main();
+                    let vp = imgui.context.main_viewport();
                     let ws = vp.work_size();
                     (ws[0], ws[1])
                 };
@@ -1216,7 +1226,11 @@ impl App {
 }
 
 /// Setup the initial docking layout - Unity-style game engine layout
-fn setup_initial_docking_layout(dockspace_id: dear_imgui_rs::Id) {
+fn setup_initial_docking_layout(
+    dockspace_id: dear_imgui_rs::Id,
+    viewport_work_pos: [f32; 2],
+    viewport_work_size: [f32; 2],
+) {
     use dear_imgui_rs::{DockBuilder, SplitDirection};
 
     println!("Setting up initial docking layout...");
@@ -1227,9 +1241,8 @@ fn setup_initial_docking_layout(dockspace_id: dear_imgui_rs::Id) {
     DockBuilder::add_node(dockspace_id, dear_imgui_rs::DockNodeFlags::NONE);
     // Match node pos/size to main viewport work area (exclude menu bars) before splitting
     {
-        let vp = dear_imgui_rs::Viewport::main();
-        DockBuilder::set_node_pos(dockspace_id, vp.work_pos());
-        DockBuilder::set_node_size(dockspace_id, vp.work_size());
+        DockBuilder::set_node_pos(dockspace_id, viewport_work_pos);
+        DockBuilder::set_node_size(dockspace_id, viewport_work_size);
     }
 
     // Unity-style Professional Layout:
