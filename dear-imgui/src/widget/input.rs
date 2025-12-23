@@ -34,6 +34,7 @@ use crate::internal::DataTypeKind;
 use crate::string::ImString;
 use crate::sys;
 use crate::ui::Ui;
+use std::borrow::Cow;
 use std::ffi::{c_int, c_void};
 use std::marker::PhantomData;
 use std::ptr;
@@ -54,20 +55,20 @@ impl Ui {
     /// }
     /// ```
     #[doc(alias = "InputText", alias = "InputTextWithHint")]
-    pub fn input_text<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn input_text<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         buf: &'p mut String,
-    ) -> InputText<'_, 'p, String, String, PassthroughCallback> {
+    ) -> InputText<'ui, 'p> {
         InputText::new(self, label, buf)
     }
 
     /// Creates a single-line text input backed by ImString (zero-copy)
-    pub fn input_text_imstr<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn input_text_imstr<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         buf: &'p mut ImString,
-    ) -> InputTextImStr<'_, 'p, String, String, PassthroughCallback> {
+    ) -> InputTextImStr<'ui, 'p> {
         InputTextImStr::new(self, label, buf)
     }
 
@@ -85,22 +86,22 @@ impl Ui {
     /// }
     /// ```
     #[doc(alias = "InputTextMultiline")]
-    pub fn input_text_multiline<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn input_text_multiline<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         buf: &'p mut String,
         size: impl Into<[f32; 2]>,
-    ) -> InputTextMultiline<'_, 'p> {
+    ) -> InputTextMultiline<'ui, 'p> {
         InputTextMultiline::new(self, label, buf, size)
     }
 
     /// Creates a multi-line text input backed by ImString (zero-copy)
-    pub fn input_text_multiline_imstr<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn input_text_multiline_imstr<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         buf: &'p mut ImString,
         size: impl Into<[f32; 2]>,
-    ) -> InputTextMultilineImStr<'_, 'p> {
+    ) -> InputTextMultilineImStr<'ui, 'p> {
         InputTextMultilineImStr::new(self, label, buf, size)
     }
 
@@ -109,7 +110,7 @@ impl Ui {
     /// Returns true if the value was edited.
     #[doc(alias = "InputInt")]
     pub fn input_int(&self, label: impl AsRef<str>, value: &mut i32) -> bool {
-        self.input_int_config(label).build(value)
+        self.input_int_config(label.as_ref()).build(value)
     }
 
     /// Creates a float input widget.
@@ -117,7 +118,7 @@ impl Ui {
     /// Returns true if the value was edited.
     #[doc(alias = "InputFloat")]
     pub fn input_float(&self, label: impl AsRef<str>, value: &mut f32) -> bool {
-        self.input_float_config(label).build(value)
+        self.input_float_config(label.as_ref()).build(value)
     }
 
     /// Creates a double input widget.
@@ -125,21 +126,24 @@ impl Ui {
     /// Returns true if the value was edited.
     #[doc(alias = "InputDouble")]
     pub fn input_double(&self, label: impl AsRef<str>, value: &mut f64) -> bool {
-        self.input_double_config(label).build(value)
+        self.input_double_config(label.as_ref()).build(value)
     }
 
     /// Creates an integer input builder
-    pub fn input_int_config(&self, label: impl AsRef<str>) -> InputInt<'_> {
+    pub fn input_int_config<'ui>(&'ui self, label: impl Into<Cow<'ui, str>>) -> InputInt<'ui> {
         InputInt::new(self, label)
     }
 
     /// Creates a float input builder
-    pub fn input_float_config(&self, label: impl AsRef<str>) -> InputFloat<'_> {
+    pub fn input_float_config<'ui>(&'ui self, label: impl Into<Cow<'ui, str>>) -> InputFloat<'ui> {
         InputFloat::new(self, label)
     }
 
     /// Creates a double input builder
-    pub fn input_double_config(&self, label: impl AsRef<str>) -> InputDouble<'_> {
+    pub fn input_double_config<'ui>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
+    ) -> InputDouble<'ui> {
         InputDouble::new(self, label)
     }
 
@@ -227,7 +231,7 @@ impl Ui {
 
 /// Builder for a text input widget
 #[must_use]
-pub struct InputText<'ui, 'p, L = String, H = String, T = PassthroughCallback> {
+pub struct InputText<'ui, 'p, L = Cow<'ui, str>, H = Cow<'ui, str>, T = PassthroughCallback> {
     ui: &'ui Ui,
     label: L,
     buf: &'p mut String,
@@ -240,7 +244,7 @@ pub struct InputText<'ui, 'p, L = String, H = String, T = PassthroughCallback> {
 
 /// Builder for a text input backed by ImString (zero-copy)
 #[must_use]
-pub struct InputTextImStr<'ui, 'p, L = String, H = String, T = PassthroughCallback> {
+pub struct InputTextImStr<'ui, 'p, L = Cow<'ui, str>, H = Cow<'ui, str>, T = PassthroughCallback> {
     ui: &'ui Ui,
     label: L,
     buf: &'p mut ImString,
@@ -250,11 +254,11 @@ pub struct InputTextImStr<'ui, 'p, L = String, H = String, T = PassthroughCallba
     _phantom: PhantomData<&'ui ()>,
 }
 
-impl<'ui, 'p> InputTextImStr<'ui, 'p, String, String, PassthroughCallback> {
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>, buf: &'p mut ImString) -> Self {
+impl<'ui, 'p> InputTextImStr<'ui, 'p, Cow<'ui, str>, Cow<'ui, str>, PassthroughCallback> {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, buf: &'p mut ImString) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             buf,
             flags: InputTextFlags::empty(),
             hint: None,
@@ -351,12 +355,12 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
         result
     }
 }
-impl<'ui, 'p> InputText<'ui, 'p, String, String, PassthroughCallback> {
+impl<'ui, 'p> InputText<'ui, 'p, Cow<'ui, str>, Cow<'ui, str>, PassthroughCallback> {
     /// Creates a new text input builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>, buf: &'p mut String) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, buf: &'p mut String) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             buf,
             flags: InputTextFlags::NONE,
             capacity_hint: None,
@@ -603,7 +607,7 @@ where
 #[must_use]
 pub struct InputTextMultiline<'ui, 'p> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     buf: &'p mut String,
     size: [f32; 2],
     flags: InputTextFlags,
@@ -615,7 +619,7 @@ pub struct InputTextMultiline<'ui, 'p> {
 #[must_use]
 pub struct InputTextMultilineImStr<'ui, 'p> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     buf: &'p mut ImString,
     size: [f32; 2],
     flags: InputTextFlags,
@@ -624,13 +628,13 @@ pub struct InputTextMultilineImStr<'ui, 'p> {
 impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
     pub fn new(
         ui: &'ui Ui,
-        label: impl AsRef<str>,
+        label: impl Into<Cow<'ui, str>>,
         buf: &'p mut ImString,
         size: impl Into<[f32; 2]>,
     ) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             buf,
             size: size.into(),
             flags: InputTextFlags::NONE,
@@ -645,7 +649,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
         self
     }
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let buf_ptr = self.buf.as_mut_ptr();
         let buf_size = self.buf.capacity_with_nul();
         let user_ptr = self.buf as *mut ImString as *mut c_void;
@@ -687,13 +691,13 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
     /// Creates a new multiline text input builder
     pub fn new(
         ui: &'ui Ui,
-        label: impl AsRef<str>,
+        label: impl Into<Cow<'ui, str>>,
         buf: &'p mut String,
         size: impl Into<[f32; 2]>,
     ) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             buf,
             size: size.into(),
             flags: InputTextFlags::NONE,
@@ -721,7 +725,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
 
     /// Builds the multiline text input widget
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
 
         // Optional pre-reserve
         if let Some(extra) = self.capacity_hint {
@@ -821,7 +825,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
 /// Multiline InputText with attached callback handler
 pub struct InputTextMultilineWithCb<'ui, 'p, T> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     buf: &'p mut String,
     size: [f32; 2],
     flags: InputTextFlags,
@@ -831,7 +835,7 @@ pub struct InputTextMultilineWithCb<'ui, 'p, T> {
 
 impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> {
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
 
         if let Some(extra) = self.capacity_hint {
             let needed = extra.saturating_sub(self.buf.capacity().saturating_sub(self.buf.len()));
@@ -943,7 +947,7 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
 #[must_use]
 pub struct InputInt<'ui> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     step: i32,
     step_fast: i32,
     flags: InputTextFlags,
@@ -951,10 +955,10 @@ pub struct InputInt<'ui> {
 
 impl<'ui> InputInt<'ui> {
     /// Creates a new integer input builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             step: 1,
             step_fast: 100,
             flags: InputTextFlags::NONE,
@@ -981,7 +985,7 @@ impl<'ui> InputInt<'ui> {
 
     /// Builds the integer input widget
     pub fn build(self, value: &mut i32) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe {
             sys::igInputInt(
                 label_ptr,
@@ -999,19 +1003,19 @@ impl<'ui> InputInt<'ui> {
 #[must_use]
 pub struct InputFloat<'ui> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     step: f32,
     step_fast: f32,
-    format: Option<String>,
+    format: Option<Cow<'ui, str>>,
     flags: InputTextFlags,
 }
 
 impl<'ui> InputFloat<'ui> {
     /// Creates a new float input builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             step: 0.0,
             step_fast: 0.0,
             format: None,
@@ -1032,8 +1036,8 @@ impl<'ui> InputFloat<'ui> {
     }
 
     /// Sets the display format
-    pub fn format(mut self, format: impl AsRef<str>) -> Self {
-        self.format = Some(format.as_ref().to_string());
+    pub fn format(mut self, format: impl Into<Cow<'ui, str>>) -> Self {
+        self.format = Some(format.into());
         self
     }
 
@@ -1045,8 +1049,11 @@ impl<'ui> InputFloat<'ui> {
 
     /// Builds the float input widget
     pub fn build(self, value: &mut f32) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
-        let format_ptr = self.ui.scratch_txt_opt(self.format.as_ref());
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
+        let format_ptr = self
+            .format
+            .as_deref()
+            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
         let format_ptr = if format_ptr.is_null() {
             self.ui.scratch_txt("%.3f")
         } else {
@@ -1071,19 +1078,19 @@ impl<'ui> InputFloat<'ui> {
 #[must_use]
 pub struct InputDouble<'ui> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     step: f64,
     step_fast: f64,
-    format: Option<String>,
+    format: Option<Cow<'ui, str>>,
     flags: InputTextFlags,
 }
 
 impl<'ui> InputDouble<'ui> {
     /// Creates a new double input builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             step: 0.0,
             step_fast: 0.0,
             format: None,
@@ -1104,8 +1111,8 @@ impl<'ui> InputDouble<'ui> {
     }
 
     /// Sets the display format
-    pub fn format(mut self, format: impl AsRef<str>) -> Self {
-        self.format = Some(format.as_ref().to_string());
+    pub fn format(mut self, format: impl Into<Cow<'ui, str>>) -> Self {
+        self.format = Some(format.into());
         self
     }
 
@@ -1117,8 +1124,11 @@ impl<'ui> InputDouble<'ui> {
 
     /// Builds the double input widget
     pub fn build(self, value: &mut f64) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
-        let format_ptr = self.ui.scratch_txt_opt(self.format.as_ref());
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
+        let format_ptr = self
+            .format
+            .as_deref()
+            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
         let format_ptr = if format_ptr.is_null() {
             self.ui.scratch_txt("%.6f")
         } else {
@@ -1291,13 +1301,13 @@ impl TextCallbackData {
 
     /// Insert text at the given position
     pub fn insert_chars(&mut self, pos: usize, text: &str) {
-        let text_cstr = format!("{}\0", text);
+        let text_ptr = crate::string::tls_scratch_txt(text);
         unsafe {
             sys::ImGuiInputTextCallbackData_InsertChars(
                 self.0,
                 pos as i32,
-                text_cstr.as_ptr() as *const std::os::raw::c_char,
-                text_cstr.as_ptr().add(text.len()) as *const std::os::raw::c_char,
+                text_ptr,
+                text_ptr.add(text.len()),
             );
         }
     }

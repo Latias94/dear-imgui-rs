@@ -10,36 +10,37 @@
 )]
 use crate::sys;
 use crate::ui::Ui;
+use std::borrow::Cow;
 
 /// # Plot Widgets
 impl Ui {
     /// Creates a plot lines widget
     #[doc(alias = "PlotLines")]
     pub fn plot_lines(&self, label: impl AsRef<str>, values: &[f32]) {
-        self.plot_lines_config(label, values).build()
+        self.plot_lines_config(label.as_ref(), values).build()
     }
 
     /// Creates a plot histogram widget
     #[doc(alias = "PlotHistogram")]
     pub fn plot_histogram(&self, label: impl AsRef<str>, values: &[f32]) {
-        self.plot_histogram_config(label, values).build()
+        self.plot_histogram_config(label.as_ref(), values).build()
     }
 
     /// Creates a plot lines builder
-    pub fn plot_lines_config<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn plot_lines_config<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         values: &'p [f32],
-    ) -> PlotLines<'_, 'p> {
+    ) -> PlotLines<'ui, 'p> {
         PlotLines::new(self, label, values)
     }
 
     /// Creates a plot histogram builder
-    pub fn plot_histogram_config<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn plot_histogram_config<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         values: &'p [f32],
-    ) -> PlotHistogram<'_, 'p> {
+    ) -> PlotHistogram<'ui, 'p> {
         PlotHistogram::new(self, label, values)
     }
 }
@@ -49,10 +50,10 @@ impl Ui {
 #[must_use]
 pub struct PlotLines<'ui, 'p> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     values: &'p [f32],
     values_offset: i32,
-    overlay_text: Option<String>,
+    overlay_text: Option<Cow<'ui, str>>,
     scale_min: f32,
     scale_max: f32,
     graph_size: [f32; 2],
@@ -60,10 +61,10 @@ pub struct PlotLines<'ui, 'p> {
 
 impl<'ui, 'p> PlotLines<'ui, 'p> {
     /// Creates a new plot lines builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>, values: &'p [f32]) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, values: &'p [f32]) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             values,
             values_offset: 0,
             overlay_text: None,
@@ -80,7 +81,7 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
     }
 
     /// Sets the overlay text
-    pub fn overlay_text(mut self, text: impl Into<String>) -> Self {
+    pub fn overlay_text(mut self, text: impl Into<Cow<'ui, str>>) -> Self {
         self.overlay_text = Some(text.into());
         self
     }
@@ -105,8 +106,11 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
 
     /// Builds the plot lines widget
     pub fn build(self) {
-        let label_ptr = self.ui.scratch_txt(&self.label);
-        let overlay_ptr = self.ui.scratch_txt_opt(self.overlay_text.as_ref());
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
+        let overlay_ptr = self
+            .overlay_text
+            .as_deref()
+            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
         unsafe {
@@ -130,10 +134,10 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
 #[must_use]
 pub struct PlotHistogram<'ui, 'p> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     values: &'p [f32],
     values_offset: i32,
-    overlay_text: Option<String>,
+    overlay_text: Option<Cow<'ui, str>>,
     scale_min: f32,
     scale_max: f32,
     graph_size: [f32; 2],
@@ -141,10 +145,10 @@ pub struct PlotHistogram<'ui, 'p> {
 
 impl<'ui, 'p> PlotHistogram<'ui, 'p> {
     /// Creates a new plot histogram builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>, values: &'p [f32]) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, values: &'p [f32]) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             values,
             values_offset: 0,
             overlay_text: None,
@@ -161,7 +165,7 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
     }
 
     /// Sets the overlay text
-    pub fn overlay_text(mut self, text: impl Into<String>) -> Self {
+    pub fn overlay_text(mut self, text: impl Into<Cow<'ui, str>>) -> Self {
         self.overlay_text = Some(text.into());
         self
     }
@@ -186,8 +190,11 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
 
     /// Builds the plot histogram widget
     pub fn build(self) {
-        let label_ptr = self.ui.scratch_txt(&self.label);
-        let overlay_ptr = self.ui.scratch_txt_opt(self.overlay_text.as_ref());
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
+        let overlay_ptr = self
+            .overlay_text
+            .as_deref()
+            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
         unsafe {

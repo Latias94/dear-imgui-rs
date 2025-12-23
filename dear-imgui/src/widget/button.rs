@@ -4,22 +4,23 @@
 //!
 use crate::Ui;
 use crate::sys;
+use std::borrow::Cow;
 
 impl Ui {
     /// Creates a button with the given label
     #[doc(alias = "Button")]
     pub fn button(&self, label: impl AsRef<str>) -> bool {
-        self.button_config(label).build()
+        self.button_config(label.as_ref()).build()
     }
 
     /// Creates a button with the given label and size
     #[doc(alias = "Button")]
     pub fn button_with_size(&self, label: impl AsRef<str>, size: impl Into<[f32; 2]>) -> bool {
-        self.button_config(label).size(size).build()
+        self.button_config(label.as_ref()).size(size).build()
     }
 
     /// Creates a button builder
-    pub fn button_config(&self, label: impl AsRef<str>) -> Button<'_> {
+    pub fn button_config<'ui>(&'ui self, label: impl Into<Cow<'ui, str>>) -> Button<'ui> {
         Button::new(self, label)
     }
 }
@@ -83,16 +84,16 @@ impl Ui {
 /// Builder for button widget
 pub struct Button<'ui> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     size: Option<[f32; 2]>,
 }
 
 impl<'ui> Button<'ui> {
     /// Creates a new button builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             size: None,
         }
     }
@@ -105,7 +106,7 @@ impl<'ui> Button<'ui> {
 
     /// Builds the button
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let size = self.size.unwrap_or([0.0, 0.0]);
         let size_vec: sys::ImVec2 = size.into();
         unsafe { sys::igButton(label_ptr, size_vec) }

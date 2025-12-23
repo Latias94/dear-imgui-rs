@@ -4,6 +4,7 @@
 //!
 use crate::sys;
 use crate::ui::Ui;
+use std::borrow::Cow;
 
 /// # Progress Bar Widgets
 impl Ui {
@@ -17,11 +18,11 @@ impl Ui {
 
     /// Creates a progress bar with overlay text.
     #[doc(alias = "ProgressBar")]
-    pub fn progress_bar_with_overlay(
-        &self,
+    pub fn progress_bar_with_overlay<'ui>(
+        &'ui self,
         fraction: f32,
-        overlay: impl AsRef<str>,
-    ) -> ProgressBar<'_> {
+        overlay: impl Into<Cow<'ui, str>>,
+    ) -> ProgressBar<'ui> {
         ProgressBar::new(self, fraction).overlay_text(overlay)
     }
 }
@@ -44,7 +45,7 @@ impl Ui {
 pub struct ProgressBar<'ui> {
     fraction: f32,
     size: [f32; 2],
-    overlay_text: Option<String>,
+    overlay_text: Option<Cow<'ui, str>>,
     ui: &'ui Ui,
 }
 
@@ -66,8 +67,8 @@ impl<'ui> ProgressBar<'ui> {
     }
 
     /// Sets an optional text that will be drawn over the progress bar.
-    pub fn overlay_text(mut self, overlay_text: impl AsRef<str>) -> Self {
-        self.overlay_text = Some(overlay_text.as_ref().to_string());
+    pub fn overlay_text(mut self, overlay_text: impl Into<Cow<'ui, str>>) -> Self {
+        self.overlay_text = Some(overlay_text.into());
         self
     }
 
@@ -92,9 +93,8 @@ impl<'ui> ProgressBar<'ui> {
         let size_vec: sys::ImVec2 = self.size.into();
         let overlay_ptr = self
             .overlay_text
-            .as_ref()
-            .map(|s| self.ui.scratch_txt(s))
-            .unwrap_or(std::ptr::null());
+            .as_deref()
+            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
 
         unsafe {
             sys::igProgressBar(self.fraction, size_vec, overlay_ptr);

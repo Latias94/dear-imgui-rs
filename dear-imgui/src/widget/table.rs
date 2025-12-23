@@ -43,18 +43,19 @@ use crate::ui::Ui;
 use crate::widget::{TableColumnFlags, TableFlags};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::ffi::CStr;
 
 /// Table column setup information
 #[derive(Clone, Debug)]
-pub struct TableColumnSetup<Name: AsRef<str>> {
+pub struct TableColumnSetup<Name> {
     pub name: Name,
     pub flags: TableColumnFlags,
     pub init_width_or_weight: f32,
     pub user_id: u32,
 }
 
-impl<Name: AsRef<str>> TableColumnSetup<Name> {
+impl<Name> TableColumnSetup<Name> {
     /// Creates a new table column setup
     pub fn new(name: Name) -> Self {
         Self {
@@ -106,7 +107,7 @@ impl Ui {
     ///     });
     /// # }
     /// ```
-    pub fn table(&self, str_id: impl AsRef<str>) -> TableBuilder<'_> {
+    pub fn table<'ui>(&'ui self, str_id: impl Into<Cow<'ui, str>>) -> TableBuilder<'ui> {
         TableBuilder::new(self, str_id)
     }
     /// Begins a table with no flags and with standard sizing constraints.
@@ -696,21 +697,21 @@ impl Ui {
 #[derive(Debug)]
 pub struct TableBuilder<'ui> {
     ui: &'ui Ui,
-    id: String,
+    id: Cow<'ui, str>,
     flags: TableFlags,
     outer_size: [f32; 2],
     inner_width: f32,
-    columns: Vec<TableColumnSetup<String>>, // owned names
+    columns: Vec<TableColumnSetup<Cow<'ui, str>>>,
     use_headers: bool,
     freeze: Option<(i32, i32)>,
 }
 
 impl<'ui> TableBuilder<'ui> {
     /// Create a new TableBuilder. Prefer using `Ui::table("id")`.
-    pub fn new(ui: &'ui Ui, str_id: impl AsRef<str>) -> Self {
+    pub fn new(ui: &'ui Ui, str_id: impl Into<Cow<'ui, str>>) -> Self {
         Self {
             ui,
-            id: str_id.as_ref().to_string(),
+            id: str_id.into(),
             flags: TableFlags::NONE,
             outer_size: [0.0, 0.0],
             inner_width: 0.0,
@@ -746,19 +747,19 @@ impl<'ui> TableBuilder<'ui> {
 
     /// Begin defining a column using a chainable ColumnBuilder.
     /// Call `.done()` to return to the TableBuilder.
-    pub fn column(self, name: impl AsRef<str>) -> ColumnBuilder<'ui> {
+    pub fn column(self, name: impl Into<Cow<'ui, str>>) -> ColumnBuilder<'ui> {
         ColumnBuilder::new(self, name)
     }
 
     /// Replace columns with provided list
-    pub fn columns<Name: AsRef<str>>(
+    pub fn columns<Name: Into<Cow<'ui, str>>>(
         mut self,
         cols: impl IntoIterator<Item = TableColumnSetup<Name>>,
     ) -> Self {
         self.columns.clear();
         for c in cols {
             self.columns.push(TableColumnSetup {
-                name: c.name.as_ref().to_string(),
+                name: c.name.into(),
                 flags: c.flags,
                 init_width_or_weight: c.init_width_or_weight,
                 user_id: c.user_id,
@@ -768,9 +769,9 @@ impl<'ui> TableBuilder<'ui> {
     }
 
     /// Add a single column setup
-    pub fn add_column<Name: AsRef<str>>(mut self, col: TableColumnSetup<Name>) -> Self {
+    pub fn add_column<Name: Into<Cow<'ui, str>>>(mut self, col: TableColumnSetup<Name>) -> Self {
         self.columns.push(TableColumnSetup {
-            name: col.name.as_ref().to_string(),
+            name: col.name.into(),
             flags: col.flags,
             init_width_or_weight: col.init_width_or_weight,
             user_id: col.user_id,
@@ -787,7 +788,7 @@ impl<'ui> TableBuilder<'ui> {
     /// Build the table and run a closure to emit rows/cells
     pub fn build(self, f: impl FnOnce(&Ui)) {
         let Some(token) = self.ui.begin_table_with_sizing(
-            &self.id,
+            self.id.as_ref(),
             self.columns.len(),
             self.flags,
             self.outer_size,
@@ -803,7 +804,7 @@ impl<'ui> TableBuilder<'ui> {
         if !self.columns.is_empty() {
             for col in &self.columns {
                 self.ui.table_setup_column(
-                    &col.name,
+                    col.name.as_ref(),
                     col.flags,
                     col.init_width_or_weight,
                     col.user_id,
@@ -825,17 +826,17 @@ impl<'ui> TableBuilder<'ui> {
 #[derive(Debug)]
 pub struct ColumnBuilder<'ui> {
     parent: TableBuilder<'ui>,
-    name: String,
+    name: Cow<'ui, str>,
     flags: TableColumnFlags,
     init_width_or_weight: f32,
     user_id: u32,
 }
 
 impl<'ui> ColumnBuilder<'ui> {
-    fn new(parent: TableBuilder<'ui>, name: impl AsRef<str>) -> Self {
+    fn new(parent: TableBuilder<'ui>, name: impl Into<Cow<'ui, str>>) -> Self {
         Self {
             parent,
-            name: name.as_ref().to_string(),
+            name: name.into(),
             flags: TableColumnFlags::NONE,
             init_width_or_weight: 0.0,
             user_id: 0,

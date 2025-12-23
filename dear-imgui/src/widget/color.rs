@@ -5,6 +5,7 @@
 //!
 use crate::sys;
 use crate::ui::Ui;
+use std::borrow::Cow;
 
 /// Flags for color edit widgets
 #[repr(transparent)]
@@ -124,75 +125,75 @@ impl Ui {
     /// Creates a color edit widget for 3 components (RGB)
     #[doc(alias = "ColorEdit3")]
     pub fn color_edit3(&self, label: impl AsRef<str>, color: &mut [f32; 3]) -> bool {
-        self.color_edit3_config(label, color).build()
+        self.color_edit3_config(label.as_ref(), color).build()
     }
 
     /// Creates a color edit widget for 4 components (RGBA)
     #[doc(alias = "ColorEdit4")]
     pub fn color_edit4(&self, label: impl AsRef<str>, color: &mut [f32; 4]) -> bool {
-        self.color_edit4_config(label, color).build()
+        self.color_edit4_config(label.as_ref(), color).build()
     }
 
     /// Creates a color picker widget for 3 components (RGB)
     #[doc(alias = "ColorPicker3")]
     pub fn color_picker3(&self, label: impl AsRef<str>, color: &mut [f32; 3]) -> bool {
-        self.color_picker3_config(label, color).build()
+        self.color_picker3_config(label.as_ref(), color).build()
     }
 
     /// Creates a color picker widget for 4 components (RGBA)
     #[doc(alias = "ColorPicker4")]
     pub fn color_picker4(&self, label: impl AsRef<str>, color: &mut [f32; 4]) -> bool {
-        self.color_picker4_config(label, color).build()
+        self.color_picker4_config(label.as_ref(), color).build()
     }
 
     /// Creates a color button widget
     #[doc(alias = "ColorButton")]
     pub fn color_button(&self, desc_id: impl AsRef<str>, color: [f32; 4]) -> bool {
-        self.color_button_config(desc_id, color).build()
+        self.color_button_config(desc_id.as_ref(), color).build()
     }
 
     /// Creates a color edit builder for 3 components
-    pub fn color_edit3_config<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn color_edit3_config<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         color: &'p mut [f32; 3],
-    ) -> ColorEdit3<'_, 'p> {
+    ) -> ColorEdit3<'ui, 'p> {
         ColorEdit3::new(self, label, color)
     }
 
     /// Creates a color edit builder for 4 components
-    pub fn color_edit4_config<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn color_edit4_config<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         color: &'p mut [f32; 4],
-    ) -> ColorEdit4<'_, 'p> {
+    ) -> ColorEdit4<'ui, 'p> {
         ColorEdit4::new(self, label, color)
     }
 
     /// Creates a color picker builder for 3 components
-    pub fn color_picker3_config<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn color_picker3_config<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         color: &'p mut [f32; 3],
-    ) -> ColorPicker3<'_, 'p> {
+    ) -> ColorPicker3<'ui, 'p> {
         ColorPicker3::new(self, label, color)
     }
 
     /// Creates a color picker builder for 4 components
-    pub fn color_picker4_config<'p>(
-        &self,
-        label: impl AsRef<str>,
+    pub fn color_picker4_config<'ui, 'p>(
+        &'ui self,
+        label: impl Into<Cow<'ui, str>>,
         color: &'p mut [f32; 4],
-    ) -> ColorPicker4<'_, 'p> {
+    ) -> ColorPicker4<'ui, 'p> {
         ColorPicker4::new(self, label, color)
     }
 
     /// Creates a color button builder
-    pub fn color_button_config(
-        &self,
-        desc_id: impl AsRef<str>,
+    pub fn color_button_config<'ui>(
+        &'ui self,
+        desc_id: impl Into<Cow<'ui, str>>,
         color: [f32; 4],
-    ) -> ColorButton<'_> {
+    ) -> ColorButton<'ui> {
         ColorButton::new(self, desc_id, color)
     }
 }
@@ -202,17 +203,17 @@ impl Ui {
 #[must_use]
 pub struct ColorEdit3<'ui, 'p> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     color: &'p mut [f32; 3],
     flags: ColorEditFlags,
 }
 
 impl<'ui, 'p> ColorEdit3<'ui, 'p> {
     /// Creates a new color edit builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>, color: &'p mut [f32; 3]) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, color: &'p mut [f32; 3]) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             color,
             flags: ColorEditFlags::NONE,
         }
@@ -226,7 +227,7 @@ impl<'ui, 'p> ColorEdit3<'ui, 'p> {
 
     /// Builds the color edit widget
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe { sys::igColorEdit3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
 }
@@ -236,17 +237,17 @@ impl<'ui, 'p> ColorEdit3<'ui, 'p> {
 #[must_use]
 pub struct ColorEdit4<'ui, 'p> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     color: &'p mut [f32; 4],
     flags: ColorEditFlags,
 }
 
 impl<'ui, 'p> ColorEdit4<'ui, 'p> {
     /// Creates a new color edit builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>, color: &'p mut [f32; 4]) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, color: &'p mut [f32; 4]) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             color,
             flags: ColorEditFlags::NONE,
         }
@@ -260,7 +261,7 @@ impl<'ui, 'p> ColorEdit4<'ui, 'p> {
 
     /// Builds the color edit widget
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe { sys::igColorEdit4(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
 }
@@ -270,17 +271,17 @@ impl<'ui, 'p> ColorEdit4<'ui, 'p> {
 #[must_use]
 pub struct ColorPicker3<'ui, 'p> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     color: &'p mut [f32; 3],
     flags: ColorEditFlags,
 }
 
 impl<'ui, 'p> ColorPicker3<'ui, 'p> {
     /// Creates a new color picker builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>, color: &'p mut [f32; 3]) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, color: &'p mut [f32; 3]) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             color,
             flags: ColorEditFlags::NONE,
         }
@@ -294,7 +295,7 @@ impl<'ui, 'p> ColorPicker3<'ui, 'p> {
 
     /// Builds the color picker widget
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe { sys::igColorPicker3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
 }
@@ -304,7 +305,7 @@ impl<'ui, 'p> ColorPicker3<'ui, 'p> {
 #[must_use]
 pub struct ColorPicker4<'ui, 'p> {
     ui: &'ui Ui,
-    label: String,
+    label: Cow<'ui, str>,
     color: &'p mut [f32; 4],
     flags: ColorEditFlags,
     ref_color: Option<[f32; 4]>,
@@ -312,10 +313,10 @@ pub struct ColorPicker4<'ui, 'p> {
 
 impl<'ui, 'p> ColorPicker4<'ui, 'p> {
     /// Creates a new color picker builder
-    pub fn new(ui: &'ui Ui, label: impl AsRef<str>, color: &'p mut [f32; 4]) -> Self {
+    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, color: &'p mut [f32; 4]) -> Self {
         Self {
             ui,
-            label: label.as_ref().to_string(),
+            label: label.into(),
             color,
             flags: ColorEditFlags::NONE,
             ref_color: None,
@@ -336,7 +337,7 @@ impl<'ui, 'p> ColorPicker4<'ui, 'p> {
 
     /// Builds the color picker widget
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(&self.label);
+        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let ref_color_ptr = self
             .ref_color
             .as_ref()
@@ -358,7 +359,7 @@ impl<'ui, 'p> ColorPicker4<'ui, 'p> {
 #[must_use]
 pub struct ColorButton<'ui> {
     ui: &'ui Ui,
-    desc_id: String,
+    desc_id: Cow<'ui, str>,
     color: [f32; 4],
     flags: ColorEditFlags,
     size: [f32; 2],
@@ -366,10 +367,10 @@ pub struct ColorButton<'ui> {
 
 impl<'ui> ColorButton<'ui> {
     /// Creates a new color button builder
-    pub fn new(ui: &'ui Ui, desc_id: impl AsRef<str>, color: [f32; 4]) -> Self {
+    pub fn new(ui: &'ui Ui, desc_id: impl Into<Cow<'ui, str>>, color: [f32; 4]) -> Self {
         Self {
             ui,
-            desc_id: desc_id.as_ref().to_string(),
+            desc_id: desc_id.into(),
             color,
             flags: ColorEditFlags::NONE,
             size: [0.0, 0.0],
@@ -390,7 +391,7 @@ impl<'ui> ColorButton<'ui> {
 
     /// Builds the color button widget
     pub fn build(self) -> bool {
-        let desc_id_ptr = self.ui.scratch_txt(&self.desc_id);
+        let desc_id_ptr = self.ui.scratch_txt(self.desc_id.as_ref());
         let size_vec: sys::ImVec2 = self.size.into();
 
         unsafe {

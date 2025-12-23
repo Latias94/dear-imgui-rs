@@ -17,6 +17,7 @@
 use crate::sys;
 use crate::texture::TextureRef;
 use crate::ui::Ui;
+use std::borrow::Cow;
 
 /// # Image Widgets
 ///
@@ -53,7 +54,8 @@ impl Ui {
         texture: impl Into<TextureRef>,
         size: [f32; 2],
     ) -> bool {
-        self.image_button_config(str_id, texture, size).build()
+        self.image_button_config(str_id.as_ref(), texture, size)
+            .build()
     }
 
     /// Creates an image builder
@@ -62,12 +64,12 @@ impl Ui {
     }
 
     /// Creates an image button builder
-    pub fn image_button_config(
-        &self,
-        str_id: impl AsRef<str>,
+    pub fn image_button_config<'ui>(
+        &'ui self,
+        str_id: impl Into<Cow<'ui, str>>,
         texture: impl Into<TextureRef>,
         size: [f32; 2],
-    ) -> ImageButton<'_> {
+    ) -> ImageButton<'ui> {
         ImageButton::new(self, str_id, texture, size)
     }
 }
@@ -180,7 +182,7 @@ impl<'ui> Image<'ui> {
 #[must_use]
 pub struct ImageButton<'ui> {
     ui: &'ui Ui,
-    str_id: String,
+    str_id: Cow<'ui, str>,
     texture: TextureRef,
     size: [f32; 2],
     uv0: [f32; 2],
@@ -193,13 +195,13 @@ impl<'ui> ImageButton<'ui> {
     /// Creates a new image button builder
     pub fn new(
         ui: &'ui Ui,
-        str_id: impl AsRef<str>,
+        str_id: impl Into<Cow<'ui, str>>,
         texture: impl Into<TextureRef>,
         size: [f32; 2],
     ) -> Self {
         Self {
             ui,
-            str_id: str_id.as_ref().to_string(),
+            str_id: str_id.into(),
             texture: texture.into(),
             size,
             uv0: [0.0, 0.0],
@@ -235,7 +237,7 @@ impl<'ui> ImageButton<'ui> {
 
     /// Builds the image button widget
     pub fn build(self) -> bool {
-        let str_id_ptr = self.ui.scratch_txt(&self.str_id);
+        let str_id_ptr = self.ui.scratch_txt(self.str_id.as_ref());
         let size_vec: sys::ImVec2 = self.size.into();
         let uv0_vec: sys::ImVec2 = self.uv0.into();
         let uv1_vec: sys::ImVec2 = self.uv1.into();
