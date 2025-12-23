@@ -6,7 +6,7 @@ This document tracks compatibility across the workspace crates, upstream Dear Im
 
 - Unified release train: all `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
 - Current train: unified `v0.8.0` (use `version = "0.8"`).
-- Previous train: unified `v0.5.0` (use `version = "0.5"`).
+- Previous train: unified `v0.7.0` (use `version = "0.7"`).
 - Internal dependency constraints in this repo also pin to the unified minor (e.g., `0.5`). Mixing different minors across our crates is unsupported.
 - Exception: helper tooling like `tools/build-support` may follow an independent version and is not part of the unified train.
 
@@ -68,6 +68,12 @@ Release Train 0.8 (current)
     - `wasm-bindgen-*` commands for core + extensions (ImPlot, ImPlot3D, ImNodes, ImGuizmo, ImGuIZMO.quat).
     - `web-demo [features]` to toggle which extensions are compiled into the web demo.
     - `build-cimgui-provider` to build the shared `imgui-sys-v0` provider (Emscripten).
+
+Release Train 0.7 (previous)
+
+- All crates unified to 0.7.0 across the workspace (use `version = "0.7"`).
+- External dependencies baseline: wgpu 27, winit 0.30.12, glow 0.16, sdl3 0.16.
+- Patch note: `dear-imgui-rs` has a core-only patch release at 0.7.1; other workspace crates remain at 0.7.0.
 
 Release Train 0.6 (previous)
 

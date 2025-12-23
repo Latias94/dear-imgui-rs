@@ -88,7 +88,7 @@ cargo run --bin reflect_demo --features reflect
 cargo run --bin implot3d_basic --features implot3d
 
 # WebAssembly (WASM) web demo (import-style, ImGui + optional ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
-# Note: this import-style WASM path is developed on `main` and shipped in the 0.7.x release train.
+# Note: this import-style WASM path is developed on `main` and shipped in the 0.7.x+ release trains.
 # For the full setup (bindings generation, web demo build, provider build, and troubleshooting),
 # see the "WebAssembly (WASM) support" section below and docs/WASM.md.
 
@@ -225,7 +225,7 @@ Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.8.x   | wgpu = 27         | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
+| dear-imgui-wgpu  | 0.8.x   | wgpu = 28         | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
 | dear-imgui-glow  | 0.8.x   | glow = 0.16       | OpenGL renderer (winit/glutin) |
 | dear-imgui-winit | 0.8.x   | winit = 0.30.12   | Winit platform backend         |
 | dear-imgui-sdl3  | 0.8.x   | sdl3 = 0.16       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
@@ -234,19 +234,22 @@ Application Runner
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.8.x   | 0.7.x                  | App runner (docking, themes, add-ons)            |
+| dear-app  | 0.8.x   | 0.8.x                  | App runner (docking, themes, add-ons)            |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.8.x   | 0.7.x                  | dear-implot-sys 0.7.x       | 2D plotting                            |
-| dear-imnodes        | 0.8.x   | 0.7.x                  | dear-imnodes-sys 0.7.x      | Node editor                            |
-| dear-imguizmo       | 0.8.x   | 0.7.x                  | dear-imguizmo-sys 0.7.x     | 3D gizmo + GraphEditor                 |
-| dear-file-browser   | 0.8.x   | 0.7.x                  | —                           | ImGui UI + native (rfd) backends       |
-| dear-implot3d       | 0.8.x   | 0.7.x                  | dear-implot3d-sys 0.7.x     | 3D plotting                            |
-| dear-imguizmo-quat  | 0.8.x   | 0.7.x                  | dear-imguizmo-quat-sys 0.7.x| Quaternion gizmo                       |
-| dear-imgui-reflect  | 0.8.x   | 0.7.x                  | —                           | Reflection-based UI helpers (pure Rust)|
+| dear-implot         | 0.8.x   | 0.8.x                  | dear-implot-sys 0.8.x       | 2D plotting                            |
+| dear-imnodes        | 0.8.x   | 0.8.x                  | dear-imnodes-sys 0.8.x      | Node editor                            |
+| dear-imguizmo       | 0.8.x   | 0.8.x                  | dear-imguizmo-sys 0.8.x     | 3D gizmo + GraphEditor                 |
+| dear-file-browser   | 0.8.x   | 0.8.x                  | —                           | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.8.x   | 0.8.x                  | dear-implot3d-sys 0.8.x     | 3D plotting                            |
+| dear-imguizmo-quat  | 0.8.x   | 0.8.x                  | dear-imguizmo-quat-sys 0.8.x| Quaternion gizmo                       |
+| dear-imgui-reflect  | 0.8.x   | 0.8.x                  | —                           | Reflection-based UI helpers (pure Rust)|
+
+Note: if you need `wgpu = 27` (or an older toolchain), use the 0.7.x train. The latest core patch is
+`dear-imgui-rs 0.7.1` (core-only); the rest of the workspace crates remain at 0.7.0.
 
 Maintenance rules
 
