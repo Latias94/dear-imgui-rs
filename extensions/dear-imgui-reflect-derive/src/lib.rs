@@ -1520,8 +1520,8 @@ fn derive_for_struct(
                     //  - global ReflectSettings::tuples()
                     //  - optional MemberSettings::tuples for this field
                     //  - optional per-field attributes overriding mode/dropdown/columns/min_width.
-                    let has_columns = tuple_columns_expr.is_some();
-                    let has_min_width = tuple_min_width_expr.is_some();
+                    let _has_columns = tuple_columns_expr.is_some();
+                    let _has_min_width = tuple_min_width_expr.is_some();
 
                     let render_mode_stmt = if let Some(mode) = tuple_render.clone() {
                         if mode == "grid" {

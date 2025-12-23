@@ -85,6 +85,10 @@ pub(crate) unsafe extern "C" fn set_clipboard_text(
         let user_data = unsafe { (*crate::sys::igGetPlatformIO_Nil()).Platform_ClipboardUserData };
 
         let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
+        if text.is_null() {
+            ctx.backend.set("");
+            return;
+        }
         let text = unsafe { CStr::from_ptr(text) }.to_string_lossy();
         ctx.backend.set(text.as_ref());
     });

@@ -452,7 +452,11 @@ impl TextureData {
     pub fn updates(&self) -> impl Iterator<Item = TextureRect> + '_ {
         unsafe {
             let vec = &(*self.as_raw()).Updates;
-            let count = vec.Size as usize;
+            let count = if vec.Size <= 0 || vec.Data.is_null() {
+                0
+            } else {
+                vec.Size as usize
+            };
             let data = vec.Data as *const sys::ImTextureRect;
             (0..count).map(move |i| TextureRect::from(*data.add(i)))
         }
