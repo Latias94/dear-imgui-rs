@@ -36,6 +36,7 @@ struct AppWindow {
     context: PossiblyCurrentContext,
     imgui: ImguiState,
     counter: i32,
+    show_hello: bool,
 }
 
 #[derive(Default)]
@@ -112,6 +113,7 @@ impl AppWindow {
             context,
             imgui,
             counter: 0,
+            show_hello: true,
         })
     }
 
@@ -140,19 +142,32 @@ impl AppWindow {
         let ui = self.imgui.context.frame();
 
         // UI
-        ui.window("Hello")
-            .size([360.0, 180.0], Condition::FirstUseEver)
-            .build(|| {
-                ui.text("Hello, world!");
-                if ui.button("Click me") {
-                    self.counter += 1;
-                }
-                ui.same_line();
-                ui.text(format!("Counter: {}", self.counter));
+        if self.show_hello {
+            ui.window("Hello")
+                .opened(&mut self.show_hello)
+                .size([360.0, 180.0], Condition::FirstUseEver)
+                .build(|| {
+                    ui.text("Hello, world!");
+                    if ui.button("Click me") {
+                        self.counter += 1;
+                    }
+                    ui.same_line();
+                    ui.text(format!("Counter: {}", self.counter));
 
-                ui.separator();
-                ui.text(format!("Frame {:.2} ms", ui.io().delta_time() * 1000.0));
-            });
+                    ui.separator();
+                    ui.text(format!("Frame {:.2} ms", ui.io().delta_time() * 1000.0));
+                    ui.text("Close this window with the title-bar X.");
+                });
+        } else {
+            ui.window("Main")
+                .size([280.0, 120.0], Condition::FirstUseEver)
+                .build(|| {
+                    ui.text("Hello window is closed.");
+                    if ui.button("Reopen Hello") {
+                        self.show_hello = true;
+                    }
+                });
+        }
 
         // Clear
         if let Some(gl) = self.imgui.renderer.gl_context() {
