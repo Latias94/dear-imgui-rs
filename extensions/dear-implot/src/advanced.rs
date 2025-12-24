@@ -3,6 +3,7 @@
 //! This module provides high-level functionality for creating complex plots
 //! with multiple subplots, legends, and advanced layout management.
 
+use crate::context::PlotScopeGuard;
 use crate::{AxisFlags, plots::PlotError, sys};
 use std::ffi::CString;
 use std::marker::PhantomData;
@@ -195,6 +196,16 @@ impl<'a> MultiAxisPlot<'a> {
         let title_cstr =
             CString::new(self.title).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
+        for axis in &self.y_axes {
+            if let Some(label) = axis.label
+                && label.contains('\0')
+            {
+                return Err(PlotError::StringConversion(
+                    "Axis label contained an interior NUL byte".to_string(),
+                ));
+            }
+        }
+
         let size = self.size.unwrap_or([-1.0, -1.0]);
         let size_vec = sys::ImVec2_c {
             x: size[0],
@@ -231,6 +242,7 @@ impl<'a> MultiAxisPlot<'a> {
             Ok(MultiAxisToken {
                 _title: title_cstr,
                 _axis_labels: axis_labels,
+                _scope: PlotScopeGuard::new(),
                 _phantom: PhantomData,
             })
         } else {
@@ -245,6 +257,7 @@ impl<'a> MultiAxisPlot<'a> {
 pub struct MultiAxisToken<'a> {
     _title: CString,
     _axis_labels: Vec<CString>,
+    _scope: PlotScopeGuard,
     _phantom: PhantomData<&'a ()>,
 }
 

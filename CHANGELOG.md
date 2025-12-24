@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Multi-viewport: avoid freeing `ViewportData` while an `&mut ViewportData` reference is still live (raw-pointer cleanup instead).
 - Extensions
   - `dear-implot`: fix `SubplotToken`/`MultiAxisToken`/`LegendToken` double-end by letting `Drop` perform the actual `End*` call; make subplot ratio buffers owned to avoid casting away constness.
+  - `dear-implot`: keep axis formatter/transform closures alive for the full plot scope (avoid dangling `user_data` pointers if tokens are dropped early).
   - `dear-imguizmo-quat`: avoid casting `*const` matrices to `*mut` in quaternion helpers by using a local mutable copy.
 
 ## [0.8.0] - 2025-12-22
