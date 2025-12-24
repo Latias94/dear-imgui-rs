@@ -14,8 +14,8 @@ pub struct SubplotGrid<'a> {
     cols: i32,
     size: Option<[f32; 2]>,
     flags: SubplotFlags,
-    row_ratios: Option<&'a [f32]>,
-    col_ratios: Option<&'a [f32]>,
+    row_ratios: Option<Vec<f32>>,
+    col_ratios: Option<Vec<f32>>,
 }
 
 bitflags::bitflags! {
@@ -61,14 +61,22 @@ impl<'a> SubplotGrid<'a> {
     }
 
     /// Set row height ratios
-    pub fn with_row_ratios(mut self, ratios: &'a [f32]) -> Self {
-        self.row_ratios = Some(ratios);
+    pub fn with_row_ratios(mut self, ratios: &[f32]) -> Self {
+        self.row_ratios = if ratios.is_empty() {
+            None
+        } else {
+            Some(ratios.to_vec())
+        };
         self
     }
 
     /// Set column width ratios
-    pub fn with_col_ratios(mut self, ratios: &'a [f32]) -> Self {
-        self.col_ratios = Some(ratios);
+    pub fn with_col_ratios(mut self, ratios: &[f32]) -> Self {
+        self.col_ratios = if ratios.is_empty() {
+            None
+        } else {
+            Some(ratios.to_vec())
+        };
         self
     }
 
@@ -83,14 +91,17 @@ impl<'a> SubplotGrid<'a> {
             y: size[1],
         };
 
-        let row_ratios_ptr = self
-            .row_ratios
-            .map(|r| r.as_ptr() as *mut f32)
+        // The C API takes `float*` for ratios. Keep owned copies alive in the token to avoid
+        // casting away constness and to stay sound even if the backend ever writes to them.
+        let mut row_ratios = self.row_ratios;
+        let mut col_ratios = self.col_ratios;
+        let row_ratios_ptr = row_ratios
+            .as_mut()
+            .map(|r| r.as_mut_ptr())
             .unwrap_or(std::ptr::null_mut());
-
-        let col_ratios_ptr = self
-            .col_ratios
-            .map(|c| c.as_ptr() as *mut f32)
+        let col_ratios_ptr = col_ratios
+            .as_mut()
+            .map(|c| c.as_mut_ptr())
             .unwrap_or(std::ptr::null_mut());
 
         let success = unsafe {
@@ -108,6 +119,8 @@ impl<'a> SubplotGrid<'a> {
         if success {
             Ok(SubplotToken {
                 _title: title_cstr,
+                _row_ratios: row_ratios,
+                _col_ratios: col_ratios,
                 _phantom: PhantomData,
             })
         } else {
@@ -121,15 +134,15 @@ impl<'a> SubplotGrid<'a> {
 /// Token representing an active subplot grid
 pub struct SubplotToken<'a> {
     _title: CString,
+    _row_ratios: Option<Vec<f32>>,
+    _col_ratios: Option<Vec<f32>>,
     _phantom: PhantomData<&'a ()>,
 }
 
 impl<'a> SubplotToken<'a> {
     /// End the subplot grid
     pub fn end(self) {
-        unsafe {
-            sys::ImPlot_EndSubplots();
-        }
+        // The actual ending happens in Drop.
     }
 }
 
@@ -248,9 +261,7 @@ impl<'a> MultiAxisToken<'a> {
 
     /// End the multi-axis plot
     pub fn end(self) {
-        unsafe {
-            sys::ImPlot_EndPlot();
-        }
+        // The actual ending happens in Drop.
     }
 }
 
@@ -332,9 +343,7 @@ pub struct LegendToken {
 impl LegendToken {
     /// End the legend
     pub fn end(self) {
-        unsafe {
-            sys::ImPlot_EndLegendPopup();
-        }
+        // The actual ending happens in Drop.
     }
 }
 

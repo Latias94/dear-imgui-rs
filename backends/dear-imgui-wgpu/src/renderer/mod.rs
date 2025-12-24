@@ -273,8 +273,17 @@ impl WgpuRenderer {
             let device = backend_data.device.clone();
             let queue = backend_data.queue.clone();
             self.reload_font_texture(imgui_ctx, &device, &queue)?;
-            // Fallback: if draw_data-based texture updates are not triggered for the font atlas
-            // on this Dear ImGui version/config, upload the font atlas now and assign a TexID.
+            if imgui_ctx
+                .io()
+                .backend_flags()
+                .contains(BackendFlags::RENDERER_HAS_TEXTURES)
+            {
+                // New backend texture system: font textures are produced via DrawData::textures()
+                // requests; do not assign a legacy TexID.
+                return Ok(());
+            }
+
+            // Legacy fallback: upload font atlas texture immediately and assign TexID.
             if self.font_texture_id.is_none() {
                 if let Some(tex_id) =
                     self.try_upload_font_atlas_legacy(imgui_ctx, &device, &queue)?
@@ -282,18 +291,12 @@ impl WgpuRenderer {
                     if cfg!(debug_assertions) {
                         tracing::debug!(
                             target: "dear-imgui-wgpu",
-                            "[dear-imgui-wgpu][debug] Font atlas uploaded via fallback (legacy-only) path; user textures use modern ImTextureData. tex_id={}",
+                            "[dear-imgui-wgpu][debug] Font atlas uploaded via legacy fallback path. tex_id={}",
                             tex_id
                         );
                     }
                     self.font_texture_id = Some(tex_id);
                 }
-            } else if cfg!(debug_assertions) {
-                tracing::debug!(
-                    target: "dear-imgui-wgpu",
-                    "[dear-imgui-wgpu][debug] Font atlas tex_id already set: {:?}",
-                    self.font_texture_id
-                );
             }
         }
         Ok(())

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Core (`dear-imgui-rs`)
+  - Draw callbacks: avoid creating `&mut` references from `*const` FFI pointers when clearing callback user data.
+  - Tests: avoid `mem::zeroed()` for `ImGuiPlatformIO` by constructing it via the C++ constructor instead.
+- `dear-imgui-wgpu`
+  - Font atlas: stop calling `FontAtlas::build()` in renderer code when using `BackendFlags::RENDERER_HAS_TEXTURES`; skip legacy TexID fallback in the new texture system.
+- `dear-imgui-sdl3`
+  - Manual gamepad mode: avoid casting away constness in Rust by taking a `*const` pointer array and copying pointers into stable storage on the C++ side.
+- Extensions
+  - `dear-implot`: fix `SubplotToken`/`MultiAxisToken`/`LegendToken` double-end by letting `Drop` perform the actual `End*` call; make subplot ratio buffers owned to avoid casting away constness.
+  - `dear-imguizmo-quat`: avoid casting `*const` matrices to `*mut` in quaternion helpers by using a local mutable copy.
+
 ## [0.8.0] - 2025-12-22
 
 ### Added

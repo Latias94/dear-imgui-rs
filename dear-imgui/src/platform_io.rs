@@ -999,10 +999,7 @@ impl PlatformIo {
             if size == 0 || vector.Data.is_null() {
                 crate::render::draw_data::TextureIterator::new(std::ptr::null(), std::ptr::null())
             } else {
-                crate::render::draw_data::TextureIterator::new(
-                    vector.Data,
-                    vector.Data.add(size),
-                )
+                crate::render::draw_data::TextureIterator::new(vector.Data, vector.Data.add(size))
             }
         }
     }
@@ -1363,9 +1360,22 @@ impl Viewport {
 mod tests {
     use super::*;
 
+    fn new_platform_io() -> sys::ImGuiPlatformIO {
+        unsafe {
+            let p = sys::ImGuiPlatformIO_ImGuiPlatformIO();
+            assert!(
+                !p.is_null(),
+                "ImGuiPlatformIO_ImGuiPlatformIO() returned null"
+            );
+            let v = *p;
+            sys::ImGuiPlatformIO_destroy(p);
+            v
+        }
+    }
+
     #[test]
     fn platform_io_textures_empty_is_safe() {
-        let mut raw: sys::ImGuiPlatformIO = unsafe { std::mem::zeroed() };
+        let mut raw: sys::ImGuiPlatformIO = new_platform_io();
 
         raw.Textures.Size = 0;
         raw.Textures.Data = std::ptr::null_mut();
@@ -1373,7 +1383,7 @@ mod tests {
         assert_eq!(pio.textures().count(), 0);
         assert_eq!(pio.textures_count(), 0);
 
-        let mut raw: sys::ImGuiPlatformIO = unsafe { std::mem::zeroed() };
+        let mut raw: sys::ImGuiPlatformIO = new_platform_io();
         raw.Textures.Size = 1;
         raw.Textures.Data = std::ptr::null_mut();
         let pio = PlatformIo { raw };

@@ -171,10 +171,7 @@ impl DrawList {
                 Ok(len) => len,
                 Err(_) => return &[],
             };
-            std::slice::from_raw_parts(
-                (*self.0).CmdBuffer.Data as *const sys::ImDrawCmd,
-                len,
-            )
+            std::slice::from_raw_parts((*self.0).CmdBuffer.Data as *const sys::ImDrawCmd, len)
         }
     }
 
@@ -1310,28 +1307,29 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
         if cmd.is_null() {
             return;
         }
-        // Access mutable ImDrawCmd to retrieve and clear user data
-        let cmd = unsafe { &mut *(cmd as *mut sys::ImDrawCmd) };
-        if cmd.UserCallbackData.is_null() {
+        let cmd_ptr = cmd as *mut sys::ImDrawCmd;
+        if unsafe { (*cmd_ptr).UserCallbackData.is_null() } {
             return;
         }
-        if cmd.UserCallbackDataOffset != 0 {
+        if unsafe { (*cmd_ptr).UserCallbackDataOffset } != 0 {
             eprintln!("dear-imgui-rs: unexpected UserCallbackDataOffset != 0");
             std::process::abort();
         }
-        if cmd.UserCallbackDataSize as usize != std::mem::size_of::<F>() {
+        if unsafe { (*cmd_ptr).UserCallbackDataSize as usize } != std::mem::size_of::<F>() {
             eprintln!("dear-imgui-rs: unexpected UserCallbackDataSize mismatch");
             std::process::abort();
         }
         // Compute pointer to our boxed closure (respect offset if ever used)
-        let data_ptr = cmd.UserCallbackData as *mut F;
+        let data_ptr = unsafe { (*cmd_ptr).UserCallbackData as *mut F };
         if data_ptr.is_null() {
             return;
         }
         // Take ownership and clear the pointer/size to avoid double-free or re-entry
-        cmd.UserCallbackData = std::ptr::null_mut();
-        cmd.UserCallbackDataSize = 0;
-        cmd.UserCallbackDataOffset = 0;
+        unsafe {
+            (*cmd_ptr).UserCallbackData = std::ptr::null_mut();
+            (*cmd_ptr).UserCallbackDataSize = 0;
+            (*cmd_ptr).UserCallbackDataOffset = 0;
+        }
         let cb = unsafe { Box::from_raw(data_ptr) };
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
             cb();

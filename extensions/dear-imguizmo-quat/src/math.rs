@@ -17,7 +17,10 @@ pub fn quat_from_mat4_to<Q: QuatLike>(mat: &[f32; 16], out: &mut Q) {
         z: 0.0,
         w: 1.0,
     };
-    unsafe { sys::quat_cast(mat.as_ptr() as *mut f32, &mut sq as *mut _) };
+    // The C API takes a mutable pointer but does not need to mutate the input matrix.
+    // Copy into a local buffer to avoid casting away constness (and stay sound if it ever writes).
+    let mut mat_copy = *mat;
+    unsafe { sys::quat_cast(mat_copy.as_mut_ptr(), &mut sq as *mut _) };
     out.set_from_xyzw([sq.x, sq.y, sq.z, sq.w]);
 }
 
@@ -47,13 +50,8 @@ pub fn quat_pos_from_mat4_to<Q: QuatLike, V3: Vec3Like>(
         y: 0.0,
         z: 0.0,
     };
-    unsafe {
-        sys::quat_pos_cast(
-            mat.as_ptr() as *mut f32,
-            &mut sq as *mut _,
-            &mut sp as *mut _,
-        )
-    };
+    let mut mat_copy = *mat;
+    unsafe { sys::quat_pos_cast(mat_copy.as_mut_ptr(), &mut sq as *mut _, &mut sp as *mut _) };
     out_q.set_from_xyzw([sq.x, sq.y, sq.z, sq.w]);
     out_pos.set_from_array([sp.x, sp.y, sp.z]);
 }

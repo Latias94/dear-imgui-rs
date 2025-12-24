@@ -10,6 +10,7 @@
 #endif
 
 #include <SDL3/SDL.h>
+#include <vector>
 
 extern "C" {
 
@@ -91,8 +92,19 @@ void ImGui_ImplSDL3_SetGamepadMode_AutoAll_Rust() {
     ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll, nullptr, 0);
 }
 
-void ImGui_ImplSDL3_SetGamepadMode_Manual_Rust(SDL_Gamepad** manual_gamepads_array, int manual_gamepads_count) {
-    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, manual_gamepads_array, manual_gamepads_count);
+void ImGui_ImplSDL3_SetGamepadMode_Manual_Rust(SDL_Gamepad* const* manual_gamepads_array, int manual_gamepads_count) {
+    // Dear ImGui SDL backends may keep a pointer to the passed-in array. Copy it into stable
+    // storage so Rust callers don't need to keep their slice buffer alive.
+    static std::vector<SDL_Gamepad*> manual_gamepads;
+    manual_gamepads.clear();
+    if (manual_gamepads_array != nullptr && manual_gamepads_count > 0) {
+        manual_gamepads.assign(manual_gamepads_array, manual_gamepads_array + manual_gamepads_count);
+    }
+    ImGui_ImplSDL3_SetGamepadMode(
+        ImGui_ImplSDL3_GamepadMode_Manual,
+        manual_gamepads.empty() ? nullptr : manual_gamepads.data(),
+        (int)manual_gamepads.size()
+    );
 }
 
 } // extern "C"

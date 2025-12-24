@@ -8,23 +8,16 @@ impl WgpuRenderer {
     ///
     /// With the new texture management system in Dear ImGui 1.92+, font textures are
     /// automatically managed through ImDrawData->Textures[] during rendering.
-    /// However, we need to ensure the font atlas is built and ready before the first render.
+    /// Do not manually call `fonts.build()` here: with ImGui 1.92+ this is handled by
+    /// `ImFontAtlasUpdateNewFrame()` when `BackendFlags::RENDERER_HAS_TEXTURES` is set, and
+    /// calling Build() in the legacy mode can trigger assertions on the next frame.
     pub(super) fn reload_font_texture(
         &mut self,
         imgui_ctx: &mut Context,
         _device: &Device,
         _queue: &Queue,
     ) -> RendererResult<()> {
-        let mut fonts = imgui_ctx.font_atlas_mut();
-        // Build the font atlas if not already built
-        // This prepares the font data but doesn't create GPU textures yet
-        if !fonts.is_built() {
-            fonts.build();
-        }
-
-        // Do not manually set TexRef/TexID here. With BackendFlags::RENDERER_HAS_TEXTURES,
-        // Dear ImGui will emit texture requests (WantCreate/WantUpdates) via DrawData::textures(),
-        // and our texture manager will create/upload the font texture on demand during rendering.
+        let _ = imgui_ctx;
 
         Ok(())
     }

@@ -51,7 +51,7 @@ mod ffi {
         pub fn ImGui_ImplSDL3_SetGamepadMode_AutoFirst_Rust();
         pub fn ImGui_ImplSDL3_SetGamepadMode_AutoAll_Rust();
         pub fn ImGui_ImplSDL3_SetGamepadMode_Manual_Rust(
-            manual_gamepads_array: *mut *mut sdl3_sys::gamepad::SDL_Gamepad,
+            manual_gamepads_array: *const *mut sdl3_sys::gamepad::SDL_Gamepad,
             manual_gamepads_count: i32,
         );
     }
@@ -110,12 +110,10 @@ pub fn set_gamepad_mode(mode: GamepadMode) {
 ///
 /// - The caller must ensure every pointer in `gamepads` is a valid, opened `SDL_Gamepad`.
 /// - The caller is responsible for keeping those gamepads alive for the duration of ImGui usage.
+/// - The slice itself is only read during this call; the backend copies the pointers.
 pub unsafe fn set_gamepad_mode_manual(gamepads: &[*mut sdl3_sys::gamepad::SDL_Gamepad]) {
     unsafe {
-        ffi::ImGui_ImplSDL3_SetGamepadMode_Manual_Rust(
-            gamepads.as_ptr() as *mut *mut sdl3_sys::gamepad::SDL_Gamepad,
-            gamepads.len() as i32,
-        );
+        ffi::ImGui_ImplSDL3_SetGamepadMode_Manual_Rust(gamepads.as_ptr(), gamepads.len() as i32);
     }
 }
 
