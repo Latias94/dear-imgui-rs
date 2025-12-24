@@ -4,8 +4,8 @@ use super::*;
 use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::Viewport;
 use std::ffi::c_void;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 #[cfg(not(target_arch = "wasm32"))]
 use winit::window::Window;
 
@@ -20,8 +20,9 @@ pub struct ViewportWgpuData {
 }
 
 static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
-static GLOBAL: OnceLock<GlobalHandles> = OnceLock::new();
+static GLOBAL: Mutex<Option<GlobalHandles>> = Mutex::new(None);
 
+#[derive(Clone)]
 struct GlobalHandles {
     instance: Option<wgpu::Instance>,
     adapter: Option<wgpu::Adapter>,
@@ -54,13 +55,35 @@ pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
 
     // Also store global handles so creation/resizing callbacks don't rely on renderer pointer stability
     if let Some(backend) = renderer.backend_data.as_ref() {
-        let _ = GLOBAL.set(GlobalHandles {
+        let mut g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
+        *g = Some(GlobalHandles {
             instance: backend.instance.clone(),
             adapter: backend.adapter.clone(),
             device: backend.device.clone(),
             render_target_format: backend.render_target_format,
         });
     }
+}
+
+/// Disable WGPU multi-viewport callbacks and clear stored globals.
+pub fn disable(imgui_context: &mut Context) {
+    unsafe {
+        let platform_io = imgui_context.platform_io_mut();
+        platform_io.set_renderer_create_window(None);
+        platform_io.set_renderer_destroy_window(None);
+        platform_io.set_renderer_set_window_size(None);
+        platform_io.set_platform_render_window_raw(None);
+        platform_io.set_platform_swap_buffers_raw(None);
+    }
+    RENDERER_PTR.store(0, Ordering::SeqCst);
+    let mut g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
+    *g = None;
+}
+
+/// Convenience helper that disables callbacks and destroys all platform windows.
+pub fn shutdown_multi_viewport_support(context: &mut Context) {
+    disable(context);
+    context.destroy_platform_windows();
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -94,9 +117,12 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         mvlog!("[wgpu-mv] Renderer_CreateWindow");
 
-        let global = match GLOBAL.get() {
-            Some(g) => g,
-            None => return,
+        let global = {
+            let g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
+            match g.as_ref() {
+                Some(g) => g.clone(),
+                None => return,
+            }
         };
 
         // Obtain window from platform handle
@@ -271,9 +297,12 @@ pub unsafe extern "C" fn renderer_set_window_size(
             size.x,
             size.y
         );
-        let global = match GLOBAL.get() {
-            Some(g) => g,
-            None => return,
+        let global = {
+            let g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
+            match g.as_ref() {
+                Some(g) => g.clone(),
+                None => return,
+            }
         };
         if let Some(data) = viewport_user_data_mut(vp) {
             // Winit multi-viewport uses logical screen coordinates for viewport sizes.
