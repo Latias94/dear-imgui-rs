@@ -679,9 +679,8 @@ impl WgpuRenderer {
                         } => {
                             // Texture bind group resolution mirrors render_draw_lists_static
                             // Resolve effective ImTextureID using raw_cmd (modern texture path)
-                            let tex_id = dear_imgui_rs::sys::ImDrawCmd_GetTexID(
-                                raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
-                            ) as u64;
+                            let mut cmd_copy = *raw_cmd;
+                            let tex_id = dear_imgui_rs::sys::ImDrawCmd_GetTexID(&mut cmd_copy) as u64;
 
                             // Switch common bind group (sampler) if this texture uses a custom sampler.
                             let desired_sampler_id = if tex_id == 0 {

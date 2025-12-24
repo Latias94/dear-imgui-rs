@@ -191,10 +191,15 @@ impl From<u64> for TextureRef {
 impl From<&TextureData> for TextureRef {
     #[inline]
     fn from(td: &TextureData) -> Self {
-        // Safe for immediate use during the frame; the caller must uphold lifetime.
+        // Safety: A shared `&TextureData` must not be used to give Dear ImGui a mutable
+        // `ImTextureData*` because ImGui/backends may mutate fields such as `Status`/`TexID`
+        // during the frame, which would violate Rust aliasing rules.
+        //
+        // We therefore treat `&TextureData` as a legacy reference: only forward the current
+        // `TexID` value (if any). For managed textures, pass `&mut TextureData` instead.
         TextureRef(sys::ImTextureRef {
-            _TexData: td.as_raw() as *mut sys::ImTextureData,
-            _TexID: 0,
+            _TexData: std::ptr::null_mut(),
+            _TexID: td.tex_id().id() as sys::ImTextureID,
         })
     }
 }

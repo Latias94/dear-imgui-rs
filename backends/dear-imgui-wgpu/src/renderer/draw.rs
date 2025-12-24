@@ -143,9 +143,8 @@ impl WgpuRenderer {
                     } => {
                         // Resolve effective ImTextureID now (after texture updates)
                         let tex_id = unsafe {
-                            dear_imgui_rs::sys::ImDrawCmd_GetTexID(
-                                raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
-                            )
+                            let mut cmd_copy = *raw_cmd;
+                            dear_imgui_rs::sys::ImDrawCmd_GetTexID(&mut cmd_copy)
                         } as u64;
 
                         // Switch common bind group (sampler) if this texture uses a custom sampler.

@@ -269,7 +269,8 @@ impl Iterator for DrawCmdIterator<'_> {
                     cmd.ClipRect.w,
                 ],
                 texture_id: TextureId::from(unsafe {
-                    sys::ImDrawCmd_GetTexID(cmd as *const _ as *mut sys::ImDrawCmd)
+                    let mut cmd_copy = *cmd;
+                    sys::ImDrawCmd_GetTexID(&mut cmd_copy)
                 }),
                 vtx_offset: cmd.VtxOffset as usize,
                 idx_offset: cmd.IdxOffset as usize,

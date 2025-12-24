@@ -809,9 +809,8 @@ impl GlowRenderer {
                         raw_cmd,
                     } => {
                         let tex_id_u64 = unsafe {
-                            dear_imgui_rs::sys::ImDrawCmd_GetTexID(
-                                raw_cmd as *mut dear_imgui_rs::sys::ImDrawCmd,
-                            )
+                            let mut cmd_copy = *raw_cmd;
+                            dear_imgui_rs::sys::ImDrawCmd_GetTexID(&mut cmd_copy)
                         } as u64;
                         let tex_id = dear_imgui_rs::TextureId::from(tex_id_u64);
                         self.render_elements(

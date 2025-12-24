@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core (`dear-imgui-rs`)
   - Draw callbacks: avoid creating `&mut` references from `*const` FFI pointers when clearing callback user data.
+  - Texture refs: avoid constructing `ImTextureRef` from `&TextureData` via a mutable FFI pointer; `&TextureData` now forwards only the current `TexID` (legacy path), use `&mut TextureData` for managed textures.
   - Texture IDs: make `RawTextureId` match Dear ImGui's `ImTextureID` (`ImU64`) and add debug assertions to catch pointer-width truncation when converting a `TextureId` into `usize`/`*const c_void`.
   - Tests: avoid `mem::zeroed()` for `ImGuiPlatformIO` by constructing it via the C++ constructor instead.
   - Deprecated glyph ranges: ensure `GlyphRangesBuilder::add_ranges` always passes a NUL-terminated `ImWchar` list to the C++ builder.
