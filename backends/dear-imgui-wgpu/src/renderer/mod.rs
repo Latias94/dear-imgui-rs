@@ -892,3 +892,19 @@ impl Default for WgpuRenderer {
         Self::empty()
     }
 }
+
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+impl Drop for WgpuRenderer {
+    fn drop(&mut self) {
+        // Make any installed multi-viewport callbacks become a no-op if the
+        // renderer is dropped without an explicit disable/shutdown call.
+        #[cfg(feature = "multi-viewport-winit")]
+        {
+            multi_viewport::clear_for_drop(self as *mut WgpuRenderer);
+        }
+        #[cfg(feature = "multi-viewport-sdl3")]
+        {
+            multi_viewport_sdl3::clear_for_drop(self as *mut WgpuRenderer);
+        }
+    }
+}

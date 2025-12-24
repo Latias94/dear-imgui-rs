@@ -18,11 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Font atlas: stop calling `FontAtlas::build()` in renderer code when using `BackendFlags::RENDERER_HAS_TEXTURES`; skip legacy TexID fallback in the new texture system.
   - SDL3 multi-viewport: drop unnecessary `unsafe impl Send/Sync` from the SDL window surface target adapter.
   - Multi-viewport: add `disable()`/`shutdown_multi_viewport_support()` helpers and clear stored globals to avoid stale callback pointers when tearing down a renderer.
+  - Multi-viewport: clear the global renderer pointer on drop so callbacks become a no-op if the renderer is dropped without an explicit disable.
 - `dear-imgui-sdl3`
   - Manual gamepad mode: avoid casting away constness in Rust by taking a `*const` pointer array and copying pointers into stable storage on the C++ side.
   - OpenGL3 renderer: make `RenderDrawData` wrapper const-correct to avoid casting `&DrawData` to `*mut` across FFI.
 - `dear-imgui-glow`
   - GL state restore: treat negative `glGetIntegerv` results defensively when restoring bindings (avoid casting `i32` → `u32` blindly).
+  - Multi-viewport: clear the global renderer pointer on drop so callbacks become a no-op if the renderer is dropped without an explicit disable.
 - `dear-imgui-winit`
   - Multi-viewport: avoid freeing `ViewportData` while an `&mut ViewportData` reference is still live (raw-pointer cleanup instead).
   - Multi-viewport: avoid creating `&mut Window` references from stored raw window pointers in platform callbacks.

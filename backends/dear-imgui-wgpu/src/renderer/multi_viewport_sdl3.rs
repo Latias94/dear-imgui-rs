@@ -65,6 +65,16 @@ pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
     }
 }
 
+pub(crate) fn clear_for_drop(renderer: *mut WgpuRenderer) {
+    if RENDERER_PTR
+        .compare_exchange(renderer as usize, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        let mut g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
+        *g = None;
+    }
+}
+
 /// Disable WGPU multi-viewport callbacks and clear stored globals (SDL3 platform).
 pub fn disable(imgui_context: &mut Context) {
     unsafe {

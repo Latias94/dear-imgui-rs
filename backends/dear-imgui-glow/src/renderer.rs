@@ -1374,6 +1374,19 @@ pub mod multi_viewport {
         }
     }
 
+    /// Clear the global renderer pointer if it matches `renderer`.
+    ///
+    /// This is used to make multi-viewport callbacks become a no-op when the
+    /// renderer is dropped without an explicit call to [`disable`].
+    pub(crate) fn clear_renderer_ptr_for_drop(renderer: *mut GlowRenderer) {
+        let _ = RENDERER_PTR.compare_exchange(
+            renderer as usize,
+            0,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
+    }
+
     /// Enable Glow multi-viewport rendering for the given ImGui context and renderer.
     ///
     /// This registers a `Renderer_RenderWindow` callback in `ImGuiPlatformIO`, which
@@ -1488,6 +1501,14 @@ pub mod multi_viewport {
 
 impl Drop for GlowRenderer {
     fn drop(&mut self) {
+        #[cfg(feature = "multi-viewport")]
+        {
+            // Ensure that the multi-viewport callback cannot ever access a
+            // dropped renderer. We intentionally do not uninstall the callback
+            // from PlatformIO here (we don't have a Context), but making it a
+            // no-op is sufficient to avoid UAF.
+            multi_viewport::clear_renderer_ptr_for_drop(self as *mut GlowRenderer);
+        }
         if let Some(gl) = self.gl_context.take() {
             self.destroy_device_objects(&gl);
         }
