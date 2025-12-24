@@ -109,7 +109,10 @@ impl EditorContext {
             if ptr.is_null() || size == 0 {
                 return String::new();
             }
-            let slice = std::slice::from_raw_parts(ptr as *const u8, size);
+            let mut slice = std::slice::from_raw_parts(ptr as *const u8, size);
+            if slice.last() == Some(&0) {
+                slice = &slice[..slice.len().saturating_sub(1)];
+            }
             String::from_utf8_lossy(slice).into_owned()
         }
     }
@@ -744,7 +747,10 @@ impl PostEditor {
             if ptr.is_null() || size == 0 {
                 return String::new();
             }
-            let slice = std::slice::from_raw_parts(ptr as *const u8, size);
+            let mut slice = std::slice::from_raw_parts(ptr as *const u8, size);
+            if slice.last() == Some(&0) {
+                slice = &slice[..slice.len().saturating_sub(1)];
+            }
             String::from_utf8_lossy(slice).into_owned()
         }
     }

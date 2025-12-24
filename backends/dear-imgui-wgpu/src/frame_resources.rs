@@ -115,31 +115,33 @@ impl FrameResources {
             RendererError::InvalidRenderState("Vertex buffer not initialized".to_string())
         })?;
 
-        // Convert vertices to bytes
-        let vertex_bytes = unsafe {
-            std::slice::from_raw_parts(
-                vertices.as_ptr() as *const u8,
-                std::mem::size_of_val(vertices),
-            )
-        };
+        let required_bytes = std::mem::size_of_val(vertices);
+        let aligned_size = align_size(required_bytes, 4);
 
-        // Copy to host buffer first
-        if let Some(ref mut host_buffer) = self.vertex_buffer_host
-            && vertex_bytes.len() <= host_buffer.len()
-        {
-            host_buffer[..vertex_bytes.len()].copy_from_slice(vertex_bytes);
+        let host_buffer = self.vertex_buffer_host.as_mut().ok_or_else(|| {
+            RendererError::InvalidRenderState("Vertex host buffer not initialized".to_string())
+        })?;
+        if aligned_size > host_buffer.len() {
+            return Err(RendererError::InvalidRenderState(
+                "Vertex host buffer capacity is too small".to_string(),
+            ));
+        }
+
+        // Avoid reinterpreting `DrawVert` as bytes: that can read uninitialized padding bytes.
+        // Pack vertices explicitly in the same layout used by Dear ImGui (pos, uv, col).
+        host_buffer[..aligned_size].fill(0);
+        const VERT_STRIDE: usize = std::mem::size_of::<DrawVert>();
+        for (i, v) in vertices.iter().enumerate() {
+            let base = i * VERT_STRIDE;
+            host_buffer[base..base + 4].copy_from_slice(&v.pos[0].to_ne_bytes());
+            host_buffer[base + 4..base + 8].copy_from_slice(&v.pos[1].to_ne_bytes());
+            host_buffer[base + 8..base + 12].copy_from_slice(&v.uv[0].to_ne_bytes());
+            host_buffer[base + 12..base + 16].copy_from_slice(&v.uv[1].to_ne_bytes());
+            host_buffer[base + 16..base + 20].copy_from_slice(&v.col.to_ne_bytes());
         }
 
         // Upload to GPU with proper alignment
-        let aligned_size = align_size(vertex_bytes.len(), 4);
-        if aligned_size > vertex_bytes.len() {
-            // Need to pad the data to meet alignment requirements
-            let mut aligned_data = vertex_bytes.to_vec();
-            aligned_data.resize(aligned_size, 0);
-            queue.write_buffer(vertex_buffer, 0, &aligned_data);
-        } else {
-            queue.write_buffer(vertex_buffer, 0, vertex_bytes);
-        }
+        queue.write_buffer(vertex_buffer, 0, &host_buffer[..aligned_size]);
         Ok(())
     }
 
@@ -149,31 +151,27 @@ impl FrameResources {
             RendererError::InvalidRenderState("Index buffer not initialized".to_string())
         })?;
 
-        // Convert indices to bytes
-        let index_bytes = unsafe {
-            std::slice::from_raw_parts(
-                indices.as_ptr() as *const u8,
-                std::mem::size_of_val(indices),
-            )
-        };
+        let required_bytes = std::mem::size_of_val(indices);
+        let aligned_size = align_size(required_bytes, 4);
 
-        // Copy to host buffer first
-        if let Some(ref mut host_buffer) = self.index_buffer_host
-            && index_bytes.len() <= host_buffer.len()
-        {
-            host_buffer[..index_bytes.len()].copy_from_slice(index_bytes);
+        let host_buffer = self.index_buffer_host.as_mut().ok_or_else(|| {
+            RendererError::InvalidRenderState("Index host buffer not initialized".to_string())
+        })?;
+        if aligned_size > host_buffer.len() {
+            return Err(RendererError::InvalidRenderState(
+                "Index host buffer capacity is too small".to_string(),
+            ));
+        }
+
+        host_buffer[..aligned_size].fill(0);
+        for (i, &idx) in indices.iter().enumerate() {
+            let bytes = idx.to_ne_bytes();
+            let base = i * std::mem::size_of::<DrawIdx>();
+            host_buffer[base..base + 2].copy_from_slice(&bytes);
         }
 
         // Upload to GPU with proper alignment
-        let aligned_size = align_size(index_bytes.len(), 4);
-        if aligned_size > index_bytes.len() {
-            // Need to pad the data to meet alignment requirements
-            let mut aligned_data = index_bytes.to_vec();
-            aligned_data.resize(aligned_size, 0);
-            queue.write_buffer(index_buffer, 0, &aligned_data);
-        } else {
-            queue.write_buffer(index_buffer, 0, index_bytes);
-        }
+        queue.write_buffer(index_buffer, 0, &host_buffer[..aligned_size]);
         Ok(())
     }
 

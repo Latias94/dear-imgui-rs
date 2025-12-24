@@ -380,8 +380,7 @@ pub fn render(draw_data: &DrawData) {
 #[cfg(feature = "opengl3-renderer")]
 pub fn update_texture(tex: &mut TextureData) {
     unsafe {
-        let raw = tex as *mut TextureData as *mut sys::ImTextureData;
-        ffi::ImGui_ImplOpenGL3_UpdateTexture_Rust(raw);
+        ffi::ImGui_ImplOpenGL3_UpdateTexture_Rust(tex.as_raw_mut());
     }
 }
 

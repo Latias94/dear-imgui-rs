@@ -189,7 +189,7 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
         payload: P,
     ) -> Option<DragDropSourceTooltip<'ui>> {
         unsafe {
-            let payload = TypedPayload::new(payload);
+            let payload = make_typed_payload(payload);
             self.begin_payload_unchecked(
                 &payload as *const _ as *const ffi::c_void,
                 std::mem::size_of::<TypedPayload<P>>(),
@@ -312,7 +312,13 @@ impl<'ui> DragDropTarget<'ui> {
         let output = unsafe { self.accept_payload_unchecked(name, flags) };
 
         output.map(|payload| {
-            let typed_payload = unsafe { &*(payload.data as *const TypedPayload<T>) };
+            if payload.data.is_null() || payload.size < std::mem::size_of::<TypedPayload<T>>() {
+                return Err(PayloadIsWrongType);
+            }
+
+            // Dear ImGui stores payload data in an unaligned byte buffer, so always read unaligned.
+            let typed_payload: TypedPayload<T> =
+                unsafe { std::ptr::read_unaligned(payload.data as *const TypedPayload<T>) };
 
             if typed_payload.type_id == any::TypeId::of::<T>() {
                 Ok(DragDropPayloadPod {
@@ -380,19 +386,26 @@ impl Drop for DragDropTarget<'_> {
 
 // Payload types and utilities
 
-/// Wrapper for typed payloads with runtime type checking
+/// Wrapper for typed payloads with runtime type checking.
+///
+/// Important: payload memory is copied and stored by Dear ImGui in an unaligned byte buffer.
+/// Never take `&TypedPayload<T>` from the raw pointer returned by `AcceptDragDropPayload()`.
+/// Always copy out using `ptr::read_unaligned`.
 #[repr(C)]
-struct TypedPayload<T> {
+#[derive(Copy, Clone)]
+struct TypedPayload<T: Copy> {
     type_id: any::TypeId,
     data: T,
 }
 
-impl<T: 'static> TypedPayload<T> {
-    fn new(data: T) -> Self {
-        Self {
-            type_id: any::TypeId::of::<T>(),
-            data,
-        }
+fn make_typed_payload<T: Copy + 'static>(data: T) -> TypedPayload<T> {
+    // Ensure we do not pass uninitialized padding bytes across the C++ boundary.
+    let mut out = std::mem::MaybeUninit::<TypedPayload<T>>::zeroed();
+    unsafe {
+        let ptr = out.as_mut_ptr();
+        std::ptr::addr_of_mut!((*ptr).type_id).write(any::TypeId::of::<T>());
+        std::ptr::addr_of_mut!((*ptr).data).write(data);
+        out.assume_init()
     }
 }
 
@@ -440,3 +453,40 @@ impl std::fmt::Display for PayloadIsWrongType {
 }
 
 impl std::error::Error for PayloadIsWrongType {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload_bytes<T: Copy + 'static>(value: T) -> Vec<u8> {
+        let payload = make_typed_payload(value);
+        let size = std::mem::size_of::<TypedPayload<T>>();
+        let mut out = vec![0u8; size];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                std::ptr::from_ref(&payload).cast::<u8>(),
+                out.as_mut_ptr(),
+                size,
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn typed_payload_bytes_are_deterministic() {
+        // If we accidentally leak uninitialized padding bytes, these can become nondeterministic.
+        assert_eq!(payload_bytes(7u8), payload_bytes(7u8));
+        assert_eq!(payload_bytes(0x1122_3344u32), payload_bytes(0x1122_3344u32));
+    }
+
+    #[test]
+    fn typed_payload_can_be_read_unaligned() {
+        let bytes = payload_bytes(7u8);
+        let mut buf = vec![0u8; 1 + bytes.len()];
+        buf[1..].copy_from_slice(&bytes);
+        let ptr = unsafe { buf.as_ptr().add(1) } as *const TypedPayload<u8>;
+        let decoded = unsafe { std::ptr::read_unaligned(ptr) };
+        assert_eq!(decoded.type_id, any::TypeId::of::<u8>());
+        assert_eq!(decoded.data, 7u8);
+    }
+}

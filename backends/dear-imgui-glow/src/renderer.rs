@@ -9,13 +9,12 @@ use glow::{Context, HasContext};
 use std::mem::size_of;
 
 use crate::{
-    GlBuffer, GlTexture, GlVertexArray,
+    GlBuffer, GlTexture, GlVertexArray, draw_indices_as_bytes, draw_verts_as_bytes,
     error::{InitError, InitResult, RenderError, RenderResult},
     gl_debug_message,
     shaders::Shaders,
     state::GlStateBackup,
     texture::{SimpleTextureMap, TextureMap},
-    to_byte_slice,
     versions::GlVersion,
 };
 
@@ -39,7 +38,7 @@ pub struct GlowRenderer {
 
     // Resource management
     gl_context: Option<std::rc::Rc<glow::Context>>, // None = externally managed
-    texture_map: Box<dyn TextureMap>,
+    texture_map: Option<Box<dyn TextureMap>>,
     // Optional: enable GL_FRAMEBUFFER_SRGB during ImGui rendering
     framebuffer_srgb: bool,
     // Optional: override color gamma applied to vertex colors (None = auto)
@@ -205,7 +204,7 @@ impl GlowRenderer {
             has_clip_origin_support,
             is_destroyed: false,
             gl_context: owned_gl,
-            texture_map,
+            texture_map: Some(texture_map),
             framebuffer_srgb: false,
             color_gamma_override: None,
             viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
@@ -446,12 +445,16 @@ impl GlowRenderer {
 
     /// Get a reference to the texture map
     pub fn texture_map(&self) -> &dyn TextureMap {
-        &*self.texture_map
+        self.texture_map
+            .as_deref()
+            .expect("GlowRenderer texture_map missing (internal borrow bug)")
     }
 
     /// Get a mutable reference to the texture map
     pub fn texture_map_mut(&mut self) -> &mut dyn TextureMap {
-        &mut *self.texture_map
+        self.texture_map
+            .as_deref_mut()
+            .expect("GlowRenderer texture_map missing (internal borrow bug)")
     }
 
     /// Called every frame to prepare for rendering
@@ -496,9 +499,9 @@ impl GlowRenderer {
     /// Render Dear ImGui draw data
     pub fn render(&mut self, draw_data: &DrawData) -> RenderResult<()> {
         // Handle texture updates first, following the original Dear ImGui OpenGL3 implementation
-        for texture_data in draw_data.textures() {
+        for mut texture_data in draw_data.textures() {
             if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
-                self.update_texture_from_data(texture_data)?;
+                self.update_texture_from_data(&mut *texture_data)?;
             }
         }
 
@@ -512,9 +515,9 @@ impl GlowRenderer {
     /// Advanced render method with external OpenGL context
     pub fn render_with_context(&mut self, gl: &Context, draw_data: &DrawData) -> RenderResult<()> {
         // Handle texture updates first
-        for texture_data in draw_data.textures() {
+        for mut texture_data in draw_data.textures() {
             if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
-                self.update_texture_from_data(texture_data)?;
+                self.update_texture_from_data(&mut *texture_data)?;
             }
         }
 
@@ -572,12 +575,15 @@ impl GlowRenderer {
 
         self.set_up_render_state(gl, draw_data, fb_width, fb_height)?;
 
-        // Render draw lists - we need to avoid borrowing self and self.texture_map at the same time
-        // Create a raw pointer to avoid borrow checker issues
-        let texture_map_ptr = &*self.texture_map as *const dyn TextureMap;
-        unsafe {
-            self.render_draw_lists(gl, &*texture_map_ptr, draw_data)?;
-        }
+        // Render draw lists. We temporarily move `texture_map` out to avoid creating
+        // aliasing references (e.g. `&mut self` + `&self.texture_map`) and relying on raw pointers.
+        let texture_map = self
+            .texture_map
+            .take()
+            .expect("GlowRenderer texture_map missing (internal borrow bug)");
+        let render_res = self.render_draw_lists(gl, &*texture_map, draw_data);
+        self.texture_map = Some(texture_map);
+        render_res?;
 
         // Cleanup
         #[cfg(feature = "bind_vertex_array_support")]
@@ -831,7 +837,14 @@ impl GlowRenderer {
                         )?;
                     }
                     DrawCmd::RawCallback { callback, raw_cmd } => {
-                        unsafe { callback(draw_list.raw(), raw_cmd) };
+                        let res =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+                                callback(draw_list.raw(), raw_cmd)
+                            }));
+                        if res.is_err() {
+                            eprintln!("dear-imgui-glow: panic in DrawCmd raw callback");
+                            std::process::abort();
+                        }
                     }
                 }
             }
@@ -853,7 +866,7 @@ impl GlowRenderer {
             // This avoids corruption issues reported with Intel GPU drivers when using glBufferSubData()
             gl.buffer_data_u8_slice(
                 glow::ARRAY_BUFFER,
-                to_byte_slice(vertices),
+                draw_verts_as_bytes(vertices),
                 glow::STREAM_DRAW,
             );
         }
@@ -878,7 +891,7 @@ impl GlowRenderer {
             // This avoids corruption issues reported with Intel GPU drivers when using glBufferSubData()
             gl.buffer_data_u8_slice(
                 glow::ELEMENT_ARRAY_BUFFER,
-                to_byte_slice(indices),
+                draw_indices_as_bytes(indices),
                 glow::STREAM_DRAW,
             );
         }
@@ -1093,9 +1106,12 @@ impl GlowRenderer {
                 gl_texture
             };
             // Register texture and set ID back to Dear ImGui
-            let tex_id =
-                self.texture_map
-                    .register_texture(gl_texture, width as i32, height as i32, format);
+            let tex_id = self.texture_map_mut().register_texture(
+                gl_texture,
+                width as i32,
+                height as i32,
+                format,
+            );
             texture_data.set_tex_id(tex_id);
             texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
         }
@@ -1110,7 +1126,7 @@ impl GlowRenderer {
     ) -> RenderResult<()> {
         let gl = self.get_gl_context()?;
         let tex_id = texture_data.tex_id();
-        let gl_texture = match self.texture_map.get(tex_id) {
+        let gl_texture = match self.texture_map().get(tex_id) {
             Some(t) => t,
             None => {
                 // If texture doesn't exist, create it fully
@@ -1277,11 +1293,11 @@ impl GlowRenderer {
         let gl = self.get_gl_context()?;
         let texture_id = texture_data.tex_id();
 
-        if let Some(gl_texture) = self.texture_map.get(texture_id) {
+        if let Some(gl_texture) = self.texture_map().get(texture_id) {
             unsafe {
                 gl.delete_texture(gl_texture);
             }
-            self.texture_map.remove(texture_id);
+            self.texture_map_mut().remove(texture_id);
         }
 
         texture_data.set_status(dear_imgui_rs::TextureStatus::Destroyed);
@@ -1304,7 +1320,7 @@ impl GlowRenderer {
         let gl_texture = update_imgui_texture(gl, texture_id, width, height, data)?;
 
         // Update the texture mapping with modern texture management
-        self.texture_map
+        self.texture_map_mut()
             .update_texture(texture_id, gl_texture, width as i32, height as i32);
 
         Ok(())
@@ -1324,21 +1340,26 @@ impl GlowRenderer {
             .get_gl_context()
             .map_err(|e| InitError::Generic(e.to_string()))?;
         let gl_texture = create_texture_from_rgba(gl, width, height, data)?;
-        let texture_id =
-            self.texture_map
-                .register_texture(gl_texture, width as i32, height as i32, format);
+        let texture_id = self.texture_map_mut().register_texture(
+            gl_texture,
+            width as i32,
+            height as i32,
+            format,
+        );
 
         Ok(texture_id)
     }
 
     /// Get texture data for a given texture ID
     pub fn get_texture_data(&self, texture_id: TextureId) -> Option<&TextureData> {
-        self.texture_map.get_texture_data(texture_id)
+        self.texture_map.as_deref()?.get_texture_data(texture_id)
     }
 
     /// Get mutable texture data for a given texture ID
     pub fn get_texture_data_mut(&mut self, texture_id: TextureId) -> Option<&mut TextureData> {
-        self.texture_map.get_texture_data_mut(texture_id)
+        self.texture_map
+            .as_deref_mut()?
+            .get_texture_data_mut(texture_id)
     }
 }
 
@@ -1353,6 +1374,8 @@ pub mod multi_viewport {
     use dear_imgui_rs::{Context, ViewportFlags, internal::RawCast, render::DrawData, sys};
     use glow::HasContext;
     use std::ffi::c_void;
+    use std::ops::{Deref, DerefMut};
+    use std::sync::atomic::AtomicBool;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // Global pointer to the active GlowRenderer used for multi-viewport rendering.
@@ -1360,16 +1383,52 @@ pub mod multi_viewport {
     // This mirrors the pattern used by the WGPU backend and the official C++ backends,
     // where the renderer backend installs callbacks in ImGuiPlatformIO.
     static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
+    static RENDERER_BORROWED: AtomicBool = AtomicBool::new(false);
+
+    struct RendererBorrowGuard {
+        renderer: *mut GlowRenderer,
+    }
+
+    impl Drop for RendererBorrowGuard {
+        fn drop(&mut self) {
+            RENDERER_BORROWED.store(false, Ordering::SeqCst);
+        }
+    }
+
+    impl Deref for RendererBorrowGuard {
+        type Target = GlowRenderer;
+
+        fn deref(&self) -> &Self::Target {
+            // Safety: guarded by `RENDERER_BORROWED` and pointer validity contract of `enable`.
+            unsafe { &*self.renderer }
+        }
+    }
+
+    impl DerefMut for RendererBorrowGuard {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            // Safety: guarded by `RENDERER_BORROWED` and pointer validity contract of `enable`.
+            unsafe { &mut *self.renderer }
+        }
+    }
 
     #[inline]
-    fn get_renderer<'a>() -> Option<&'a mut GlowRenderer> {
+    fn borrow_renderer() -> Option<RendererBorrowGuard> {
         let ptr = RENDERER_PTR.load(Ordering::SeqCst);
         if ptr == 0 {
             None
         } else {
-            // Safety: we only ever store valid `GlowRenderer` pointers in RENDERER_PTR,
-            // and the caller must ensure the referenced renderer outlives callbacks.
-            Some(unsafe { &mut *(ptr as *mut GlowRenderer) })
+            if RENDERER_BORROWED
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                eprintln!(
+                    "dear-imgui-glow: GlowRenderer is already mutably borrowed (multi-viewport reentrancy?); skipping callback"
+                );
+                return None;
+            }
+            Some(RendererBorrowGuard {
+                renderer: ptr as *mut GlowRenderer,
+            })
         }
     }
 
@@ -1378,12 +1437,8 @@ pub mod multi_viewport {
     /// This is used to make multi-viewport callbacks become a no-op when the
     /// renderer is dropped without an explicit call to [`disable`].
     pub(crate) fn clear_renderer_ptr_for_drop(renderer: *mut GlowRenderer) {
-        let _ = RENDERER_PTR.compare_exchange(
-            renderer as usize,
-            0,
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-        );
+        let _ =
+            RENDERER_PTR.compare_exchange(renderer as usize, 0, Ordering::SeqCst, Ordering::SeqCst);
     }
 
     /// Enable Glow multi-viewport rendering for the given ImGui context and renderer.
@@ -1451,7 +1506,7 @@ pub mod multi_viewport {
         }
 
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let renderer = match get_renderer() {
+            let mut renderer = match borrow_renderer() {
                 Some(r) => r,
                 None => return,
             };

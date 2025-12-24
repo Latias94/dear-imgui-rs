@@ -43,25 +43,44 @@ use crate::widget::{TableFlags, TableRowFlags};
 use crate::window::WindowFlags;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::cell::UnsafeCell;
 
 /// User interface style/colors
 ///
 /// Note: This is a transparent wrapper over `sys::ImGuiStyle` (v1.92+ layout).
 /// Do not assume field layout here; use accessors or `raw()/raw_mut()` if needed.
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Style(pub(crate) sys::ImGuiStyle);
+#[derive(Debug)]
+pub struct Style(pub(crate) UnsafeCell<sys::ImGuiStyle>);
+
+// Ensure the wrapper stays layout-compatible with the sys bindings.
+const _: [(); std::mem::size_of::<sys::ImGuiStyle>()] = [(); std::mem::size_of::<Style>()];
+const _: [(); std::mem::align_of::<sys::ImGuiStyle>()] = [(); std::mem::align_of::<Style>()];
 
 impl Style {
+    #[inline]
+    fn inner(&self) -> &sys::ImGuiStyle {
+        // Safety: `Style` is a view into ImGui-owned style data. Dear ImGui can update style state
+        // (e.g. via push/pop stacks or user code) while Rust holds `&Style`, so we store it behind
+        // `UnsafeCell` to make that interior mutability explicit.
+        unsafe { &*self.0.get() }
+    }
+
+    #[inline]
+    fn inner_mut(&mut self) -> &mut sys::ImGuiStyle {
+        // Safety: caller has `&mut Style`, so this is a unique Rust borrow for this wrapper.
+        unsafe { &mut *self.0.get() }
+    }
+
     /// Get a color by style color identifier
     pub fn color(&self, color: StyleColor) -> [f32; 4] {
-        let c = self.0.Colors[color as usize];
+        let c = self.inner().Colors[color as usize];
         [c.x, c.y, c.z, c.w]
     }
 
     /// Set a color by style color identifier
     pub fn set_color(&mut self, color: StyleColor, value: [f32; 4]) {
-        self.0.Colors[color as usize] = sys::ImVec4 {
+        self.inner_mut().Colors[color as usize] = sys::ImVec4 {
             x: value[0],
             y: value[1],
             z: value[2],
@@ -71,482 +90,506 @@ impl Style {
 
     /// Get main font scale (formerly io.FontGlobalScale)
     pub fn font_scale_main(&self) -> f32 {
-        self.0.FontScaleMain
+        self.inner().FontScaleMain
     }
 
     /// Set main font scale (formerly io.FontGlobalScale)
     pub fn set_font_scale_main(&mut self, scale: f32) {
-        self.0.FontScaleMain = scale;
+        self.inner_mut().FontScaleMain = scale;
     }
 
     /// Get DPI font scale (auto-overwritten if ConfigDpiScaleFonts=true)
     pub fn font_scale_dpi(&self) -> f32 {
-        self.0.FontScaleDpi
+        self.inner().FontScaleDpi
     }
 
     /// Set DPI font scale
     pub fn set_font_scale_dpi(&mut self, scale: f32) {
-        self.0.FontScaleDpi = scale;
+        self.inner_mut().FontScaleDpi = scale;
     }
 
     /// Base size used by style for font sizing
     pub fn font_size_base(&self) -> f32 {
-        self.0.FontSizeBase
+        self.inner().FontSizeBase
     }
 
     pub fn set_font_size_base(&mut self, sz: f32) {
-        self.0.FontSizeBase = sz;
+        self.inner_mut().FontSizeBase = sz;
     }
 
     // Common style accessors (typed, convenient)
 
     pub fn alpha(&self) -> f32 {
-        self.0.Alpha
+        self.inner().Alpha
     }
     pub fn set_alpha(&mut self, v: f32) {
-        self.0.Alpha = v;
+        self.inner_mut().Alpha = v;
     }
 
     pub fn disabled_alpha(&self) -> f32 {
-        self.0.DisabledAlpha
+        self.inner().DisabledAlpha
     }
     pub fn set_disabled_alpha(&mut self, v: f32) {
-        self.0.DisabledAlpha = v;
+        self.inner_mut().DisabledAlpha = v;
     }
 
     pub fn window_padding(&self) -> [f32; 2] {
-        [self.0.WindowPadding.x, self.0.WindowPadding.y]
+        [self.inner().WindowPadding.x, self.inner().WindowPadding.y]
     }
     pub fn set_window_padding(&mut self, v: [f32; 2]) {
-        self.0.WindowPadding = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().WindowPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn window_rounding(&self) -> f32 {
-        self.0.WindowRounding
+        self.inner().WindowRounding
     }
     pub fn set_window_rounding(&mut self, v: f32) {
-        self.0.WindowRounding = v;
+        self.inner_mut().WindowRounding = v;
     }
 
     pub fn window_border_size(&self) -> f32 {
-        self.0.WindowBorderSize
+        self.inner().WindowBorderSize
     }
     pub fn set_window_border_size(&mut self, v: f32) {
-        self.0.WindowBorderSize = v;
+        self.inner_mut().WindowBorderSize = v;
     }
 
     pub fn window_min_size(&self) -> [f32; 2] {
-        [self.0.WindowMinSize.x, self.0.WindowMinSize.y]
+        [self.inner().WindowMinSize.x, self.inner().WindowMinSize.y]
     }
     pub fn set_window_min_size(&mut self, v: [f32; 2]) {
-        self.0.WindowMinSize = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().WindowMinSize = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn window_title_align(&self) -> [f32; 2] {
-        [self.0.WindowTitleAlign.x, self.0.WindowTitleAlign.y]
+        [
+            self.inner().WindowTitleAlign.x,
+            self.inner().WindowTitleAlign.y,
+        ]
     }
     pub fn set_window_title_align(&mut self, v: [f32; 2]) {
-        self.0.WindowTitleAlign = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().WindowTitleAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn window_menu_button_position(&self) -> Direction {
-        Direction::from(self.0.WindowMenuButtonPosition)
+        Direction::from(self.inner().WindowMenuButtonPosition)
     }
     pub fn set_window_menu_button_position(&mut self, d: Direction) {
-        self.0.WindowMenuButtonPosition = d.into();
+        self.inner_mut().WindowMenuButtonPosition = d.into();
     }
 
     pub fn child_rounding(&self) -> f32 {
-        self.0.ChildRounding
+        self.inner().ChildRounding
     }
     pub fn set_child_rounding(&mut self, v: f32) {
-        self.0.ChildRounding = v;
+        self.inner_mut().ChildRounding = v;
     }
 
     pub fn child_border_size(&self) -> f32 {
-        self.0.ChildBorderSize
+        self.inner().ChildBorderSize
     }
     pub fn set_child_border_size(&mut self, v: f32) {
-        self.0.ChildBorderSize = v;
+        self.inner_mut().ChildBorderSize = v;
     }
 
     pub fn popup_rounding(&self) -> f32 {
-        self.0.PopupRounding
+        self.inner().PopupRounding
     }
     pub fn set_popup_rounding(&mut self, v: f32) {
-        self.0.PopupRounding = v;
+        self.inner_mut().PopupRounding = v;
     }
 
     pub fn popup_border_size(&self) -> f32 {
-        self.0.PopupBorderSize
+        self.inner().PopupBorderSize
     }
     pub fn set_popup_border_size(&mut self, v: f32) {
-        self.0.PopupBorderSize = v;
+        self.inner_mut().PopupBorderSize = v;
     }
 
     pub fn frame_padding(&self) -> [f32; 2] {
-        [self.0.FramePadding.x, self.0.FramePadding.y]
+        [self.inner().FramePadding.x, self.inner().FramePadding.y]
     }
     pub fn set_frame_padding(&mut self, v: [f32; 2]) {
-        self.0.FramePadding = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().FramePadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn frame_rounding(&self) -> f32 {
-        self.0.FrameRounding
+        self.inner().FrameRounding
     }
     pub fn set_frame_rounding(&mut self, v: f32) {
-        self.0.FrameRounding = v;
+        self.inner_mut().FrameRounding = v;
     }
 
     pub fn frame_border_size(&self) -> f32 {
-        self.0.FrameBorderSize
+        self.inner().FrameBorderSize
     }
     pub fn set_frame_border_size(&mut self, v: f32) {
-        self.0.FrameBorderSize = v;
+        self.inner_mut().FrameBorderSize = v;
     }
 
     pub fn item_spacing(&self) -> [f32; 2] {
-        [self.0.ItemSpacing.x, self.0.ItemSpacing.y]
+        [self.inner().ItemSpacing.x, self.inner().ItemSpacing.y]
     }
     pub fn set_item_spacing(&mut self, v: [f32; 2]) {
-        self.0.ItemSpacing = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().ItemSpacing = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn item_inner_spacing(&self) -> [f32; 2] {
-        [self.0.ItemInnerSpacing.x, self.0.ItemInnerSpacing.y]
+        [
+            self.inner().ItemInnerSpacing.x,
+            self.inner().ItemInnerSpacing.y,
+        ]
     }
     pub fn set_item_inner_spacing(&mut self, v: [f32; 2]) {
-        self.0.ItemInnerSpacing = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().ItemInnerSpacing = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn cell_padding(&self) -> [f32; 2] {
-        [self.0.CellPadding.x, self.0.CellPadding.y]
+        [self.inner().CellPadding.x, self.inner().CellPadding.y]
     }
     pub fn set_cell_padding(&mut self, v: [f32; 2]) {
-        self.0.CellPadding = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().CellPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn touch_extra_padding(&self) -> [f32; 2] {
-        [self.0.TouchExtraPadding.x, self.0.TouchExtraPadding.y]
+        [
+            self.inner().TouchExtraPadding.x,
+            self.inner().TouchExtraPadding.y,
+        ]
     }
     pub fn set_touch_extra_padding(&mut self, v: [f32; 2]) {
-        self.0.TouchExtraPadding = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().TouchExtraPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn indent_spacing(&self) -> f32 {
-        self.0.IndentSpacing
+        self.inner().IndentSpacing
     }
     pub fn set_indent_spacing(&mut self, v: f32) {
-        self.0.IndentSpacing = v;
+        self.inner_mut().IndentSpacing = v;
     }
 
     pub fn columns_min_spacing(&self) -> f32 {
-        self.0.ColumnsMinSpacing
+        self.inner().ColumnsMinSpacing
     }
     pub fn set_columns_min_spacing(&mut self, v: f32) {
-        self.0.ColumnsMinSpacing = v;
+        self.inner_mut().ColumnsMinSpacing = v;
     }
 
     pub fn scrollbar_size(&self) -> f32 {
-        self.0.ScrollbarSize
+        self.inner().ScrollbarSize
     }
     pub fn set_scrollbar_size(&mut self, v: f32) {
-        self.0.ScrollbarSize = v;
+        self.inner_mut().ScrollbarSize = v;
     }
 
     pub fn scrollbar_rounding(&self) -> f32 {
-        self.0.ScrollbarRounding
+        self.inner().ScrollbarRounding
     }
     pub fn set_scrollbar_rounding(&mut self, v: f32) {
-        self.0.ScrollbarRounding = v;
+        self.inner_mut().ScrollbarRounding = v;
     }
 
     pub fn grab_min_size(&self) -> f32 {
-        self.0.GrabMinSize
+        self.inner().GrabMinSize
     }
     pub fn set_grab_min_size(&mut self, v: f32) {
-        self.0.GrabMinSize = v;
+        self.inner_mut().GrabMinSize = v;
     }
 
     pub fn grab_rounding(&self) -> f32 {
-        self.0.GrabRounding
+        self.inner().GrabRounding
     }
     pub fn set_grab_rounding(&mut self, v: f32) {
-        self.0.GrabRounding = v;
+        self.inner_mut().GrabRounding = v;
     }
 
     pub fn log_slider_deadzone(&self) -> f32 {
-        self.0.LogSliderDeadzone
+        self.inner().LogSliderDeadzone
     }
     pub fn set_log_slider_deadzone(&mut self, v: f32) {
-        self.0.LogSliderDeadzone = v;
+        self.inner_mut().LogSliderDeadzone = v;
     }
 
     pub fn tab_rounding(&self) -> f32 {
-        self.0.TabRounding
+        self.inner().TabRounding
     }
     pub fn set_tab_rounding(&mut self, v: f32) {
-        self.0.TabRounding = v;
+        self.inner_mut().TabRounding = v;
     }
 
     pub fn tab_border_size(&self) -> f32 {
-        self.0.TabBorderSize
+        self.inner().TabBorderSize
     }
     pub fn set_tab_border_size(&mut self, v: f32) {
-        self.0.TabBorderSize = v;
+        self.inner_mut().TabBorderSize = v;
     }
 
     pub fn color_button_position(&self) -> Direction {
-        Direction::from(self.0.ColorButtonPosition)
+        Direction::from(self.inner().ColorButtonPosition)
     }
     pub fn set_color_button_position(&mut self, d: Direction) {
-        self.0.ColorButtonPosition = d.into();
+        self.inner_mut().ColorButtonPosition = d.into();
     }
 
     pub fn button_text_align(&self) -> [f32; 2] {
-        [self.0.ButtonTextAlign.x, self.0.ButtonTextAlign.y]
+        [
+            self.inner().ButtonTextAlign.x,
+            self.inner().ButtonTextAlign.y,
+        ]
     }
     pub fn set_button_text_align(&mut self, v: [f32; 2]) {
-        self.0.ButtonTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().ButtonTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn selectable_text_align(&self) -> [f32; 2] {
-        [self.0.SelectableTextAlign.x, self.0.SelectableTextAlign.y]
+        [
+            self.inner().SelectableTextAlign.x,
+            self.inner().SelectableTextAlign.y,
+        ]
     }
     pub fn set_selectable_text_align(&mut self, v: [f32; 2]) {
-        self.0.SelectableTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().SelectableTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn display_window_padding(&self) -> [f32; 2] {
-        [self.0.DisplayWindowPadding.x, self.0.DisplayWindowPadding.y]
+        [
+            self.inner().DisplayWindowPadding.x,
+            self.inner().DisplayWindowPadding.y,
+        ]
     }
     pub fn set_display_window_padding(&mut self, v: [f32; 2]) {
-        self.0.DisplayWindowPadding = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().DisplayWindowPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn display_safe_area_padding(&self) -> [f32; 2] {
         [
-            self.0.DisplaySafeAreaPadding.x,
-            self.0.DisplaySafeAreaPadding.y,
+            self.inner().DisplaySafeAreaPadding.x,
+            self.inner().DisplaySafeAreaPadding.y,
         ]
     }
     pub fn set_display_safe_area_padding(&mut self, v: [f32; 2]) {
-        self.0.DisplaySafeAreaPadding = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().DisplaySafeAreaPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn mouse_cursor_scale(&self) -> f32 {
-        self.0.MouseCursorScale
+        self.inner().MouseCursorScale
     }
     pub fn set_mouse_cursor_scale(&mut self, v: f32) {
-        self.0.MouseCursorScale = v;
+        self.inner_mut().MouseCursorScale = v;
     }
 
     pub fn anti_aliased_lines(&self) -> bool {
-        self.0.AntiAliasedLines
+        self.inner().AntiAliasedLines
     }
     pub fn set_anti_aliased_lines(&mut self, v: bool) {
-        self.0.AntiAliasedLines = v;
+        self.inner_mut().AntiAliasedLines = v;
     }
 
     pub fn anti_aliased_lines_use_tex(&self) -> bool {
-        self.0.AntiAliasedLinesUseTex
+        self.inner().AntiAliasedLinesUseTex
     }
     pub fn set_anti_aliased_lines_use_tex(&mut self, v: bool) {
-        self.0.AntiAliasedLinesUseTex = v;
+        self.inner_mut().AntiAliasedLinesUseTex = v;
     }
 
     pub fn anti_aliased_fill(&self) -> bool {
-        self.0.AntiAliasedFill
+        self.inner().AntiAliasedFill
     }
     pub fn set_anti_aliased_fill(&mut self, v: bool) {
-        self.0.AntiAliasedFill = v;
+        self.inner_mut().AntiAliasedFill = v;
     }
 
     pub fn curve_tessellation_tol(&self) -> f32 {
-        self.0.CurveTessellationTol
+        self.inner().CurveTessellationTol
     }
     pub fn set_curve_tessellation_tol(&mut self, v: f32) {
-        self.0.CurveTessellationTol = v;
+        self.inner_mut().CurveTessellationTol = v;
     }
 
     pub fn circle_tessellation_max_error(&self) -> f32 {
-        self.0.CircleTessellationMaxError
+        self.inner().CircleTessellationMaxError
     }
     pub fn set_circle_tessellation_max_error(&mut self, v: f32) {
-        self.0.CircleTessellationMaxError = v;
+        self.inner_mut().CircleTessellationMaxError = v;
     }
 
     // Newly exposed 1.92+ or less-common fields
 
     pub fn window_border_hover_padding(&self) -> f32 {
-        self.0.WindowBorderHoverPadding
+        self.inner().WindowBorderHoverPadding
     }
     pub fn set_window_border_hover_padding(&mut self, v: f32) {
-        self.0.WindowBorderHoverPadding = v;
+        self.inner_mut().WindowBorderHoverPadding = v;
     }
 
     pub fn scrollbar_padding(&self) -> f32 {
-        self.0.ScrollbarPadding
+        self.inner().ScrollbarPadding
     }
     pub fn set_scrollbar_padding(&mut self, v: f32) {
-        self.0.ScrollbarPadding = v;
+        self.inner_mut().ScrollbarPadding = v;
     }
 
     pub fn image_border_size(&self) -> f32 {
-        self.0.ImageBorderSize
+        self.inner().ImageBorderSize
     }
     pub fn set_image_border_size(&mut self, v: f32) {
-        self.0.ImageBorderSize = v;
+        self.inner_mut().ImageBorderSize = v;
     }
 
     pub fn tab_min_width_base(&self) -> f32 {
-        self.0.TabMinWidthBase
+        self.inner().TabMinWidthBase
     }
     pub fn set_tab_min_width_base(&mut self, v: f32) {
-        self.0.TabMinWidthBase = v;
+        self.inner_mut().TabMinWidthBase = v;
     }
 
     pub fn tab_min_width_shrink(&self) -> f32 {
-        self.0.TabMinWidthShrink
+        self.inner().TabMinWidthShrink
     }
     pub fn set_tab_min_width_shrink(&mut self, v: f32) {
-        self.0.TabMinWidthShrink = v;
+        self.inner_mut().TabMinWidthShrink = v;
     }
 
     pub fn tab_close_button_min_width_selected(&self) -> f32 {
-        self.0.TabCloseButtonMinWidthSelected
+        self.inner().TabCloseButtonMinWidthSelected
     }
     pub fn set_tab_close_button_min_width_selected(&mut self, v: f32) {
-        self.0.TabCloseButtonMinWidthSelected = v;
+        self.inner_mut().TabCloseButtonMinWidthSelected = v;
     }
 
     pub fn tab_close_button_min_width_unselected(&self) -> f32 {
-        self.0.TabCloseButtonMinWidthUnselected
+        self.inner().TabCloseButtonMinWidthUnselected
     }
     pub fn set_tab_close_button_min_width_unselected(&mut self, v: f32) {
-        self.0.TabCloseButtonMinWidthUnselected = v;
+        self.inner_mut().TabCloseButtonMinWidthUnselected = v;
     }
 
     pub fn tab_bar_border_size(&self) -> f32 {
-        self.0.TabBarBorderSize
+        self.inner().TabBarBorderSize
     }
     pub fn set_tab_bar_border_size(&mut self, v: f32) {
-        self.0.TabBarBorderSize = v;
+        self.inner_mut().TabBarBorderSize = v;
     }
 
     pub fn tab_bar_overline_size(&self) -> f32 {
-        self.0.TabBarOverlineSize
+        self.inner().TabBarOverlineSize
     }
     pub fn set_tab_bar_overline_size(&mut self, v: f32) {
-        self.0.TabBarOverlineSize = v;
+        self.inner_mut().TabBarOverlineSize = v;
     }
 
     pub fn table_angled_headers_angle(&self) -> f32 {
-        self.0.TableAngledHeadersAngle
+        self.inner().TableAngledHeadersAngle
     }
     pub fn set_table_angled_headers_angle(&mut self, v: f32) {
-        self.0.TableAngledHeadersAngle = v;
+        self.inner_mut().TableAngledHeadersAngle = v;
     }
 
     pub fn table_angled_headers_text_align(&self) -> [f32; 2] {
         [
-            self.0.TableAngledHeadersTextAlign.x,
-            self.0.TableAngledHeadersTextAlign.y,
+            self.inner().TableAngledHeadersTextAlign.x,
+            self.inner().TableAngledHeadersTextAlign.y,
         ]
     }
     pub fn set_table_angled_headers_text_align(&mut self, v: [f32; 2]) {
-        self.0.TableAngledHeadersTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().TableAngledHeadersTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn tree_lines_flags(&self) -> TreeNodeFlags {
-        TreeNodeFlags::from_bits_truncate(self.0.TreeLinesFlags as i32)
+        TreeNodeFlags::from_bits_truncate(self.inner().TreeLinesFlags as i32)
     }
     pub fn set_tree_lines_flags(&mut self, flags: TreeNodeFlags) {
-        self.0.TreeLinesFlags = flags.bits() as sys::ImGuiTreeNodeFlags;
+        self.inner_mut().TreeLinesFlags = flags.bits() as sys::ImGuiTreeNodeFlags;
     }
 
     pub fn tree_lines_size(&self) -> f32 {
-        self.0.TreeLinesSize
+        self.inner().TreeLinesSize
     }
     pub fn set_tree_lines_size(&mut self, v: f32) {
-        self.0.TreeLinesSize = v;
+        self.inner_mut().TreeLinesSize = v;
     }
 
     pub fn tree_lines_rounding(&self) -> f32 {
-        self.0.TreeLinesRounding
+        self.inner().TreeLinesRounding
     }
     pub fn set_tree_lines_rounding(&mut self, v: f32) {
-        self.0.TreeLinesRounding = v;
+        self.inner_mut().TreeLinesRounding = v;
     }
 
     pub fn separator_text_border_size(&self) -> f32 {
-        self.0.SeparatorTextBorderSize
+        self.inner().SeparatorTextBorderSize
     }
     pub fn set_separator_text_border_size(&mut self, v: f32) {
-        self.0.SeparatorTextBorderSize = v;
+        self.inner_mut().SeparatorTextBorderSize = v;
     }
 
     pub fn separator_text_align(&self) -> [f32; 2] {
-        [self.0.SeparatorTextAlign.x, self.0.SeparatorTextAlign.y]
+        [
+            self.inner().SeparatorTextAlign.x,
+            self.inner().SeparatorTextAlign.y,
+        ]
     }
     pub fn set_separator_text_align(&mut self, v: [f32; 2]) {
-        self.0.SeparatorTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().SeparatorTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn separator_text_padding(&self) -> [f32; 2] {
-        [self.0.SeparatorTextPadding.x, self.0.SeparatorTextPadding.y]
+        [
+            self.inner().SeparatorTextPadding.x,
+            self.inner().SeparatorTextPadding.y,
+        ]
     }
     pub fn set_separator_text_padding(&mut self, v: [f32; 2]) {
-        self.0.SeparatorTextPadding = sys::ImVec2 { x: v[0], y: v[1] };
+        self.inner_mut().SeparatorTextPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
     pub fn docking_node_has_close_button(&self) -> bool {
-        self.0.DockingNodeHasCloseButton
+        self.inner().DockingNodeHasCloseButton
     }
     pub fn set_docking_node_has_close_button(&mut self, v: bool) {
-        self.0.DockingNodeHasCloseButton = v;
+        self.inner_mut().DockingNodeHasCloseButton = v;
     }
 
     pub fn docking_separator_size(&self) -> f32 {
-        self.0.DockingSeparatorSize
+        self.inner().DockingSeparatorSize
     }
     pub fn set_docking_separator_size(&mut self, v: f32) {
-        self.0.DockingSeparatorSize = v;
+        self.inner_mut().DockingSeparatorSize = v;
     }
 
     pub fn hover_stationary_delay(&self) -> f32 {
-        self.0.HoverStationaryDelay
+        self.inner().HoverStationaryDelay
     }
     pub fn set_hover_stationary_delay(&mut self, v: f32) {
-        self.0.HoverStationaryDelay = v;
+        self.inner_mut().HoverStationaryDelay = v;
     }
 
     pub fn hover_delay_short(&self) -> f32 {
-        self.0.HoverDelayShort
+        self.inner().HoverDelayShort
     }
     pub fn set_hover_delay_short(&mut self, v: f32) {
-        self.0.HoverDelayShort = v;
+        self.inner_mut().HoverDelayShort = v;
     }
 
     pub fn hover_delay_normal(&self) -> f32 {
-        self.0.HoverDelayNormal
+        self.inner().HoverDelayNormal
     }
     pub fn set_hover_delay_normal(&mut self, v: f32) {
-        self.0.HoverDelayNormal = v;
+        self.inner_mut().HoverDelayNormal = v;
     }
 
     pub fn hover_flags_for_tooltip_mouse(&self) -> HoveredFlags {
-        HoveredFlags::from_bits_truncate(self.0.HoverFlagsForTooltipMouse as i32)
+        HoveredFlags::from_bits_truncate(self.inner().HoverFlagsForTooltipMouse as i32)
     }
     pub fn set_hover_flags_for_tooltip_mouse(&mut self, flags: HoveredFlags) {
-        self.0.HoverFlagsForTooltipMouse = flags.bits() as sys::ImGuiHoveredFlags;
+        self.inner_mut().HoverFlagsForTooltipMouse = flags.bits() as sys::ImGuiHoveredFlags;
     }
 
     pub fn hover_flags_for_tooltip_nav(&self) -> HoveredFlags {
-        HoveredFlags::from_bits_truncate(self.0.HoverFlagsForTooltipNav as i32)
+        HoveredFlags::from_bits_truncate(self.inner().HoverFlagsForTooltipNav as i32)
     }
     pub fn set_hover_flags_for_tooltip_nav(&mut self, flags: HoveredFlags) {
-        self.0.HoverFlagsForTooltipNav = flags.bits() as sys::ImGuiHoveredFlags;
+        self.inner_mut().HoverFlagsForTooltipNav = flags.bits() as sys::ImGuiHoveredFlags;
     }
 }
 
@@ -661,15 +704,27 @@ impl StyleColor {
     pub const COUNT: usize = sys::ImGuiCol_COUNT as usize;
 }
 
+impl Clone for Style {
+    fn clone(&self) -> Self {
+        Self(UnsafeCell::new(*self.inner()))
+    }
+}
+
+impl PartialEq for Style {
+    fn eq(&self, other: &Self) -> bool {
+        *self.inner() == *other.inner()
+    }
+}
+
 impl RawWrapper for Style {
     type Raw = sys::ImGuiStyle;
 
     unsafe fn raw(&self) -> &Self::Raw {
-        &self.0
+        self.inner()
     }
 
     unsafe fn raw_mut(&mut self) -> &mut Self::Raw {
-        &mut self.0
+        self.inner_mut()
     }
 }
 

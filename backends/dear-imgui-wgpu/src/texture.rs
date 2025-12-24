@@ -693,7 +693,7 @@ impl WgpuTextureManager {
         queue: &Queue,
         render_resources: &mut RenderResources,
     ) {
-        for texture_data in draw_data.textures() {
+        for mut texture_data in draw_data.textures() {
             let status = texture_data.status();
             let current_tex_id = texture_data.tex_id().id();
 
@@ -708,7 +708,7 @@ impl WgpuTextureManager {
                         render_resources.remove_image_bind_group(current_tex_id);
                     }
 
-                    match self.create_texture_from_data(device, queue, texture_data) {
+                    match self.create_texture_from_data(device, queue, &*texture_data) {
                         Ok(wgpu_texture_id) => {
                             // CRITICAL: Set the texture ID back to Dear ImGui
                             // In the C++ implementation, they use the TextureView pointer as ImTextureID.
@@ -737,7 +737,7 @@ impl WgpuTextureManager {
                     // id isn't registered, create it now and write back the TexID,
                     // so this frame (or the next one) can bind the correct texture.
                     if internal_id == 0 || !self.contains_texture(internal_id) {
-                        match self.create_texture_from_data(device, queue, texture_data) {
+                        match self.create_texture_from_data(device, queue, &*texture_data) {
                             Ok(new_id) => {
                                 texture_data.set_tex_id(dear_imgui_rs::TextureId::from(new_id));
                                 texture_data.set_status(TextureStatus::OK);
@@ -754,7 +754,7 @@ impl WgpuTextureManager {
 
                         // Try in-place sub-rect updates first
                         if self
-                            .apply_subrect_updates(queue, texture_data, internal_id)
+                            .apply_subrect_updates(queue, &*texture_data, internal_id)
                             .unwrap_or(false)
                         {
                             texture_data.set_status(TextureStatus::OK);
@@ -762,7 +762,7 @@ impl WgpuTextureManager {
                             .update_texture_from_data_with_id(
                                 device,
                                 queue,
-                                texture_data,
+                                &*texture_data,
                                 internal_id,
                             )
                             .is_err()

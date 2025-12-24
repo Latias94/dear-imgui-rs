@@ -149,6 +149,9 @@ impl Context {
         unsafe {
             // Bindings provide igGetIO_Nil; use it to access current IO
             let io_ptr = sys::igGetIO_Nil();
+            if io_ptr.is_null() {
+                panic!("Context::io_mut() requires an active ImGui context");
+            }
             &mut *(io_ptr as *mut Io)
         }
     }
@@ -159,6 +162,9 @@ impl Context {
         unsafe {
             // Bindings provide igGetIO_Nil; use it to access current IO
             let io_ptr = sys::igGetIO_Nil();
+            if io_ptr.is_null() {
+                panic!("Context::io() requires an active ImGui context");
+            }
             &*(io_ptr as *const crate::io::Io)
         }
     }
@@ -168,6 +174,9 @@ impl Context {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             let style_ptr = sys::igGetStyle();
+            if style_ptr.is_null() {
+                panic!("Context::style() requires an active ImGui context");
+            }
             &*(style_ptr as *const crate::style::Style)
         }
     }
@@ -177,6 +186,9 @@ impl Context {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             let style_ptr = sys::igGetStyle();
+            if style_ptr.is_null() {
+                panic!("Context::style_mut() requires an active ImGui context");
+            }
             &mut *(style_ptr as *mut crate::style::Style)
         }
     }
@@ -208,7 +220,11 @@ impl Context {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             sys::igRender();
-            &*(sys::igGetDrawData() as *const crate::render::DrawData)
+            let dd = sys::igGetDrawData();
+            if dd.is_null() {
+                panic!("Context::render() returned null draw data");
+            }
+            &*(dd as *const crate::render::DrawData)
         }
     }
 
@@ -601,6 +617,8 @@ impl Context {
 
     /// Sets the clipboard backend used for clipboard operations
     pub fn set_clipboard_backend<T: ClipboardBackend>(&mut self, backend: T) {
+        let _guard = CTX_MUTEX.lock();
+
         let clipboard_ctx: Box<UnsafeCell<_>> =
             Box::new(UnsafeCell::new(ClipboardContext::new(backend)));
 
@@ -615,6 +633,9 @@ impl Context {
         #[cfg(not(target_arch = "wasm32"))]
         unsafe {
             let platform_io = sys::igGetPlatformIO_Nil();
+            if platform_io.is_null() {
+                panic!("Context::set_clipboard_backend() requires an active ImGui context");
+            }
             (*platform_io).Platform_SetClipboardTextFn = Some(crate::clipboard::set_clipboard_text);
             (*platform_io).Platform_GetClipboardTextFn = Some(crate::clipboard::get_clipboard_text);
             (*platform_io).Platform_ClipboardUserData = clipboard_ctx.get() as *mut _;

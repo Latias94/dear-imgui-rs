@@ -60,10 +60,24 @@ pub type GlVertexArray = <Context as HasContext>::VertexArray;
 pub type GlProgram = <Context as HasContext>::Program;
 pub type GlUniformLocation = <Context as HasContext>::UniformLocation;
 
-/// Convert a slice to a byte slice
+/// Convert a DrawVert slice to a byte slice
+///
+/// Safety notes:
+/// - This intentionally does **not** accept arbitrary `T` to avoid accidentally
+///   reading padding bytes from Rust-side structs (which could be uninitialized).
+/// - `DrawVert` is a `#[repr(C)]` layout-compatible vertex type with no padding
+///   (verified via the size check below).
 #[inline]
-fn to_byte_slice<T>(slice: &[T]) -> &[u8] {
-    unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const u8, std::mem::size_of_val(slice)) }
+fn draw_verts_as_bytes(slice: &[dear_imgui_rs::render::DrawVert]) -> &[u8] {
+    const _: [(); 20] = [(); std::mem::size_of::<dear_imgui_rs::render::DrawVert>()];
+    unsafe { std::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), std::mem::size_of_val(slice)) }
+}
+
+/// Convert a DrawIdx slice to a byte slice.
+#[inline]
+fn draw_indices_as_bytes(slice: &[dear_imgui_rs::render::DrawIdx]) -> &[u8] {
+    const _: [(); 2] = [(); std::mem::size_of::<dear_imgui_rs::render::DrawIdx>()];
+    unsafe { std::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), std::mem::size_of_val(slice)) }
 }
 
 /// Debug message helper for OpenGL debugging

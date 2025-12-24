@@ -177,6 +177,8 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
 }
 
 fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+    let cimplot_cpp = patched_cimplot_cpp(cfg, cimplot_root);
+
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
 
@@ -218,12 +220,61 @@ fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgu
     build.include(cimplot_root.join("implot"));
 
     // Sources
-    build.file(cimplot_root.join("cimplot.cpp"));
+    build.file(cimplot_cpp);
     build.file(cimplot_root.join("implot/implot.cpp"));
     build.file(cimplot_root.join("implot/implot_items.cpp"));
     build.file(cimplot_root.join("implot/implot_demo.cpp"));
 
     build.compile("dear_implot");
+}
+
+fn patched_cimplot_cpp(cfg: &BuildConfig, cimplot_root: &Path) -> PathBuf {
+    // NOTE: This intentionally does not modify the git submodule on disk.
+    //
+    // cimplot's generated C++ wrapper currently contains an out-of-bounds array access:
+    // `dest.FormatSpec[16] = src.FormatSpec[16];` for `char FormatSpec[16]`.
+    // We compile a patched copy from OUT_DIR to avoid shipping C++ UB, while keeping the submodule
+    // clean for upstream updates.
+    let src = cimplot_root.join("cimplot.cpp");
+    let Ok(mut text) = std::fs::read_to_string(&src) else {
+        return src;
+    };
+
+    let needle = "dest.FormatSpec[16] = src.FormatSpec[16];";
+    if !text.contains(needle) {
+        return src;
+    }
+
+    if !text.contains("#include <string.h>") {
+        if text.contains("#include \"cimplot.h\"") {
+            text = text.replace(
+                "#include \"cimplot.h\"\r\n",
+                "#include \"cimplot.h\"\r\n#include <string.h>\r\n",
+            );
+            text = text.replace(
+                "#include \"cimplot.h\"\n",
+                "#include \"cimplot.h\"\n#include <string.h>\n",
+            );
+        } else {
+            text = format!("#include <string.h>\n{text}");
+        }
+    }
+
+    text = text.replace(
+        needle,
+        "memcpy(dest.FormatSpec, src.FormatSpec, sizeof(dest.FormatSpec));",
+    );
+
+    let out = cfg.out_dir.join("cimplot_patched.cpp");
+    if std::fs::write(&out, text).is_ok() {
+        println!(
+            "cargo:warning=Using patched cimplot.cpp from {} (fixes known OOB FormatSpec copy; original submodule is unchanged)",
+            out.display()
+        );
+        out
+    } else {
+        src
+    }
 }
 
 fn main() {
@@ -395,6 +446,15 @@ fn sanitize_bindings_string(content: &str) -> String {
 }
 
 fn build_with_cmake(cfg: &BuildConfig, cimplot_root: &Path) -> bool {
+    // If the known cimplot OOB wrapper bug is present, prefer the `cc` build path where we can
+    // compile a patched copy from OUT_DIR without modifying the submodule.
+    if cimplot_needs_patch(cimplot_root) {
+        println!(
+            "cargo:warning=Skipping CMake build for cimplot because a known OOB wrapper bug was detected; falling back to cc build with a patched copy"
+        );
+        return false;
+    }
+
     let cmake_lists = cimplot_root.join("CMakeLists.txt");
     if !cmake_lists.exists() {
         return false;
@@ -446,6 +506,14 @@ fn build_with_cmake(cfg: &BuildConfig, cimplot_root: &Path) -> bool {
     }
     println!("cargo:rustc-link-lib=static=cimplot");
     true
+}
+
+fn cimplot_needs_patch(cimplot_root: &Path) -> bool {
+    let src = cimplot_root.join("cimplot.cpp");
+    let Ok(text) = std::fs::read_to_string(&src) else {
+        return false;
+    };
+    text.contains("dest.FormatSpec[16] = src.FormatSpec[16];")
 }
 
 fn expected_lib_name(target_env: &str) -> &'static str {

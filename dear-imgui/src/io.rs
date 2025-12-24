@@ -25,6 +25,7 @@ use bitflags::bitflags;
 use crate::sys;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::cell::UnsafeCell;
 use std::ffi::{CStr, c_void};
 
 #[cfg(feature = "serde")]
@@ -181,40 +182,58 @@ bitflags! {
 /// Settings and inputs/outputs for imgui-rs
 /// This is a transparent wrapper around ImGuiIO
 #[repr(transparent)]
-pub struct Io(sys::ImGuiIO);
+pub struct Io(UnsafeCell<sys::ImGuiIO>);
+
+// Ensure the wrapper stays layout-compatible with the sys bindings.
+const _: [(); std::mem::size_of::<sys::ImGuiIO>()] = [(); std::mem::size_of::<Io>()];
+const _: [(); std::mem::align_of::<sys::ImGuiIO>()] = [(); std::mem::align_of::<Io>()];
 
 impl Io {
+    #[inline]
+    fn inner(&self) -> &sys::ImGuiIO {
+        // Safety: `Io` is a transparent wrapper around the sys `ImGuiIO` value which is owned by
+        // Dear ImGui. The value may be mutated by Dear ImGui even while Rust holds `&Io`, so we
+        // store it behind `UnsafeCell` to make that interior mutability explicit.
+        unsafe { &*self.0.get() }
+    }
+
+    #[inline]
+    fn inner_mut(&mut self) -> &mut sys::ImGuiIO {
+        // Safety: caller has `&mut Io`, so this is a unique Rust borrow for this wrapper.
+        unsafe { &mut *self.0.get() }
+    }
+
     /// Main display size in pixels
     pub fn display_size(&self) -> [f32; 2] {
-        [self.0.DisplaySize.x, self.0.DisplaySize.y]
+        [self.inner().DisplaySize.x, self.inner().DisplaySize.y]
     }
 
     /// Set main display size in pixels
     pub fn set_display_size(&mut self, size: [f32; 2]) {
-        self.0.DisplaySize.x = size[0];
-        self.0.DisplaySize.y = size[1];
+        self.inner_mut().DisplaySize.x = size[0];
+        self.inner_mut().DisplaySize.y = size[1];
     }
 
     /// Time elapsed since last frame, in seconds
     pub fn delta_time(&self) -> f32 {
-        self.0.DeltaTime
+        self.inner().DeltaTime
     }
 
     /// Set time elapsed since last frame, in seconds
     pub fn set_delta_time(&mut self, delta_time: f32) {
-        self.0.DeltaTime = delta_time;
+        self.inner_mut().DeltaTime = delta_time;
     }
 
     /// Auto-save interval for `.ini` settings, in seconds.
     #[doc(alias = "IniSavingRate")]
     pub fn ini_saving_rate(&self) -> f32 {
-        self.0.IniSavingRate
+        self.inner().IniSavingRate
     }
 
     /// Set auto-save interval for `.ini` settings, in seconds.
     #[doc(alias = "IniSavingRate")]
     pub fn set_ini_saving_rate(&mut self, seconds: f32) {
-        self.0.IniSavingRate = seconds;
+        self.inner_mut().IniSavingRate = seconds;
     }
 
     /// Returns the current `.ini` filename, or `None` if disabled.
@@ -222,7 +241,7 @@ impl Io {
     /// Note: to set this safely, use `Context::set_ini_filename()`.
     #[doc(alias = "IniFilename")]
     pub fn ini_filename(&self) -> Option<&CStr> {
-        let ptr = self.0.IniFilename;
+        let ptr = self.inner().IniFilename;
         unsafe { (!ptr.is_null()).then(|| CStr::from_ptr(ptr)) }
     }
 
@@ -231,69 +250,69 @@ impl Io {
     /// Note: to set this safely, use `Context::set_log_filename()`.
     #[doc(alias = "LogFilename")]
     pub fn log_filename(&self) -> Option<&CStr> {
-        let ptr = self.0.LogFilename;
+        let ptr = self.inner().LogFilename;
         unsafe { (!ptr.is_null()).then(|| CStr::from_ptr(ptr)) }
     }
 
     /// Returns user data pointer stored in `ImGuiIO`.
     #[doc(alias = "UserData")]
     pub fn user_data(&self) -> *mut c_void {
-        self.0.UserData
+        self.inner().UserData
     }
 
     /// Set user data pointer stored in `ImGuiIO`.
     #[doc(alias = "UserData")]
     pub fn set_user_data(&mut self, user_data: *mut c_void) {
-        self.0.UserData = user_data;
+        self.inner_mut().UserData = user_data;
     }
 
     /// Returns whether font scaling via Ctrl+MouseWheel is enabled.
     #[doc(alias = "FontAllowUserScaling")]
     pub fn font_allow_user_scaling(&self) -> bool {
-        self.0.FontAllowUserScaling
+        self.inner().FontAllowUserScaling
     }
 
     /// Set whether font scaling via Ctrl+MouseWheel is enabled.
     #[doc(alias = "FontAllowUserScaling")]
     pub fn set_font_allow_user_scaling(&mut self, enabled: bool) {
-        self.0.FontAllowUserScaling = enabled;
+        self.inner_mut().FontAllowUserScaling = enabled;
     }
 
     /// Mouse position, in pixels
     pub fn mouse_pos(&self) -> [f32; 2] {
-        [self.0.MousePos.x, self.0.MousePos.y]
+        [self.inner().MousePos.x, self.inner().MousePos.y]
     }
 
     /// Set mouse position, in pixels
     pub fn set_mouse_pos(&mut self, pos: [f32; 2]) {
-        self.0.MousePos.x = pos[0];
-        self.0.MousePos.y = pos[1];
+        self.inner_mut().MousePos.x = pos[0];
+        self.inner_mut().MousePos.y = pos[1];
     }
 
     /// Mouse wheel vertical scrolling
     pub fn mouse_wheel(&self) -> f32 {
-        self.0.MouseWheel
+        self.inner().MouseWheel
     }
 
     /// Set mouse wheel vertical scrolling
     pub fn set_mouse_wheel(&mut self, wheel: f32) {
-        self.0.MouseWheel = wheel;
+        self.inner_mut().MouseWheel = wheel;
     }
 
     /// Mouse wheel horizontal scrolling
     pub fn mouse_wheel_h(&self) -> f32 {
-        self.0.MouseWheelH
+        self.inner().MouseWheelH
     }
 
     /// Set mouse wheel horizontal scrolling
     pub fn set_mouse_wheel_h(&mut self, wheel_h: f32) {
-        self.0.MouseWheelH = wheel_h;
+        self.inner_mut().MouseWheelH = wheel_h;
     }
 
     /// Check if a mouse button is down
     pub fn mouse_down(&self, button: usize) -> bool {
         if button < 5 {
-            self.0.MouseDown[button]
+            self.inner().MouseDown[button]
         } else {
             false
         }
@@ -307,7 +326,7 @@ impl Io {
     /// Set mouse button state
     pub fn set_mouse_down(&mut self, button: usize, down: bool) {
         if button < 5 {
-            self.0.MouseDown[button] = down;
+            self.inner_mut().MouseDown[button] = down;
         }
     }
 
@@ -318,364 +337,364 @@ impl Io {
 
     /// Check if imgui wants to capture mouse input
     pub fn want_capture_mouse(&self) -> bool {
-        self.0.WantCaptureMouse
+        self.inner().WantCaptureMouse
     }
 
     /// Returns whether ImGui wants to capture mouse, unless a popup is closing.
     #[doc(alias = "WantCaptureMouseUnlessPopupClose")]
     pub fn want_capture_mouse_unless_popup_close(&self) -> bool {
-        self.0.WantCaptureMouseUnlessPopupClose
+        self.inner().WantCaptureMouseUnlessPopupClose
     }
 
     /// Check if imgui wants to capture keyboard input
     pub fn want_capture_keyboard(&self) -> bool {
-        self.0.WantCaptureKeyboard
+        self.inner().WantCaptureKeyboard
     }
 
     /// Check if imgui wants to use text input
     pub fn want_text_input(&self) -> bool {
-        self.0.WantTextInput
+        self.inner().WantTextInput
     }
 
     /// Check if imgui wants to set mouse position
     pub fn want_set_mouse_pos(&self) -> bool {
-        self.0.WantSetMousePos
+        self.inner().WantSetMousePos
     }
     /// Whether ImGui requests software-drawn mouse cursor
     pub fn mouse_draw_cursor(&self) -> bool {
-        self.0.MouseDrawCursor
+        self.inner().MouseDrawCursor
     }
     /// Enable or disable software-drawn mouse cursor
     pub fn set_mouse_draw_cursor(&mut self, draw: bool) {
-        self.0.MouseDrawCursor = draw;
+        self.inner_mut().MouseDrawCursor = draw;
     }
 
     /// Check if imgui wants to save ini settings
     pub fn want_save_ini_settings(&self) -> bool {
-        self.0.WantSaveIniSettings
+        self.inner().WantSaveIniSettings
     }
 
     /// Framerate estimation, in frames per second
     pub fn framerate(&self) -> f32 {
-        self.0.Framerate
+        self.inner().Framerate
     }
 
     /// Vertices output during last call to render
     pub fn metrics_render_vertices(&self) -> i32 {
-        self.0.MetricsRenderVertices
+        self.inner().MetricsRenderVertices
     }
 
     /// Indices output during last call to render
     pub fn metrics_render_indices(&self) -> i32 {
-        self.0.MetricsRenderIndices
+        self.inner().MetricsRenderIndices
     }
 
     /// Number of visible windows
     pub fn metrics_render_windows(&self) -> i32 {
-        self.0.MetricsRenderWindows
+        self.inner().MetricsRenderWindows
     }
 
     /// Number of active windows
     pub fn metrics_active_windows(&self) -> i32 {
-        self.0.MetricsActiveWindows
+        self.inner().MetricsActiveWindows
     }
 
     /// Configuration flags
     pub fn config_flags(&self) -> ConfigFlags {
-        ConfigFlags::from_bits_truncate(self.0.ConfigFlags)
+        ConfigFlags::from_bits_truncate(self.inner().ConfigFlags)
     }
 
     /// Set configuration flags
     pub fn set_config_flags(&mut self, flags: ConfigFlags) {
-        self.0.ConfigFlags = flags.bits();
+        self.inner_mut().ConfigFlags = flags.bits();
     }
 
     /// Returns whether to swap gamepad buttons for navigation.
     #[doc(alias = "ConfigNavSwapGamepadButtons")]
     pub fn config_nav_swap_gamepad_buttons(&self) -> bool {
-        self.0.ConfigNavSwapGamepadButtons
+        self.inner().ConfigNavSwapGamepadButtons
     }
 
     /// Set whether to swap gamepad buttons for navigation.
     #[doc(alias = "ConfigNavSwapGamepadButtons")]
     pub fn set_config_nav_swap_gamepad_buttons(&mut self, enabled: bool) {
-        self.0.ConfigNavSwapGamepadButtons = enabled;
+        self.inner_mut().ConfigNavSwapGamepadButtons = enabled;
     }
 
     /// Returns whether navigation can move the mouse cursor.
     #[doc(alias = "ConfigNavMoveSetMousePos")]
     pub fn config_nav_move_set_mouse_pos(&self) -> bool {
-        self.0.ConfigNavMoveSetMousePos
+        self.inner().ConfigNavMoveSetMousePos
     }
 
     /// Set whether navigation can move the mouse cursor.
     #[doc(alias = "ConfigNavMoveSetMousePos")]
     pub fn set_config_nav_move_set_mouse_pos(&mut self, enabled: bool) {
-        self.0.ConfigNavMoveSetMousePos = enabled;
+        self.inner_mut().ConfigNavMoveSetMousePos = enabled;
     }
 
     /// Returns whether to capture keyboard inputs during navigation.
     #[doc(alias = "ConfigNavCaptureKeyboard")]
     pub fn config_nav_capture_keyboard(&self) -> bool {
-        self.0.ConfigNavCaptureKeyboard
+        self.inner().ConfigNavCaptureKeyboard
     }
 
     /// Set whether to capture keyboard inputs during navigation.
     #[doc(alias = "ConfigNavCaptureKeyboard")]
     pub fn set_config_nav_capture_keyboard(&mut self, enabled: bool) {
-        self.0.ConfigNavCaptureKeyboard = enabled;
+        self.inner_mut().ConfigNavCaptureKeyboard = enabled;
     }
 
     /// Returns whether Escape clears the focused item.
     #[doc(alias = "ConfigNavEscapeClearFocusItem")]
     pub fn config_nav_escape_clear_focus_item(&self) -> bool {
-        self.0.ConfigNavEscapeClearFocusItem
+        self.inner().ConfigNavEscapeClearFocusItem
     }
 
     /// Set whether Escape clears the focused item.
     #[doc(alias = "ConfigNavEscapeClearFocusItem")]
     pub fn set_config_nav_escape_clear_focus_item(&mut self, enabled: bool) {
-        self.0.ConfigNavEscapeClearFocusItem = enabled;
+        self.inner_mut().ConfigNavEscapeClearFocusItem = enabled;
     }
 
     /// Returns whether Escape clears the focused window.
     #[doc(alias = "ConfigNavEscapeClearFocusWindow")]
     pub fn config_nav_escape_clear_focus_window(&self) -> bool {
-        self.0.ConfigNavEscapeClearFocusWindow
+        self.inner().ConfigNavEscapeClearFocusWindow
     }
 
     /// Set whether Escape clears the focused window.
     #[doc(alias = "ConfigNavEscapeClearFocusWindow")]
     pub fn set_config_nav_escape_clear_focus_window(&mut self, enabled: bool) {
-        self.0.ConfigNavEscapeClearFocusWindow = enabled;
+        self.inner_mut().ConfigNavEscapeClearFocusWindow = enabled;
     }
 
     /// Returns whether the navigation cursor visibility is automatically managed.
     #[doc(alias = "ConfigNavCursorVisibleAuto")]
     pub fn config_nav_cursor_visible_auto(&self) -> bool {
-        self.0.ConfigNavCursorVisibleAuto
+        self.inner().ConfigNavCursorVisibleAuto
     }
 
     /// Set whether the navigation cursor visibility is automatically managed.
     #[doc(alias = "ConfigNavCursorVisibleAuto")]
     pub fn set_config_nav_cursor_visible_auto(&mut self, enabled: bool) {
-        self.0.ConfigNavCursorVisibleAuto = enabled;
+        self.inner_mut().ConfigNavCursorVisibleAuto = enabled;
     }
 
     /// Returns whether the navigation cursor is always visible.
     #[doc(alias = "ConfigNavCursorVisibleAlways")]
     pub fn config_nav_cursor_visible_always(&self) -> bool {
-        self.0.ConfigNavCursorVisibleAlways
+        self.inner().ConfigNavCursorVisibleAlways
     }
 
     /// Set whether the navigation cursor is always visible.
     #[doc(alias = "ConfigNavCursorVisibleAlways")]
     pub fn set_config_nav_cursor_visible_always(&mut self, enabled: bool) {
-        self.0.ConfigNavCursorVisibleAlways = enabled;
+        self.inner_mut().ConfigNavCursorVisibleAlways = enabled;
     }
 
     /// Returns whether docking is prevented from splitting nodes.
     #[doc(alias = "ConfigDockingNoSplit")]
     pub fn config_docking_no_split(&self) -> bool {
-        self.0.ConfigDockingNoSplit
+        self.inner().ConfigDockingNoSplit
     }
 
     /// Set whether docking is prevented from splitting nodes.
     #[doc(alias = "ConfigDockingNoSplit")]
     pub fn set_config_docking_no_split(&mut self, enabled: bool) {
-        self.0.ConfigDockingNoSplit = enabled;
+        self.inner_mut().ConfigDockingNoSplit = enabled;
     }
 
     /// Returns whether docking over other windows is disabled.
     #[doc(alias = "ConfigDockingNoDockingOver")]
     pub fn config_docking_no_docking_over(&self) -> bool {
-        self.0.ConfigDockingNoDockingOver
+        self.inner().ConfigDockingNoDockingOver
     }
 
     /// Set whether docking over other windows is disabled.
     #[doc(alias = "ConfigDockingNoDockingOver")]
     pub fn set_config_docking_no_docking_over(&mut self, enabled: bool) {
-        self.0.ConfigDockingNoDockingOver = enabled;
+        self.inner_mut().ConfigDockingNoDockingOver = enabled;
     }
 
     /// Returns whether docking requires holding Shift.
     #[doc(alias = "ConfigDockingWithShift")]
     pub fn config_docking_with_shift(&self) -> bool {
-        self.0.ConfigDockingWithShift
+        self.inner().ConfigDockingWithShift
     }
 
     /// Set whether docking requires holding Shift.
     #[doc(alias = "ConfigDockingWithShift")]
     pub fn set_config_docking_with_shift(&mut self, enabled: bool) {
-        self.0.ConfigDockingWithShift = enabled;
+        self.inner_mut().ConfigDockingWithShift = enabled;
     }
 
     /// Returns whether docking uses a tab bar when possible.
     #[doc(alias = "ConfigDockingAlwaysTabBar")]
     pub fn config_docking_always_tab_bar(&self) -> bool {
-        self.0.ConfigDockingAlwaysTabBar
+        self.inner().ConfigDockingAlwaysTabBar
     }
 
     /// Set whether docking uses a tab bar when possible.
     #[doc(alias = "ConfigDockingAlwaysTabBar")]
     pub fn set_config_docking_always_tab_bar(&mut self, enabled: bool) {
-        self.0.ConfigDockingAlwaysTabBar = enabled;
+        self.inner_mut().ConfigDockingAlwaysTabBar = enabled;
     }
 
     /// Returns whether docking payloads are rendered transparently.
     #[doc(alias = "ConfigDockingTransparentPayload")]
     pub fn config_docking_transparent_payload(&self) -> bool {
-        self.0.ConfigDockingTransparentPayload
+        self.inner().ConfigDockingTransparentPayload
     }
 
     /// Set whether docking payloads are rendered transparently.
     #[doc(alias = "ConfigDockingTransparentPayload")]
     pub fn set_config_docking_transparent_payload(&mut self, enabled: bool) {
-        self.0.ConfigDockingTransparentPayload = enabled;
+        self.inner_mut().ConfigDockingTransparentPayload = enabled;
     }
 
     /// Returns whether viewports should avoid auto-merging.
     #[doc(alias = "ConfigViewportsNoAutoMerge")]
     pub fn config_viewports_no_auto_merge(&self) -> bool {
-        self.0.ConfigViewportsNoAutoMerge
+        self.inner().ConfigViewportsNoAutoMerge
     }
 
     /// Set whether viewports should avoid auto-merging.
     #[doc(alias = "ConfigViewportsNoAutoMerge")]
     pub fn set_config_viewports_no_auto_merge(&mut self, enabled: bool) {
-        self.0.ConfigViewportsNoAutoMerge = enabled;
+        self.inner_mut().ConfigViewportsNoAutoMerge = enabled;
     }
 
     /// Returns whether viewports should avoid task bar icons.
     #[doc(alias = "ConfigViewportsNoTaskBarIcon")]
     pub fn config_viewports_no_task_bar_icon(&self) -> bool {
-        self.0.ConfigViewportsNoTaskBarIcon
+        self.inner().ConfigViewportsNoTaskBarIcon
     }
 
     /// Set whether viewports should avoid task bar icons.
     #[doc(alias = "ConfigViewportsNoTaskBarIcon")]
     pub fn set_config_viewports_no_task_bar_icon(&mut self, enabled: bool) {
-        self.0.ConfigViewportsNoTaskBarIcon = enabled;
+        self.inner_mut().ConfigViewportsNoTaskBarIcon = enabled;
     }
 
     /// Returns whether viewports should avoid platform window decorations.
     #[doc(alias = "ConfigViewportsNoDecoration")]
     pub fn config_viewports_no_decoration(&self) -> bool {
-        self.0.ConfigViewportsNoDecoration
+        self.inner().ConfigViewportsNoDecoration
     }
 
     /// Set whether viewports should avoid platform window decorations.
     #[doc(alias = "ConfigViewportsNoDecoration")]
     pub fn set_config_viewports_no_decoration(&mut self, enabled: bool) {
-        self.0.ConfigViewportsNoDecoration = enabled;
+        self.inner_mut().ConfigViewportsNoDecoration = enabled;
     }
 
     /// Returns whether viewports should not have a default parent.
     #[doc(alias = "ConfigViewportsNoDefaultParent")]
     pub fn config_viewports_no_default_parent(&self) -> bool {
-        self.0.ConfigViewportsNoDefaultParent
+        self.inner().ConfigViewportsNoDefaultParent
     }
 
     /// Set whether viewports should not have a default parent.
     #[doc(alias = "ConfigViewportsNoDefaultParent")]
     pub fn set_config_viewports_no_default_parent(&mut self, enabled: bool) {
-        self.0.ConfigViewportsNoDefaultParent = enabled;
+        self.inner_mut().ConfigViewportsNoDefaultParent = enabled;
     }
 
     /// Returns whether platform focus also sets ImGui focus in viewports.
     #[doc(alias = "ConfigViewportsPlatformFocusSetsImGuiFocus")]
     pub fn config_viewports_platform_focus_sets_imgui_focus(&self) -> bool {
-        self.0.ConfigViewportsPlatformFocusSetsImGuiFocus
+        self.inner().ConfigViewportsPlatformFocusSetsImGuiFocus
     }
 
     /// Set whether platform focus also sets ImGui focus in viewports.
     #[doc(alias = "ConfigViewportsPlatformFocusSetsImGuiFocus")]
     pub fn set_config_viewports_platform_focus_sets_imgui_focus(&mut self, enabled: bool) {
-        self.0.ConfigViewportsPlatformFocusSetsImGuiFocus = enabled;
+        self.inner_mut().ConfigViewportsPlatformFocusSetsImGuiFocus = enabled;
     }
 
     /// Returns whether fonts are scaled by DPI.
     #[doc(alias = "ConfigDpiScaleFonts")]
     pub fn config_dpi_scale_fonts(&self) -> bool {
-        self.0.ConfigDpiScaleFonts
+        self.inner().ConfigDpiScaleFonts
     }
 
     /// Set whether fonts are scaled by DPI.
     #[doc(alias = "ConfigDpiScaleFonts")]
     pub fn set_config_dpi_scale_fonts(&mut self, enabled: bool) {
-        self.0.ConfigDpiScaleFonts = enabled;
+        self.inner_mut().ConfigDpiScaleFonts = enabled;
     }
 
     /// Returns whether viewports are scaled by DPI.
     #[doc(alias = "ConfigDpiScaleViewports")]
     pub fn config_dpi_scale_viewports(&self) -> bool {
-        self.0.ConfigDpiScaleViewports
+        self.inner().ConfigDpiScaleViewports
     }
 
     /// Set whether viewports are scaled by DPI.
     #[doc(alias = "ConfigDpiScaleViewports")]
     pub fn set_config_dpi_scale_viewports(&mut self, enabled: bool) {
-        self.0.ConfigDpiScaleViewports = enabled;
+        self.inner_mut().ConfigDpiScaleViewports = enabled;
     }
 
     /// Returns whether to use MacOSX-style behaviors.
     #[doc(alias = "ConfigMacOSXBehaviors")]
     pub fn config_macosx_behaviors(&self) -> bool {
-        self.0.ConfigMacOSXBehaviors
+        self.inner().ConfigMacOSXBehaviors
     }
 
     /// Set whether to use MacOSX-style behaviors.
     #[doc(alias = "ConfigMacOSXBehaviors")]
     pub fn set_config_macosx_behaviors(&mut self, enabled: bool) {
-        self.0.ConfigMacOSXBehaviors = enabled;
+        self.inner_mut().ConfigMacOSXBehaviors = enabled;
     }
 
     /// Returns whether to trickle input events through the queue.
     #[doc(alias = "ConfigInputTrickleEventQueue")]
     pub fn config_input_trickle_event_queue(&self) -> bool {
-        self.0.ConfigInputTrickleEventQueue
+        self.inner().ConfigInputTrickleEventQueue
     }
 
     /// Set whether to trickle input events through the queue.
     #[doc(alias = "ConfigInputTrickleEventQueue")]
     pub fn set_config_input_trickle_event_queue(&mut self, enabled: bool) {
-        self.0.ConfigInputTrickleEventQueue = enabled;
+        self.inner_mut().ConfigInputTrickleEventQueue = enabled;
     }
 
     /// Returns whether the input text cursor blinks.
     #[doc(alias = "ConfigInputTextCursorBlink")]
     pub fn config_input_text_cursor_blink(&self) -> bool {
-        self.0.ConfigInputTextCursorBlink
+        self.inner().ConfigInputTextCursorBlink
     }
 
     /// Set whether the input text cursor blinks.
     #[doc(alias = "ConfigInputTextCursorBlink")]
     pub fn set_config_input_text_cursor_blink(&mut self, enabled: bool) {
-        self.0.ConfigInputTextCursorBlink = enabled;
+        self.inner_mut().ConfigInputTextCursorBlink = enabled;
     }
 
     /// Returns whether Enter keeps the input text active.
     #[doc(alias = "ConfigInputTextEnterKeepActive")]
     pub fn config_input_text_enter_keep_active(&self) -> bool {
-        self.0.ConfigInputTextEnterKeepActive
+        self.inner().ConfigInputTextEnterKeepActive
     }
 
     /// Set whether Enter keeps the input text active.
     #[doc(alias = "ConfigInputTextEnterKeepActive")]
     pub fn set_config_input_text_enter_keep_active(&mut self, enabled: bool) {
-        self.0.ConfigInputTextEnterKeepActive = enabled;
+        self.inner_mut().ConfigInputTextEnterKeepActive = enabled;
     }
 
     /// Returns whether click-drag on numeric widgets turns into text input.
     #[doc(alias = "ConfigDragClickToInputText")]
     pub fn config_drag_click_to_input_text(&self) -> bool {
-        self.0.ConfigDragClickToInputText
+        self.inner().ConfigDragClickToInputText
     }
 
     /// Set whether click-drag on numeric widgets turns into text input.
     #[doc(alias = "ConfigDragClickToInputText")]
     pub fn set_config_drag_click_to_input_text(&mut self, enabled: bool) {
-        self.0.ConfigDragClickToInputText = enabled;
+        self.inner_mut().ConfigDragClickToInputText = enabled;
     }
 
     /// Returns whether windows can be moved only from their title bar.
@@ -685,7 +704,7 @@ impl Io {
     /// while interacting with in-window widgets (e.g. gizmos in a scene view).
     #[doc(alias = "ConfigWindowsMoveFromTitleBarOnly")]
     pub fn config_windows_move_from_title_bar_only(&self) -> bool {
-        self.0.ConfigWindowsMoveFromTitleBarOnly
+        self.inner().ConfigWindowsMoveFromTitleBarOnly
     }
 
     /// Set whether windows can be moved only from their title bar.
@@ -694,247 +713,248 @@ impl Io {
     /// during initialization or before calling `Context::frame()`.
     #[doc(alias = "ConfigWindowsMoveFromTitleBarOnly")]
     pub fn set_config_windows_move_from_title_bar_only(&mut self, enabled: bool) {
-        self.0.ConfigWindowsMoveFromTitleBarOnly = enabled;
+        self.inner_mut().ConfigWindowsMoveFromTitleBarOnly = enabled;
     }
 
     /// Returns whether windows can be resized from their edges.
     #[doc(alias = "ConfigWindowsResizeFromEdges")]
     pub fn config_windows_resize_from_edges(&self) -> bool {
-        self.0.ConfigWindowsResizeFromEdges
+        self.inner().ConfigWindowsResizeFromEdges
     }
 
     /// Set whether windows can be resized from their edges.
     #[doc(alias = "ConfigWindowsResizeFromEdges")]
     pub fn set_config_windows_resize_from_edges(&mut self, enabled: bool) {
-        self.0.ConfigWindowsResizeFromEdges = enabled;
+        self.inner_mut().ConfigWindowsResizeFromEdges = enabled;
     }
 
     /// Returns whether Ctrl+C copies window contents.
     #[doc(alias = "ConfigWindowsCopyContentsWithCtrlC")]
     pub fn config_windows_copy_contents_with_ctrl_c(&self) -> bool {
-        self.0.ConfigWindowsCopyContentsWithCtrlC
+        self.inner().ConfigWindowsCopyContentsWithCtrlC
     }
 
     /// Set whether Ctrl+C copies window contents.
     #[doc(alias = "ConfigWindowsCopyContentsWithCtrlC")]
     pub fn set_config_windows_copy_contents_with_ctrl_c(&mut self, enabled: bool) {
-        self.0.ConfigWindowsCopyContentsWithCtrlC = enabled;
+        self.inner_mut().ConfigWindowsCopyContentsWithCtrlC = enabled;
     }
 
     /// Returns whether scrollbars scroll by page.
     #[doc(alias = "ConfigScrollbarScrollByPage")]
     pub fn config_scrollbar_scroll_by_page(&self) -> bool {
-        self.0.ConfigScrollbarScrollByPage
+        self.inner().ConfigScrollbarScrollByPage
     }
 
     /// Set whether scrollbars scroll by page.
     #[doc(alias = "ConfigScrollbarScrollByPage")]
     pub fn set_config_scrollbar_scroll_by_page(&mut self, enabled: bool) {
-        self.0.ConfigScrollbarScrollByPage = enabled;
+        self.inner_mut().ConfigScrollbarScrollByPage = enabled;
     }
 
     /// Returns the memory compact timer (seconds).
     #[doc(alias = "ConfigMemoryCompactTimer")]
     pub fn config_memory_compact_timer(&self) -> f32 {
-        self.0.ConfigMemoryCompactTimer
+        self.inner().ConfigMemoryCompactTimer
     }
 
     /// Set the memory compact timer (seconds).
     #[doc(alias = "ConfigMemoryCompactTimer")]
     pub fn set_config_memory_compact_timer(&mut self, seconds: f32) {
-        self.0.ConfigMemoryCompactTimer = seconds;
+        self.inner_mut().ConfigMemoryCompactTimer = seconds;
     }
 
     /// Returns the time for a double-click (seconds).
     #[doc(alias = "MouseDoubleClickTime")]
     pub fn mouse_double_click_time(&self) -> f32 {
-        self.0.MouseDoubleClickTime
+        self.inner().MouseDoubleClickTime
     }
 
     /// Set the time for a double-click (seconds).
     #[doc(alias = "MouseDoubleClickTime")]
     pub fn set_mouse_double_click_time(&mut self, seconds: f32) {
-        self.0.MouseDoubleClickTime = seconds;
+        self.inner_mut().MouseDoubleClickTime = seconds;
     }
 
     /// Returns the maximum distance to qualify as a double-click (pixels).
     #[doc(alias = "MouseDoubleClickMaxDist")]
     pub fn mouse_double_click_max_dist(&self) -> f32 {
-        self.0.MouseDoubleClickMaxDist
+        self.inner().MouseDoubleClickMaxDist
     }
 
     /// Set the maximum distance to qualify as a double-click (pixels).
     #[doc(alias = "MouseDoubleClickMaxDist")]
     pub fn set_mouse_double_click_max_dist(&mut self, pixels: f32) {
-        self.0.MouseDoubleClickMaxDist = pixels;
+        self.inner_mut().MouseDoubleClickMaxDist = pixels;
     }
 
     /// Returns the distance threshold for starting a drag (pixels).
     #[doc(alias = "MouseDragThreshold")]
     pub fn mouse_drag_threshold(&self) -> f32 {
-        self.0.MouseDragThreshold
+        self.inner().MouseDragThreshold
     }
 
     /// Set the distance threshold for starting a drag (pixels).
     #[doc(alias = "MouseDragThreshold")]
     pub fn set_mouse_drag_threshold(&mut self, pixels: f32) {
-        self.0.MouseDragThreshold = pixels;
+        self.inner_mut().MouseDragThreshold = pixels;
     }
 
     /// Returns the key repeat delay (seconds).
     #[doc(alias = "KeyRepeatDelay")]
     pub fn key_repeat_delay(&self) -> f32 {
-        self.0.KeyRepeatDelay
+        self.inner().KeyRepeatDelay
     }
 
     /// Set the key repeat delay (seconds).
     #[doc(alias = "KeyRepeatDelay")]
     pub fn set_key_repeat_delay(&mut self, seconds: f32) {
-        self.0.KeyRepeatDelay = seconds;
+        self.inner_mut().KeyRepeatDelay = seconds;
     }
 
     /// Returns the key repeat rate (seconds).
     #[doc(alias = "KeyRepeatRate")]
     pub fn key_repeat_rate(&self) -> f32 {
-        self.0.KeyRepeatRate
+        self.inner().KeyRepeatRate
     }
 
     /// Set the key repeat rate (seconds).
     #[doc(alias = "KeyRepeatRate")]
     pub fn set_key_repeat_rate(&mut self, seconds: f32) {
-        self.0.KeyRepeatRate = seconds;
+        self.inner_mut().KeyRepeatRate = seconds;
     }
 
     /// Returns whether error recovery is enabled.
     #[doc(alias = "ConfigErrorRecovery")]
     pub fn config_error_recovery(&self) -> bool {
-        self.0.ConfigErrorRecovery
+        self.inner().ConfigErrorRecovery
     }
 
     /// Set whether error recovery is enabled.
     #[doc(alias = "ConfigErrorRecovery")]
     pub fn set_config_error_recovery(&mut self, enabled: bool) {
-        self.0.ConfigErrorRecovery = enabled;
+        self.inner_mut().ConfigErrorRecovery = enabled;
     }
 
     /// Returns whether error recovery enables asserts.
     #[doc(alias = "ConfigErrorRecoveryEnableAssert")]
     pub fn config_error_recovery_enable_assert(&self) -> bool {
-        self.0.ConfigErrorRecoveryEnableAssert
+        self.inner().ConfigErrorRecoveryEnableAssert
     }
 
     /// Set whether error recovery enables asserts.
     #[doc(alias = "ConfigErrorRecoveryEnableAssert")]
     pub fn set_config_error_recovery_enable_assert(&mut self, enabled: bool) {
-        self.0.ConfigErrorRecoveryEnableAssert = enabled;
+        self.inner_mut().ConfigErrorRecoveryEnableAssert = enabled;
     }
 
     /// Returns whether error recovery enables debug logs.
     #[doc(alias = "ConfigErrorRecoveryEnableDebugLog")]
     pub fn config_error_recovery_enable_debug_log(&self) -> bool {
-        self.0.ConfigErrorRecoveryEnableDebugLog
+        self.inner().ConfigErrorRecoveryEnableDebugLog
     }
 
     /// Set whether error recovery enables debug logs.
     #[doc(alias = "ConfigErrorRecoveryEnableDebugLog")]
     pub fn set_config_error_recovery_enable_debug_log(&mut self, enabled: bool) {
-        self.0.ConfigErrorRecoveryEnableDebugLog = enabled;
+        self.inner_mut().ConfigErrorRecoveryEnableDebugLog = enabled;
     }
 
     /// Returns whether error recovery enables tooltips.
     #[doc(alias = "ConfigErrorRecoveryEnableTooltip")]
     pub fn config_error_recovery_enable_tooltip(&self) -> bool {
-        self.0.ConfigErrorRecoveryEnableTooltip
+        self.inner().ConfigErrorRecoveryEnableTooltip
     }
 
     /// Set whether error recovery enables tooltips.
     #[doc(alias = "ConfigErrorRecoveryEnableTooltip")]
     pub fn set_config_error_recovery_enable_tooltip(&mut self, enabled: bool) {
-        self.0.ConfigErrorRecoveryEnableTooltip = enabled;
+        self.inner_mut().ConfigErrorRecoveryEnableTooltip = enabled;
     }
 
     /// Returns whether Dear ImGui thinks a debugger is present.
     #[doc(alias = "ConfigDebugIsDebuggerPresent")]
     pub fn config_debug_is_debugger_present(&self) -> bool {
-        self.0.ConfigDebugIsDebuggerPresent
+        self.inner().ConfigDebugIsDebuggerPresent
     }
 
     /// Set whether Dear ImGui thinks a debugger is present.
     #[doc(alias = "ConfigDebugIsDebuggerPresent")]
     pub fn set_config_debug_is_debugger_present(&mut self, enabled: bool) {
-        self.0.ConfigDebugIsDebuggerPresent = enabled;
+        self.inner_mut().ConfigDebugIsDebuggerPresent = enabled;
     }
 
     /// Returns whether to highlight ID conflicts.
     #[doc(alias = "ConfigDebugHighlightIdConflicts")]
     pub fn config_debug_highlight_id_conflicts(&self) -> bool {
-        self.0.ConfigDebugHighlightIdConflicts
+        self.inner().ConfigDebugHighlightIdConflicts
     }
 
     /// Set whether to highlight ID conflicts.
     #[doc(alias = "ConfigDebugHighlightIdConflicts")]
     pub fn set_config_debug_highlight_id_conflicts(&mut self, enabled: bool) {
-        self.0.ConfigDebugHighlightIdConflicts = enabled;
+        self.inner_mut().ConfigDebugHighlightIdConflicts = enabled;
     }
 
     /// Returns whether to show the item picker when highlighting ID conflicts.
     #[doc(alias = "ConfigDebugHighlightIdConflictsShowItemPicker")]
     pub fn config_debug_highlight_id_conflicts_show_item_picker(&self) -> bool {
-        self.0.ConfigDebugHighlightIdConflictsShowItemPicker
+        self.inner().ConfigDebugHighlightIdConflictsShowItemPicker
     }
 
     /// Set whether to show the item picker when highlighting ID conflicts.
     #[doc(alias = "ConfigDebugHighlightIdConflictsShowItemPicker")]
     pub fn set_config_debug_highlight_id_conflicts_show_item_picker(&mut self, enabled: bool) {
-        self.0.ConfigDebugHighlightIdConflictsShowItemPicker = enabled;
+        self.inner_mut()
+            .ConfigDebugHighlightIdConflictsShowItemPicker = enabled;
     }
 
     /// Returns whether `Begin()` returns `true` once.
     #[doc(alias = "ConfigDebugBeginReturnValueOnce")]
     pub fn config_debug_begin_return_value_once(&self) -> bool {
-        self.0.ConfigDebugBeginReturnValueOnce
+        self.inner().ConfigDebugBeginReturnValueOnce
     }
 
     /// Set whether `Begin()` returns `true` once.
     #[doc(alias = "ConfigDebugBeginReturnValueOnce")]
     pub fn set_config_debug_begin_return_value_once(&mut self, enabled: bool) {
-        self.0.ConfigDebugBeginReturnValueOnce = enabled;
+        self.inner_mut().ConfigDebugBeginReturnValueOnce = enabled;
     }
 
     /// Returns whether `Begin()` returns `true` in a loop.
     #[doc(alias = "ConfigDebugBeginReturnValueLoop")]
     pub fn config_debug_begin_return_value_loop(&self) -> bool {
-        self.0.ConfigDebugBeginReturnValueLoop
+        self.inner().ConfigDebugBeginReturnValueLoop
     }
 
     /// Set whether `Begin()` returns `true` in a loop.
     #[doc(alias = "ConfigDebugBeginReturnValueLoop")]
     pub fn set_config_debug_begin_return_value_loop(&mut self, enabled: bool) {
-        self.0.ConfigDebugBeginReturnValueLoop = enabled;
+        self.inner_mut().ConfigDebugBeginReturnValueLoop = enabled;
     }
 
     /// Returns whether to ignore focus loss.
     #[doc(alias = "ConfigDebugIgnoreFocusLoss")]
     pub fn config_debug_ignore_focus_loss(&self) -> bool {
-        self.0.ConfigDebugIgnoreFocusLoss
+        self.inner().ConfigDebugIgnoreFocusLoss
     }
 
     /// Set whether to ignore focus loss.
     #[doc(alias = "ConfigDebugIgnoreFocusLoss")]
     pub fn set_config_debug_ignore_focus_loss(&mut self, enabled: bool) {
-        self.0.ConfigDebugIgnoreFocusLoss = enabled;
+        self.inner_mut().ConfigDebugIgnoreFocusLoss = enabled;
     }
 
     /// Returns whether to display ini settings debug tools.
     #[doc(alias = "ConfigDebugIniSettings")]
     pub fn config_debug_ini_settings(&self) -> bool {
-        self.0.ConfigDebugIniSettings
+        self.inner().ConfigDebugIniSettings
     }
 
     /// Set whether to display ini settings debug tools.
     #[doc(alias = "ConfigDebugIniSettings")]
     pub fn set_config_debug_ini_settings(&mut self, enabled: bool) {
-        self.0.ConfigDebugIniSettings = enabled;
+        self.inner_mut().ConfigDebugIniSettings = enabled;
     }
 
     /// Returns the backend platform name, if set.
@@ -942,7 +962,7 @@ impl Io {
     /// Note: to set this safely, use `Context::set_platform_name()`.
     #[doc(alias = "BackendPlatformName")]
     pub fn backend_platform_name(&self) -> Option<&CStr> {
-        let ptr = self.0.BackendPlatformName;
+        let ptr = self.inner().BackendPlatformName;
         unsafe { (!ptr.is_null()).then(|| CStr::from_ptr(ptr)) }
     }
 
@@ -951,88 +971,88 @@ impl Io {
     /// Note: to set this safely, use `Context::set_renderer_name()`.
     #[doc(alias = "BackendRendererName")]
     pub fn backend_renderer_name(&self) -> Option<&CStr> {
-        let ptr = self.0.BackendRendererName;
+        let ptr = self.inner().BackendRendererName;
         unsafe { (!ptr.is_null()).then(|| CStr::from_ptr(ptr)) }
     }
 
     /// Returns the backend platform user data pointer.
     #[doc(alias = "BackendPlatformUserData")]
     pub fn backend_platform_user_data(&self) -> *mut c_void {
-        self.0.BackendPlatformUserData
+        self.inner().BackendPlatformUserData
     }
 
     /// Set the backend platform user data pointer.
     #[doc(alias = "BackendPlatformUserData")]
     pub fn set_backend_platform_user_data(&mut self, user_data: *mut c_void) {
-        self.0.BackendPlatformUserData = user_data;
+        self.inner_mut().BackendPlatformUserData = user_data;
     }
 
     /// Returns the backend renderer user data pointer.
     #[doc(alias = "BackendRendererUserData")]
     pub fn backend_renderer_user_data(&self) -> *mut c_void {
-        self.0.BackendRendererUserData
+        self.inner().BackendRendererUserData
     }
 
     /// Set the backend renderer user data pointer.
     #[doc(alias = "BackendRendererUserData")]
     pub fn set_backend_renderer_user_data(&mut self, user_data: *mut c_void) {
-        self.0.BackendRendererUserData = user_data;
+        self.inner_mut().BackendRendererUserData = user_data;
     }
 
     /// Returns the backend language user data pointer.
     #[doc(alias = "BackendLanguageUserData")]
     pub fn backend_language_user_data(&self) -> *mut c_void {
-        self.0.BackendLanguageUserData
+        self.inner().BackendLanguageUserData
     }
 
     /// Set the backend language user data pointer.
     #[doc(alias = "BackendLanguageUserData")]
     pub fn set_backend_language_user_data(&mut self, user_data: *mut c_void) {
-        self.0.BackendLanguageUserData = user_data;
+        self.inner_mut().BackendLanguageUserData = user_data;
     }
 
     /// Backend flags
     pub fn backend_flags(&self) -> BackendFlags {
-        BackendFlags::from_bits_truncate(self.0.BackendFlags)
+        BackendFlags::from_bits_truncate(self.inner().BackendFlags)
     }
 
     /// Set backend flags
     pub fn set_backend_flags(&mut self, flags: BackendFlags) {
-        self.0.BackendFlags = flags.bits();
+        self.inner_mut().BackendFlags = flags.bits();
     }
 
     /// Add a key event to the input queue
     pub fn add_key_event(&mut self, key: crate::Key, down: bool) {
         unsafe {
-            sys::ImGuiIO_AddKeyEvent(&mut self.0 as *mut _, key.into(), down);
+            sys::ImGuiIO_AddKeyEvent(self.inner_mut() as *mut _, key.into(), down);
         }
     }
 
     /// Add a character input event to the input queue
     pub fn add_input_character(&mut self, character: char) {
         unsafe {
-            sys::ImGuiIO_AddInputCharacter(&mut self.0 as *mut _, character as u32);
+            sys::ImGuiIO_AddInputCharacter(self.inner_mut() as *mut _, character as u32);
         }
     }
 
     /// Add a mouse position event to the input queue
     pub fn add_mouse_pos_event(&mut self, pos: [f32; 2]) {
         unsafe {
-            sys::ImGuiIO_AddMousePosEvent(&mut self.0 as *mut _, pos[0], pos[1]);
+            sys::ImGuiIO_AddMousePosEvent(self.inner_mut() as *mut _, pos[0], pos[1]);
         }
     }
 
     /// Add a mouse button event to the input queue
     pub fn add_mouse_button_event(&mut self, button: crate::input::MouseButton, down: bool) {
         unsafe {
-            sys::ImGuiIO_AddMouseButtonEvent(&mut self.0 as *mut _, button.into(), down);
+            sys::ImGuiIO_AddMouseButtonEvent(self.inner_mut() as *mut _, button.into(), down);
         }
     }
 
     /// Add a mouse wheel event to the input queue
     pub fn add_mouse_wheel_event(&mut self, wheel: [f32; 2]) {
         unsafe {
-            sys::ImGuiIO_AddMouseWheelEvent(&mut self.0 as *mut _, wheel[0], wheel[1]);
+            sys::ImGuiIO_AddMouseWheelEvent(self.inner_mut() as *mut _, wheel[0], wheel[1]);
         }
     }
 
@@ -1043,7 +1063,7 @@ impl Io {
     /// the frame.
     pub fn add_mouse_source_event(&mut self, source: crate::input::MouseSource) {
         unsafe {
-            sys::ImGuiIO_AddMouseSourceEvent(&mut self.0 as *mut _, source.into());
+            sys::ImGuiIO_AddMouseSourceEvent(self.inner_mut() as *mut _, source.into());
         }
     }
 
@@ -1055,7 +1075,7 @@ impl Io {
     /// frame.
     pub fn add_mouse_viewport_event(&mut self, viewport_id: crate::Id) {
         unsafe {
-            sys::ImGuiIO_AddMouseViewportEvent(&mut self.0 as *mut _, viewport_id.raw());
+            sys::ImGuiIO_AddMouseViewportEvent(self.inner_mut() as *mut _, viewport_id.raw());
         }
     }
 
@@ -1063,7 +1083,7 @@ impl Io {
     /// This mirrors `io.AddFocusEvent()` in Dear ImGui and is used by platform backends.
     pub fn add_focus_event(&mut self, focused: bool) {
         unsafe {
-            sys::ImGuiIO_AddFocusEvent(&mut self.0 as *mut _, focused);
+            sys::ImGuiIO_AddFocusEvent(self.inner_mut() as *mut _, focused);
         }
     }
 
@@ -1083,45 +1103,45 @@ impl Io {
 
     /// Get the display framebuffer scale
     pub fn display_framebuffer_scale(&self) -> [f32; 2] {
-        let scale = self.0.DisplayFramebufferScale;
+        let scale = self.inner().DisplayFramebufferScale;
         [scale.x, scale.y]
     }
 
     /// Returns the mouse delta from the previous frame, in pixels.
     #[doc(alias = "MouseDelta")]
     pub fn mouse_delta(&self) -> [f32; 2] {
-        let delta = self.0.MouseDelta;
+        let delta = self.inner().MouseDelta;
         [delta.x, delta.y]
     }
 
     /// Returns whether Ctrl modifier is held.
     #[doc(alias = "KeyCtrl")]
     pub fn key_ctrl(&self) -> bool {
-        self.0.KeyCtrl
+        self.inner().KeyCtrl
     }
 
     /// Returns whether Shift modifier is held.
     #[doc(alias = "KeyShift")]
     pub fn key_shift(&self) -> bool {
-        self.0.KeyShift
+        self.inner().KeyShift
     }
 
     /// Returns whether Alt modifier is held.
     #[doc(alias = "KeyAlt")]
     pub fn key_alt(&self) -> bool {
-        self.0.KeyAlt
+        self.inner().KeyAlt
     }
 
     /// Returns whether Super/Command modifier is held.
     #[doc(alias = "KeySuper")]
     pub fn key_super(&self) -> bool {
-        self.0.KeySuper
+        self.inner().KeySuper
     }
 
     /// Returns the current mouse input source.
     #[doc(alias = "MouseSource")]
     pub fn mouse_source(&self) -> crate::input::MouseSource {
-        match self.0.MouseSource {
+        match self.inner().MouseSource {
             sys::ImGuiMouseSource_Mouse => crate::input::MouseSource::Mouse,
             sys::ImGuiMouseSource_TouchScreen => crate::input::MouseSource::TouchScreen,
             sys::ImGuiMouseSource_Pen => crate::input::MouseSource::Pen,
@@ -1132,25 +1152,25 @@ impl Io {
     /// Returns the viewport id hovered by the OS mouse (if supported by the backend).
     #[doc(alias = "MouseHoveredViewport")]
     pub fn mouse_hovered_viewport(&self) -> crate::Id {
-        crate::Id::from(self.0.MouseHoveredViewport)
+        crate::Id::from(self.inner().MouseHoveredViewport)
     }
 
     /// Returns whether Ctrl+LeftClick should be treated as RightClick.
     #[doc(alias = "MouseCtrlLeftAsRightClick")]
     pub fn mouse_ctrl_left_as_right_click(&self) -> bool {
-        self.0.MouseCtrlLeftAsRightClick
+        self.inner().MouseCtrlLeftAsRightClick
     }
 
     /// Set whether Ctrl+LeftClick should be treated as RightClick.
     #[doc(alias = "MouseCtrlLeftAsRightClick")]
     pub fn set_mouse_ctrl_left_as_right_click(&mut self, enabled: bool) {
-        self.0.MouseCtrlLeftAsRightClick = enabled;
+        self.inner_mut().MouseCtrlLeftAsRightClick = enabled;
     }
 
     /// Set the display framebuffer scale
     /// This is important for HiDPI displays to ensure proper rendering
     pub fn set_display_framebuffer_scale(&mut self, scale: [f32; 2]) {
-        self.0.DisplayFramebufferScale.x = scale[0];
-        self.0.DisplayFramebufferScale.y = scale[1];
+        self.inner_mut().DisplayFramebufferScale.x = scale[0];
+        self.inner_mut().DisplayFramebufferScale.y = scale[1];
     }
 }

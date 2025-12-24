@@ -303,6 +303,42 @@ impl FontAtlas {
                     .expect("Failed to add TTF font from memory");
                 font.id()
             }
+            FontSource::CompressedTtfData {
+                data,
+                size_pixels,
+                config,
+            } => {
+                let size = size_pixels.unwrap_or(0.0);
+                let mut cfg = config.clone().unwrap_or_default();
+                if size > 0.0 {
+                    cfg = cfg.size_pixels(size);
+                }
+                if merge_mode {
+                    cfg = cfg.merge_mode(true);
+                }
+                let font = self
+                    .add_font_from_memory_compressed_ttf(data, size, Some(&cfg), None)
+                    .expect("Failed to add compressed TTF font from memory");
+                font.id()
+            }
+            FontSource::CompressedTtfBase85 {
+                data,
+                size_pixels,
+                config,
+            } => {
+                let size = size_pixels.unwrap_or(0.0);
+                let mut cfg = config.clone().unwrap_or_default();
+                if size > 0.0 {
+                    cfg = cfg.size_pixels(size);
+                }
+                if merge_mode {
+                    cfg = cfg.merge_mode(true);
+                }
+                let font = self
+                    .add_font_from_memory_compressed_base85_ttf(data, size, Some(&cfg), None)
+                    .expect("Failed to add base85 compressed TTF font from memory");
+                font.id()
+            }
             FontSource::TtfFile {
                 path,
                 size_pixels,
@@ -395,24 +431,124 @@ impl FontAtlas {
         font_cfg: Option<&FontConfig>,
         glyph_ranges: Option<&[sys::ImWchar]>,
     ) -> Option<&mut Font> {
+        // Dear ImGui asserts on suspiciously small buffers to catch common mistakes.
+        // Mirror that behavior by returning `None` instead of panicking/aborting in debug builds.
+        if font_data.len() <= 100 {
+            return None;
+        }
         let font_data_len = i32::try_from(font_data.len()).ok()?;
         unsafe {
-            // SAFETY: `font_data` typically points to Rust-owned memory (e.g. `Vec<u8>`).
-            // Dear ImGui's `AddFontFromMemoryTTF()` transfers ownership by default, which
-            // would lead to use-after-free or double-free on Rust buffers. Force the safe
-            // path where Dear ImGui duplicates the bytes into its own allocator.
+            // SAFETY: `AddFontFromMemoryTTF()` stores the pointer for (potential) rebuilds and may
+            // free it later depending on `FontDataOwnedByAtlas`. Never pass a pointer into
+            // Rust-owned stack/Vec memory here.
+            //
+            // Allocate and copy the bytes using Dear ImGui's allocator, then let the atlas own it.
+            // This avoids use-after-free, double-free, and leaking uninitialized padding bytes
+            // across the C++ boundary.
+            let mem = sys::igMemAlloc(font_data.len());
+            if mem.is_null() {
+                return None;
+            }
+            std::ptr::copy_nonoverlapping(font_data.as_ptr(), mem as *mut u8, font_data.len());
+
             let cfg = font_cfg
                 .cloned()
                 .unwrap_or_default()
-                .font_data_owned_by_atlas(false);
+                .font_data_owned_by_atlas(true);
             let is_merge = cfg.raw.MergeMode;
             let cfg_ptr = cfg.raw();
             let ranges_ptr = glyph_ranges.map_or(ptr::null(), |ranges| ranges.as_ptr());
 
             let font_ptr = sys::ImFontAtlas_AddFontFromMemoryTTF(
                 self.raw,
-                font_data.as_ptr() as *mut std::os::raw::c_void,
+                mem,
                 font_data_len,
+                size_pixels,
+                cfg_ptr,
+                ranges_ptr,
+            );
+
+            if font_ptr.is_null() {
+                sys::igMemFree(mem);
+                None
+            } else {
+                if is_merge {
+                    self.discard_bakes(0);
+                }
+                Some(Font::from_raw_mut(font_ptr))
+            }
+        }
+    }
+
+    /// Add a font from memory (compressed TTF data).
+    ///
+    /// Dear ImGui will decompress the data immediately and keep the decompressed buffer alive
+    /// (owned by the atlas), so the `compressed_font_data` slice does not need to outlive this call.
+    #[doc(alias = "AddFontFromMemoryCompressedTTF")]
+    pub fn add_font_from_memory_compressed_ttf(
+        &mut self,
+        compressed_font_data: &[u8],
+        size_pixels: f32,
+        font_cfg: Option<&FontConfig>,
+        glyph_ranges: Option<&[sys::ImWchar]>,
+    ) -> Option<&mut Font> {
+        if compressed_font_data.is_empty() {
+            return None;
+        }
+        let compressed_len = i32::try_from(compressed_font_data.len()).ok()?;
+
+        unsafe {
+            let cfg = font_cfg.cloned().unwrap_or_default();
+            let is_merge = cfg.raw.MergeMode;
+            let cfg_ptr = cfg.raw();
+            let ranges_ptr = glyph_ranges.map_or(ptr::null(), |ranges| ranges.as_ptr());
+
+            let font_ptr = sys::ImFontAtlas_AddFontFromMemoryCompressedTTF(
+                self.raw,
+                compressed_font_data.as_ptr() as *const std::os::raw::c_void,
+                compressed_len,
+                size_pixels,
+                cfg_ptr,
+                ranges_ptr,
+            );
+
+            if font_ptr.is_null() {
+                None
+            } else {
+                if is_merge {
+                    self.discard_bakes(0);
+                }
+                Some(Font::from_raw_mut(font_ptr))
+            }
+        }
+    }
+
+    /// Add a font from memory (compressed + base85-encoded TTF data).
+    ///
+    /// The input string must be NUL-terminated for Dear ImGui; this wrapper allocates a `CString`
+    /// and passes it to the backend.
+    #[doc(alias = "AddFontFromMemoryCompressedBase85TTF")]
+    pub fn add_font_from_memory_compressed_base85_ttf(
+        &mut self,
+        compressed_font_data_base85: &str,
+        size_pixels: f32,
+        font_cfg: Option<&FontConfig>,
+        glyph_ranges: Option<&[sys::ImWchar]>,
+    ) -> Option<&mut Font> {
+        if compressed_font_data_base85.is_empty() {
+            return None;
+        }
+        let base85 = std::ffi::CString::new(compressed_font_data_base85).ok()?;
+
+        unsafe {
+            let cfg = font_cfg.cloned().unwrap_or_default();
+            let is_merge = cfg.raw.MergeMode;
+            let cfg_ptr = cfg.raw();
+            let ranges_ptr = glyph_ranges.map_or(ptr::null(), |ranges| ranges.as_ptr());
+
+            let font_ptr = sys::ImFontAtlas_AddFontFromMemoryCompressedBase85TTF(
+                self.raw,
+                base85.as_ptr(),
                 size_pixels,
                 cfg_ptr,
                 ranges_ptr,
@@ -748,9 +884,10 @@ impl FontConfig {
 
     /// Control whether the atlas takes ownership of `FontData` passed from memory.
     ///
-    /// Dear ImGui's `AddFontFromMemoryTTF()` transfers ownership by default, which is
-    /// unsafe for Rust-owned buffers. When set to `false`, Dear ImGui will duplicate
-    /// the bytes into its own allocator and manage them internally.
+    /// Dear ImGui's `AddFontFromMemoryTTF()` stores the `FontData` pointer for potential rebuilds.
+    /// When this flag is `true`, the atlas will later free `FontData` using Dear ImGui's allocator.
+    /// When it is `false`, Dear ImGui will *not* free the pointer and the caller must ensure the
+    /// memory stays valid for as long as the atlas may use it.
     pub fn font_data_owned_by_atlas(mut self, owned: bool) -> Self {
         self.raw.FontDataOwnedByAtlas = owned;
         self
@@ -901,6 +1038,17 @@ mod tests {
     fn font_config_glyph_exclude_ranges_rejects_out_of_range() {
         let _ = FontConfig::new().glyph_exclude_ranges(&[0x1_0000]);
     }
+
+    #[test]
+    fn add_font_from_memory_ttf_rejects_too_small_buffers() {
+        let mut ctx = crate::Context::create();
+        let mut fonts = ctx.font_atlas_mut();
+        assert!(
+            fonts
+                .add_font_from_memory_ttf(&[0u8; 10], 13.0, None, None)
+                .is_none()
+        );
+    }
 }
 
 /// A source for font data with v1.92+ dynamic font support
@@ -919,6 +1067,24 @@ pub enum FontSource<'a> {
     /// With v1.92+, size_pixels can be 0.0 for dynamic sizing
     TtfData {
         data: &'a [u8],
+        size_pixels: Option<f32>,
+        config: Option<FontConfig>,
+    },
+
+    /// Compressed TTF font data (stb-compressed)
+    ///
+    /// Dear ImGui decompresses immediately and keeps the decompressed buffer owned by the atlas.
+    CompressedTtfData {
+        data: &'a [u8],
+        size_pixels: Option<f32>,
+        config: Option<FontConfig>,
+    },
+
+    /// Compressed + base85-encoded TTF font data
+    ///
+    /// The provided string is converted into a NUL-terminated `CString` for Dear ImGui.
+    CompressedTtfBase85 {
+        data: &'a str,
         size_pixels: Option<f32>,
         config: Option<FontConfig>,
     },
@@ -968,6 +1134,42 @@ impl<'a> FontSource<'a> {
         }
     }
 
+    /// Creates a compressed TTF data source with dynamic sizing
+    pub fn compressed_ttf_data(data: &'a [u8]) -> Self {
+        Self::CompressedTtfData {
+            data,
+            size_pixels: None,
+            config: None,
+        }
+    }
+
+    /// Creates a compressed TTF data source with specific size
+    pub fn compressed_ttf_data_with_size(data: &'a [u8], size: f32) -> Self {
+        Self::CompressedTtfData {
+            data,
+            size_pixels: Some(size),
+            config: None,
+        }
+    }
+
+    /// Creates a base85 compressed TTF source with dynamic sizing
+    pub fn compressed_ttf_base85(data: &'a str) -> Self {
+        Self::CompressedTtfBase85 {
+            data,
+            size_pixels: None,
+            config: None,
+        }
+    }
+
+    /// Creates a base85 compressed TTF source with specific size
+    pub fn compressed_ttf_base85_with_size(data: &'a str, size: f32) -> Self {
+        Self::CompressedTtfBase85 {
+            data,
+            size_pixels: Some(size),
+            config: None,
+        }
+    }
+
     /// Creates a TTF file source with dynamic sizing
     pub fn ttf_file(path: &'a str) -> Self {
         Self::TtfFile {
@@ -991,6 +1193,8 @@ impl<'a> FontSource<'a> {
         match &mut self {
             Self::DefaultFontData { config: cfg, .. } => *cfg = Some(config),
             Self::TtfData { config: cfg, .. } => *cfg = Some(config),
+            Self::CompressedTtfData { config: cfg, .. } => *cfg = Some(config),
+            Self::CompressedTtfBase85 { config: cfg, .. } => *cfg = Some(config),
             Self::TtfFile { config: cfg, .. } => *cfg = Some(config),
         }
         self

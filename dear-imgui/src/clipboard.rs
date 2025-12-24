@@ -8,6 +8,29 @@ use std::ffi::{CStr, CString};
 use std::fmt;
 use std::os::raw::c_char;
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static CLIPBOARD_BORROWED: AtomicBool = AtomicBool::new(false);
+
+struct ClipboardBorrowGuard;
+
+impl ClipboardBorrowGuard {
+    fn try_new() -> Option<Self> {
+        if CLIPBOARD_BORROWED
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return None;
+        }
+        Some(Self)
+    }
+}
+
+impl Drop for ClipboardBorrowGuard {
+    fn drop(&mut self) {
+        CLIPBOARD_BORROWED.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Trait for clipboard backends
 pub trait ClipboardBackend: 'static {
@@ -60,10 +83,17 @@ pub(crate) unsafe extern "C" fn get_clipboard_text(
     _user_data: *mut crate::sys::ImGuiContext,
 ) -> *const c_char {
     let result = std::panic::catch_unwind(|| {
-        let user_data = unsafe { (*crate::sys::igGetPlatformIO_Nil()).Platform_ClipboardUserData };
+        let platform_io = unsafe { crate::sys::igGetPlatformIO_Nil() };
+        if platform_io.is_null() {
+            return ptr::null();
+        }
+        let user_data = unsafe { (*platform_io).Platform_ClipboardUserData };
         if user_data.is_null() {
             return ptr::null();
         }
+        let Some(_borrow) = ClipboardBorrowGuard::try_new() else {
+            return ptr::null();
+        };
 
         let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
         match ctx.backend.get() {
@@ -96,10 +126,17 @@ pub(crate) unsafe extern "C" fn set_clipboard_text(
     text: *const c_char,
 ) {
     let result = std::panic::catch_unwind(|| {
-        let user_data = unsafe { (*crate::sys::igGetPlatformIO_Nil()).Platform_ClipboardUserData };
+        let platform_io = unsafe { crate::sys::igGetPlatformIO_Nil() };
+        if platform_io.is_null() {
+            return;
+        }
+        let user_data = unsafe { (*platform_io).Platform_ClipboardUserData };
         if user_data.is_null() {
             return;
         }
+        let Some(_borrow) = ClipboardBorrowGuard::try_new() else {
+            return;
+        };
 
         let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
         if text.is_null() {

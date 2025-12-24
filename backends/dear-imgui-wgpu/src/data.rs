@@ -51,16 +51,10 @@ impl WgpuRenderState {
     /// 2. No other mutable references to the render pass exist
     /// 3. The lifetime is appropriate
     ///
-    /// This method is designed for use in C++ callbacks where we need to provide
-    /// mutable access to the render pass from an immutable context.
-    ///
-    /// # Clippy Allow
-    ///
-    /// We allow `clippy::mut_from_ref` here because this is a legitimate use case
-    /// for FFI interop where we need to provide mutable access through an immutable
-    /// interface to match C++ callback expectations.
-    #[allow(clippy::mut_from_ref)]
-    pub unsafe fn render_pass_encoder(&self) -> &mut RenderPass<'_> {
+    /// This method returns a mutable reference and therefore requires `&mut self`.
+    /// In callbacks, you typically obtain `&mut WgpuRenderState` by casting the raw
+    /// `Renderer_RenderState` pointer provided by Dear ImGui.
+    pub unsafe fn render_pass_encoder(&mut self) -> &mut RenderPass<'_> {
         unsafe { &mut *(self.render_pass_encoder as *mut RenderPass) }
     }
 }

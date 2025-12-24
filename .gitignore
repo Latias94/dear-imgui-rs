@@ -2,5 +2,7 @@
 .idea
 .vscode
 imgui.ini
+implot3d_demo.ini
 extensions/target
 *.ttf
+repo-ref/

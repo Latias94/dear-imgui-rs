@@ -190,6 +190,11 @@ pub trait MultiSelectIndexStorage {
     /// Total number of items in the selection scope.
     fn len(&self) -> usize;
 
+    /// Returns `true` if the selection scope is empty.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Returns whether item at `index` is currently selected.
     fn is_selected(&self, index: usize) -> bool;
 
@@ -228,7 +233,7 @@ impl MultiSelectIndexStorage for Vec<bool> {
     }
 }
 
-impl<'a> MultiSelectIndexStorage for &'a mut [bool] {
+impl MultiSelectIndexStorage for &mut [bool] {
     fn len(&self) -> usize {
         (**self).len()
     }
@@ -367,9 +372,8 @@ impl<'ui> MultiSelectScope<'ui> {
     fn new(flags: MultiSelectFlags, selection_size: Option<i32>, items_count: usize) -> Self {
         let selection_size_i32 = selection_size.unwrap_or(-1);
         let items_count_i32 = i32::try_from(items_count).unwrap_or(i32::MAX);
-        let ms_io_begin = unsafe {
-            sys::igBeginMultiSelect(flags.bits(), selection_size_i32, items_count_i32)
-        };
+        let ms_io_begin =
+            unsafe { sys::igBeginMultiSelect(flags.bits(), selection_size_i32, items_count_i32) };
         Self {
             ms_io_begin,
             items_count: items_count_i32,

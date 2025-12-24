@@ -12,6 +12,7 @@ compile_error!("The `multi-viewport` feature is not supported on wasm32 targets 
 use crate::sys;
 #[cfg(feature = "multi-viewport")]
 use core::ffi::c_char;
+use std::cell::UnsafeCell;
 use std::ffi::c_void;
 #[cfg(feature = "multi-viewport")]
 use std::sync::Mutex;
@@ -22,8 +23,14 @@ use std::sync::Mutex;
 /// safe access to platform-specific functionality.
 #[repr(transparent)]
 pub struct PlatformIo {
-    raw: sys::ImGuiPlatformIO,
+    raw: UnsafeCell<sys::ImGuiPlatformIO>,
 }
+
+// Ensure the wrapper stays layout-compatible with the sys bindings.
+const _: [(); std::mem::size_of::<sys::ImGuiPlatformIO>()] =
+    [(); std::mem::size_of::<PlatformIo>()];
+const _: [(); std::mem::align_of::<sys::ImGuiPlatformIO>()] =
+    [(); std::mem::align_of::<PlatformIo>()];
 
 // Typed-callback trampolines (avoid transmute) --------------------------------
 #[cfg(feature = "multi-viewport")]
@@ -352,6 +359,20 @@ mod trampolines {
 }
 
 impl PlatformIo {
+    #[inline]
+    fn inner(&self) -> &sys::ImGuiPlatformIO {
+        // Safety: `PlatformIo` is a view into ImGui-owned platform state which may be mutated by
+        // Dear ImGui while Rust holds `&PlatformIo`, so we store it behind `UnsafeCell` to make
+        // that interior mutability explicit.
+        unsafe { &*self.raw.get() }
+    }
+
+    #[inline]
+    fn inner_mut(&mut self) -> &mut sys::ImGuiPlatformIO {
+        // Safety: caller has `&mut PlatformIo`, so this is a unique Rust borrow for this wrapper.
+        unsafe { &mut *self.raw.get() }
+    }
+
     /// Get a reference to the platform IO from a raw pointer
     ///
     /// # Safety
@@ -379,12 +400,12 @@ impl PlatformIo {
 
     /// Get the raw pointer to the underlying `ImGuiPlatformIO`
     pub fn as_raw(&self) -> *const sys::ImGuiPlatformIO {
-        &self.raw as *const _
+        self.raw.get().cast_const()
     }
 
     /// Get the raw mutable pointer to the underlying `ImGuiPlatformIO`
     pub fn as_raw_mut(&mut self) -> *mut sys::ImGuiPlatformIO {
-        &mut self.raw as *mut _
+        self.raw.get()
     }
 
     /// Set platform create window callback (raw sys pointer)
@@ -393,7 +414,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
-        self.raw.Platform_CreateWindow = callback;
+        self.inner_mut().Platform_CreateWindow = callback;
     }
 
     /// Set platform create window callback (typed Viewport).
@@ -424,7 +445,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
-        self.raw.Platform_DestroyWindow = callback;
+        self.inner_mut().Platform_DestroyWindow = callback;
     }
 
     /// Set platform destroy window callback (typed Viewport).
@@ -450,7 +471,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
-        self.raw.Platform_ShowWindow = callback;
+        self.inner_mut().Platform_ShowWindow = callback;
     }
 
     /// Set platform show window callback (typed Viewport).
@@ -476,7 +497,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)>,
     ) {
-        self.raw.Platform_SetWindowPos = callback;
+        self.inner_mut().Platform_SetWindowPos = callback;
     }
 
     /// Set platform set window position callback (typed Viewport).
@@ -503,7 +524,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
     ) {
-        self.raw.Platform_GetWindowPos = callback;
+        self.inner_mut().Platform_GetWindowPos = callback;
     }
 
     /// Set platform get window position callback (typed Viewport).
@@ -530,7 +551,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)>,
     ) {
-        self.raw.Platform_SetWindowSize = callback;
+        self.inner_mut().Platform_SetWindowSize = callback;
     }
 
     /// Set platform set window size callback (typed Viewport).
@@ -557,7 +578,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
     ) {
-        self.raw.Platform_GetWindowSize = callback;
+        self.inner_mut().Platform_GetWindowSize = callback;
     }
 
     /// Set platform get window size callback (typed Viewport).
@@ -584,7 +605,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
-        self.raw.Platform_SetWindowFocus = callback;
+        self.inner_mut().Platform_SetWindowFocus = callback;
     }
 
     /// Set platform set window focus callback (typed Viewport).
@@ -610,7 +631,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> bool>,
     ) {
-        self.raw.Platform_GetWindowFocus = callback;
+        self.inner_mut().Platform_GetWindowFocus = callback;
     }
 
     /// Set platform get window focus callback (typed Viewport).
@@ -637,7 +658,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> bool>,
     ) {
-        self.raw.Platform_GetWindowMinimized = callback;
+        self.inner_mut().Platform_GetWindowMinimized = callback;
     }
 
     /// Set platform get window minimized callback (typed Viewport).
@@ -664,7 +685,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *const c_char)>,
     ) {
-        self.raw.Platform_SetWindowTitle = callback;
+        self.inner_mut().Platform_SetWindowTitle = callback;
     }
 
     /// Set platform set window title callback (typed Viewport).
@@ -691,7 +712,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, f32)>,
     ) {
-        self.raw.Platform_SetWindowAlpha = callback;
+        self.inner_mut().Platform_SetWindowAlpha = callback;
     }
 
     /// Set platform set window alpha callback (typed Viewport).
@@ -718,7 +739,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
-        self.raw.Platform_UpdateWindow = callback;
+        self.inner_mut().Platform_UpdateWindow = callback;
     }
 
     /// Set platform update window callback (typed Viewport).
@@ -744,7 +765,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)>,
     ) {
-        self.raw.Platform_RenderWindow = callback;
+        self.inner_mut().Platform_RenderWindow = callback;
     }
 
     /// Set platform render window callback (typed Viewport).
@@ -771,7 +792,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)>,
     ) {
-        self.raw.Platform_SwapBuffers = callback;
+        self.inner_mut().Platform_SwapBuffers = callback;
     }
 
     /// Set platform swap buffers callback (typed Viewport).
@@ -798,7 +819,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
-        self.raw.Renderer_CreateWindow = callback;
+        self.inner_mut().Renderer_CreateWindow = callback;
     }
 
     /// Set renderer create window callback (typed Viewport).
@@ -825,7 +846,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
-        self.raw.Renderer_DestroyWindow = callback;
+        self.inner_mut().Renderer_DestroyWindow = callback;
     }
 
     /// Set renderer destroy window callback (typed Viewport).
@@ -851,7 +872,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)>,
     ) {
-        self.raw.Renderer_SetWindowSize = callback;
+        self.inner_mut().Renderer_SetWindowSize = callback;
     }
 
     /// Set renderer set window size callback (typed Viewport).
@@ -878,7 +899,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)>,
     ) {
-        self.raw.Renderer_RenderWindow = callback;
+        self.inner_mut().Renderer_RenderWindow = callback;
     }
 
     /// Set renderer render window callback (typed Viewport).
@@ -905,7 +926,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)>,
     ) {
-        self.raw.Renderer_SwapBuffers = callback;
+        self.inner_mut().Renderer_SwapBuffers = callback;
     }
 
     /// Set renderer swap buffers callback (typed Viewport).
@@ -933,7 +954,7 @@ impl PlatformIo {
             crate::internal::imvector_cast_ref::<
                 sys::ImGuiPlatformMonitor,
                 sys::ImVector_ImGuiPlatformMonitor,
-            >(&self.raw.Monitors)
+            >(&self.inner().Monitors)
         }
     }
 
@@ -944,7 +965,7 @@ impl PlatformIo {
             crate::internal::imvector_cast_mut::<
                 sys::ImGuiPlatformMonitor,
                 sys::ImVector_ImGuiPlatformMonitor,
-            >(&mut self.raw.Monitors)
+            >(&mut self.inner_mut().Monitors)
         }
     }
 
@@ -955,7 +976,7 @@ impl PlatformIo {
             crate::internal::imvector_cast_ref::<
                 *mut sys::ImGuiViewport,
                 sys::ImVector_ImGuiViewportPtr,
-            >(&self.raw.Viewports)
+            >(&self.inner().Viewports)
         }
     }
 
@@ -966,7 +987,7 @@ impl PlatformIo {
             crate::internal::imvector_cast_mut::<
                 *mut sys::ImGuiViewport,
                 sys::ImVector_ImGuiViewportPtr,
-            >(&mut self.raw.Viewports)
+            >(&mut self.inner_mut().Viewports)
         }
     }
 
@@ -989,9 +1010,12 @@ impl PlatformIo {
     /// Get an iterator over all textures managed by the platform
     ///
     /// This is used by renderer backends during shutdown to destroy all textures.
+    ///
+    /// Note: items returned by this iterator provide a guarded mutable view; do not store them or
+    /// hold them across iterations.
     pub fn textures(&self) -> crate::render::draw_data::TextureIterator<'_> {
         unsafe {
-            let vector = &self.raw.Textures;
+            let vector = &self.inner().Textures;
             let size = match usize::try_from(vector.Size) {
                 Ok(size) => size,
                 Err(_) => 0,
@@ -1006,7 +1030,7 @@ impl PlatformIo {
 
     /// Get the number of textures managed by the platform
     pub fn textures_count(&self) -> usize {
-        let vector = &self.raw.Textures;
+        let vector = &self.inner().Textures;
         if vector.Data.is_null() {
             return 0;
         }
@@ -1018,7 +1042,8 @@ impl PlatformIo {
     /// Returns None if the index is out of bounds.
     pub fn texture(&self, index: usize) -> Option<&crate::texture::TextureData> {
         unsafe {
-            let vector = &self.raw.Textures;
+            crate::render::draw_data::assert_texture_data_not_borrowed();
+            let vector = &self.inner().Textures;
             let size = usize::try_from(vector.Size).ok()?;
             if size == 0 || vector.Data.is_null() {
                 return None;
@@ -1030,7 +1055,9 @@ impl PlatformIo {
             if texture_ptr.is_null() {
                 return None;
             }
-            Some(crate::texture::TextureData::from_raw(texture_ptr))
+            Some(crate::texture::TextureData::from_raw_ref(
+                texture_ptr as *const _,
+            ))
         }
     }
 
@@ -1039,7 +1066,7 @@ impl PlatformIo {
     /// Returns None if the index is out of bounds.
     pub fn texture_mut(&mut self, index: usize) -> Option<&mut crate::texture::TextureData> {
         unsafe {
-            let vector = &self.raw.Textures;
+            let vector = &self.inner().Textures;
             let size = usize::try_from(vector.Size).ok()?;
             if size == 0 || vector.Data.is_null() {
                 return None;
@@ -1068,7 +1095,7 @@ impl PlatformIo {
     /// - The pointed-to data matches the expected render state structure for the backend
     /// - The pointer is set to null after rendering is complete
     pub unsafe fn set_renderer_render_state(&mut self, render_state: *mut std::ffi::c_void) {
-        self.raw.Renderer_RenderState = render_state;
+        self.inner_mut().Renderer_RenderState = render_state;
     }
 
     /// Get the current renderer render state
@@ -1082,7 +1109,7 @@ impl PlatformIo {
     /// - The returned pointer is cast to the correct render state type for the backend
     /// - The pointer is only used during the render_draw_data() call
     pub unsafe fn renderer_render_state(&self) -> *mut std::ffi::c_void {
-        self.raw.Renderer_RenderState
+        self.inner().Renderer_RenderState
     }
 }
 
@@ -1099,10 +1126,26 @@ impl PlatformIo {
 /// safe access to viewport functionality.
 #[repr(transparent)]
 pub struct Viewport {
-    raw: sys::ImGuiViewport,
+    raw: UnsafeCell<sys::ImGuiViewport>,
 }
 
+// Ensure the wrapper stays layout-compatible with the sys bindings.
+const _: [(); std::mem::size_of::<sys::ImGuiViewport>()] = [(); std::mem::size_of::<Viewport>()];
+const _: [(); std::mem::align_of::<sys::ImGuiViewport>()] = [(); std::mem::align_of::<Viewport>()];
+
 impl Viewport {
+    #[inline]
+    fn inner(&self) -> &sys::ImGuiViewport {
+        // Safety: `Viewport` is a view into ImGui-owned viewport state which may be mutated by
+        // Dear ImGui and platform/renderer backends while Rust holds `&Viewport`.
+        unsafe { &*self.raw.get() }
+    }
+
+    #[inline]
+    fn inner_mut(&mut self) -> &mut sys::ImGuiViewport {
+        unsafe { &mut *self.raw.get() }
+    }
+
     /// Get a reference to the viewport from a raw pointer
     ///
     /// # Safety
@@ -1130,49 +1173,49 @@ impl Viewport {
 
     /// Get the raw pointer to the underlying `ImGuiViewport`
     pub fn as_raw(&self) -> *const sys::ImGuiViewport {
-        &self.raw as *const _
+        self.raw.get().cast_const()
     }
 
     /// Get the raw mutable pointer to the underlying `ImGuiViewport`
     pub fn as_raw_mut(&mut self) -> *mut sys::ImGuiViewport {
-        &mut self.raw as *mut _
+        self.raw.get()
     }
 
     /// Get the viewport ID
     pub fn id(&self) -> sys::ImGuiID {
-        self.raw.ID
+        self.inner().ID
     }
 
     /// Set the viewport position
     pub fn set_pos(&mut self, pos: [f32; 2]) {
-        self.raw.Pos.x = pos[0];
-        self.raw.Pos.y = pos[1];
+        self.inner_mut().Pos.x = pos[0];
+        self.inner_mut().Pos.y = pos[1];
     }
 
     /// Get the viewport position
     pub fn pos(&self) -> [f32; 2] {
-        [self.raw.Pos.x, self.raw.Pos.y]
+        [self.inner().Pos.x, self.inner().Pos.y]
     }
 
     /// Set the viewport size
     pub fn set_size(&mut self, size: [f32; 2]) {
-        self.raw.Size.x = size[0];
-        self.raw.Size.y = size[1];
+        self.inner_mut().Size.x = size[0];
+        self.inner_mut().Size.y = size[1];
     }
 
     /// Get the viewport size
     pub fn size(&self) -> [f32; 2] {
-        [self.raw.Size.x, self.raw.Size.y]
+        [self.inner().Size.x, self.inner().Size.y]
     }
 
     /// Get the viewport work position (excluding menu bars, task bars, etc.)
     pub fn work_pos(&self) -> [f32; 2] {
-        [self.raw.WorkPos.x, self.raw.WorkPos.y]
+        [self.inner().WorkPos.x, self.inner().WorkPos.y]
     }
 
     /// Get the viewport work size (excluding menu bars, task bars, etc.)
     pub fn work_size(&self) -> [f32; 2] {
-        [self.raw.WorkSize.x, self.raw.WorkSize.y]
+        [self.inner().WorkSize.x, self.inner().WorkSize.y]
     }
 
     /// Check if this is the main viewport
@@ -1180,19 +1223,19 @@ impl Viewport {
     /// Note: Main viewport is typically identified by ID == 0 or by checking if it's not a platform window
     #[cfg(feature = "multi-viewport")]
     pub fn is_main(&self) -> bool {
-        self.raw.ID == 0
-            || (self.raw.Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) == 0
+        self.inner().ID == 0
+            || (self.inner().Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) == 0
     }
 
     #[cfg(not(feature = "multi-viewport"))]
     pub fn is_main(&self) -> bool {
-        self.raw.ID == 0
+        self.inner().ID == 0
     }
 
     /// Check if this is a platform window (not the main viewport)
     #[cfg(feature = "multi-viewport")]
     pub fn is_platform_window(&self) -> bool {
-        (self.raw.Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) != 0
+        (self.inner().Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) != 0
     }
 
     #[cfg(not(feature = "multi-viewport"))]
@@ -1203,7 +1246,7 @@ impl Viewport {
     /// Check if this is a platform monitor
     #[cfg(feature = "multi-viewport")]
     pub fn is_platform_monitor(&self) -> bool {
-        (self.raw.Flags & (crate::ViewportFlags::IS_PLATFORM_MONITOR.bits())) != 0
+        (self.inner().Flags & (crate::ViewportFlags::IS_PLATFORM_MONITOR.bits())) != 0
     }
 
     #[cfg(not(feature = "multi-viewport"))]
@@ -1214,7 +1257,7 @@ impl Viewport {
     /// Check if this viewport is owned by the application
     #[cfg(feature = "multi-viewport")]
     pub fn is_owned_by_app(&self) -> bool {
-        (self.raw.Flags & (crate::ViewportFlags::OWNED_BY_APP.bits())) != 0
+        (self.inner().Flags & (crate::ViewportFlags::OWNED_BY_APP.bits())) != 0
     }
 
     #[cfg(not(feature = "multi-viewport"))]
@@ -1224,135 +1267,138 @@ impl Viewport {
 
     /// Get the platform user data
     pub fn platform_user_data(&self) -> *mut c_void {
-        self.raw.PlatformUserData
+        self.inner().PlatformUserData
     }
 
     /// Set the platform user data
     pub fn set_platform_user_data(&mut self, data: *mut c_void) {
-        self.raw.PlatformUserData = data;
+        self.inner_mut().PlatformUserData = data;
     }
 
     /// Get the renderer user data
     pub fn renderer_user_data(&self) -> *mut c_void {
-        self.raw.RendererUserData
+        self.inner().RendererUserData
     }
 
     /// Set the renderer user data
     pub fn set_renderer_user_data(&mut self, data: *mut c_void) {
-        self.raw.RendererUserData = data;
+        self.inner_mut().RendererUserData = data;
     }
 
     /// Get the platform handle
     pub fn platform_handle(&self) -> *mut c_void {
-        self.raw.PlatformHandle
+        self.inner().PlatformHandle
     }
 
     /// Set the platform handle
     pub fn set_platform_handle(&mut self, handle: *mut c_void) {
-        self.raw.PlatformHandle = handle;
+        self.inner_mut().PlatformHandle = handle;
     }
 
     /// Check if the platform window was created
     pub fn platform_window_created(&self) -> bool {
-        self.raw.PlatformWindowCreated
+        self.inner().PlatformWindowCreated
     }
 
     /// Set whether the platform window was created
     pub fn set_platform_window_created(&mut self, created: bool) {
-        self.raw.PlatformWindowCreated = created;
+        self.inner_mut().PlatformWindowCreated = created;
     }
 
     /// Check if the platform requested move
     pub fn platform_request_move(&self) -> bool {
-        self.raw.PlatformRequestMove
+        self.inner().PlatformRequestMove
     }
 
     /// Set whether the platform requested move
     pub fn set_platform_request_move(&mut self, request: bool) {
-        self.raw.PlatformRequestMove = request;
+        self.inner_mut().PlatformRequestMove = request;
     }
 
     /// Check if the platform requested resize
     pub fn platform_request_resize(&self) -> bool {
-        self.raw.PlatformRequestResize
+        self.inner().PlatformRequestResize
     }
 
     /// Set whether the platform requested resize
     pub fn set_platform_request_resize(&mut self, request: bool) {
-        self.raw.PlatformRequestResize = request;
+        self.inner_mut().PlatformRequestResize = request;
     }
 
     /// Check if the platform requested close
     pub fn platform_request_close(&self) -> bool {
-        self.raw.PlatformRequestClose
+        self.inner().PlatformRequestClose
     }
 
     /// Set whether the platform requested close
     pub fn set_platform_request_close(&mut self, request: bool) {
-        self.raw.PlatformRequestClose = request;
+        self.inner_mut().PlatformRequestClose = request;
     }
 
     /// Get the viewport flags
     pub fn flags(&self) -> sys::ImGuiViewportFlags {
-        self.raw.Flags
+        self.inner().Flags
     }
 
     /// Set the viewport flags
     pub fn set_flags(&mut self, flags: sys::ImGuiViewportFlags) {
-        self.raw.Flags = flags;
+        self.inner_mut().Flags = flags;
     }
 
     /// Get the DPI scale factor
     #[cfg(feature = "multi-viewport")]
     pub fn dpi_scale(&self) -> f32 {
-        self.raw.DpiScale
+        self.inner().DpiScale
     }
 
     /// Set the DPI scale factor
     #[cfg(feature = "multi-viewport")]
     pub fn set_dpi_scale(&mut self, scale: f32) {
-        self.raw.DpiScale = scale;
+        self.inner_mut().DpiScale = scale;
     }
 
     /// Get the parent viewport ID
     #[cfg(feature = "multi-viewport")]
     pub fn parent_viewport_id(&self) -> sys::ImGuiID {
-        self.raw.ParentViewportId
+        self.inner().ParentViewportId
     }
 
     /// Set the parent viewport ID
     #[cfg(feature = "multi-viewport")]
     pub fn set_parent_viewport_id(&mut self, id: sys::ImGuiID) {
-        self.raw.ParentViewportId = id;
+        self.inner_mut().ParentViewportId = id;
     }
 
     /// Get the draw data pointer
     #[cfg(feature = "multi-viewport")]
     pub fn draw_data(&self) -> *mut sys::ImDrawData {
-        self.raw.DrawData
+        self.inner().DrawData
     }
 
     /// Get the draw data as a reference (if available)
     #[cfg(feature = "multi-viewport")]
     pub fn draw_data_ref(&self) -> Option<&sys::ImDrawData> {
-        if self.raw.DrawData.is_null() {
+        if self.inner().DrawData.is_null() {
             None
         } else {
-            Some(unsafe { &*self.raw.DrawData })
+            Some(unsafe { &*self.inner().DrawData })
         }
     }
 
     /// Get the framebuffer scale
     #[cfg(feature = "multi-viewport")]
     pub fn framebuffer_scale(&self) -> [f32; 2] {
-        [self.raw.FramebufferScale.x, self.raw.FramebufferScale.y]
+        [
+            self.inner().FramebufferScale.x,
+            self.inner().FramebufferScale.y,
+        ]
     }
 
     /// Set the framebuffer scale
     #[cfg(feature = "multi-viewport")]
     pub fn set_framebuffer_scale(&mut self, scale: [f32; 2]) {
-        self.raw.FramebufferScale.x = scale[0];
-        self.raw.FramebufferScale.y = scale[1];
+        self.inner_mut().FramebufferScale.x = scale[0];
+        self.inner_mut().FramebufferScale.y = scale[1];
     }
 }
 
@@ -1379,14 +1425,18 @@ mod tests {
 
         raw.Textures.Size = 0;
         raw.Textures.Data = std::ptr::null_mut();
-        let pio = PlatformIo { raw };
+        let pio = PlatformIo {
+            raw: UnsafeCell::new(raw),
+        };
         assert_eq!(pio.textures().count(), 0);
         assert_eq!(pio.textures_count(), 0);
 
         let mut raw: sys::ImGuiPlatformIO = new_platform_io();
         raw.Textures.Size = 1;
         raw.Textures.Data = std::ptr::null_mut();
-        let pio = PlatformIo { raw };
+        let pio = PlatformIo {
+            raw: UnsafeCell::new(raw),
+        };
         assert_eq!(pio.textures().count(), 0);
         assert_eq!(pio.textures_count(), 0);
         assert!(pio.texture(0).is_none());

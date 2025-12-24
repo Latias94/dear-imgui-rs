@@ -193,15 +193,20 @@ impl<T> ImVector<T> {
 
 /// Cast a bindgen-generated `ImVector_*` to our generic `ImVector<T>` view.
 ///
-/// Safety: `raw` must be a pointer/reference to a C `ImVector` instantiated
-/// with the same element type `T` (layout-compatible). Only use with
-/// bindgen-generated `ImVector_*` structs from dear-imgui-sys.
+/// # Safety
+/// `raw` must be a pointer/reference to a C `ImVector` instantiated with the same element type
+/// `T` (layout-compatible). Only use with bindgen-generated `ImVector_*` structs from
+/// `dear-imgui-sys`.
 #[inline]
 pub unsafe fn imvector_cast_ref<T, R>(raw: &R) -> &ImVector<T> {
     unsafe { &*(raw as *const R as *const ImVector<T>) }
 }
 
 /// Mutable variant of [`imvector_cast_ref`]. See its safety contract.
+///
+/// # Safety
+/// Same as [`imvector_cast_ref`], but additionally the caller must ensure the `ImVector` is
+/// uniquely borrowed for the duration of the returned `&mut` reference.
 #[inline]
 pub unsafe fn imvector_cast_mut<T, R>(raw: &mut R) -> &mut ImVector<T> {
     unsafe { &mut *(raw as *mut R as *mut ImVector<T>) }

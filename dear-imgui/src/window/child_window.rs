@@ -23,6 +23,9 @@
     clippy::cast_sign_loss,
     clippy::as_conversions
 )]
+// NOTE: Keep explicit `as u32` casts when using bindgen-generated flag constants.
+// The exact Rust type of `sys::ImGui*Flags_*` may vary across platforms/toolchains, while our
+// public wrapper APIs intentionally expose fixed underlying integer types.
 use crate::sys;
 use crate::{Ui, WindowFlags};
 use std::borrow::Cow;

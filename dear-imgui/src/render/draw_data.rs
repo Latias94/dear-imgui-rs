@@ -9,6 +9,18 @@ use crate::texture::TextureId;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::slice;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static TEXTURE_DATA_BORROWED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn assert_texture_data_not_borrowed() {
+    if TEXTURE_DATA_BORROWED.load(Ordering::Acquire) {
+        panic!(
+            "TextureData is already mutably borrowed; \
+             do not mix DrawData::textures()/PlatformIo::textures() with DrawData::texture()/PlatformIo::texture() calls"
+        );
+    }
+}
 
 /// All draw data to render a Dear ImGui frame.
 #[repr(C)]
@@ -22,7 +34,7 @@ pub struct DrawData {
     /// For convenience, sum of all draw list vertex buffer sizes.
     pub total_vtx_count: i32,
     // Array of DrawList.
-    cmd_lists: crate::internal::ImVector<DrawList>,
+    cmd_lists: crate::internal::ImVector<*mut sys::ImDrawList>,
     /// Upper-left position of the viewport to render.
     ///
     /// (= upper-left corner of the orthogonal projection matrix to use)
@@ -42,6 +54,10 @@ pub struct DrawData {
     /// Texture data (internal use)
     textures: *mut crate::internal::ImVector<*mut sys::ImTextureData>,
 }
+
+// Keep this struct layout-compatible with the sys bindings (`ImDrawData`).
+const _: [(); std::mem::size_of::<sys::ImDrawData>()] = [(); std::mem::size_of::<DrawData>()];
+const _: [(); std::mem::align_of::<sys::ImDrawData>()] = [(); std::mem::align_of::<DrawData>()];
 
 unsafe impl RawCast<sys::ImDrawData> for DrawData {}
 
@@ -91,6 +107,9 @@ impl DrawData {
     /// - `WantUpdates`: upload specified `UpdateRect` regions.
     /// - `WantDestroy`: destroy the GPU texture (may be delayed until unused).
     /// Most of the time this list has only 1 texture and it doesn't need any update.
+    ///
+    /// Note: items returned by this iterator provide a guarded mutable view; do not store them or
+    /// hold them across iterations.
     pub fn textures(&self) -> TextureIterator<'_> {
         unsafe {
             if self.textures.is_null() {
@@ -127,6 +146,7 @@ impl DrawData {
     /// Returns None if the index is out of bounds or no textures are available.
     pub fn texture(&self, index: usize) -> Option<&crate::texture::TextureData> {
         unsafe {
+            assert_texture_data_not_borrowed();
             if self.textures.is_null() {
                 return None;
             }
@@ -142,7 +162,9 @@ impl DrawData {
             if texture_ptr.is_null() {
                 return None;
             }
-            Some(crate::texture::TextureData::from_raw(texture_ptr))
+            Some(crate::texture::TextureData::from_raw_ref(
+                texture_ptr as *const _,
+            ))
         }
     }
 
@@ -188,7 +210,7 @@ impl DrawData {
     }
 
     #[inline]
-    pub(crate) unsafe fn cmd_lists(&self) -> &[*const DrawList] {
+    pub(crate) unsafe fn cmd_lists(&self) -> &[*mut sys::ImDrawList] {
         unsafe {
             if self.cmd_lists_count <= 0 || self.cmd_lists.data.is_null() {
                 return &[];
@@ -197,10 +219,7 @@ impl DrawData {
                 Ok(len) => len,
                 Err(_) => return &[],
             };
-            slice::from_raw_parts(
-                self.cmd_lists.data as *const *const DrawList,
-                len,
-            )
+            slice::from_raw_parts(self.cmd_lists.data, len)
         }
     }
 
@@ -232,14 +251,20 @@ impl DrawData {
 
 /// Iterator over draw lists
 pub struct DrawListIterator<'a> {
-    iter: std::slice::Iter<'a, *const DrawList>,
+    iter: std::slice::Iter<'a, *mut sys::ImDrawList>,
 }
 
 impl<'a> Iterator for DrawListIterator<'a> {
     type Item = &'a DrawList;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|&ptr| unsafe { &*ptr })
+        self.iter.next().and_then(|&ptr| {
+            if ptr.is_null() {
+                None
+            } else {
+                Some(unsafe { DrawList::from_raw(ptr.cast_const()) })
+            }
+        })
     }
 }
 
@@ -252,6 +277,10 @@ impl<'a> ExactSizeIterator for DrawListIterator<'a> {
 /// Draw command list
 #[repr(transparent)]
 pub struct DrawList(sys::ImDrawList);
+
+// Ensure the wrapper stays layout-compatible with the sys bindings.
+const _: [(); std::mem::size_of::<sys::ImDrawList>()] = [(); std::mem::size_of::<DrawList>()];
+const _: [(); std::mem::align_of::<sys::ImDrawList>()] = [(); std::mem::align_of::<DrawList>()];
 
 impl RawWrapper for DrawList {
     type Raw = sys::ImDrawList;
@@ -266,6 +295,11 @@ impl RawWrapper for DrawList {
 }
 
 impl DrawList {
+    #[inline]
+    pub(crate) unsafe fn from_raw<'a>(raw: *const sys::ImDrawList) -> &'a Self {
+        unsafe { &*(raw as *const Self) }
+    }
+
     #[inline]
     pub(crate) unsafe fn cmd_buffer(&self) -> &[sys::ImDrawCmd] {
         unsafe {
@@ -419,6 +453,10 @@ pub struct DrawVert {
     pub col: u32,
 }
 
+// Ensure our Rust-side vertex/index types stay layout-compatible with the raw sys bindings.
+const _: [(); std::mem::size_of::<sys::ImDrawVert>()] = [(); std::mem::size_of::<DrawVert>()];
+const _: [(); std::mem::align_of::<sys::ImDrawVert>()] = [(); std::mem::align_of::<DrawVert>()];
+
 impl DrawVert {
     /// Creates a new draw vertex with u32 color
     pub fn new(pos: [f32; 2], uv: [f32; 2], col: u32) -> Self {
@@ -447,6 +485,9 @@ impl DrawVert {
 
 /// Index type used by Dear ImGui
 pub type DrawIdx = u16;
+
+const _: [(); std::mem::size_of::<sys::ImDrawIdx>()] = [(); std::mem::size_of::<DrawIdx>()];
+const _: [(); std::mem::align_of::<sys::ImDrawIdx>()] = [(); std::mem::align_of::<DrawIdx>()];
 
 /// A container for a heap-allocated deep copy of a `DrawData` struct.
 ///
@@ -585,26 +626,67 @@ impl<'a> TextureIterator<'a> {
 }
 
 impl<'a> Iterator for TextureIterator<'a> {
-    type Item = &'a mut crate::texture::TextureData;
+    type Item = TextureDataMut<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.ptr >= self.end {
-            None
-        } else {
-            unsafe {
-                let texture_ptr = *self.ptr;
-                self.ptr = self.ptr.add(1);
-                if texture_ptr.is_null() {
-                    self.next() // Skip null pointers
-                } else {
-                    Some(crate::texture::TextureData::from_raw(texture_ptr))
-                }
+        while self.ptr < self.end {
+            let texture_ptr = unsafe { *self.ptr };
+            self.ptr = unsafe { self.ptr.add(1) };
+            if texture_ptr.is_null() {
+                continue;
             }
+
+            if TEXTURE_DATA_BORROWED
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
+                panic!(
+                    "TextureData is already mutably borrowed; \
+                     do not hold items from DrawData::textures()/PlatformIo::textures() across iterations"
+                );
+            }
+
+            return Some(TextureDataMut {
+                raw: texture_ptr,
+                _phantom: PhantomData,
+            });
         }
+
+        None
     }
 }
 
 impl<'a> std::iter::FusedIterator for TextureIterator<'a> {}
+
+/// A guarded mutable view of a single `ImTextureData`.
+///
+/// This exists because the texture list is exposed from a shared `&DrawData` reference in order to
+/// keep renderer APIs ergonomic, but the list still needs to be mutated by the backend. The guard
+/// ensures at runtime that only one mutable view is alive at a time, preventing Rust aliasing UB.
+pub struct TextureDataMut<'a> {
+    raw: *mut sys::ImTextureData,
+    _phantom: PhantomData<&'a mut crate::texture::TextureData>,
+}
+
+impl Drop for TextureDataMut<'_> {
+    fn drop(&mut self) {
+        TEXTURE_DATA_BORROWED.store(false, Ordering::Release);
+    }
+}
+
+impl std::ops::Deref for TextureDataMut<'_> {
+    type Target = crate::texture::TextureData;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*(self.raw as *const crate::texture::TextureData) }
+    }
+}
+
+impl std::ops::DerefMut for TextureDataMut<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *(self.raw as *mut crate::texture::TextureData) }
+    }
+}
 
 #[cfg(test)]
 mod tests {

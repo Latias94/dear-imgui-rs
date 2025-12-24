@@ -307,7 +307,7 @@ impl<'ui> Window<'ui> {
             None => std::ptr::null_mut(),
         };
         let result = unsafe { crate::sys::igBegin(name_ptr, opened_ptr, self.flags.bits()) };
-        let is_open = opened.map_or(true, |opened| *opened);
+        let is_open = opened.is_none_or(|opened| *opened);
 
         // IMPORTANT: According to ImGui documentation, Begin/End calls must be balanced.
         // If Begin returns false, we need to call End immediately and return None.

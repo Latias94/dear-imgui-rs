@@ -29,6 +29,10 @@
     clippy::cast_sign_loss,
     clippy::as_conversions
 )]
+// NOTE: Keep explicit `as i32`/`as u32` casts when bridging bindgen-generated flags into the
+// Dear ImGui C ABI. Bindgen may represent the same C enum/typedef with different Rust integer
+// types across platforms/toolchains; our wrappers intentionally pin the expected width/sign at
+// the FFI call sites.
 use crate::InputTextFlags;
 use crate::internal::DataTypeKind;
 use crate::string::ImString;

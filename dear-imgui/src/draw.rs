@@ -1290,13 +1290,17 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
     pub fn build(self) {
         use std::os::raw::c_void;
         // Box the closure so we can pass an owning pointer to C.
+        //
+        // Note: Dear ImGui's `ImDrawList::AddCallback()` optionally copies `userdata` bytes into an
+        // internal unaligned byte buffer when `userdata_size != 0`. That mode is suitable only for
+        // plain-old-data payloads; it must not be used for Rust closures.
         let ptr: *mut F = Box::into_raw(Box::new(self.callback));
         unsafe {
             sys::ImDrawList_AddCallback(
                 self.draw_list.draw_list,
                 Some(Self::run_callback),
                 ptr as *mut c_void,
-                std::mem::size_of::<F>(),
+                0,
             );
         }
     }
@@ -1312,12 +1316,12 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
         if unsafe { (*cmd_ptr).UserCallbackData.is_null() } {
             return;
         }
-        if unsafe { (*cmd_ptr).UserCallbackDataOffset } != 0 {
-            eprintln!("dear-imgui-rs: unexpected UserCallbackDataOffset != 0");
+        if unsafe { (*cmd_ptr).UserCallbackDataOffset } != -1 {
+            eprintln!("dear-imgui-rs: unexpected UserCallbackDataOffset (expected -1)");
             std::process::abort();
         }
-        if unsafe { (*cmd_ptr).UserCallbackDataSize as usize } != std::mem::size_of::<F>() {
-            eprintln!("dear-imgui-rs: unexpected UserCallbackDataSize mismatch");
+        if unsafe { (*cmd_ptr).UserCallbackDataSize } != 0 {
+            eprintln!("dear-imgui-rs: unexpected UserCallbackDataSize (expected 0)");
             std::process::abort();
         }
         // Compute pointer to our boxed closure (respect offset if ever used)
@@ -1338,6 +1342,67 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
         if res.is_err() {
             eprintln!("dear-imgui-rs: panic in DrawList callback");
             std::process::abort();
+        }
+    }
+}
+
+#[cfg(test)]
+mod callback_tests {
+    use super::*;
+
+    #[test]
+    fn safe_draw_callback_uses_direct_user_data_pointer() {
+        fn noop() {}
+
+        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
+        assert!(!shared.is_null());
+        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
+        assert!(!raw_draw_list.is_null());
+
+        // Ensure CmdBuffer.Size > 0 (required by AddCallback).
+        unsafe { sys::ImDrawList_AddDrawCmd(raw_draw_list) };
+
+        let draw_list = DrawListMut {
+            draw_list_type: DrawListType::Window,
+            draw_list: raw_draw_list,
+            _phantom: PhantomData,
+        };
+        draw_list.add_callback_safe(noop).build();
+
+        let cmd_buffer = unsafe { &(*draw_list.draw_list).CmdBuffer };
+        assert!(cmd_buffer.Size > 0);
+        assert!(!cmd_buffer.Data.is_null());
+
+        let (cmd_ptr, cmd_copy) = {
+            let cmds = unsafe {
+                let len = usize::try_from(cmd_buffer.Size)
+                    .expect("expected non-negative CmdBuffer.Size in test");
+                std::slice::from_raw_parts(cmd_buffer.Data, len)
+            };
+            let (i, cmd) = cmds
+                .iter()
+                .enumerate()
+                .find(|(_, cmd)| cmd.UserCallback.is_some() && !cmd.UserCallbackData.is_null())
+                .expect("expected callback command to be present");
+
+            let cmd_ptr = unsafe { cmd_buffer.Data.add(i) as *const sys::ImDrawCmd };
+            (cmd_ptr, *cmd)
+        };
+
+        assert!(cmd_copy.UserCallback.is_some());
+        assert_eq!(cmd_copy.UserCallbackDataOffset, -1);
+        assert_eq!(cmd_copy.UserCallbackDataSize, 0);
+        assert!(!cmd_copy.UserCallbackData.is_null());
+
+        // Run the callback once to reclaim the boxed closure and avoid leaking in the test.
+        unsafe { cmd_copy.UserCallback.unwrap()(draw_list.draw_list as *const _, cmd_ptr) }
+
+        let cmd_after = unsafe { *cmd_ptr };
+        assert!(cmd_after.UserCallbackData.is_null());
+
+        unsafe {
+            sys::ImDrawList_destroy(raw_draw_list);
+            sys::ImDrawListSharedData_destroy(shared);
         }
     }
 }
@@ -1368,21 +1433,24 @@ impl<'ui> DrawListMut<'ui> {
 impl<'ui> DrawListMut<'ui> {
     /// Unsafe low-level geometry API: reserve index and vertex space.
     ///
-    /// Safety: Caller must write exactly the reserved amount using PrimWrite* and ensure valid topology.
+    /// # Safety
+    /// Caller must write exactly the reserved amount using `prim_write_*` and ensure valid topology.
     pub unsafe fn prim_reserve(&self, idx_count: i32, vtx_count: i32) {
         unsafe { sys::ImDrawList_PrimReserve(self.draw_list, idx_count, vtx_count) }
     }
 
     /// Unsafe low-level geometry API: unreserve previously reserved space.
     ///
-    /// Safety: Must match a prior call to `prim_reserve` which hasn't been fully written.
+    /// # Safety
+    /// Must match a prior call to `prim_reserve` which hasn't been fully written.
     pub unsafe fn prim_unreserve(&self, idx_count: i32, vtx_count: i32) {
         unsafe { sys::ImDrawList_PrimUnreserve(self.draw_list, idx_count, vtx_count) }
     }
 
     /// Unsafe low-level geometry API: append a rectangle primitive with a single color.
     ///
-    /// Safety: Only use between `prim_reserve` and completing the reserved writes.
+    /// # Safety
+    /// Only use between `prim_reserve` and completing the reserved writes.
     pub unsafe fn prim_rect(
         &self,
         a: impl Into<sys::ImVec2>,
@@ -1394,7 +1462,8 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Unsafe low-level geometry API: append a rectangle primitive with UVs and color.
     ///
-    /// Safety: Only use between `prim_reserve` and completing the reserved writes.
+    /// # Safety
+    /// Only use between `prim_reserve` and completing the reserved writes.
     pub unsafe fn prim_rect_uv(
         &self,
         a: impl Into<sys::ImVec2>,
@@ -1417,7 +1486,8 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Unsafe low-level geometry API: append a quad primitive with UVs and color.
     ///
-    /// Safety: Only use between `prim_reserve` and completing the reserved writes.
+    /// # Safety
+    /// Only use between `prim_reserve` and completing the reserved writes.
     pub unsafe fn prim_quad_uv(
         &self,
         a: impl Into<sys::ImVec2>,
@@ -1448,7 +1518,8 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Unsafe low-level geometry API: write a vertex.
     ///
-    /// Safety: Only use to fill space reserved by `prim_reserve`.
+    /// # Safety
+    /// Only use to fill space reserved by `prim_reserve`.
     pub unsafe fn prim_write_vtx(
         &self,
         pos: impl Into<sys::ImVec2>,
@@ -1462,14 +1533,16 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Unsafe low-level geometry API: write an index.
     ///
-    /// Safety: Only use to fill space reserved by `prim_reserve`.
+    /// # Safety
+    /// Only use to fill space reserved by `prim_reserve`.
     pub unsafe fn prim_write_idx(&self, idx: sys::ImDrawIdx) {
         unsafe { sys::ImDrawList_PrimWriteIdx(self.draw_list, idx) }
     }
 
     /// Unsafe low-level geometry API: convenience to append one vertex (pos+uv+col).
     ///
-    /// Safety: Only use between `prim_reserve` and completing the reserved writes.
+    /// # Safety
+    /// Only use between `prim_reserve` and completing the reserved writes.
     pub unsafe fn prim_vtx(
         &self,
         pos: impl Into<sys::ImVec2>,
@@ -1821,7 +1894,7 @@ impl<'ui> BezierCurve<'ui> {
 /// Represents a poly line about to be drawn
 #[must_use = "should call .build() to draw the object"]
 pub struct Polyline<'ui> {
-    points: Vec<[f32; 2]>,
+    points: Vec<sys::ImVec2>,
     thickness: f32,
     filled: bool,
     color: ImColor32,
@@ -1835,13 +1908,7 @@ impl<'ui> Polyline<'ui> {
         P: Into<sys::ImVec2>,
     {
         Self {
-            points: points
-                .into_iter()
-                .map(|p| {
-                    let v: sys::ImVec2 = p.into();
-                    v.into()
-                })
-                .collect(),
+            points: points.into_iter().map(Into::into).collect(),
             color: c.into(),
             thickness: 1.0,
             filled: false,
@@ -1872,7 +1939,7 @@ impl<'ui> Polyline<'ui> {
             unsafe {
                 sys::ImDrawList_AddConvexPolyFilled(
                     self.draw_list.draw_list,
-                    self.points.as_ptr() as *const sys::ImVec2,
+                    self.points.as_ptr(),
                     count,
                     self.color.into(),
                 )
@@ -1881,7 +1948,7 @@ impl<'ui> Polyline<'ui> {
             unsafe {
                 sys::ImDrawList_AddPolyline(
                     self.draw_list.draw_list,
-                    self.points.as_ptr() as *const sys::ImVec2,
+                    self.points.as_ptr(),
                     count,
                     self.color.into(),
                     sys::ImDrawFlags::default(),

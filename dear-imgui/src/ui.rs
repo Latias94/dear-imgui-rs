@@ -57,7 +57,13 @@ impl Ui {
     /// Returns an immutable reference to the inputs/outputs object
     #[doc(alias = "GetIO")]
     pub fn io(&self) -> &crate::io::Io {
-        unsafe { &*(sys::igGetIO_Nil() as *const crate::io::Io) }
+        unsafe {
+            let io = sys::igGetIO_Nil();
+            if io.is_null() {
+                panic!("Ui::io() requires an active ImGui context");
+            }
+            &*(io as *const crate::io::Io)
+        }
     }
 
     /// Internal method to push a single text to our scratch buffer.
@@ -425,19 +431,19 @@ impl Ui {
     /// Write the Dark style values into the provided [`Style`] object.
     #[doc(alias = "StyleColorsDark")]
     pub fn style_colors_dark_into(&self, dst: &mut crate::Style) {
-        unsafe { sys::igStyleColorsDark(dst as *mut _ as *mut sys::ImGuiStyle) }
+        unsafe { sys::igStyleColorsDark(dst.raw_mut() as *mut sys::ImGuiStyle) }
     }
 
     /// Write the Light style values into the provided [`Style`] object.
     #[doc(alias = "StyleColorsLight")]
     pub fn style_colors_light_into(&self, dst: &mut crate::Style) {
-        unsafe { sys::igStyleColorsLight(dst as *mut _ as *mut sys::ImGuiStyle) }
+        unsafe { sys::igStyleColorsLight(dst.raw_mut() as *mut sys::ImGuiStyle) }
     }
 
     /// Write the Classic style values into the provided [`Style`] object.
     #[doc(alias = "StyleColorsClassic")]
     pub fn style_colors_classic_into(&self, dst: &mut crate::Style) {
-        unsafe { sys::igStyleColorsClassic(dst as *mut _ as *mut sys::ImGuiStyle) }
+        unsafe { sys::igStyleColorsClassic(dst.raw_mut() as *mut sys::ImGuiStyle) }
     }
 
     /// Returns DPI scale currently associated to the current window's viewport.

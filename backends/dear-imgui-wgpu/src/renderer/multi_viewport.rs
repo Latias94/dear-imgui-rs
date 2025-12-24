@@ -4,8 +4,10 @@ use super::*;
 use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::Viewport;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use winit::window::Window;
 
@@ -20,6 +22,7 @@ pub struct ViewportWgpuData {
 }
 
 static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
+static RENDERER_BORROWED: AtomicBool = AtomicBool::new(false);
 static GLOBAL: Mutex<Option<GlobalHandles>> = Mutex::new(None);
 
 #[derive(Clone)]
@@ -97,20 +100,53 @@ pub fn shutdown_multi_viewport_support(context: &mut Context) {
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn get_renderer<'a>() -> Option<&'a mut WgpuRenderer> {
+unsafe fn borrow_renderer() -> Option<RendererBorrowGuard> {
     let ptr = RENDERER_PTR.load(Ordering::SeqCst) as *mut WgpuRenderer;
-    ptr.as_mut()
+    if ptr.is_null() {
+        return None;
+    }
+    if RENDERER_BORROWED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        eprintln!("[wgpu-mv] renderer already mutably borrowed; skipping callback");
+        return None;
+    }
+    Some(RendererBorrowGuard { renderer: ptr })
 }
 
 /// Helper to get or create per-viewport user data
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn viewport_user_data_mut<'a>(vp: *mut Viewport) -> Option<&'a mut ViewportWgpuData> {
-    let vpm = &mut *vp;
+unsafe fn viewport_user_data_mut<'a>(vpm: &'a mut Viewport) -> Option<&'a mut ViewportWgpuData> {
     let data = vpm.renderer_user_data();
     if data.is_null() {
         None
     } else {
         Some(&mut *(data as *mut ViewportWgpuData))
+    }
+}
+
+struct RendererBorrowGuard {
+    renderer: *mut WgpuRenderer,
+}
+
+impl Drop for RendererBorrowGuard {
+    fn drop(&mut self) {
+        RENDERER_BORROWED.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Deref for RendererBorrowGuard {
+    type Target = WgpuRenderer;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.renderer }
+    }
+}
+
+impl DerefMut for RendererBorrowGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.renderer }
     }
 }
 
@@ -314,11 +350,11 @@ pub unsafe extern "C" fn renderer_set_window_size(
                 None => return,
             }
         };
-        if let Some(data) = viewport_user_data_mut(vp) {
+        let vpm = &mut *vp;
+        let scale = vpm.framebuffer_scale();
+        if let Some(data) = viewport_user_data_mut(vpm) {
             // Winit multi-viewport uses logical screen coordinates for viewport sizes.
             // Convert to physical pixels for WGPU surfaces using framebuffer scale.
-            let vpm_ref = &*vp;
-            let scale = vpm_ref.framebuffer_scale();
             let sx = if scale[0].is_finite() && scale[0] > 0.0 {
                 scale[0]
             } else {
@@ -355,7 +391,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         return;
     }
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-        let Some(renderer) = get_renderer() else {
+        let Some(mut renderer) = borrow_renderer() else {
             return;
         };
         // Clone device/queue to avoid borrowing renderer during render
@@ -365,6 +401,9 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         };
         // Obtain draw data for this viewport
         let vpm = &mut *vp;
+        let vp_id = vpm.id();
+        #[cfg(not(target_arch = "wasm32"))]
+        let platform_handle = vpm.platform_handle();
         let raw_dd = vpm.draw_data();
         if raw_dd.is_null() {
             // No draw data for this viewport (e.g. minimized or empty)
@@ -374,7 +413,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         // returns a valid ImDrawData pointer for each viewport being rendered.
         let draw_data: &dear_imgui_rs::render::DrawData =
             dear_imgui_rs::render::DrawData::from_raw(&*raw_dd);
-        if let Some(data) = viewport_user_data_mut(vp) {
+        if let Some(data) = viewport_user_data_mut(vpm) {
             // Targeted debug log: only print on size/scale change or mismatch.
             #[cfg(feature = "mv-log")]
             {
@@ -392,7 +431,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                 if mismatch || disp_changed || scale_changed {
                     mvlog!(
                         "[wgpu-mv] vp={} disp=({:.1},{:.1}) fb_scale=({:.2},{:.2}) expected_fb=({},{}) cfg_fb=({},{}) mismatch={}",
-                        (&*vp).id(),
+                        vp_id,
                         disp[0],
                         disp[1],
                         fb_scale[0],
@@ -417,10 +456,8 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                     // Reconfigure with current window size and retry next frame
                     #[cfg(not(target_arch = "wasm32"))]
                     {
-                        let vpm_ref = &*vp;
-                        let window_ptr = vpm_ref.platform_handle();
-                        if !window_ptr.is_null() {
-                            let window: &winit::window::Window = &*(window_ptr as *const _);
+                        if !platform_handle.is_null() {
+                            let window: &winit::window::Window = &*(platform_handle as *const _);
                             let size = window.inner_size();
                             if size.width > 0 && size.height > 0 {
                                 data.config.width = size.width;
@@ -505,7 +542,8 @@ pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *
         return;
     }
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-        if let Some(data) = viewport_user_data_mut(vp) {
+        let vpm = &mut *vp;
+        if let Some(data) = viewport_user_data_mut(vpm) {
             if let Some(frame) = data.pending_frame.take() {
                 frame.present();
             }

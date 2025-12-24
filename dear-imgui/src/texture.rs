@@ -5,6 +5,7 @@
 //! status management, and automatic texture updates.
 
 use crate::sys;
+use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
@@ -156,6 +157,10 @@ impl From<TextureId> for RawTextureId {
 #[derive(Copy, Clone, Debug)]
 #[repr(transparent)]
 pub struct TextureRef(sys::ImTextureRef);
+
+// Ensure the wrapper stays layout-compatible with the sys bindings.
+const _: [(); std::mem::size_of::<sys::ImTextureRef>()] = [(); std::mem::size_of::<TextureRef>()];
+const _: [(); std::mem::align_of::<sys::ImTextureRef>()] = [(); std::mem::align_of::<TextureRef>()];
 
 impl TextureRef {
     /// Create a texture reference from a raw ImGui texture ref
@@ -400,10 +405,30 @@ impl AsMut<TextureData> for OwnedTextureData {
 /// by the C++ side.
 #[repr(transparent)]
 pub struct TextureData {
-    raw: sys::ImTextureData,
+    raw: UnsafeCell<sys::ImTextureData>,
 }
 
+// Ensure the wrapper stays layout-compatible with the sys bindings.
+const _: [(); std::mem::size_of::<sys::ImTextureData>()] = [(); std::mem::size_of::<TextureData>()];
+const _: [(); std::mem::align_of::<sys::ImTextureData>()] =
+    [(); std::mem::align_of::<TextureData>()];
+
 impl TextureData {
+    #[inline]
+    fn inner(&self) -> &sys::ImTextureData {
+        // Safety: `TextureData` is a view into an ImGui-owned `ImTextureData`. Dear ImGui and
+        // renderer backends can mutate fields (e.g. Status/TexID/BackendUserData) while Rust holds
+        // `&TextureData`, so we store it behind `UnsafeCell` to make that interior mutability
+        // explicit.
+        unsafe { &*self.raw.get() }
+    }
+
+    #[inline]
+    fn inner_mut(&mut self) -> &mut sys::ImTextureData {
+        // Safety: caller has `&mut TextureData`, so this is a unique Rust borrow for this wrapper.
+        unsafe { &mut *self.raw.get() }
+    }
+
     /// Create a new owned texture data object.
     ///
     /// This is kept for convenience. Prefer [`OwnedTextureData::new()`] for clarity.
@@ -418,24 +443,31 @@ impl TextureData {
         unsafe { &mut *(raw as *mut Self) }
     }
 
+    /// Create a shared texture data view from a raw pointer (crate-internal).
+    ///
+    /// Safety: caller must ensure the pointer is valid for the returned lifetime.
+    pub(crate) unsafe fn from_raw_ref<'a>(raw: *const sys::ImTextureData) -> &'a Self {
+        unsafe { &*(raw as *const Self) }
+    }
+
     /// Get the raw pointer to the underlying ImTextureData
     pub fn as_raw(&self) -> *const sys::ImTextureData {
-        &self.raw as *const _
+        self.raw.get() as *const _
     }
 
     /// Get the raw mutable pointer to the underlying ImTextureData
     pub fn as_raw_mut(&mut self) -> *mut sys::ImTextureData {
-        &mut self.raw as *mut _
+        self.raw.get()
     }
 
     /// Get the unique ID of this texture (for debugging)
     pub fn unique_id(&self) -> i32 {
-        self.raw.UniqueID
+        self.inner().UniqueID
     }
 
     /// Get the current status of this texture
     pub fn status(&self) -> TextureStatus {
-        TextureStatus::from(self.raw.Status)
+        TextureStatus::from(self.inner().Status)
     }
 
     /// Set the status of this texture
@@ -456,17 +488,17 @@ impl TextureData {
 
     /// Get the backend user data
     pub fn backend_user_data(&self) -> *mut c_void {
-        self.raw.BackendUserData
+        self.inner().BackendUserData
     }
 
     /// Set the backend user data
     pub fn set_backend_user_data(&mut self, data: *mut c_void) {
-        self.raw.BackendUserData = data;
+        self.inner_mut().BackendUserData = data;
     }
 
     /// Get the texture ID
     pub fn tex_id(&self) -> TextureId {
-        TextureId::from(self.raw.TexID)
+        TextureId::from(self.inner().TexID)
     }
 
     /// Set the texture ID
@@ -480,54 +512,55 @@ impl TextureData {
 
     /// Get the texture format
     pub fn format(&self) -> TextureFormat {
-        TextureFormat::from(self.raw.Format)
+        TextureFormat::from(self.inner().Format)
     }
 
     /// Get the texture width
     pub fn width(&self) -> i32 {
-        self.raw.Width
+        self.inner().Width
     }
 
     /// Get the texture height
     pub fn height(&self) -> i32 {
-        self.raw.Height
+        self.inner().Height
     }
 
     /// Get the bytes per pixel
     pub fn bytes_per_pixel(&self) -> i32 {
-        self.raw.BytesPerPixel
+        self.inner().BytesPerPixel
     }
 
     /// Get the number of unused frames
     pub fn unused_frames(&self) -> i32 {
-        self.raw.UnusedFrames
+        self.inner().UnusedFrames
     }
 
     /// Get the reference count
     pub fn ref_count(&self) -> u16 {
-        self.raw.RefCount
+        self.inner().RefCount
     }
 
     /// Check if the texture uses colors (rather than just white + alpha)
     pub fn use_colors(&self) -> bool {
-        self.raw.UseColors
+        self.inner().UseColors
     }
 
     /// Check if the texture is queued for destruction next frame
     pub fn want_destroy_next_frame(&self) -> bool {
-        self.raw.WantDestroyNextFrame
+        self.inner().WantDestroyNextFrame
     }
 
     /// Get the pixel data
     ///
     /// Returns None if no pixel data is available.
     pub fn pixels(&self) -> Option<&[u8]> {
-        if self.raw.Pixels.is_null() {
+        let raw = self.inner();
+        if raw.Pixels.is_null() {
             None
         } else {
-            let width = self.width();
-            let height = self.height();
-            let bytes_per_pixel = self.bytes_per_pixel();
+            let width = raw.Width;
+            let height = raw.Height;
+            let bytes_per_pixel = raw.BytesPerPixel;
             if width <= 0 || height <= 0 || bytes_per_pixel <= 0 {
                 return None;
             }
@@ -535,47 +568,41 @@ impl TextureData {
             let size = (width as usize)
                 .checked_mul(height as usize)?
                 .checked_mul(bytes_per_pixel as usize)?;
-            unsafe {
-                Some(std::slice::from_raw_parts(
-                    self.raw.Pixels as *const u8,
-                    size,
-                ))
-            }
+            unsafe { Some(std::slice::from_raw_parts(raw.Pixels as *const u8, size)) }
         }
     }
 
     /// Get the bounding box of all used pixels in the texture
     pub fn used_rect(&self) -> TextureRect {
-        unsafe { TextureRect::from((*self.as_raw()).UsedRect) }
+        TextureRect::from(self.inner().UsedRect)
     }
 
     /// Get the bounding box of all queued updates
     pub fn update_rect(&self) -> TextureRect {
-        unsafe { TextureRect::from((*self.as_raw()).UpdateRect) }
+        TextureRect::from(self.inner().UpdateRect)
     }
 
     /// Iterate over queued update rectangles (copying to safe TextureRect)
     pub fn updates(&self) -> impl Iterator<Item = TextureRect> + '_ {
-        unsafe {
-            let vec = &(*self.as_raw()).Updates;
-            let count = if vec.Data.is_null() {
-                0
-            } else {
-                usize::try_from(vec.Size).unwrap_or(0)
-            };
-            let data = vec.Data as *const sys::ImTextureRect;
-            (0..count).map(move |i| TextureRect::from(*data.add(i)))
-        }
+        let vec = &self.inner().Updates;
+        let count = if vec.Data.is_null() {
+            0
+        } else {
+            usize::try_from(vec.Size).unwrap_or(0)
+        };
+        let data = vec.Data as *const sys::ImTextureRect;
+        (0..count).map(move |i| unsafe { TextureRect::from(*data.add(i)) })
     }
 
     /// Get the pixel data at a specific position
     ///
     /// Returns None if no pixel data is available or coordinates are out of bounds.
     pub fn pixels_at(&self, x: i32, y: i32) -> Option<&[u8]> {
-        let width = self.width();
-        let height = self.height();
-        let bytes_per_pixel = self.bytes_per_pixel();
-        if self.raw.Pixels.is_null()
+        let raw = self.inner();
+        let width = raw.Width;
+        let height = raw.Height;
+        let bytes_per_pixel = raw.BytesPerPixel;
+        if raw.Pixels.is_null()
             || width <= 0
             || height <= 0
             || bytes_per_pixel <= 0
@@ -600,7 +627,7 @@ impl TextureData {
             let remaining_size = total_size.checked_sub(offset_bytes)?;
 
             unsafe {
-                let ptr = (self.raw.Pixels as *const u8).add(offset_bytes);
+                let ptr = (raw.Pixels as *const u8).add(offset_bytes);
                 Some(std::slice::from_raw_parts(ptr, remaining_size))
             }
         }
@@ -674,23 +701,19 @@ impl TextureData {
 
     /// Set the width of the texture
     pub fn set_width(&mut self, width: u32) {
-        unsafe {
-            (*self.as_raw_mut()).Width = width as i32;
-        }
+        let width = width.min(i32::MAX as u32) as i32;
+        self.inner_mut().Width = width;
     }
 
     /// Set the height of the texture
     pub fn set_height(&mut self, height: u32) {
-        unsafe {
-            (*self.as_raw_mut()).Height = height as i32;
-        }
+        let height = height.min(i32::MAX as u32) as i32;
+        self.inner_mut().Height = height;
     }
 
     /// Set the format of the texture
     pub fn set_format(&mut self, format: TextureFormat) {
-        unsafe {
-            (*self.as_raw_mut()).Format = format.into();
-        }
+        self.inner_mut().Format = format.into();
     }
 }
 

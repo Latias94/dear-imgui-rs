@@ -33,8 +33,7 @@ mod wgpu_init;
 ///   input (e.g. Chinese/Japanese) renders instead of showing `?`.
 fn try_merge_noto_sans_sc(context: &mut Context) -> Result<(), String> {
     let path = "examples/assets/NotoSansSC-Regular.ttf";
-    let data = std::fs::read(path)
-        .map_err(|e| format!("Failed to read {} ({}).", path, e))?;
+    let data = std::fs::read(path).map_err(|e| format!("Failed to read {} ({}).", path, e))?;
 
     // Minimal sanity check: classic TrueType header (0x00010000) or 'true'.
     if data.len() < 4 {
@@ -83,7 +82,10 @@ fn init_fonts(context: &mut Context) -> bool {
     match try_merge_noto_sans_sc(context) {
         Ok(()) => true,
         Err(msg) => {
-            eprintln!("[ime_debug] {} Put NotoSansSC-Regular.ttf under examples/assets/.", msg);
+            eprintln!(
+                "[ime_debug] {} Put NotoSansSC-Regular.ttf under examples/assets/.",
+                msg
+            );
             false
         }
     }

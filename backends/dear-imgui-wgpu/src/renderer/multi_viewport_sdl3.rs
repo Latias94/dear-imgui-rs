@@ -8,8 +8,10 @@ use super::*;
 use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::Viewport;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::sdl3_raw_window_handle::Sdl3SurfaceTarget;
 
@@ -24,6 +26,7 @@ pub struct ViewportWgpuData {
 }
 
 static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
+static RENDERER_BORROWED: AtomicBool = AtomicBool::new(false);
 static GLOBAL: Mutex<Option<GlobalHandles>> = Mutex::new(None);
 
 #[derive(Clone)]
@@ -97,18 +100,51 @@ pub fn shutdown_multi_viewport_support(context: &mut Context) {
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn get_renderer<'a>() -> Option<&'a mut WgpuRenderer> {
+unsafe fn borrow_renderer() -> Option<RendererBorrowGuard> {
     let ptr = RENDERER_PTR.load(Ordering::SeqCst) as *mut WgpuRenderer;
-    ptr.as_mut()
+    if ptr.is_null() {
+        return None;
+    }
+    if RENDERER_BORROWED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        eprintln!("[wgpu-mv-sdl3] renderer already mutably borrowed; skipping callback");
+        return None;
+    }
+    Some(RendererBorrowGuard { renderer: ptr })
 }
 
-unsafe fn viewport_user_data_mut<'a>(vp: *mut Viewport) -> Option<&'a mut ViewportWgpuData> {
-    let vpm = unsafe { &mut *vp };
+unsafe fn viewport_user_data_mut<'a>(vpm: &'a mut Viewport) -> Option<&'a mut ViewportWgpuData> {
     let data = vpm.renderer_user_data();
     if data.is_null() {
         None
     } else {
         Some(unsafe { &mut *(data as *mut ViewportWgpuData) })
+    }
+}
+
+struct RendererBorrowGuard {
+    renderer: *mut WgpuRenderer,
+}
+
+impl Drop for RendererBorrowGuard {
+    fn drop(&mut self) {
+        RENDERER_BORROWED.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Deref for RendererBorrowGuard {
+    type Target = WgpuRenderer;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.renderer }
+    }
+}
+
+impl DerefMut for RendererBorrowGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.renderer }
     }
 }
 
@@ -312,9 +348,9 @@ pub unsafe extern "C" fn renderer_set_window_size(
                 None => return,
             }
         };
-        if let Some(data) = viewport_user_data_mut(vp) {
-            let vpm_ref = &*vp;
-            let scale = vpm_ref.framebuffer_scale();
+        let vpm = &mut *vp;
+        let scale = vpm.framebuffer_scale();
+        if let Some(data) = viewport_user_data_mut(vpm) {
             let sx = if scale[0].is_finite() && scale[0] > 0.0 {
                 scale[0]
             } else {
@@ -353,7 +389,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         mvlog!("[wgpu-mv-sdl3] Renderer_RenderWindow");
 
-        let Some(renderer) = get_renderer() else {
+        let Some(mut renderer) = borrow_renderer() else {
             return;
         };
         let (device, queue) = match renderer.backend_data.as_ref() {
@@ -362,6 +398,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         };
 
         let vpm = &mut *vp;
+        let window_id = sdl_window_id_from_viewport(vpm);
         let raw_dd = vpm.draw_data();
         if raw_dd.is_null() {
             return;
@@ -370,12 +407,14 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         let draw_data: &dear_imgui_rs::render::DrawData =
             dear_imgui_rs::render::DrawData::from_raw(&*raw_dd);
 
-        if let Some(data) = viewport_user_data_mut(vp) {
+        if let Some(data) = viewport_user_data_mut(vpm) {
+            let fb_w = data.config.width;
+            let fb_h = data.config.height;
             let frame = match data.surface.get_current_texture() {
                 Ok(f) => f,
                 Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Lost) => {
                     // Reconfigure from actual SDL3 pixel size and retry next frame.
-                    if let Some(window_id) = sdl_window_id_from_viewport(&*vp) {
+                    if let Some(window_id) = window_id {
                         if let Some(target) = Sdl3SurfaceTarget::from_window_id(window_id) {
                             let raw_window = target.raw_window();
                             let mut w: i32 = 0;
@@ -426,20 +465,14 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                         timestamp_writes: None,
                     });
 
-                    if let Some(vd) = viewport_user_data_mut(vp) {
-                        let fb_w = vd.config.width;
-                        let fb_h = vd.config.height;
-                        if let Err(e) = renderer.render_draw_data_with_fb_size_ex(
-                            &draw_data,
-                            &mut render_pass,
-                            fb_w,
-                            fb_h,
-                            false,
-                        ) {
-                            eprintln!("[wgpu-mv-sdl3] render_draw_data(with_fb) error: {:?}", e);
-                        }
-                    } else if let Err(e) = renderer.render_draw_data(&draw_data, &mut render_pass) {
-                        eprintln!("[wgpu-mv-sdl3] render_draw_data error: {:?}", e);
+                    if let Err(e) = renderer.render_draw_data_with_fb_size_ex(
+                        &draw_data,
+                        &mut render_pass,
+                        fb_w,
+                        fb_h,
+                        false,
+                    ) {
+                        eprintln!("[wgpu-mv-sdl3] render_draw_data(with_fb) error: {:?}", e);
                     }
                 }
                 queue.submit(std::iter::once(encoder.finish()));
@@ -473,7 +506,8 @@ pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *
     }
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         mvlog!("[wgpu-mv-sdl3] Renderer_SwapBuffers");
-        if let Some(data) = viewport_user_data_mut(vp) {
+        let vpm = &mut *vp;
+        if let Some(data) = viewport_user_data_mut(vpm) {
             if let Some(frame) = data.pending_frame.take() {
                 frame.present();
             }

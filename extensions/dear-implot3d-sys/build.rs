@@ -340,6 +340,8 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
 }
 
 fn build_with_cc(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+    let cimplot3d_cpp = cimplot3d_root.join("cimplot3d.cpp");
+
     let mut build = cc::Build::new();
     if cfg.target_arch == "wasm32" {
         build.define("IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS", "1");
@@ -378,7 +380,7 @@ fn build_with_cc(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cim
     build.include(cimplot3d_root);
     build.include(cimplot3d_root.join("implot3d"));
 
-    build.file(cimplot3d_root.join("cimplot3d.cpp"));
+    build.file(cimplot3d_cpp);
     build.file(cimplot3d_root.join("implot3d/implot3d.cpp"));
     build.file(cimplot3d_root.join("implot3d/implot3d_items.cpp"));
     build.file(cimplot3d_root.join("implot3d/implot3d_meshes.cpp"));

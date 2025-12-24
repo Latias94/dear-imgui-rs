@@ -1767,22 +1767,34 @@ impl<'ui> Mesh3DBuilder<'ui> {
         self
     }
     pub fn plot(self) {
-        // SAFETY: ImPlot3DPoint has (x,y,z) floats; we transmute from [[f32;3]] for FFI call
-        // Layout compatibility assumed; if upstream changes, this needs revisiting.
         let Some(vtx_count) = len_i32(self.vertices.len()) else {
             return;
         };
         let Some(idx_count) = len_i32(self.indices.len()) else {
             return;
         };
+        // ImPlot3DPoint is a C++ struct containing 3 doubles. Passing `[[f32; 3]]` by pointer
+        // would be a layout mismatch (UB). Convert to the exact FFI layout before calling C++.
+        let vertices: Vec<sys::ImPlot3DPoint> = self
+            .vertices
+            .iter()
+            .map(|v| {
+                let [x, y, z] = *v;
+                sys::ImPlot3DPoint_c {
+                    x: x as f64,
+                    y: y as f64,
+                    z: z as f64,
+                }
+            })
+            .collect();
+
         let label = self.label.as_ref();
         let label = if label.contains('\0') { "mesh" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
-            let vtx_ptr = self.vertices.as_ptr() as *const sys::ImPlot3DPoint;
             sys::ImPlot3D_PlotMesh(
                 label_ptr,
-                vtx_ptr,
+                vertices.as_ptr(),
                 self.indices.as_ptr(),
                 vtx_count,
                 idx_count,
@@ -1807,5 +1819,17 @@ impl<'ui> Plot3DUi<'ui> {
             indices,
             flags: Mesh3DFlags::NONE,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sys;
+    use std::mem::{align_of, size_of};
+
+    #[test]
+    fn ffi_layout_implot3d_point_is_3_f64() {
+        assert_eq!(size_of::<sys::ImPlot3DPoint>(), 3 * size_of::<f64>());
+        assert_eq!(align_of::<sys::ImPlot3DPoint>(), align_of::<f64>());
     }
 }
