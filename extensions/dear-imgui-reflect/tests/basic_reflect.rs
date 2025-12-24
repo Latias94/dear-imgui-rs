@@ -5,24 +5,17 @@ use reflect::ImGuiReflect;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::{Mutex, OnceLock};
 
-fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
-}
+mod common;
 
-#[derive(ImGuiReflect)]
+use common::test_guard;
+
+#[derive(ImGuiReflect, Default)]
 enum Quality {
+    #[default]
     Low,
     Medium,
     High,
-}
-
-impl Default for Quality {
-    fn default() -> Self {
-        Quality::Low
-    }
 }
 
 #[derive(ImGuiReflect, Default)]
@@ -218,8 +211,10 @@ fn derive_compiles_and_runs_basic_ui() {
     // This should compile and not panic. We do not assert on ImGui state here.
     let _changed = reflect::input(ui, "Settings", &mut settings);
 
-    let mut advanced = AdvancedSettings::default();
-    advanced.optional_mode = Some(Quality::Medium);
+    let mut advanced = AdvancedSettings {
+        optional_mode: Some(Quality::Medium),
+        ..Default::default()
+    };
     let _changed2 = reflect::input(ui, "Advanced", &mut advanced);
 }
 

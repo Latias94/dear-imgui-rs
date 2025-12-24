@@ -129,30 +129,35 @@ impl<T> ImVector<T> {
     #[inline]
     pub fn as_slice(&self) -> &[T] {
         if self.size <= 0 || self.data.is_null() {
-            &[]
-        } else {
-            unsafe { slice::from_raw_parts(self.data, self.size as usize) }
+            return &[];
         }
+        let len = match usize::try_from(self.size) {
+            Ok(len) => len,
+            Err(_) => return &[],
+        };
+        unsafe { slice::from_raw_parts(self.data, len) }
     }
 
     /// Returns the vector as a mutable slice
     #[inline]
     pub fn as_slice_mut(&mut self) -> &mut [T] {
         if self.size <= 0 || self.data.is_null() {
-            &mut []
-        } else {
-            unsafe { slice::from_raw_parts_mut(self.data, self.size as usize) }
+            return &mut [];
         }
+        let len = match usize::try_from(self.size) {
+            Ok(len) => len,
+            Err(_) => return &mut [],
+        };
+        unsafe { slice::from_raw_parts_mut(self.data, len) }
     }
 
     /// Returns the number of elements in the vector
     #[inline]
     pub fn len(&self) -> usize {
         if self.size <= 0 {
-            0
-        } else {
-            self.size as usize
+            return 0;
         }
+        usize::try_from(self.size).unwrap_or(0)
     }
 
     /// Returns true if the vector is empty

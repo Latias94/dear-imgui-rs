@@ -1,16 +1,13 @@
+mod common;
+
 #[cfg(feature = "glam")]
 mod glam_tests {
     use dear_imgui_reflect as reflect;
     use dear_imgui_reflect::imgui::Context;
     use reflect::ImGuiReflect;
 
+    use crate::common::test_guard;
     use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-    use std::sync::{Mutex, OnceLock};
-
-    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
-    }
 
     #[derive(ImGuiReflect, Default)]
     struct GlamSettings {
@@ -36,6 +33,6 @@ mod glam_tests {
         let ui = ctx.frame();
         let mut settings = GlamSettings::default();
 
-        let _changed = reflect::input(&ui, "GlamSettings", &mut settings);
+        let _changed = reflect::input(ui, "GlamSettings", &mut settings);
     }
 }

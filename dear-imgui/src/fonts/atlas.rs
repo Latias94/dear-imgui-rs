@@ -266,7 +266,7 @@ impl FontAtlas {
     fn add_font_internal(
         &mut self,
         font_source: &FontSource<'_>,
-        _merge_mode: bool,
+        merge_mode: bool,
     ) -> crate::fonts::FontId {
         match font_source {
             FontSource::DefaultFontData {
@@ -278,6 +278,9 @@ impl FontAtlas {
                 let mut cfg = config.clone().unwrap_or_default();
                 if size > 0.0 {
                     cfg = cfg.size_pixels(size);
+                }
+                if merge_mode {
+                    cfg = cfg.merge_mode(true);
                 }
                 let font = self.add_font_default(Some(&cfg));
                 font.id()
@@ -291,6 +294,9 @@ impl FontAtlas {
                 let mut cfg = config.clone().unwrap_or_default();
                 if size > 0.0 {
                     cfg = cfg.size_pixels(size);
+                }
+                if merge_mode {
+                    cfg = cfg.merge_mode(true);
                 }
                 let font = self
                     .add_font_from_memory_ttf(data, size, Some(&cfg), None)
@@ -307,6 +313,9 @@ impl FontAtlas {
                 if size > 0.0 {
                     cfg = cfg.size_pixels(size);
                 }
+                if merge_mode {
+                    cfg = cfg.merge_mode(true);
+                }
                 let font = self
                     .add_font_from_file_ttf(path, size, Some(&cfg), None)
                     .expect("Failed to add TTF font from file");
@@ -320,6 +329,9 @@ impl FontAtlas {
     pub fn add_font_with_config(&mut self, font_cfg: &FontConfig) -> &mut Font {
         unsafe {
             let font_ptr = sys::ImFontAtlas_AddFont(self.raw, font_cfg.raw());
+            if font_cfg.raw.MergeMode {
+                self.discard_bakes(0);
+            }
             Font::from_raw_mut(font_ptr)
         }
     }
@@ -330,6 +342,11 @@ impl FontAtlas {
         unsafe {
             let cfg_ptr = font_cfg.map_or(ptr::null(), |cfg| cfg.raw());
             let font_ptr = sys::ImFontAtlas_AddFontDefault(self.raw, cfg_ptr);
+            if let Some(cfg) = font_cfg {
+                if cfg.raw.MergeMode {
+                    self.discard_bakes(0);
+                }
+            }
             Font::from_raw_mut(font_ptr)
         }
     }
@@ -359,6 +376,11 @@ impl FontAtlas {
             if font_ptr.is_null() {
                 None
             } else {
+                if let Some(cfg) = font_cfg {
+                    if cfg.raw.MergeMode {
+                        self.discard_bakes(0);
+                    }
+                }
                 Some(Font::from_raw_mut(font_ptr))
             }
         }
@@ -375,7 +397,16 @@ impl FontAtlas {
     ) -> Option<&mut Font> {
         let font_data_len = i32::try_from(font_data.len()).ok()?;
         unsafe {
-            let cfg_ptr = font_cfg.map_or(ptr::null(), |cfg| cfg.raw());
+            // SAFETY: `font_data` typically points to Rust-owned memory (e.g. `Vec<u8>`).
+            // Dear ImGui's `AddFontFromMemoryTTF()` transfers ownership by default, which
+            // would lead to use-after-free or double-free on Rust buffers. Force the safe
+            // path where Dear ImGui duplicates the bytes into its own allocator.
+            let cfg = font_cfg
+                .cloned()
+                .unwrap_or_default()
+                .font_data_owned_by_atlas(false);
+            let is_merge = cfg.raw.MergeMode;
+            let cfg_ptr = cfg.raw();
             let ranges_ptr = glyph_ranges.map_or(ptr::null(), |ranges| ranges.as_ptr());
 
             let font_ptr = sys::ImFontAtlas_AddFontFromMemoryTTF(
@@ -390,6 +421,9 @@ impl FontAtlas {
             if font_ptr.is_null() {
                 None
             } else {
+                if is_merge {
+                    self.discard_bakes(0);
+                }
                 Some(Font::from_raw_mut(font_ptr))
             }
         }
@@ -421,19 +455,46 @@ impl FontAtlas {
 
     /// Get default glyph ranges (Basic Latin + Latin Supplement)
     #[doc(alias = "GetGlyphRangesDefault")]
+    pub fn get_glyph_ranges_default_ptr(&self) -> *const sys::ImWchar {
+        if self.raw.is_null() {
+            return std::ptr::null();
+        }
+        unsafe { sys::ImFontAtlas_GetGlyphRangesDefault(self.raw) }
+    }
+
+    /// Get default glyph ranges (Basic Latin + Latin Supplement)
+    ///
+    /// The returned slice is terminated by a `0` sentinel, matching Dear ImGui's
+    /// `ImWchar` range list format: `[start, end, start, end, ..., 0]`.
+    ///
+    /// Prefer [`Self::get_glyph_ranges_default_ptr`] when passing glyph ranges
+    /// back into FFI, to avoid any scanning on the Rust side.
+    #[doc(alias = "GetGlyphRangesDefault")]
     pub fn get_glyph_ranges_default(&self) -> &[sys::ImWchar] {
         unsafe {
-            let ptr = sys::ImFontAtlas_GetGlyphRangesDefault(self.raw);
+            let ptr = self.get_glyph_ranges_default_ptr();
             if ptr.is_null() {
                 &[]
             } else {
-                // Count the ranges (terminated by 0)
-                let mut len = 0;
-                while *ptr.add(len) != 0 {
-                    len += 1;
+                // Count the ranges (terminated by 0). Dear ImGui stores the list as
+                // pairs: [start, end, start, end, ..., 0].
+                //
+                // This assumes the pointer points to a valid, null-terminated
+                // static array as provided by Dear ImGui.
+                const MAX_WORDS: usize = 2048;
+                let mut i = 0usize;
+                while i < MAX_WORDS {
+                    if *ptr.add(i) == 0 {
+                        return std::slice::from_raw_parts(ptr, i + 1);
+                    }
+                    i = i.saturating_add(2);
                 }
-                // Include the terminating 0 sentinel.
-                std::slice::from_raw_parts(ptr, len + 1)
+
+                debug_assert!(
+                    false,
+                    "ImFontAtlas_GetGlyphRangesDefault() did not terminate within MAX_WORDS"
+                );
+                &[]
             }
         }
     }
@@ -441,23 +502,47 @@ impl FontAtlas {
     /// Build the font atlas texture
     ///
     /// This is a simplified build process. For more control, use the individual build functions.
+    ///
+    /// Note: with Dear ImGui 1.92+ "new backend" texture system, you should generally
+    /// not call `build()` manually. The renderer should set `ImGuiBackendFlags_RendererHasTextures`
+    /// and the atlas will be built/updated on demand.
+    ///
+    /// In particular, calling `build()` before the renderer sets `RendererHasTextures`
+    /// may cause Dear ImGui to assert on the next frame.
     #[doc(alias = "Build")]
     pub fn build(&mut self) -> bool {
         if self.raw.is_null() {
             return false;
         }
+        // NOTE: In Dear ImGui, `ImFontAtlasBuildMain()` will call `ImFontAtlasBuildInit()`
+        // lazily if needed (Builder == NULL). Calling BuildInit unconditionally would leak
+        // the builder and is not idempotent.
         unsafe {
-            // Initialize the build process
-            sys::igImFontAtlasBuildInit(self.raw);
-
-            // Perform the main build
             sys::igImFontAtlasBuildMain(self.raw);
-
-            // Update pointers
-            sys::igImFontAtlasBuildUpdatePointers(self.raw);
-
-            // Check if build was successful
             (*self.raw).TexIsBuilt
+        }
+    }
+
+    /// Discard baked font caches.
+    ///
+    /// This clears cached glyph data (including cached "not found" entries) so that
+    /// newly added font sources (e.g. merged CJK/emoji fonts) can take effect.
+    ///
+    /// Pass `unused_frames = 0` to discard everything (recommended after font merging).
+    ///
+    /// Notes:
+    /// - Only call this when the atlas is not locked (typically before `Context::frame()`).
+    /// - No-op if the atlas builder hasn't been created yet.
+    #[doc(alias = "ImFontAtlasBuildDiscardBakes")]
+    pub fn discard_bakes(&mut self, unused_frames: i32) {
+        if self.raw.is_null() {
+            return;
+        }
+        unsafe {
+            if (*self.raw).Builder.is_null() {
+                return;
+            }
+            sys::igImFontAtlasBuildDiscardBakes(self.raw, unused_frames);
         }
     }
 
@@ -658,6 +743,16 @@ impl FontConfig {
     /// Set whether to merge this font with the previous one
     pub fn merge_mode(mut self, merge: bool) -> Self {
         self.raw.MergeMode = merge;
+        self
+    }
+
+    /// Control whether the atlas takes ownership of `FontData` passed from memory.
+    ///
+    /// Dear ImGui's `AddFontFromMemoryTTF()` transfers ownership by default, which is
+    /// unsafe for Rust-owned buffers. When set to `false`, Dear ImGui will duplicate
+    /// the bytes into its own allocator and manage them internally.
+    pub fn font_data_owned_by_atlas(mut self, owned: bool) -> Self {
+        self.raw.FontDataOwnedByAtlas = owned;
         self
     }
 

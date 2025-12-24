@@ -3,12 +3,10 @@ use dear_imgui_reflect::imgui::Context;
 use reflect::ImGuiReflect;
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
-fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
-}
+mod common;
+
+use common::test_guard;
 
 /// Simple struct to exercise container-level events with stable field paths.
 #[derive(ImGuiReflect, Default)]
@@ -37,7 +35,7 @@ fn reflect_response_tracks_container_events_with_paths() {
     let mut resp = reflect::ReflectResponse::default();
 
     // First pass: no changes should produce no events.
-    let _changed = reflect::input_with_response(&ui, "ResponseDemo", &mut demo, &mut resp);
+    let _changed = reflect::input_with_response(ui, "ResponseDemo", &mut demo, &mut resp);
     assert!(resp.is_empty());
 
     // Mutate the data before the next frame so that container editors have
@@ -54,6 +52,6 @@ fn reflect_response_tracks_container_events_with_paths() {
 
     // Second pass: containers have elements; we still don't simulate clicks,
     // but this ensures that simply reflecting does not spuriously emit events.
-    let _changed = reflect::input_with_response(&ui, "ResponseDemo", &mut demo, &mut resp);
+    let _changed = reflect::input_with_response(ui, "ResponseDemo", &mut demo, &mut resp);
     assert!(resp.is_empty());
 }

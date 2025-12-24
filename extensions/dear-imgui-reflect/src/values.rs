@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::hash::BuildHasher;
 
+use crate::response;
 use crate::settings::with_settings_read;
 use crate::{
     ImGuiValue, TupleRenderMode, TupleSettings, imgui, imgui_array_with_settings,
@@ -259,7 +260,13 @@ where
                 if index > 0 {
                     ui.same_line();
                 }
-                *changed |= render_element(ui, index);
+                let local_changed = if response::is_field_path_active() {
+                    let segment = format!("[{index}]");
+                    response::with_field_path(&segment, || render_element(ui, index))
+                } else {
+                    render_element(ui, index)
+                };
+                *changed |= local_changed;
             }
         }
         TupleRenderMode::Grid => {
@@ -281,7 +288,13 @@ where
                 for index in 0..element_count {
                     ui.table_next_column();
                     let _id = ui.push_id(index as i32);
-                    *changed |= render_element(ui, index);
+                    let local_changed = if response::is_field_path_active() {
+                        let segment = format!("[{index}]");
+                        response::with_field_path(&segment, || render_element(ui, index))
+                    } else {
+                        render_element(ui, index)
+                    };
+                    *changed |= local_changed;
                 }
             }
         }

@@ -182,9 +182,8 @@ impl AppWindow {
                 size_pixels: Some(16.0),
                 config: None,
             }]);
-            // build atlas; renderer.new_frame() will pick up changes too
-            let mut fonts = context_imgui.fonts();
-            fonts.build();
+            // Do not call `fonts.build()` here: it must not be called before the renderer
+            // sets `ImGuiBackendFlags_RendererHasTextures` on the IO (ImGui 1.92+).
         }
 
         // Renderer
@@ -1163,7 +1162,6 @@ impl AppWindow {
             size_pixels: Some(size),
             config: Some(cfg),
         }]);
-        fonts.build();
         true
     }
 
@@ -1345,6 +1343,107 @@ impl AppWindow {
                 ui.separator();
                 ui.text("Preview: 你好, 世界! こんにちは! Hello! 🙂🚀");
                 ui.text("如果看不到中文或 Emoji，请点击上面的按钮加载字体，或把字体放到 examples/assets 下。");
+                // Diagnostics: help validate whether the current font contains the glyphs we expect.
+                {
+                    let wchar_bytes = std::mem::size_of::<dear_imgui_rs::sys::ImWchar>();
+                    let (
+                        backend_flags,
+                        atlas_locked,
+                        atlas_fonts,
+                        atlas_sources,
+                        font_sources,
+                        in_ni,
+                        loaded_ni,
+                        in_shi,
+                        loaded_shi,
+                        in_ko,
+                        loaded_ko,
+                    ) = unsafe {
+                        let to_wchar = |c: char| -> Option<dear_imgui_rs::sys::ImWchar> {
+                            let u = c as u32;
+                            if wchar_bytes == 2 {
+                                u16::try_from(u).ok().map(|v| v as dear_imgui_rs::sys::ImWchar)
+                            } else {
+                                Some(u as dear_imgui_rs::sys::ImWchar)
+                            }
+                        };
+
+                        let font = dear_imgui_rs::sys::igGetFont();
+                        let font_size = dear_imgui_rs::sys::igGetFontSize();
+                        let baked = if font.is_null() {
+                            std::ptr::null_mut()
+                        } else {
+                            dear_imgui_rs::sys::ImFont_GetFontBaked(font, font_size, 1.0)
+                        };
+
+                        let cp_ni = to_wchar('你');
+                        let cp_shi = to_wchar('世');
+                        let cp_ko = to_wchar('こ');
+
+                        let in_ni = cp_ni.is_some()
+                            && !font.is_null()
+                            && dear_imgui_rs::sys::ImFont_IsGlyphInFont(font, cp_ni.unwrap());
+                        let in_shi = cp_shi.is_some()
+                            && !font.is_null()
+                            && dear_imgui_rs::sys::ImFont_IsGlyphInFont(font, cp_shi.unwrap());
+                        let in_ko = cp_ko.is_some()
+                            && !font.is_null()
+                            && dear_imgui_rs::sys::ImFont_IsGlyphInFont(font, cp_ko.unwrap());
+
+                        let loaded_ni = cp_ni.is_some()
+                            && !baked.is_null()
+                            && dear_imgui_rs::sys::ImFontBaked_IsGlyphLoaded(baked, cp_ni.unwrap());
+                        let loaded_shi = cp_shi.is_some()
+                            && !baked.is_null()
+                            && dear_imgui_rs::sys::ImFontBaked_IsGlyphLoaded(baked, cp_shi.unwrap());
+                        let loaded_ko = cp_ko.is_some()
+                            && !baked.is_null()
+                            && dear_imgui_rs::sys::ImFontBaked_IsGlyphLoaded(baked, cp_ko.unwrap());
+
+                        let io = dear_imgui_rs::sys::igGetIO_Nil();
+                        if io.is_null() || (*io).Fonts.is_null() {
+                            (0, false, 0, 0, 0, in_ni, loaded_ni, in_shi, loaded_shi, in_ko, loaded_ko)
+                        } else {
+                            let atlas = (*io).Fonts;
+                            let font_sources = if font.is_null() {
+                                0
+                            } else {
+                                usize::try_from((*font).Sources.Size).unwrap_or(0)
+                            };
+                            (
+                                (*io).BackendFlags,
+                                (*atlas).Locked,
+                                usize::try_from((*atlas).Fonts.Size).unwrap_or(0),
+                                usize::try_from((*atlas).Sources.Size).unwrap_or(0),
+                                font_sources,
+                                in_ni,
+                                loaded_ni,
+                                in_shi,
+                                loaded_shi,
+                                in_ko,
+                                loaded_ko,
+                            )
+                        }
+                    };
+                    ui.text_disabled(&format!(
+                        "Diagnostics: BackendFlags=0x{:X} Locked={} | atlas fonts={} sources={} | font sources={} | U+4F60(in={}, loaded={}) U+4E16(in={}, loaded={}) U+3053(in={}, loaded={}) | ImWchar={} bytes",
+                        backend_flags,
+                        atlas_locked,
+                        atlas_fonts,
+                        atlas_sources,
+                        font_sources,
+                        in_ni,
+                        loaded_ni,
+                        in_shi,
+                        loaded_shi,
+                        in_ko,
+                        loaded_ko,
+                        wchar_bytes,
+                    ));
+                    if wchar_bytes == 2 {
+                        ui.text_disabled("Note: most emoji (e.g. 🙂) require IMGUI_USE_WCHAR32 (not enabled on this target).");
+                    }
+                }
 
                 ui.separator();
                 ui.text("Built-in Style Editor");

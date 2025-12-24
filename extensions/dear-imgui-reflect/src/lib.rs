@@ -268,7 +268,7 @@ pub use containers::{
     imgui_array_with_settings, imgui_btree_map_with_settings, imgui_hash_map_with_settings,
     imgui_vec_with_settings,
 };
-pub use response::{ReflectEvent, ReflectResponse, with_field_path};
+pub use response::{ReflectEvent, ReflectResponse, with_field_path, with_field_path_static};
 pub use settings::{
     ArraySettings, BoolSettings, BoolStyle, MapSettings, MemberSettings, NumericDefaultRange,
     NumericRange, NumericTypeSettings, NumericWidgetKind, ReflectSettings, TupleRenderMode,

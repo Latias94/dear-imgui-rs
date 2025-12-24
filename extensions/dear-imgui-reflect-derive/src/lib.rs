@@ -1,4 +1,5 @@
 use proc_macro::TokenStream;
+use proc_macro2::Span;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Type, parse_macro_input, parse_quote};
 
@@ -15,11 +16,14 @@ use crate::parse::{FieldAttrs, parse_field_attrs};
 ///
 /// Currently supports:
 ///
-/// - Structs with named fields. Each field must implement
+/// - Structs with named fields, tuple fields, and unit structs. Each field must implement
 ///   [`dear_imgui_reflect::ImGuiValue`], either directly or via a blanket
 ///   implementation (for example, another type that implements
 ///   [`dear_imgui_reflect::ImGuiReflect`]).
-/// - C-like enums (no payload). Variants are edited via a combo box.
+/// - Enums with unit, tuple, or named payload variants. Variants are edited via a combo box
+///   (default) or radio buttons via `#[imgui(enum_style = "radio")]`.
+///   Switching to a payload variant constructs its payload using `Default`, so payload field types
+///   must implement `Default` to allow variant switching.
 ///
 /// Supported field attributes:
 ///
@@ -52,28 +56,52 @@ fn derive_for_struct(
     mut generics: syn::Generics,
     data: syn::DataStruct,
 ) -> TokenStream {
-    let fields = match data.fields {
-        Fields::Named(named) => named.named,
-        _ => {
-            return syn::Error::new_spanned(
-                ident,
-                "ImGuiReflect currently supports only structs with named fields",
-            )
-            .to_compile_error()
-            .into();
-        }
-    };
+    let reflect_settings_ident = syn::Ident::new("__imgui_reflect_settings", Span::call_site());
+    enum FieldAccess {
+        Named(syn::Ident),
+        Unnamed(syn::Index),
+    }
 
     let mut field_stmts = Vec::new();
     let mut bound_types: Vec<Type> = Vec::new();
     let mut default_range_types: Vec<Type> = Vec::new();
 
-    for field in fields {
-        let field_ident = match &field.ident {
-            Some(id) => id.clone(),
-            None => continue,
-        };
+    let fields: Vec<(syn::Field, FieldAccess, syn::Ident, syn::LitStr)> = match data.fields {
+        Fields::Named(named) => named
+            .named
+            .into_iter()
+            .filter_map(|field| {
+                let ident = field.ident.clone()?;
+                let key = ident.to_string();
+                Some((
+                    field,
+                    FieldAccess::Named(ident.clone()),
+                    ident,
+                    syn::LitStr::new(&key, Span::call_site()),
+                ))
+            })
+            .collect(),
+        Fields::Unnamed(unnamed) => unnamed
+            .unnamed
+            .into_iter()
+            .enumerate()
+            .map(|(index, field)| {
+                let idx = syn::Index::from(index);
+                let field_ident_for_errors =
+                    syn::Ident::new(&format!("field_{index}"), Span::call_site());
+                let key = index.to_string();
+                (
+                    field,
+                    FieldAccess::Unnamed(idx),
+                    field_ident_for_errors,
+                    syn::LitStr::new(&key, Span::call_site()),
+                )
+            })
+            .collect(),
+        Fields::Unit => Vec::new(),
+    };
 
+    for (field, field_access, field_ident, field_name_lit) in fields {
         let parsed: FieldAttrs = match parse_field_attrs(&field_ident, &field) {
             Ok(attrs) => attrs,
             Err(err) => return err.to_compile_error().into(),
@@ -324,15 +352,13 @@ fn derive_for_struct(
         let label = if let Some(lit) = label_override {
             quote! { #lit }
         } else {
-            let name = field_ident.to_string();
-            let lit = syn::LitStr::new(&name, field_ident.span());
-            quote! { #lit }
+            quote! { #field_name_lit }
         };
 
-        // Use the original Rust field name (not the label override) as the
-        // stable identifier for member-level settings, similar to
-        // ImSettings::push_member<&T::field>() in ImReflect.
-        let field_name_lit = syn::LitStr::new(&field_ident.to_string(), field_ident.span());
+        let field_access_expr = match field_access {
+            FieldAccess::Named(ident) => quote! { self.#ident },
+            FieldAccess::Unnamed(index) => quote! { self.#index },
+        };
 
         bound_types.push(ty.clone());
         if slider_default_range {
@@ -343,6 +369,7 @@ fn derive_for_struct(
         let inner_stmt = match kind {
             FieldTypeKind::Bool => {
                 match codegen::gen_bool_field(
+                    &reflect_settings_ident,
                     &field_ident,
                     &field_name_lit,
                     &label,
@@ -616,7 +643,7 @@ fn derive_for_struct(
 
                         quote! {
                             {
-                                let mut builder = ui.input_scalar(#label, &mut self.#field_ident);
+                                let mut builder = ui.input_scalar(#label, __field);
                                 #fmt_stmt
                                 #step_stmt
                                 #step_fast_stmt
@@ -722,14 +749,14 @@ fn derive_for_struct(
                                     let mut slider = ui.slider_config(#label, min, max);
                                     #fmt_stmt
                                     #flags_stmt
-                                    let mut local_changed = slider.build(&mut self.#field_ident);
+                                    let mut local_changed = slider.build(__field);
                                     if #clamp_manual {
-                                        if self.#field_ident < min {
-                                            self.#field_ident = min;
+                                        if *__field < min {
+                                            *__field = min;
                                             local_changed = true;
                                         }
-                                        if self.#field_ident > max {
-                                            self.#field_ident = max;
+                                        if *__field > max {
+                                            *__field = max;
                                             local_changed = true;
                                         }
                                     }
@@ -745,14 +772,14 @@ fn derive_for_struct(
                                     let mut slider = ui.slider_config(#label, #min, #max);
                                     #fmt_stmt
                                     #flags_stmt
-                                    let mut local_changed = slider.build(&mut self.#field_ident);
+                                    let mut local_changed = slider.build(__field);
                                     if #clamp_manual {
-                                        if self.#field_ident < #min {
-                                            self.#field_ident = #min;
+                                        if *__field < #min {
+                                            *__field = #min;
                                             local_changed = true;
                                         }
-                                        if self.#field_ident > #max {
-                                            self.#field_ident = #max;
+                                        if *__field > #max {
+                                            *__field = #max;
                                             local_changed = true;
                                         }
                                     }
@@ -874,7 +901,7 @@ fn derive_for_struct(
                                 #speed_stmt
                                 #fmt_stmt
                                 #flags_stmt
-                                let local_changed = drag.build(ui, &mut self.#field_ident);
+                                let local_changed = drag.build(ui, __field);
                                 __changed |= local_changed;
                             }
                         }
@@ -888,7 +915,7 @@ fn derive_for_struct(
                                             NumericWidgetKind as __NumKind,
                                             NumericRange as __NumRange,
                                         };
-                                        let settings = ::dear_imgui_reflect::current_settings();
+                                        let settings = &#reflect_settings_ident;
                                         let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
                                             if let Some(member) = settings.member::<Self>(#field_name_lit) {
                                                 if let Some(ref override_settings) = member.numerics_i32 {
@@ -902,7 +929,7 @@ fn derive_for_struct(
                                         };
                                         match numeric.widget {
                                             __NumKind::Input => {
-                                                let mut builder = ui.input_scalar(#label, &mut self.#field_ident);
+                                                let mut builder = ui.input_scalar(#label, __field);
                                                 if let Some(ref fmt) = numeric.format {
                                                     builder = builder.display_format(fmt);
                                                 }
@@ -963,14 +990,14 @@ fn derive_for_struct(
                                                     }
                                                     slider = slider.flags(flags);
                                                 }
-                                                let mut local_changed = slider.build(&mut self.#field_ident);
+                                                let mut local_changed = slider.build(__field);
                                                 if numeric.clamp {
-                                                    if self.#field_ident < min {
-                                                        self.#field_ident = min;
+                                                    if *__field < min {
+                                                        *__field = min;
                                                         local_changed = true;
                                                     }
-                                                    if self.#field_ident > max {
-                                                        self.#field_ident = max;
+                                                    if *__field > max {
+                                                        *__field = max;
                                                         local_changed = true;
                                                     }
                                                 }
@@ -1027,7 +1054,7 @@ fn derive_for_struct(
                                                     }
                                                     drag = drag.flags(flags);
                                                 }
-                                                let local_changed = drag.build(ui, &mut self.#field_ident);
+                                                let local_changed = drag.build(ui, __field);
                                                 __changed |= local_changed;
                                             }
                                         }
@@ -1041,7 +1068,7 @@ fn derive_for_struct(
                                             NumericWidgetKind as __NumKind,
                                             NumericRange as __NumRange,
                                         };
-                                        let settings = ::dear_imgui_reflect::current_settings();
+                                        let settings = &#reflect_settings_ident;
                                         let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
                                             if let Some(member) = settings.member::<Self>(#field_name_lit) {
                                                 if let Some(ref override_settings) = member.numerics_u32 {
@@ -1055,7 +1082,7 @@ fn derive_for_struct(
                                         };
                                         match numeric.widget {
                                             __NumKind::Input => {
-                                                let mut builder = ui.input_scalar(#label, &mut self.#field_ident);
+                                                let mut builder = ui.input_scalar(#label, __field);
                                                 if let Some(ref fmt) = numeric.format {
                                                     builder = builder.display_format(fmt);
                                                 }
@@ -1116,14 +1143,14 @@ fn derive_for_struct(
                                                     }
                                                     slider = slider.flags(flags);
                                                 }
-                                                let mut local_changed = slider.build(&mut self.#field_ident);
+                                                let mut local_changed = slider.build(__field);
                                                 if numeric.clamp {
-                                                    if self.#field_ident < min {
-                                                        self.#field_ident = min;
+                                                    if *__field < min {
+                                                        *__field = min;
                                                         local_changed = true;
                                                     }
-                                                    if self.#field_ident > max {
-                                                        self.#field_ident = max;
+                                                    if *__field > max {
+                                                        *__field = max;
                                                         local_changed = true;
                                                     }
                                                 }
@@ -1179,7 +1206,7 @@ fn derive_for_struct(
                                                     }
                                                     drag = drag.flags(flags);
                                                 }
-                                                let local_changed = drag.build(ui, &mut self.#field_ident);
+                                                let local_changed = drag.build(ui, __field);
                                                 __changed |= local_changed;
                                             }
                                         }
@@ -1193,7 +1220,7 @@ fn derive_for_struct(
                                             NumericWidgetKind as __NumKind,
                                             NumericRange as __NumRange,
                                         };
-                                        let settings = ::dear_imgui_reflect::current_settings();
+                                        let settings = &#reflect_settings_ident;
                                         let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
                                             if let Some(member) = settings.member::<Self>(#field_name_lit) {
                                                 if let Some(ref override_settings) = member.numerics_f32 {
@@ -1207,7 +1234,7 @@ fn derive_for_struct(
                                         };
                                         match numeric.widget {
                                             __NumKind::Input => {
-                                                let mut builder = ui.input_scalar(#label, &mut self.#field_ident);
+                                                let mut builder = ui.input_scalar(#label, __field);
                                                 if let Some(ref fmt) = numeric.format {
                                                     builder = builder.display_format(fmt);
                                                 }
@@ -1268,14 +1295,14 @@ fn derive_for_struct(
                                                     }
                                                     slider = slider.flags(flags);
                                                 }
-                                                let mut local_changed = slider.build(&mut self.#field_ident);
+                                                let mut local_changed = slider.build(__field);
                                                 if numeric.clamp {
-                                                    if self.#field_ident < min {
-                                                        self.#field_ident = min;
+                                                    if *__field < min {
+                                                        *__field = min;
                                                         local_changed = true;
                                                     }
-                                                    if self.#field_ident > max {
-                                                        self.#field_ident = max;
+                                                    if *__field > max {
+                                                        *__field = max;
                                                         local_changed = true;
                                                     }
                                                 }
@@ -1331,7 +1358,7 @@ fn derive_for_struct(
                                                     }
                                                     drag = drag.flags(flags);
                                                 }
-                                                let local_changed = drag.build(ui, &mut self.#field_ident);
+                                                let local_changed = drag.build(ui, __field);
                                                 __changed |= local_changed;
                                             }
                                         }
@@ -1345,7 +1372,7 @@ fn derive_for_struct(
                                             NumericWidgetKind as __NumKind,
                                             NumericRange as __NumRange,
                                         };
-                                        let settings = ::dear_imgui_reflect::current_settings();
+                                        let settings = &#reflect_settings_ident;
                                         let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
                                             if let Some(member) = settings.member::<Self>(#field_name_lit) {
                                                 if let Some(ref override_settings) = member.numerics_f64 {
@@ -1359,7 +1386,7 @@ fn derive_for_struct(
                                         };
                                         match numeric.widget {
                                             __NumKind::Input => {
-                                                let mut builder = ui.input_scalar(#label, &mut self.#field_ident);
+                                                let mut builder = ui.input_scalar(#label, __field);
                                                 if let Some(ref fmt) = numeric.format {
                                                     builder = builder.display_format(fmt);
                                                 }
@@ -1420,14 +1447,14 @@ fn derive_for_struct(
                                                     }
                                                     slider = slider.flags(flags);
                                                 }
-                                                let mut local_changed = slider.build(&mut self.#field_ident);
+                                                let mut local_changed = slider.build(__field);
                                                 if numeric.clamp {
-                                                    if self.#field_ident < min {
-                                                        self.#field_ident = min;
+                                                    if *__field < min {
+                                                        *__field = min;
                                                         local_changed = true;
                                                     }
-                                                    if self.#field_ident > max {
-                                                        self.#field_ident = max;
+                                                    if *__field > max {
+                                                        *__field = max;
                                                         local_changed = true;
                                                     }
                                                 }
@@ -1483,7 +1510,7 @@ fn derive_for_struct(
                                                     }
                                                     drag = drag.flags(flags);
                                                 }
-                                                let local_changed = drag.build(ui, &mut self.#field_ident);
+                                                let local_changed = drag.build(ui, __field);
                                                 __changed |= local_changed;
                                             }
                                         }
@@ -1495,7 +1522,7 @@ fn derive_for_struct(
                                     __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                                         ui,
                                         #label,
-                                        &mut self.#field_ident,
+                                        __field,
                                     );
                                 }
                             }
@@ -1515,7 +1542,7 @@ fn derive_for_struct(
                         __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                             ui,
                             #label,
-                            &mut self.#field_ident,
+                            __field,
                         );
                     }
                 } else {
@@ -1577,8 +1604,8 @@ fn derive_for_struct(
                             let element_label =
                                 syn::LitStr::new(&format!("##{}", index), field_ident.span());
                             let element_member_name = syn::LitStr::new(
-                                &format!("{}[{}]", field_ident, index),
-                                field_ident.span(),
+                                &format!("{}[{}]", field_name_lit.value(), index),
+                                field_name_lit.span(),
                             );
 
                             // Decide whether this element should use numeric type-level
@@ -1592,7 +1619,7 @@ fn derive_for_struct(
                                                 NumericWidgetKind as __NumKind,
                                                 NumericRange as __NumRange,
                                             };
-                                            let settings = ::dear_imgui_reflect::current_settings();
+                                            let settings = &#reflect_settings_ident;
                                             let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
                                                 if let Some(member) = settings.member::<Self>(#element_member_name) {
                                                     if let Some(ref override_settings) = member.numerics_i32 {
@@ -1606,7 +1633,8 @@ fn derive_for_struct(
                                             };
                                             match numeric.widget {
                                                 __NumKind::Input => {
-                                                    let mut builder = ui.input_scalar(#element_label, &mut self.#field_ident.#idx);
+                                                    let mut builder =
+                                                        ui.input_scalar(#element_label, &mut __field.#idx);
                                                     if let Some(ref fmt) = numeric.format {
                                                         builder = builder.display_format(fmt);
                                                     }
@@ -1667,14 +1695,15 @@ fn derive_for_struct(
                                                         }
                                                         slider = slider.flags(flags);
                                                     }
-                                                    let mut local_changed = slider.build(&mut self.#field_ident.#idx);
+                                                    let mut local_changed =
+                                                        slider.build(&mut __field.#idx);
                                                     if numeric.clamp {
-                                                        if self.#field_ident.#idx < min {
-                                                            self.#field_ident.#idx = min;
+                                                        if __field.#idx < min {
+                                                            __field.#idx = min;
                                                             local_changed = true;
                                                         }
-                                                        if self.#field_ident.#idx > max {
-                                                            self.#field_ident.#idx = max;
+                                                        if __field.#idx > max {
+                                                            __field.#idx = max;
                                                             local_changed = true;
                                                         }
                                                     }
@@ -1730,7 +1759,7 @@ fn derive_for_struct(
                                                         }
                                                         drag = drag.flags(flags);
                                                     }
-                                                    drag.build(ui, &mut self.#field_ident.#idx)
+                                                    drag.build(ui, &mut __field.#idx)
                                                 }
                                             }
                                         }
@@ -1743,7 +1772,7 @@ fn derive_for_struct(
                                                 NumericWidgetKind as __NumKind,
                                                 NumericRange as __NumRange,
                                             };
-                                            let settings = ::dear_imgui_reflect::current_settings();
+                                            let settings = &#reflect_settings_ident;
                                             let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
                                                 if let Some(member) = settings.member::<Self>(#element_member_name) {
                                                     if let Some(ref override_settings) = member.numerics_u32 {
@@ -1757,7 +1786,8 @@ fn derive_for_struct(
                                             };
                                             match numeric.widget {
                                                 __NumKind::Input => {
-                                                    let mut builder = ui.input_scalar(#element_label, &mut self.#field_ident.#idx);
+                                                    let mut builder =
+                                                        ui.input_scalar(#element_label, &mut __field.#idx);
                                                     if let Some(ref fmt) = numeric.format {
                                                         builder = builder.display_format(fmt);
                                                     }
@@ -1818,14 +1848,15 @@ fn derive_for_struct(
                                                         }
                                                         slider = slider.flags(flags);
                                                     }
-                                                    let mut local_changed = slider.build(&mut self.#field_ident.#idx);
+                                                    let mut local_changed =
+                                                        slider.build(&mut __field.#idx);
                                                     if numeric.clamp {
-                                                        if self.#field_ident.#idx < min {
-                                                            self.#field_ident.#idx = min;
+                                                        if __field.#idx < min {
+                                                            __field.#idx = min;
                                                             local_changed = true;
                                                         }
-                                                        if self.#field_ident.#idx > max {
-                                                            self.#field_ident.#idx = max;
+                                                        if __field.#idx > max {
+                                                            __field.#idx = max;
                                                             local_changed = true;
                                                         }
                                                     }
@@ -1881,7 +1912,7 @@ fn derive_for_struct(
                                                         }
                                                         drag = drag.flags(flags);
                                                     }
-                                                    drag.build(ui, &mut self.#field_ident.#idx)
+                                                    drag.build(ui, &mut __field.#idx)
                                                 }
                                             }
                                         }
@@ -1894,7 +1925,7 @@ fn derive_for_struct(
                                                 NumericWidgetKind as __NumKind,
                                                 NumericRange as __NumRange,
                                             };
-                                            let settings = ::dear_imgui_reflect::current_settings();
+                                            let settings = &#reflect_settings_ident;
                                             let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
                                                 if let Some(member) = settings.member::<Self>(#element_member_name) {
                                                     if let Some(ref override_settings) = member.numerics_f32 {
@@ -1908,7 +1939,8 @@ fn derive_for_struct(
                                             };
                                             match numeric.widget {
                                                 __NumKind::Input => {
-                                                    let mut builder = ui.input_scalar(#element_label, &mut self.#field_ident.#idx);
+                                                    let mut builder =
+                                                        ui.input_scalar(#element_label, &mut __field.#idx);
                                                     if let Some(ref fmt) = numeric.format {
                                                         builder = builder.display_format(fmt);
                                                     }
@@ -1969,14 +2001,15 @@ fn derive_for_struct(
                                                         }
                                                         slider = slider.flags(flags);
                                                     }
-                                                    let mut local_changed = slider.build(&mut self.#field_ident.#idx);
+                                                    let mut local_changed =
+                                                        slider.build(&mut __field.#idx);
                                                     if numeric.clamp {
-                                                        if self.#field_ident.#idx < min {
-                                                            self.#field_ident.#idx = min;
+                                                        if __field.#idx < min {
+                                                            __field.#idx = min;
                                                             local_changed = true;
                                                         }
-                                                        if self.#field_ident.#idx > max {
-                                                            self.#field_ident.#idx = max;
+                                                        if __field.#idx > max {
+                                                            __field.#idx = max;
                                                             local_changed = true;
                                                         }
                                                     }
@@ -2032,7 +2065,7 @@ fn derive_for_struct(
                                                         }
                                                         drag = drag.flags(flags);
                                                     }
-                                                    drag.build(ui, &mut self.#field_ident.#idx)
+                                                    drag.build(ui, &mut __field.#idx)
                                                 }
                                             }
                                         }
@@ -2045,7 +2078,7 @@ fn derive_for_struct(
                                                 NumericWidgetKind as __NumKind,
                                                 NumericRange as __NumRange,
                                             };
-                                            let settings = ::dear_imgui_reflect::current_settings();
+                                            let settings = &#reflect_settings_ident;
                                             let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
                                                 if let Some(member) = settings.member::<Self>(#element_member_name) {
                                                     if let Some(ref override_settings) = member.numerics_f64 {
@@ -2059,7 +2092,8 @@ fn derive_for_struct(
                                             };
                                             match numeric.widget {
                                                 __NumKind::Input => {
-                                                    let mut builder = ui.input_scalar(#element_label, &mut self.#field_ident.#idx);
+                                                    let mut builder =
+                                                        ui.input_scalar(#element_label, &mut __field.#idx);
                                                     if let Some(ref fmt) = numeric.format {
                                                         builder = builder.display_format(fmt);
                                                     }
@@ -2120,14 +2154,15 @@ fn derive_for_struct(
                                                         }
                                                         slider = slider.flags(flags);
                                                     }
-                                                    let mut local_changed = slider.build(&mut self.#field_ident.#idx);
+                                                    let mut local_changed =
+                                                        slider.build(&mut __field.#idx);
                                                     if numeric.clamp {
-                                                        if (self.#field_ident.#idx as f64) < min {
-                                                            self.#field_ident.#idx = min as _;
+                                                        if (__field.#idx as f64) < min {
+                                                            __field.#idx = min as _;
                                                             local_changed = true;
                                                         }
-                                                        if (self.#field_ident.#idx as f64) > max {
-                                                            self.#field_ident.#idx = max as _;
+                                                        if (__field.#idx as f64) > max {
+                                                            __field.#idx = max as _;
                                                             local_changed = true;
                                                         }
                                                     }
@@ -2183,7 +2218,7 @@ fn derive_for_struct(
                                                         }
                                                         drag = drag.flags(flags);
                                                     }
-                                                    drag.build(ui, &mut self.#field_ident.#idx)
+                                                    drag.build(ui, &mut __field.#idx)
                                                 }
                                             }
                                         }
@@ -2194,7 +2229,7 @@ fn derive_for_struct(
                                         ::dear_imgui_reflect::ImGuiValue::imgui_value(
                                             ui,
                                             #element_label,
-                                            &mut self.#field_ident.#idx,
+                                            &mut __field.#idx,
                                         )
                                     }
                                 }
@@ -2203,7 +2238,7 @@ fn derive_for_struct(
                             per_element_arms.push(quote! {
                                 #index => {
                                     let __element_read_only = {
-                                        let settings = ::dear_imgui_reflect::current_settings();
+                                        let settings = &#reflect_settings_ident;
                                         if let Some(member) = settings.member::<Self>(#element_member_name) {
                                             member.read_only
                                         } else {
@@ -2231,7 +2266,7 @@ fn derive_for_struct(
 
                     quote! {
                         {
-                            let settings = ::dear_imgui_reflect::current_settings();
+                            let settings = &#reflect_settings_ident;
                             let mut tuple_settings =
                                 settings.tuples().clone();
                             if let Some(member) = settings.member::<Self>(#field_name_lit) {
@@ -2270,7 +2305,7 @@ fn derive_for_struct(
                             if seg.ident == "Vec" {
                                 quote! {
                                     {
-                                        let settings = ::dear_imgui_reflect::current_settings();
+                                        let settings = &#reflect_settings_ident;
                                         let vec_settings: ::dear_imgui_reflect::VecSettings = {
                                             if let Some(member) = settings.member::<Self>(#field_name_lit) {
                                                 if let Some(ref override_settings) = member.vec {
@@ -2285,7 +2320,7 @@ fn derive_for_struct(
                                         __changed |= ::dear_imgui_reflect::imgui_vec_with_settings(
                                             ui,
                                             #label,
-                                            &mut self.#field_ident,
+                                            __field,
                                             &vec_settings,
                                         );
                                     }
@@ -2295,7 +2330,7 @@ fn derive_for_struct(
                                     __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                                         ui,
                                         #label,
-                                        &mut self.#field_ident,
+                                        __field,
                                     );
                                 }
                             }
@@ -2304,7 +2339,7 @@ fn derive_for_struct(
                                 __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                                     ui,
                                     #label,
-                                    &mut self.#field_ident,
+                                    __field,
                                 );
                             }
                         }
@@ -2314,7 +2349,7 @@ fn derive_for_struct(
                             __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                                 ui,
                                 #label,
-                                &mut self.#field_ident,
+                                __field,
                             );
                         }
                     }
@@ -2326,7 +2361,7 @@ fn derive_for_struct(
                     Type::Array(_) => {
                         quote! {
                             {
-                                let settings = ::dear_imgui_reflect::current_settings();
+                                let settings = &#reflect_settings_ident;
                                 let arr_settings: ::dear_imgui_reflect::ArraySettings = {
                                     if let Some(member) = settings.member::<Self>(#field_name_lit) {
                                         if let Some(ref override_settings) = member.arrays {
@@ -2341,7 +2376,7 @@ fn derive_for_struct(
                                 __changed |= ::dear_imgui_reflect::imgui_array_with_settings(
                                     ui,
                                     #label,
-                                    &mut self.#field_ident,
+                                    __field,
                                     &arr_settings,
                                 );
                             }
@@ -2352,7 +2387,7 @@ fn derive_for_struct(
                             __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                                 ui,
                                 #label,
-                                &mut self.#field_ident,
+                                __field,
                             );
                         }
                     }
@@ -2368,7 +2403,7 @@ fn derive_for_struct(
                             if ident_str == "HashMap" {
                                 quote! {
                                     {
-                                        let settings = ::dear_imgui_reflect::current_settings();
+                                        let settings = &#reflect_settings_ident;
                                         let map_settings: ::dear_imgui_reflect::MapSettings = {
                                             if let Some(member) = settings.member::<Self>(#field_name_lit) {
                                                 if let Some(ref override_settings) = member.maps {
@@ -2383,7 +2418,7 @@ fn derive_for_struct(
                                         __changed |= ::dear_imgui_reflect::imgui_hash_map_with_settings(
                                             ui,
                                             #label,
-                                            &mut self.#field_ident,
+                                            __field,
                                             &map_settings,
                                         );
                                     }
@@ -2391,7 +2426,7 @@ fn derive_for_struct(
                             } else if ident_str == "BTreeMap" {
                                 quote! {
                                     {
-                                        let settings = ::dear_imgui_reflect::current_settings();
+                                        let settings = &#reflect_settings_ident;
                                         let map_settings: ::dear_imgui_reflect::MapSettings = {
                                             if let Some(member) = settings.member::<Self>(#field_name_lit) {
                                                 if let Some(ref override_settings) = member.maps {
@@ -2406,7 +2441,7 @@ fn derive_for_struct(
                                         __changed |= ::dear_imgui_reflect::imgui_btree_map_with_settings(
                                             ui,
                                             #label,
-                                            &mut self.#field_ident,
+                                            __field,
                                             &map_settings,
                                         );
                                     }
@@ -2416,7 +2451,7 @@ fn derive_for_struct(
                                     __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                                         ui,
                                         #label,
-                                        &mut self.#field_ident,
+                                        __field,
                                     );
                                 }
                             }
@@ -2425,7 +2460,7 @@ fn derive_for_struct(
                                 __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                                     ui,
                                     #label,
-                                    &mut self.#field_ident,
+                                    __field,
                                 );
                             }
                         }
@@ -2435,7 +2470,7 @@ fn derive_for_struct(
                             __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                                 ui,
                                 #label,
-                                &mut self.#field_ident,
+                                __field,
                             );
                         }
                     }
@@ -2446,7 +2481,7 @@ fn derive_for_struct(
                     __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
                         ui,
                         #label,
-                        &mut self.#field_ident,
+                        __field,
                     );
                 }
             }
@@ -2458,21 +2493,24 @@ fn derive_for_struct(
         let field_read_only = read_only;
         let stmt = quote! {
             {
-                let __member_read_only = {
-                    let settings = ::dear_imgui_reflect::current_settings();
-                    if let Some(member) = settings.member::<Self>(#field_name_lit) {
-                        member.read_only
+                ::dear_imgui_reflect::with_field_path_static(#field_name_lit, || {
+                    let __field = &mut #field_access_expr;
+                    let __member_read_only = {
+                        let settings = &#reflect_settings_ident;
+                        if let Some(member) = settings.member::<Self>(#field_name_lit) {
+                            member.read_only
+                        } else {
+                            false
+                        }
+                    };
+                    if #field_read_only || __member_read_only {
+                        let _disabled = ui.begin_disabled();
+                        #inner_stmt
+                        drop(_disabled);
                     } else {
-                        false
+                        #inner_stmt
                     }
-                };
-                if #field_read_only || __member_read_only {
-                    let _disabled = ui.begin_disabled();
-                    #inner_stmt
-                    drop(_disabled);
-                } else {
-                    #inner_stmt
-                }
+                });
             }
         };
 
@@ -2502,6 +2540,7 @@ fn derive_for_struct(
                 ui: &::dear_imgui_reflect::imgui::Ui,
                 label: &str,
             ) -> bool {
+                let #reflect_settings_ident = ::dear_imgui_reflect::current_settings();
                 let mut __changed = false;
                 if let Some(__node) = ui.tree_node(label) {
                     let _ = __node;

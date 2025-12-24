@@ -992,12 +992,16 @@ impl PlatformIo {
     pub fn textures(&self) -> crate::render::draw_data::TextureIterator<'_> {
         unsafe {
             let vector = &self.raw.Textures;
-            if vector.Size <= 0 || vector.Data.is_null() {
+            let size = match usize::try_from(vector.Size) {
+                Ok(size) => size,
+                Err(_) => 0,
+            };
+            if size == 0 || vector.Data.is_null() {
                 crate::render::draw_data::TextureIterator::new(std::ptr::null(), std::ptr::null())
             } else {
                 crate::render::draw_data::TextureIterator::new(
                     vector.Data,
-                    vector.Data.add(vector.Size as usize),
+                    vector.Data.add(size),
                 )
             }
         }
@@ -1006,11 +1010,10 @@ impl PlatformIo {
     /// Get the number of textures managed by the platform
     pub fn textures_count(&self) -> usize {
         let vector = &self.raw.Textures;
-        if vector.Size <= 0 || vector.Data.is_null() {
-            0
-        } else {
-            vector.Size as usize
+        if vector.Data.is_null() {
+            return 0;
         }
+        usize::try_from(vector.Size).unwrap_or(0)
     }
 
     /// Get a specific texture by index
@@ -1019,10 +1022,11 @@ impl PlatformIo {
     pub fn texture(&self, index: usize) -> Option<&crate::texture::TextureData> {
         unsafe {
             let vector = &self.raw.Textures;
-            if vector.Size <= 0 || vector.Data.is_null() {
+            let size = usize::try_from(vector.Size).ok()?;
+            if size == 0 || vector.Data.is_null() {
                 return None;
             }
-            if index >= vector.Size as usize {
+            if index >= size {
                 return None;
             }
             let texture_ptr = *vector.Data.add(index);
@@ -1039,10 +1043,11 @@ impl PlatformIo {
     pub fn texture_mut(&mut self, index: usize) -> Option<&mut crate::texture::TextureData> {
         unsafe {
             let vector = &self.raw.Textures;
-            if vector.Size <= 0 || vector.Data.is_null() {
+            let size = usize::try_from(vector.Size).ok()?;
+            if size == 0 || vector.Data.is_null() {
                 return None;
             }
-            if index >= vector.Size as usize {
+            if index >= size {
                 return None;
             }
             let texture_ptr = *vector.Data.add(index);

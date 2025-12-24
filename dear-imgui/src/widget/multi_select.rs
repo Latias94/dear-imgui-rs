@@ -319,18 +319,18 @@ unsafe fn apply_multi_select_requests_indexed<S: MultiSelectIndexStorage>(
         }
 
         let io_ref: &mut sys::ImGuiMultiSelectIO = &mut *ms_io;
-        let items_count = if io_ref.ItemsCount < 0 {
-            0
-        } else {
-            io_ref.ItemsCount as usize
-        };
+        let items_count = usize::try_from(io_ref.ItemsCount).unwrap_or(0);
 
         let requests = &mut io_ref.Requests;
         if requests.Data.is_null() || requests.Size <= 0 {
             return;
         }
 
-        let slice = std::slice::from_raw_parts_mut(requests.Data, requests.Size as usize);
+        let len = match usize::try_from(requests.Size) {
+            Ok(len) => len,
+            Err(_) => return,
+        };
+        let slice = std::slice::from_raw_parts_mut(requests.Data, len);
 
         for req in slice {
             if req.Type == sys::ImGuiSelectionRequestType_SetAll {
@@ -366,12 +366,13 @@ pub struct MultiSelectScope<'ui> {
 impl<'ui> MultiSelectScope<'ui> {
     fn new(flags: MultiSelectFlags, selection_size: Option<i32>, items_count: usize) -> Self {
         let selection_size_i32 = selection_size.unwrap_or(-1);
+        let items_count_i32 = i32::try_from(items_count).unwrap_or(i32::MAX);
         let ms_io_begin = unsafe {
-            sys::igBeginMultiSelect(flags.bits(), selection_size_i32, items_count as i32)
+            sys::igBeginMultiSelect(flags.bits(), selection_size_i32, items_count_i32)
         };
         Self {
             ms_io_begin,
-            items_count: items_count as i32,
+            items_count: items_count_i32,
             _marker: std::marker::PhantomData,
         }
     }
@@ -649,7 +650,11 @@ unsafe fn apply_multi_select_requests_basic<G>(
             return;
         }
 
-        let slice = std::slice::from_raw_parts_mut(requests.Data, requests.Size as usize);
+        let len = match usize::try_from(requests.Size) {
+            Ok(len) => len,
+            Err(_) => return,
+        };
+        let slice = std::slice::from_raw_parts_mut(requests.Data, len);
 
         for req in slice {
             if req.Type == sys::ImGuiSelectionRequestType_SetAll {

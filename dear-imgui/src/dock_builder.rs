@@ -472,8 +472,17 @@ impl DockBuilder {
         // Build CStrings and a contiguous array of const char* pointers
         let mut cstrings: Vec<CString> = Vec::with_capacity(window_remaps.len() * 2);
         for (src, dst) in window_remaps {
-            cstrings.push(CString::new(*src).expect("Source window name contained null byte"));
-            cstrings.push(CString::new(*dst).expect("Destination window name contained null byte"));
+            let Ok(src) = CString::new(*src) else {
+                continue;
+            };
+            let Ok(dst) = CString::new(*dst) else {
+                continue;
+            };
+            cstrings.push(src);
+            cstrings.push(dst);
+        }
+        if cstrings.is_empty() {
+            return;
         }
         let ptrs: Vec<*const i8> = cstrings.iter().map(|s| s.as_ptr()).collect();
         let mut boxed: Box<[*const i8]> = ptrs.into_boxed_slice();
@@ -510,7 +519,13 @@ impl DockBuilder {
         unsafe {
             if !out.Data.is_null() {
                 if out.Size > 0 {
-                    let len = out.Size as usize;
+                    let len = match usize::try_from(out.Size) {
+                        Ok(len) => len,
+                        Err(_) => {
+                            sys::igMemFree(out.Data as *mut c_void);
+                            return result;
+                        }
+                    };
                     let slice_ids = slice::from_raw_parts(out.Data, len);
                     // Interpret as pairs
                     for pair in slice_ids.chunks_exact(2) {

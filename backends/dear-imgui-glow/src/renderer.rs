@@ -226,8 +226,12 @@ impl GlowRenderer {
     ) -> InitResult<GlTexture> {
         let mut fonts = imgui_context.fonts();
 
-        // Build the font atlas CPU data
-        fonts.build();
+        // Build the font atlas CPU data (legacy/fallback path only).
+        // With ImGui 1.92+ and BackendFlags::RENDERER_HAS_TEXTURES, the renderer will normally
+        // receive font texture requests via DrawData::textures().
+        if !fonts.is_built() {
+            fonts.build();
+        }
 
         // Try to upload the font atlas immediately (font-atlas fallback, legacy-style),
         // mirroring dear imgui's OpenGL3 backend and our WGPU backend behavior.

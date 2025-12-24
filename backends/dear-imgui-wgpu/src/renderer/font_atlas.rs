@@ -56,11 +56,20 @@ impl WgpuRenderer {
             let h = (*raw_tex).Height as u32;
             let bpp = (*raw_tex).BytesPerPixel;
             let px_ptr = (*raw_tex).Pixels as *const u8;
-            if px_ptr.is_null() || w == 0 || h == 0 {
+            if px_ptr.is_null() || w == 0 || h == 0 || bpp <= 0 {
                 (w, h, bpp, None)
             } else {
-                let size = (w as usize) * (h as usize) * (bpp as usize).max(1);
-                (w, h, bpp, Some(std::slice::from_raw_parts(px_ptr, size)))
+                let bpp_usize = match usize::try_from(bpp) {
+                    Ok(v) if v > 0 => v,
+                    _ => 0,
+                };
+                let size = (w as usize)
+                    .checked_mul(h as usize)
+                    .and_then(|v| v.checked_mul(bpp_usize));
+                match size {
+                    Some(size) => (w, h, bpp, Some(std::slice::from_raw_parts(px_ptr, size))),
+                    None => (w, h, bpp, None),
+                }
             }
         };
 
@@ -77,7 +86,15 @@ impl WgpuRenderer {
                 (wgpu::TextureFormat::Rgba8Unorm, src.to_vec())
             } else if bpp == 1 {
                 // Alpha8 -> RGBA8 (white RGB + alpha)
-                let mut out = Vec::with_capacity((width as usize) * (height as usize) * 4);
+                let px_count = match (width as usize).checked_mul(height as usize) {
+                    Some(v) => v,
+                    None => return Ok(None),
+                };
+                let cap = match px_count.checked_mul(4) {
+                    Some(v) => v,
+                    None => return Ok(None),
+                };
+                let mut out = Vec::with_capacity(cap);
                 for &a in src.iter() {
                     out.extend_from_slice(&[255, 255, 255, a]);
                 }

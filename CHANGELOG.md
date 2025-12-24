@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-implot`: add non-variadic text helpers for annotations/tags (avoids calling C `...`, useful for import-style WASM).
   - `dear-imguizmo`: expose safe alternative-window helpers and byte-slice ID helpers (`str_begin/str_end` form).
   - `dear-imnodes`: expose accessors for the current/raw context pointer.
+  - `dear-imgui-reflect`: derive now supports tuple/unit structs and enums with payload variants (payload types must implement `Default` to allow switching); vector editor adds per-item context menus (insert/remove/move/clear), nested container edits now include index/key segments in response paths (e.g. `items[0]`, `map["k"]`), and `ReflectEvent` is now `#[non_exhaustive]` (includes new `ReflectEvent::VecCleared`).
 
 ### Fixed
 
@@ -43,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - InputText (String-backed): avoid undefined behavior when trimming at NUL by zero-initializing spare capacity, including during ImGui resize callbacks.
   - Deprecated glyph ranges: fix `GlyphRangesBuilder::add_ranges` to pass the correct `ImWchar` layout, and free internal `ImVector_ImWchar` buffers; add `Drop` for the underlying C++ builder.
   - Dynamic fonts: fix `FontConfig::glyph_exclude_ranges` to pass the correct `ImWchar` layout (and now owns the converted ranges buffer, ensuring it is NUL-terminated).
+  - Dynamic fonts: discard baked glyph caches when adding merge-mode fonts, so runtime font merging can override previously-missing glyphs (e.g. `style_and_fonts` CJK merge).
   - Managed textures: avoid null pointer arithmetic when iterating `DrawData::textures()` / `PlatformIo::textures()` on empty lists; make `DrawData::texture{,_mut}` robust to negative vector sizes.
   - Managed textures: fix `ImTextureData` ownership by introducing `OwnedTextureData` (C++ constructed/destroyed) and making `TextureData::new()` return it; use `ImTextureData_SetStatus`/`ImTextureData_SetTexID` to preserve ImGui's internal state machine.
   - Managed textures: `TextureData::set_status(Destroyed)` now clears `TexID`/`BackendUserData` to match Dear ImGui's texture contract and avoid asserts.
@@ -60,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-glow`: validate `TextureId` range when updating existing OpenGL textures (avoid truncation/panic).
   - `dear-imgui-wgpu`: avoid `transmute` for `wgpu::Surface` lifetimes in multi-viewport backends, harden draw offsets against integer overflow, and avoid panicking when retrieving cached bind groups.
   - `dear-imgui-wgpu`: keep existing GPU texture and mark status `OK` when a `WantUpdates` upload fails (avoids invalid `TexID` during the same frame).
+  - `dear-imgui-reflect`: harden response/settings scopes against panics, fix `Vec` button ID collisions, reduce `BTreeMap` editor overhead, and clean up map-add popup temporary state.
 
 ### Changed
 
@@ -147,6 +150,9 @@ Upstream Dear ImGui/cimgui version is unchanged in this release (still Dear ImGu
 - dear-app
   - Render loop now performs basic GPU/surface loss recovery: if a frame render returns a fatal GPU error, dear-app tears down the existing `AppWindow` and attempts to recreate the WGPU device/surface/renderer stack using the same `RunnerConfig`/add-ons.
   - Existing graceful handling of `SurfaceError::Lost`/`Outdated` remains in place (surface is reconfigured in-place when possible); the new logic adds a “full rebuild” path for irrecoverable errors instead of leaving the app in a broken redraw loop.
+
+- Examples
+  - `ime_debug`: add a runtime CJK merge button and `DEAR_IMGUI_DEFER_CJK=1` mode to validate dynamic font merging after missing-glyph caching (WGPU path).
 
 
 ## [0.6.0] - 2025-11-28

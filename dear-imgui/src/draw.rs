@@ -167,9 +167,13 @@ impl DrawList {
             if (*self.0).CmdBuffer.Size <= 0 || (*self.0).CmdBuffer.Data.is_null() {
                 return &[];
             }
+            let len = match usize::try_from((*self.0).CmdBuffer.Size) {
+                Ok(len) => len,
+                Err(_) => return &[],
+            };
             std::slice::from_raw_parts(
                 (*self.0).CmdBuffer.Data as *const sys::ImDrawCmd,
-                (*self.0).CmdBuffer.Size as usize,
+                len,
             )
         }
     }
@@ -180,9 +184,13 @@ impl DrawList {
             if (*self.0).VtxBuffer.Size <= 0 || (*self.0).VtxBuffer.Data.is_null() {
                 return &[];
             }
+            let len = match usize::try_from((*self.0).VtxBuffer.Size) {
+                Ok(len) => len,
+                Err(_) => return &[],
+            };
             std::slice::from_raw_parts(
                 (*self.0).VtxBuffer.Data as *const crate::render::DrawVert,
-                (*self.0).VtxBuffer.Size as usize,
+                len,
             )
         }
     }
@@ -193,7 +201,11 @@ impl DrawList {
             if (*self.0).IdxBuffer.Size <= 0 || (*self.0).IdxBuffer.Data.is_null() {
                 return &[];
             }
-            std::slice::from_raw_parts((*self.0).IdxBuffer.Data, (*self.0).IdxBuffer.Size as usize)
+            let len = match usize::try_from((*self.0).IdxBuffer.Size) {
+                Ok(len) => len,
+                Err(_) => return &[],
+            };
+            std::slice::from_raw_parts((*self.0).IdxBuffer.Data, len)
         }
     }
 

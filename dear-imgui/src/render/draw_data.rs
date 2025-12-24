@@ -193,9 +193,13 @@ impl DrawData {
             if self.cmd_lists_count <= 0 || self.cmd_lists.data.is_null() {
                 return &[];
             }
+            let len = match usize::try_from(self.cmd_lists_count) {
+                Ok(len) => len,
+                Err(_) => return &[],
+            };
             slice::from_raw_parts(
                 self.cmd_lists.data as *const *const DrawList,
-                self.cmd_lists_count as usize,
+                len,
             )
         }
     }
@@ -269,7 +273,11 @@ impl DrawList {
             if cmd_buffer.Size <= 0 || cmd_buffer.Data.is_null() {
                 return &[];
             }
-            slice::from_raw_parts(cmd_buffer.Data, cmd_buffer.Size as usize)
+            let len = match usize::try_from(cmd_buffer.Size) {
+                Ok(len) => len,
+                Err(_) => return &[],
+            };
+            slice::from_raw_parts(cmd_buffer.Data, len)
         }
     }
 
@@ -289,7 +297,11 @@ impl DrawList {
             if vtx_buffer.Size <= 0 || vtx_buffer.Data.is_null() {
                 return &[];
             }
-            slice::from_raw_parts(vtx_buffer.Data as *const DrawVert, vtx_buffer.Size as usize)
+            let len = match usize::try_from(vtx_buffer.Size) {
+                Ok(len) => len,
+                Err(_) => return &[],
+            };
+            slice::from_raw_parts(vtx_buffer.Data as *const DrawVert, len)
         }
     }
 
@@ -300,7 +312,11 @@ impl DrawList {
             if idx_buffer.Size <= 0 || idx_buffer.Data.is_null() {
                 return &[];
             }
-            slice::from_raw_parts(idx_buffer.Data, idx_buffer.Size as usize)
+            let len = match usize::try_from(idx_buffer.Size) {
+                Ok(len) => len,
+                Err(_) => return &[],
+            };
+            slice::from_raw_parts(idx_buffer.Data, len)
         }
     }
 }

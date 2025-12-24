@@ -1,7 +1,12 @@
 use dear_imgui_reflect as reflect;
 
+mod common;
+
+use common::test_guard;
+
 #[test]
 fn settings_scope_restores_global_defaults() {
+    let _guard = test_guard();
     use reflect::{NumericRange, NumericTypeSettings, NumericWidgetKind};
 
     // Establish a known global baseline for i32 numeric settings.

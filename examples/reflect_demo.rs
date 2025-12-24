@@ -363,6 +363,13 @@ fn main() {
                                         from, to, path
                                     ));
                                 }
+                                reflect::ReflectEvent::VecCleared { path, previous_len } => {
+                                    let path = path.as_deref().unwrap_or("<unknown field>");
+                                    ui.bullet_text(&format!(
+                                        "VecCleared ({} entries removed) (field: {})",
+                                        previous_len, path
+                                    ));
+                                }
                                 reflect::ReflectEvent::ArrayReordered { path, from, to } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
                                     ui.bullet_text(&format!(
@@ -398,6 +405,7 @@ fn main() {
                                         previous_len, path
                                     ));
                                 }
+                                _ => {}
                             }
                         }
                     }

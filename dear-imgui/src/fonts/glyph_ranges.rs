@@ -81,7 +81,14 @@ impl GlyphRangesBuilder {
             // Convert ImVector to Vec
             let mut result: Vec<u32> = Vec::new();
             if out_ranges.Size > 0 && !out_ranges.Data.is_null() {
-                let len = out_ranges.Size as usize;
+                let len = match usize::try_from(out_ranges.Size) {
+                    Ok(len) => len,
+                    Err(_) => 0,
+                };
+                if len == 0 {
+                    sys::ImVector_ImWchar_UnInit(&mut out_ranges);
+                    return result;
+                }
                 result = Vec::with_capacity(len);
                 for i in 0..len {
                     result.push(*out_ranges.Data.add(i) as u32);

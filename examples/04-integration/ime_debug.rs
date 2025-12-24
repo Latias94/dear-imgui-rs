@@ -31,7 +31,35 @@ mod wgpu_init;
 /// - Always ensure a default font is present.
 /// - If a CJK font is available under `examples/assets`, merge it so IME
 ///   input (e.g. Chinese/Japanese) renders instead of showing `?`.
-fn init_fonts(context: &mut Context) {
+fn try_merge_noto_sans_sc(context: &mut Context) -> Result<(), String> {
+    let path = "examples/assets/NotoSansSC-Regular.ttf";
+    let data = std::fs::read(path)
+        .map_err(|e| format!("Failed to read {} ({}).", path, e))?;
+
+    // Minimal sanity check: classic TrueType header (0x00010000) or 'true'.
+    if data.len() < 4 {
+        return Err(format!("{} is too small to be a valid TTF.", path));
+    }
+    let tag = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+    const TAG_TRUE: u32 = 0x7472_7565; // 'true'
+    if !(tag == 0x0001_0000 || tag == TAG_TRUE) {
+        return Err(format!(
+            "{} does not look like a TrueType font (unexpected header).",
+            path
+        ));
+    }
+
+    let mut fonts = context.fonts();
+    let cfg = FontConfig::new().size_pixels(18.0).merge_mode(true);
+    let _id = fonts.add_font(&[FontSource::TtfData {
+        data: &data,
+        size_pixels: Some(18.0),
+        config: Some(cfg),
+    }]);
+    Ok(())
+}
+
+fn init_fonts(context: &mut Context) -> bool {
     let mut fonts = context.fonts();
 
     // Make sure we have a default Latin font.
@@ -40,49 +68,25 @@ fn init_fonts(context: &mut Context) {
         config: None,
     }]);
 
-    // Optional: merge a CJK font if present.
-    // The repository ships `examples/assets/NotoSansSC-Regular.ttf` (Noto Sans SC).
-    // If the file is missing or invalid, we skip it and keep ASCII-only rendering.
-    let path = "examples/assets/NotoSansSC-Regular.ttf";
-    match std::fs::read(path) {
-        Ok(data) => {
-            // Minimal sanity check: classic TrueType header (0x00010000) or 'true'.
-            if data.len() >= 4 {
-                let tag = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
-                const TAG_TRUE: u32 = 0x7472_7565; // 'true'
-                if tag == 0x0001_0000 || tag == TAG_TRUE {
-                    let cfg = FontConfig::new().size_pixels(18.0).merge_mode(true);
-                    let _id = fonts.add_font(&[FontSource::TtfData {
-                        data: &data,
-                        size_pixels: Some(18.0),
-                        config: Some(cfg),
-                    }]);
-                } else {
-                    eprintln!(
-                        "[ime_debug] {} does not look like a TrueType font (unexpected header); skipping CJK font.",
-                        path
-                    );
-                }
-            } else {
-                eprintln!(
-                    "[ime_debug] {} is too small to be a valid TTF; skipping CJK font.",
-                    path
-                );
-            }
-        }
-        Err(err) => {
-            eprintln!(
-                "[ime_debug] Failed to read {} ({}); IME text will fall back to ASCII-only fonts.",
-                path, err
-            );
-        }
+    // Optional debug mode: skip the initial CJK merge so we can reproduce/test runtime merging.
+    // If you render CJK before merging, Dear ImGui may cache "missing glyph" results in baked
+    // font data. Our Rust wrapper discards those baked caches automatically when adding
+    // merge-mode fonts, so the runtime merge should still take effect.
+    let defer_cjk_merge = std::env::var_os("DEAR_IMGUI_DEFER_CJK").is_some();
+    if defer_cjk_merge {
+        eprintln!("[ime_debug] DEAR_IMGUI_DEFER_CJK is set: skip initial CJK merge.");
+        return false;
     }
 
-    // Note:
-    // Do not call `fonts.build()` here. With the ImGui 1.92+ "new backend"
-    // model, font atlas building should happen after the renderer has set
-    // ImGuiBackendFlags_RendererHasTextures, typically via the renderer
-    // or NewFrame path. Here we only register font sources into the atlas.
+    // Optional: merge a CJK font if present.
+    // If the file is missing or invalid, we skip it and keep ASCII-only rendering.
+    match try_merge_noto_sans_sc(context) {
+        Ok(()) => true,
+        Err(msg) => {
+            eprintln!("[ime_debug] {} Put NotoSansSC-Regular.ttf under examples/assets/.", msg);
+            false
+        }
+    }
 }
 
 struct ImguiState {
@@ -102,9 +106,32 @@ struct AppWindow {
     input_text: String,
     ime_forced: bool,
     ime_force_state: bool,
+    cjk_merged: bool,
+    pending_merge_cjk: bool,
+    font_status: String,
 }
 
 impl AppWindow {
+    fn merge_cjk_font(&mut self) {
+        if self.cjk_merged {
+            self.font_status = "[OK] CJK font already merged".to_string();
+            return;
+        }
+
+        match try_merge_noto_sans_sc(&mut self.imgui.context) {
+            Ok(()) => {
+                self.cjk_merged = true;
+                self.font_status = "[OK] CJK font merged (runtime)".to_string();
+            }
+            Err(msg) => {
+                self.font_status = format!(
+                    "[WARN] {} Put NotoSansSC-Regular.ttf under examples/assets/.",
+                    msg
+                );
+            }
+        }
+    }
+
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         // Create window and WGPU surface using the shared helper
         let window: Arc<Window> = Arc::new(
@@ -124,7 +151,7 @@ impl AppWindow {
         context.set_ini_filename(None::<String>).unwrap();
 
         // Fonts: default + optional CJK merge (Noto Sans SC) for IME text.
-        init_fonts(&mut context);
+        let cjk_merged = init_fonts(&mut context);
 
         // Basic style
         unsafe {
@@ -155,6 +182,9 @@ impl AppWindow {
             input_text: String::new(),
             ime_forced: false,
             ime_force_state: false,
+            cjk_merged,
+            pending_merge_cjk: false,
+            font_status: String::new(),
         })
     }
 
@@ -174,6 +204,12 @@ impl AppWindow {
             .io_mut()
             .set_delta_time(delta_time.as_secs_f32());
         self.imgui.last_frame = now;
+
+        // Apply deferred font merge before starting a new ImGui frame.
+        if self.pending_merge_cjk {
+            self.merge_cjk_font();
+            self.pending_merge_cjk = false;
+        }
 
         let frame = match self.surface.get_current_texture() {
             Ok(f) => f,
@@ -215,6 +251,19 @@ impl AppWindow {
                 ui.input_text("Input", &mut self.input_text)
                     .hint("Type here...")
                     .build();
+
+                ui.separator();
+                ui.text("Font merge test (runtime):");
+                ui.text("Preview: 你好, 世界! こんにちは!");
+                ui.text_disabled(
+                    "Tip: run with DEAR_IMGUI_DEFER_CJK=1 to reproduce runtime merge after rendering '?' once.",
+                );
+                if ui.button("Load + Merge CJK (NotoSansSC)") {
+                    // Defer to the next frame to avoid borrowing conflicts while building UI.
+                    self.pending_merge_cjk = true;
+                }
+                ui.same_line();
+                ui.text_disabled(&self.font_status);
 
                 ui.separator();
                 ui.text("IO / backend state:");
