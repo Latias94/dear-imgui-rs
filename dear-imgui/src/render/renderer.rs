@@ -10,16 +10,18 @@ pub use crate::texture::{RawTextureId, TextureData, TextureFormat, TextureRect, 
 mod tests {
     use super::*;
     use crate::texture::TextureId;
-    use std::ffi::c_void;
     use std::mem;
 
     #[test]
     fn test_texture_id_memory_layout() {
-        // Ensure TextureId has the same size as a pointer
-        assert_eq!(mem::size_of::<TextureId>(), mem::size_of::<*const c_void>());
+        // Ensure TextureId matches Dear ImGui's ImTextureID (ImU64 in v1.91.4+).
+        assert_eq!(
+            mem::size_of::<TextureId>(),
+            mem::size_of::<crate::sys::ImTextureID>()
+        );
         assert_eq!(
             mem::align_of::<TextureId>(),
-            mem::align_of::<*const c_void>()
+            mem::align_of::<crate::sys::ImTextureID>()
         );
     }
 

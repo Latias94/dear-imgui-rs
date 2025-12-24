@@ -69,6 +69,11 @@ impl<T> From<*mut T> for TextureId {
 impl From<TextureId> for *const c_void {
     #[inline]
     fn from(id: TextureId) -> Self {
+        debug_assert!(
+            id.0 <= (usize::MAX as u64),
+            "TextureId value {} exceeds pointer width on this target",
+            id.0
+        );
         id.0 as usize as *const c_void
     }
 }
@@ -76,6 +81,11 @@ impl From<TextureId> for *const c_void {
 impl From<TextureId> for *mut c_void {
     #[inline]
     fn from(id: TextureId) -> Self {
+        debug_assert!(
+            id.0 <= (usize::MAX as u64),
+            "TextureId value {} exceeds pointer width on this target",
+            id.0
+        );
         id.0 as usize as *mut c_void
     }
 }
@@ -92,6 +102,11 @@ impl From<usize> for TextureId {
 impl From<TextureId> for usize {
     #[inline]
     fn from(id: TextureId) -> Self {
+        debug_assert!(
+            id.0 <= (usize::MAX as u64),
+            "TextureId value {} exceeds usize width on this target",
+            id.0
+        );
         id.0 as usize
     }
 }
@@ -104,7 +119,14 @@ impl Default for TextureId {
 }
 
 /// Raw texture ID type for compatibility with Dear ImGui
-pub type RawTextureId = *const c_void;
+pub type RawTextureId = sys::ImTextureID;
+
+impl From<TextureId> for RawTextureId {
+    #[inline]
+    fn from(id: TextureId) -> Self {
+        id.id() as sys::ImTextureID
+    }
+}
 
 /// A convenient, typed wrapper around ImGui's ImTextureRef (v1.92+)
 ///
