@@ -1499,7 +1499,7 @@ impl TextCallbackData {
             );
 
             let str = std::str::from_utf8_mut(std::slice::from_raw_parts_mut(
-                (*(self.0)).Buf as *const _ as *mut _,
+                (*(self.0)).Buf as *mut u8,
                 (*(self.0)).BufTextLen as usize,
             ))
             .expect("internal imgui error -- it boofed a utf8");

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - GL state restore: treat negative `glGetIntegerv` results defensively when restoring bindings (avoid casting `i32` → `u32` blindly).
 - `dear-imgui-winit`
   - Multi-viewport: avoid freeing `ViewportData` while an `&mut ViewportData` reference is still live (raw-pointer cleanup instead).
+  - Multi-viewport: avoid creating `&mut Window` references from stored raw window pointers in platform callbacks.
 - Extensions
   - `dear-implot`: fix `SubplotToken`/`MultiAxisToken`/`LegendToken` double-end by letting `Drop` perform the actual `End*` call; make subplot ratio buffers owned to avoid casting away constness.
   - `dear-implot`: keep axis formatter/transform closures alive for the full plot scope (avoid dangling `user_data` pointers if tokens are dropped early).

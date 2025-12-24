@@ -935,7 +935,7 @@ unsafe extern "C" fn winit_set_window_pos(
         let vp_ref = unsafe { &*vp };
         let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
         if let Some(vd) = unsafe { vd_ptr.as_mut() } {
-            if let Some(window) = unsafe { vd.window.as_mut() } {
+            if let Some(window) = unsafe { vd.window.as_ref() } {
                 // ImGui provides screen-space logical coordinates relative to client origin.
                 // Convert to outer coordinates for winit by subtracting decoration offset.
                 let desired_client = LogicalPosition::new(pos.x as f64, pos.y as f64);
@@ -1083,7 +1083,7 @@ unsafe extern "C" fn winit_set_window_size(
         let vp_ref = unsafe { &*vp };
         let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
         if let Some(vd) = unsafe { vd_ptr.as_mut() } {
-            if let Some(window) = unsafe { vd.window.as_mut() } {
+            if let Some(window) = unsafe { vd.window.as_ref() } {
                 // ImGui provides inner size in logical pixels; pass through directly.
                 let logical: LogicalSize<f64> = LogicalSize::new(size.x as f64, size.y as f64);
                 let _ = window.request_inner_size(winit::dpi::Size::Logical(logical));
