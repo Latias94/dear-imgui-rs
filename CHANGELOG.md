@@ -9,57 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Core (`dear-imgui-rs`)
-  - Draw callbacks: avoid creating `&mut` references from `*const` FFI pointers when clearing callback user data; ensure `add_callback_safe` stores a direct userdata pointer (`userdata_size = 0`) so Dear ImGui doesn't copy closure bytes into its internal callback buffer (fixes UB when executing callbacks).
-  - Drag and drop typed payloads: avoid passing uninitialized padding bytes across the C++ boundary and read payload bytes using `read_unaligned` instead of creating references into Dear ImGui's unaligned payload storage (fixes UB).
-  - Font atlas: make `FontAtlas::add_font_from_memory_ttf` always copy the TTF bytes into Dear ImGui-owned memory (via `igMemAlloc`) and set `FontDataOwnedByAtlas=true` so the atlas can safely rebuild and free the buffer (fixes potential use-after-free/double-free when passing Rust-owned buffers).
-  - Font atlas: add safe wrappers for `AddFontFromMemoryCompressedTTF` / `AddFontFromMemoryCompressedBase85TTF` and extend `FontSource` accordingly (Base85 input is now explicitly NUL-terminated via `CString`).
-  - Texture iteration/access: make `DrawData::textures()` / `PlatformIo::textures()` yield a guarded mutable view instead of `&mut TextureData` from `&self`, and avoid creating `&mut TextureData` internally when returning `&TextureData` from `DrawData::texture()` / `PlatformIo::texture()` (prevents Rust aliasing UB while keeping the renderer API ergonomic).
-  - Texture refs: avoid constructing `ImTextureRef` from `&TextureData` via a mutable FFI pointer; `&TextureData` now forwards only the current `TexID` (legacy path), use `&mut TextureData` for managed textures.
-  - Texture IDs: make `RawTextureId` match Dear ImGui's `ImTextureID` (`ImU64`) and add debug assertions to catch pointer-width truncation when converting a `TextureId` into `usize`/`*const c_void`.
-  - Clipboard callbacks: handle null `PlatformIO` defensively and guard `ClipboardContext` access against reentrant mutable borrows (avoids potential aliasing UB in callbacks).
-  - Draw data types: add compile-time layout assertions to keep `DrawVert`/`DrawIdx` compatible with sys `ImDrawVert`/`ImDrawIdx`.
-  - FFI wrappers: add compile-time layout assertions for transparent wrappers (`Io`, `Style`, `Font`, `PlatformIo`, `Viewport`, `TextureRef`, `TextureData`) to keep pointer casts sound when updating sys bindings.
-  - Draw data: make internal `DrawData::cmd_lists` representation match sys (`ImDrawList*` pointers) and add compile-time layout assertions for `DrawData`/`DrawList` (reduces pointer casts and prevents silent layout drift).
-  - `Ui::io`: panic on null IO pointer instead of dereferencing it (avoid UB when called without an active context).
-  - `Io`: store `ImGuiIO` behind `UnsafeCell` to make Dear ImGui-driven interior mutability explicit (reduces risk of Rust aliasing UB when the C++ side updates IO state).
-  - `Style`: store `ImGuiStyle` behind `UnsafeCell` to make Dear ImGui-driven interior mutability explicit (reduces risk of Rust aliasing UB when the C++ side mutates style state).
-  - `Font`/`PlatformIo`/`Viewport`: store ImGui-owned sys values behind `UnsafeCell` to make Dear ImGui-driven interior mutability explicit (reduces risk of Rust aliasing UB when the C++ side mutates these structs).
-  - `TextureData`: store `ImTextureData` behind `UnsafeCell` to make backend-driven interior mutability explicit (reduces risk of Rust aliasing UB when renderers update `Status`/`TexID` during the frame).
-  - Tests: avoid `mem::zeroed()` for `ImGuiPlatformIO` by constructing it via the C++ constructor instead.
-  - Deprecated glyph ranges: ensure `GlyphRangesBuilder::add_ranges` always passes a NUL-terminated `ImWchar` list to the C++ builder.
-- `dear-imgui-wgpu`
-  - Font atlas: stop calling `FontAtlas::build()` in renderer code when using `BackendFlags::RENDERER_HAS_TEXTURES`; skip legacy TexID fallback in the new texture system.
-  - SDL3 multi-viewport: drop unnecessary `unsafe impl Send/Sync` from the SDL window surface target adapter.
-  - Render callbacks: require `&mut WgpuRenderState` to access the render pass encoder (avoid `&mut` derived from `&self` / `clippy::mut_from_ref` footgun).
-  - Multi-viewport: add `disable()`/`shutdown_multi_viewport_support()` helpers and clear stored globals to avoid stale callback pointers when tearing down a renderer.
-  - Multi-viewport: clear the global renderer pointer on drop so callbacks become a no-op if the renderer is dropped without an explicit disable.
-  - Multi-viewport: guard access to the global renderer pointer to avoid creating multiple `&mut WgpuRenderer` references across callbacks (skip on reentrancy).
-  - SDL3 multi-viewport: avoid nested mutable borrows of per-viewport `RendererUserData` by caching framebuffer sizes before encoding draw commands (prevents aliasing UB).
-  - Frame resources: pack vertex/index data into byte buffers explicitly instead of casting typed slices to bytes (avoids reading uninitialized padding bytes).
-- `dear-imgui-sdl3`
-  - Manual gamepad mode: avoid casting away constness in Rust by taking a `*const` pointer array and copying pointers into stable storage on the C++ side.
-  - OpenGL3 renderer: make `RenderDrawData` wrapper const-correct to avoid casting `&DrawData` to `*mut` across FFI; use `TextureData::as_raw_mut()` for `UpdateTexture` helper to avoid relying on wrapper pointer casts.
-- `dear-imgui-glow`
-  - GL state restore: treat negative `glGetIntegerv` results defensively when restoring bindings (avoid casting `i32` → `u32` blindly).
-  - Draw callbacks: abort on panic when executing `ImDrawCmd` raw callbacks (avoid unwinding across `extern "C"` ABI).
-  - Multi-viewport: clear the global renderer pointer on drop so callbacks become a no-op if the renderer is dropped without an explicit disable.
-  - Texture map: avoid aliasing `&mut self` with `&self.texture_map` during rendering by temporarily moving the texture map out (removes raw-pointer borrow workaround, prevents potential aliasing UB).
-  - Multi-viewport: guard access to the global renderer pointer to avoid creating multiple `&mut GlowRenderer` references across callbacks (skip on reentrancy).
-  - Vertex/index uploads: restrict slice-to-bytes conversion to `DrawVert`/`DrawIdx` to avoid accidentally reading padding bytes from arbitrary Rust types.
-- `dear-imgui-winit`
-  - Multi-viewport: avoid freeing `ViewportData` while an `&mut ViewportData` reference is still live (raw-pointer cleanup instead).
-  - Multi-viewport: avoid creating `&mut Window` references from stored raw window pointers in platform callbacks.
-  - IME bridge: treat `Platform_ImeUserData` as `*const Window` in callbacks to avoid suggesting mutability across the FFI boundary.
-- Extensions
-  - `dear-implot`: fix `SubplotToken`/`MultiAxisToken`/`LegendToken` double-end by letting `Drop` perform the actual `End*` call; make subplot ratio buffers owned to avoid casting away constness.
-  - `dear-implot`: keep axis formatter/transform closures alive for the full plot scope (avoid dangling `user_data` pointers if tokens are dropped early).
-  - `dear-imnodes`: trim trailing NUL terminators from INI state strings returned by ImNodes save APIs.
-  - `dear-implot3d`: fix `PlotMesh` vertex layout (convert `[[f32; 3]]` into `ImPlot3DPoint` with `f64` fields before the FFI call).
-  - `dear-imguizmo-quat`: avoid casting `*const` matrices to `*mut` in quaternion helpers by using a local mutable copy.
-  - `dear-implot-sys`: build-from-source compiles a patched `cimplot.cpp` copy from `OUT_DIR` to avoid a known out-of-bounds `FormatSpec[16]` access in the upstream-generated wrapper code (submodule remains unchanged; when the bug is detected we also skip the CMake build path and fall back to the patched `cc` build).
+- _Nothing yet._
 
 ## [0.8.0] - 2025-12-22
+
+This release focuses on FFI soundness and correctness improvements for Dear ImGui v1.92+ (texture system, font atlas, callbacks),
+plus backend hardening for multi-viewport and renderer integrations.
+
+### Highlights
+
+- Major UB/FFI hardening pass across core + backends (callbacks, drag/drop payloads, font atlas memory ownership, texture system).
+- Managed textures: correctness fixes for `ImTextureData` construction/ownership and the status/TexID contract (fewer asserts and safer iteration).
+- Font atlas: safer glyph range handling + runtime font merge behavior; align renderer usage with the new `RENDERER_HAS_TEXTURES` flow.
+- Multi-viewport: safer teardown and reentrancy guards for WGPU/Glow/Winit callback paths.
+- Extensions: pointer-lifetime fixes and reduced const-casts/`transmute` in ImPlot/ImPlot3D/ImNodes/ImGuizmo/Reflect.
+
+### Breaking Changes
+
+- Core (`dear-imgui-rs`)
+  - Remove `Viewport::main()` (returned `&'static Viewport`); use `Ui::main_viewport()` or `Context::main_viewport()` to get a viewport reference tied to the caller's lifetime.
+- `dear-imgui-wgpu`
+  - Bump `wgpu` to v28 (requires Rust 1.92+).
 
 ### Added
 
@@ -91,35 +61,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Selectables: `Selectable::build_with_ref` now uses ImGui's `Selectable(..., bool*)` variant for closer upstream behavior parity.
   - `TextFilter`: fix a leak by calling `ImGuiTextFilter_destroy` on drop; avoid per-call allocations; add `pass_filter_range` with correct `text_end` semantics.
   - Clipboard: handle non-UTF8 clipboard payloads without panicking (lossy conversion), sanitize interior NUL bytes, and guard against missing clipboard user data.
+  - Draw callbacks: avoid creating `&mut` references from `*const` FFI pointers when clearing callback user data; ensure `add_callback_safe` stores a direct userdata pointer (`userdata_size = 0`) so Dear ImGui doesn't copy closure bytes into its internal callback buffer (fixes UB when executing callbacks).
+  - Drag and drop typed payloads: avoid passing uninitialized padding bytes across the C++ boundary and read payload bytes using `read_unaligned` instead of creating references into Dear ImGui's unaligned payload storage (fixes UB).
   - Scratch C strings: sanitize interior NUL bytes (`'\0'` → `?`) instead of panicking when building temporary C string pointers.
   - Rendering draw lists: handle null vertex/index buffers defensively when constructing slices at the FFI boundary.
   - InputText (String-backed): avoid undefined behavior when trimming at NUL by zero-initializing spare capacity, including during ImGui resize callbacks.
-  - Deprecated glyph ranges: fix `GlyphRangesBuilder::add_ranges` to pass the correct `ImWchar` layout, and free internal `ImVector_ImWchar` buffers; add `Drop` for the underlying C++ builder.
+  - Font atlas: make `FontAtlas::add_font_from_memory_ttf` always copy the TTF bytes into Dear ImGui-owned memory (via `igMemAlloc`) and set `FontDataOwnedByAtlas=true` so the atlas can safely rebuild and free the buffer (fixes potential use-after-free/double-free when passing Rust-owned buffers).
+  - Font atlas: add safe wrappers for `AddFontFromMemoryCompressedTTF` / `AddFontFromMemoryCompressedBase85TTF` and extend `FontSource` accordingly (Base85 input is now explicitly NUL-terminated via `CString`).
+  - Deprecated glyph ranges: fix `GlyphRangesBuilder::add_ranges` to pass the correct `ImWchar` layout, and free internal `ImVector_ImWchar` buffers; ensure `add_ranges` always passes a NUL-terminated list; add `Drop` for the underlying C++ builder.
   - Dynamic fonts: fix `FontConfig::glyph_exclude_ranges` to pass the correct `ImWchar` layout (and now owns the converted ranges buffer, ensuring it is NUL-terminated).
   - Dynamic fonts: discard baked glyph caches when adding merge-mode fonts, so runtime font merging can override previously-missing glyphs (e.g. `style_and_fonts` CJK merge).
+  - Texture iteration/access: make `DrawData::textures()` / `PlatformIo::textures()` yield a guarded mutable view instead of `&mut TextureData` from `&self`, and avoid creating `&mut TextureData` internally when returning `&TextureData` from `DrawData::texture()` / `PlatformIo::texture()` (prevents Rust aliasing UB while keeping the renderer API ergonomic).
+  - Texture refs: avoid constructing `ImTextureRef` from `&TextureData` via a mutable FFI pointer; `&TextureData` now forwards only the current `TexID` (legacy path), use `&mut TextureData` for managed textures.
+  - Texture IDs: make `RawTextureId` match Dear ImGui's `ImTextureID` (`ImU64`) and add debug assertions to catch pointer-width truncation when converting a `TextureId` into `usize`/`*const c_void`.
   - Managed textures: avoid null pointer arithmetic when iterating `DrawData::textures()` / `PlatformIo::textures()` on empty lists; make `DrawData::texture{,_mut}` robust to negative vector sizes.
   - Managed textures: fix `ImTextureData` ownership by introducing `OwnedTextureData` (C++ constructed/destroyed) and making `TextureData::new()` return it; use `ImTextureData_SetStatus`/`ImTextureData_SetTexID` to preserve ImGui's internal state machine.
   - Managed textures: `TextureData::set_status(Destroyed)` now clears `TexID`/`BackendUserData` to match Dear ImGui's texture contract and avoid asserts.
   - Font atlases: `FontAtlas::get_glyph_ranges_default` includes the terminating `0` sentinel.
   - `PlatformIo`: typed callback setters no longer panic if the internal callback mutex is poisoned.
+  - Clipboard callbacks: handle null `PlatformIO` defensively and guard `ClipboardContext` access against reentrant mutable borrows (avoids potential aliasing UB in callbacks).
   - `OwnedDrawData`: avoid double-free by letting `ImDrawData` own and free its `CmdLists` storage (we still destroy the cloned `ImDrawList` payloads).
   - `Context::save_ini_settings`: read the returned settings blob using `out_ini_size` instead of relying on NUL termination.
   - `Ui::get_key_name` / `Ui::style_color_name`: handle null pointers defensively at the FFI boundary.
+  - Draw data types: add compile-time layout assertions to keep `DrawVert`/`DrawIdx` compatible with sys `ImDrawVert`/`ImDrawIdx`.
+  - FFI wrappers: add compile-time layout assertions for transparent wrappers (`Io`, `Style`, `Font`, `PlatformIo`, `Viewport`, `TextureRef`, `TextureData`) to keep pointer casts sound when updating sys bindings.
+  - Draw data: make internal `DrawData::cmd_lists` representation match sys (`ImDrawList*` pointers) and add compile-time layout assertions for `DrawData`/`DrawList` (reduces pointer casts and prevents silent layout drift).
+  - `Ui::io`: panic on null IO pointer instead of dereferencing it (avoid UB when called without an active context).
+  - `Io`/`Style`/`Font`/`PlatformIo`/`Viewport`/`TextureData`: store ImGui-owned sys values behind `UnsafeCell` to make Dear ImGui-driven interior mutability explicit (reduces risk of Rust aliasing UB when the C++ side mutates these structs).
+  - Tests: avoid `mem::zeroed()` for `ImGuiPlatformIO` by constructing it via the C++ constructor instead.
   - Additional FFI hardening: treat negative `ImVector` sizes as empty, guard `TextureData::pixels*` against invalid dimensions/overflow, clamp `TextureData::set_width/set_height` to avoid `u32 → i32` wrap-around, validate `InputTextCallbackData::str_as_bytes_mut` buffer bounds before creating slices, and prevent unwinding across FFI (panic → abort).
+
+- Backends
+  - `dear-imgui-wgpu`
+    - Font atlas: stop calling `FontAtlas::build()` in renderer code when using `BackendFlags::RENDERER_HAS_TEXTURES`; skip legacy TexID fallback in the new texture system.
+    - SDL3 multi-viewport: drop unnecessary `unsafe impl Send/Sync` from the SDL window surface target adapter.
+    - Render callbacks: require `&mut WgpuRenderState` to access the render pass encoder (avoid `&mut` derived from `&self` / `clippy::mut_from_ref` footgun).
+    - Multi-viewport: add `disable()`/`shutdown_multi_viewport_support()` helpers and clear stored globals to avoid stale callback pointers when tearing down a renderer.
+    - Multi-viewport: clear the global renderer pointer on drop so callbacks become a no-op if the renderer is dropped without an explicit disable.
+    - Multi-viewport: guard access to the global renderer pointer to avoid creating multiple `&mut WgpuRenderer` references across callbacks (skip on reentrancy).
+    - SDL3 multi-viewport: avoid nested mutable borrows of per-viewport `RendererUserData` by caching framebuffer sizes before encoding draw commands (prevents aliasing UB).
+    - Frame resources: pack vertex/index data into byte buffers explicitly instead of casting typed slices to bytes (avoids reading uninitialized padding bytes).
+    - Multi-viewport: avoid `transmute` for `wgpu::Surface` lifetimes in multi-viewport backends, harden draw offsets against integer overflow, and avoid panicking when retrieving cached bind groups.
+    - Managed textures: keep existing GPU texture and mark status `OK` when a `WantUpdates` upload fails (avoids invalid `TexID` during the same frame).
+  - `dear-imgui-sdl3`
+    - Manual gamepad mode: avoid casting away constness in Rust by taking a `*const` pointer array and copying pointers into stable storage on the C++ side.
+    - OpenGL3 renderer: make `RenderDrawData` wrapper const-correct to avoid casting `&DrawData` to `*mut` across FFI; use `TextureData::as_raw_mut()` for `UpdateTexture` helper to avoid relying on wrapper pointer casts.
+  - `dear-imgui-glow`
+    - GL state restore: treat negative `glGetIntegerv` results defensively when restoring bindings (avoid casting `i32` → `u32` blindly).
+    - Draw callbacks: abort on panic when executing `ImDrawCmd` raw callbacks (avoid unwinding across `extern "C"` ABI).
+    - Multi-viewport: clear the global renderer pointer on drop so callbacks become a no-op if the renderer is dropped without an explicit disable.
+    - Texture map: avoid aliasing `&mut self` with `&self.texture_map` during rendering by temporarily moving the texture map out (removes raw-pointer borrow workaround, prevents potential aliasing UB).
+    - Multi-viewport: guard access to the global renderer pointer to avoid creating multiple `&mut GlowRenderer` references across callbacks (skip on reentrancy).
+    - Vertex/index uploads: restrict slice-to-bytes conversion to `DrawVert`/`DrawIdx` to avoid accidentally reading padding bytes from arbitrary Rust types.
+    - Textures: validate `TextureId` range when updating existing OpenGL textures (avoid truncation/panic).
+  - `dear-imgui-winit`
+    - Multi-viewport: avoid freeing `ViewportData` while an `&mut ViewportData` reference is still live (raw-pointer cleanup instead).
+    - Multi-viewport: avoid creating `&mut Window` references from stored raw window pointers in platform callbacks.
+    - IME bridge: treat `Platform_ImeUserData` as `*const Window` in callbacks to avoid suggesting mutability across the FFI boundary.
+
 - Extensions
+  - `dear-implot`: fix `SubplotToken`/`MultiAxisToken`/`LegendToken` double-end by letting `Drop` perform the actual `End*` call; make subplot ratio buffers owned to avoid casting away constness.
+  - `dear-implot`: keep axis formatter/transform closures alive for the full plot scope (avoid dangling `user_data` pointers if tokens are dropped early).
   - `dear-implot`: fix `MultiAxisPlot` axis setup (Y1 is now configurable) and remove a potential panic when keeping axis labels alive.
+  - `dear-implot`: avoid `transmute` when passing `dear-imgui-rs::TextureId` to `ImTextureID`.
+  - `dear-implot3d`: fix `PlotMesh` vertex layout (convert `[[f32; 3]]` into `ImPlot3DPoint` with `f64` fields before the FFI call).
   - `dear-implot3d`: keep tick label pointers alive for `setup_axis_ticks_*` calls (avoids passing dangling pointers to C).
   - `dear-implot3d`: destroy the correct context pointer on drop (no reliance on "current context").
-  - `dear-implot`: avoid `transmute` when passing `dear-imgui-rs::TextureId` to `ImTextureID`.
-  - `dear-imgui-glow`: validate `TextureId` range when updating existing OpenGL textures (avoid truncation/panic).
-  - `dear-imgui-wgpu`: avoid `transmute` for `wgpu::Surface` lifetimes in multi-viewport backends, harden draw offsets against integer overflow, and avoid panicking when retrieving cached bind groups.
-  - `dear-imgui-wgpu`: keep existing GPU texture and mark status `OK` when a `WantUpdates` upload fails (avoids invalid `TexID` during the same frame).
+  - `dear-imnodes`: trim trailing NUL terminators from INI state strings returned by ImNodes save APIs.
+  - `dear-imguizmo-quat`: avoid casting `*const` matrices to `*mut` in quaternion helpers by using a local mutable copy.
+  - `dear-implot-sys`: build-from-source compiles a patched `cimplot.cpp` copy from `OUT_DIR` to avoid a known out-of-bounds `FormatSpec[16]` access in the upstream-generated wrapper code (submodule remains unchanged; when the bug is detected we also skip the CMake build path and fall back to the patched `cc` build).
   - `dear-imgui-reflect`: harden response/settings scopes against panics, fix `Vec` button ID collisions, reduce `BTreeMap` editor overhead, and clean up map-add popup temporary state.
 
 ### Changed
 
 - Core (`dear-imgui-rs`)
-  - Remove `Viewport::main()` (returned `&'static Viewport`); use `Ui::main_viewport()` or `Context::main_viewport()` to get a viewport reference tied to the caller's lifetime.
   - `ui.window(...).build(...)` only shows a close button when `opened(...)` is provided (matches upstream Dear ImGui behavior).
   - `Ui::get_id` uses the internal scratch buffer instead of allocating a `CString`.
   - `Ui::window` now accepts `Into<Cow<'_, str>>` and avoids per-frame string allocation for borrowed names.
@@ -130,9 +145,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Non-`Ui` string entrypoints also use the shared scratch strategy where applicable:
     `DockBuilder::dock_window`, `DockBuilder::copy_window_settings`, and `TextCallbackData::insert_chars`.
   - `ImString` now rejects interior NUL bytes in safe constructors/mutators (`new`, `push_str`).
-- `dear-imgui-wgpu`: bump `wgpu` to v28 (requires Rust 1.92+).
+- `dear-imgui-wgpu`
   - Allow enabling both `multi-viewport-winit` and `multi-viewport-sdl3` simultaneously (exports both helper modules).
-- Extensions: avoid per-call `CString` allocations in most label/text/title APIs by using the shared scratch string helpers (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`).
+- Extensions (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`)
+  - Avoid per-call `CString` allocations in most label/text/title APIs by using the shared scratch string helpers.
 
 ## [0.7.0] - 2025-12-13
 
