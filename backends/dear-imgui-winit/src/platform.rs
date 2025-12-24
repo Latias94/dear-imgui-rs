@@ -35,7 +35,7 @@ unsafe extern "C" fn imgui_winit_set_ime_data(
             return;
         }
 
-        let user_data = (*pio).Platform_ImeUserData as *mut Window;
+        let user_data = (*pio).Platform_ImeUserData as *const Window;
         if user_data.is_null() {
             return;
         }

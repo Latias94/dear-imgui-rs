@@ -75,8 +75,9 @@ void ImGui_ImplOpenGL3_NewFrame_Rust() {
     ImGui_ImplOpenGL3_NewFrame();
 }
 
-void ImGui_ImplOpenGL3_RenderDrawData_Rust(ImDrawData* draw_data) {
-    ImGui_ImplOpenGL3_RenderDrawData(draw_data);
+void ImGui_ImplOpenGL3_RenderDrawData_Rust(const ImDrawData* draw_data) {
+    // Upstream backend takes `ImDrawData*` but treats it as read-only. Keep the Rust side const-correct.
+    ImGui_ImplOpenGL3_RenderDrawData(const_cast<ImDrawData*>(draw_data));
 }
 
 	void ImGui_ImplOpenGL3_UpdateTexture_Rust(ImTextureData* tex) {

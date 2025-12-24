@@ -63,7 +63,7 @@ mod ffi {
         pub fn ImGui_ImplOpenGL3_DestroyDeviceObjects_Rust();
         pub fn ImGui_ImplOpenGL3_Shutdown_Rust();
         pub fn ImGui_ImplOpenGL3_NewFrame_Rust();
-        pub fn ImGui_ImplOpenGL3_RenderDrawData_Rust(draw_data: *mut sys::ImDrawData);
+        pub fn ImGui_ImplOpenGL3_RenderDrawData_Rust(draw_data: *const sys::ImDrawData);
         pub fn ImGui_ImplOpenGL3_UpdateTexture_Rust(tex: *mut sys::ImTextureData);
     }
 }
@@ -369,7 +369,7 @@ pub fn process_sys_event(event: &SDL_Event) -> bool {
 pub fn render(draw_data: &DrawData) {
     // Render main viewport
     unsafe {
-        let raw = draw_data as *const DrawData as *mut sys::ImDrawData;
+        let raw = draw_data as *const DrawData as *const sys::ImDrawData;
         ffi::ImGui_ImplOpenGL3_RenderDrawData_Rust(raw);
     }
 }
