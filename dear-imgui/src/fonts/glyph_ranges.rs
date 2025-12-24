@@ -58,6 +58,9 @@ impl GlyphRangesBuilder {
     /// Add a range of characters
     #[doc(alias = "AddRanges")]
     pub fn add_ranges(&mut self, ranges: &[u32]) {
+        if ranges.is_empty() {
+            return;
+        }
         let mut tmp: Vec<sys::ImWchar> = Vec::with_capacity(ranges.len());
         for &v in ranges {
             assert!(
@@ -65,6 +68,9 @@ impl GlyphRangesBuilder {
                 "glyph range value {v:#X} exceeded ImWchar16 max (0xFFFF)"
             );
             tmp.push(v as sys::ImWchar);
+        }
+        if tmp.last().copied() != Some(0) {
+            tmp.push(0);
         }
         unsafe { sys::ImFontGlyphRangesBuilder_AddRanges(self.raw, tmp.as_ptr()) };
     }
@@ -127,6 +133,15 @@ mod tests {
     fn add_ranges_rejects_non_bmp_codepoints() {
         let mut b = GlyphRangesBuilder::new();
         b.add_ranges(&[0x1_0000, 0]);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn add_ranges_appends_terminator_if_missing() {
+        let mut b = GlyphRangesBuilder::new();
+        b.add_ranges(&[0x20, 0x7E]);
+        let ranges = b.build_ranges();
+        assert_eq!(ranges.last().copied(), Some(0));
     }
 }
 

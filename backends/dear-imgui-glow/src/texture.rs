@@ -297,7 +297,10 @@ pub fn update_imgui_texture(
 ) -> InitResult<GlTexture> {
     unsafe {
         // Backup current texture binding
-        let last_texture = gl.get_parameter_i32(glow::TEXTURE_BINDING_2D) as u32;
+        let last_texture = u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
+            .ok()
+            .and_then(std::num::NonZeroU32::new)
+            .map(glow::NativeTexture);
 
         // Set pixel store parameters
         gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
@@ -366,13 +369,7 @@ pub fn update_imgui_texture(
         };
 
         // Restore previous texture binding
-        if last_texture != 0 {
-            let restore_texture =
-                glow::NativeTexture(std::num::NonZeroU32::new(last_texture).unwrap());
-            gl.bind_texture(glow::TEXTURE_2D, Some(restore_texture));
-        } else {
-            gl.bind_texture(glow::TEXTURE_2D, None);
-        }
+        gl.bind_texture(glow::TEXTURE_2D, last_texture);
 
         Ok(gl_texture)
     }

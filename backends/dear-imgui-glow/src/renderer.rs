@@ -1007,9 +1007,14 @@ impl GlowRenderer {
         if let Some(pixels) = texture_data.pixels() {
             let gl_texture = unsafe {
                 // Backup texture binding / active texture / unpack alignment
-                let last_active = gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32;
+                let last_active = u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE))
+                    .ok()
+                    .unwrap_or(glow::TEXTURE0);
                 gl.active_texture(glow::TEXTURE0);
-                let last_texture = gl.get_parameter_i32(glow::TEXTURE_BINDING_2D) as u32;
+                let last_texture = u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
+                    .ok()
+                    .and_then(std::num::NonZeroU32::new)
+                    .map(glow::NativeTexture);
                 let last_unpack = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
 
                 let gl_texture = gl.create_texture().map_err(|e| {
@@ -1084,13 +1089,7 @@ impl GlowRenderer {
 
                 // Restore pixel store and previous binding
                 gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
-                if last_texture != 0 {
-                    let restore =
-                        glow::NativeTexture(std::num::NonZeroU32::new(last_texture).unwrap());
-                    gl.bind_texture(glow::TEXTURE_2D, Some(restore));
-                } else {
-                    gl.bind_texture(glow::TEXTURE_2D, None);
-                }
+                gl.bind_texture(glow::TEXTURE_2D, last_texture);
                 gl.active_texture(last_active);
                 gl_texture
             };
@@ -1135,8 +1134,13 @@ impl GlowRenderer {
         };
 
         // Backup texture binding / active texture / unpack alignment
-        let last_active = unsafe { gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32 };
-        let last_texture = unsafe { gl.get_parameter_i32(glow::TEXTURE_BINDING_2D) as u32 };
+        let last_active = u32::try_from(unsafe { gl.get_parameter_i32(glow::ACTIVE_TEXTURE) })
+            .ok()
+            .unwrap_or(glow::TEXTURE0);
+        let last_texture = u32::try_from(unsafe { gl.get_parameter_i32(glow::TEXTURE_BINDING_2D) })
+            .ok()
+            .and_then(std::num::NonZeroU32::new)
+            .map(glow::NativeTexture);
         let last_unpack = unsafe { gl.get_parameter_i32(glow::UNPACK_ALIGNMENT) };
         unsafe {
             gl.active_texture(glow::TEXTURE0);
@@ -1159,13 +1163,7 @@ impl GlowRenderer {
             // Restore previous binding and pixel store
             unsafe {
                 gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
-                if last_texture != 0 {
-                    let restore =
-                        glow::NativeTexture(std::num::NonZeroU32::new(last_texture).unwrap());
-                    gl.bind_texture(glow::TEXTURE_2D, Some(restore));
-                } else {
-                    gl.bind_texture(glow::TEXTURE_2D, None);
-                }
+                gl.bind_texture(glow::TEXTURE_2D, last_texture);
                 gl.active_texture(last_active);
             }
             return Ok(());
@@ -1263,12 +1261,7 @@ impl GlowRenderer {
         // Restore previous binding and pixel store
         unsafe {
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
-            if last_texture != 0 {
-                let restore = glow::NativeTexture(std::num::NonZeroU32::new(last_texture).unwrap());
-                gl.bind_texture(glow::TEXTURE_2D, Some(restore));
-            } else {
-                gl.bind_texture(glow::TEXTURE_2D, None);
-            }
+            gl.bind_texture(glow::TEXTURE_2D, last_texture);
             gl.active_texture(last_active);
         }
 

@@ -77,55 +77,42 @@ impl GlStateBackup {
 
             // Buffers
             let buffer_binding = gl.get_parameter_i32(glow::ARRAY_BUFFER_BINDING);
-            self.array_buffer_binding = if buffer_binding == 0 {
-                None
-            } else {
-                Some(glow::NativeBuffer(
-                    std::num::NonZeroU32::new(buffer_binding as u32).unwrap(),
-                ))
-            };
+            self.array_buffer_binding = u32::try_from(buffer_binding)
+                .ok()
+                .and_then(std::num::NonZeroU32::new)
+                .map(glow::NativeBuffer);
             let element_buffer_binding = gl.get_parameter_i32(glow::ELEMENT_ARRAY_BUFFER_BINDING);
-            self.element_array_buffer_binding = if element_buffer_binding == 0 {
-                None
-            } else {
-                Some(glow::NativeBuffer(
-                    std::num::NonZeroU32::new(element_buffer_binding as u32).unwrap(),
-                ))
-            };
+            self.element_array_buffer_binding = u32::try_from(element_buffer_binding)
+                .ok()
+                .and_then(std::num::NonZeroU32::new)
+                .map(glow::NativeBuffer);
 
             // Vertex array
             #[cfg(feature = "bind_vertex_array_support")]
             if gl_version.bind_vertex_array_support() {
                 let vao_binding = gl.get_parameter_i32(glow::VERTEX_ARRAY_BINDING);
-                self.vertex_array_binding = if vao_binding == 0 {
-                    None
-                } else {
-                    Some(glow::NativeVertexArray(
-                        std::num::NonZeroU32::new(vao_binding as u32).unwrap(),
-                    ))
-                };
+                self.vertex_array_binding = u32::try_from(vao_binding)
+                    .ok()
+                    .and_then(std::num::NonZeroU32::new)
+                    .map(glow::NativeVertexArray);
             }
 
             // Textures
-            self.active_texture = gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32;
+            self.active_texture = u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE))
+                .ok()
+                .unwrap_or(glow::TEXTURE0);
             let texture_binding = gl.get_parameter_i32(glow::TEXTURE_BINDING_2D);
-            self.texture_2d_binding = if texture_binding == 0 {
-                None
-            } else {
-                Some(glow::NativeTexture(
-                    std::num::NonZeroU32::new(texture_binding as u32).unwrap(),
-                ))
-            };
+            self.texture_2d_binding = u32::try_from(texture_binding)
+                .ok()
+                .and_then(std::num::NonZeroU32::new)
+                .map(glow::NativeTexture);
 
             // Shader program
             let program_binding = gl.get_parameter_i32(glow::CURRENT_PROGRAM);
-            self.current_program = if program_binding == 0 {
-                None
-            } else {
-                Some(glow::NativeProgram(
-                    std::num::NonZeroU32::new(program_binding as u32).unwrap(),
-                ))
-            };
+            self.current_program = u32::try_from(program_binding)
+                .ok()
+                .and_then(std::num::NonZeroU32::new)
+                .map(glow::NativeProgram);
 
             // Other state
             self.cull_face_enabled = gl.is_enabled(glow::CULL_FACE);
@@ -149,7 +136,9 @@ impl GlStateBackup {
             // Sampler binding
             #[cfg(feature = "bind_sampler_support")]
             if gl_version.bind_sampler_support() {
-                self.sampler_binding = gl.get_parameter_i32(glow::SAMPLER_BINDING) as u32;
+                self.sampler_binding = u32::try_from(gl.get_parameter_i32(glow::SAMPLER_BINDING))
+                    .ok()
+                    .unwrap_or(0);
             }
         }
     }

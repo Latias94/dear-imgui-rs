@@ -682,19 +682,22 @@ unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui_rs::sys::ImGuiView
 
         let vp_ref = unsafe { &mut *vp };
         let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-        if let Some(vd) = unsafe { vd_ptr.as_mut() } {
-            if vd.window_owned && !vd.window.is_null() {
-                // Clean up the window
-                unsafe {
-                    let _ = Box::from_raw(vd.window);
-                }
-            }
-            vd.window = std::ptr::null_mut();
+        if vd_ptr.is_null() {
+            vp_ref.PlatformUserData = std::ptr::null_mut();
+            vp_ref.PlatformHandle = std::ptr::null_mut();
+            return;
+        }
 
-            // Clean up ViewportData using the original raw pointer
-            unsafe {
-                let _ = Box::from_raw(vd_ptr);
+        unsafe {
+            if (*vd_ptr).window_owned && !(*vd_ptr).window.is_null() {
+                // Clean up the window.
+                let _ = Box::from_raw((*vd_ptr).window);
             }
+            (*vd_ptr).window = std::ptr::null_mut();
+
+            // Drop the allocation backing `ViewportData`. Avoid creating an `&mut ViewportData`
+            // reference and then freeing it while that reference is still live.
+            let _ = Box::from_raw(vd_ptr);
         }
         vp_ref.PlatformUserData = std::ptr::null_mut();
         vp_ref.PlatformHandle = std::ptr::null_mut();
