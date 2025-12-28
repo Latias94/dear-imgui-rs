@@ -103,6 +103,13 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Install LLVM (libclang) for bindgen
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          directory: ${{ runner.temp }}/llvm
+          cached: true
+          version: '14.0'
+
       - name: Add armv7 target
         run: rustup target add armv7-unknown-linux-gnueabihf
 
