@@ -9,7 +9,7 @@
 
 use crate::fonts::Font;
 use crate::sys;
-use std::ffi::CString;
+use std::ffi::{CString, c_char};
 use std::marker::PhantomData;
 use std::ptr;
 use std::rc::Rc;
@@ -945,7 +945,7 @@ impl FontConfig {
 
         // Copy the name
         for (i, &byte) in name_bytes.iter().take(copy_len).enumerate() {
-            self.raw.Name[i] = byte as i8;
+            self.raw.Name[i] = byte as c_char;
         }
 
         self
