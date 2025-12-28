@@ -84,6 +84,44 @@ jobs:
       - name: Build examples (all extensions)
         run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat"
 
+  ffi-cross-check:
+    name: FFI signedness check (armv7)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install LLVM (libclang) for bindgen
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          directory: ${{ runner.temp }}/llvm
+          cached: true
+          version: '14.0'
+
+      - name: Add armv7 target
+        run: rustup target add armv7-unknown-linux-gnueabihf
+
+      - name: Cargo check (armv7)
+        run: cargo check -p dear-imgui-rs -p dear-implot -p dear-imnodes --target armv7-unknown-linux-gnueabihf
+        env:
+          # This job is a type-check sentinel for `c_char` signedness (u8 vs i8).
+          # We don't need to link any native C/C++ code here, so skip cc/cmake builds.
+          IMGUI_SYS_SKIP_CC: "1"
+          IMPLOT_SYS_SKIP_CC: "1"
+          IMNODES_SYS_SKIP_CC: "1"
+
   publish-check:
     name: Package check (ubuntu)
     runs-on: ubuntu-latest

@@ -3,6 +3,7 @@ use dear_imgui_rs::{
     Context as ImGuiContext, Ui, with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_two,
 };
 use dear_imgui_sys as imgui_sys;
+use std::os::raw::c_char;
 use std::{cell::RefCell, rc::Rc};
 
 /// ImPlot context that manages the plotting state
@@ -444,7 +445,7 @@ impl<'ui> PlotUi<'ui> {
                     axis as sys::ImAxis,
                     values.as_ptr(),
                     count,
-                    ptrs.as_ptr() as *const *const i8,
+                    ptrs.as_ptr() as *const *const c_char,
                     keep_default,
                 )
             })
@@ -488,7 +489,7 @@ impl<'ui> PlotUi<'ui> {
                     axis as sys::ImAxis,
                     values.as_ptr(),
                     count,
-                    ptrs.as_ptr() as *const *const i8,
+                    ptrs.as_ptr() as *const *const c_char,
                     keep_default,
                 )
             })
@@ -537,7 +538,7 @@ impl<'ui> PlotUi<'ui> {
                     v_min,
                     v_max,
                     n_ticks,
-                    ptrs.as_ptr() as *const *const i8,
+                    ptrs.as_ptr() as *const *const c_char,
                     keep_default,
                 )
             })
@@ -587,7 +588,7 @@ impl<'ui> PlotUi<'ui> {
                     v_min,
                     v_max,
                     n_ticks,
-                    ptrs.as_ptr() as *const *const i8,
+                    ptrs.as_ptr() as *const *const c_char,
                     keep_default,
                 )
             })

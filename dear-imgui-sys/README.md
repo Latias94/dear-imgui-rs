@@ -150,7 +150,7 @@ unsafe {
 
     // Main loop
     igNewFrame();
-    igText(b"Hello from Dear ImGui!\0".as_ptr() as *const i8);
+    igText(b"Hello from Dear ImGui!\0".as_ptr() as *const std::os::raw::c_char);
     igRender();
 
     // Clean up

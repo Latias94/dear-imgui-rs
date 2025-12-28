@@ -1,7 +1,7 @@
 use crate::sys;
 use dear_imgui_rs::sys as imgui_sys;
 use dear_imgui_rs::{Context as ImGuiContext, Ui};
-use std::os::raw::c_void;
+use std::os::raw::{c_char, c_void};
 
 /// Global ImNodes context
 pub struct Context {
@@ -122,7 +122,7 @@ impl EditorContext {
         unsafe {
             sys::imnodes_LoadEditorStateFromIniString(
                 self.raw,
-                data.as_ptr() as *const i8,
+                data.as_ptr() as *const c_char,
                 data.len(),
             )
         }
@@ -762,7 +762,7 @@ impl PostEditor {
         // duration of the call.
         unsafe {
             sys::imnodes_LoadCurrentEditorStateFromIniString(
-                data.as_ptr() as *const i8,
+                data.as_ptr() as *const c_char,
                 data.len(),
             );
         }
