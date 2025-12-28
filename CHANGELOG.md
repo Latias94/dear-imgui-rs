@@ -55,6 +55,7 @@ plus backend hardening for multi-viewport and renderer integrations.
 ### Fixed
 
 - Cross-target FFI: fix remaining `c_char` signedness assumptions (i8 vs u8) and add an armv7 CI type-check sentinel to catch regressions.
+- FFI: fix incorrect `c_char` signedness assumptions in a few call sites (thanks @EtherealPsyche, #10).
 
 - Core (`dear-imgui-rs`)
   - Windows: expose ImGui `p_open` via `Window::opened(&mut bool)` so the title-bar close button (X) can toggle window state.
