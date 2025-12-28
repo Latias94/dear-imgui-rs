@@ -45,6 +45,7 @@ use crate::Id;
 use crate::sys;
 use crate::ui::Ui;
 use std::ffi::CString;
+use std::ffi::c_char;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
 use std::slice;
@@ -484,8 +485,8 @@ impl DockBuilder {
         if cstrings.is_empty() {
             return;
         }
-        let ptrs: Vec<*const i8> = cstrings.iter().map(|s| s.as_ptr()).collect();
-        let mut boxed: Box<[*const i8]> = ptrs.into_boxed_slice();
+        let ptrs: Vec<*const c_char> = cstrings.iter().map(|s| s.as_ptr()).collect();
+        let mut boxed: Box<[*const c_char]> = ptrs.into_boxed_slice();
         let boxed_len_i32 = match i32::try_from(boxed.len()) {
             Ok(n) => n,
             Err(_) => return,
