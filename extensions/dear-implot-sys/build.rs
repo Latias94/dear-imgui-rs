@@ -303,6 +303,27 @@ fn main() {
         return;
     }
 
+    // When explicitly skipping native compilation, also skip bindgen and rely on
+    // pregenerated bindings. This keeps `cargo check --target ...` working for
+    // cross targets without requiring a C sysroot for bindgen/clang.
+    if env::var("IMPLOT_SYS_SKIP_CC").is_ok() {
+        let ok = if cfg.target_arch == "wasm32" {
+            use_pregenerated_wasm_bindings(&cfg.out_dir)
+        } else {
+            use_pregenerated_bindings(&cfg.out_dir)
+        };
+        if !ok {
+            panic!(
+                "IMPLOT_SYS_SKIP_CC is set but no pregenerated bindings were found. \
+                 Please ensure src/bindings_pregenerated.rs exists, or unset IMPLOT_SYS_SKIP_CC."
+            );
+        }
+
+        // Optionally link prebuilt if available; otherwise type-checking still works.
+        let _ = try_link_prebuilt_all(&cfg);
+        return;
+    }
+
     if !imgui_src.exists() {
         panic!(
             "ImGui source not found at {:?}. Did you forget to initialize git submodules?",

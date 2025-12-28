@@ -75,8 +75,19 @@ fn main() {
         return;
     }
 
-    // Native: always generate bindings from cimgui
-    generate_bindings_native(&cfg);
+    // Bindings: default to generating via bindgen, but allow skipping all native
+    // toolchain usage (cc + bindgen) via IMGUI_SYS_SKIP_CC.
+    if env::var("IMGUI_SYS_SKIP_CC").is_ok() {
+        if !use_pregenerated_bindings(&cfg.out_dir) {
+            panic!(
+                "IMGUI_SYS_SKIP_CC is set but no pregenerated bindings were found. \
+                 Please ensure src/bindings_pregenerated.rs exists, or unset IMGUI_SYS_SKIP_CC."
+            );
+        }
+    } else {
+        // Native: generate bindings from cimgui
+        generate_bindings_native(&cfg);
+    }
 
     // Build strategy selection via features + env var override
     // Force native build when explicitly requested or when sandboxed
