@@ -121,6 +121,7 @@ plus backend hardening for multi-viewport and renderer integrations.
     - Multi-viewport: avoid freeing `ViewportData` while an `&mut ViewportData` reference is still live (raw-pointer cleanup instead).
     - Multi-viewport: avoid creating `&mut Window` references from stored raw window pointers in platform callbacks.
     - IME bridge: treat `Platform_ImeUserData` as `*const Window` in callbacks to avoid suggesting mutability across the FFI boundary.
+    - Keyboard modifiers: submit `ImGuiMod_*` key events on `ModifiersChanged` so `io.KeyMods` / `io.KeyCtrl` / `io.KeyShift` / `io.KeyAlt` / `io.KeySuper` are updated correctly (#11).
 
 - Extensions
   - `dear-implot`: fix `SubplotToken`/`MultiAxisToken`/`LegendToken` double-end by letting `Drop` perform the actual `End*` call; make subplot ratio buffers owned to avoid casting away constness.

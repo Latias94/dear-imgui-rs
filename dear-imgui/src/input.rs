@@ -130,6 +130,14 @@ pub enum Key {
     RightAlt = sys::ImGuiKey_RightAlt as i32,
     /// Right Super key
     RightSuper = sys::ImGuiKey_RightSuper as i32,
+    /// Ctrl modifier (for `io.KeyMods` / `io.KeyCtrl`)
+    ModCtrl = sys::ImGuiMod_Ctrl as i32,
+    /// Shift modifier (for `io.KeyMods` / `io.KeyShift`)
+    ModShift = sys::ImGuiMod_Shift as i32,
+    /// Alt modifier (for `io.KeyMods` / `io.KeyAlt`)
+    ModAlt = sys::ImGuiMod_Alt as i32,
+    /// Super/Cmd modifier (for `io.KeyMods` / `io.KeySuper`)
+    ModSuper = sys::ImGuiMod_Super as i32,
     /// Menu key
     Menu = sys::ImGuiKey_Menu as i32,
     /// 0 key
@@ -325,6 +333,7 @@ impl From<Key> for sys::ImGuiKey {
 }
 
 // Key modifier flags are available via io.KeyCtrl/KeyShift/KeyAlt/KeySuper.
+// Backends should submit modifier state via `Key::ModCtrl`/`ModShift`/`ModAlt`/`ModSuper` using `Io::add_key_event`.
 
 bitflags! {
     /// Input text flags for text input widgets

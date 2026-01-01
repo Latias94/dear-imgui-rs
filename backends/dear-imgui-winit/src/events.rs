@@ -100,14 +100,23 @@ pub fn handle_modifiers_changed(modifiers: &winit::event::Modifiers, imgui_ctx: 
     let io = imgui_ctx.io_mut();
     let state = modifiers.state();
 
-    // Update modifier key states - our Key enum has Left/Right variants instead of Mod variants
-    // We'll update both left and right keys to the same state since winit doesn't distinguish
+    // Update modifier key states.
+    //
+    // Dear ImGui derives `io.KeyMods`/`io.KeyCtrl`/`io.KeyShift`/`io.KeyAlt`/`io.KeySuper`
+    // from the `ImGuiMod_*` keys, so we must submit those in addition to the left/right keys.
+    //
+    // We update both left and right keys to the same state since `ModifiersChanged` doesn't
+    // reliably distinguish them across platforms.
+    io.add_key_event(dear_imgui_rs::Key::ModShift, state.shift_key());
     io.add_key_event(dear_imgui_rs::Key::LeftShift, state.shift_key());
     io.add_key_event(dear_imgui_rs::Key::RightShift, state.shift_key());
+    io.add_key_event(dear_imgui_rs::Key::ModCtrl, state.control_key());
     io.add_key_event(dear_imgui_rs::Key::LeftCtrl, state.control_key());
     io.add_key_event(dear_imgui_rs::Key::RightCtrl, state.control_key());
+    io.add_key_event(dear_imgui_rs::Key::ModAlt, state.alt_key());
     io.add_key_event(dear_imgui_rs::Key::LeftAlt, state.alt_key());
     io.add_key_event(dear_imgui_rs::Key::RightAlt, state.alt_key());
+    io.add_key_event(dear_imgui_rs::Key::ModSuper, state.super_key());
     io.add_key_event(dear_imgui_rs::Key::LeftSuper, state.super_key());
     io.add_key_event(dear_imgui_rs::Key::RightSuper, state.super_key());
 }
@@ -199,6 +208,7 @@ mod tests {
     use crate::test_util::test_sync::lock_context;
     use dear_imgui_rs::Context;
     use winit::event::{ElementState, MouseButton};
+    use winit::keyboard::ModifiersState;
 
     #[test]
     fn test_keyboard_input_handling() {
@@ -233,5 +243,26 @@ mod tests {
         // We just test that it doesn't panic
         // Test that the function returns a boolean value (always true)
         let _ = handled; // Just verify it's a boolean
+    }
+
+    #[test]
+    fn test_modifiers_changed_updates_key_mods() {
+        let _guard = lock_context();
+        let mut ctx = Context::create();
+        let io = ctx.io_mut();
+        io.set_display_size([1.0, 1.0]);
+        io.set_backend_flags(
+            io.backend_flags() | dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES,
+        );
+        ctx.fonts().build();
+
+        let modifiers: winit::event::Modifiers = ModifiersState::CONTROL.into();
+        handle_modifiers_changed(&modifiers, &mut ctx);
+
+        let ui = ctx.frame();
+        assert!(ui.io().key_ctrl());
+        assert!(!ui.io().key_shift());
+        assert!(!ui.io().key_alt());
+        assert!(!ui.io().key_super());
     }
 }

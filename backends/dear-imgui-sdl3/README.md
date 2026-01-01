@@ -31,21 +31,21 @@ Typical use cases:
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 
 ```toml
-dear-imgui-sdl3 = { version = "0.7", default-features = false }
+dear-imgui-sdl3 = { version = "0.8", default-features = false }
 ```
 
 Enable the official OpenGL3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.7", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "0.8", features = ["opengl3-renderer"] }
 ```
 
 ## Compatibility
 
 | Item          | Version  |
 |---------------|----------|
-| Crate         | 0.7.x    |
-| dear-imgui-rs | 0.7.x    |
+| Crate         | 0.8.x    |
+| dear-imgui-rs | 0.8.x    |
 | SDL3 crate    | 0.16.2   |
 | sdl3-sys      | 0.5      |
 
