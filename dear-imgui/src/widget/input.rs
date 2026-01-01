@@ -327,12 +327,10 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
     }
 
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        let hint_ptr = if let Some(ref hint) = self.hint {
-            self.ui.scratch_txt(hint.as_ref())
-        } else {
-            std::ptr::null()
-        };
+        let (label_ptr, hint_ptr) = self.ui.scratch_txt_with_opt(
+            self.label.as_ref(),
+            self.hint.as_ref().map(|hint| hint.as_ref()),
+        );
         let buf_ptr = self.buf.as_mut_ptr();
         let buf_size = self.buf.capacity_with_nul();
         let user_ptr = self.buf as *mut ImString as *mut c_void;
@@ -521,12 +519,10 @@ where
 {
     /// Builds the text input widget
     pub fn build(self) -> bool {
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        let hint_ptr = if let Some(ref hint) = self.hint {
-            self.ui.scratch_txt(hint.as_ref())
-        } else {
-            std::ptr::null()
-        };
+        let (label_ptr, hint_ptr) = self.ui.scratch_txt_with_opt(
+            self.label.as_ref(),
+            self.hint.as_ref().map(|hint| hint.as_ref()),
+        );
 
         if let Some(extra) = self.capacity_hint {
             let needed = extra.saturating_sub(self.buf.capacity().saturating_sub(self.buf.len()));
@@ -1201,16 +1197,8 @@ impl<'ui> InputFloat<'ui> {
 
     /// Builds the float input widget
     pub fn build(self, value: &mut f32) -> bool {
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        let format_ptr = self
-            .format
-            .as_deref()
-            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
-        let format_ptr = if format_ptr.is_null() {
-            self.ui.scratch_txt("%.3f")
-        } else {
-            format_ptr
-        };
+        let format = self.format.as_deref().unwrap_or("%.3f");
+        let (label_ptr, format_ptr) = self.ui.scratch_txt_two(self.label.as_ref(), format);
 
         unsafe {
             sys::igInputFloat(
@@ -1276,16 +1264,8 @@ impl<'ui> InputDouble<'ui> {
 
     /// Builds the double input widget
     pub fn build(self, value: &mut f64) -> bool {
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        let format_ptr = self
-            .format
-            .as_deref()
-            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
-        let format_ptr = if format_ptr.is_null() {
-            self.ui.scratch_txt("%.6f")
-        } else {
-            format_ptr
-        };
+        let format = self.format.as_deref().unwrap_or("%.6f");
+        let (label_ptr, format_ptr) = self.ui.scratch_txt_two(self.label.as_ref(), format);
 
         unsafe {
             sys::igInputDouble(

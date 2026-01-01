@@ -112,8 +112,7 @@ impl Ui {
         label: impl AsRef<str>,
         shortcut: impl AsRef<str>,
     ) -> bool {
-        let label_ptr = self.scratch_txt(label);
-        let shortcut_ptr = self.scratch_txt(shortcut);
+        let (label_ptr, shortcut_ptr) = self.scratch_txt_two(label, shortcut);
         unsafe { sys::igMenuItemEx(label_ptr, std::ptr::null(), shortcut_ptr, false, true) }
     }
 
@@ -127,12 +126,17 @@ impl Ui {
         selected: bool,
         enabled: bool,
     ) -> bool {
-        let label_ptr = self.scratch_txt(label);
-        let shortcut_ptr = shortcut
-            .as_ref()
-            .map(|s| self.scratch_txt(s.as_ref()))
-            .unwrap_or(std::ptr::null());
-        unsafe { sys::igMenuItem_Bool(label_ptr, shortcut_ptr, selected, enabled) }
+        let label = label.as_ref();
+        match shortcut {
+            Some(shortcut) => {
+                let (label_ptr, shortcut_ptr) = self.scratch_txt_two(label, shortcut.as_ref());
+                unsafe { sys::igMenuItem_Bool(label_ptr, shortcut_ptr, selected, enabled) }
+            }
+            None => {
+                let label_ptr = self.scratch_txt(label);
+                unsafe { sys::igMenuItem_Bool(label_ptr, std::ptr::null(), selected, enabled) }
+            }
+        }
     }
 
     /// Creates a menu item with explicit enabled/selected state (no shortcut).
@@ -172,12 +176,17 @@ impl Ui {
         selected: &mut bool,
         enabled: bool,
     ) -> bool {
-        let label_ptr = self.scratch_txt(label);
-        let shortcut_ptr = shortcut
-            .as_ref()
-            .map(|s| self.scratch_txt(s.as_ref()))
-            .unwrap_or(std::ptr::null());
-        unsafe { sys::igMenuItem_BoolPtr(label_ptr, shortcut_ptr, selected, enabled) }
+        let label = label.as_ref();
+        match shortcut {
+            Some(shortcut) => {
+                let (label_ptr, shortcut_ptr) = self.scratch_txt_two(label, shortcut.as_ref());
+                unsafe { sys::igMenuItem_BoolPtr(label_ptr, shortcut_ptr, selected, enabled) }
+            }
+            None => {
+                let label_ptr = self.scratch_txt(label);
+                unsafe { sys::igMenuItem_BoolPtr(label_ptr, std::ptr::null(), selected, enabled) }
+            }
+        }
     }
 
     /// Creates a toggleable menu item bound to `selected` (no shortcut).

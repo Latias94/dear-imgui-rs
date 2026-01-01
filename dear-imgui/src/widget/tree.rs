@@ -235,37 +235,32 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
 
             match &self.id {
                 TreeNodeId::Str(s) => {
-                    let id_ptr = self.ui.scratch_txt(s);
-                    let label_ptr = self
-                        .label
-                        .as_ref()
-                        .map(|l| self.ui.scratch_txt(l))
-                        .unwrap_or(id_ptr);
-                    sys::igTreeNodeEx_StrStr(id_ptr, self.flags.bits(), label_ptr)
+                    if let Some(label) = self.label.as_ref() {
+                        let (id_ptr, label_ptr) = self.ui.scratch_txt_two(s, label);
+                        sys::igPushID_Str(id_ptr);
+                        let open = sys::igTreeNodeEx_Str(label_ptr, self.flags.bits());
+                        sys::igPopID();
+                        open
+                    } else {
+                        let label_ptr = self.ui.scratch_txt(s);
+                        sys::igTreeNodeEx_Str(label_ptr, self.flags.bits())
+                    }
                 }
                 TreeNodeId::Ptr(ptr) => {
-                    let label_ptr = self
-                        .label
-                        .as_ref()
-                        .map(|l| self.ui.scratch_txt(l))
-                        .unwrap_or(std::ptr::null());
-                    sys::igTreeNodeEx_Ptr(
-                        *ptr as *const std::os::raw::c_void,
-                        self.flags.bits(),
-                        label_ptr,
-                    )
+                    let label = self.label.as_ref().map_or("", |l| l.as_ref());
+                    let label_ptr = self.ui.scratch_txt(label);
+                    sys::igPushID_Ptr(*ptr as *const std::os::raw::c_void);
+                    let open = sys::igTreeNodeEx_Str(label_ptr, self.flags.bits());
+                    sys::igPopID();
+                    open
                 }
                 TreeNodeId::Int(i) => {
-                    let label_ptr = self
-                        .label
-                        .as_ref()
-                        .map(|l| self.ui.scratch_txt(l))
-                        .unwrap_or(std::ptr::null());
-                    sys::igTreeNodeEx_Ptr(
-                        *i as *const std::os::raw::c_void,
-                        self.flags.bits(),
-                        label_ptr,
-                    )
+                    let label = self.label.as_ref().map_or("", |l| l.as_ref());
+                    let label_ptr = self.ui.scratch_txt(label);
+                    sys::igPushID_Int(*i);
+                    let open = sys::igTreeNodeEx_Str(label_ptr, self.flags.bits());
+                    sys::igPopID();
+                    open
                 }
             }
         };

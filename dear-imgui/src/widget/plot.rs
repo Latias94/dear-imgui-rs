@@ -110,11 +110,9 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
             Ok(n) => n,
             Err(_) => return,
         };
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        let overlay_ptr = self
-            .overlay_text
-            .as_deref()
-            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
+        let (label_ptr, overlay_ptr) = self
+            .ui
+            .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
         unsafe {
@@ -198,11 +196,9 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
             Ok(n) => n,
             Err(_) => return,
         };
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        let overlay_ptr = self
-            .overlay_text
-            .as_deref()
-            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
+        let (label_ptr, overlay_ptr) = self
+            .ui
+            .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
         unsafe {

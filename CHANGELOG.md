@@ -63,10 +63,12 @@ plus backend hardening for multi-viewport and renderer integrations.
     `Ui::begin_modal_popup_with_opened`, `Ui::modal_popup_with_opened`, `Ui::collapsing_header_with_visible`.
   - Selectables: `Selectable::build_with_ref` now uses ImGui's `Selectable(..., bool*)` variant for closer upstream behavior parity.
   - Text helpers: avoid passing user text as a C variadic format string (prevents potential UB when strings contain `%`) and prefer non-variadic tooltip/text paths where available.
+  - Tree nodes: avoid calling C variadic tree-node APIs with user-provided labels by routing `TreeNode` through non-variadic `TreeNodeEx` + `PushID`/`PopID`, preventing potential UB when labels contain `%`.
   - `TextFilter`: fix a leak by calling `ImGuiTextFilter_destroy` on drop; avoid per-call allocations; add `pass_filter_range` with correct `text_end` semantics.
   - Clipboard: handle non-UTF8 clipboard payloads without panicking (lossy conversion), sanitize interior NUL bytes, and guard against missing clipboard user data.
   - Draw callbacks: avoid creating `&mut` references from `*const` FFI pointers when clearing callback user data; ensure `add_callback_safe` stores a direct userdata pointer (`userdata_size = 0`) so Dear ImGui doesn't copy closure bytes into its internal callback buffer (fixes UB when executing callbacks).
   - Drag and drop typed payloads: avoid passing uninitialized padding bytes across the C++ boundary and read payload bytes using `read_unaligned` instead of creating references into Dear ImGui's unaligned payload storage (fixes UB).
+  - Scratch C strings: avoid scratch-buffer pointer invalidation in multi-string widget calls by using the paired scratch helpers (`scratch_txt_two`/`scratch_txt_with_opt`) when passing multiple C string pointers in one FFI call.
   - Scratch C strings: sanitize interior NUL bytes (`'\0'` → `?`) instead of panicking when building temporary C string pointers.
   - Rendering draw lists: handle null vertex/index buffers defensively when constructing slices at the FFI boundary.
   - InputText (String-backed): avoid undefined behavior when trimming at NUL by zero-initializing spare capacity, including during ImGui resize callbacks.
