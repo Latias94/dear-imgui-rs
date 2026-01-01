@@ -62,6 +62,7 @@ plus backend hardening for multi-viewport and renderer integrations.
   - Popups/headers: expose the corresponding `bool*` variants via
     `Ui::begin_modal_popup_with_opened`, `Ui::modal_popup_with_opened`, `Ui::collapsing_header_with_visible`.
   - Selectables: `Selectable::build_with_ref` now uses ImGui's `Selectable(..., bool*)` variant for closer upstream behavior parity.
+  - Text helpers: avoid passing user text as a C variadic format string (prevents potential UB when strings contain `%`) and prefer non-variadic tooltip/text paths where available.
   - `TextFilter`: fix a leak by calling `ImGuiTextFilter_destroy` on drop; avoid per-call allocations; add `pass_filter_range` with correct `text_end` semantics.
   - Clipboard: handle non-UTF8 clipboard payloads without panicking (lossy conversion), sanitize interior NUL bytes, and guard against missing clipboard user data.
   - Draw callbacks: avoid creating `&mut` references from `*const` FFI pointers when clearing callback user data; ensure `add_callback_safe` stores a direct userdata pointer (`userdata_size = 0`) so Dear ImGui doesn't copy closure bytes into its internal callback buffer (fixes UB when executing callbacks).

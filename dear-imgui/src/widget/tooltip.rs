@@ -69,12 +69,19 @@ impl Ui {
     }
 
     /// Sets a tooltip with simple text content.
-    /// This is more efficient than begin_tooltip/end_tooltip for simple text.
+    ///
+    /// This renders unformatted text (no `%`-style formatting) and avoids calling C variadic APIs.
     #[doc(alias = "SetTooltip")]
     pub fn set_tooltip(&self, text: impl AsRef<str>) {
-        let text_ptr = self.scratch_txt(text);
+        let s = text.as_ref();
         unsafe {
-            sys::igSetTooltip(text_ptr);
+            // Avoid calling C variadic APIs: build a tooltip window and render unformatted text.
+            if sys::igBeginTooltip() {
+                let begin = s.as_ptr() as *const std::os::raw::c_char;
+                let end = begin.add(s.len());
+                sys::igTextUnformatted(begin, end);
+                sys::igEndTooltip();
+            }
         }
     }
 
@@ -85,11 +92,20 @@ impl Ui {
     }
 
     /// Sets a tooltip for the last item with simple text content.
-    /// More efficient than building a tooltip window for simple cases.
+    ///
+    /// Uses the non-variadic `BeginItemTooltip` path and renders unformatted text.
     #[doc(alias = "SetItemTooltip")]
     pub fn set_item_tooltip(&self, text: impl AsRef<str>) {
-        let text_ptr = self.scratch_txt(text);
-        unsafe { sys::igSetItemTooltip(text_ptr) }
+        let s = text.as_ref();
+        unsafe {
+            // Prefer the non-variadic ImGui 1.9x+ API when available.
+            if sys::igBeginItemTooltip() {
+                let begin = s.as_ptr() as *const std::os::raw::c_char;
+                let end = begin.add(s.len());
+                sys::igTextUnformatted(begin, end);
+                sys::igEndTooltip();
+            }
+        }
     }
 }
 

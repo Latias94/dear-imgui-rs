@@ -44,7 +44,9 @@ impl Ui {
     pub fn bullet_text(&self, text: impl AsRef<str>) {
         let text_ptr = self.scratch_txt(text);
         unsafe {
-            sys::igBulletText(text_ptr);
+            // Always treat the value as unformatted user text.
+            const FMT: &[u8; 3] = b"%s\0";
+            sys::igBulletText(FMT.as_ptr() as *const std::os::raw::c_char, text_ptr);
         }
     }
 }

@@ -79,15 +79,17 @@ impl Ui {
 
     /// Display text wrapped to fit the current item width
     ///
-    /// # Note
-    ///
-    /// This function currently uses the scratch buffer implementation.
-    /// Optimization for this function requires additional investigation.
+    /// This uses `PushTextWrapPos + TextUnformatted + PopTextWrapPos` to avoid
+    /// calling C variadic APIs and to keep the input string unformatted.
     #[doc(alias = "TextWrapped")]
     pub fn text_wrapped(&self, text: impl AsRef<str>) {
-        let text_ptr = self.scratch_txt(text);
+        let s = text.as_ref();
         unsafe {
-            sys::igTextWrapped(text_ptr);
+            sys::igPushTextWrapPos(0.0);
+            let begin = s.as_ptr() as *const std::os::raw::c_char;
+            let end = begin.add(s.len());
+            sys::igTextUnformatted(begin, end);
+            sys::igPopTextWrapPos();
         }
     }
 
@@ -96,7 +98,13 @@ impl Ui {
     pub fn label_text(&self, label: impl AsRef<str>, text: impl AsRef<str>) {
         let (label_ptr, text_ptr) = self.scratch_txt_two(label, text);
         unsafe {
-            sys::igLabelText(label_ptr, text_ptr);
+            // Always treat the value as unformatted user text.
+            const FMT: &[u8; 3] = b"%s\0";
+            sys::igLabelText(
+                label_ptr,
+                FMT.as_ptr() as *const std::os::raw::c_char,
+                text_ptr,
+            );
         }
     }
 
