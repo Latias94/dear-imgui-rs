@@ -85,6 +85,7 @@ fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, c
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .allowlist_function("ImPlot.*")
         .allowlist_type("ImPlot.*")
+        .allowlist_type("ImWchar32")
         .allowlist_var("ImPlot.*")
         .allowlist_var("IMPLOT_.*")
         .blocklist_type("ImVec2")
@@ -305,6 +306,24 @@ fn main() {
         return;
     }
 
+    // Maintainer workflow: regenerate bindings via bindgen without requiring native compilation.
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        if !imgui_src.exists() {
+            panic!(
+                "ImGui source not found at {:?}. Did you forget to initialize git submodules?",
+                imgui_src
+            );
+        }
+        if !cimplot_root.exists() {
+            panic!(
+                "cimplot source not found at {:?}. Did you forget to initialize git submodules?",
+                cimplot_root
+            );
+        }
+        generate_bindings(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+        return;
+    }
+
     // When explicitly skipping native compilation, also skip bindgen and rely on
     // pregenerated bindings. This keeps `cargo check --target ...` working for
     // cross targets without requiring a C sysroot for bindgen/clang.
@@ -390,6 +409,10 @@ fn docsrs_build(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui
 }
 
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        return false;
+    }
+
     let preg = Path::new("src").join("bindings_pregenerated.rs");
     if preg.exists() {
         match std::fs::read_to_string(&preg).and_then(|content| {
@@ -414,6 +437,10 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
 }
 
 fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        return false;
+    }
+
     let preg = Path::new("src").join("wasm_bindings_pregenerated.rs");
     if preg.exists() {
         match std::fs::read_to_string(&preg).and_then(|content| {

@@ -99,6 +99,7 @@ fn generate_bindings(
         .allowlist_function("imnodes_getIOKeyShiftPtr")
         .allowlist_function("imnodes_getIOKeyAltPtr")
         .allowlist_type("ImNodes.*")
+        .allowlist_type("ImWchar32")
         .allowlist_var("ImNodes.*")
         .blocklist_type("ImVec2")
         .blocklist_type("ImVec4")
@@ -238,6 +239,23 @@ fn main() {
         return;
     }
 
+    // Maintainer workflow: regenerate bindings via bindgen without requiring native compilation.
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
+        let cimnodes_root = cfg.manifest_dir.join("third-party/cimnodes");
+        if !imgui_src.exists() {
+            panic!("ImGui include not found at {:?}", imgui_src);
+        }
+        if !cimnodes_root.exists() {
+            panic!(
+                "cimnodes root not found at {:?}. Did you init submodules?",
+                cimnodes_root
+            );
+        }
+        generate_bindings(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
+        return;
+    }
+
     // When explicitly skipping native compilation, also skip bindgen and rely on
     // pregenerated bindings. This keeps `cargo check --target ...` working for
     // cross targets without requiring a C sysroot for bindgen/clang.
@@ -318,6 +336,10 @@ fn docsrs_build(cfg: &BuildConfig) {
 }
 
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        return false;
+    }
+
     let preg = Path::new("src").join("bindings_pregenerated.rs");
     if preg.exists() {
         match std::fs::read_to_string(&preg).and_then(|content| {
@@ -342,6 +364,10 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
 }
 
 fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        return false;
+    }
+
     let preg = Path::new("src").join("wasm_bindings_pregenerated.rs");
     if preg.exists() {
         match std::fs::read_to_string(&preg).and_then(|content| {

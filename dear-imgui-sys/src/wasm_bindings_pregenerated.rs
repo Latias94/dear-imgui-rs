@@ -140,18 +140,13 @@ where
         }
     }
 }
-pub type __int64_t = ::std::os::raw::c_longlong;
-pub type __darwin_va_list = __builtin_va_list;
-pub type __darwin_off_t = __int64_t;
-pub type va_list = __darwin_va_list;
-pub type fpos_t = __darwin_off_t;
+pub type va_list = *mut ::std::os::raw::c_char;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub struct __sbuf {
-    pub _base: *mut ::std::os::raw::c_uchar,
-    pub _size: ::std::os::raw::c_int,
+pub struct _iobuf {
+    pub _Placeholder: *mut ::std::os::raw::c_void,
 }
-impl Default for __sbuf {
+impl Default for _iobuf {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
         unsafe {
@@ -160,65 +155,8 @@ impl Default for __sbuf {
         }
     }
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __sFILEX {
-    _unused: [u8; 0],
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub struct __sFILE {
-    pub _p: *mut ::std::os::raw::c_uchar,
-    pub _r: ::std::os::raw::c_int,
-    pub _w: ::std::os::raw::c_int,
-    pub _flags: ::std::os::raw::c_short,
-    pub _file: ::std::os::raw::c_short,
-    pub _bf: __sbuf,
-    pub _lbfsize: ::std::os::raw::c_int,
-    pub _cookie: *mut ::std::os::raw::c_void,
-    pub _close: ::std::option::Option<
-        unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void) -> ::std::os::raw::c_int,
-    >,
-    pub _read: ::std::option::Option<
-        unsafe extern "C" fn(
-            arg1: *mut ::std::os::raw::c_void,
-            arg2: *mut ::std::os::raw::c_char,
-            __n: ::std::os::raw::c_int,
-        ) -> ::std::os::raw::c_int,
-    >,
-    pub _seek: ::std::option::Option<
-        unsafe extern "C" fn(
-            arg1: *mut ::std::os::raw::c_void,
-            arg2: fpos_t,
-            arg3: ::std::os::raw::c_int,
-        ) -> fpos_t,
-    >,
-    pub _write: ::std::option::Option<
-        unsafe extern "C" fn(
-            arg1: *mut ::std::os::raw::c_void,
-            arg2: *const ::std::os::raw::c_char,
-            __n: ::std::os::raw::c_int,
-        ) -> ::std::os::raw::c_int,
-    >,
-    pub _ub: __sbuf,
-    pub _extra: *mut __sFILEX,
-    pub _ur: ::std::os::raw::c_int,
-    pub _ubuf: [::std::os::raw::c_uchar; 3usize],
-    pub _nbuf: [::std::os::raw::c_uchar; 1usize],
-    pub _lb: __sbuf,
-    pub _blksize: ::std::os::raw::c_int,
-    pub _offset: fpos_t,
-}
-impl Default for __sFILE {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
-}
-pub type FILE = __sFILE;
+pub type FILE = _iobuf;
+pub type ImU64 = ::std::os::raw::c_ulonglong;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ImGuiDockRequest {
@@ -273,7 +211,6 @@ pub type ImU16 = ::std::os::raw::c_ushort;
 pub type ImS32 = ::std::os::raw::c_int;
 pub type ImU32 = ::std::os::raw::c_uint;
 pub type ImS64 = ::std::os::raw::c_longlong;
-pub type ImU64 = ::std::os::raw::c_ulonglong;
 pub type ImGuiCol = ::std::os::raw::c_int;
 pub type ImGuiCond = ::std::os::raw::c_int;
 pub type ImGuiDataType = ::std::os::raw::c_int;
@@ -391,7 +328,7 @@ pub const ImGuiWindowFlags_Tooltip: ImGuiWindowFlags_ = 33554432;
 pub const ImGuiWindowFlags_Popup: ImGuiWindowFlags_ = 67108864;
 pub const ImGuiWindowFlags_Modal: ImGuiWindowFlags_ = 134217728;
 pub const ImGuiWindowFlags_ChildMenu: ImGuiWindowFlags_ = 268435456;
-pub type ImGuiWindowFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiWindowFlags_ = ::std::os::raw::c_int;
 pub const ImGuiChildFlags_None: ImGuiChildFlags_ = 0;
 pub const ImGuiChildFlags_Borders: ImGuiChildFlags_ = 1;
 pub const ImGuiChildFlags_AlwaysUseWindowPadding: ImGuiChildFlags_ = 2;
@@ -402,7 +339,7 @@ pub const ImGuiChildFlags_AutoResizeY: ImGuiChildFlags_ = 32;
 pub const ImGuiChildFlags_AlwaysAutoResize: ImGuiChildFlags_ = 64;
 pub const ImGuiChildFlags_FrameStyle: ImGuiChildFlags_ = 128;
 pub const ImGuiChildFlags_NavFlattened: ImGuiChildFlags_ = 256;
-pub type ImGuiChildFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiChildFlags_ = ::std::os::raw::c_int;
 pub const ImGuiItemFlags_None: ImGuiItemFlags_ = 0;
 pub const ImGuiItemFlags_NoTabStop: ImGuiItemFlags_ = 1;
 pub const ImGuiItemFlags_NoNav: ImGuiItemFlags_ = 2;
@@ -410,7 +347,7 @@ pub const ImGuiItemFlags_NoNavDefaultFocus: ImGuiItemFlags_ = 4;
 pub const ImGuiItemFlags_ButtonRepeat: ImGuiItemFlags_ = 8;
 pub const ImGuiItemFlags_AutoClosePopups: ImGuiItemFlags_ = 16;
 pub const ImGuiItemFlags_AllowDuplicateId: ImGuiItemFlags_ = 32;
-pub type ImGuiItemFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiItemFlags_ = ::std::os::raw::c_int;
 pub const ImGuiInputTextFlags_None: ImGuiInputTextFlags_ = 0;
 pub const ImGuiInputTextFlags_CharsDecimal: ImGuiInputTextFlags_ = 1;
 pub const ImGuiInputTextFlags_CharsHexadecimal: ImGuiInputTextFlags_ = 2;
@@ -437,7 +374,7 @@ pub const ImGuiInputTextFlags_CallbackCharFilter: ImGuiInputTextFlags_ = 2097152
 pub const ImGuiInputTextFlags_CallbackResize: ImGuiInputTextFlags_ = 4194304;
 pub const ImGuiInputTextFlags_CallbackEdit: ImGuiInputTextFlags_ = 8388608;
 pub const ImGuiInputTextFlags_WordWrap: ImGuiInputTextFlags_ = 16777216;
-pub type ImGuiInputTextFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiInputTextFlags_ = ::std::os::raw::c_int;
 pub const ImGuiTreeNodeFlags_None: ImGuiTreeNodeFlags_ = 0;
 pub const ImGuiTreeNodeFlags_Selected: ImGuiTreeNodeFlags_ = 1;
 pub const ImGuiTreeNodeFlags_Framed: ImGuiTreeNodeFlags_ = 2;
@@ -460,7 +397,7 @@ pub const ImGuiTreeNodeFlags_CollapsingHeader: ImGuiTreeNodeFlags_ = 26;
 pub const ImGuiTreeNodeFlags_DrawLinesNone: ImGuiTreeNodeFlags_ = 262144;
 pub const ImGuiTreeNodeFlags_DrawLinesFull: ImGuiTreeNodeFlags_ = 524288;
 pub const ImGuiTreeNodeFlags_DrawLinesToNodes: ImGuiTreeNodeFlags_ = 1048576;
-pub type ImGuiTreeNodeFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiTreeNodeFlags_ = ::std::os::raw::c_int;
 pub const ImGuiPopupFlags_None: ImGuiPopupFlags_ = 0;
 pub const ImGuiPopupFlags_MouseButtonLeft: ImGuiPopupFlags_ = 0;
 pub const ImGuiPopupFlags_MouseButtonRight: ImGuiPopupFlags_ = 1;
@@ -473,7 +410,7 @@ pub const ImGuiPopupFlags_NoOpenOverItems: ImGuiPopupFlags_ = 256;
 pub const ImGuiPopupFlags_AnyPopupId: ImGuiPopupFlags_ = 1024;
 pub const ImGuiPopupFlags_AnyPopupLevel: ImGuiPopupFlags_ = 2048;
 pub const ImGuiPopupFlags_AnyPopup: ImGuiPopupFlags_ = 3072;
-pub type ImGuiPopupFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiPopupFlags_ = ::std::os::raw::c_int;
 pub const ImGuiSelectableFlags_None: ImGuiSelectableFlags_ = 0;
 pub const ImGuiSelectableFlags_NoAutoClosePopups: ImGuiSelectableFlags_ = 1;
 pub const ImGuiSelectableFlags_SpanAllColumns: ImGuiSelectableFlags_ = 2;
@@ -482,7 +419,7 @@ pub const ImGuiSelectableFlags_Disabled: ImGuiSelectableFlags_ = 8;
 pub const ImGuiSelectableFlags_AllowOverlap: ImGuiSelectableFlags_ = 16;
 pub const ImGuiSelectableFlags_Highlight: ImGuiSelectableFlags_ = 32;
 pub const ImGuiSelectableFlags_SelectOnNav: ImGuiSelectableFlags_ = 64;
-pub type ImGuiSelectableFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiSelectableFlags_ = ::std::os::raw::c_int;
 pub const ImGuiComboFlags_None: ImGuiComboFlags_ = 0;
 pub const ImGuiComboFlags_PopupAlignLeft: ImGuiComboFlags_ = 1;
 pub const ImGuiComboFlags_HeightSmall: ImGuiComboFlags_ = 2;
@@ -493,7 +430,7 @@ pub const ImGuiComboFlags_NoArrowButton: ImGuiComboFlags_ = 32;
 pub const ImGuiComboFlags_NoPreview: ImGuiComboFlags_ = 64;
 pub const ImGuiComboFlags_WidthFitPreview: ImGuiComboFlags_ = 128;
 pub const ImGuiComboFlags_HeightMask_: ImGuiComboFlags_ = 30;
-pub type ImGuiComboFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiComboFlags_ = ::std::os::raw::c_int;
 pub const ImGuiTabBarFlags_None: ImGuiTabBarFlags_ = 0;
 pub const ImGuiTabBarFlags_Reorderable: ImGuiTabBarFlags_ = 1;
 pub const ImGuiTabBarFlags_AutoSelectNewTabs: ImGuiTabBarFlags_ = 2;
@@ -507,7 +444,7 @@ pub const ImGuiTabBarFlags_FittingPolicyShrink: ImGuiTabBarFlags_ = 256;
 pub const ImGuiTabBarFlags_FittingPolicyScroll: ImGuiTabBarFlags_ = 512;
 pub const ImGuiTabBarFlags_FittingPolicyMask_: ImGuiTabBarFlags_ = 896;
 pub const ImGuiTabBarFlags_FittingPolicyDefault_: ImGuiTabBarFlags_ = 128;
-pub type ImGuiTabBarFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiTabBarFlags_ = ::std::os::raw::c_int;
 pub const ImGuiTabItemFlags_None: ImGuiTabItemFlags_ = 0;
 pub const ImGuiTabItemFlags_UnsavedDocument: ImGuiTabItemFlags_ = 1;
 pub const ImGuiTabItemFlags_SetSelected: ImGuiTabItemFlags_ = 2;
@@ -518,7 +455,7 @@ pub const ImGuiTabItemFlags_NoReorder: ImGuiTabItemFlags_ = 32;
 pub const ImGuiTabItemFlags_Leading: ImGuiTabItemFlags_ = 64;
 pub const ImGuiTabItemFlags_Trailing: ImGuiTabItemFlags_ = 128;
 pub const ImGuiTabItemFlags_NoAssumedClosure: ImGuiTabItemFlags_ = 256;
-pub type ImGuiTabItemFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiTabItemFlags_ = ::std::os::raw::c_int;
 pub const ImGuiFocusedFlags_None: ImGuiFocusedFlags_ = 0;
 pub const ImGuiFocusedFlags_ChildWindows: ImGuiFocusedFlags_ = 1;
 pub const ImGuiFocusedFlags_RootWindow: ImGuiFocusedFlags_ = 2;
@@ -526,7 +463,7 @@ pub const ImGuiFocusedFlags_AnyWindow: ImGuiFocusedFlags_ = 4;
 pub const ImGuiFocusedFlags_NoPopupHierarchy: ImGuiFocusedFlags_ = 8;
 pub const ImGuiFocusedFlags_DockHierarchy: ImGuiFocusedFlags_ = 16;
 pub const ImGuiFocusedFlags_RootAndChildWindows: ImGuiFocusedFlags_ = 3;
-pub type ImGuiFocusedFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiFocusedFlags_ = ::std::os::raw::c_int;
 pub const ImGuiHoveredFlags_None: ImGuiHoveredFlags_ = 0;
 pub const ImGuiHoveredFlags_ChildWindows: ImGuiHoveredFlags_ = 1;
 pub const ImGuiHoveredFlags_RootWindow: ImGuiHoveredFlags_ = 2;
@@ -548,7 +485,7 @@ pub const ImGuiHoveredFlags_DelayNone: ImGuiHoveredFlags_ = 16384;
 pub const ImGuiHoveredFlags_DelayShort: ImGuiHoveredFlags_ = 32768;
 pub const ImGuiHoveredFlags_DelayNormal: ImGuiHoveredFlags_ = 65536;
 pub const ImGuiHoveredFlags_NoSharedDelay: ImGuiHoveredFlags_ = 131072;
-pub type ImGuiHoveredFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiHoveredFlags_ = ::std::os::raw::c_int;
 pub const ImGuiDockNodeFlags_None: ImGuiDockNodeFlags_ = 0;
 pub const ImGuiDockNodeFlags_KeepAliveOnly: ImGuiDockNodeFlags_ = 1;
 pub const ImGuiDockNodeFlags_NoDockingOverCentralNode: ImGuiDockNodeFlags_ = 4;
@@ -557,7 +494,7 @@ pub const ImGuiDockNodeFlags_NoDockingSplit: ImGuiDockNodeFlags_ = 16;
 pub const ImGuiDockNodeFlags_NoResize: ImGuiDockNodeFlags_ = 32;
 pub const ImGuiDockNodeFlags_AutoHideTabBar: ImGuiDockNodeFlags_ = 64;
 pub const ImGuiDockNodeFlags_NoUndocking: ImGuiDockNodeFlags_ = 128;
-pub type ImGuiDockNodeFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiDockNodeFlags_ = ::std::os::raw::c_int;
 pub const ImGuiDragDropFlags_None: ImGuiDragDropFlags_ = 0;
 pub const ImGuiDragDropFlags_SourceNoPreviewTooltip: ImGuiDragDropFlags_ = 1;
 pub const ImGuiDragDropFlags_SourceNoDisableHover: ImGuiDragDropFlags_ = 2;
@@ -572,7 +509,7 @@ pub const ImGuiDragDropFlags_AcceptNoDrawDefaultRect: ImGuiDragDropFlags_ = 2048
 pub const ImGuiDragDropFlags_AcceptNoPreviewTooltip: ImGuiDragDropFlags_ = 4096;
 pub const ImGuiDragDropFlags_AcceptDrawAsHovered: ImGuiDragDropFlags_ = 8192;
 pub const ImGuiDragDropFlags_AcceptPeekOnly: ImGuiDragDropFlags_ = 3072;
-pub type ImGuiDragDropFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiDragDropFlags_ = ::std::os::raw::c_int;
 pub const ImGuiDataType_S8: ImGuiDataType_ = 0;
 pub const ImGuiDataType_U8: ImGuiDataType_ = 1;
 pub const ImGuiDataType_S16: ImGuiDataType_ = 2;
@@ -586,7 +523,7 @@ pub const ImGuiDataType_Double: ImGuiDataType_ = 9;
 pub const ImGuiDataType_Bool: ImGuiDataType_ = 10;
 pub const ImGuiDataType_String: ImGuiDataType_ = 11;
 pub const ImGuiDataType_COUNT: ImGuiDataType_ = 12;
-pub type ImGuiDataType_ = ::std::os::raw::c_uint;
+pub type ImGuiDataType_ = ::std::os::raw::c_int;
 pub const ImGuiDir_None: ImGuiDir = -1;
 pub const ImGuiDir_Left: ImGuiDir = 0;
 pub const ImGuiDir_Right: ImGuiDir = 1;
@@ -597,7 +534,7 @@ pub type ImGuiDir = ::std::os::raw::c_int;
 pub const ImGuiSortDirection_None: ImGuiSortDirection = 0;
 pub const ImGuiSortDirection_Ascending: ImGuiSortDirection = 1;
 pub const ImGuiSortDirection_Descending: ImGuiSortDirection = 2;
-pub type ImGuiSortDirection = ::std::os::raw::c_uint;
+pub type ImGuiSortDirection = ::std::os::raw::c_int;
 pub const ImGuiKey_None: ImGuiKey = 0;
 pub const ImGuiKey_NamedKey_BEGIN: ImGuiKey = 512;
 pub const ImGuiKey_Tab: ImGuiKey = 512;
@@ -763,7 +700,7 @@ pub const ImGuiMod_Shift: ImGuiKey = 8192;
 pub const ImGuiMod_Alt: ImGuiKey = 16384;
 pub const ImGuiMod_Super: ImGuiKey = 32768;
 pub const ImGuiMod_Mask_: ImGuiKey = 61440;
-pub type ImGuiKey = ::std::os::raw::c_uint;
+pub type ImGuiKey = ::std::os::raw::c_int;
 pub const ImGuiInputFlags_None: ImGuiInputFlags_ = 0;
 pub const ImGuiInputFlags_Repeat: ImGuiInputFlags_ = 1;
 pub const ImGuiInputFlags_RouteActive: ImGuiInputFlags_ = 1024;
@@ -775,7 +712,7 @@ pub const ImGuiInputFlags_RouteOverActive: ImGuiInputFlags_ = 32768;
 pub const ImGuiInputFlags_RouteUnlessBgFocused: ImGuiInputFlags_ = 65536;
 pub const ImGuiInputFlags_RouteFromRootWindow: ImGuiInputFlags_ = 131072;
 pub const ImGuiInputFlags_Tooltip: ImGuiInputFlags_ = 262144;
-pub type ImGuiInputFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiInputFlags_ = ::std::os::raw::c_int;
 pub const ImGuiConfigFlags_None: ImGuiConfigFlags_ = 0;
 pub const ImGuiConfigFlags_NavEnableKeyboard: ImGuiConfigFlags_ = 1;
 pub const ImGuiConfigFlags_NavEnableGamepad: ImGuiConfigFlags_ = 2;
@@ -786,7 +723,7 @@ pub const ImGuiConfigFlags_DockingEnable: ImGuiConfigFlags_ = 128;
 pub const ImGuiConfigFlags_ViewportsEnable: ImGuiConfigFlags_ = 1024;
 pub const ImGuiConfigFlags_IsSRGB: ImGuiConfigFlags_ = 1048576;
 pub const ImGuiConfigFlags_IsTouchScreen: ImGuiConfigFlags_ = 2097152;
-pub type ImGuiConfigFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiConfigFlags_ = ::std::os::raw::c_int;
 pub const ImGuiBackendFlags_None: ImGuiBackendFlags_ = 0;
 pub const ImGuiBackendFlags_HasGamepad: ImGuiBackendFlags_ = 1;
 pub const ImGuiBackendFlags_HasMouseCursors: ImGuiBackendFlags_ = 2;
@@ -797,7 +734,7 @@ pub const ImGuiBackendFlags_RendererHasViewports: ImGuiBackendFlags_ = 1024;
 pub const ImGuiBackendFlags_PlatformHasViewports: ImGuiBackendFlags_ = 2048;
 pub const ImGuiBackendFlags_HasMouseHoveredViewport: ImGuiBackendFlags_ = 4096;
 pub const ImGuiBackendFlags_HasParentViewport: ImGuiBackendFlags_ = 8192;
-pub type ImGuiBackendFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiBackendFlags_ = ::std::os::raw::c_int;
 pub const ImGuiCol_Text: ImGuiCol_ = 0;
 pub const ImGuiCol_TextDisabled: ImGuiCol_ = 1;
 pub const ImGuiCol_WindowBg: ImGuiCol_ = 2;
@@ -861,7 +798,7 @@ pub const ImGuiCol_NavWindowingHighlight: ImGuiCol_ = 59;
 pub const ImGuiCol_NavWindowingDimBg: ImGuiCol_ = 60;
 pub const ImGuiCol_ModalWindowDimBg: ImGuiCol_ = 61;
 pub const ImGuiCol_COUNT: ImGuiCol_ = 62;
-pub type ImGuiCol_ = ::std::os::raw::c_uint;
+pub type ImGuiCol_ = ::std::os::raw::c_int;
 pub const ImGuiStyleVar_Alpha: ImGuiStyleVar_ = 0;
 pub const ImGuiStyleVar_DisabledAlpha: ImGuiStyleVar_ = 1;
 pub const ImGuiStyleVar_WindowPadding: ImGuiStyleVar_ = 2;
@@ -903,14 +840,14 @@ pub const ImGuiStyleVar_SeparatorTextAlign: ImGuiStyleVar_ = 37;
 pub const ImGuiStyleVar_SeparatorTextPadding: ImGuiStyleVar_ = 38;
 pub const ImGuiStyleVar_DockingSeparatorSize: ImGuiStyleVar_ = 39;
 pub const ImGuiStyleVar_COUNT: ImGuiStyleVar_ = 40;
-pub type ImGuiStyleVar_ = ::std::os::raw::c_uint;
+pub type ImGuiStyleVar_ = ::std::os::raw::c_int;
 pub const ImGuiButtonFlags_None: ImGuiButtonFlags_ = 0;
 pub const ImGuiButtonFlags_MouseButtonLeft: ImGuiButtonFlags_ = 1;
 pub const ImGuiButtonFlags_MouseButtonRight: ImGuiButtonFlags_ = 2;
 pub const ImGuiButtonFlags_MouseButtonMiddle: ImGuiButtonFlags_ = 4;
 pub const ImGuiButtonFlags_MouseButtonMask_: ImGuiButtonFlags_ = 7;
 pub const ImGuiButtonFlags_EnableNav: ImGuiButtonFlags_ = 8;
-pub type ImGuiButtonFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiButtonFlags_ = ::std::os::raw::c_int;
 pub const ImGuiColorEditFlags_None: ImGuiColorEditFlags_ = 0;
 pub const ImGuiColorEditFlags_NoAlpha: ImGuiColorEditFlags_ = 2;
 pub const ImGuiColorEditFlags_NoPicker: ImGuiColorEditFlags_ = 4;
@@ -942,7 +879,7 @@ pub const ImGuiColorEditFlags_DisplayMask_: ImGuiColorEditFlags_ = 7340032;
 pub const ImGuiColorEditFlags_DataTypeMask_: ImGuiColorEditFlags_ = 25165824;
 pub const ImGuiColorEditFlags_PickerMask_: ImGuiColorEditFlags_ = 100663296;
 pub const ImGuiColorEditFlags_InputMask_: ImGuiColorEditFlags_ = 402653184;
-pub type ImGuiColorEditFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiColorEditFlags_ = ::std::os::raw::c_int;
 pub const ImGuiSliderFlags_None: ImGuiSliderFlags_ = 0;
 pub const ImGuiSliderFlags_Logarithmic: ImGuiSliderFlags_ = 32;
 pub const ImGuiSliderFlags_NoRoundToFormat: ImGuiSliderFlags_ = 64;
@@ -953,12 +890,12 @@ pub const ImGuiSliderFlags_ClampZeroRange: ImGuiSliderFlags_ = 1024;
 pub const ImGuiSliderFlags_NoSpeedTweaks: ImGuiSliderFlags_ = 2048;
 pub const ImGuiSliderFlags_AlwaysClamp: ImGuiSliderFlags_ = 1536;
 pub const ImGuiSliderFlags_InvalidMask_: ImGuiSliderFlags_ = 1879048207;
-pub type ImGuiSliderFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiSliderFlags_ = ::std::os::raw::c_int;
 pub const ImGuiMouseButton_Left: ImGuiMouseButton_ = 0;
 pub const ImGuiMouseButton_Right: ImGuiMouseButton_ = 1;
 pub const ImGuiMouseButton_Middle: ImGuiMouseButton_ = 2;
 pub const ImGuiMouseButton_COUNT: ImGuiMouseButton_ = 5;
-pub type ImGuiMouseButton_ = ::std::os::raw::c_uint;
+pub type ImGuiMouseButton_ = ::std::os::raw::c_int;
 pub const ImGuiMouseCursor_None: ImGuiMouseCursor_ = -1;
 pub const ImGuiMouseCursor_Arrow: ImGuiMouseCursor_ = 0;
 pub const ImGuiMouseCursor_TextInput: ImGuiMouseCursor_ = 1;
@@ -977,13 +914,13 @@ pub const ImGuiMouseSource_Mouse: ImGuiMouseSource = 0;
 pub const ImGuiMouseSource_TouchScreen: ImGuiMouseSource = 1;
 pub const ImGuiMouseSource_Pen: ImGuiMouseSource = 2;
 pub const ImGuiMouseSource_COUNT: ImGuiMouseSource = 3;
-pub type ImGuiMouseSource = ::std::os::raw::c_uint;
+pub type ImGuiMouseSource = ::std::os::raw::c_int;
 pub const ImGuiCond_None: ImGuiCond_ = 0;
 pub const ImGuiCond_Always: ImGuiCond_ = 1;
 pub const ImGuiCond_Once: ImGuiCond_ = 2;
 pub const ImGuiCond_FirstUseEver: ImGuiCond_ = 4;
 pub const ImGuiCond_Appearing: ImGuiCond_ = 8;
-pub type ImGuiCond_ = ::std::os::raw::c_uint;
+pub type ImGuiCond_ = ::std::os::raw::c_int;
 pub const ImGuiTableFlags_None: ImGuiTableFlags_ = 0;
 pub const ImGuiTableFlags_Resizable: ImGuiTableFlags_ = 1;
 pub const ImGuiTableFlags_Reorderable: ImGuiTableFlags_ = 2;
@@ -1021,7 +958,7 @@ pub const ImGuiTableFlags_SortMulti: ImGuiTableFlags_ = 67108864;
 pub const ImGuiTableFlags_SortTristate: ImGuiTableFlags_ = 134217728;
 pub const ImGuiTableFlags_HighlightHoveredColumn: ImGuiTableFlags_ = 268435456;
 pub const ImGuiTableFlags_SizingMask_: ImGuiTableFlags_ = 57344;
-pub type ImGuiTableFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiTableFlags_ = ::std::os::raw::c_int;
 pub const ImGuiTableColumnFlags_None: ImGuiTableColumnFlags_ = 0;
 pub const ImGuiTableColumnFlags_Disabled: ImGuiTableColumnFlags_ = 1;
 pub const ImGuiTableColumnFlags_DefaultHide: ImGuiTableColumnFlags_ = 2;
@@ -1050,15 +987,15 @@ pub const ImGuiTableColumnFlags_WidthMask_: ImGuiTableColumnFlags_ = 24;
 pub const ImGuiTableColumnFlags_IndentMask_: ImGuiTableColumnFlags_ = 196608;
 pub const ImGuiTableColumnFlags_StatusMask_: ImGuiTableColumnFlags_ = 251658240;
 pub const ImGuiTableColumnFlags_NoDirectResize_: ImGuiTableColumnFlags_ = 1073741824;
-pub type ImGuiTableColumnFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiTableColumnFlags_ = ::std::os::raw::c_int;
 pub const ImGuiTableRowFlags_None: ImGuiTableRowFlags_ = 0;
 pub const ImGuiTableRowFlags_Headers: ImGuiTableRowFlags_ = 1;
-pub type ImGuiTableRowFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiTableRowFlags_ = ::std::os::raw::c_int;
 pub const ImGuiTableBgTarget_None: ImGuiTableBgTarget_ = 0;
 pub const ImGuiTableBgTarget_RowBg0: ImGuiTableBgTarget_ = 1;
 pub const ImGuiTableBgTarget_RowBg1: ImGuiTableBgTarget_ = 2;
 pub const ImGuiTableBgTarget_CellBg: ImGuiTableBgTarget_ = 3;
-pub type ImGuiTableBgTarget_ = ::std::os::raw::c_uint;
+pub type ImGuiTableBgTarget_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiTableSortSpecs {
@@ -1548,7 +1485,7 @@ impl Default for ImGuiStorage {
 }
 pub const ImGuiListClipperFlags_None: ImGuiListClipperFlags_ = 0;
 pub const ImGuiListClipperFlags_NoSetTableRowCounters: ImGuiListClipperFlags_ = 1;
-pub type ImGuiListClipperFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiListClipperFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiListClipper {
@@ -1594,7 +1531,7 @@ pub const ImGuiMultiSelectFlags_SelectOnClick: ImGuiMultiSelectFlags_ = 8192;
 pub const ImGuiMultiSelectFlags_SelectOnClickRelease: ImGuiMultiSelectFlags_ = 16384;
 pub const ImGuiMultiSelectFlags_NavWrapX: ImGuiMultiSelectFlags_ = 65536;
 pub const ImGuiMultiSelectFlags_NoSelectOnRightClick: ImGuiMultiSelectFlags_ = 131072;
-pub type ImGuiMultiSelectFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiMultiSelectFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImGuiSelectionRequest {
@@ -1633,7 +1570,7 @@ impl Default for ImGuiMultiSelectIO {
 pub const ImGuiSelectionRequestType_None: ImGuiSelectionRequestType = 0;
 pub const ImGuiSelectionRequestType_SetAll: ImGuiSelectionRequestType = 1;
 pub const ImGuiSelectionRequestType_SetRange: ImGuiSelectionRequestType = 2;
-pub type ImGuiSelectionRequestType = ::std::os::raw::c_uint;
+pub type ImGuiSelectionRequestType = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiSelectionRequest {
@@ -1839,13 +1776,13 @@ pub const ImDrawFlags_RoundCornersRight: ImDrawFlags_ = 160;
 pub const ImDrawFlags_RoundCornersAll: ImDrawFlags_ = 240;
 pub const ImDrawFlags_RoundCornersDefault_: ImDrawFlags_ = 240;
 pub const ImDrawFlags_RoundCornersMask_: ImDrawFlags_ = 496;
-pub type ImDrawFlags_ = ::std::os::raw::c_uint;
+pub type ImDrawFlags_ = ::std::os::raw::c_int;
 pub const ImDrawListFlags_None: ImDrawListFlags_ = 0;
 pub const ImDrawListFlags_AntiAliasedLines: ImDrawListFlags_ = 1;
 pub const ImDrawListFlags_AntiAliasedLinesUseTex: ImDrawListFlags_ = 2;
 pub const ImDrawListFlags_AntiAliasedFill: ImDrawListFlags_ = 4;
 pub const ImDrawListFlags_AllowVtxOffset: ImDrawListFlags_ = 8;
-pub type ImDrawListFlags_ = ::std::os::raw::c_uint;
+pub type ImDrawListFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImDrawVert {
@@ -2012,13 +1949,13 @@ impl Default for ImDrawData {
 }
 pub const ImTextureFormat_RGBA32: ImTextureFormat = 0;
 pub const ImTextureFormat_Alpha8: ImTextureFormat = 1;
-pub type ImTextureFormat = ::std::os::raw::c_uint;
+pub type ImTextureFormat = ::std::os::raw::c_int;
 pub const ImTextureStatus_OK: ImTextureStatus = 0;
 pub const ImTextureStatus_Destroyed: ImTextureStatus = 1;
 pub const ImTextureStatus_WantCreate: ImTextureStatus = 2;
 pub const ImTextureStatus_WantUpdates: ImTextureStatus = 3;
 pub const ImTextureStatus_WantDestroy: ImTextureStatus = 4;
-pub type ImTextureStatus = ::std::os::raw::c_uint;
+pub type ImTextureStatus = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImTextureRect {
@@ -2331,7 +2268,7 @@ pub const ImFontAtlasFlags_None: ImFontAtlasFlags_ = 0;
 pub const ImFontAtlasFlags_NoPowerOfTwoHeight: ImFontAtlasFlags_ = 1;
 pub const ImFontAtlasFlags_NoMouseCursors: ImFontAtlasFlags_ = 2;
 pub const ImFontAtlasFlags_NoBakedLines: ImFontAtlasFlags_ = 4;
-pub type ImFontAtlasFlags_ = ::std::os::raw::c_uint;
+pub type ImFontAtlasFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImFontPtr {
@@ -2663,7 +2600,7 @@ pub const ImFontFlags_None: ImFontFlags_ = 0;
 pub const ImFontFlags_NoLoadError: ImFontFlags_ = 2;
 pub const ImFontFlags_NoLoadGlyphs: ImFontFlags_ = 4;
 pub const ImFontFlags_LockBakedSizes: ImFontFlags_ = 8;
-pub type ImFontFlags_ = ::std::os::raw::c_uint;
+pub type ImFontFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImFontConfigPtr {
@@ -2692,7 +2629,7 @@ pub struct ImFont {
     pub Sources: ImVector_ImFontConfigPtr,
     pub EllipsisChar: ImWchar,
     pub FallbackChar: ImWchar,
-    pub Used8kPagesMap: [ImU8; 1usize],
+    pub Used8kPagesMap: [ImU8; 17usize],
     pub EllipsisAutoBake: bool,
     pub RemapPairs: ImGuiStorage,
 }
@@ -2720,7 +2657,7 @@ pub const ImGuiViewportFlags_TopMost: ImGuiViewportFlags_ = 1024;
 pub const ImGuiViewportFlags_CanHostOtherWindows: ImGuiViewportFlags_ = 2048;
 pub const ImGuiViewportFlags_IsMinimized: ImGuiViewportFlags_ = 4096;
 pub const ImGuiViewportFlags_IsFocused: ImGuiViewportFlags_ = 8192;
-pub type ImGuiViewportFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiViewportFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiViewport {
@@ -2932,7 +2869,7 @@ pub const ImDrawTextFlags_None: ImDrawTextFlags_ = 0;
 pub const ImDrawTextFlags_CpuFineClip: ImDrawTextFlags_ = 1;
 pub const ImDrawTextFlags_WrapKeepBlanks: ImDrawTextFlags_ = 2;
 pub const ImDrawTextFlags_StopOnNewLine: ImDrawTextFlags_ = 4;
-pub type ImDrawTextFlags_ = ::std::os::raw::c_uint;
+pub type ImDrawTextFlags_ = ::std::os::raw::c_int;
 pub type ImFileHandle = *mut FILE;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -3254,7 +3191,7 @@ impl Default for ImGuiDataTypeInfo {
 }
 pub const ImGuiDataType_Pointer: ImGuiDataTypePrivate_ = 12;
 pub const ImGuiDataType_ID: ImGuiDataTypePrivate_ = 13;
-pub type ImGuiDataTypePrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiDataTypePrivate_ = ::std::os::raw::c_int;
 pub const ImGuiItemFlags_Disabled: ImGuiItemFlagsPrivate_ = 1024;
 pub const ImGuiItemFlags_ReadOnly: ImGuiItemFlagsPrivate_ = 2048;
 pub const ImGuiItemFlags_MixedValue: ImGuiItemFlagsPrivate_ = 4096;
@@ -3267,7 +3204,7 @@ pub const ImGuiItemFlags_Inputable: ImGuiItemFlagsPrivate_ = 1048576;
 pub const ImGuiItemFlags_HasSelectionUserData: ImGuiItemFlagsPrivate_ = 2097152;
 pub const ImGuiItemFlags_IsMultiSelect: ImGuiItemFlagsPrivate_ = 4194304;
 pub const ImGuiItemFlags_Default_: ImGuiItemFlagsPrivate_ = 16;
-pub type ImGuiItemFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiItemFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiItemStatusFlags_None: ImGuiItemStatusFlags_ = 0;
 pub const ImGuiItemStatusFlags_HoveredRect: ImGuiItemStatusFlags_ = 1;
 pub const ImGuiItemStatusFlags_HasDisplayRect: ImGuiItemStatusFlags_ = 2;
@@ -3280,15 +3217,15 @@ pub const ImGuiItemStatusFlags_HoveredWindow: ImGuiItemStatusFlags_ = 128;
 pub const ImGuiItemStatusFlags_Visible: ImGuiItemStatusFlags_ = 256;
 pub const ImGuiItemStatusFlags_HasClipRect: ImGuiItemStatusFlags_ = 512;
 pub const ImGuiItemStatusFlags_HasShortcut: ImGuiItemStatusFlags_ = 1024;
-pub type ImGuiItemStatusFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiItemStatusFlags_ = ::std::os::raw::c_int;
 pub const ImGuiHoveredFlags_DelayMask_: ImGuiHoveredFlagsPrivate_ = 245760;
 pub const ImGuiHoveredFlags_AllowedMaskForIsWindowHovered: ImGuiHoveredFlagsPrivate_ = 12479;
 pub const ImGuiHoveredFlags_AllowedMaskForIsItemHovered: ImGuiHoveredFlagsPrivate_ = 262048;
-pub type ImGuiHoveredFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiHoveredFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiInputTextFlags_Multiline: ImGuiInputTextFlagsPrivate_ = 67108864;
 pub const ImGuiInputTextFlags_MergedItem: ImGuiInputTextFlagsPrivate_ = 134217728;
 pub const ImGuiInputTextFlags_LocalizeDecimalPoint: ImGuiInputTextFlagsPrivate_ = 268435456;
-pub type ImGuiInputTextFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiInputTextFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiButtonFlags_PressedOnClick: ImGuiButtonFlagsPrivate_ = 16;
 pub const ImGuiButtonFlags_PressedOnClickRelease: ImGuiButtonFlagsPrivate_ = 32;
 pub const ImGuiButtonFlags_PressedOnClickReleaseAnywhere: ImGuiButtonFlagsPrivate_ = 64;
@@ -3307,12 +3244,12 @@ pub const ImGuiButtonFlags_NoTestKeyOwner: ImGuiButtonFlagsPrivate_ = 2097152;
 pub const ImGuiButtonFlags_NoFocus: ImGuiButtonFlagsPrivate_ = 4194304;
 pub const ImGuiButtonFlags_PressedOnMask_: ImGuiButtonFlagsPrivate_ = 1008;
 pub const ImGuiButtonFlags_PressedOnDefault_: ImGuiButtonFlagsPrivate_ = 32;
-pub type ImGuiButtonFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiButtonFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiComboFlags_CustomPreview: ImGuiComboFlagsPrivate_ = 1048576;
-pub type ImGuiComboFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiComboFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiSliderFlags_Vertical: ImGuiSliderFlagsPrivate_ = 1048576;
 pub const ImGuiSliderFlags_ReadOnly: ImGuiSliderFlagsPrivate_ = 2097152;
-pub type ImGuiSliderFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiSliderFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiSelectableFlags_NoHoldingActiveID: ImGuiSelectableFlagsPrivate_ = 1048576;
 pub const ImGuiSelectableFlags_SelectOnClick: ImGuiSelectableFlagsPrivate_ = 4194304;
 pub const ImGuiSelectableFlags_SelectOnRelease: ImGuiSelectableFlagsPrivate_ = 8388608;
@@ -3320,45 +3257,45 @@ pub const ImGuiSelectableFlags_SpanAvailWidth: ImGuiSelectableFlagsPrivate_ = 16
 pub const ImGuiSelectableFlags_SetNavIdOnHover: ImGuiSelectableFlagsPrivate_ = 33554432;
 pub const ImGuiSelectableFlags_NoPadWithHalfSpacing: ImGuiSelectableFlagsPrivate_ = 67108864;
 pub const ImGuiSelectableFlags_NoSetKeyOwner: ImGuiSelectableFlagsPrivate_ = 134217728;
-pub type ImGuiSelectableFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiSelectableFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiTreeNodeFlags_NoNavFocus: ImGuiTreeNodeFlagsPrivate_ = 134217728;
 pub const ImGuiTreeNodeFlags_ClipLabelForTrailingButton: ImGuiTreeNodeFlagsPrivate_ = 268435456;
 pub const ImGuiTreeNodeFlags_UpsideDownArrow: ImGuiTreeNodeFlagsPrivate_ = 536870912;
 pub const ImGuiTreeNodeFlags_OpenOnMask_: ImGuiTreeNodeFlagsPrivate_ = 192;
 pub const ImGuiTreeNodeFlags_DrawLinesMask_: ImGuiTreeNodeFlagsPrivate_ = 1835008;
-pub type ImGuiTreeNodeFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiTreeNodeFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiSeparatorFlags_None: ImGuiSeparatorFlags_ = 0;
 pub const ImGuiSeparatorFlags_Horizontal: ImGuiSeparatorFlags_ = 1;
 pub const ImGuiSeparatorFlags_Vertical: ImGuiSeparatorFlags_ = 2;
 pub const ImGuiSeparatorFlags_SpanAllColumns: ImGuiSeparatorFlags_ = 4;
-pub type ImGuiSeparatorFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiSeparatorFlags_ = ::std::os::raw::c_int;
 pub const ImGuiFocusRequestFlags_None: ImGuiFocusRequestFlags_ = 0;
 pub const ImGuiFocusRequestFlags_RestoreFocusedChild: ImGuiFocusRequestFlags_ = 1;
 pub const ImGuiFocusRequestFlags_UnlessBelowModal: ImGuiFocusRequestFlags_ = 2;
-pub type ImGuiFocusRequestFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiFocusRequestFlags_ = ::std::os::raw::c_int;
 pub const ImGuiTextFlags_None: ImGuiTextFlags_ = 0;
 pub const ImGuiTextFlags_NoWidthForLargeClippedText: ImGuiTextFlags_ = 1;
-pub type ImGuiTextFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiTextFlags_ = ::std::os::raw::c_int;
 pub const ImGuiTooltipFlags_None: ImGuiTooltipFlags_ = 0;
 pub const ImGuiTooltipFlags_OverridePrevious: ImGuiTooltipFlags_ = 2;
-pub type ImGuiTooltipFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiTooltipFlags_ = ::std::os::raw::c_int;
 pub const ImGuiLayoutType_Horizontal: ImGuiLayoutType_ = 0;
 pub const ImGuiLayoutType_Vertical: ImGuiLayoutType_ = 1;
-pub type ImGuiLayoutType_ = ::std::os::raw::c_uint;
+pub type ImGuiLayoutType_ = ::std::os::raw::c_int;
 pub const ImGuiLogFlags_None: ImGuiLogFlags_ = 0;
 pub const ImGuiLogFlags_OutputTTY: ImGuiLogFlags_ = 1;
 pub const ImGuiLogFlags_OutputFile: ImGuiLogFlags_ = 2;
 pub const ImGuiLogFlags_OutputBuffer: ImGuiLogFlags_ = 4;
 pub const ImGuiLogFlags_OutputClipboard: ImGuiLogFlags_ = 8;
 pub const ImGuiLogFlags_OutputMask_: ImGuiLogFlags_ = 15;
-pub type ImGuiLogFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiLogFlags_ = ::std::os::raw::c_int;
 pub const ImGuiAxis_None: ImGuiAxis = -1;
 pub const ImGuiAxis_X: ImGuiAxis = 0;
 pub const ImGuiAxis_Y: ImGuiAxis = 1;
 pub type ImGuiAxis = ::std::os::raw::c_int;
 pub const ImGuiPlotType_Lines: ImGuiPlotType = 0;
 pub const ImGuiPlotType_Histogram: ImGuiPlotType = 1;
-pub type ImGuiPlotType = ::std::os::raw::c_uint;
+pub type ImGuiPlotType = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImGuiComboPreviewData {
@@ -3454,10 +3391,10 @@ pub const ImGuiWindowRefreshFlags_None: ImGuiWindowRefreshFlags_ = 0;
 pub const ImGuiWindowRefreshFlags_TryToAvoidRefresh: ImGuiWindowRefreshFlags_ = 1;
 pub const ImGuiWindowRefreshFlags_RefreshOnHover: ImGuiWindowRefreshFlags_ = 2;
 pub const ImGuiWindowRefreshFlags_RefreshOnFocus: ImGuiWindowRefreshFlags_ = 4;
-pub type ImGuiWindowRefreshFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiWindowRefreshFlags_ = ::std::os::raw::c_int;
 pub const ImGuiWindowBgClickFlags_None: ImGuiWindowBgClickFlags_ = 0;
 pub const ImGuiWindowBgClickFlags_Move: ImGuiWindowBgClickFlags_ = 1;
-pub type ImGuiWindowBgClickFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiWindowBgClickFlags_ = ::std::os::raw::c_int;
 pub const ImGuiNextWindowDataFlags_None: ImGuiNextWindowDataFlags_ = 0;
 pub const ImGuiNextWindowDataFlags_HasPos: ImGuiNextWindowDataFlags_ = 1;
 pub const ImGuiNextWindowDataFlags_HasSize: ImGuiNextWindowDataFlags_ = 2;
@@ -3473,7 +3410,7 @@ pub const ImGuiNextWindowDataFlags_HasRefreshPolicy: ImGuiNextWindowDataFlags_ =
 pub const ImGuiNextWindowDataFlags_HasViewport: ImGuiNextWindowDataFlags_ = 2048;
 pub const ImGuiNextWindowDataFlags_HasDock: ImGuiNextWindowDataFlags_ = 4096;
 pub const ImGuiNextWindowDataFlags_HasWindowClass: ImGuiNextWindowDataFlags_ = 8192;
-pub type ImGuiNextWindowDataFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiNextWindowDataFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiNextWindowData {
@@ -3516,7 +3453,7 @@ pub const ImGuiNextItemDataFlags_HasOpen: ImGuiNextItemDataFlags_ = 2;
 pub const ImGuiNextItemDataFlags_HasShortcut: ImGuiNextItemDataFlags_ = 4;
 pub const ImGuiNextItemDataFlags_HasRefVal: ImGuiNextItemDataFlags_ = 8;
 pub const ImGuiNextItemDataFlags_HasStorageID: ImGuiNextItemDataFlags_ = 16;
-pub type ImGuiNextItemDataFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiNextItemDataFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImGuiNextItemData {
@@ -3621,7 +3558,7 @@ pub struct ImGuiDeactivatedItemData {
 pub const ImGuiPopupPositionPolicy_Default: ImGuiPopupPositionPolicy = 0;
 pub const ImGuiPopupPositionPolicy_ComboBox: ImGuiPopupPositionPolicy = 1;
 pub const ImGuiPopupPositionPolicy_Tooltip: ImGuiPopupPositionPolicy = 2;
-pub type ImGuiPopupPositionPolicy = ::std::os::raw::c_uint;
+pub type ImGuiPopupPositionPolicy = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiPopupData {
@@ -3658,13 +3595,13 @@ pub const ImGuiInputEventType_Key: ImGuiInputEventType = 5;
 pub const ImGuiInputEventType_Text: ImGuiInputEventType = 6;
 pub const ImGuiInputEventType_Focus: ImGuiInputEventType = 7;
 pub const ImGuiInputEventType_COUNT: ImGuiInputEventType = 8;
-pub type ImGuiInputEventType = ::std::os::raw::c_uint;
+pub type ImGuiInputEventType = ::std::os::raw::c_int;
 pub const ImGuiInputSource_None: ImGuiInputSource = 0;
 pub const ImGuiInputSource_Mouse: ImGuiInputSource = 1;
 pub const ImGuiInputSource_Keyboard: ImGuiInputSource = 2;
 pub const ImGuiInputSource_Gamepad: ImGuiInputSource = 3;
 pub const ImGuiInputSource_COUNT: ImGuiInputSource = 4;
-pub type ImGuiInputSource = ::std::os::raw::c_uint;
+pub type ImGuiInputSource = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiInputEventMousePos {
@@ -3857,7 +3794,7 @@ pub const ImGuiInputFlags_SupportedByShortcut: ImGuiInputFlagsPrivate_ = 261375;
 pub const ImGuiInputFlags_SupportedBySetNextItemShortcut: ImGuiInputFlagsPrivate_ = 523519;
 pub const ImGuiInputFlags_SupportedBySetKeyOwner: ImGuiInputFlagsPrivate_ = 3145728;
 pub const ImGuiInputFlags_SupportedBySetItemKeyOwner: ImGuiInputFlagsPrivate_ = 15728640;
-pub type ImGuiInputFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiInputFlagsPrivate_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiListClipperRange {
@@ -3908,7 +3845,7 @@ pub const ImGuiActivateFlags_TryToPreserveState: ImGuiActivateFlags_ = 4;
 pub const ImGuiActivateFlags_FromTabbing: ImGuiActivateFlags_ = 8;
 pub const ImGuiActivateFlags_FromShortcut: ImGuiActivateFlags_ = 16;
 pub const ImGuiActivateFlags_FromFocusApi: ImGuiActivateFlags_ = 32;
-pub type ImGuiActivateFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiActivateFlags_ = ::std::os::raw::c_int;
 pub const ImGuiScrollFlags_None: ImGuiScrollFlags_ = 0;
 pub const ImGuiScrollFlags_KeepVisibleEdgeX: ImGuiScrollFlags_ = 1;
 pub const ImGuiScrollFlags_KeepVisibleEdgeY: ImGuiScrollFlags_ = 2;
@@ -3919,12 +3856,12 @@ pub const ImGuiScrollFlags_AlwaysCenterY: ImGuiScrollFlags_ = 32;
 pub const ImGuiScrollFlags_NoScrollParent: ImGuiScrollFlags_ = 64;
 pub const ImGuiScrollFlags_MaskX_: ImGuiScrollFlags_ = 21;
 pub const ImGuiScrollFlags_MaskY_: ImGuiScrollFlags_ = 42;
-pub type ImGuiScrollFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiScrollFlags_ = ::std::os::raw::c_int;
 pub const ImGuiNavRenderCursorFlags_None: ImGuiNavRenderCursorFlags_ = 0;
 pub const ImGuiNavRenderCursorFlags_Compact: ImGuiNavRenderCursorFlags_ = 2;
 pub const ImGuiNavRenderCursorFlags_AlwaysDraw: ImGuiNavRenderCursorFlags_ = 4;
 pub const ImGuiNavRenderCursorFlags_NoRounding: ImGuiNavRenderCursorFlags_ = 8;
-pub type ImGuiNavRenderCursorFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiNavRenderCursorFlags_ = ::std::os::raw::c_int;
 pub const ImGuiNavMoveFlags_None: ImGuiNavMoveFlags_ = 0;
 pub const ImGuiNavMoveFlags_LoopX: ImGuiNavMoveFlags_ = 1;
 pub const ImGuiNavMoveFlags_LoopY: ImGuiNavMoveFlags_ = 2;
@@ -3943,11 +3880,11 @@ pub const ImGuiNavMoveFlags_Activate: ImGuiNavMoveFlags_ = 4096;
 pub const ImGuiNavMoveFlags_NoSelect: ImGuiNavMoveFlags_ = 8192;
 pub const ImGuiNavMoveFlags_NoSetNavCursorVisible: ImGuiNavMoveFlags_ = 16384;
 pub const ImGuiNavMoveFlags_NoClearActiveId: ImGuiNavMoveFlags_ = 32768;
-pub type ImGuiNavMoveFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiNavMoveFlags_ = ::std::os::raw::c_int;
 pub const ImGuiNavLayer_Main: ImGuiNavLayer = 0;
 pub const ImGuiNavLayer_Menu: ImGuiNavLayer = 1;
 pub const ImGuiNavLayer_COUNT: ImGuiNavLayer = 2;
-pub type ImGuiNavLayer = ::std::os::raw::c_uint;
+pub type ImGuiNavLayer = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiNavItemData {
@@ -3979,7 +3916,7 @@ pub struct ImGuiFocusScopeData {
 pub const ImGuiTypingSelectFlags_None: ImGuiTypingSelectFlags_ = 0;
 pub const ImGuiTypingSelectFlags_AllowBackspace: ImGuiTypingSelectFlags_ = 1;
 pub const ImGuiTypingSelectFlags_AllowSingleCharMode: ImGuiTypingSelectFlags_ = 2;
-pub type ImGuiTypingSelectFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiTypingSelectFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiTypingSelectRequest {
@@ -4024,7 +3961,7 @@ pub const ImGuiOldColumnFlags_NoResize: ImGuiOldColumnFlags_ = 2;
 pub const ImGuiOldColumnFlags_NoPreserveWidths: ImGuiOldColumnFlags_ = 4;
 pub const ImGuiOldColumnFlags_NoForceWithinWindow: ImGuiOldColumnFlags_ = 8;
 pub const ImGuiOldColumnFlags_GrowParentContentsSize: ImGuiOldColumnFlags_ = 16;
-pub type ImGuiOldColumnFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiOldColumnFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct ImGuiOldColumnData {
@@ -4090,6 +4027,7 @@ pub struct ImGuiBoxSelectState {
     pub RequestClear: bool,
     pub _bitfield_align_1: [u16; 0],
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 2usize]>,
+    pub __bindgen_padding_0: u32,
     pub StartPosRel: ImVec2_c,
     pub EndPosRel: ImVec2_c,
     pub ScrollAccum: ImVec2_c,
@@ -4224,12 +4162,12 @@ pub type ImGuiDockNodeFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiDataAuthority_Auto: ImGuiDataAuthority_ = 0;
 pub const ImGuiDataAuthority_DockNode: ImGuiDataAuthority_ = 1;
 pub const ImGuiDataAuthority_Window: ImGuiDataAuthority_ = 2;
-pub type ImGuiDataAuthority_ = ::std::os::raw::c_uint;
+pub type ImGuiDataAuthority_ = ::std::os::raw::c_int;
 pub const ImGuiDockNodeState_Unknown: ImGuiDockNodeState = 0;
 pub const ImGuiDockNodeState_HostWindowHiddenBecauseSingleWindow: ImGuiDockNodeState = 1;
 pub const ImGuiDockNodeState_HostWindowHiddenBecauseWindowsAreResizing: ImGuiDockNodeState = 2;
 pub const ImGuiDockNodeState_HostWindowVisible: ImGuiDockNodeState = 3;
-pub type ImGuiDockNodeState = ::std::os::raw::c_uint;
+pub type ImGuiDockNodeState = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImGuiWindowPtr {
@@ -4842,7 +4780,7 @@ pub const ImGuiWindowDockStyleCol_TabDimmedSelected: ImGuiWindowDockStyleCol = 6
 pub const ImGuiWindowDockStyleCol_TabDimmedSelectedOverline: ImGuiWindowDockStyleCol = 7;
 pub const ImGuiWindowDockStyleCol_UnsavedMarker: ImGuiWindowDockStyleCol = 8;
 pub const ImGuiWindowDockStyleCol_COUNT: ImGuiWindowDockStyleCol = 9;
-pub type ImGuiWindowDockStyleCol = ::std::os::raw::c_uint;
+pub type ImGuiWindowDockStyleCol = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiWindowDockStyle {
@@ -5010,7 +4948,7 @@ pub const ImGuiLocKey_DockingHideTabBar: ImGuiLocKey = 10;
 pub const ImGuiLocKey_DockingHoldShiftToDock: ImGuiLocKey = 11;
 pub const ImGuiLocKey_DockingDragToUndockOrMoveNode: ImGuiLocKey = 12;
 pub const ImGuiLocKey_COUNT: ImGuiLocKey = 13;
-pub type ImGuiLocKey = ::std::os::raw::c_uint;
+pub type ImGuiLocKey = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiLocEntry {
@@ -5049,7 +4987,7 @@ pub const ImGuiDebugLogFlags_EventViewport: ImGuiDebugLogFlags_ = 2048;
 pub const ImGuiDebugLogFlags_EventMask_: ImGuiDebugLogFlags_ = 4095;
 pub const ImGuiDebugLogFlags_OutputToTTY: ImGuiDebugLogFlags_ = 1048576;
 pub const ImGuiDebugLogFlags_OutputToTestEngine: ImGuiDebugLogFlags_ = 2097152;
-pub type ImGuiDebugLogFlags_ = ::std::os::raw::c_uint;
+pub type ImGuiDebugLogFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiDebugAllocEntry {
@@ -5148,7 +5086,7 @@ pub const ImGuiContextHookType_RenderPre: ImGuiContextHookType = 4;
 pub const ImGuiContextHookType_RenderPost: ImGuiContextHookType = 5;
 pub const ImGuiContextHookType_Shutdown: ImGuiContextHookType = 6;
 pub const ImGuiContextHookType_PendingRemoval_: ImGuiContextHookType = 7;
-pub type ImGuiContextHookType = ::std::os::raw::c_uint;
+pub type ImGuiContextHookType = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiContextHook {
@@ -6119,6 +6057,7 @@ pub struct ImGuiWindow {
     pub DisableInputsFrames: ImS8,
     pub _bitfield_align_1: [u8; 0],
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 5usize]>,
+    pub __bindgen_padding_0: u32,
     pub SetWindowPosVal: ImVec2_c,
     pub SetWindowPosPivot: ImVec2_c,
     pub IDStack: ImVector_ImGuiID,
@@ -6540,13 +6479,13 @@ impl ImGuiWindow {
 pub const ImGuiTabBarFlags_DockNode: ImGuiTabBarFlagsPrivate_ = 1048576;
 pub const ImGuiTabBarFlags_IsFocused: ImGuiTabBarFlagsPrivate_ = 2097152;
 pub const ImGuiTabBarFlags_SaveSettings: ImGuiTabBarFlagsPrivate_ = 4194304;
-pub type ImGuiTabBarFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiTabBarFlagsPrivate_ = ::std::os::raw::c_int;
 pub const ImGuiTabItemFlags_SectionMask_: ImGuiTabItemFlagsPrivate_ = 192;
 pub const ImGuiTabItemFlags_NoCloseButton: ImGuiTabItemFlagsPrivate_ = 1048576;
 pub const ImGuiTabItemFlags_Button: ImGuiTabItemFlagsPrivate_ = 2097152;
 pub const ImGuiTabItemFlags_Invisible: ImGuiTabItemFlagsPrivate_ = 4194304;
 pub const ImGuiTabItemFlags_Unsorted: ImGuiTabItemFlagsPrivate_ = 8388608;
-pub type ImGuiTabItemFlagsPrivate_ = ::std::os::raw::c_uint;
+pub type ImGuiTabItemFlagsPrivate_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiTabItem {
@@ -16231,4 +16170,3 @@ unsafe extern "C" {
         >,
     );
 }
-pub type __builtin_va_list = *mut ::std::os::raw::c_char;

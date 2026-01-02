@@ -2628,7 +2628,7 @@ pub struct ImFont {
     pub Sources: ImVector_ImFontConfigPtr,
     pub EllipsisChar: ImWchar,
     pub FallbackChar: ImWchar,
-    pub Used8kPagesMap: [ImU8; 1usize],
+    pub Used8kPagesMap: [ImU8; 17usize],
     pub EllipsisAutoBake: bool,
     pub RemapPairs: ImGuiStorage,
 }
@@ -14619,4 +14619,3 @@ unsafe extern "C" {
         >,
     );
 }
-

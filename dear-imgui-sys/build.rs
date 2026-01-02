@@ -75,6 +75,13 @@ fn main() {
         return;
     }
 
+    // Maintainer workflow: regenerate bindings via bindgen without requiring native compilation.
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        generate_bindings_native(&cfg);
+        export_include_paths(&cfg);
+        return;
+    }
+
     // Bindings: default to generating via bindgen, but allow skipping all native
     // toolchain usage (cc + bindgen) via IMGUI_SYS_SKIP_CC.
     if env::var("IMGUI_SYS_SKIP_CC").is_ok() {
@@ -641,6 +648,10 @@ fn build_with_cmake(manifest_dir: &Path) -> bool {
 }
 
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        return false;
+    }
+
     // Prefer wasm pregenerated bindings when targeting wasm32, unless single-module is requested
     let single_module = std::env::var("IMGUI_SYS_SINGLE_MODULE")
         .ok()

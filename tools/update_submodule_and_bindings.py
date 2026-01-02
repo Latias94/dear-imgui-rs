@@ -153,6 +153,8 @@ def main() -> int:
 
     # Generate pregenerated bindings for selected crates
     env_base = os.environ.copy()
+    # Force build.rs to run bindgen instead of re-copying existing pregenerated files.
+    env_base["DEAR_IMGUI_RS_REGEN_BINDINGS"] = "1"
     profile_flag = ["--release"] if args.profile == "release" else []
     crate_skip_env = {
         "dear-imgui-sys": "IMGUI_SYS_SKIP_CC",
@@ -205,7 +207,7 @@ def main() -> int:
         env = os.environ.copy()
         env["IMGUI_SYS_SKIP_CC"] = "1"
         rc = run([
-            "cargo", "check", "-p", "dear-imgui", "-F", "wasm", "--target", "wasm32-unknown-unknown"
+            "cargo", "check", "-p", "dear-imgui-rs", "-F", "wasm", "--target", "wasm32-unknown-unknown"
         ], cwd=str(repo_root), env=env, dry=args.dry_run)
         if rc != 0:
             return rc

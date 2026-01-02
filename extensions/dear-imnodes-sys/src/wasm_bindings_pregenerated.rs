@@ -140,16 +140,12 @@ where
         }
     }
 }
-pub type __int64_t = ::std::os::raw::c_longlong;
-pub type __darwin_off_t = __int64_t;
-pub type fpos_t = __darwin_off_t;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub struct __sbuf {
-    pub _base: *mut ::std::os::raw::c_uchar,
-    pub _size: ::std::os::raw::c_int,
+pub struct _iobuf {
+    pub _Placeholder: *mut ::std::os::raw::c_void,
 }
-impl Default for __sbuf {
+impl Default for _iobuf {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
         unsafe {
@@ -158,65 +154,8 @@ impl Default for __sbuf {
         }
     }
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __sFILEX {
-    _unused: [u8; 0],
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub struct __sFILE {
-    pub _p: *mut ::std::os::raw::c_uchar,
-    pub _r: ::std::os::raw::c_int,
-    pub _w: ::std::os::raw::c_int,
-    pub _flags: ::std::os::raw::c_short,
-    pub _file: ::std::os::raw::c_short,
-    pub _bf: __sbuf,
-    pub _lbfsize: ::std::os::raw::c_int,
-    pub _cookie: *mut ::std::os::raw::c_void,
-    pub _close: ::std::option::Option<
-        unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void) -> ::std::os::raw::c_int,
-    >,
-    pub _read: ::std::option::Option<
-        unsafe extern "C" fn(
-            arg1: *mut ::std::os::raw::c_void,
-            arg2: *mut ::std::os::raw::c_char,
-            __n: ::std::os::raw::c_int,
-        ) -> ::std::os::raw::c_int,
-    >,
-    pub _seek: ::std::option::Option<
-        unsafe extern "C" fn(
-            arg1: *mut ::std::os::raw::c_void,
-            arg2: fpos_t,
-            arg3: ::std::os::raw::c_int,
-        ) -> fpos_t,
-    >,
-    pub _write: ::std::option::Option<
-        unsafe extern "C" fn(
-            arg1: *mut ::std::os::raw::c_void,
-            arg2: *const ::std::os::raw::c_char,
-            __n: ::std::os::raw::c_int,
-        ) -> ::std::os::raw::c_int,
-    >,
-    pub _ub: __sbuf,
-    pub _extra: *mut __sFILEX,
-    pub _ur: ::std::os::raw::c_int,
-    pub _ubuf: [::std::os::raw::c_uchar; 3usize],
-    pub _nbuf: [::std::os::raw::c_uchar; 1usize],
-    pub _lb: __sbuf,
-    pub _blksize: ::std::os::raw::c_int,
-    pub _offset: fpos_t,
-}
-impl Default for __sFILE {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
-}
-pub type FILE = __sFILE;
+pub type FILE = _iobuf;
+pub type ImU64 = ::std::os::raw::c_ulonglong;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ImGuiDockRequest {
@@ -245,7 +184,6 @@ pub type ImU16 = ::std::os::raw::c_ushort;
 pub type ImS32 = ::std::os::raw::c_int;
 pub type ImU32 = ::std::os::raw::c_uint;
 pub type ImS64 = ::std::os::raw::c_longlong;
-pub type ImU64 = ::std::os::raw::c_ulonglong;
 pub type ImGuiCol = ::std::os::raw::c_int;
 pub type ImGuiCond = ::std::os::raw::c_int;
 pub type ImGuiMouseCursor = ::std::os::raw::c_int;
@@ -274,6 +212,7 @@ pub type ImGuiTableRowFlags = ::std::os::raw::c_int;
 pub type ImGuiTreeNodeFlags = ::std::os::raw::c_int;
 pub type ImGuiViewportFlags = ::std::os::raw::c_int;
 pub type ImGuiWindowFlags = ::std::os::raw::c_int;
+pub type ImWchar32 = ::std::os::raw::c_uint;
 pub type ImWchar16 = ::std::os::raw::c_ushort;
 pub type ImWchar = ImWchar32;
 pub type ImGuiSelectionUserData = ImS64;
@@ -319,7 +258,7 @@ pub type ImGuiDir = ::std::os::raw::c_int;
 pub const ImGuiSortDirection_None: ImGuiSortDirection = 0;
 pub const ImGuiSortDirection_Ascending: ImGuiSortDirection = 1;
 pub const ImGuiSortDirection_Descending: ImGuiSortDirection = 2;
-pub type ImGuiSortDirection = ::std::os::raw::c_uint;
+pub type ImGuiSortDirection = ::std::os::raw::c_int;
 pub const ImGuiKey_None: ImGuiKey = 0;
 pub const ImGuiKey_NamedKey_BEGIN: ImGuiKey = 512;
 pub const ImGuiKey_Tab: ImGuiKey = 512;
@@ -485,12 +424,12 @@ pub const ImGuiMod_Shift: ImGuiKey = 8192;
 pub const ImGuiMod_Alt: ImGuiKey = 16384;
 pub const ImGuiMod_Super: ImGuiKey = 32768;
 pub const ImGuiMod_Mask_: ImGuiKey = 61440;
-pub type ImGuiKey = ::std::os::raw::c_uint;
+pub type ImGuiKey = ::std::os::raw::c_int;
 pub const ImGuiMouseSource_Mouse: ImGuiMouseSource = 0;
 pub const ImGuiMouseSource_TouchScreen: ImGuiMouseSource = 1;
 pub const ImGuiMouseSource_Pen: ImGuiMouseSource = 2;
 pub const ImGuiMouseSource_COUNT: ImGuiMouseSource = 3;
-pub type ImGuiMouseSource = ::std::os::raw::c_uint;
+pub type ImGuiMouseSource = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiTableSortSpecs {
@@ -960,7 +899,7 @@ impl Default for ImGuiMultiSelectIO {
 pub const ImGuiSelectionRequestType_None: ImGuiSelectionRequestType = 0;
 pub const ImGuiSelectionRequestType_SetAll: ImGuiSelectionRequestType = 1;
 pub const ImGuiSelectionRequestType_SetRange: ImGuiSelectionRequestType = 2;
-pub type ImGuiSelectionRequestType = ::std::os::raw::c_uint;
+pub type ImGuiSelectionRequestType = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiSelectionRequest {
@@ -1244,13 +1183,13 @@ impl Default for ImDrawData {
 }
 pub const ImTextureFormat_RGBA32: ImTextureFormat = 0;
 pub const ImTextureFormat_Alpha8: ImTextureFormat = 1;
-pub type ImTextureFormat = ::std::os::raw::c_uint;
+pub type ImTextureFormat = ::std::os::raw::c_int;
 pub const ImTextureStatus_OK: ImTextureStatus = 0;
 pub const ImTextureStatus_Destroyed: ImTextureStatus = 1;
 pub const ImTextureStatus_WantCreate: ImTextureStatus = 2;
 pub const ImTextureStatus_WantUpdates: ImTextureStatus = 3;
 pub const ImTextureStatus_WantDestroy: ImTextureStatus = 4;
-pub type ImTextureStatus = ::std::os::raw::c_uint;
+pub type ImTextureStatus = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImTextureRect {
@@ -1874,7 +1813,7 @@ pub struct ImFont {
     pub Sources: ImVector_ImFontConfigPtr,
     pub EllipsisChar: ImWchar,
     pub FallbackChar: ImWchar,
-    pub Used8kPagesMap: [ImU8; 1usize],
+    pub Used8kPagesMap: [ImU8; 17usize],
     pub EllipsisAutoBake: bool,
     pub RemapPairs: ImGuiStorage,
 }
@@ -2516,13 +2455,13 @@ pub const ImGuiInputEventType_Key: ImGuiInputEventType = 5;
 pub const ImGuiInputEventType_Text: ImGuiInputEventType = 6;
 pub const ImGuiInputEventType_Focus: ImGuiInputEventType = 7;
 pub const ImGuiInputEventType_COUNT: ImGuiInputEventType = 8;
-pub type ImGuiInputEventType = ::std::os::raw::c_uint;
+pub type ImGuiInputEventType = ::std::os::raw::c_int;
 pub const ImGuiInputSource_None: ImGuiInputSource = 0;
 pub const ImGuiInputSource_Mouse: ImGuiInputSource = 1;
 pub const ImGuiInputSource_Keyboard: ImGuiInputSource = 2;
 pub const ImGuiInputSource_Gamepad: ImGuiInputSource = 3;
 pub const ImGuiInputSource_COUNT: ImGuiInputSource = 4;
-pub type ImGuiInputSource = ::std::os::raw::c_uint;
+pub type ImGuiInputSource = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiInputEventMousePos {
@@ -2737,7 +2676,7 @@ impl Default for ImGuiListClipperData {
 pub const ImGuiNavLayer_Main: ImGuiNavLayer = 0;
 pub const ImGuiNavLayer_Menu: ImGuiNavLayer = 1;
 pub const ImGuiNavLayer_COUNT: ImGuiNavLayer = 2;
-pub type ImGuiNavLayer = ::std::os::raw::c_uint;
+pub type ImGuiNavLayer = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiNavItemData {
@@ -2869,6 +2808,7 @@ pub struct ImGuiBoxSelectState {
     pub RequestClear: bool,
     pub _bitfield_align_1: [u16; 0],
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 2usize]>,
+    pub __bindgen_padding_0: u32,
     pub StartPosRel: ImVec2_c,
     pub EndPosRel: ImVec2_c,
     pub ScrollAccum: ImVec2_c,
@@ -2985,7 +2925,7 @@ pub const ImGuiDockNodeState_Unknown: ImGuiDockNodeState = 0;
 pub const ImGuiDockNodeState_HostWindowHiddenBecauseSingleWindow: ImGuiDockNodeState = 1;
 pub const ImGuiDockNodeState_HostWindowHiddenBecauseWindowsAreResizing: ImGuiDockNodeState = 2;
 pub const ImGuiDockNodeState_HostWindowVisible: ImGuiDockNodeState = 3;
-pub type ImGuiDockNodeState = ::std::os::raw::c_uint;
+pub type ImGuiDockNodeState = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImGuiWindowPtr {
@@ -3830,7 +3770,7 @@ pub const ImGuiContextHookType_RenderPre: ImGuiContextHookType = 4;
 pub const ImGuiContextHookType_RenderPost: ImGuiContextHookType = 5;
 pub const ImGuiContextHookType_Shutdown: ImGuiContextHookType = 6;
 pub const ImGuiContextHookType_PendingRemoval_: ImGuiContextHookType = 7;
-pub type ImGuiContextHookType = ::std::os::raw::c_uint;
+pub type ImGuiContextHookType = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiContextHook {
@@ -4458,6 +4398,7 @@ pub struct ImGuiWindow {
     pub DisableInputsFrames: ImS8,
     pub _bitfield_align_1: [u8; 0],
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 5usize]>,
+    pub __bindgen_padding_0: u32,
     pub SetWindowPosVal: ImVec2_c,
     pub SetWindowPosPivot: ImVec2_c,
     pub IDStack: ImVector_ImGuiID,
@@ -5834,7 +5775,7 @@ pub const ImNodesCol_MiniMapLinkSelected: ImNodesCol_ = 26;
 pub const ImNodesCol_MiniMapCanvas: ImNodesCol_ = 27;
 pub const ImNodesCol_MiniMapCanvasOutline: ImNodesCol_ = 28;
 pub const ImNodesCol_COUNT: ImNodesCol_ = 29;
-pub type ImNodesCol_ = ::std::os::raw::c_uint;
+pub type ImNodesCol_ = ::std::os::raw::c_int;
 pub const ImNodesStyleVar_GridSpacing: ImNodesStyleVar_ = 0;
 pub const ImNodesStyleVar_NodeCornerRounding: ImNodesStyleVar_ = 1;
 pub const ImNodesStyleVar_NodePadding: ImNodesStyleVar_ = 2;
@@ -5851,24 +5792,24 @@ pub const ImNodesStyleVar_PinOffset: ImNodesStyleVar_ = 12;
 pub const ImNodesStyleVar_MiniMapPadding: ImNodesStyleVar_ = 13;
 pub const ImNodesStyleVar_MiniMapOffset: ImNodesStyleVar_ = 14;
 pub const ImNodesStyleVar_COUNT: ImNodesStyleVar_ = 15;
-pub type ImNodesStyleVar_ = ::std::os::raw::c_uint;
+pub type ImNodesStyleVar_ = ::std::os::raw::c_int;
 pub const ImNodesStyleFlags_None: ImNodesStyleFlags_ = 0;
 pub const ImNodesStyleFlags_NodeOutline: ImNodesStyleFlags_ = 1;
 pub const ImNodesStyleFlags_GridLines: ImNodesStyleFlags_ = 4;
 pub const ImNodesStyleFlags_GridLinesPrimary: ImNodesStyleFlags_ = 8;
 pub const ImNodesStyleFlags_GridSnapping: ImNodesStyleFlags_ = 16;
-pub type ImNodesStyleFlags_ = ::std::os::raw::c_uint;
+pub type ImNodesStyleFlags_ = ::std::os::raw::c_int;
 pub const ImNodesPinShape_Circle: ImNodesPinShape_ = 0;
 pub const ImNodesPinShape_CircleFilled: ImNodesPinShape_ = 1;
 pub const ImNodesPinShape_Triangle: ImNodesPinShape_ = 2;
 pub const ImNodesPinShape_TriangleFilled: ImNodesPinShape_ = 3;
 pub const ImNodesPinShape_Quad: ImNodesPinShape_ = 4;
 pub const ImNodesPinShape_QuadFilled: ImNodesPinShape_ = 5;
-pub type ImNodesPinShape_ = ::std::os::raw::c_uint;
+pub type ImNodesPinShape_ = ::std::os::raw::c_int;
 pub const ImNodesAttributeFlags_None: ImNodesAttributeFlags_ = 0;
 pub const ImNodesAttributeFlags_EnableLinkDetachWithDragClick: ImNodesAttributeFlags_ = 1;
 pub const ImNodesAttributeFlags_EnableLinkCreationOnSnap: ImNodesAttributeFlags_ = 2;
-pub type ImNodesAttributeFlags_ = ::std::os::raw::c_uint;
+pub type ImNodesAttributeFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct EmulateThreeButtonMouse {
@@ -5954,7 +5895,7 @@ pub const ImNodesMiniMapLocation_BottomLeft: ImNodesMiniMapLocation_ = 0;
 pub const ImNodesMiniMapLocation_BottomRight: ImNodesMiniMapLocation_ = 1;
 pub const ImNodesMiniMapLocation_TopLeft: ImNodesMiniMapLocation_ = 2;
 pub const ImNodesMiniMapLocation_TopRight: ImNodesMiniMapLocation_ = 3;
-pub type ImNodesMiniMapLocation_ = ::std::os::raw::c_uint;
+pub type ImNodesMiniMapLocation_ = ::std::os::raw::c_int;
 pub type ImNodesMiniMapNodeHoveringCallback = ::std::option::Option<
     unsafe extern "C" fn(arg1: ::std::os::raw::c_int, arg2: *mut ::std::os::raw::c_void),
 >;

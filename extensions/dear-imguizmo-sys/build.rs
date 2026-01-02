@@ -56,6 +56,10 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
 }
 
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        return false;
+    }
+
     let preg = Path::new("src").join("bindings_pregenerated.rs");
     if preg.exists() {
         match std::fs::read_to_string(&preg).and_then(|content| {
@@ -80,6 +84,10 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
 }
 
 fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        return false;
+    }
+
     let preg = Path::new("src").join("wasm_bindings_pregenerated.rs");
     if preg.exists() {
         match std::fs::read_to_string(&preg).and_then(|content| {
@@ -165,6 +173,7 @@ fn generate_bindings(
         .allowlist_function("ImGuizmo_.*")
         .allowlist_function("Style_.*")
         .allowlist_type("(Style|COLOR|MODE|OPERATION)")
+        .allowlist_type("ImWchar32")
         .allowlist_var("(COLOR|MODE|OPERATION|COUNT|TRANSLATE.*|ROTATE.*|SCALE.*|UNIVERSAL)")
         .blocklist_type("ImVec2")
         .blocklist_type("ImVec4")
