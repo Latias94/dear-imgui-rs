@@ -141,7 +141,15 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None, dry_run: bool = Fals
     try:
         if capture:
             # Capture output for processing
-            result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True)
+            result = subprocess.run(
+                cmd,
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
             if result.stdout:
                 print(result.stdout)
             return 0
@@ -184,14 +192,16 @@ def check_crate_published(crate_name: str, version: str) -> bool:
             ["cargo", "search", crate_name, "--limit", "1"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True
         )
         # Output format: "crate_name = \"version\" # description"
-        if f'{crate_name} = "{version}"' in result.stdout:
+        if result.stdout and f'{crate_name} = "{version}"' in result.stdout:
             return True
     except subprocess.CalledProcessError:
         pass
-    
+     
     return False
 
 
