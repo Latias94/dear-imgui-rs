@@ -21,7 +21,7 @@ Typical use cases:
 - This crate assumes a single Dear ImGui context and a single SDL3 event pump. The upstream
   SDL3 backend notes that multi-context usage is not well tested and may be dysfunctional.
 - The vendored SDL3 backend sources currently include a few compatibility branches for
-  SDL 3.1.x preview APIs; these will be removed once SDL3 stabilizes.
+  older SDL 3.x preview APIs; these will be removed as upstream APIs stabilize.
 
 ## Features
 
@@ -46,8 +46,8 @@ dear-imgui-sdl3 = { version = "0.8", features = ["opengl3-renderer"] }
 |---------------|----------|
 | Crate         | 0.8.x    |
 | dear-imgui-rs | 0.8.x    |
-| SDL3 crate    | 0.16.2   |
-| sdl3-sys      | 0.5      |
+| SDL3 crate    | 0.17     |
+| sdl3-sys      | 0.6      |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md)
 for the full workspace matrix.

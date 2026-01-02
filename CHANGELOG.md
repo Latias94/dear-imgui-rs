@@ -30,6 +30,7 @@ plus backend hardening for multi-viewport and renderer integrations.
 ### Changed
 
 - Sys bindings: always enable `IMGUI_USE_WCHAR32` (ImWchar = 32-bit) across all targets, including import-style WASM bindings.
+- SDL3 backend: bump SDL3 dependencies (`sdl3` 0.17, `sdl3-sys` 0.6 / SDL 3.4.0).
 
 ### Added
 

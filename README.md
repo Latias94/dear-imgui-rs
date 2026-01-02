@@ -228,7 +228,7 @@ Backends
 | dear-imgui-wgpu  | 0.8.x   | wgpu = 28         | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
 | dear-imgui-glow  | 0.8.x   | glow = 0.16       | OpenGL renderer (winit/glutin) |
 | dear-imgui-winit | 0.8.x   | winit = 0.30.12   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.8.x   | sdl3 = 0.16       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
+| dear-imgui-sdl3  | 0.8.x   | sdl3 = 0.17       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
 
 Application Runner
 
