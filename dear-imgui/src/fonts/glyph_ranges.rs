@@ -61,13 +61,21 @@ impl GlyphRangesBuilder {
         if ranges.is_empty() {
             return;
         }
+        const IMWCHAR_MAX: u32 = if std::mem::size_of::<sys::ImWchar>() == 2 {
+            0xFFFF
+        } else {
+            0x10FFFF
+        };
         let mut tmp: Vec<sys::ImWchar> = Vec::with_capacity(ranges.len());
         for &v in ranges {
             assert!(
-                v <= u32::from(u16::MAX),
-                "glyph range value {v:#X} exceeded ImWchar16 max (0xFFFF)"
+                v <= IMWCHAR_MAX,
+                "glyph range value {v:#X} exceeded ImWchar max ({IMWCHAR_MAX:#X})"
             );
-            tmp.push(v as sys::ImWchar);
+            let v = sys::ImWchar::try_from(v).unwrap_or_else(|_| {
+                panic!("glyph range value {v:#X} was not representable as ImWchar")
+            });
+            tmp.push(v);
         }
         if tmp.last().copied() != Some(0) {
             tmp.push(0);
@@ -129,10 +137,15 @@ mod tests {
 
     #[test]
     #[allow(deprecated)]
-    #[should_panic(expected = "exceeded ImWchar16 max")]
-    fn add_ranges_rejects_non_bmp_codepoints() {
-        let mut b = GlyphRangesBuilder::new();
-        b.add_ranges(&[0x1_0000, 0]);
+    fn add_ranges_rejects_non_bmp_codepoints_when_wchar16() {
+        if std::mem::size_of::<sys::ImWchar>() != 2 {
+            return;
+        }
+        let res = std::panic::catch_unwind(|| {
+            let mut b = GlyphRangesBuilder::new();
+            b.add_ranges(&[0x1_0000, 0]);
+        });
+        assert!(res.is_err());
     }
 
     #[test]
@@ -142,6 +155,20 @@ mod tests {
         b.add_ranges(&[0x20, 0x7E]);
         let ranges = b.build_ranges();
         assert_eq!(ranges.last().copied(), Some(0));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn add_ranges_accepts_non_bmp_when_wchar32() {
+        if std::mem::size_of::<sys::ImWchar>() != 4 {
+            return;
+        }
+        let mut b = GlyphRangesBuilder::new();
+        b.add_ranges(&[0x1_0000, 0x1_0001]);
+        let ranges = b.build_ranges();
+        assert_eq!(ranges.last().copied(), Some(0));
+        assert!(ranges.contains(&0x1_0000));
+        assert!(ranges.contains(&0x1_0001));
     }
 }
 

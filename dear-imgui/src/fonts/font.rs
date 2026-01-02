@@ -68,7 +68,11 @@ impl Font {
     /// Check if a glyph is available in this font
     #[doc(alias = "IsGlyphInFont")]
     pub fn is_glyph_in_font(&self, c: char) -> bool {
-        unsafe { sys::ImFont_IsGlyphInFont(self.raw(), c as u16) }
+        let codepoint = c as u32;
+        if std::mem::size_of::<sys::ImWchar>() == 2 && codepoint > 0xFFFF {
+            return false;
+        }
+        unsafe { sys::ImFont_IsGlyphInFont(self.raw(), codepoint as sys::ImWchar) }
     }
 
     /// Calculate text size for the given text
@@ -128,13 +132,33 @@ impl Font {
     /// Add character remapping
     #[doc(alias = "AddRemapChar")]
     pub fn add_remap_char(&mut self, from: char, to: char) {
-        unsafe { sys::ImFont_AddRemapChar(self.raw(), from as u16, to as u16) }
+        let from = from as u32;
+        let to = to as u32;
+        if std::mem::size_of::<sys::ImWchar>() == 2 && (from > 0xFFFF || to > 0xFFFF) {
+            return;
+        }
+        unsafe { sys::ImFont_AddRemapChar(self.raw(), from as sys::ImWchar, to as sys::ImWchar) }
     }
 
     /// Check if a glyph range is unused
     #[doc(alias = "IsGlyphRangeUnused")]
     pub fn is_glyph_range_unused(&self, c_begin: u32, c_last: u32) -> bool {
-        unsafe { sys::ImFont_IsGlyphRangeUnused(self.raw(), c_begin, c_last) }
+        const IMWCHAR_MAX: u32 = if std::mem::size_of::<sys::ImWchar>() == 2 {
+            0xFFFF
+        } else {
+            0x10FFFF
+        };
+        if c_begin > IMWCHAR_MAX {
+            return true;
+        }
+        let c_last = c_last.min(IMWCHAR_MAX);
+        unsafe {
+            sys::ImFont_IsGlyphRangeUnused(
+                self.raw(),
+                c_begin as sys::ImWchar,
+                c_last as sys::ImWchar,
+            )
+        }
     }
 }
 

@@ -370,22 +370,57 @@ impl ImString {
         self.0.as_mut_ptr() as *mut c_char
     }
 
+    /// Ensures the internal buffer length matches the requested size (including the trailing NUL).
+    ///
+    /// This is primarily used to prepare the backing storage for C APIs that write into the buffer
+    /// using an explicit `BufSize` parameter (e.g. `InputText`).
+    pub(crate) fn ensure_buf_size(&mut self, buf_size: usize) {
+        if self.0.len() < buf_size {
+            self.0.resize(buf_size, 0);
+        } else if self.0.len() > buf_size {
+            self.0.truncate(buf_size);
+            if let Some(last) = self.0.last_mut() {
+                *last = 0;
+            } else {
+                self.0.push(0);
+            }
+        } else if let Some(last) = self.0.last_mut() {
+            *last = 0;
+        }
+    }
+
     /// Refreshes the length of the string by searching for the null terminator
     ///
     /// # Safety
     ///
     /// This function is unsafe because it assumes the buffer contains valid UTF-8
     /// and has a null terminator somewhere within the allocated capacity.
+    ///
+    /// If the terminator is not within the current Vec length, this will scan up to the full
+    /// allocation capacity. In that case, the caller must ensure that bytes up to the first
+    /// terminator (or the full capacity, if no terminator exists) are initialized.
     pub unsafe fn refresh_len(&mut self) {
-        unsafe {
-            // For now, we'll use a simple implementation without libc
-            // In a real implementation, you'd want to use libc::strlen or similar
-            let mut len = 0;
-            let ptr = self.as_ptr() as *const u8;
-            while *ptr.add(len) != 0 {
-                len += 1;
+        if let Some(pos) = self.0.iter().position(|&b| b == 0) {
+            self.0.truncate(pos + 1);
+            return;
+        }
+
+        let cap = self.0.capacity();
+        if cap == 0 {
+            self.0.push(0);
+            return;
+        }
+
+        let ptr = self.0.as_ptr();
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, cap) };
+        let pos = bytes.iter().position(|&b| b == 0).unwrap_or(cap - 1);
+        if pos == cap - 1 && bytes[pos] != 0 {
+            unsafe {
+                *self.0.as_mut_ptr().add(cap - 1) = 0;
             }
-            self.0.set_len(len + 1);
+        }
+        unsafe {
+            self.0.set_len(pos + 1);
         }
     }
 
@@ -468,6 +503,29 @@ macro_rules! im_str {
 mod tests {
     use super::*;
     use std::ffi::CStr;
+
+    #[test]
+    fn im_string_ensure_buf_size_resizes_and_nul_terminates() {
+        let mut s = ImString::new("abc");
+        s.ensure_buf_size(16);
+        assert_eq!(s.0.len(), 16);
+        assert_eq!(&s.0[..3], b"abc");
+        assert_eq!(s.0[3], 0);
+        assert!(s.0[4..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn im_string_refresh_len_scans_capacity_when_len_has_no_nul() {
+        let mut v = vec![b'x'; 16];
+        v[..4].copy_from_slice(b"abcd");
+        v[10] = 0;
+        v.truncate(4);
+
+        let mut s = ImString(v);
+        unsafe { s.refresh_len() };
+        assert_eq!(s.to_str(), "abcdxxxxxx");
+        assert_eq!(s.0.last().copied(), Some(0));
+    }
 
     #[test]
     fn ui_buffer_push_appends_nul() {

@@ -102,6 +102,41 @@ pub fn compose_manifest_bytes(
     buf
 }
 
+pub fn prebuilt_manifest_features(dir: &Path) -> Option<Vec<String>> {
+    let mut candidates = Vec::with_capacity(2);
+    candidates.push(dir.join("manifest.txt"));
+    if let Some(parent) = dir.parent() {
+        candidates.push(parent.join("manifest.txt"));
+    }
+
+    for manifest in candidates {
+        let Ok(s) = std::fs::read_to_string(&manifest) else {
+            continue;
+        };
+        for line in s.lines() {
+            if let Some(rest) = line.strip_prefix("features=") {
+                let features = rest
+                    .split(',')
+                    .map(|f| f.trim().to_ascii_lowercase())
+                    .filter(|f| !f.is_empty())
+                    .collect::<Vec<_>>();
+                return Some(features);
+            }
+        }
+        return Some(Vec::new());
+    }
+
+    None
+}
+
+pub fn prebuilt_manifest_has_feature(dir: &Path, feature: &str) -> bool {
+    let feature = feature.trim().to_ascii_lowercase();
+    let Some(features) = prebuilt_manifest_features(dir) else {
+        return false;
+    };
+    features.iter().any(|f| f == &feature)
+}
+
 pub fn release_candidate_urls(
     owner: &str,
     repo: &str,
@@ -245,6 +280,55 @@ pub fn download_prebuilt(
     let bytes = resp.bytes().map_err(|e| format!("read body: {}", e))?;
     std::fs::write(&dst, &bytes).map_err(|e| format!("write {}: {}", dst.display(), e))?;
     Ok(dl_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_tmp_dir(suffix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "dear-imgui-build-support-test-{}-{}-{}",
+            std::process::id(),
+            nanos,
+            suffix
+        ))
+    }
+
+    #[test]
+    fn prebuilt_manifest_has_feature_checks_parent_manifest_for_lib_dir() {
+        let root = unique_tmp_dir("parent");
+        let lib_dir = root.join("lib");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        std::fs::write(
+            root.join("manifest.txt"),
+            "crate prebuilt\nfeatures=wchar32,freetype\n",
+        )
+        .unwrap();
+
+        assert!(prebuilt_manifest_has_feature(&lib_dir, "wchar32"));
+        assert!(prebuilt_manifest_has_feature(&lib_dir, "freetype"));
+        assert!(!prebuilt_manifest_has_feature(&lib_dir, "nope"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn prebuilt_manifest_has_feature_checks_manifest_in_dir() {
+        let root = unique_tmp_dir("self");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("manifest.txt"), "features=wchar32\n").unwrap();
+
+        assert!(prebuilt_manifest_has_feature(&root, "wchar32"));
+        assert!(!prebuilt_manifest_has_feature(&root, "freetype"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 pub fn prebuilt_cache_root_from_env_or_target(

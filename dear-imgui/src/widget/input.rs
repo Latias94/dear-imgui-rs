@@ -331,8 +331,9 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
             self.label.as_ref(),
             self.hint.as_ref().map(|hint| hint.as_ref()),
         );
+        let buf_size = self.buf.capacity_with_nul().max(1);
+        self.buf.ensure_buf_size(buf_size);
         let buf_ptr = self.buf.as_mut_ptr();
-        let buf_size = self.buf.capacity_with_nul();
         let user_ptr = self.buf as *mut ImString as *mut c_void;
 
         extern "C" fn resize_cb_imstr(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
@@ -352,9 +353,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                         return;
                     }
                     let requested = requested_i32 as usize;
-                    if im.0.len() < requested {
-                        im.0.resize(requested, 0);
-                    }
+                    im.ensure_buf_size(requested);
                     (*data).Buf = im.as_mut_ptr();
                     (*data).BufDirty = true;
                 }
@@ -612,9 +611,9 @@ where
                             std::char::from_u32((*data).EventChar as u32).unwrap_or('\0')
                         };
                         let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
-                        let new_ch_u16 = u16::try_from(new_ch).unwrap_or(0);
                         unsafe {
-                            (*data).EventChar = new_ch_u16;
+                            (*data).EventChar =
+                                sys::ImWchar::try_from(new_ch).unwrap_or(0 as sys::ImWchar);
                         }
                         0
                     }
@@ -719,8 +718,9 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
     }
     pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
+        let buf_size = self.buf.capacity_with_nul().max(1);
+        self.buf.ensure_buf_size(buf_size);
         let buf_ptr = self.buf.as_mut_ptr();
-        let buf_size = self.buf.capacity_with_nul();
         let user_ptr = self.buf as *mut ImString as *mut c_void;
         let size_vec: sys::ImVec2 = self.size.into();
 
@@ -741,9 +741,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
                         return;
                     }
                     let requested = requested_i32 as usize;
-                    if im.0.len() < requested {
-                        im.0.resize(requested, 0);
-                    }
+                    im.ensure_buf_size(requested);
                     (*data).Buf = im.as_mut_ptr();
                     (*data).BufDirty = true;
                 }
@@ -1041,9 +1039,9 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                             std::char::from_u32((*data).EventChar as u32).unwrap_or('\0')
                         };
                         let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
-                        let new_ch_u16 = u16::try_from(new_ch).unwrap_or(0);
                         unsafe {
-                            (*data).EventChar = new_ch_u16;
+                            (*data).EventChar =
+                                sys::ImWchar::try_from(new_ch).unwrap_or(0 as sys::ImWchar);
                         }
                         0
                     }

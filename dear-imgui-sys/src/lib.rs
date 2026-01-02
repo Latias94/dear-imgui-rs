@@ -41,6 +41,9 @@
 mod ffi;
 pub use ffi::*;
 
+// This project always builds Dear ImGui with `IMGUI_USE_WCHAR32`, so `ImWchar` must be 32-bit.
+const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
+
 // Ensure common ImGui typedefs are available even if bindgen doesn't emit them explicitly
 
 // cimgui exposes typed vectors (e.g., ImVector_ImVec2) instead of a generic ImVector<T>.

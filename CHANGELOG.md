@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Sys bindings: always enable `IMGUI_USE_WCHAR32` (ImWchar = 32-bit) across all targets, including import-style WASM bindings.
+
 ### Fixed
 
-- _Nothing yet._
+- FFI: harden `ImString`/`InputText` buffer handling to avoid unbounded scans and ensure NUL-terminated, zero-initialized backing storage before calling into C.
+- Prebuilt: reject ABI-incompatible prebuilts by requiring `features=wchar32` in `manifest.txt` (and `freetype` when enabled).
+- Fonts: fix `ImWchar` handling for wchar32 and add non-BMP glyph range/exclude-range test coverage.
 
 ## [0.8.0] - 2025-12-22
 

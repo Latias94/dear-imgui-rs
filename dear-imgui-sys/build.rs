@@ -150,7 +150,7 @@ fn docsrs_build(cfg: &BuildConfig) {
     // Expose include paths to dependent crates during docs.rs builds
     println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
-    let bindings = bindgen::Builder::default()
+    let mut bindings = bindgen::Builder::default()
         .header(cimgui_root.join("cimgui.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .clang_arg(format!("-I{}", cimgui_root.display()))
@@ -168,6 +168,9 @@ fn docsrs_build(cfg: &BuildConfig) {
         .derive_hash(true)
         .prepend_enum_name(false)
         .layout_tests(false);
+    // Keep bindgen in sync with the compiled C++ library: we always enable `IMGUI_USE_WCHAR32`
+    // so `ImWchar` is a 32-bit codepoint type.
+    bindings = bindings.clang_arg("-DIMGUI_USE_WCHAR32");
     let bindings = bindings
         .generate()
         .expect("Unable to generate bindings from cimgui.h (docs.rs)");
@@ -209,6 +212,9 @@ fn generate_bindings_native(cfg: &BuildConfig) {
         .derive_hash(true)
         .prepend_enum_name(false)
         .layout_tests(false);
+    // Keep bindgen in sync with the compiled C++ library: we always enable `IMGUI_USE_WCHAR32`
+    // so `ImWchar` is a 32-bit codepoint type.
+    bindings = bindings.clang_arg("-DIMGUI_USE_WCHAR32");
     #[cfg(feature = "freetype")]
     if let Ok(freetype) = pkg_config::probe_library("freetype2") {
         // Mirror CMake behavior: when building with FreeType, also keep stb_truetype enabled
@@ -326,6 +332,7 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     // This is excluded from the WASM single‑module path below.
     build.file(imgui_src.join("imgui_demo.cpp"));
     build.file(cimgui_root.join("cimgui.cpp"));
+    build.define("IMGUI_USE_WCHAR32", None);
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
         let use_static = cfg.use_static_crt();
@@ -343,7 +350,6 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
             build.opt_level(2);
         }
         build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
-        build.define("IMGUI_USE_WCHAR32", None);
     }
     #[cfg(feature = "freetype")]
     if let Ok(freetype) = pkg_config::probe_library("freetype2") {
@@ -366,9 +372,7 @@ fn export_include_paths(cfg: &BuildConfig) {
     println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
     println!("cargo:DEFINE_IMGUITEST=0");
-    if cfg.is_msvc() {
-        println!("cargo:DEFINE_IMGUI_USE_WCHAR32=1");
-    }
+    println!("cargo:DEFINE_IMGUI_USE_WCHAR32=1");
 }
 
 fn expected_lib_name(target_env: &str) -> String {
@@ -381,29 +385,15 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
     if !lib_path.exists() {
         return false;
     }
+
+    // Prebuilt ABI guard: we always compile with `IMGUI_USE_WCHAR32`, so we must not link a
+    // wchar16 prebuilt. Enforce this via the package manifest.
+    if !build_support::prebuilt_manifest_has_feature(dir, "wchar32") {
+        return false;
+    }
     // If freetype feature is enabled, only accept prebuilt if manifest declares it
     if cfg!(feature = "freetype") {
-        // Expect manifest.txt in parent of lib dir (tar layout: <extract>/lib/<lib>)
-        if let Some(parent) = dir.parent() {
-            let manifest = parent.join("manifest.txt");
-            let mut ok = false;
-            if manifest.exists()
-                && let Ok(s) = std::fs::read_to_string(&manifest)
-            {
-                for line in s.lines() {
-                    if let Some(rest) = line.strip_prefix("features=") {
-                        ok = rest
-                            .split(',')
-                            .any(|f| f.trim().eq_ignore_ascii_case("freetype"));
-                        break;
-                    }
-                }
-            }
-            if !ok {
-                // Manifest missing or freetype not declared → refuse
-                return false;
-            }
-        } else {
+        if !build_support::prebuilt_manifest_has_feature(dir, "freetype") {
             return false;
         }
     }
@@ -595,8 +585,8 @@ fn build_with_cmake(manifest_dir: &Path) -> bool {
         "Release"
     };
     cfg.profile(cmake_profile);
+    cfg.define("IMGUI_WCHAR32", "ON");
     if cfg!(target_env = "msvc") {
-        cfg.define("IMGUI_WCHAR32", "ON");
         let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
         let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
         let msvc_runtime = if use_static_crt {

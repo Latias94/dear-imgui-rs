@@ -178,6 +178,7 @@ fn generate_bindings(
         .clang_arg(format!("-I{}", imgui_src.display()))
         .clang_arg(format!("-I{}", cimplot3d_root.display()))
         .clang_arg(format!("-I{}", cimplot3d_root.join("implot3d").display()))
+        .clang_arg("-DIMGUI_USE_WCHAR32")
         .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
         .derive_default(true)
         .derive_debug(true)
@@ -211,6 +212,9 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
     let lib_path = dir.join(lib_name);
     if !lib_path.exists() {
+        return false;
+    }
+    if !build_support::prebuilt_manifest_has_feature(&dir, "wchar32") {
         return false;
     }
     println!("cargo:rustc-link-search=native={}", dir.display());
@@ -365,16 +369,19 @@ fn build_with_cc(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cim
             build.debug(false).opt_level(2);
         }
         build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
-        build.define("IMGUI_USE_WCHAR32", None);
     }
 
     for (k, v) in env::vars() {
-        if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
+        let suffix = k
+            .strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
+            .or_else(|| k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_"));
+        if let Some(suffix) = suffix {
             build.define(suffix, v.as_str());
         }
     }
 
     build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
+    build.define("IMGUI_USE_WCHAR32", None);
     build.include(imgui_src);
     build.include(cimgui_root);
     build.include(cimplot3d_root);

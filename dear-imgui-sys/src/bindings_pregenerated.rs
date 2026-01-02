@@ -251,7 +251,7 @@ pub type ImGuiViewportFlags = ::std::os::raw::c_int;
 pub type ImGuiWindowFlags = ::std::os::raw::c_int;
 pub type ImWchar32 = ::std::os::raw::c_uint;
 pub type ImWchar16 = ::std::os::raw::c_ushort;
-pub type ImWchar = ImWchar16;
+pub type ImWchar = ImWchar32;
 pub type ImGuiSelectionUserData = ImS64;
 pub type ImGuiInputTextCallback = ::std::option::Option<
     unsafe extern "C" fn(data: *mut ImGuiInputTextCallbackData) -> ::std::os::raw::c_int,

@@ -108,6 +108,7 @@ fn generate_bindings(
         .clang_arg(format!("-I{}", imgui_src.display()))
         .clang_arg(format!("-I{}", cimnodes_root.display()))
         .clang_arg(format!("-I{}", cimnodes_root.join("imnodes").display()))
+        .clang_arg("-DIMGUI_USE_WCHAR32")
         .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
         .derive_default(true)
         .derive_debug(true)
@@ -190,6 +191,7 @@ fn build_with_cc(cfg: &BuildConfig, cimnodes_root: &Path, imgui_src: &Path, cimg
     build.include(cimnodes_root);
     build.include(cfg.manifest_dir.join("shim"));
     build.include(cimnodes_root.join("imnodes"));
+    build.define("IMGUI_USE_WCHAR32", None);
     build.define("IMNODES_NAMESPACE", Some("imnodes"));
     build.file(cimnodes_root.join("cimnodes.cpp"));
     build.file(cimnodes_root.join("imnodes/imnodes.cpp"));
@@ -400,6 +402,9 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
     let lib_path = dir.join(lib_name);
     if !lib_path.exists() {
+        return false;
+    }
+    if !build_support::prebuilt_manifest_has_feature(&dir, "wchar32") {
         return false;
     }
     println!("cargo:rustc-link-search=native={}", dir.display());

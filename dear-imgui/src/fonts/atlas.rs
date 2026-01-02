@@ -911,10 +911,19 @@ impl FontConfig {
             return self;
         }
 
+        const IMWCHAR_MAX: u32 = if std::mem::size_of::<sys::ImWchar>() == 2 {
+            0xFFFF
+        } else {
+            0x10FFFF
+        };
         let mut converted: Vec<sys::ImWchar> = Vec::with_capacity(ranges.len() + 1);
         for &v in ranges {
+            assert!(
+                v <= IMWCHAR_MAX,
+                "glyph_exclude_ranges value out of range for ImWchar (max {IMWCHAR_MAX:#x}): {v:#x}"
+            );
             let v = sys::ImWchar::try_from(v).unwrap_or_else(|_| {
-                panic!("glyph_exclude_ranges value out of range for ImWchar (u16): {v:#x}")
+                panic!("glyph_exclude_ranges value {v:#x} was not representable as ImWchar")
             });
             converted.push(v);
         }
@@ -1034,9 +1043,29 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "glyph_exclude_ranges value out of range")]
+    fn font_config_glyph_exclude_ranges_accepts_non_bmp_when_wchar32() {
+        if std::mem::size_of::<sys::ImWchar>() != 4 {
+            return;
+        }
+        let cfg = FontConfig::new().glyph_exclude_ranges(&[0x1_0000]);
+        assert!(!cfg.raw.GlyphExcludeRanges.is_null());
+        unsafe {
+            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(0), 0x1_0000 as sys::ImWchar);
+            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(1), 0);
+        }
+    }
+
+    #[test]
     fn font_config_glyph_exclude_ranges_rejects_out_of_range() {
-        let _ = FontConfig::new().glyph_exclude_ranges(&[0x1_0000]);
+        let out_of_range = if std::mem::size_of::<sys::ImWchar>() == 2 {
+            0x1_0000
+        } else {
+            0x11_0000
+        };
+        let res = std::panic::catch_unwind(|| {
+            let _ = FontConfig::new().glyph_exclude_ranges(&[out_of_range]);
+        });
+        assert!(res.is_err());
     }
 
     #[test]

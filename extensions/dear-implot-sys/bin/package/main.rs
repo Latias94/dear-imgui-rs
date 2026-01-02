@@ -93,6 +93,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let link_type = "static";
 
+    // Package features (comma-separated), e.g. "wchar32".
+    //
+    // We always compile with `IMGUI_USE_WCHAR32`, so this is always declared to allow the sys
+    // build script to reject ABI-incompatible prebuilts.
+    let mut features = env::var("IMPLOT_SYS_PKG_FEATURES")
+        .or_else(|_| env::var("IMGUI_SYS_PKG_FEATURES"))
+        .unwrap_or_default();
+    if features.is_empty() {
+        features = "wchar32".to_string();
+    } else {
+        let mut user: Vec<String> = features
+            .split(',')
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !user.iter().any(|s| s == "wchar32") {
+            user.push("wchar32".to_string());
+        }
+        features = user.join(",");
+    }
+
     let pkg_dir = env::var("IMPLOT_SYS_PACKAGE_DIR")
         .or_else(|_| env::var("IMGUI_SYS_PACKAGE_DIR"))
         .map(PathBuf::from)
@@ -109,6 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !crt.is_empty() {
         println!("  CRT: {}", crt);
     }
+    println!("  Features: {}", features);
     println!("  Package dir: {}", pkg_dir.display());
 
     let sys_out = locate_sys_out_dir(workspace_root, &target)?;
@@ -187,8 +209,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Added lib: {}", lib_path.display());
 
     // manifest
-    let manifest_txt =
-        compose_manifest_bytes("dear-implot", &crate_version, &target, link_type, crt, None);
+    let manifest_txt = compose_manifest_bytes(
+        "dear-implot",
+        &crate_version,
+        &target,
+        link_type,
+        crt,
+        Some(&features),
+    );
     let mut hdr = tar::Header::new_gnu();
     hdr.set_size(manifest_txt.len() as u64);
     hdr.set_mode(0o644);

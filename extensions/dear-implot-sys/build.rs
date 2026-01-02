@@ -112,6 +112,7 @@ fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, c
         .clang_arg(format!("-I{}", cimgui_root.display()))
         .clang_arg(format!("-I{}", cimplot_root.display()))
         .clang_arg(format!("-I{}", cimplot_root.join("implot").display()))
+        .clang_arg("-DIMGUI_USE_WCHAR32")
         .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
         .clang_arg("-DCIMGUI_VARGS0")
         .clang_arg("-x")
@@ -203,16 +204,17 @@ fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgu
 
     // Inherit dear-imgui defines
     for (k, v) in env::vars() {
-        if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
+        let suffix = k
+            .strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
+            .or_else(|| k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_"));
+        if let Some(suffix) = suffix {
             build.define(suffix, v.as_str());
         }
     }
 
     // Includes and defines
     build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
-    if cfg.is_msvc() {
-        build.define("IMGUI_USE_WCHAR32", None);
-    }
+    build.define("IMGUI_USE_WCHAR32", None);
     build.define("CIMGUI_VARGS0", None);
     build.include(imgui_src);
     build.include(cimgui_root);
@@ -553,6 +555,9 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
             "cargo:warning=prebuilt dear_implot not found at {}",
             lib_path.display()
         );
+        return false;
+    }
+    if !build_support::prebuilt_manifest_has_feature(&dir, "wchar32") {
         return false;
     }
     println!("cargo:rustc-link-search=native={}", dir.display());

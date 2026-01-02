@@ -175,6 +175,7 @@ fn generate_bindings(
         .clang_arg(format!("-I{}", imgui_src.display()))
         .clang_arg(format!("-I{}", cimguizmo_root.display()))
         .clang_arg(format!("-I{}", cimguizmo_root.join("ImGuizmo").display()))
+        .clang_arg("-DIMGUI_USE_WCHAR32")
         .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
         .derive_default(true)
         .derive_debug(true)
@@ -268,7 +269,10 @@ fn build_with_cc(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cim
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     for (k, v) in env::vars() {
-        if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
+        let suffix = k
+            .strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
+            .or_else(|| k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_"));
+        if let Some(suffix) = suffix {
             build.define(suffix, v.as_str());
         }
     }
@@ -276,6 +280,7 @@ fn build_with_cc(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cim
     build.include(cimgui_root);
     build.include(cimguizmo_root);
     build.include(cimguizmo_root.join("ImGuizmo"));
+    build.define("IMGUI_USE_WCHAR32", None);
     build.file(cimguizmo_root.join("cimguizmo.cpp"));
     build.file(cimguizmo_root.join("ImGuizmo/ImGuizmo.cpp"));
 
@@ -367,6 +372,9 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
     let lib_path = dir.join(lib_name);
     if !lib_path.exists() {
+        return false;
+    }
+    if !build_support::prebuilt_manifest_has_feature(&dir, "wchar32") {
         return false;
     }
     println!("cargo:rustc-link-search=native={}", dir.display());

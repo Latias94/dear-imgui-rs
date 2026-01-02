@@ -97,15 +97,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let link_type = "static"; // we package static lib
 
-    // Package features (comma-separated), e.g. "freetype"
+    // Package features (comma-separated), e.g. "wchar32,freetype".
+    //
+    // We always compile with `IMGUI_USE_WCHAR32`, so this is always declared to allow the sys
+    // build script to reject ABI-incompatible prebuilts.
+    //
     // Prefer explicit env override, otherwise infer from cargo feature env.
     let mut features = env::var("IMGUI_SYS_PKG_FEATURES").unwrap_or_default();
+    let mut v: Vec<&'static str> = Vec::new();
+    v.push("wchar32");
     if features.is_empty() {
-        let mut v = Vec::new();
         if env::var("CARGO_FEATURE_FREETYPE").is_ok() {
             v.push("freetype");
         }
         features = v.join(",");
+    } else {
+        let mut user: Vec<String> = features
+            .split(',')
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !user.iter().any(|s| s == "wchar32") {
+            user.push("wchar32".to_string());
+        }
+        features = user.join(",");
     }
 
     let pkg_dir = PathBuf::from(
