@@ -54,11 +54,11 @@ def task_check(args, repo_root: Path) -> int:
     """Run pre-publish validation checks."""
     cmd = [sys.executable, "tools/pre_publish_check.py"]
     
-    if args.skip_git:
+    if getattr(args, "skip_git", False):
         cmd.append("--skip-git-check")
-    if args.skip_doc:
+    if getattr(args, "skip_doc", False):
         cmd.append("--skip-doc-check")
-    if args.skip_test:
+    if getattr(args, "skip_test", False):
         cmd.append("--skip-test-check")
     
     return run_command(cmd, cwd=repo_root)
@@ -73,9 +73,9 @@ def task_bump(args, repo_root: Path) -> int:
     
     cmd = [sys.executable, "tools/bump_version.py", args.version]
     
-    if args.dry_run:
+    if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
-    if args.old_version:
+    if getattr(args, "old_version", None):
         cmd.extend(["--old-version", args.old_version])
     
     return run_command(cmd, cwd=repo_root)
@@ -85,19 +85,19 @@ def task_bindings(args, repo_root: Path) -> int:
     """Update pregenerated bindings."""
     cmd = [sys.executable, "tools/update_submodule_and_bindings.py"]
     
-    if args.crates:
+    if getattr(args, "crates", None):
         cmd.extend(["--crates", args.crates])
     else:
         cmd.extend(["--crates", "all"])
     
     cmd.extend(["--profile", "release"])
     
-    if args.update_submodules:
+    if getattr(args, "update_submodules", False):
         cmd.extend(["--submodules", "update"])
     else:
         cmd.extend(["--submodules", "skip"])
     
-    if args.dry_run:
+    if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
     
     return run_command(cmd, cwd=repo_root)
@@ -107,15 +107,15 @@ def task_publish(args, repo_root: Path) -> int:
     """Publish crates to crates.io."""
     cmd = [sys.executable, "tools/publish.py"]
     
-    if args.dry_run:
+    if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
-    if args.no_verify:
+    if getattr(args, "no_verify", False):
         cmd.append("--no-verify")
-    if args.crates:
+    if getattr(args, "crates", None):
         cmd.extend(["--crates", args.crates])
-    if args.start_from:
+    if getattr(args, "start_from", None):
         cmd.extend(["--start-from", args.start_from])
-    if args.wait:
+    if getattr(args, "wait", None):
         cmd.extend(["--wait", str(args.wait)])
     
     return run_command(cmd, cwd=repo_root)
@@ -125,9 +125,9 @@ def task_test(args, repo_root: Path) -> int:
     """Run tests."""
     cmd = ["cargo", "test", "--workspace"]
     
-    if args.lib_only:
+    if getattr(args, "lib_only", False):
         cmd.append("--lib")
-    if args.package:
+    if getattr(args, "package", None):
         cmd.extend(["-p", args.package])
     
     return run_command(cmd, cwd=repo_root)
@@ -137,11 +137,11 @@ def task_doc(args, repo_root: Path) -> int:
     """Build documentation."""
     cmd = ["cargo", "doc", "--workspace"]
     
-    if args.no_deps:
+    if getattr(args, "no_deps", False):
         cmd.append("--no-deps")
-    if args.open:
+    if getattr(args, "open", False):
         cmd.append("--open")
-    if args.package:
+    if getattr(args, "package", None):
         cmd.extend(["-p", args.package])
     
     return run_command(cmd, cwd=repo_root)
@@ -151,7 +151,7 @@ def task_clean(args, repo_root: Path) -> int:
     """Clean build artifacts."""
     cmd = ["cargo", "clean"]
     
-    if args.package:
+    if getattr(args, "package", None):
         cmd.extend(["-p", args.package])
     
     return run_command(cmd, cwd=repo_root)
@@ -171,9 +171,10 @@ def task_release_prep(args, repo_root: Path) -> int:
     steps = [
         ("1. Bump version", lambda: task_bump(args, repo_root)),
         ("2. Update bindings", lambda: task_bindings(args, repo_root)),
-        ("3. Run tests", lambda: task_test(args, repo_root)),
-        ("4. Run checks", lambda: task_check(args, repo_root)),
     ]
+    if not getattr(args, "skip_test", False):
+        steps.append(("3. Run tests", lambda: task_test(args, repo_root)))
+    steps.append(("4. Run checks", lambda: task_check(args, repo_root)))
     
     for step_name, step_func in steps:
         print(f"\n{'=' * 80}")
@@ -253,6 +254,12 @@ def main() -> int:
     release_prep_parser = subparsers.add_parser("release-prep", help="Prepare for release (all-in-one)")
     release_prep_parser.add_argument("version", nargs="?", help="New version (e.g., 0.5.0)")
     release_prep_parser.add_argument("--old-version", help="Old version to replace")
+    release_prep_parser.add_argument("--crates", help="Comma-separated list of crates (for bindings)")
+    release_prep_parser.add_argument("--update-submodules", action="store_true", help="Update submodules when generating bindings")
+    release_prep_parser.add_argument("--dry-run", action="store_true", help="Dry run where supported")
+    release_prep_parser.add_argument("--skip-git", action="store_true", help="Skip git checks")
+    release_prep_parser.add_argument("--skip-doc", action="store_true", help="Skip doc checks")
+    release_prep_parser.add_argument("--skip-test", action="store_true", help="Skip the test step and pre-publish test checks")
     
     args = parser.parse_args()
     
