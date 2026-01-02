@@ -386,6 +386,41 @@ fn expected_lib_name(target_env: &str) -> String {
     build_support::expected_lib_name(target_env, "dear_imgui")
 }
 
+fn prebuilt_manifest_features(dir: &Path) -> Option<Vec<String>> {
+    let mut candidates = Vec::with_capacity(2);
+    candidates.push(dir.join("manifest.txt"));
+    if let Some(parent) = dir.parent() {
+        candidates.push(parent.join("manifest.txt"));
+    }
+
+    for manifest in candidates {
+        let Ok(s) = std::fs::read_to_string(&manifest) else {
+            continue;
+        };
+        for line in s.lines() {
+            if let Some(rest) = line.strip_prefix("features=") {
+                return Some(
+                    rest.split(',')
+                        .map(|f| f.trim().to_ascii_lowercase())
+                        .filter(|f| !f.is_empty())
+                        .collect(),
+                );
+            }
+        }
+        return Some(Vec::new());
+    }
+
+    None
+}
+
+fn prebuilt_manifest_has_feature(dir: &Path, feature: &str) -> bool {
+    let feature = feature.trim().to_ascii_lowercase();
+    let Some(features) = prebuilt_manifest_features(dir) else {
+        return false;
+    };
+    features.iter().any(|f| f == &feature)
+}
+
 fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
     let lib_path = dir.join(lib_name.as_str());
@@ -395,12 +430,12 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
 
     // Prebuilt ABI guard: we always compile with `IMGUI_USE_WCHAR32`, so we must not link a
     // wchar16 prebuilt. Enforce this via the package manifest.
-    if !build_support::prebuilt_manifest_has_feature(dir, "wchar32") {
+    if !prebuilt_manifest_has_feature(dir, "wchar32") {
         return false;
     }
     // If freetype feature is enabled, only accept prebuilt if manifest declares it
     if cfg!(feature = "freetype") {
-        if !build_support::prebuilt_manifest_has_feature(dir, "freetype") {
+        if !prebuilt_manifest_has_feature(dir, "freetype") {
             return false;
         }
     }

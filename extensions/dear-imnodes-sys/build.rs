@@ -424,13 +424,37 @@ fn sanitize_bindings_string(content: &str) -> String {
 
 // keep the existing expected_lib_name returning &'static str defined above
 
+fn prebuilt_manifest_has_feature(dir: &Path, feature: &str) -> bool {
+    let mut candidates = Vec::with_capacity(2);
+    candidates.push(dir.join("manifest.txt"));
+    if let Some(parent) = dir.parent() {
+        candidates.push(parent.join("manifest.txt"));
+    }
+    let Some(s) = candidates
+        .into_iter()
+        .find_map(|p| std::fs::read_to_string(&p).ok())
+    else {
+        return false;
+    };
+    let feature = feature.trim().to_ascii_lowercase();
+    for line in s.lines() {
+        if let Some(rest) = line.strip_prefix("features=") {
+            return rest
+                .split(',')
+                .map(|f| f.trim().to_ascii_lowercase())
+                .any(|f| f == feature);
+        }
+    }
+    false
+}
+
 fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
     let lib_name = expected_lib_name(target_env);
     let lib_path = dir.join(lib_name);
     if !lib_path.exists() {
         return false;
     }
-    if !build_support::prebuilt_manifest_has_feature(&dir, "wchar32") {
+    if !prebuilt_manifest_has_feature(&dir, "wchar32") {
         return false;
     }
     println!("cargo:rustc-link-search=native={}", dir.display());
