@@ -7,17 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Sys bindings: always enable `IMGUI_USE_WCHAR32` (ImWchar = 32-bit) across all targets, including import-style WASM bindings.
-
-### Fixed
-
-- FFI: harden `ImString`/`InputText` buffer handling to avoid unbounded scans and ensure NUL-terminated, zero-initialized backing storage before calling into C.
-- Prebuilt: reject ABI-incompatible prebuilts by requiring `features=wchar32` in `manifest.txt` (and `freetype` when enabled).
-- Fonts: fix `ImWchar` handling for wchar32 and add non-BMP glyph range/exclude-range test coverage.
-
-## [0.8.0] - 2025-12-22
+## [0.8.0] - 2026-01-03
 
 This release focuses on FFI soundness and correctness improvements for Dear ImGui v1.92+ (texture system, font atlas, callbacks),
 plus backend hardening for multi-viewport and renderer integrations.
@@ -36,6 +26,10 @@ plus backend hardening for multi-viewport and renderer integrations.
   - Remove `Viewport::main()` (returned `&'static Viewport`); use `Ui::main_viewport()` or `Context::main_viewport()` to get a viewport reference tied to the caller's lifetime.
 - `dear-imgui-wgpu`
   - Bump `wgpu` to v28 (requires Rust 1.92+).
+
+### Changed
+
+- Sys bindings: always enable `IMGUI_USE_WCHAR32` (ImWchar = 32-bit) across all targets, including import-style WASM bindings.
 
 ### Added
 
@@ -60,6 +54,9 @@ plus backend hardening for multi-viewport and renderer integrations.
 
 ### Fixed
 
+- FFI: harden `ImString`/`InputText` buffer handling to avoid unbounded scans and ensure NUL-terminated, zero-initialized backing storage before calling into C.
+- Prebuilt: reject ABI-incompatible prebuilts by requiring `features=wchar32` in `manifest.txt` (and `freetype` when enabled).
+- Fonts: fix `ImWchar` handling for wchar32 and add non-BMP glyph range/exclude-range test coverage.
 - Cross-target FFI: fix remaining `c_char` signedness assumptions (i8 vs u8) and add an armv7 CI type-check sentinel to catch regressions.
 - FFI: fix incorrect `c_char` signedness assumptions in a few call sites (thanks @EtherealPsyche, #10).
 
