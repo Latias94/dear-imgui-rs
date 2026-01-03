@@ -206,7 +206,7 @@ dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.8" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.8" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.8" }
 dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.8", optional = true }
-dear-app = { path = "../dear-app", version = "0.8" }
+dear-app = { path = "../dear-app", version = "0.9" }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
