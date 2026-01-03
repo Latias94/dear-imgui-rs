@@ -7,7 +7,7 @@
 //! hiccups.
 
 use ::image::ImageReader;
-use dear_app::{AddOnsConfig, AppBuilder, RedrawMode, RunnerConfig, Theme};
+use dear_app::{AddOnsConfig, AppBuilder, RedrawMode, RunnerConfig, Theme, WgpuConfig, WgpuPreset};
 use dear_imgui_rs::*;
 use std::{path::PathBuf, time::Instant};
 use wgpu as wgpu_rs;
@@ -88,7 +88,7 @@ impl TexDemoState {
             .and_then(|r| r.with_guessed_format())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         {
-            Ok(mut r) => match r.decode() {
+            Ok(r) => match r.decode() {
                 Ok(img) => {
                     let rgba = img.to_rgba8();
                     let (w, h) = rgba.dimensions();
@@ -145,6 +145,7 @@ fn main() {
         window_size: (1280.0, 720.0),
         present_mode: wgpu::PresentMode::Fifo,
         clear_color: [0.1, 0.12, 0.14, 1.0],
+        wgpu: WgpuConfig::from_preset(WgpuPreset::HighPerformance),
         docking: dear_app::DockingConfig::default(),
         ini_filename: None,
         restore_previous_geometry: true,

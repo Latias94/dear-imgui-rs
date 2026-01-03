@@ -1,4 +1,6 @@
-use dear_app::{AddOnsConfig, AppBuilder, DockingConfig, RedrawMode, RunnerConfig};
+use dear_app::{
+    AddOnsConfig, AppBuilder, DockingConfig, RedrawMode, RunnerConfig, WgpuConfig, WgpuPreset,
+};
 use dear_imgui_rs::*;
 
 struct DockDemoState {
@@ -87,6 +89,7 @@ fn main() {
         window_size: (1280.0, 720.0),
         present_mode: wgpu::PresentMode::Fifo,
         clear_color: [0.1, 0.1, 0.12, 1.0],
+        wgpu: WgpuConfig::from_preset(WgpuPreset::HighPerformance),
         docking: DockingConfig {
             enable: true,
             auto_dockspace: false, // we'll create our own with dynamic flags
