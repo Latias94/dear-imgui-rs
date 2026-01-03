@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - Not Released
+
+This release focuses on `dear-app` usability improvements for real applications (GPU configuration presets, smoother startup, and clearer redraw semantics).
+
+### Breaking Changes
+
+- `dear-app`
+  - `RunnerConfig` gains a new required field: `wgpu: WgpuConfig`. Struct-literal initializers without `..Default::default()` must be updated.
+  - `RunnerCallbacks` gains a new field: `on_gpu_init`. Struct-literal initializers must be updated.
+  - `RedrawMode::Wait` now truly waits (no implicit per-frame redraw). Use `Poll` or `WaitUntil` for continuous rendering.
+
+### Added
+
+- `dear-app`
+  - `WgpuConfig` and `RunnerConfig::wgpu`: configure instance/adapter/device selection (backends, power preference, required features/limits, memory hints, etc.).
+  - `WgpuPreset` and `WgpuConfig::from_preset`: curated presets for common scenarios (performance, low-power, downlevel compatibility, software fallback).
+  - `AppBuilder::on_gpu_init`: a lifecycle hook for one-time GPU resource initialization after `Device/Queue/SurfaceConfiguration` are available.
+  - `pub use wgpu;` re-export as `dear_app::wgpu` for downstream convenience.
+
+### Changed
+
+- `dear-app`
+  - Theme application now uses the safe high-level `dear-imgui-rs` `Theme/ThemePreset` API (avoids direct `sys::igStyleColors*` usage).
+  - Acquire the swapchain texture later in the frame to reduce the time the surface image is held.
+  - `restore_previous_geometry = false` now disables INI persistence by forcing the INI filename to `None`.
+
+### Fixed
+
+- `dear-app`
+  - Per-frame OS cursor/IME state updates via `prepare_render_with_ui` (more correct cursor shape + IME toggling).
+  - More reliable recovery when recreating the window/GPU stack after fatal surface errors; if recreation fails, `on_exit` is called with the old context for cleanup.
+  - `WaitUntil { fps }` control flow now uses `fps` to schedule the next wake consistently.
+
 ## [0.8.0] - 2026-01-03
 
 This release focuses on FFI soundness and correctness improvements for Dear ImGui v1.92+ (texture system, font atlas, callbacks),

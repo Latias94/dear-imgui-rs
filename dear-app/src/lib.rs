@@ -36,6 +36,9 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
+/// Re-exported for convenience when configuring `WgpuConfig`.
+pub use wgpu;
+
 #[cfg(feature = "imnodes")]
 use dear_imnodes as imnodes;
 #[cfg(feature = "implot")]
@@ -107,6 +110,8 @@ pub struct RunnerConfig {
     pub window_size: (f64, f64),
     pub present_mode: wgpu::PresentMode,
     pub clear_color: [f32; 4],
+    /// WGPU instance/adapter/device configuration.
+    pub wgpu: WgpuConfig,
     pub docking: DockingConfig,
     pub ini_filename: Option<PathBuf>,
     pub restore_previous_geometry: bool,
@@ -125,12 +130,101 @@ impl Default for RunnerConfig {
             window_size: (1280.0, 720.0),
             present_mode: wgpu::PresentMode::Fifo,
             clear_color: [0.1, 0.2, 0.3, 1.0],
+            wgpu: WgpuConfig::default(),
             docking: DockingConfig::default(),
             ini_filename: None,
             restore_previous_geometry: true,
             redraw: RedrawMode::Poll,
             io_config_flags: None,
             theme: None,
+        }
+    }
+}
+
+/// WGPU configuration for adapter/device creation.
+///
+/// This is intentionally a small, stable subset of WGPU knobs that tend to matter for apps
+/// (adapter selection and required features/limits).
+pub struct WgpuConfig {
+    /// Which backends to enable for the WGPU instance.
+    pub backends: wgpu::Backends,
+    /// Adapter power preference.
+    pub power_preference: wgpu::PowerPreference,
+    /// Whether to allow selecting a fallback (software) adapter.
+    pub force_fallback_adapter: bool,
+    /// Optional device debug label.
+    pub device_label: Option<String>,
+    /// Features required from the device.
+    pub required_features: wgpu::Features,
+    /// Limits required from the device.
+    pub required_limits: wgpu::Limits,
+    /// Memory allocation hints for the device.
+    pub memory_hints: wgpu::MemoryHints,
+}
+
+/// Small set of curated WGPU presets for common application needs.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub enum WgpuPreset {
+    /// Uses `WgpuConfig::default()`.
+    #[default]
+    Default,
+    /// Prefer the fastest adapter (often discrete GPU).
+    HighPerformance,
+    /// Prefer the lowest power adapter (often integrated GPU).
+    LowPower,
+    /// Let WGPU decide (power preference is not considered).
+    Balanced,
+    /// Prefer broad compatibility by requesting downlevel-friendly limits.
+    DownlevelCompatible,
+    /// Force selecting a fallback (software) adapter if available.
+    SoftwareFallback,
+}
+
+impl Default for WgpuConfig {
+    fn default() -> Self {
+        Self {
+            backends: wgpu::Backends::PRIMARY,
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            device_label: None,
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+        }
+    }
+}
+
+impl WgpuConfig {
+    /// Build a `WgpuConfig` from a curated preset.
+    #[must_use]
+    pub fn from_preset(preset: WgpuPreset) -> Self {
+        match preset {
+            WgpuPreset::Default => Self::default(),
+            WgpuPreset::HighPerformance => Self {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                memory_hints: wgpu::MemoryHints::Performance,
+                ..Self::default()
+            },
+            WgpuPreset::LowPower => Self {
+                power_preference: wgpu::PowerPreference::LowPower,
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
+                ..Self::default()
+            },
+            WgpuPreset::Balanced => Self {
+                power_preference: wgpu::PowerPreference::None,
+                ..Self::default()
+            },
+            WgpuPreset::DownlevelCompatible => Self {
+                power_preference: wgpu::PowerPreference::None,
+                required_limits: wgpu::Limits::downlevel_defaults(),
+                ..Self::default()
+            },
+            WgpuPreset::SoftwareFallback => Self {
+                power_preference: wgpu::PowerPreference::None,
+                force_fallback_adapter: true,
+                required_limits: wgpu::Limits::downlevel_defaults(),
+                ..Self::default()
+            },
         }
     }
 }
@@ -185,15 +279,15 @@ pub enum Theme {
     Classic,
 }
 
-fn apply_theme(_ctx: &mut imgui::Context, theme: Theme) {
-    // Apply via ImGui global helpers; doesn't require a Ui
-    unsafe {
-        match theme {
-            Theme::Dark => dear_imgui_rs::sys::igStyleColorsDark(std::ptr::null_mut()),
-            Theme::Light => dear_imgui_rs::sys::igStyleColorsLight(std::ptr::null_mut()),
-            Theme::Classic => dear_imgui_rs::sys::igStyleColorsClassic(std::ptr::null_mut()),
-        }
-    }
+fn apply_theme(ctx: &mut imgui::Context, theme: Theme) {
+    let preset = match theme {
+        Theme::Dark => imgui::ThemePreset::Dark,
+        Theme::Light => imgui::ThemePreset::Light,
+        Theme::Classic => imgui::ThemePreset::Classic,
+    };
+    let mut t = imgui::Theme::default();
+    t.preset = preset;
+    t.apply_to_context(ctx);
 }
 
 /// Runner lifecycle callbacks (all optional)
@@ -202,6 +296,9 @@ pub struct RunnerCallbacks {
     pub on_style: Option<Box<dyn FnMut(&mut imgui::Context)>>,
     pub on_fonts: Option<Box<dyn FnMut(&mut imgui::Context)>>,
     pub on_post_init: Option<Box<dyn FnMut(&mut imgui::Context)>>,
+    pub on_gpu_init: Option<
+        Box<dyn FnMut(&Arc<Window>, &wgpu::Device, &wgpu::Queue, &wgpu::SurfaceConfiguration)>,
+    >,
     pub on_event:
         Option<Box<dyn FnMut(&winit::event::Event<()>, &Arc<Window>, &mut imgui::Context)>>,
     pub on_exit: Option<Box<dyn FnMut(&mut imgui::Context)>>,
@@ -214,6 +311,7 @@ impl Default for RunnerCallbacks {
             on_style: None,
             on_fonts: None,
             on_post_init: None,
+            on_gpu_init: None,
             on_event: None,
             on_exit: None,
         }
@@ -265,6 +363,15 @@ impl AppBuilder {
         self.cbs.on_post_init = Some(Box::new(f));
         self
     }
+    pub fn on_gpu_init<
+        F: FnMut(&Arc<Window>, &wgpu::Device, &wgpu::Queue, &wgpu::SurfaceConfiguration) + 'static,
+    >(
+        mut self,
+        f: F,
+    ) -> Self {
+        self.cbs.on_gpu_init = Some(Box::new(f));
+        self
+    }
     pub fn on_event<
         F: FnMut(&winit::event::Event<()>, &Arc<Window>, &mut imgui::Context) + 'static,
     >(
@@ -310,11 +417,7 @@ where
 /// Run an app with configuration and add-ons.
 ///
 /// The `gui` callback is called every frame with access to ImGui `Ui` and the initialized add-ons.
-pub fn run<F>(
-    runner: RunnerConfig,
-    addons_cfg: AddOnsConfig,
-    mut gui: F,
-) -> Result<(), DearAppError>
+pub fn run<F>(runner: RunnerConfig, addons_cfg: AddOnsConfig, gui: F) -> Result<(), DearAppError>
 where
     F: FnMut(&imgui::Ui, &mut AddOns) + 'static,
 {
@@ -335,9 +438,10 @@ where
     match runner.redraw {
         RedrawMode::Poll => event_loop.set_control_flow(ControlFlow::Poll),
         RedrawMode::Wait => event_loop.set_control_flow(ControlFlow::Wait),
-        RedrawMode::WaitUntil { .. } => event_loop.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(16),
-        )),
+        RedrawMode::WaitUntil { fps } => {
+            let frame = Duration::from_secs_f32(1.0f32 / fps.max(1.0));
+            event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + frame));
+        }
     }
 
     let mut app = App::new(runner, addons_cfg, cbs, gui);
@@ -350,7 +454,6 @@ struct ImguiState {
     context: imgui::Context,
     platform: imgui_winit::WinitPlatform,
     renderer: imgui_wgpu::WgpuRenderer,
-    last_frame: Instant,
 }
 
 // Runtime docking flags controller
@@ -416,6 +519,9 @@ impl<'a> GpuApi<'a> {
 }
 
 struct AppWindow {
+    // Kept alive to ensure the surface outlives its instance on all backends.
+    #[allow(dead_code)]
+    instance: wgpu::Instance,
     device: wgpu::Device,
     queue: wgpu::Queue,
     window: Arc<Window>,
@@ -443,9 +549,11 @@ impl AppWindow {
         addons: &AddOnsConfig,
         cbs: &mut RunnerCallbacks,
     ) -> Result<Self, DearAppError> {
+        let _ = addons;
+
         // WGPU instance and window
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: cfg.wgpu.backends,
             ..Default::default()
         });
 
@@ -467,13 +575,20 @@ impl AppWindow {
             .map_err(|e| DearAppError::Generic(format!("Failed to create surface: {e}")))?;
 
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
+            power_preference: cfg.wgpu.power_preference,
             compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
+            force_fallback_adapter: cfg.wgpu.force_fallback_adapter,
         }))
         .expect("No suitable GPU adapter found");
 
-        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        let device_desc = wgpu::DeviceDescriptor {
+            label: cfg.wgpu.device_label.as_deref(),
+            required_features: cfg.wgpu.required_features,
+            required_limits: cfg.wgpu.required_limits.clone(),
+            memory_hints: cfg.wgpu.memory_hints.clone(),
+            ..Default::default()
+        };
+        let (device, queue) = block_on(adapter.request_device(&device_desc))
             .map_err(|e| DearAppError::Generic(format!("request_device failed: {e}")))?;
 
         // Surface config
@@ -502,10 +617,16 @@ impl AppWindow {
 
         surface.configure(&device, &surface_desc);
 
+        if let Some(cb) = cbs.on_gpu_init.as_mut() {
+            cb(&window, &device, &queue, &surface_desc);
+        }
+
         // ImGui setup
         let mut context = imgui::Context::create();
         // ini setup before fonts
-        if let Some(p) = &cfg.ini_filename {
+        if !cfg.restore_previous_geometry {
+            let _ = context.set_ini_filename(None::<String>);
+        } else if let Some(p) = &cfg.ini_filename {
             let _ = context.set_ini_filename(Some(p.clone()));
         } else {
             let _ = context.set_ini_filename(None::<String>);
@@ -574,10 +695,10 @@ impl AppWindow {
             context,
             platform,
             renderer,
-            last_frame: Instant::now(),
         };
 
         Ok(Self {
+            instance,
             device,
             queue,
             window,
@@ -614,26 +735,6 @@ impl AppWindow {
     where
         F: FnMut(&imgui::Ui, &mut AddOns),
     {
-        let now = Instant::now();
-        let delta_time = now - self.imgui.last_frame;
-        self.imgui
-            .context
-            .io_mut()
-            .set_delta_time(delta_time.as_secs_f32());
-        self.imgui.last_frame = now;
-
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(SurfaceError::Lost | SurfaceError::Outdated) => {
-                self.surface.configure(&self.device, &self.surface_desc);
-                return Ok(());
-            }
-            Err(SurfaceError::Timeout) => {
-                return Ok(());
-            }
-            Err(e) => return Err(DearAppError::from(e)),
-        };
-
         self.imgui
             .platform
             .prepare_frame(&self.window, &mut self.imgui.context);
@@ -690,6 +791,24 @@ impl AppWindow {
         // Call user GUI
         gui(&ui, &mut addons);
 
+        // Keep OS cursor/IME state in sync with Dear ImGui's per-frame intent.
+        self.imgui
+            .platform
+            .prepare_render_with_ui(&ui, &self.window);
+
+        let draw_data = self.imgui.context.render();
+
+        // Acquire the swapchain image as late as possible to reduce time holding it.
+        let frame = match self.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(SurfaceError::Lost | SurfaceError::Outdated) => {
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            Err(SurfaceError::Timeout) => return Ok(()),
+            Err(e) => return Err(DearAppError::from(e)),
+        };
+
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -698,8 +817,6 @@ impl AppWindow {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
-
-        let draw_data = self.imgui.context.render();
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -778,6 +895,9 @@ where
                             cb(&mut w.imgui.context);
                         }
                     }
+                    if let Some(w) = self.window.as_ref() {
+                        w.window.request_redraw();
+                    }
                 }
                 Err(e) => {
                     error!("Failed to create window: {e}");
@@ -816,31 +936,34 @@ where
                     if let Err(e) = window.render(&mut self.gui, &self.cfg.docking) {
                         error!("Render error: {e}; attempting to recover by recreating GPU state");
                         need_recreate = true;
-                    } else {
+                    } else if matches!(self.cfg.redraw, RedrawMode::Poll) {
                         window.window.request_redraw();
                     }
                 }
 
                 if need_recreate {
                     // Drop the existing window and try to rebuild the whole stack.
-                    self.window = None;
-                    if let Err(e) =
-                        AppWindow::new(event_loop, &self.cfg, &self.addons_cfg, &mut self.cbs)
-                    {
-                        error!("Failed to recreate window after GPU error: {e}");
-                        if let Some(cb) = self.cbs.on_exit.as_mut() {
-                            // Best-effort: give user a chance to clean up the old context if any.
-                            if let Some(w) = self.window.as_mut() {
-                                cb(&mut w.imgui.context);
+                    let mut old_window = self.window.take();
+                    match AppWindow::new(event_loop, &self.cfg, &self.addons_cfg, &mut self.cbs) {
+                        Ok(window) => {
+                            self.window = Some(window);
+                            info!("Successfully recreated window and GPU state after error");
+                            if let Some(window) = self.window.as_mut() {
+                                if let Some(cb) = self.cbs.on_post_init.as_mut() {
+                                    cb(&mut window.imgui.context);
+                                }
+                                window.window.request_redraw();
                             }
                         }
-                        event_loop.exit();
-                    } else if let Some(window) = self.window.as_mut() {
-                        info!("Successfully recreated window and GPU state after error");
-                        if let Some(cb) = self.cbs.on_post_init.as_mut() {
-                            cb(&mut window.imgui.context);
+                        Err(e) => {
+                            error!("Failed to recreate window after GPU error: {e}");
+                            if let (Some(cb), Some(old)) =
+                                (self.cbs.on_exit.as_mut(), old_window.as_mut())
+                            {
+                                cb(&mut old.imgui.context);
+                            }
+                            event_loop.exit();
                         }
-                        window.window.request_redraw();
                     }
                 }
             }
@@ -887,22 +1010,29 @@ where
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(window) = &self.window {
-            match self.cfg.redraw {
-                RedrawMode::Poll => {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        match self.cfg.redraw {
+            RedrawMode::Poll => {
+                event_loop.set_control_flow(ControlFlow::Poll);
+                if let Some(window) = &self.window {
                     window.window.request_redraw();
                 }
-                RedrawMode::Wait => {
-                    // On-demand: redraw only on events; still keep UI alive
-                }
-                RedrawMode::WaitUntil { fps } => {
-                    let frame = (1.0f32 / fps.max(1.0)) as f32;
-                    if self.last_wake.elapsed() >= Duration::from_secs_f32(frame) {
+            }
+            RedrawMode::Wait => {
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
+            RedrawMode::WaitUntil { fps } => {
+                let frame = Duration::from_secs_f32(1.0f32 / fps.max(1.0));
+                let now = Instant::now();
+                let mut next_wake = self.last_wake + frame;
+                if now >= next_wake {
+                    self.last_wake = now;
+                    next_wake = self.last_wake + frame;
+                    if let Some(window) = &self.window {
                         window.window.request_redraw();
-                        self.last_wake = Instant::now();
                     }
                 }
+                event_loop.set_control_flow(ControlFlow::WaitUntil(next_wake));
             }
         }
     }

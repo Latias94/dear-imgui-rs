@@ -44,16 +44,23 @@ Tip: pass `.opened(&mut open)` if you want a title-bar close button (X), and sto
 Builder with add-ons and docking/theme presets:
 
 ```rust
-use dear_app::{AppBuilder, AddOnsConfig, RunnerConfig, Theme};
+use dear_app::{AppBuilder, AddOnsConfig, RunnerConfig, Theme, WgpuConfig, WgpuPreset};
 use dear_imgui_rs as imgui;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cfg = RunnerConfig { theme: Some(Theme::Dark), ..Default::default() };
+    let cfg = RunnerConfig {
+        theme: Some(Theme::Dark),
+        wgpu: WgpuConfig::from_preset(WgpuPreset::HighPerformance),
+        ..Default::default()
+    };
     let addons = AddOnsConfig::auto(); // enable compiled add-ons
 
     AppBuilder::new()
         .with_config(cfg)
         .with_addons(addons)
+        .on_gpu_init(|_window, _device, _queue, _surface_cfg| {
+            // Ideal for one-time GPU resource initialization to avoid first-frame hitches.
+        })
         .on_frame(|ui: &imgui::Ui, addons| {
             ui.window("App").build(|| {
                 ui.text("Docking and WGPU are ready!");
