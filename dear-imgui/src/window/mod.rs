@@ -51,6 +51,8 @@ use crate::{Condition, Ui};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use child_window::*;
+
 pub(crate) mod child_window;
 pub(crate) mod content_region;
 pub(crate) mod scroll;
