@@ -379,6 +379,14 @@ impl Ui {
         }
     }
 
+    /// Returns the width of the item given the pushed settings and the current cursor position.
+    ///
+    /// This is NOT necessarily the width of last item.
+    #[doc(alias = "CalcItemWidth")]
+    pub fn calc_item_width(&self) -> f32 {
+        unsafe { sys::igCalcItemWidth() }
+    }
+
     // ============================================================================
     // Style Access
     // ============================================================================

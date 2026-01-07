@@ -110,6 +110,8 @@ bitflags::bitflags! {
         const SPAN_AVAIL_WIDTH = sys::ImGuiTreeNodeFlags_SpanAvailWidth as i32;
         /// Extend hit box to the left-most and right-most edges (bypass the indented area).
         const SPAN_FULL_WIDTH = sys::ImGuiTreeNodeFlags_SpanFullWidth as i32;
+        /// Frame will span all columns of its container table (text will still fit in current column)
+        const SPAN_ALL_COLUMNS = sys::ImGuiTreeNodeFlags_SpanAllColumns as i32;
         /// (WIP) Nav: left direction goes to parent. Only for the tree node, not the tree push.
         const NAV_LEFT_JUMPS_BACK_HERE = sys::ImGuiTreeNodeFlags_NavLeftJumpsToParent as i32;
         /// Combination of Leaf and NoTreePushOnOpen

@@ -34,13 +34,13 @@
     clippy::cast_sign_loss,
     clippy::as_conversions
 )]
-use crate::Context;
 use crate::internal::RawWrapper;
 use crate::sys;
 use crate::utils::HoveredFlags;
 use crate::widget::TreeNodeFlags;
 use crate::widget::{TableFlags, TableRowFlags};
 use crate::window::WindowFlags;
+use crate::Context;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::cell::UnsafeCell;
@@ -70,6 +70,13 @@ impl Style {
     fn inner_mut(&mut self) -> &mut sys::ImGuiStyle {
         // Safety: caller has `&mut Style`, so this is a unique Rust borrow for this wrapper.
         unsafe { &mut *self.0.get() }
+    }
+
+    /// Scales all sizes in the style
+    pub fn scale_all_sizes(&mut self, scale_factor: f32) {
+        unsafe {
+            sys::ImGuiStyle_ScaleAllSizes(self.inner_mut(), scale_factor);
+        }
     }
 
     /// Get a color by style color identifier

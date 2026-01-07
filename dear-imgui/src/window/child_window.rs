@@ -102,6 +102,13 @@ impl<'ui> ChildWindow<'ui> {
         self
     }
 
+    /// Enables/disables the horizontal scrollbar.
+    #[inline]
+    pub fn horizontal_scrollbar(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::HORIZONTAL_SCROLLBAR, value);
+        self
+    }
+
     /// Builds the child window and calls the provided closure
     pub fn build<F, R>(self, ui: &'ui Ui, f: F) -> Option<R>
     where
