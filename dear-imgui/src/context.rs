@@ -767,6 +767,21 @@ impl SuspendedContext {
             Err(self)
         }
     }
+
+    /// Updates the extra Viewports created by ImGui.
+    /// Has to be called every frame if Viewports are enabled.
+    pub fn update_platform_windows(&mut self) {
+        unsafe {
+            sys::igUpdatePlatformWindows();
+        }
+    }
+    /// Basically just calls the [`PlatformViewportBackend`](crate::PlatformViewportBackend) and [`RendererViewportBackend`](crate::RendererViewportBackend)
+    /// functions. If you render your extra viewports manually this function is not needed at all.
+    pub fn render_platform_windows_default(&mut self) {
+        unsafe {
+            sys::igRenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
+        }
+    }
 }
 
 // Dear ImGui is not thread-safe. The Context must not be sent or shared across
