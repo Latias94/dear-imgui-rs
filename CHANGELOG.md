@@ -17,6 +17,9 @@ This release focuses on `dear-app` usability improvements for real applications 
   - `RunnerConfig` gains a new required field: `wgpu: WgpuConfig`. Struct-literal initializers without `..Default::default()` must be updated.
   - `RunnerCallbacks` gains a new field: `on_gpu_init`. Struct-literal initializers must be updated.
   - `RedrawMode::Wait` now truly waits (no implicit per-frame redraw). Use `Poll` or `WaitUntil` for continuous rendering.
+- Backends
+  - `dear-imgui-winit`: `multi_viewport::ViewportData` is no longer a public API (internal backend detail).
+  - `dear-imgui-wgpu`: `multi_viewport::{ViewportWgpuData}` and `multi_viewport_sdl3::{ViewportWgpuData}` are no longer public APIs (internal renderer details).
 - `*-sys` crates (prebuilt downloads)
   - Prebuilt downloads/extraction are now gated behind the Cargo feature `prebuilt`. If you set `*_SYS_PREBUILT_URL` to an `http(s)://...` URL or to a `.tar.gz` archive, or set `*_SYS_USE_PREBUILT=1`, you must also enable `--features prebuilt`.
   - Default builds do not enable `prebuilt` (and therefore do not pull in HTTP client dependencies like `ureq`). (Fixes #12)

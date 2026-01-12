@@ -4,7 +4,6 @@
 //! This module converts that ID back into an `SDL_Window*` and exposes window/display
 //! handles compatible with `wgpu::Instance::create_surface`.
 
-use core::ptr::NonNull;
 #[cfg(all(
     unix,
     not(target_os = "macos"),

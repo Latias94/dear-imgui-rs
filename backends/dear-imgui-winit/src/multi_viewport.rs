@@ -49,7 +49,7 @@ fn abort_on_panic<R>(name: &str, f: impl FnOnce() -> R) -> R {
 /// Helper structure stored in the void* PlatformUserData field of each ImGuiViewport
 /// to easily retrieve our backend data. Following official ImGui backend pattern.
 #[repr(C)]
-pub struct ViewportData {
+struct ViewportData {
     pub window: *mut Window, // Stored in ImGuiViewport::PlatformHandle
     pub window_owned: bool,  // Set to false for main window
     pub ignore_window_pos_event_frame: i32,

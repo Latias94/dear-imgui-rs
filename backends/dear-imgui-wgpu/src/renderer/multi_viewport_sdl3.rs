@@ -19,7 +19,7 @@ use super::sdl3_raw_window_handle::Sdl3SurfaceTarget;
 compile_error!("`multi-viewport-sdl3` is not supported on wasm32 targets.");
 
 /// Per-viewport WGPU data stored in ImGuiViewport::RendererUserData
-pub struct ViewportWgpuData {
+struct ViewportWgpuData {
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub pending_frame: Option<wgpu::SurfaceTexture>,
@@ -153,7 +153,7 @@ fn sdl_window_id_from_viewport(vp: &Viewport) -> Option<sdl3_sys::video::SDL_Win
     if handle.is_null() {
         None
     } else {
-        Some(handle as usize as sdl3_sys::video::SDL_WindowID)
+        Some(sdl3_sys::video::SDL_WindowID(handle as usize as u32))
     }
 }
 

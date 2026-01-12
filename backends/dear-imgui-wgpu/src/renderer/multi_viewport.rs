@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use winit::window::Window;
 
 /// Per-viewport WGPU data stored in ImGuiViewport::RendererUserData
-pub struct ViewportWgpuData {
+struct ViewportWgpuData {
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub pending_frame: Option<wgpu::SurfaceTexture>,
