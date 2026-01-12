@@ -11,7 +11,7 @@ downloading/extracting prebuilt static libraries.
 - Compose archive names in a consistent scheme:
   `<crate>-prebuilt-<version>-<target>-<link>[<extra>][-<crt>].tar.gz`
 - Compose a `manifest.txt` describing the prebuilt contents (version, target, link type, CRT, features)
-- Download `.tar.gz` archives (blocking reqwest + rustls) and extract to a cache
+- Download `.tar.gz` archives (HTTP(S), optional feature `download`) and extract to a cache
 - Utility helpers to build candidate GitHub release URLs
 
 ## API Sketch
@@ -43,8 +43,12 @@ let lib_dir = download_prebuilt(&cache_root, url, &lib_name, target_env)?;
 
 ## Blocking HTTP and TLS
 
-This crate enables `reqwest` with the `blocking` and `rustls-tls` features. Build scripts use
-blocking I/O to download prebuilt archives when requested by environment variables or features.
+HTTP(S) download support is behind the feature `download`, which enables `ureq` (with rustls).
+By default, the crate does not pull in an HTTP client.
+
+`download_prebuilt()` always accepts local file paths (including `file://...`) without requiring
+the `download` feature. Note that extracting `.tar.gz` archives requires the feature `archive`
+(enabled automatically by `download`).
 
 ## When to Use
 

@@ -189,12 +189,12 @@ fn ui_frame(ui: &reflect::imgui::Ui, settings: &mut Settings) {
 
 - Default: build from source on all platforms. Prebuilt binaries are optional and off by default.
 - Windows: we publish prebuilt packages (MD/MT, with/without `freetype`). Linux/macOS may have CI artifacts but are not used automatically.
-- Opt-in prebuilt download from Release: enable either the crate feature `prebuilt` or set `<CRATE>_SYS_USE_PREBUILT=1`. Otherwise builds only use prebuilt when you explicitly point to them (e.g., `<CRATE>_SYS_LIB_DIR` or `<CRATE>_SYS_PREBUILT_URL`).
+- Opt-in prebuilt download from Release: enable the crate feature `prebuilt` (the env toggle `<CRATE>_SYS_USE_PREBUILT=1` is still accepted but requires that feature). Otherwise builds only use prebuilt when you explicitly point to them (e.g., `<CRATE>_SYS_LIB_DIR` or `<CRATE>_SYS_PREBUILT_URL`).
 
 Env vars per -sys crate:
 - `<CRATE>_SYS_LIB_DIR` — link from a dir containing the static lib
-- `<CRATE>_SYS_PREBUILT_URL` — explicit URL to `.a/.lib` or `.tar.gz` (always honored)
-- `<CRATE>_SYS_USE_PREBUILT=1` — allow auto download from GitHub Releases
+- `<CRATE>_SYS_PREBUILT_URL` — explicit URL or local path to `.a/.lib` or `.tar.gz` (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`)
+- `<CRATE>_SYS_USE_PREBUILT=1` — allow auto download from GitHub Releases (requires feature `prebuilt`)
 - `<CRATE>_SYS_PACKAGE_DIR` — local dir with `.tar.gz` packages
 - `<CRATE>_SYS_CACHE_DIR` — cache root for downloads/extraction
 - `<CRATE>_SYS_SKIP_CC` — skip C/C++ compilation
@@ -207,8 +207,8 @@ Freetype: enable once anywhere. Turning on `freetype` in any extension (imnodes/
 Quick examples (enable auto prebuilt download):
 
 - Feature: `cargo build -p dear-imgui-sys --features prebuilt`
-- Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-sys`
-- Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-sys`
+- Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-sys --features prebuilt`
+- Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-sys --features prebuilt`
 
 ## Compatibility (Latest)
 

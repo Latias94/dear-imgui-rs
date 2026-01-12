@@ -113,7 +113,7 @@ Centralize all prebuilt download/extract/naming logic via the shared helper crat
 - Depend on `dear-imgui-build-support` in your `-sys` crate as a build-dependency:
   ```toml
   [build-dependencies]
-  build-support = { package = "dear-imgui-build-support", version = "0.1" }
+  build-support = { package = "dear-imgui-build-support", version = "0.2" }
   ```
 
 - In `build.rs`, prefer the helpers instead of duplicating logic:
@@ -128,7 +128,7 @@ Centralize all prebuilt download/extract/naming logic via the shared helper crat
   ```
 
 Benefits:
-- No direct `reqwest` in each extension crate
+- No direct HTTP client dependency in each extension crate
 - Unified archive naming & manifest format
 - Simpler CI packaging
 
@@ -138,7 +138,7 @@ Provide three modes (opt-in via env):
 
 - Source build (default)
 - System/prebuilt: `*_SYS_LIB_DIR` -> add `cargo:rustc-link-search` and `-l static=<name>`
-- Remote prebuilt: `*_SYS_PREBUILT_URL` -> download to `OUT_DIR/prebuilt/`
+- Remote prebuilt: `*_SYS_PREBUILT_URL` -> download (HTTP(S) requires feature `prebuilt`)
 
 Tip: allow automated downloads from GitHub Releases by generating candidate URLs via
 `build_support::release_candidate_urls_env()` and trying them in order.

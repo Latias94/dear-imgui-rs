@@ -33,7 +33,7 @@ Each `*-sys` crate supports multiple ways to obtain its own native static librar
 
 - Source build (default): compile upstream C/C++ sources with `cc`.
 - System/prebuilt: set a directory env var so Cargo can find the static lib.
-- Remote prebuilt: set a direct URL; the file is downloaded into `OUT_DIR/prebuilt/`.
+- Remote prebuilt: set a direct URL (requires feature `prebuilt`); the file is downloaded into `OUT_DIR/prebuilt/`.
 
 Environment variables:
 
@@ -44,7 +44,7 @@ Environment variables:
 
 Optional toggles:
 
-- Auto-download prebuilt archives: feature `prebuilt` or `*_SYS_USE_PREBUILT=1`
+- Auto-download prebuilt archives: feature `prebuilt` (the env toggle `*_SYS_USE_PREBUILT=1` requires the feature)
 - Force build from sources: feature `build-from-source` or `*_SYS_FORCE_BUILD=1`
 
 See also:

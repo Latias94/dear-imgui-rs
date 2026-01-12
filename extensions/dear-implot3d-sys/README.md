@@ -4,7 +4,7 @@ Low-level FFI bindings for ImPlot3D via the `cimplot3d` C API. This crate pairs 
 
 ## Features
 
-- `prebuilt`: allow the build script to auto-download a release archive when available (or when `IMPLOT3D_SYS_USE_PREBUILT=1`).
+- `prebuilt`: allow the build script to auto-download a release archive when available (the env toggle `IMPLOT3D_SYS_USE_PREBUILT=1` requires this feature).
 - `build-from-source`: force building native sources with `cc` even if a prebuilt could be linked.
 - `package-bin`: enable an internal `bin/package` helper to produce release artifacts.
 
@@ -26,7 +26,7 @@ This crate supports multiple ways to obtain the native `dear_implot3d` static li
   - Directory containing the prebuilt static library.
   - Expected names: `dear_implot3d.lib` (Windows/MSVC), `libdear_implot3d.a` (Unix).
 - `IMPLOT3D_SYS_PREBUILT_URL`
-  - Direct URL to the prebuilt static library file, or to a `.tar.gz` package produced by our packager.
+  - Local file path or direct URL to the prebuilt static library file, or to a `.tar.gz` package produced by our packager (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`).
   - Downloaded to `OUT_DIR/prebuilt/` and reused on subsequent builds.
 - `IMPLOT3D_SYS_USE_PREBUILT`
   - If set to `1` or the `prebuilt` feature is enabled, the build script may auto-download a release asset.
