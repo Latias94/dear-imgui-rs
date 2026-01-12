@@ -455,10 +455,8 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
         return false;
     }
     // If freetype feature is enabled, only accept prebuilt if manifest declares it
-    if cfg!(feature = "freetype") {
-        if !prebuilt_manifest_has_feature(dir, "freetype") {
-            return false;
-        }
+    if cfg!(feature = "freetype") && !prebuilt_manifest_has_feature(dir, "freetype") {
+        return false;
     }
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");

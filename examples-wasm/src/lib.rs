@@ -13,10 +13,10 @@ use dear_imnodes::{Context as ImnodesContext, EditorContext as ImnodesEditorCont
 use dear_implot::PlotContext;
 #[cfg(feature = "implot3d")]
 use dear_implot3d::{Axis3DFlags, Plot3DContext, Plot3DFlags, Scatter3DFlags};
-use instant::Instant;
 use log::info;
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::prelude::*;
+use web_time::Instant;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -442,7 +442,7 @@ impl AppWindow {
                 .map_err(|e| JsValue::from_str(&format!("new_frame: {e}")))?;
             self.imgui
                 .renderer
-                .render_draw_data(&draw_data, &mut rpass)
+                .render_draw_data(draw_data, &mut rpass)
                 .map_err(|e| JsValue::from_str(&format!("render_draw_data: {e}")))?;
         }
 
@@ -453,7 +453,7 @@ impl AppWindow {
 }
 
 thread_local! {
-    static APP_READY: RefCell<Option<AppWindow>> = RefCell::new(None);
+    static APP_READY: RefCell<Option<AppWindow>> = const { RefCell::new(None) };
 }
 
 impl ApplicationHandler for App {
@@ -516,10 +516,10 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         // If async init completed, pick up the window now
-        if self.window.is_none() {
-            if let Some(w) = APP_READY.with(|cell| cell.borrow_mut().take()) {
-                self.window = Some(w);
-            }
+        if self.window.is_none()
+            && let Some(w) = APP_READY.with(|cell| cell.borrow_mut().take())
+        {
+            self.window = Some(w);
         }
         let Some(window) = self.window.as_mut() else {
             return;
@@ -557,10 +557,10 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         // Pick up async init completion if available
-        if self.window.is_none() {
-            if let Some(w) = APP_READY.with(|cell| cell.borrow_mut().take()) {
-                self.window = Some(w);
-            }
+        if self.window.is_none()
+            && let Some(w) = APP_READY.with(|cell| cell.borrow_mut().take())
+        {
+            self.window = Some(w);
         }
         if let Some(window) = &self.window {
             window.window.request_redraw();

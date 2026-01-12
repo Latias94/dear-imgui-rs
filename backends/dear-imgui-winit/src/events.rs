@@ -17,13 +17,13 @@ pub fn handle_keyboard_input(event: &KeyEvent, imgui_ctx: &mut Context) -> bool 
     let io = imgui_ctx.io_mut();
 
     // Inject text for character input on key press (matches upstream imgui-winit behavior)
-    if event.state.is_pressed() {
-        if let Some(txt) = &event.text {
-            for ch in txt.chars() {
-                // Filter out DEL control code as upstream does
-                if ch != '\u{7f}' {
-                    io.add_input_character(ch);
-                }
+    if event.state.is_pressed()
+        && let Some(txt) = &event.text
+    {
+        for ch in txt.chars() {
+            // Filter out DEL control code as upstream does
+            if ch != '\u{7f}' {
+                io.add_input_character(ch);
             }
         }
     }
@@ -152,7 +152,7 @@ pub fn handle_touch_event(touch: &winit::event::Touch, _window: &Window, _imgui_
 
     // Convert touch events to mouse events for basic touch support
     ACTIVE_TOUCH.with(|active| {
-        let active_id = active.borrow().clone();
+        let active_id = *active.borrow();
         let id = touch.id;
         match touch.phase {
             TouchPhase::Started => {
