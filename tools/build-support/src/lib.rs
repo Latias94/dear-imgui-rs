@@ -206,16 +206,16 @@ pub fn extract_archive_to_cache(
 ) -> Result<PathBuf, String> {
     #[cfg(feature = "archive")]
     {
-        return extract_archive_to_cache_impl(archive_path, cache_root, lib_name);
+        extract_archive_to_cache_impl(archive_path, cache_root, lib_name)
     }
 
     #[cfg(not(feature = "archive"))]
     {
         let _ = (archive_path, cache_root, lib_name);
-        return Err(
+        Err(
             "archive extraction disabled: enable feature `dear-imgui-build-support/archive`"
                 .to_string(),
-        );
+        )
     }
 }
 
@@ -264,16 +264,16 @@ pub fn download_prebuilt(
 
     #[cfg(feature = "download")]
     {
-        return download_prebuilt_http(cache_root, url, lib_name);
+        download_prebuilt_http(cache_root, url, lib_name)
     }
 
     #[cfg(not(feature = "download"))]
     {
         let _ = (cache_root, url, lib_name);
-        return Err(
+        Err(
             "download support disabled: enable feature `dear-imgui-build-support/download`"
                 .to_string(),
-        );
+        )
     }
 }
 
@@ -390,6 +390,22 @@ fn download_prebuilt_http(cache_root: &Path, url: &str, lib_name: &str) -> Resul
     Ok(dl_dir)
 }
 
+pub fn prebuilt_cache_root_from_env_or_target(
+    manifest_dir: &Path,
+    cache_env_var: &str,
+    folder: &str,
+) -> PathBuf {
+    if let Ok(dir) = env::var(cache_env_var) {
+        return PathBuf::from(dir);
+    }
+    let target_dir = env::var("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| manifest_dir.parent().unwrap().join("target"));
+    target_dir.join(folder)
+}
+pub const DEFAULT_GITHUB_OWNER: &str = "Latias94";
+pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,19 +454,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
-
-pub fn prebuilt_cache_root_from_env_or_target(
-    manifest_dir: &Path,
-    cache_env_var: &str,
-    folder: &str,
-) -> PathBuf {
-    if let Ok(dir) = env::var(cache_env_var) {
-        return PathBuf::from(dir);
-    }
-    let target_dir = env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| manifest_dir.parent().unwrap().join("target"));
-    target_dir.join(folder)
-}
-pub const DEFAULT_GITHUB_OWNER: &str = "Latias94";
-pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
