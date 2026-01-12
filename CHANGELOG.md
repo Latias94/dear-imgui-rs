@@ -17,6 +17,8 @@ This release focuses on `dear-app` usability improvements for real applications 
   - `RunnerConfig` gains a new required field: `wgpu: WgpuConfig`. Struct-literal initializers without `..Default::default()` must be updated.
   - `RunnerCallbacks` gains a new field: `on_gpu_init`. Struct-literal initializers must be updated.
   - `RedrawMode::Wait` now truly waits (no implicit per-frame redraw). Use `Poll` or `WaitUntil` for continuous rendering.
+- Core (`dear-imgui-rs`)
+  - `PlatformIo::viewports()` / `PlatformIo::viewports_mut()` are no longer public APIs; use `PlatformIo::viewports_iter()` / `PlatformIo::viewports_iter_mut()` instead.
 - Backends
   - `dear-imgui-winit`: `multi_viewport::ViewportData` is no longer a public API (internal backend detail).
   - `dear-imgui-wgpu`: `multi_viewport::{ViewportWgpuData}` and `multi_viewport_sdl3::{ViewportWgpuData}` are no longer public APIs (internal renderer details).
