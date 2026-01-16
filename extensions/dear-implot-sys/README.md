@@ -4,7 +4,7 @@ Low-level FFI bindings for ImPlot via the cimplot C API. This crate pairs with `
 
 ## Features
 
-- `prebuilt`: allow the build script to auto-download a release archive when available (or when `IMPLOT_SYS_USE_PREBUILT=1`).
+- `prebuilt`: allow the build script to auto-download a release archive when available (the env toggle `IMPLOT_SYS_USE_PREBUILT=1` requires this feature).
 - `build-from-source`: force building native sources with `cc` even if a prebuilt could be linked.
 - `freetype`: passthrough to `dear-imgui-sys/freetype` to enable FreeType in the workspace.
 - `package-bin`: enable an internal `bin/package` helper to produce release artifacts.
@@ -27,7 +27,7 @@ This crate supports three ways to obtain the native `dear_implot` static library
   - Directory containing the prebuilt static library.
   - Expected names: `dear_implot.lib` (Windows/MSVC), `libdear_implot.a` (Unix).
 - `IMPLOT_SYS_PREBUILT_URL`
-  - Direct URL to the prebuilt static library file.
+  - Local file path or direct URL to the prebuilt static library file (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`).
   - The file is downloaded to `OUT_DIR/prebuilt/` and reused on subsequent builds.
 - `IMPLOT_SYS_SKIP_CC`
   - If set, skips native C/C++ compilation. Typically used with one of the above.

@@ -4,7 +4,7 @@ Low-level FFI bindings for ImGuIZMO.quat via the `cimguizmo_quat` C API. This cr
 
 ## Features
 
-- `prebuilt`: allow the build script to auto-download a release archive when available (or when `IMGUIZMO_QUAT_SYS_USE_PREBUILT=1`).
+- `prebuilt`: allow the build script to auto-download a release archive when available (the env toggle `IMGUIZMO_QUAT_SYS_USE_PREBUILT=1` requires this feature).
 - `build-from-source`: force building native sources with `cc` even if a prebuilt could be linked.
 - `freetype`: passthrough to `dear-imgui-sys/freetype` to enable FreeType in the workspace.
 - `package-bin`: enable an internal `bin/package` helper to produce release artifacts.
@@ -27,7 +27,7 @@ This crate supports multiple ways to obtain the native `dear_imguizmo_quat` stat
   - Directory containing the prebuilt static library.
   - Expected names: `dear_imguizmo_quat.lib` (Windows/MSVC), `libdear_imguizmo_quat.a` (Unix).
 - `IMGUIZMO_QUAT_SYS_PREBUILT_URL`
-  - Direct URL to the prebuilt static library file, or to a `.tar.gz` package produced by our packager.
+  - Local file path or direct URL to the prebuilt static library file, or to a `.tar.gz` package produced by our packager (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`).
   - Downloaded to `OUT_DIR/prebuilt/` and reused on subsequent builds.
 - `IMGUIZMO_QUAT_SYS_USE_PREBUILT`
   - If set to `1` or the `prebuilt` feature is enabled, the build script may auto-download a release asset.
@@ -79,4 +79,3 @@ cargo build -p dear-imguizmo-quat-sys
 - MSVC (Windows) builds align CRT and exception flags with `dear-imgui-sys`.
 - `docs.rs` builds generate bindings only and export include paths for downstream crates.
 - Higher-level Rust APIs live in `extensions/dear-imguizmo-quat/`. See that crate and `examples/imguizmo_quat_basic.rs` for usage.
-

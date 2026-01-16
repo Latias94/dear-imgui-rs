@@ -14,10 +14,10 @@ keywords.workspace = true
 dear-imgui-rs = { path = "../../dear-imgui", version = "0.8" }
 winit.workspace = true
 #cfg-if.workspace = true
-instant = { version = "0.1", features = ["wasm-bindgen"] }
 
 # WASM-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time.workspace = true
 web-sys = { workspace = true, features = [
     "Document",
     "Element",

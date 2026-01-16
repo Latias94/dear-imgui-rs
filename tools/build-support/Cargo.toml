@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-build-support"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -14,7 +14,14 @@ name = "build_support"
 path = "src/lib.rs"
 
 [dependencies]
-reqwest = { version = "0.12", features = ["blocking", "http2", "rustls-tls"], default-features = false }
-flate2.workspace = true
-tar.workspace = true
+ureq = { version = "3.1", default-features = false, features = ["rustls"], optional = true }
+flate2 = { workspace = true, optional = true }
+tar = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enable HTTP(S) download support for build scripts.
+download = ["dep:ureq", "archive"]
+# Enable `.tar.gz` extraction support.
+archive = ["dep:flate2", "dep:tar"]
 

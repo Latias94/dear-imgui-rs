@@ -41,16 +41,14 @@ dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.8" }
 cfg-if.workspace = true
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
-build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../../tools/build-support", optional = true }
+build-support = { package = "dear-imgui-build-support", version = "0.2", path = "../../tools/build-support", optional = true }
 
 [build-dependencies]
 bindgen.workspace = true
 cc.workspace = true
 xshell = { workspace = true }
 pkg-config = { workspace = true }
-flate2 = "1"
-tar = "0.4"
-build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../../tools/build-support" }
+build-support = { package = "dear-imgui-build-support", version = "0.2", path = "../../tools/build-support" }
 
 [[bin]]
 name = "package"
@@ -62,5 +60,5 @@ package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
 default = []
 freetype = ["dear-imgui-sys/freetype"]
 wasm = ["dear-imgui-sys/wasm"]
-prebuilt = []
+prebuilt = ["build-support/download"]
 build-from-source = []

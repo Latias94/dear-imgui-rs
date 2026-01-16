@@ -971,7 +971,7 @@ impl PlatformIo {
 
     /// Get access to the viewports vector
     #[cfg(feature = "multi-viewport")]
-    pub fn viewports(&self) -> &crate::internal::ImVector<*mut sys::ImGuiViewport> {
+    pub(crate) fn viewports(&self) -> &crate::internal::ImVector<*mut sys::ImGuiViewport> {
         unsafe {
             crate::internal::imvector_cast_ref::<
                 *mut sys::ImGuiViewport,
@@ -982,7 +982,9 @@ impl PlatformIo {
 
     /// Get mutable access to the viewports vector
     #[cfg(feature = "multi-viewport")]
-    pub fn viewports_mut(&mut self) -> &mut crate::internal::ImVector<*mut sys::ImGuiViewport> {
+    pub(crate) fn viewports_mut(
+        &mut self,
+    ) -> &mut crate::internal::ImVector<*mut sys::ImGuiViewport> {
         unsafe {
             crate::internal::imvector_cast_mut::<
                 *mut sys::ImGuiViewport,

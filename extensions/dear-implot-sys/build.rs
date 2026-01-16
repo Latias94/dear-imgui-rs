@@ -3,6 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+fn is_http_url(s: &str) -> bool {
+    s.starts_with("http://") || s.starts_with("https://")
+}
+
+fn is_archive_urlish(s: &str) -> bool {
+    s.ends_with(".tar.gz") || s.ends_with(".tgz")
+}
+
 #[derive(Clone, Debug)]
 struct BuildConfig {
     manifest_dir: PathBuf,
@@ -139,6 +147,14 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
         );
     }
     if let Ok(url) = env::var("IMPLOT_SYS_PREBUILT_URL") {
+        if (is_http_url(&url) || is_archive_urlish(&url)) && !cfg!(feature = "prebuilt") {
+            println!(
+                "cargo:warning=IMPLOT_SYS_PREBUILT_URL is an HTTP(S) URL or a .tar.gz archive, but feature `prebuilt` is disabled; \
+                 enable it to allow downloads/extraction (e.g. `cargo build -p dear-implot-sys --features prebuilt`) \
+                 or use IMPLOT_SYS_LIB_DIR instead."
+            );
+            return false;
+        }
         let cache_root = prebuilt_cache_root(cfg);
         if let Ok(dir) = try_download_prebuilt(&cache_root, &url, target_env) {
             if try_link_prebuilt(dir.clone(), target_env) {
@@ -155,12 +171,17 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
             env::var("IMPLOT_SYS_USE_PREBUILT").ok().as_deref(),
             Some("1") | Some("true") | Some("yes")
         );
-        let allow_auto_prebuilt = allow_feature || allow_env;
+        if allow_env && !allow_feature {
+            println!(
+                "cargo:warning=IMPLOT_SYS_USE_PREBUILT is set, but feature `prebuilt` is disabled; \
+                 downloads are unavailable without enabling the feature (e.g. `cargo build -p dear-implot-sys --features prebuilt`)."
+            );
+        }
+        let allow_auto_prebuilt = allow_feature;
         if allow_auto_prebuilt {
             let source = match (allow_feature, allow_env) {
                 (true, true) => "feature+env",
                 (true, false) => "feature",
-                (false, true) => "env",
                 _ => "",
             };
             let (owner, repo) = build_support::release_owner_repo();
@@ -624,6 +645,14 @@ fn try_download_prebuilt(
     target_env: &str,
 ) -> Result<PathBuf, String> {
     let lib_name = expected_lib_name(target_env);
+    if is_http_url(url) {
+        println!(
+            "cargo:warning=Downloading prebuilt dear_implot from {}",
+            url
+        );
+    } else {
+        println!("cargo:warning=Using prebuilt dear_implot from {}", url);
+    }
     build_support::download_prebuilt(cache_root, url, lib_name, target_env)
 }
 

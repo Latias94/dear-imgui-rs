@@ -204,6 +204,27 @@ pub fn extract_archive_to_cache(
     cache_root: &Path,
     lib_name: &str,
 ) -> Result<PathBuf, String> {
+    #[cfg(feature = "archive")]
+    {
+        extract_archive_to_cache_impl(archive_path, cache_root, lib_name)
+    }
+
+    #[cfg(not(feature = "archive"))]
+    {
+        let _ = (archive_path, cache_root, lib_name);
+        Err(
+            "archive extraction disabled: enable feature `dear-imgui-build-support/archive`"
+                .to_string(),
+        )
+    }
+}
+
+#[cfg(feature = "archive")]
+fn extract_archive_to_cache_impl(
+    archive_path: &Path,
+    cache_root: &Path,
+    lib_name: &str,
+) -> Result<PathBuf, String> {
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let extract_dir = prebuilt_extract_dir_env(cache_root, &target_env);
     if extract_dir.exists() {
@@ -237,6 +258,81 @@ pub fn download_prebuilt(
     lib_name: &str,
     _target_env: &str,
 ) -> Result<PathBuf, String> {
+    if let Some(path) = local_path_from_urlish(url) {
+        return stage_or_extract_local(cache_root, &path, lib_name);
+    }
+
+    #[cfg(feature = "download")]
+    {
+        download_prebuilt_http(cache_root, url, lib_name)
+    }
+
+    #[cfg(not(feature = "download"))]
+    {
+        let _ = (cache_root, url, lib_name);
+        Err(
+            "download support disabled: enable feature `dear-imgui-build-support/download`"
+                .to_string(),
+        )
+    }
+}
+
+fn local_path_from_urlish(url: &str) -> Option<PathBuf> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("file://") {
+        // Accept both file:///C:/... and file://C:/...
+        let rest = rest.trim_start_matches('/');
+        let p = PathBuf::from(rest);
+        if p.exists() {
+            return Some(p);
+        }
+        return None;
+    }
+
+    let p = PathBuf::from(trimmed);
+    if p.exists() { Some(p) } else { None }
+}
+
+fn stage_or_extract_local(
+    cache_root: &Path,
+    path: &Path,
+    lib_name: &str,
+) -> Result<PathBuf, String> {
+    if is_archive_path(path) {
+        return extract_archive_to_cache(path, cache_root, lib_name);
+    }
+
+    if path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| s == lib_name)
+    {
+        let Some(parent) = path.parent() else {
+            return Err("local prebuilt path had no parent directory".to_string());
+        };
+        return Ok(parent.to_path_buf());
+    }
+
+    let dl_dir = cache_root.join("download");
+    let _ = std::fs::create_dir_all(&dl_dir);
+    let dst = dl_dir.join(lib_name);
+    if !dst.exists() {
+        std::fs::copy(path, &dst).map_err(|e| format!("copy {}: {}", path.display(), e))?;
+    }
+    Ok(dl_dir)
+}
+
+fn is_archive_path(path: &Path) -> bool {
+    let s = path.to_string_lossy().to_ascii_lowercase();
+    s.ends_with(".tar.gz") || s.ends_with(".tgz")
+}
+
+#[cfg(feature = "download")]
+fn download_prebuilt_http(cache_root: &Path, url: &str, lib_name: &str) -> Result<PathBuf, String> {
     let dl_dir = cache_root.join("download");
     let _ = std::fs::create_dir_all(&dl_dir);
 
@@ -244,18 +340,24 @@ pub fn download_prebuilt(
         let fname = url.split('/').next_back().unwrap_or("prebuilt.tar.gz");
         let archive_path = dl_dir.join(fname);
         if !archive_path.exists() {
-            let client = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(300))
-                .build()
-                .map_err(|e| format!("create http client: {}", e))?;
-            let resp = client
+            let config = ureq::Agent::config_builder()
+                .timeout_global(Some(std::time::Duration::from_secs(300)))
+                .build();
+            let agent = ureq::Agent::new_with_config(config);
+            let resp = agent
                 .get(url)
-                .send()
+                .call()
                 .map_err(|e| format!("http get: {}", e))?;
-            if !resp.status().is_success() {
-                return Err(format!("http status {}", resp.status()));
+            let status = resp.status();
+            if !status.is_success() {
+                return Err(format!("http status {}", status));
             }
-            let bytes = resp.bytes().map_err(|e| format!("read body: {}", e))?;
+            let mut reader = resp.into_body().into_reader();
+            let mut bytes = Vec::new();
+            use std::io::Read as _;
+            reader
+                .read_to_end(&mut bytes)
+                .map_err(|e| format!("read body: {}", e))?;
             std::fs::write(&archive_path, &bytes)
                 .map_err(|e| format!("write {}: {}", archive_path.display(), e))?;
         }
@@ -266,21 +368,43 @@ pub fn download_prebuilt(
     if dst.exists() {
         return Ok(dl_dir);
     }
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| format!("http client: {}", e))?;
-    let resp = client
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(120)))
+        .build();
+    let agent = ureq::Agent::new_with_config(config);
+    let resp = agent
         .get(url)
-        .send()
+        .call()
         .map_err(|e| format!("http get: {}", e))?;
-    if !resp.status().is_success() {
-        return Err(format!("http status {}", resp.status()));
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("http status {}", status));
     }
-    let bytes = resp.bytes().map_err(|e| format!("read body: {}", e))?;
+    let mut reader = resp.into_body().into_reader();
+    let mut bytes = Vec::new();
+    use std::io::Read as _;
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("read body: {}", e))?;
     std::fs::write(&dst, &bytes).map_err(|e| format!("write {}: {}", dst.display(), e))?;
     Ok(dl_dir)
 }
+
+pub fn prebuilt_cache_root_from_env_or_target(
+    manifest_dir: &Path,
+    cache_env_var: &str,
+    folder: &str,
+) -> PathBuf {
+    if let Ok(dir) = env::var(cache_env_var) {
+        return PathBuf::from(dir);
+    }
+    let target_dir = env::var("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| manifest_dir.parent().unwrap().join("target"));
+    target_dir.join(folder)
+}
+pub const DEFAULT_GITHUB_OWNER: &str = "Latias94";
+pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 
 #[cfg(test)]
 mod tests {
@@ -330,19 +454,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
-
-pub fn prebuilt_cache_root_from_env_or_target(
-    manifest_dir: &Path,
-    cache_env_var: &str,
-    folder: &str,
-) -> PathBuf {
-    if let Ok(dir) = env::var(cache_env_var) {
-        return PathBuf::from(dir);
-    }
-    let target_dir = env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| manifest_dir.parent().unwrap().join("target"));
-    target_dir.join(folder)
-}
-pub const DEFAULT_GITHUB_OWNER: &str = "Latias94";
-pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";

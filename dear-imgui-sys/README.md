@@ -27,12 +27,12 @@ The fastest way to get started. Use prebuilt static libraries instead of compili
 # Option A: Point to a local directory containing the static library
 export IMGUI_SYS_LIB_DIR=/path/to/lib/dir  # Contains dear_imgui.lib (Windows) or libdear_imgui.a (Unix)
 
-# Option B: Download from a direct URL
-export IMGUI_SYS_PREBUILT_URL=https://example.com/dear_imgui.lib
+# Option B: Use a local file path (library or .tar.gz archive)
+export IMGUI_SYS_PREBUILT_URL=/path/to/dear_imgui.lib
 
-# Option C: Enable automatic download from GitHub releases
-cargo build --features prebuilt
-# or
+# Option C: Enable HTTP(S) downloads / auto-download from GitHub releases
+cargo build -p dear-imgui-sys --features prebuilt
+# optional (requires the feature above)
 export IMGUI_SYS_USE_PREBUILT=1
 ```
 
@@ -182,8 +182,8 @@ Control build behavior with these environment variables:
 | Variable | Description |
 |----------|-------------|
 | `IMGUI_SYS_LIB_DIR` | Path to directory containing prebuilt static library |
-| `IMGUI_SYS_PREBUILT_URL` | Direct URL to download prebuilt library |
-| `IMGUI_SYS_USE_PREBUILT` | Enable automatic download from GitHub releases (`1`) |
+| `IMGUI_SYS_PREBUILT_URL` | Local file path or direct URL to a prebuilt library/archive (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`) |
+| `IMGUI_SYS_USE_PREBUILT` | Enable automatic download from GitHub releases (`1`, requires feature `prebuilt`) |
 | `IMGUI_SYS_USE_CMAKE` | Force CMake build instead of cc crate (`1`) |
 | `IMGUI_SYS_SKIP_CC` | Skip C/C++ compilation, use pregenerated bindings only (`1`) |
 | `IMGUI_SYS_FORCE_BUILD` | Force build from source, ignore prebuilt options (`1`) |

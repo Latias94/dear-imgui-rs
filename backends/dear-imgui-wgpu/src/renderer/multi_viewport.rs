@@ -12,12 +12,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use winit::window::Window;
 
 /// Per-viewport WGPU data stored in ImGuiViewport::RendererUserData
-pub struct ViewportWgpuData {
+struct ViewportWgpuData {
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub pending_frame: Option<wgpu::SurfaceTexture>,
     // Last values we logged for this viewport (to avoid per-frame spam).
+    #[cfg(feature = "mv-log")]
     pub last_log_display_size: [f32; 2],
+    #[cfg(feature = "mv-log")]
     pub last_log_fb_scale: [f32; 2],
 }
 
@@ -287,7 +289,9 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
                 surface,
                 config,
                 pending_frame: None,
+                #[cfg(feature = "mv-log")]
                 last_log_display_size: [0.0, 0.0],
+                #[cfg(feature = "mv-log")]
                 last_log_fb_scale: [0.0, 0.0],
             };
             vpm.set_renderer_user_data(Box::into_raw(Box::new(data)) as *mut c_void);
@@ -401,6 +405,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         };
         // Obtain draw data for this viewport
         let vpm = &mut *vp;
+        #[cfg(feature = "mv-log")]
         let vp_id = vpm.id();
         #[cfg(not(target_arch = "wasm32"))]
         let platform_handle = vpm.platform_handle();

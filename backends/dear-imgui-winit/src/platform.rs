@@ -3,13 +3,17 @@
 //! This module contains the core `WinitPlatform` struct and its implementation
 //! for integrating Dear ImGui with winit windowing.
 
-use instant::Instant;
 use std::ffi::c_void;
 
 use dear_imgui_rs::{BackendFlags, ConfigFlags, Context};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{Event, WindowEvent};
 use winit::window::{Window, WindowAttributes};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use crate::cursor::CursorSettings;
 use crate::events;

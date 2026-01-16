@@ -42,7 +42,7 @@ mint.workspace = true
 cfg-if.workspace = true
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
-build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../tools/build-support", optional = true }
+build-support = { package = "dear-imgui-build-support", version = "0.2", path = "../tools/build-support", optional = true }
 glam = { workspace = true, optional = true }
 
 [build-dependencies]
@@ -51,9 +51,7 @@ cc.workspace = true
 pkg-config = { workspace = true, optional = true }
 xshell = { workspace = true }
 cmake = "0.1"
-flate2 = "1"
-tar = "0.4"
-build-support = { package = "dear-imgui-build-support", version = "0.1", path = "../tools/build-support" }
+build-support = { package = "dear-imgui-build-support", version = "0.2", path = "../tools/build-support" }
 
 [[bin]]
 name = "package"
@@ -70,6 +68,6 @@ freetype = ["pkg-config"]
 # Enable for WASM targets
 wasm = []
 package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
-prebuilt = []
+prebuilt = ["build-support/download"]
 build-from-source = []
 glam = ["dep:glam"]

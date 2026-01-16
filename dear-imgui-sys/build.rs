@@ -57,6 +57,14 @@ fn use_cmake_requested() -> bool {
     matches!(env::var("IMGUI_SYS_USE_CMAKE"), Ok(v) if !v.is_empty())
 }
 
+fn is_http_url(s: &str) -> bool {
+    s.starts_with("http://") || s.starts_with("https://")
+}
+
+fn is_archive_urlish(s: &str) -> bool {
+    s.ends_with(".tar.gz") || s.ends_with(".tgz")
+}
+
 fn main() {
     let cfg = BuildConfig::new();
 
@@ -264,16 +272,24 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
             }
         }
         if !linked && let Some(url) = env::var_os("IMGUI_SYS_PREBUILT_URL") {
-            let cache_root = prebuilt_cache_root(cfg);
-            if let Ok(lib_dir) =
-                try_download_prebuilt(&cache_root, &url.to_string_lossy(), &cfg.target_env)
-                && try_link_prebuilt(&lib_dir, &cfg.target_env)
-            {
+            let url = url.to_string_lossy();
+            if (is_http_url(&url) || is_archive_urlish(&url)) && !cfg!(feature = "prebuilt") {
                 println!(
-                    "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
-                    lib_dir.display()
+                    "cargo:warning=IMGUI_SYS_PREBUILT_URL is an HTTP(S) URL or a .tar.gz archive, but feature `prebuilt` is disabled; \
+                     enable it to allow downloads/extraction (e.g. `cargo build -p dear-imgui-sys --features prebuilt`) \
+                     or use IMGUI_SYS_LIB_DIR / repo prebuilts instead."
                 );
-                linked = true;
+            } else {
+                let cache_root = prebuilt_cache_root(cfg);
+                if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env)
+                    && try_link_prebuilt(&lib_dir, &cfg.target_env)
+                {
+                    println!(
+                        "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
+                        lib_dir.display()
+                    );
+                    linked = true;
+                }
             }
         }
         // Only attempt automatic release download when explicitly enabled.
@@ -282,12 +298,17 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
             env::var("IMGUI_SYS_USE_PREBUILT").ok().as_deref(),
             Some("1") | Some("true") | Some("yes")
         );
-        let allow_auto_prebuilt = allow_feature || allow_env;
+        if allow_env && !allow_feature {
+            println!(
+                "cargo:warning=IMGUI_SYS_USE_PREBUILT is set, but feature `prebuilt` is disabled; \
+                 downloads are unavailable without enabling the feature (e.g. `cargo build -p dear-imgui-sys --features prebuilt`)."
+            );
+        }
+        let allow_auto_prebuilt = allow_feature;
         if !linked && allow_auto_prebuilt {
             let source = match (allow_feature, allow_env) {
                 (true, true) => "feature+env",
                 (true, false) => "feature",
-                (false, true) => "env",
                 _ => "",
             };
             let (owner, repo) = build_support::release_owner_repo();
@@ -434,10 +455,8 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
         return false;
     }
     // If freetype feature is enabled, only accept prebuilt if manifest declares it
-    if cfg!(feature = "freetype") {
-        if !prebuilt_manifest_has_feature(dir, "freetype") {
-            return false;
-        }
+    if cfg!(feature = "freetype") && !prebuilt_manifest_has_feature(dir, "freetype") {
+        return false;
     }
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");
@@ -513,7 +532,11 @@ fn try_download_prebuilt(
     target_env: &str,
 ) -> Result<PathBuf, String> {
     let lib_name = expected_lib_name(target_env);
-    println!("cargo:warning=Downloading prebuilt dear_imgui from {}", url);
+    if is_http_url(url) {
+        println!("cargo:warning=Downloading prebuilt dear_imgui from {}", url);
+    } else {
+        println!("cargo:warning=Using prebuilt dear_imgui from {}", url);
+    }
     build_support::download_prebuilt(cache_root, url, lib_name.as_str(), target_env)
 }
 
