@@ -156,9 +156,9 @@ impl AppWindow {
         // Main menu bar
         if let Some(_bar) = ui.begin_main_menu_bar() {
             ui.menu("File", || {
-                if ui.menu_item_with_shortcut("New", "Ctrl+N") {}
-                if ui.menu_item_with_shortcut("Open...", "Ctrl+O") {}
-                if ui.menu_item_with_shortcut("Save", "Ctrl+S") {}
+                if ui.menu_item_config("New").shortcut("Ctrl+N").build() {}
+                if ui.menu_item_config("Open...").shortcut("Ctrl+O").build() {}
+                if ui.menu_item_config("Save").shortcut("Ctrl+S").build() {}
                 ui.separator();
                 if ui.menu_item("Preferences...") {
                     self.prefs_open = true;
@@ -171,8 +171,14 @@ impl AppWindow {
             });
 
             ui.menu("Edit", || {
-                ui.menu_item_enabled_selected("Undo", Some("Ctrl+Z"), false, false);
-                ui.menu_item_enabled_selected("Redo", Some("Ctrl+Y"), false, false);
+                ui.menu_item_config("Undo")
+                    .shortcut("Ctrl+Z")
+                    .enabled(false)
+                    .build();
+                ui.menu_item_config("Redo")
+                    .shortcut("Ctrl+Y")
+                    .enabled(false)
+                    .build();
                 ui.separator();
                 ui.menu_item("Cut");
                 ui.menu_item("Copy");
@@ -180,8 +186,10 @@ impl AppWindow {
             });
 
             ui.menu("View", || {
-                ui.menu_item_toggle_no_shortcut("Status Bar", &mut self.status_bar, true);
-                ui.menu_item_toggle_no_shortcut("Dark Theme", &mut self.theme_dark, true);
+                ui.menu_item_config("Status Bar")
+                    .build_with_ref(&mut self.status_bar);
+                ui.menu_item_config("Dark Theme")
+                    .build_with_ref(&mut self.theme_dark);
             });
 
             ui.menu("Help", || {
@@ -205,7 +213,12 @@ impl AppWindow {
                             ui.open_popup("RenameDoc");
                         }
                         let has_sel = self.selected.is_some();
-                        if ui.menu_item_enabled_selected_no_shortcut("Delete...", false, has_sel) {
+                        if ui
+                            .menu_item_config("Delete...")
+                            .enabled(false)
+                            .selected(has_sel)
+                            .build()
+                        {
                             self.confirm_delete_open = true;
                             ui.open_popup("ConfirmDelete");
                         }
@@ -240,7 +253,12 @@ impl AppWindow {
                         ui.close_current_popup();
                     }
                     let has_sel = self.selected.is_some();
-                    if ui.menu_item_enabled_selected_no_shortcut("Duplicate", false, has_sel) {
+                    if ui
+                        .menu_item_config("Duplicate")
+                        .enabled(false)
+                        .selected(has_sel)
+                        .build()
+                    {
                         if let Some(i) = self.selected {
                             let name = format!("{} Copy", self.sections[i]);
                             self.sections.push(name);
@@ -249,7 +267,12 @@ impl AppWindow {
                         ui.close_current_popup();
                     }
                     ui.separator();
-                    if ui.menu_item_enabled_selected_no_shortcut("Delete", false, has_sel) {
+                    if ui
+                        .menu_item_config("Delete")
+                        .enabled(false)
+                        .selected(has_sel)
+                        .build()
+                    {
                         if let Some(i) = self.selected {
                             self.sections.remove(i);
                             if self.sections.is_empty() {

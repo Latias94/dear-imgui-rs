@@ -56,6 +56,10 @@ pub enum MouseCursor {
     ResizeNWSE = sys::ImGuiMouseCursor_ResizeNWSE,
     /// Hand cursor
     Hand = sys::ImGuiMouseCursor_Hand,
+    /// Wait cursor
+    Wait = sys::ImGuiMouseCursor_Wait,
+    /// Progress cursor
+    Progress = sys::ImGuiMouseCursor_Progress,
     /// Not allowed cursor
     NotAllowed = sys::ImGuiMouseCursor_NotAllowed,
 }

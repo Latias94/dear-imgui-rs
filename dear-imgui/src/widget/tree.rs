@@ -215,6 +215,12 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
         self
     }
 
+    /// Span the tree node of its container table
+    pub fn span_all_columns(mut self, value: bool) -> Self {
+        self.flags.set(TreeNodeFlags::SPAN_ALL_COLUMNS, value);
+        self
+    }
+
     /// Left direction may move to this tree node from any of its child
     pub fn nav_left_jumps_back_here(mut self, nav: bool) -> Self {
         self.flags.set(TreeNodeFlags::NAV_LEFT_JUMPS_BACK_HERE, nav);

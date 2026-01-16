@@ -14,6 +14,7 @@ use std::ptr;
 
 use crate::clipboard::{ClipboardBackend, ClipboardContext};
 use crate::fonts::{Font, FontAtlas, SharedFontAtlas};
+use crate::input::MouseCursor;
 use crate::io::Io;
 
 use crate::sys;
@@ -225,6 +226,30 @@ impl Context {
                 panic!("Context::render() returned null draw data");
             }
             &*(dd as *const crate::render::DrawData)
+        }
+    }
+
+    /// Returns the currently desired mouse cursor type.
+    ///
+    /// This was set *last frame* by the [Ui] object, and will be reset when
+    /// [new_frame] is called.
+    ///
+    /// Returns `None` if no cursor should be displayed
+    ///
+    /// [new_frame]: Self::new_frame
+    #[doc(alias = "GetMouseCursor")]
+    pub fn mouse_cursor(&self) -> Option<MouseCursor> {
+        match unsafe { sys::igGetMouseCursor() } {
+            sys::ImGuiMouseCursor_Arrow => Some(MouseCursor::Arrow),
+            sys::ImGuiMouseCursor_TextInput => Some(MouseCursor::TextInput),
+            sys::ImGuiMouseCursor_ResizeAll => Some(MouseCursor::ResizeAll),
+            sys::ImGuiMouseCursor_ResizeNS => Some(MouseCursor::ResizeNS),
+            sys::ImGuiMouseCursor_ResizeEW => Some(MouseCursor::ResizeEW),
+            sys::ImGuiMouseCursor_ResizeNESW => Some(MouseCursor::ResizeNESW),
+            sys::ImGuiMouseCursor_ResizeNWSE => Some(MouseCursor::ResizeNWSE),
+            sys::ImGuiMouseCursor_Hand => Some(MouseCursor::Hand),
+            sys::ImGuiMouseCursor_NotAllowed => Some(MouseCursor::NotAllowed),
+            _ => None,
         }
     }
 

@@ -40,6 +40,8 @@ pub fn to_winit_cursor(cursor: MouseCursor) -> WinitCursor {
         MouseCursor::ResizeNESW => WinitCursor::NeswResize,
         MouseCursor::ResizeNWSE => WinitCursor::NwseResize,
         MouseCursor::Hand => WinitCursor::Pointer,
+        MouseCursor::Wait => WinitCursor::Wait,
+        MouseCursor::Progress => WinitCursor::Progress,
         MouseCursor::NotAllowed => WinitCursor::NotAllowed,
     }
 }

@@ -51,6 +51,8 @@ use crate::{Condition, Ui};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use child_window::*;
+
 pub(crate) mod child_window;
 pub(crate) mod content_region;
 pub(crate) mod scroll;
@@ -146,6 +148,7 @@ pub struct Window<'ui> {
     size_condition: Condition,
     pos: Option<[f32; 2]>,
     pos_condition: Condition,
+    pos_pivot: [f32; 2],
     content_size: Option<[f32; 2]>,
     content_size_condition: Condition,
     collapsed: Option<bool>,
@@ -166,6 +169,7 @@ impl<'ui> Window<'ui> {
             size_condition: Condition::Always,
             pos: None,
             pos_condition: Condition::Always,
+            pos_pivot: [0.0, 0.0],
             content_size: None,
             content_size_condition: Condition::Always,
             collapsed: None,
@@ -208,6 +212,12 @@ impl<'ui> Window<'ui> {
         self
     }
 
+    /// Sets window position pivot
+    pub fn position_pivot(mut self, pivot: [f32; 2]) -> Self {
+        self.pos_pivot = pivot;
+        self
+    }
+
     /// Sets window content size
     pub fn content_size(mut self, size: [f32; 2], condition: Condition) -> Self {
         self.content_size = Some(size);
@@ -231,6 +241,141 @@ impl<'ui> Window<'ui> {
     /// Sets window background alpha
     pub fn bg_alpha(mut self, alpha: f32) -> Self {
         self.bg_alpha = Some(alpha);
+        self
+    }
+
+    /// Sets the title bar
+    pub fn title_bar(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_TITLE_BAR, !value);
+        self
+    }
+
+    /// Sets resizing with the lower-right grip
+    pub fn resizable(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_RESIZE, !value);
+        self
+    }
+
+    /// Sets moving the window
+    pub fn movable(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_MOVE, !value);
+        self
+    }
+
+    /// Sets scrollbars (scrolling is still possible with the mouse or programmatically)
+    pub fn scroll_bar(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_SCROLLBAR, !value);
+        self
+    }
+
+    /// Sets vertical scrolling with the mouse wheel
+    pub fn scrollable(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_SCROLL_WITH_MOUSE, !value);
+        self
+    }
+
+    /// Sets collapsing the window by double-clicking it
+    pub fn collapsible(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_COLLAPSE, !value);
+        self
+    }
+
+    /// Sets resizing the window to its content on every frame
+    pub fn always_auto_resize(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::ALWAYS_AUTO_RESIZE, value);
+        self
+    }
+
+    /// Sets drawing of background color and outside border
+    pub fn draw_background(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_BACKGROUND, !value);
+        self
+    }
+
+    /// Sets loading and saving of settings (e.g. from/to an .ini file)
+    pub fn save_settings(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_SAVED_SETTINGS, !value);
+        self
+    }
+
+    /// Sets catching mouse input.
+    pub fn mouse_inputs(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_MOUSE_INPUTS, !value);
+        self
+    }
+
+    /// Sets the menu bar
+    pub fn menu_bar(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::MENU_BAR, value);
+        self
+    }
+
+    /// Sets the horizontal scrollbar
+    pub fn horizontal_scrollbar(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::HORIZONTAL_SCROLLBAR, value);
+        self
+    }
+
+    /// Sets taking focus when transitioning from hidden to visible state
+    pub fn focus_on_appearing(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_FOCUS_ON_APPEARING, !value);
+        self
+    }
+
+    /// Sets bringing the window to front when taking focus (e.g. clicking it or programmatically
+    /// giving it focus).
+    pub fn bring_to_front_on_focus(mut self, value: bool) -> Self {
+        self.flags
+            .set(WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS, !value);
+        self
+    }
+
+    /// When enabled, forces the vertical scrollbar to render regardless of the content size
+    pub fn always_vertical_scrollbar(mut self, value: bool) -> Self {
+        self.flags
+            .set(WindowFlags::ALWAYS_VERTICAL_SCROLLBAR, value);
+        self
+    }
+
+    /// When enabled, forces the horizontal scrollbar to render regardless of the content size
+    pub fn always_horizontal_scrollbar(mut self, value: bool) -> Self {
+        self.flags
+            .set(WindowFlags::ALWAYS_HORIZONTAL_SCROLLBAR, value);
+        self
+    }
+
+    /// Sets gamepad/keyboard navigation within the window
+    pub fn nav_inputs(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_NAV_INPUTS, !value);
+        self
+    }
+
+    /// Sets focusing toward this window with gamepad/keyboard navigation (e.g. CTRL+TAB)
+    pub fn nav_focus(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::NO_NAV_FOCUS, !value);
+        self
+    }
+    /// When enabled, appends '*' to title without affecting the ID, as a convenience
+    pub fn unsaved_document(mut self, value: bool) -> Self {
+        self.flags.set(WindowFlags::UNSAVED_DOCUMENT, value);
+        self
+    }
+
+    /// Disable gamepad/keyboard navigation and focusing
+    pub fn no_nav(mut self) -> Self {
+        self.flags |= WindowFlags::NO_NAV;
+        self
+    }
+
+    /// Disable all window decorations
+    pub fn no_decoration(mut self) -> Self {
+        self.flags |= WindowFlags::NO_DECORATION;
+        self
+    }
+
+    /// Disable input handling
+    pub fn no_inputs(mut self) -> Self {
+        self.flags |= WindowFlags::NO_INPUTS;
         self
     }
 
@@ -265,7 +410,12 @@ impl<'ui> Window<'ui> {
                     x: pos[0],
                     y: pos[1],
                 };
-                let pivot_vec = crate::sys::ImVec2 { x: 0.0, y: 0.0 };
+
+                let pivot_vec = crate::sys::ImVec2 {
+                    x: self.pos_pivot[0],
+                    y: self.pos_pivot[1],
+                };
+
                 crate::sys::igSetNextWindowPos(pos_vec, self.pos_condition as i32, pivot_vec);
             }
         }

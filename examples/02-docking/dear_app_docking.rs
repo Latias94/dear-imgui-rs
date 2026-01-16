@@ -128,11 +128,16 @@ fn main() {
                     _m.end();
                 }
                 if let Some(_m) = ui.begin_menu("Windows") {
-                    ui.menu_item_toggle_no_shortcut("Main View", &mut state.show_main, true);
-                    ui.menu_item_toggle_no_shortcut("Command", &mut state.show_command, true);
-                    ui.menu_item_toggle_no_shortcut("Command 2", &mut state.show_command2, true);
-                    ui.menu_item_toggle_no_shortcut("Misc", &mut state.show_misc, true);
-                    ui.menu_item_toggle_no_shortcut("Logs", &mut state.show_logs, true);
+                    ui.menu_item_config("Main View")
+                        .build_with_ref(&mut state.show_main);
+                    ui.menu_item_config("Command")
+                        .build_with_ref(&mut state.show_command);
+                    ui.menu_item_config("Command 2")
+                        .build_with_ref(&mut state.show_command2);
+                    ui.menu_item_config("Misc")
+                        .build_with_ref(&mut state.show_misc);
+                    ui.menu_item_config("Logs")
+                        .build_with_ref(&mut state.show_logs);
                     _m.end();
                 }
                 _mb.end();
@@ -193,36 +198,37 @@ fn main() {
                             let mut no_central =
                                 new_flags.contains(DockFlags::NO_DOCKING_OVER_CENTRAL_NODE);
 
-                            if ui.menu_item_toggle_no_shortcut("NoSplit", &mut no_split, true) {
+                            if ui.menu_item_config("NoSplit").build_with_ref(&mut no_split) {
                                 if no_split {
                                     new_flags |= DockFlags::NO_DOCKING_SPLIT;
                                 } else {
                                     new_flags.remove(DockFlags::NO_DOCKING_SPLIT);
                                 }
                             }
-                            if ui.menu_item_toggle_no_shortcut("NoResize", &mut no_resize, true) {
+                            if ui
+                                .menu_item_config("NoResize")
+                                .build_with_ref(&mut no_resize)
+                            {
                                 if no_resize {
                                     new_flags |= DockFlags::NO_RESIZE;
                                 } else {
                                     new_flags.remove(DockFlags::NO_RESIZE);
                                 }
                             }
-                            if ui.menu_item_toggle_no_shortcut(
-                                "AutoHideTabBar",
-                                &mut auto_hide,
-                                true,
-                            ) {
+                            if ui
+                                .menu_item_config("AutoHideTabBar")
+                                .build_with_ref(&mut auto_hide)
+                            {
                                 if auto_hide {
                                     new_flags |= DockFlags::AUTO_HIDE_TAB_BAR;
                                 } else {
                                     new_flags.remove(DockFlags::AUTO_HIDE_TAB_BAR);
                                 }
                             }
-                            if ui.menu_item_toggle_no_shortcut(
-                                "NoDockingOverCentral",
-                                &mut no_central,
-                                true,
-                            ) {
+                            if ui
+                                .menu_item_config("NoDockingOverCentral")
+                                .build_with_ref(&mut no_central)
+                            {
                                 if no_central {
                                     new_flags |= DockFlags::NO_DOCKING_OVER_CENTRAL_NODE;
                                 } else {
