@@ -37,6 +37,7 @@ This release focuses on `dear-app` usability improvements for real applications 
   - `Ui::set_window_focus`: focus a window by name, or clear focus via `None` (`SetWindowFocus(NULL)`).
   - Input capture hints: `Ui::set_next_frame_want_capture_keyboard` / `Ui::set_next_frame_want_capture_mouse`.
   - Navigation: `Ui::set_nav_cursor_visible`.
+  - Drag and drop: `Ui::drag_drop_payload` (`GetDragDropPayload`).
   - Focus utilities: `FocusedFlags`, `Ui::is_window_focused_with_flags`.
   - Window builder: `Window::size_constraints` and `Window::scroll` (`SetNextWindowSizeConstraints`, `SetNextWindowScroll`).
   - Window runtime control: `Ui::set_window_pos*`, `Ui::set_window_size*`, `Ui::set_window_collapsed*`.

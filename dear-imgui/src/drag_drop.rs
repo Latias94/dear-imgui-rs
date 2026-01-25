@@ -128,6 +128,34 @@ impl Ui {
             None
         }
     }
+
+    /// Returns the current drag and drop payload, if any.
+    ///
+    /// This is a convenience wrapper over `ImGui::GetDragDropPayload`.
+    ///
+    /// The returned payload is owned and managed by Dear ImGui and may become invalid
+    /// after the drag operation completes. Do not cache it beyond the current frame.
+    #[doc(alias = "GetDragDropPayload")]
+    pub fn drag_drop_payload(&self) -> Option<DragDropPayload> {
+        unsafe {
+            let ptr = sys::igGetDragDropPayload();
+            if ptr.is_null() {
+                return None;
+            }
+            let inner = *ptr;
+            let size = if inner.DataSize <= 0 || inner.Data.is_null() {
+                0
+            } else {
+                inner.DataSize as usize
+            };
+            Some(DragDropPayload {
+                data: inner.Data,
+                size,
+                preview: inner.Preview,
+                delivery: inner.Delivery,
+            })
+        }
+    }
 }
 
 /// Builder for creating drag drop sources
