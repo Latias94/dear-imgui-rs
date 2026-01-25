@@ -9,6 +9,15 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 
 
+### Chore
+
+- updated the following local packages: dear-imgui-rs (0000000)
+
+
+# Changelog
+
+
+
 ### Fixes
 
 - fix readme (18ae52b…)
