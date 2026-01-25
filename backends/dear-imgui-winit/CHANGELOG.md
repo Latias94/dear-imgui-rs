@@ -5,6 +5,20 @@ All notable changes to `dear-imgui-winit` will be documented in this file.
 The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
+# Changelog
+
+
+
+### Chore
+
+- switch wasm timing to web-time [deps] (c36f2b9…)
+
+
+### Refactor
+
+- hide viewport user data types (BREAKING) [backends] (4f0aa9b…)
+
+
 
 ### Added
 
