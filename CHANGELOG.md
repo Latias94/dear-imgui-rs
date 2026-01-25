@@ -33,6 +33,25 @@ This release focuses on `dear-app` usability improvements for real applications 
   - `WgpuPreset` and `WgpuConfig::from_preset`: curated presets for common scenarios (performance, low-power, downlevel compatibility, software fallback).
   - `AppBuilder::on_gpu_init`: a lifecycle hook for one-time GPU resource initialization after `Device/Queue/SurfaceConfiguration` are available.
   - `pub use wgpu;` re-export as `dear_app::wgpu` for downstream convenience.
+- Core (`dear-imgui-rs`)
+  - `Ui::set_window_focus`: focus a window by name, or clear focus via `None` (`SetWindowFocus(NULL)`).
+  - Input capture hints: `Ui::set_next_frame_want_capture_keyboard` / `Ui::set_next_frame_want_capture_mouse`.
+  - Navigation: `Ui::set_nav_cursor_visible`.
+  - Focus utilities: `FocusedFlags`, `Ui::is_window_focused_with_flags`.
+  - Window builder: `Window::size_constraints` and `Window::scroll` (`SetNextWindowSizeConstraints`, `SetNextWindowScroll`).
+  - Window runtime control: `Ui::set_window_pos*`, `Ui::set_window_size*`, `Ui::set_window_collapsed*`.
+  - Shortcut routing: `KeyChord`, `KeyMods`, `InputFlags`, plus `Ui::shortcut` / `Ui::set_next_item_shortcut` / `Ui::is_key_chord_pressed`.
+  - Vector sliders: `Ui::slider_float2/3/4` and `Ui::slider_int2/3/4`.
+  - `Ui::checkbox_flags` is now aliased as `CheckboxFlags` (matches ImGui semantics, no sys call needed).
+  - Tab helpers: `Ui::tab_item_button*` and `Ui::set_tab_item_closed`.
+  - Color defaults: `Ui::set_color_edit_options` (`SetColorEditOptions`).
+  - Color packing helpers: `Ui::get_color_u32*` and `Ui::style_color` now uses `GetStyleColorVec4`; `Color::{to_imgui_u32,from_imgui_u32}` now use `ColorConvert*`.
+  - State storage: `Ui::state_storage`, `Ui::push_state_storage`, `Ui::set_next_item_storage_id`, plus `OwnedStateStorage`.
+  - Misc queries: `Ui::window_viewport`, `Ui::tree_node_to_label_spacing`, `Ui::item_id`, `Ui::is_item_edited`.
+  - More queries: `Ui::calc_item_width`, `Ui::is_mouse_pos_valid*`, `Ui::is_mouse_released_with_delay`, `Ui::find_viewport_by_id`, `Ui::find_viewport_by_platform_handle`.
+  - Context helpers: clipboard (`Context::clipboard_text`, `Context::set_clipboard_text`) and INI disk IO (`Context::load_ini_settings_from_disk`, `Context::save_ini_settings_to_disk`).
+  - Logging helpers: `Ui::log_to_tty`, `Ui::log_to_file_default`, `Ui::log_to_file`, `Ui::log_to_clipboard`, `Ui::log_buttons`, `Ui::log_finish`.
+  - Popup helper: `Ui::open_popup_on_item_click` / `Ui::open_popup_on_item_click_with_flags`.
 
 ### Changed
 
