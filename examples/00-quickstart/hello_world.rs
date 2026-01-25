@@ -1,7 +1,7 @@
 //! Minimal Dear ImGui example using winit + glow/glutin
 //! Single-file, copy-pasteable starter showing a window and a button.
 
-use std::{num::NonZeroU32, sync::Arc, time::Instant};
+use std::{num::NonZeroU32, path::PathBuf, sync::Arc, time::Instant};
 
 use dear_imgui_glow::GlowRenderer;
 use dear_imgui_rs::*;
@@ -28,6 +28,7 @@ struct ImguiState {
     platform: WinitPlatform,
     renderer: GlowRenderer,
     last_frame: Instant,
+    ini_path: PathBuf,
 }
 
 struct AppWindow {
@@ -45,6 +46,16 @@ struct App {
 }
 
 impl AppWindow {
+    fn save_ini_settings(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = self
+                .imgui
+                .context
+                .save_ini_settings_to_disk(self.imgui.ini_path.clone());
+        }
+    }
+
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         // Create window with OpenGL context
         let window_attributes = winit::window::Window::default_attributes()
@@ -82,6 +93,11 @@ impl AppWindow {
         let mut imgui_context = Context::create();
         // Keep layouts deterministic for a starter example
         imgui_context.set_ini_filename(None::<String>).unwrap();
+        let ini_path = std::env::temp_dir().join("dear-imgui-hello_world.ini");
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = imgui_context.load_ini_settings_from_disk(ini_path.clone());
+        }
 
         let mut platform = WinitPlatform::new(&mut imgui_context);
         platform.attach_window(
@@ -105,6 +121,7 @@ impl AppWindow {
             platform,
             renderer,
             last_frame: Instant::now(),
+            ini_path,
         };
 
         Ok(Self {
@@ -231,10 +248,12 @@ impl ApplicationHandler for App {
                 window.window.request_redraw();
             }
             WindowEvent::CloseRequested => {
+                window.save_ini_settings();
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.logical_key == Key::Named(NamedKey::Escape) {
+                    window.save_ini_settings();
                     event_loop.exit();
                 }
             }

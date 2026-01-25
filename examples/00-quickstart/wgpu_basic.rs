@@ -2,7 +2,7 @@ use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
-use std::{sync::Arc, time::Instant};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 use winit::{
     application::ApplicationHandler,
@@ -20,6 +20,7 @@ struct ImguiState {
     clear_color: wgpu::Color,
     demo_open: bool,
     last_frame: Instant,
+    ini_path: PathBuf,
     // Logging demo state
     log_counter: i32,
     frame_count: u64,
@@ -41,6 +42,22 @@ struct App {
 }
 
 impl AppWindow {
+    fn save_ini_settings(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Err(e) = self
+                .imgui
+                .context
+                .save_ini_settings_to_disk(self.imgui.ini_path.clone())
+            {
+                debug!(
+                    "Failed to save ini settings to {:?}: {e}",
+                    self.imgui.ini_path
+                );
+            }
+        }
+    }
+
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -101,6 +118,13 @@ impl AppWindow {
         // Setup ImGui immediately
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
+        let ini_path = std::env::temp_dir().join("dear-imgui-wgpu_basic.ini");
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Err(e) = context.load_ini_settings_from_disk(ini_path.clone()) {
+                debug!("Failed to load ini settings from {:?}: {e}", ini_path);
+            }
+        }
 
         let mut platform = WinitPlatform::new(&mut context);
         platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
@@ -130,6 +154,7 @@ impl AppWindow {
             },
             demo_open: true,
             last_frame: Instant::now(),
+            ini_path,
             log_counter: 0,
             frame_count: 0,
             total_frame_time: 0.0,
@@ -379,10 +404,12 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CloseRequested => {
                 info!("Close requested");
+                window.save_ini_settings();
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.logical_key == Key::Named(NamedKey::Escape) {
+                    window.save_ini_settings();
                     event_loop.exit();
                 }
             }
