@@ -336,6 +336,88 @@ impl From<Key> for sys::ImGuiKey {
 // Backends should submit modifier state via `Key::ModCtrl`/`ModShift`/`ModAlt`/`ModSuper` using `Io::add_key_event`.
 
 bitflags! {
+    /// Modifier flags for building an ImGui key chord.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct KeyMods: i32 {
+        /// Ctrl modifier
+        const CTRL = sys::ImGuiMod_Ctrl as i32;
+        /// Shift modifier
+        const SHIFT = sys::ImGuiMod_Shift as i32;
+        /// Alt modifier
+        const ALT = sys::ImGuiMod_Alt as i32;
+        /// Super/Cmd modifier
+        const SUPER = sys::ImGuiMod_Super as i32;
+    }
+}
+
+impl Default for KeyMods {
+    fn default() -> Self {
+        KeyMods::empty()
+    }
+}
+
+/// A key chord (key + optional modifier flags), used by ImGui shortcut routing APIs.
+///
+/// This is a thin wrapper over `sys::ImGuiKeyChord` (an `int`).
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub struct KeyChord(sys::ImGuiKeyChord);
+
+impl KeyChord {
+    /// Create a chord from a key (no modifiers).
+    pub fn new(key: Key) -> Self {
+        Self(key as sys::ImGuiKeyChord)
+    }
+
+    /// Add modifier flags to the chord.
+    pub fn with_mods(self, mods: KeyMods) -> Self {
+        Self(self.0 | mods.bits())
+    }
+
+    /// Returns the raw `ImGuiKeyChord` value.
+    pub fn raw(self) -> sys::ImGuiKeyChord {
+        self.0
+    }
+}
+
+impl From<Key> for KeyChord {
+    fn from(value: Key) -> Self {
+        Self::new(value)
+    }
+}
+
+bitflags! {
+    /// Input flags for shortcut routing APIs.
+    ///
+    /// This corresponds to public `ImGuiInputFlags_*` values (not the private/internal ones).
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct InputFlags: i32 {
+        const NONE = sys::ImGuiInputFlags_None as i32;
+        const REPEAT = sys::ImGuiInputFlags_Repeat as i32;
+
+        const ROUTE_ACTIVE = sys::ImGuiInputFlags_RouteActive as i32;
+        const ROUTE_FOCUSED = sys::ImGuiInputFlags_RouteFocused as i32;
+        const ROUTE_GLOBAL = sys::ImGuiInputFlags_RouteGlobal as i32;
+        const ROUTE_ALWAYS = sys::ImGuiInputFlags_RouteAlways as i32;
+
+        const ROUTE_OVER_FOCUSED = sys::ImGuiInputFlags_RouteOverFocused as i32;
+        const ROUTE_OVER_ACTIVE = sys::ImGuiInputFlags_RouteOverActive as i32;
+        const ROUTE_UNLESS_BG_FOCUSED = sys::ImGuiInputFlags_RouteUnlessBgFocused as i32;
+        const ROUTE_FROM_ROOT_WINDOW = sys::ImGuiInputFlags_RouteFromRootWindow as i32;
+
+        const TOOLTIP = sys::ImGuiInputFlags_Tooltip as i32;
+    }
+}
+
+impl Default for InputFlags {
+    fn default() -> Self {
+        InputFlags::NONE
+    }
+}
+
+bitflags! {
     /// Input text flags for text input widgets
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -433,6 +515,48 @@ impl crate::Ui {
         unsafe { sys::igIsKeyReleased_Nil(key as sys::ImGuiKey) }
     }
 
+    /// Check if a key chord was pressed (e.g. `Ctrl+S`).
+    #[doc(alias = "IsKeyChordPressed")]
+    pub fn is_key_chord_pressed(&self, key_chord: KeyChord) -> bool {
+        unsafe { sys::igIsKeyChordPressed_Nil(key_chord.raw()) }
+    }
+
+    /// Call ImGui shortcut routing with default flags.
+    #[doc(alias = "Shortcut")]
+    pub fn shortcut(&self, key_chord: KeyChord) -> bool {
+        self.shortcut_with_flags(key_chord, InputFlags::NONE)
+    }
+
+    /// Call ImGui shortcut routing with explicit input flags.
+    #[doc(alias = "Shortcut")]
+    pub fn shortcut_with_flags(&self, key_chord: KeyChord, flags: InputFlags) -> bool {
+        unsafe { sys::igShortcut_Nil(key_chord.raw(), flags.bits()) }
+    }
+
+    /// Set the next item's shortcut with default flags.
+    #[doc(alias = "SetNextItemShortcut")]
+    pub fn set_next_item_shortcut(&self, key_chord: KeyChord) {
+        self.set_next_item_shortcut_with_flags(key_chord, InputFlags::NONE);
+    }
+
+    /// Set the next item's shortcut with explicit input flags.
+    #[doc(alias = "SetNextItemShortcut")]
+    pub fn set_next_item_shortcut_with_flags(&self, key_chord: KeyChord, flags: InputFlags) {
+        unsafe { sys::igSetNextItemShortcut(key_chord.raw(), flags.bits()) }
+    }
+
+    /// Overrides `io.WantCaptureKeyboard` for the next frame.
+    #[doc(alias = "SetNextFrameWantCaptureKeyboard")]
+    pub fn set_next_frame_want_capture_keyboard(&self, want_capture_keyboard: bool) {
+        unsafe { sys::igSetNextFrameWantCaptureKeyboard(want_capture_keyboard) }
+    }
+
+    /// Overrides `io.WantCaptureMouse` for the next frame.
+    #[doc(alias = "SetNextFrameWantCaptureMouse")]
+    pub fn set_next_frame_want_capture_mouse(&self, want_capture_mouse: bool) {
+        unsafe { sys::igSetNextFrameWantCaptureMouse(want_capture_mouse) }
+    }
+
     /// Check if a mouse button is being held down
     #[doc(alias = "IsMouseDown")]
     pub fn is_mouse_down(&self, button: MouseButton) -> bool {
@@ -461,6 +585,30 @@ impl crate::Ui {
     #[doc(alias = "IsMouseDoubleClicked")]
     pub fn is_mouse_double_clicked(&self, button: MouseButton) -> bool {
         unsafe { sys::igIsMouseDoubleClicked_Nil(button.into()) }
+    }
+
+    /// Returns `true` if the mouse position is valid (not NaN).
+    ///
+    /// This checks the current mouse position as known by Dear ImGui.
+    #[doc(alias = "IsMousePosValid")]
+    pub fn is_mouse_pos_valid(&self) -> bool {
+        unsafe { sys::igIsMousePosValid(std::ptr::null()) }
+    }
+
+    /// Returns `true` if the provided mouse position is valid (not NaN).
+    #[doc(alias = "IsMousePosValid")]
+    pub fn is_mouse_pos_valid_at(&self, pos: [f32; 2]) -> bool {
+        let v = sys::ImVec2_c {
+            x: pos[0],
+            y: pos[1],
+        };
+        unsafe { sys::igIsMousePosValid(&v as *const sys::ImVec2_c) }
+    }
+
+    /// Returns `true` if the mouse button was released and the given delay has passed.
+    #[doc(alias = "IsMouseReleasedWithDelay")]
+    pub fn is_mouse_released_with_delay(&self, button: MouseButton, delay: f32) -> bool {
+        unsafe { sys::igIsMouseReleasedWithDelay(button.into(), delay) }
     }
 
     /// Get mouse position in screen coordinates

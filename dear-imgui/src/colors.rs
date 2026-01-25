@@ -50,11 +50,10 @@ impl Color {
     /// ImGui packs colors with IM_COL32(R,G,B,A) into `(A<<24)|(B<<16)|(G<<8)|R`.
     /// This converts that ABGR-packed u32 into an RGBA float Color.
     pub fn from_imgui_u32(abgr: u32) -> Self {
-        let a = ((abgr >> 24) & 0xFF) as u8;
-        let b = ((abgr >> 16) & 0xFF) as u8;
-        let g = ((abgr >> 8) & 0xFF) as u8;
-        let r = (abgr & 0xFF) as u8;
-        Self::from_rgba_bytes(r, g, b, a)
+        unsafe {
+            let v = sys::igColorConvertU32ToFloat4(abgr);
+            Self::new(v.x, v.y, v.z, v.w)
+        }
     }
 
     /// Construct from an opaque 24-bit RGB value (0xRRGGBB).
@@ -69,11 +68,14 @@ impl Color {
 
     /// Pack to ImGui ImU32 ABGR order `(A<<24)|(B<<16)|(G<<8)|R`.
     pub fn to_imgui_u32(self) -> u32 {
-        let r = (self.r * 255.0).round() as u32;
-        let g = (self.g * 255.0).round() as u32;
-        let b = (self.b * 255.0).round() as u32;
-        let a = (self.a * 255.0).round() as u32;
-        (a << 24) | (b << 16) | (g << 8) | r
+        unsafe {
+            sys::igColorConvertFloat4ToU32(sys::ImVec4_c {
+                x: self.r,
+                y: self.g,
+                z: self.b,
+                w: self.a,
+            })
+        }
     }
     pub fn to_array(self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]

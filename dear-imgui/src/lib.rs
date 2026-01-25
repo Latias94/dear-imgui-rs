@@ -279,11 +279,12 @@ pub use self::fonts::*;
 pub use self::input::*;
 pub use self::io::*;
 pub use self::platform_io::*;
+pub use self::state_storage::*;
 pub use self::string::*;
 pub use self::style::*;
 pub use self::ui::*;
 // Re-export utility flags/types for convenience
-pub use self::utils::HoveredFlags;
+pub use self::utils::{FocusedFlags, HoveredFlags};
 
 // Utility modules
 pub use self::list_clipper::*;
@@ -323,6 +324,7 @@ mod io;
 mod list_clipper;
 pub mod platform_io;
 pub mod render;
+mod state_storage;
 mod string;
 mod style;
 pub mod texture;

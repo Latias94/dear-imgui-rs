@@ -122,6 +122,16 @@ impl std::ops::Not for ColorEditFlags {
 
 /// # Color Edit Widgets
 impl Ui {
+    /// Initializes default color editing/picking options.
+    ///
+    /// This configures the defaults used by the various `Color*` widgets (unless
+    /// overridden per-call via flags). Users can still change many options via
+    /// the right-click context menu unless `_NO_OPTIONS` is passed.
+    #[doc(alias = "SetColorEditOptions")]
+    pub fn set_color_edit_options(&self, flags: ColorEditFlags) {
+        unsafe { sys::igSetColorEditOptions(flags.bits() as i32) }
+    }
+
     /// Creates a color edit widget for 3 components (RGB)
     #[doc(alias = "ColorEdit3")]
     pub fn color_edit3(&self, label: impl AsRef<str>, color: &mut [f32; 3]) -> bool {

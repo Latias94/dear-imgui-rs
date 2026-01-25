@@ -172,6 +172,14 @@ impl Ui {
         unsafe { sys::igIsItemDeactivatedAfterEdit() }
     }
 
+    /// Returns true if the last item was edited.
+    ///
+    /// This is typically used to detect value changes for widgets.
+    #[doc(alias = "IsItemEdited")]
+    pub fn is_item_edited(&self) -> bool {
+        unsafe { sys::igIsItemEdited() }
+    }
+
     /// Returns true if any item is active.
     #[doc(alias = "IsAnyItemActive")]
     pub fn is_any_item_active(&self) -> bool {
@@ -203,6 +211,12 @@ impl Ui {
     pub fn item_rect_size(&self) -> [f32; 2] {
         let size = unsafe { sys::igGetItemRectSize() };
         [size.x, size.y]
+    }
+
+    /// Returns the ImGui ID of the last item.
+    #[doc(alias = "GetItemID")]
+    pub fn item_id(&self) -> crate::Id {
+        unsafe { crate::Id::from(sys::igGetItemID()) }
     }
 }
 

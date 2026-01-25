@@ -100,6 +100,12 @@ impl Ui {
         let label_ptr = self.scratch_txt(label);
         unsafe { sys::igCollapsingHeader_BoolPtr(label_ptr, visible as *mut bool, flags.bits()) }
     }
+
+    /// Returns the distance from the start of a tree node to the label text.
+    #[doc(alias = "GetTreeNodeToLabelSpacing")]
+    pub fn tree_node_to_label_spacing(&self) -> f32 {
+        unsafe { sys::igGetTreeNodeToLabelSpacing() }
+    }
 }
 
 /// Builder for a tree node widget

@@ -299,4 +299,22 @@ impl Ui {
             None
         }
     }
+
+    /// Creates a button on the current tab bar (e.g. to append a `+` new-tab button).
+    #[doc(alias = "TabItemButton")]
+    pub fn tab_item_button(&self, label: impl AsRef<str>) -> bool {
+        self.tab_item_button_with_flags(label, TabItemFlags::NONE)
+    }
+
+    /// Creates a button on the current tab bar with explicit flags.
+    #[doc(alias = "TabItemButton")]
+    pub fn tab_item_button_with_flags(&self, label: impl AsRef<str>, flags: TabItemFlags) -> bool {
+        unsafe { sys::igTabItemButton(self.scratch_txt(label), flags.bits()) }
+    }
+
+    /// Notifies Dear ImGui that a tab (or docked window) has been closed.
+    #[doc(alias = "SetTabItemClosed")]
+    pub fn set_tab_item_closed(&self, tab_or_docked_window_label: impl AsRef<str>) {
+        unsafe { sys::igSetTabItemClosed(self.scratch_txt(tab_or_docked_window_label)) }
+    }
 }

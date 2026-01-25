@@ -137,6 +137,55 @@ impl Ui {
         unsafe { sys::igSetNextWindowViewport(viewport_id.into()) }
     }
 
+    /// Returns the viewport of the current window.
+    ///
+    /// This requires a current window (i.e. must be called between `Begin`/`End`).
+    #[doc(alias = "GetWindowViewport")]
+    pub fn window_viewport(&self) -> &crate::platform_io::Viewport {
+        unsafe {
+            let ptr = sys::igGetWindowViewport();
+            if ptr.is_null() {
+                panic!("Ui::window_viewport() requires a current window");
+            }
+            crate::platform_io::Viewport::from_raw(ptr as *const sys::ImGuiViewport)
+        }
+    }
+
+    /// Find a viewport by ID.
+    #[doc(alias = "FindViewportByID")]
+    pub fn find_viewport_by_id(&self, viewport_id: Id) -> Option<&crate::platform_io::Viewport> {
+        unsafe {
+            let ptr = sys::igFindViewportByID(viewport_id.raw());
+            if ptr.is_null() {
+                None
+            } else {
+                Some(crate::platform_io::Viewport::from_raw(
+                    ptr as *const sys::ImGuiViewport,
+                ))
+            }
+        }
+    }
+
+    /// Find a viewport by its platform handle.
+    ///
+    /// The platform handle type depends on the backend (e.g. `HWND` on Windows).
+    #[doc(alias = "FindViewportByPlatformHandle")]
+    pub fn find_viewport_by_platform_handle(
+        &self,
+        platform_handle: *mut std::ffi::c_void,
+    ) -> Option<&crate::platform_io::Viewport> {
+        unsafe {
+            let ptr = sys::igFindViewportByPlatformHandle(platform_handle);
+            if ptr.is_null() {
+                None
+            } else {
+                Some(crate::platform_io::Viewport::from_raw(
+                    ptr as *const sys::ImGuiViewport,
+                ))
+            }
+        }
+    }
+
     /// Returns an ID from a string label in the current ID scope.
     ///
     /// This mirrors `ImGui::GetID(label)`. Useful for building stable IDs
@@ -350,6 +399,138 @@ impl Ui {
     pub fn set_keyboard_focus_here_with_offset(&self, offset: i32) {
         unsafe {
             sys::igSetKeyboardFocusHere(offset);
+        }
+    }
+
+    /// Shows or hides the navigation cursor (a small marker indicating nav focus).
+    #[doc(alias = "SetNavCursorVisible")]
+    pub fn set_nav_cursor_visible(&self, visible: bool) {
+        unsafe { sys::igSetNavCursorVisible(visible) }
+    }
+
+    /// Focus a window by name, or clear focus from all windows.
+    ///
+    /// Passing `None` is equivalent to `ImGui::SetWindowFocus(NULL)` in the C++ API.
+    /// This can be used to "unfocus" the entire UI (e.g. on Escape, to behave like
+    /// clicking outside of the UI).
+    #[doc(alias = "SetWindowFocus")]
+    pub fn set_window_focus(&self, name: Option<&str>) {
+        unsafe {
+            match name {
+                Some(name) => sys::igSetWindowFocus_Str(self.scratch_txt(name)),
+                None => sys::igSetWindowFocus_Nil(),
+            }
+        }
+    }
+
+    /// Sets the position of the current window.
+    #[doc(alias = "SetWindowPos")]
+    pub fn set_window_pos(&self, pos: [f32; 2]) {
+        self.set_window_pos_with_cond(pos, crate::Condition::Always);
+    }
+
+    /// Sets the position of the current window with a condition.
+    #[doc(alias = "SetWindowPos")]
+    pub fn set_window_pos_with_cond(&self, pos: [f32; 2], cond: crate::Condition) {
+        let pos_vec = sys::ImVec2_c {
+            x: pos[0],
+            y: pos[1],
+        };
+        unsafe { sys::igSetWindowPos_Vec2(pos_vec, cond as sys::ImGuiCond) }
+    }
+
+    /// Sets the position of a named window.
+    #[doc(alias = "SetWindowPos")]
+    pub fn set_window_pos_by_name(&self, name: impl AsRef<str>, pos: [f32; 2]) {
+        self.set_window_pos_by_name_with_cond(name, pos, crate::Condition::Always);
+    }
+
+    /// Sets the position of a named window with a condition.
+    #[doc(alias = "SetWindowPos")]
+    pub fn set_window_pos_by_name_with_cond(
+        &self,
+        name: impl AsRef<str>,
+        pos: [f32; 2],
+        cond: crate::Condition,
+    ) {
+        let pos_vec = sys::ImVec2_c {
+            x: pos[0],
+            y: pos[1],
+        };
+        unsafe { sys::igSetWindowPos_Str(self.scratch_txt(name), pos_vec, cond as sys::ImGuiCond) }
+    }
+
+    /// Sets the size of the current window.
+    #[doc(alias = "SetWindowSize")]
+    pub fn set_window_size(&self, size: [f32; 2]) {
+        self.set_window_size_with_cond(size, crate::Condition::Always);
+    }
+
+    /// Sets the size of the current window with a condition.
+    #[doc(alias = "SetWindowSize")]
+    pub fn set_window_size_with_cond(&self, size: [f32; 2], cond: crate::Condition) {
+        let size_vec = sys::ImVec2_c {
+            x: size[0],
+            y: size[1],
+        };
+        unsafe { sys::igSetWindowSize_Vec2(size_vec, cond as sys::ImGuiCond) }
+    }
+
+    /// Sets the size of a named window.
+    #[doc(alias = "SetWindowSize")]
+    pub fn set_window_size_by_name(&self, name: impl AsRef<str>, size: [f32; 2]) {
+        self.set_window_size_by_name_with_cond(name, size, crate::Condition::Always);
+    }
+
+    /// Sets the size of a named window with a condition.
+    #[doc(alias = "SetWindowSize")]
+    pub fn set_window_size_by_name_with_cond(
+        &self,
+        name: impl AsRef<str>,
+        size: [f32; 2],
+        cond: crate::Condition,
+    ) {
+        let size_vec = sys::ImVec2_c {
+            x: size[0],
+            y: size[1],
+        };
+        unsafe {
+            sys::igSetWindowSize_Str(self.scratch_txt(name), size_vec, cond as sys::ImGuiCond);
+        }
+    }
+
+    /// Collapses or expands the current window.
+    #[doc(alias = "SetWindowCollapsed")]
+    pub fn set_window_collapsed(&self, collapsed: bool) {
+        self.set_window_collapsed_with_cond(collapsed, crate::Condition::Always);
+    }
+
+    /// Collapses or expands the current window with a condition.
+    #[doc(alias = "SetWindowCollapsed")]
+    pub fn set_window_collapsed_with_cond(&self, collapsed: bool, cond: crate::Condition) {
+        unsafe { sys::igSetWindowCollapsed_Bool(collapsed, cond as sys::ImGuiCond) }
+    }
+
+    /// Collapses or expands a named window.
+    #[doc(alias = "SetWindowCollapsed")]
+    pub fn set_window_collapsed_by_name(&self, name: impl AsRef<str>, collapsed: bool) {
+        self.set_window_collapsed_by_name_with_cond(name, collapsed, crate::Condition::Always);
+    }
+
+    /// Collapses or expands a named window with a condition.
+    #[doc(alias = "SetWindowCollapsed")]
+    pub fn set_window_collapsed_by_name_with_cond(
+        &self,
+        name: impl AsRef<str>,
+        collapsed: bool,
+        cond: crate::Condition,
+    ) {
+        unsafe {
+            sys::igSetWindowCollapsed_Str(
+                self.scratch_txt(name),
+                collapsed,
+                cond as sys::ImGuiCond,
+            );
         }
     }
 

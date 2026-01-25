@@ -144,6 +144,7 @@ pub struct Window<'ui> {
     flags: WindowFlags,
     size: Option<[f32; 2]>,
     size_condition: Condition,
+    size_constraints: Option<([f32; 2], [f32; 2])>,
     pos: Option<[f32; 2]>,
     pos_condition: Condition,
     content_size: Option<[f32; 2]>,
@@ -152,6 +153,7 @@ pub struct Window<'ui> {
     collapsed_condition: Condition,
     focused: Option<bool>,
     bg_alpha: Option<f32>,
+    scroll: Option<[f32; 2]>,
 }
 
 impl<'ui> Window<'ui> {
@@ -164,6 +166,7 @@ impl<'ui> Window<'ui> {
             flags: WindowFlags::empty(),
             size: None,
             size_condition: Condition::Always,
+            size_constraints: None,
             pos: None,
             pos_condition: Condition::Always,
             content_size: None,
@@ -172,6 +175,7 @@ impl<'ui> Window<'ui> {
             collapsed_condition: Condition::Always,
             focused: None,
             bg_alpha: None,
+            scroll: None,
         }
     }
 
@@ -198,6 +202,16 @@ impl<'ui> Window<'ui> {
     pub fn size(mut self, size: [f32; 2], condition: Condition) -> Self {
         self.size = Some(size);
         self.size_condition = condition;
+        self
+    }
+
+    /// Sets window size constraints for the next Begin call.
+    ///
+    /// This is a convenience wrapper over `ImGui::SetNextWindowSizeConstraints`
+    /// without a custom size callback.
+    #[doc(alias = "SetNextWindowSizeConstraints")]
+    pub fn size_constraints(mut self, min: [f32; 2], max: [f32; 2]) -> Self {
+        self.size_constraints = Some((min, max));
         self
     }
 
@@ -234,6 +248,13 @@ impl<'ui> Window<'ui> {
         self
     }
 
+    /// Sets the initial scroll position for the next Begin call.
+    #[doc(alias = "SetNextWindowScroll")]
+    pub fn scroll(mut self, scroll: [f32; 2]) -> Self {
+        self.scroll = Some(scroll);
+        self
+    }
+
     /// Builds the window and calls the provided closure
     pub fn build<F, R>(self, f: F) -> Option<R>
     where
@@ -256,6 +277,20 @@ impl<'ui> Window<'ui> {
                     y: size[1],
                 };
                 crate::sys::igSetNextWindowSize(size_vec, self.size_condition as i32);
+            }
+        }
+
+        if let Some((min, max)) = self.size_constraints {
+            unsafe {
+                let min_vec = sys::ImVec2_c {
+                    x: min[0],
+                    y: min[1],
+                };
+                let max_vec = sys::ImVec2_c {
+                    x: max[0],
+                    y: max[1],
+                };
+                sys::igSetNextWindowSizeConstraints(min_vec, max_vec, None, std::ptr::null_mut());
             }
         }
 
@@ -297,6 +332,16 @@ impl<'ui> Window<'ui> {
         if let Some(alpha) = self.bg_alpha {
             unsafe {
                 crate::sys::igSetNextWindowBgAlpha(alpha);
+            }
+        }
+
+        if let Some(scroll) = self.scroll {
+            unsafe {
+                let scroll_vec = sys::ImVec2_c {
+                    x: scroll[0],
+                    y: scroll[1],
+                };
+                sys::igSetNextWindowScroll(scroll_vec);
             }
         }
 

@@ -59,6 +59,11 @@ impl Ui {
     /// Renders a checkbox suitable for toggling bit flags using a mask.
     ///
     /// Returns true if this checkbox was clicked.
+    ///
+    /// This matches the semantics of Dear ImGui's `CheckboxFlags()` helpers:
+    /// the checkbox is checked when `(*flags & mask) == mask`, and clicking it
+    /// toggles the bits in `mask`.
+    #[doc(alias = "CheckboxFlags")]
     pub fn checkbox_flags<T>(&self, label: impl AsRef<str>, flags: &mut T, mask: T) -> bool
     where
         T: Copy

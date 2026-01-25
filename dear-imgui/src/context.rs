@@ -615,6 +615,74 @@ impl Context {
         }
     }
 
+    /// Loads settings from a `.ini` file on disk.
+    ///
+    /// This is a convenience wrapper over `ImGui::LoadIniSettingsFromDisk`.
+    ///
+    /// Note: this is not available on `wasm32` targets.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[doc(alias = "LoadIniSettingsFromDisk")]
+    pub fn load_ini_settings_from_disk<P: Into<PathBuf>>(
+        &mut self,
+        filename: P,
+    ) -> crate::error::ImGuiResult<()> {
+        use crate::error::SafeStringConversion;
+        let _guard = CTX_MUTEX.lock();
+        let cstr = filename.into().to_string_lossy().to_cstring_safe()?;
+        unsafe { sys::igLoadIniSettingsFromDisk(cstr.as_ptr()) }
+        Ok(())
+    }
+
+    /// Saves settings to a `.ini` file on disk.
+    ///
+    /// This is a convenience wrapper over `ImGui::SaveIniSettingsToDisk`.
+    ///
+    /// Note: this is not available on `wasm32` targets.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[doc(alias = "SaveIniSettingsToDisk")]
+    pub fn save_ini_settings_to_disk<P: Into<PathBuf>>(
+        &mut self,
+        filename: P,
+    ) -> crate::error::ImGuiResult<()> {
+        use crate::error::SafeStringConversion;
+        let _guard = CTX_MUTEX.lock();
+        let cstr = filename.into().to_string_lossy().to_cstring_safe()?;
+        unsafe { sys::igSaveIniSettingsToDisk(cstr.as_ptr()) }
+        Ok(())
+    }
+
+    /// Returns the current clipboard text, if available.
+    ///
+    /// This calls Dear ImGui's clipboard callbacks (configured via
+    /// [`Context::set_clipboard_backend`]). When no backend is installed, this returns `None`.
+    ///
+    /// Note: returned data is copied into a new `String`.
+    #[doc(alias = "GetClipboardText")]
+    pub fn clipboard_text(&self) -> Option<String> {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            let ptr = sys::igGetClipboardText();
+            if ptr.is_null() {
+                return None;
+            }
+            Some(std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned())
+        }
+    }
+
+    /// Sets the clipboard text.
+    ///
+    /// This calls Dear ImGui's clipboard callbacks (configured via
+    /// [`Context::set_clipboard_backend`]). If no backend is installed, this is a no-op.
+    ///
+    /// Interior NUL bytes are sanitized to `?` to match other scratch-string helpers.
+    #[doc(alias = "SetClipboardText")]
+    pub fn set_clipboard_text(&self, text: impl AsRef<str>) {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            sys::igSetClipboardText(self.ui.scratch_txt(text.as_ref()));
+        }
+    }
+
     /// Sets the clipboard backend used for clipboard operations
     pub fn set_clipboard_backend<T: ClipboardBackend>(&mut self, backend: T) {
         let _guard = CTX_MUTEX.lock();

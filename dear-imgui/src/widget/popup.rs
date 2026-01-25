@@ -39,6 +39,23 @@ impl Ui {
         }
     }
 
+    /// Opens a popup when the last item is clicked (typically right-click).
+    ///
+    /// If `str_id` is `None`, the popup is associated with the last item ID.
+    #[doc(alias = "OpenPopupOnItemClick")]
+    pub fn open_popup_on_item_click(&self, str_id: Option<&str>) {
+        self.open_popup_on_item_click_with_flags(str_id, PopupFlags::MOUSE_BUTTON_RIGHT);
+    }
+
+    /// Opens a popup when the last item is clicked, with explicit flags.
+    #[doc(alias = "OpenPopupOnItemClick")]
+    pub fn open_popup_on_item_click_with_flags(&self, str_id: Option<&str>, flags: PopupFlags) {
+        let str_id_ptr = str_id
+            .map(|s| self.scratch_txt(s))
+            .unwrap_or(std::ptr::null());
+        unsafe { sys::igOpenPopupOnItemClick(str_id_ptr, flags.bits()) }
+    }
+
     /// Construct a popup that can have any kind of content.
     ///
     /// This should be called *per frame*, whereas [`open_popup`](Self::open_popup) should be called *once*

@@ -449,6 +449,84 @@ impl Ui {
         self.slider_config(label, min, max).build(value)
     }
 
+    /// Creates a float2 slider
+    #[doc(alias = "SliderFloat2")]
+    pub fn slider_float2(
+        &self,
+        label: impl AsRef<str>,
+        value: &mut [f32; 2],
+        min: f32,
+        max: f32,
+    ) -> bool {
+        self.slider_config(label, min, max)
+            .build_array(value.as_mut_slice())
+    }
+
+    /// Creates a float3 slider
+    #[doc(alias = "SliderFloat3")]
+    pub fn slider_float3(
+        &self,
+        label: impl AsRef<str>,
+        value: &mut [f32; 3],
+        min: f32,
+        max: f32,
+    ) -> bool {
+        self.slider_config(label, min, max)
+            .build_array(value.as_mut_slice())
+    }
+
+    /// Creates a float4 slider
+    #[doc(alias = "SliderFloat4")]
+    pub fn slider_float4(
+        &self,
+        label: impl AsRef<str>,
+        value: &mut [f32; 4],
+        min: f32,
+        max: f32,
+    ) -> bool {
+        self.slider_config(label, min, max)
+            .build_array(value.as_mut_slice())
+    }
+
+    /// Creates an int2 slider
+    #[doc(alias = "SliderInt2")]
+    pub fn slider_int2(
+        &self,
+        label: impl AsRef<str>,
+        value: &mut [i32; 2],
+        min: i32,
+        max: i32,
+    ) -> bool {
+        self.slider_config(label, min, max)
+            .build_array(value.as_mut_slice())
+    }
+
+    /// Creates an int3 slider
+    #[doc(alias = "SliderInt3")]
+    pub fn slider_int3(
+        &self,
+        label: impl AsRef<str>,
+        value: &mut [i32; 3],
+        min: i32,
+        max: i32,
+    ) -> bool {
+        self.slider_config(label, min, max)
+            .build_array(value.as_mut_slice())
+    }
+
+    /// Creates an int4 slider
+    #[doc(alias = "SliderInt4")]
+    pub fn slider_int4(
+        &self,
+        label: impl AsRef<str>,
+        value: &mut [i32; 4],
+        min: i32,
+        max: i32,
+    ) -> bool {
+        self.slider_config(label, min, max)
+            .build_array(value.as_mut_slice())
+    }
+
     /// Creates a vertical slider
     #[doc(alias = "VSliderFloat")]
     pub fn v_slider_f32(

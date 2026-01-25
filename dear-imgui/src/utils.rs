@@ -56,6 +56,32 @@ impl Default for HoveredFlags {
     }
 }
 
+bitflags! {
+    /// Flags for focus detection
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct FocusedFlags: i32 {
+        /// Return true if window is focused
+        const NONE = sys::ImGuiFocusedFlags_None as i32;
+        /// IsWindowFocused() only: Return true if any children of the window is focused
+        const CHILD_WINDOWS = sys::ImGuiFocusedFlags_ChildWindows as i32;
+        /// IsWindowFocused() only: Test from root window (top most parent of the current hierarchy)
+        const ROOT_WINDOW = sys::ImGuiFocusedFlags_RootWindow as i32;
+        /// IsWindowFocused() only: Return true if any window is focused
+        const ANY_WINDOW = sys::ImGuiFocusedFlags_AnyWindow as i32;
+        /// IsWindowFocused() only: Do not consider popup hierarchy
+        const NO_POPUP_HIERARCHY = sys::ImGuiFocusedFlags_NoPopupHierarchy as i32;
+        /// IsWindowFocused() only: Consider docking hierarchy
+        const DOCK_HIERARCHY = sys::ImGuiFocusedFlags_DockHierarchy as i32;
+    }
+}
+
+impl Default for FocusedFlags {
+    fn default() -> Self {
+        FocusedFlags::NONE
+    }
+}
+
 /// Utility functions for Dear ImGui
 impl crate::ui::Ui {
     // ============================================================================
@@ -101,7 +127,13 @@ impl crate::ui::Ui {
     /// Returns `true` if the current window is focused (and typically: not blocked by a popup/modal)
     #[doc(alias = "IsWindowFocused")]
     pub fn is_window_focused(&self) -> bool {
-        unsafe { sys::igIsWindowFocused(0) }
+        self.is_window_focused_with_flags(FocusedFlags::NONE)
+    }
+
+    /// Returns `true` if the current window is focused based on the given flags
+    #[doc(alias = "IsWindowFocused")]
+    pub fn is_window_focused_with_flags(&self, flags: FocusedFlags) -> bool {
+        unsafe { sys::igIsWindowFocused(flags.bits()) }
     }
 
     /// Returns `true` if the current window is appearing this frame.
@@ -200,18 +232,105 @@ impl crate::ui::Ui {
         unsafe { sys::igGetFrameCount() }
     }
 
+    /// Returns the width of an item based on the current layout state.
+    #[doc(alias = "CalcItemWidth")]
+    pub fn calc_item_width(&self) -> f32 {
+        unsafe { sys::igCalcItemWidth() }
+    }
+
+    /// Start logging to TTY.
+    #[doc(alias = "LogToTTY")]
+    pub fn log_to_tty(&self, auto_open_depth: i32) {
+        unsafe { sys::igLogToTTY(auto_open_depth) }
+    }
+
+    /// Start logging to file with the default filename.
+    #[doc(alias = "LogToFile")]
+    pub fn log_to_file_default(&self, auto_open_depth: i32) {
+        unsafe { sys::igLogToFile(auto_open_depth, std::ptr::null()) }
+    }
+
+    /// Start logging to file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `filename` contains NUL bytes.
+    #[doc(alias = "LogToFile")]
+    pub fn log_to_file(
+        &self,
+        auto_open_depth: i32,
+        filename: &std::path::Path,
+    ) -> crate::error::ImGuiResult<()> {
+        use crate::error::SafeStringConversion;
+        let cstr = filename.to_string_lossy().into_owned().to_cstring_safe()?;
+        unsafe { sys::igLogToFile(auto_open_depth, cstr.as_ptr()) }
+        Ok(())
+    }
+
+    /// Start logging to clipboard.
+    #[doc(alias = "LogToClipboard")]
+    pub fn log_to_clipboard(&self, auto_open_depth: i32) {
+        unsafe { sys::igLogToClipboard(auto_open_depth) }
+    }
+
+    /// Show ImGui's logging buttons (TTY/File/Clipboard).
+    #[doc(alias = "LogButtons")]
+    pub fn log_buttons(&self) {
+        unsafe { sys::igLogButtons() }
+    }
+
+    /// Finish logging (close file / copy to clipboard as needed).
+    #[doc(alias = "LogFinish")]
+    pub fn log_finish(&self) {
+        unsafe { sys::igLogFinish() }
+    }
+
     /// Returns a single style color from the user interface style.
     ///
     /// Use this function if you need to access the colors, but don't want to clone the entire
     /// style object.
-    #[doc(alias = "GetStyle")]
+    #[doc(alias = "GetStyle", alias = "GetStyleColorVec4")]
     pub fn style_color(&self, style_color: StyleColor) -> [f32; 4] {
         unsafe {
-            let style_ptr = sys::igGetStyle();
-            let colors = (*style_ptr).Colors.as_ptr();
-            let color = *colors.add(style_color as usize);
+            let color = sys::igGetStyleColorVec4(style_color as sys::ImGuiCol);
+            let color = &*color;
             [color.x, color.y, color.z, color.w]
         }
+    }
+
+    /// Returns an ImGui-packed ABGR color (`ImU32`) from a style color.
+    ///
+    /// This is a convenience wrapper over `ImGui::GetColorU32(ImGuiCol, alpha_mul)`.
+    #[doc(alias = "GetColorU32")]
+    pub fn get_color_u32(&self, style_color: StyleColor) -> u32 {
+        self.get_color_u32_with_alpha(style_color, 1.0)
+    }
+
+    /// Returns an ImGui-packed ABGR color (`ImU32`) from a style color, with alpha multiplier.
+    #[doc(alias = "GetColorU32")]
+    pub fn get_color_u32_with_alpha(&self, style_color: StyleColor, alpha_mul: f32) -> u32 {
+        unsafe { sys::igGetColorU32_Col(style_color as sys::ImGuiCol, alpha_mul) }
+    }
+
+    /// Returns an ImGui-packed ABGR color (`ImU32`) from an RGBA float color.
+    ///
+    /// Note: Dear ImGui applies the global style alpha when converting colors for rendering.
+    #[doc(alias = "GetColorU32")]
+    pub fn get_color_u32_from_rgba(&self, rgba: [f32; 4]) -> u32 {
+        unsafe {
+            sys::igGetColorU32_Vec4(sys::ImVec4_c {
+                x: rgba[0],
+                y: rgba[1],
+                z: rgba[2],
+                w: rgba[3],
+            })
+        }
+    }
+
+    /// Returns an ImGui-packed ABGR color (`ImU32`) from an existing packed color, with alpha multiplier.
+    #[doc(alias = "GetColorU32")]
+    pub fn get_color_u32_from_packed(&self, abgr: u32, alpha_mul: f32) -> u32 {
+        unsafe { sys::igGetColorU32_U32(abgr, alpha_mul) }
     }
 
     /// Returns the name of a style color.
