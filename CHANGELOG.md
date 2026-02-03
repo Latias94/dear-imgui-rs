@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Core (`dear-imgui-rs`)
+  - `Context::{register_user_texture,unregister_user_texture}`: safe wrappers for ImGui's experimental `RegisterUserTexture()` API to include user-created `ImTextureData` in `DrawData::textures()`.
+  - `Context::register_user_texture_token`: RAII helper returning `RegisteredUserTexture` which unregisters on drop.
+- Backends
+  - `dear-imgui-ash`: external texture helpers mirroring WGPU (`register_external_texture_with_sampler`, `update_external_texture_view`, `update_external_texture_sampler`, `unregister_texture`).
+
+### Changed
+
+- Examples
+  - `ash_textures` / `wgpu_textures`: register user-created `TextureData` via `Context::register_user_texture_token()` (no manual pre-warm `update_texture()` needed).
+
 ## [0.9.0] - Not Released
 
 This release focuses on `dear-app` usability improvements for real applications (GPU configuration presets, smoother startup, and clearer redraw semantics).
