@@ -79,6 +79,9 @@ jobs:
           IMNODES_SYS_FORCE_BUILD: "1"
           IMGUIZMO_SYS_FORCE_BUILD: "1"
 
+      - name: Check dear-imgui-ash feature combos
+        run: cargo check -p dear-imgui-ash --lib --features "multi-viewport-winit,dynamic-rendering"
+
       - name: Build dear-app with all add-ons
         run: cargo build -p dear-app --features "implot imnodes implot3d"
 
