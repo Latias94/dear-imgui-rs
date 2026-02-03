@@ -8,6 +8,13 @@ This crate is native-only (no `wasm32` support).
 
 Experimental. API may change.
 
+## Loader (linked vs loaded)
+
+This backend is compatible with both `ash` loader modes:
+
+- **Loaded (recommended for CI)**: use `ash::Entry::load()` (runtime loader, no `vulkan-1.lib` link).
+- **Linked**: use `ash::Entry::linked()` (requires Vulkan loader import library at link time, e.g. Vulkan SDK).
+
 ## Features
 
 - Supports Dear ImGui 1.92+ texture management (`DrawData::textures()`), including create/update/destroy.

@@ -35,5 +35,5 @@ vk-mem = ["dep:vk-mem"]
 dynamic-rendering = []
 
 # Experimental multi-viewport rendering via winit platform backend.
-# Requires `dear-imgui-rs/multi-viewport` (PlatformIO callbacks) and `ash/linked` (surface creation).
-multi-viewport-winit = ["dear-imgui-rs/multi-viewport", "dep:winit", "dep:ash-window", "ash/linked"]
+# Requires `dear-imgui-rs/multi-viewport` (PlatformIO callbacks) and `ash-window` (surface creation).
+multi-viewport-winit = ["dear-imgui-rs/multi-viewport", "dep:winit", "dep:ash-window"]
