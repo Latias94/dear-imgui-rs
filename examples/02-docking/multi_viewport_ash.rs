@@ -49,7 +49,7 @@ struct VulkanContext {
 
 impl VulkanContext {
     fn new(window: &Window, title: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let entry = Entry::linked();
+        let entry = unsafe { Entry::load()? };
 
         let app_name = CString::new(title)?;
         let engine_name = CString::new("dear-imgui-examples")?;
