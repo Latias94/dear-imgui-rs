@@ -107,6 +107,17 @@ Note: internally managed textures default to `vk::Format::R8G8B8A8_UNORM` (not `
 this behavior consistent. If you register external descriptor sets that sample from `*_SRGB`
 textures, the shader gamma path will not match (you'll effectively decode twice).
 
+## Compatibility
+
+| Item          | Version |
+|---------------|---------|
+| Crate         | 0.8.x   |
+| dear-imgui-rs | 0.8.x   |
+| ash           | 0.38    |
+| ash-window    | 0.13 (`multi-viewport-winit`) |
+
+See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
+
 ## Reference
 
 This backend is inspired by the excellent `imgui-rs-vulkan-renderer` project:
