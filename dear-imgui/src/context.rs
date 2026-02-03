@@ -245,6 +245,62 @@ impl Context {
         }
     }
 
+    /// Register a user-created texture in ImGui's global texture list (ImGui 1.92+).
+    ///
+    /// Dear ImGui builds `DrawData::textures()` from its internal `PlatformIO.Textures[]` list.
+    /// If you create a `TextureData` yourself (e.g. `OwnedTextureData::new()`), you must register
+    /// it for renderer backends (with `BackendFlags::RENDERER_HAS_TEXTURES`) to receive
+    /// Create/Update/Destroy requests automatically.
+    ///
+    /// Note: `RegisterUserTexture()` is currently an experimental ImGui API.
+    ///
+    /// # Safety & Lifetime
+    /// The underlying `ImTextureData` must remain alive and registered until you call
+    /// `unregister_user_texture()`. Unregister before dropping the texture to avoid leaving a
+    /// dangling pointer inside ImGui.
+    pub fn register_user_texture(&mut self, texture: &mut crate::texture::TextureData) {
+        let _guard = CTX_MUTEX.lock();
+        assert!(
+            self.is_current_context(),
+            "Context::register_user_texture() requires the context to be current"
+        );
+        unsafe {
+            sys::igRegisterUserTexture(texture.as_raw_mut());
+        }
+    }
+
+    /// Register a user-created texture and return an RAII token which unregisters on drop.
+    ///
+    /// This is a convenience wrapper around `register_user_texture()`.
+    ///
+    /// # Safety & Drop Ordering
+    /// The returned token must be dropped before the underlying `ImGuiContext` is destroyed.
+    /// If you store it in a struct alongside `Context`, ensure the token is dropped first.
+    pub fn register_user_texture_token(
+        &mut self,
+        texture: &mut crate::texture::TextureData,
+    ) -> RegisteredUserTexture {
+        self.register_user_texture(texture);
+        RegisteredUserTexture {
+            ctx: self.raw,
+            tex: texture.as_raw_mut(),
+        }
+    }
+
+    /// Unregister a user texture previously registered with `register_user_texture()`.
+    ///
+    /// This removes the `ImTextureData*` from ImGui's internal texture list.
+    pub fn unregister_user_texture(&mut self, texture: &mut crate::texture::TextureData) {
+        let _guard = CTX_MUTEX.lock();
+        assert!(
+            self.is_current_context(),
+            "Context::unregister_user_texture() requires the context to be current"
+        );
+        unsafe {
+            sys::igUnregisterUserTexture(texture.as_raw_mut());
+        }
+    }
+
     /// Sets the INI filename for settings persistence
     ///
     /// # Errors
@@ -808,6 +864,42 @@ impl SuspendedContext {
             Ok(self.0)
         } else {
             Err(self)
+        }
+    }
+}
+
+/// RAII token returned by `Context::register_user_texture_token()`.
+///
+/// On drop, this unregisters the corresponding `ImTextureData*` from ImGui's internal user texture
+/// list.
+///
+/// # Safety
+/// - The referenced `ImTextureData` must remain alive while the token exists.
+/// - The token must be dropped before the `ImGuiContext` is destroyed.
+#[derive(Debug)]
+pub struct RegisteredUserTexture {
+    ctx: *mut sys::ImGuiContext,
+    tex: *mut sys::ImTextureData,
+}
+
+impl Drop for RegisteredUserTexture {
+    fn drop(&mut self) {
+        if self.ctx.is_null() || self.tex.is_null() {
+            return;
+        }
+
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            // Best-effort: temporarily bind the context so we can call Unregister in cases where
+            // multiple contexts are used via activate/suspend.
+            let prev = sys::igGetCurrentContext();
+            if prev != self.ctx {
+                sys::igSetCurrentContext(self.ctx);
+            }
+            sys::igUnregisterUserTexture(self.tex);
+            if prev != self.ctx {
+                sys::igSetCurrentContext(prev);
+            }
         }
     }
 }

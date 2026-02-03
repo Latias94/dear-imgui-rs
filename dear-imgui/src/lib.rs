@@ -75,6 +75,10 @@
 //! # }
 //! ```
 //!
+//! Note: `DrawData::textures()` is built from ImGui's internal `PlatformIO.Textures[]` list. If you
+//! create `TextureData` yourself (as above), call `Context::register_user_texture(&mut tex)` once
+//! to register it, otherwise renderer backends may not receive texture requests for it.
+//!
 //! Lifetime note: when using `&TextureData`, ensure it remains alive through rendering of the frame.
 //!
 //! ### Texture Management Guide
@@ -88,8 +92,9 @@
 //!   2. Fill/modify pixels; call `set_status(WantCreate)` for initial upload, or `WantUpdates` with
 //!      `UpdateRect` for sub-updates. `TextureData::set_data()` is a convenience which copies data and
 //!      marks an update.
-//!   3. Use the texture in UI via `ui.image(&mut tex, size)` or drawlist APIs.
-//!   4. In your renderer, during `render()`, iterate `DrawData::textures()` and honor the requests
+//!   3. Register user-created textures once via `Context::register_user_texture(&mut tex)`.
+//!   4. Use the texture in UI via `ui.image(&mut tex, size)` or drawlist APIs.
+//!   5. In your renderer, during `render()`, iterate `DrawData::textures()` and honor the requests
 //!      (Create/Update/Destroy), then set status back to `OK`/`Destroyed`.
 //! - Alternatives: when you already have a GPU handle, pass `TextureId` directly.
 //!

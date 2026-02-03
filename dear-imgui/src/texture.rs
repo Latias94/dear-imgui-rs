@@ -393,8 +393,9 @@ impl AsMut<TextureData> for OwnedTextureData {
 /// - Create an instance (e.g. via `OwnedTextureData::new()` + `create()`)
 /// - Mutate pixels, set flags/rects (e.g. call `set_data()` or directly write `Pixels` then
 ///   set `UpdateRect`), and set status to `WantCreate`/`WantUpdates`.
-/// - When you pass `&mut TextureData` to any widget/draw call, Dear ImGui will place this
-///   texture into `DrawData::textures()` for the current frame.
+/// - Register user-created textures once via `Context::register_user_texture(&mut tex)`. Dear
+///   ImGui builds `DrawData::textures()` from its internal `PlatformIO.Textures[]` list (font atlas
+///   textures are registered by ImGui itself).
 /// - Your renderer backend iterates `DrawData::textures()` and performs the requested
 ///   create/update/destroy operations, then updates status to `OK`/`Destroyed`.
 /// - You can also set/get a `TexID` (e.g., GPU handle) via `set_tex_id()/tex_id()` after creation.
