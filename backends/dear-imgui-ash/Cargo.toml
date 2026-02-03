@@ -1,0 +1,39 @@
+[package]
+name = "dear-imgui-ash"
+version = "0.8.0"
+edition.workspace = true
+description = "Vulkan (Ash) renderer backend for dear-imgui-rs"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dear-imgui-ash"
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.8" }
+thiserror.workspace = true
+log.workspace = true
+
+# Vulkan (native only)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ash = { version = "0.38", default-features = false, features = ["debug", "std"] }
+ash-window = { version = "0.13", optional = true }
+winit = { workspace = true, optional = true }
+
+# Optional allocators (native only)
+gpu-allocator = { version = "0.27", default-features = false, features = ["vulkan"], optional = true }
+vk-mem = { version = "0.4", optional = true }
+
+[features]
+default = []
+# Enable gpu-allocator for internal buffers/textures
+gpu-allocator = ["dep:gpu-allocator"]
+# Enable vk-mem for internal buffers/textures
+vk-mem = ["dep:vk-mem"]
+# Use Vulkan dynamic rendering instead of a render pass.
+dynamic-rendering = []
+
+# Experimental multi-viewport rendering via winit platform backend.
+# Requires `dear-imgui-rs/multi-viewport` (PlatformIO callbacks) and `ash/linked` (surface creation).
+multi-viewport-winit = ["dear-imgui-rs/multi-viewport", "dep:winit", "dep:ash-window", "ash/linked"]

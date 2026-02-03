@@ -18,6 +18,7 @@ multi-viewport = [
     "dear-imgui-rs/multi-viewport",
     "dear-imgui-winit/multi-viewport",
     "dear-imgui-wgpu/multi-viewport-winit",
+    "dear-imgui-ash/multi-viewport-winit",
     "dear-imgui-sdl3?/multi-viewport",
     "dear-imgui-glow/multi-viewport",
 ]
@@ -108,6 +109,11 @@ path = "02-docking/multi_viewport_wgpu.rs"
 required-features = ["multi-viewport"]
 
 [[bin]]
+name = "multi_viewport_ash"
+path = "02-docking/multi_viewport_ash.rs"
+required-features = ["multi-viewport"]
+
+[[bin]]
 name = "sdl3_opengl_multi_viewport"
 path = "02-docking/sdl3_opengl_multi_viewport.rs"
 required-features = ["multi-viewport", "sdl3-opengl3"]
@@ -134,6 +140,14 @@ path = "01-renderers/wgpu_textures.rs"
 [[bin]]
 name = "dear_app_wgpu_textures"
 path = "01-renderers/dear_app_wgpu_textures.rs"
+
+[[bin]]
+name = "ash_basic"
+path = "01-renderers/ash_basic.rs"
+
+[[bin]]
+name = "ash_textures"
+path = "01-renderers/ash_textures.rs"
 
 [[bin]]
 name = "implot_basic"
@@ -206,6 +220,7 @@ dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.8" }
 dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.8" }
 dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.8" }
 dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.8", optional = true }
+dear-imgui-ash = { path = "../backends/dear-imgui-ash", version = "0.8" }
 dear-app = { path = "../dear-app", version = "0.8" }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
@@ -229,6 +244,8 @@ raw-window-handle = { workspace = true }
 image = { workspace = true }
 bytemuck = { workspace = true }
 once_cell = "1"
+ash = { version = "0.38", default-features = false, features = ["std", "debug", "linked"] }
+ash-window = "0.13"
 
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 # On Linux/Windows, prefer building SDL3 from source so CI and users don't

@@ -30,7 +30,7 @@
 - Core
   - `dear-imgui-sys` — low‑level FFI via cimgui (docking branch), bindgen against Dear ImGui v1.92.5
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
-  - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-winit`, `dear-imgui-sdl3`
+  - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`
   - `dear-app` — convenient Winit + WGPU application runner (docking, themes, add-ons)
 - Extensions
   - `dear-imguizmo` — 3D gizmo (cimguizmo C API) + a pure‑Rust GraphEditor

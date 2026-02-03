@@ -31,6 +31,9 @@ Quick picks:
   - With experimental multi-viewport (winit + WGPU, native only): `cargo run --bin game_engine_docking --features multi-viewport`
 - Docking minimal: `cargo run --bin dockspace_minimal`
 - WGPU minimal: `cargo run --bin wgpu_basic`
+- Vulkan (Ash) minimal: `cargo run --bin ash_basic`
+- Vulkan (Ash) textures: `cargo run --bin ash_textures`
+- Multi-viewport (winit + Vulkan/Ash, native only): `cargo run --bin multi_viewport_ash --features multi-viewport`
 - OpenGL + textures: `cargo run --bin glow_textures`
 - WGPU + textures: `cargo run --bin wgpu_textures`
 - ImGuIZMO.quat (WGPU): `cargo run --features imguizmo-quat --bin imguizmo_quat_basic`
@@ -68,6 +71,8 @@ This is the intended organization.
 - 01-renderers (single-file, backend topics)
   - `glow_textures.rs`: modern texture system (register/update).
   - `wgpu_textures.rs`: CPU-updated texture registered in WGPU backend.
+  - `ash_basic.rs`: Vulkan (Ash) renderer + winit platform (single window).
+  - `ash_textures.rs`: Vulkan (Ash) renderer + ImGui-managed textures (`TextureData` + `ui.image()`).
   - `sdl3_wgpu.rs`: SDL3 window + WGPU renderer (single window; uses official SDL3 platform backend).
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform`
     - For native multi-viewport, see `sdl3_wgpu_multi_viewport.rs` below.
@@ -85,6 +90,10 @@ This is the intended organization.
       `dear-imgui-winit/multi-viewport` + `dear-imgui-wgpu/multi-viewport-winit`.
     - Important pattern: only the main window should drive WGPU rendering and surface resize;
       secondary viewport windows are rendered via ImGui platform/renderer callbacks.
+  - `multi_viewport_ash.rs`: **Experimental test example only** - winit + Vulkan/Ash multi-viewport support.
+    - Run with: `cargo run --bin multi_viewport_ash --features multi-viewport`
+    - Secondary viewports create their own Vulkan surfaces + swapchains.
+    - The examples feature `multi-viewport` enables: `dear-imgui-ash/multi-viewport-winit`.
   - `sdl3_opengl_multi_viewport.rs`: SDL3 + OpenGL3 multi-viewport example using official C++ backends.
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
     - Shows how to combine SDL3 platform backend with OpenGL renderer, including a simple "Game View" texture inside an ImGui window that can be dragged across OS windows.

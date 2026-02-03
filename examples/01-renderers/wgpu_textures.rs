@@ -17,6 +17,8 @@ use winit::{
 };
 
 struct ImguiState {
+    // Ensure registered textures are unregistered before the ImGui context is destroyed.
+    registered_user_textures: Vec<dear_imgui_rs::RegisteredUserTexture>,
     context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
@@ -125,11 +127,24 @@ impl AppWindow {
             }
         }
         img_tex.set_data(&pixels);
+        img_tex.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
 
         // Optionally, create a second managed texture from a user image
-        let photo_tex = Self::maybe_load_photo_texture();
+        let mut photo_tex = Self::maybe_load_photo_texture();
+        if let Some(photo) = photo_tex.as_mut() {
+            photo.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
+        }
+
+        // Register user-created textures so renderer backends can see them via DrawData::textures().
+        // This avoids TexID==0 assertions and lets the backend handle Create/Update/Destroy.
+        let mut registered_user_textures = Vec::new();
+        registered_user_textures.push(context.register_user_texture_token(&mut *img_tex));
+        if let Some(photo) = photo_tex.as_mut() {
+            registered_user_textures.push(context.register_user_texture_token(&mut **photo));
+        }
 
         let imgui = ImguiState {
+            registered_user_textures,
             context,
             platform,
             renderer,
@@ -238,18 +253,6 @@ impl AppWindow {
         let delta_secs = delta_time.as_secs_f32();
         self.imgui.context.io_mut().set_delta_time(delta_secs);
         self.imgui.last_frame = now;
-
-        // Pre-warm ImGui-managed textures so TexID is available before draw lists iterate.
-        // This avoids a white frame on first use and prevents assertions inside
-        // ImDrawCmd_GetTexID when the raw field is still 0.
-        if let Ok(res) = self.imgui.renderer.update_texture(&self.img_tex) {
-            res.apply_to(&mut *self.img_tex);
-        }
-        if let Some(photo) = self.photo_tex.as_mut() {
-            if let Ok(res) = self.imgui.renderer.update_texture(&*photo) {
-                res.apply_to(&mut **photo);
-            }
-        }
 
         // Update animated texture (marks WantUpdates)
         self.update_texture();
