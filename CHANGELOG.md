@@ -7,22 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Core (`dear-imgui-rs`)
-  - `Context::{register_user_texture,unregister_user_texture}`: safe wrappers for ImGui's experimental `RegisterUserTexture()` API to include user-created `ImTextureData` in `DrawData::textures()`.
-  - `Context::register_user_texture_token`: RAII helper returning `RegisteredUserTexture` which unregisters on drop.
-  - `PlatformIo::{platform_create_vk_surface_raw,set_platform_create_vk_surface_raw}`: access to ImGui's optional `Platform_CreateVkSurface` callback (used by Vulkan renderers with SDL2/SDL3/GLFW/Win32 multi-viewport).
-- Backends
-  - `dear-imgui-ash`: external texture helpers mirroring WGPU (`register_external_texture_with_sampler`, `update_external_texture_view`, `update_external_texture_sampler`, `unregister_texture`).
-  - `dear-imgui-ash`: `multi-viewport-sdl3` feature to render secondary viewports when using the SDL3 platform backend (creates surfaces via `Platform_CreateVkSurface`).
-
-### Changed
-
-- Examples
-  - `ash_textures` / `wgpu_textures`: register user-created `TextureData` via `Context::register_user_texture_token()` (no manual pre-warm `update_texture()` needed).
-  - `sdl3_ash_multi_viewport`: SDL3 + Ash multi-viewport example, including external Vulkan texture + sampler toggle.
-
 ## [0.9.0] - Not Released
 
 This release focuses on `dear-app` usability improvements for real applications (GPU configuration presets, smoother startup, and clearer redraw semantics).
@@ -51,6 +35,9 @@ This release focuses on `dear-app` usability improvements for real applications 
   - `pub use wgpu;` re-export as `dear_app::wgpu` for downstream convenience.
 - Core (`dear-imgui-rs`)
   - `Ui::set_window_focus`: focus a window by name, or clear focus via `None` (`SetWindowFocus(NULL)`).
+  - `Context::{register_user_texture,unregister_user_texture}`: safe wrappers for ImGui's experimental `RegisterUserTexture()` API to include user-created `ImTextureData` in `DrawData::textures()`.
+  - `Context::register_user_texture_token`: RAII helper returning `RegisteredUserTexture` which unregisters on drop.
+  - `PlatformIo::{platform_create_vk_surface_raw,set_platform_create_vk_surface_raw}`: access to ImGui's optional `Platform_CreateVkSurface` callback (used by Vulkan renderers with SDL2/SDL3/GLFW/Win32 multi-viewport).
   - Input capture hints: `Ui::set_next_frame_want_capture_keyboard` / `Ui::set_next_frame_want_capture_mouse`.
   - Navigation: `Ui::set_nav_cursor_visible`.
   - Drag and drop: `Ui::drag_drop_payload` (`GetDragDropPayload`).
@@ -69,6 +56,9 @@ This release focuses on `dear-app` usability improvements for real applications 
   - Context helpers: clipboard (`Context::clipboard_text`, `Context::set_clipboard_text`) and INI disk IO (`Context::load_ini_settings_from_disk`, `Context::save_ini_settings_to_disk`).
   - Logging helpers: `Ui::log_to_tty`, `Ui::log_to_file_default`, `Ui::log_to_file`, `Ui::log_to_clipboard`, `Ui::log_buttons`, `Ui::log_finish`.
   - Popup helper: `Ui::open_popup_on_item_click` / `Ui::open_popup_on_item_click_with_flags`.
+- Backends
+  - `dear-imgui-ash`: external texture helpers mirroring WGPU (`register_external_texture_with_sampler`, `update_external_texture_view`, `update_external_texture_sampler`, `unregister_texture`).
+  - `dear-imgui-ash`: `multi-viewport-sdl3` feature to render secondary viewports when using the SDL3 platform backend (creates surfaces via `Platform_CreateVkSurface`).
 
 ### Changed
 
@@ -76,6 +66,9 @@ This release focuses on `dear-app` usability improvements for real applications 
   - Theme application now uses the safe high-level `dear-imgui-rs` `Theme/ThemePreset` API (avoids direct `sys::igStyleColors*` usage).
   - Acquire the swapchain texture later in the frame to reduce the time the surface image is held.
   - `restore_previous_geometry = false` now disables INI persistence by forcing the INI filename to `None`.
+- Examples
+  - `ash_textures` / `wgpu_textures`: register user-created `TextureData` via `Context::register_user_texture_token()` (no manual pre-warm `update_texture()` needed).
+  - `sdl3_ash_multi_viewport`: SDL3 + Ash multi-viewport example, including external Vulkan texture + sampler toggle.
 
 ### Fixed
 
