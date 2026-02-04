@@ -12,13 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core (`dear-imgui-rs`)
   - `Context::{register_user_texture,unregister_user_texture}`: safe wrappers for ImGui's experimental `RegisterUserTexture()` API to include user-created `ImTextureData` in `DrawData::textures()`.
   - `Context::register_user_texture_token`: RAII helper returning `RegisteredUserTexture` which unregisters on drop.
+  - `PlatformIo::{platform_create_vk_surface_raw,set_platform_create_vk_surface_raw}`: access to ImGui's optional `Platform_CreateVkSurface` callback (used by Vulkan renderers with SDL2/SDL3/GLFW/Win32 multi-viewport).
 - Backends
   - `dear-imgui-ash`: external texture helpers mirroring WGPU (`register_external_texture_with_sampler`, `update_external_texture_view`, `update_external_texture_sampler`, `unregister_texture`).
+  - `dear-imgui-ash`: `multi-viewport-sdl3` feature to render secondary viewports when using the SDL3 platform backend (creates surfaces via `Platform_CreateVkSurface`).
 
 ### Changed
 
 - Examples
   - `ash_textures` / `wgpu_textures`: register user-created `TextureData` via `Context::register_user_texture_token()` (no manual pre-warm `update_texture()` needed).
+  - `sdl3_ash_multi_viewport`: SDL3 + Ash multi-viewport example, including external Vulkan texture + sampler toggle.
 
 ## [0.9.0] - Not Released
 
