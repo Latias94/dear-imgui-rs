@@ -32,6 +32,14 @@ sdl3-wgpu-multi-viewport = [
     "dear-imgui-sdl3/multi-viewport",
     "dear-imgui-wgpu/multi-viewport-sdl3",
 ]
+
+# Enable Ash multi-viewport when using the SDL3 platform backend (native only).
+sdl3-ash-multi-viewport = [
+    "sdl3-platform",
+    "dear-imgui-rs/multi-viewport",
+    "dear-imgui-sdl3/multi-viewport",
+    "dear-imgui-ash/multi-viewport-sdl3",
+]
 ### SDL3 platform (window + events)
 ###
 ### This feature gates SDL3-related dependencies so that examples which do not
@@ -132,6 +140,11 @@ required-features = ["sdl3-platform"]
 name = "sdl3_wgpu_multi_viewport"
 path = "02-docking/sdl3_wgpu_multi_viewport.rs"
 required-features = ["sdl3-wgpu-multi-viewport"]
+
+[[bin]]
+name = "sdl3_ash_multi_viewport"
+path = "02-docking/sdl3_ash_multi_viewport.rs"
+required-features = ["sdl3-ash-multi-viewport"]
 
 [[bin]]
 name = "wgpu_textures"
@@ -244,16 +257,16 @@ raw-window-handle = { workspace = true }
 image = { workspace = true }
 bytemuck = { workspace = true }
 once_cell = "1"
-ash = "0.38"
+ash = { version = "0.38", default-features = false, features = ["debug", "std"] }
 ash-window = "0.13"
 
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 # On Linux/Windows, prefer building SDL3 from source so CI and users don't
 # need a pre-installed system SDL3. This uses sdl3-sys + CMake internally.
-sdl3 = { version = "0.17", features = ["raw-window-handle", "build-from-source"], optional = true }
+sdl3 = { version = "0.17", features = ["raw-window-handle", "build-from-source", "ash"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # On macOS, rely on a system SDL3 install (e.g. `brew install sdl3`) instead of
 # building from source to avoid CMake permission/toolchain issues on user
 # machines. The `raw-window-handle` feature is still required for WGPU.
-sdl3 = { version = "0.17", features = ["raw-window-handle"], optional = true }
+sdl3 = { version = "0.17", features = ["raw-window-handle", "ash"], optional = true }

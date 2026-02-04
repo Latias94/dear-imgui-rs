@@ -34,6 +34,7 @@ Quick picks:
 - Vulkan (Ash) minimal: `cargo run --bin ash_basic`
 - Vulkan (Ash) textures: `cargo run --bin ash_textures`
 - Multi-viewport (winit + Vulkan/Ash, native only): `cargo run --bin multi_viewport_ash --features multi-viewport`
+- SDL3 + Vulkan/Ash multi-viewport (native only): `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
 - OpenGL + textures: `cargo run --bin glow_textures`
 - WGPU + textures: `cargo run --bin wgpu_textures`
 - ImGuIZMO.quat (WGPU): `cargo run --features imguizmo-quat --bin imguizmo_quat_basic`
@@ -104,6 +105,9 @@ This is the intended organization.
   - `sdl3_wgpu_multi_viewport.rs`: SDL3 + WGPU multi-viewport example (experimental, native only) using Rust WGPU renderer backend.
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
     - Uses SDL3 platform backend for window management and `dear-imgui-wgpu` to render all viewports.
+  - `sdl3_ash_multi_viewport.rs`: SDL3 + Vulkan/Ash multi-viewport example (experimental, native only) using Rust Vulkan renderer backend.
+    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
+    - Uses SDL3 platform backend for window management and `dear-imgui-ash` to render all viewports via `Platform_CreateVkSurface`.
 
 - 03-extensions (feature-gated)
   - ImPlot: `implot_basic.rs`.
