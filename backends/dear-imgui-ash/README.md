@@ -99,6 +99,55 @@ Notes:
 - Secondary viewports create their own Vulkan `SurfaceKHR` + swapchain via `ash-window`.
 - Swapchain formats may differ per viewport. The renderer caches pipelines per `vk::Format`.
 
+## Multi-viewport (SDL3)
+
+This crate can render Dear ImGui secondary viewports when using the SDL3 platform backend.
+
+Requirements:
+
+- Enable the renderer feature: `dear-imgui-ash/multi-viewport-sdl3`
+- Enable the core feature: `dear-imgui-rs/multi-viewport`
+- Initialize the SDL3 platform backend for Vulkan: `dear_imgui_sdl3::init_for_vulkan(imgui, window)`
+  - This sets `ImGuiPlatformIO::Platform_CreateVkSurface`, which the renderer uses to create per-viewport `VkSurfaceKHR`.
+
+Minimal integration outline:
+
+```rust,no_run
+use dear_imgui_ash::multi_viewport_sdl3 as ash_mvp;
+
+# fn example(
+#   renderer: &mut dear_imgui_ash::AshRenderer,
+#   imgui: &mut dear_imgui_rs::Context,
+#   entry: ash::Entry,
+#   instance: ash::Instance,
+#   physical_device: ash::vk::PhysicalDevice,
+#   present_queue: ash::vk::Queue,
+#   graphics_queue_family_index: u32,
+#   present_queue_family_index: u32,
+# ) -> Result<(), dear_imgui_sdl3::Sdl3BackendError> {
+imgui.enable_multi_viewport();
+
+// Configure SDL3 platform backend for Vulkan (sets Platform_CreateVkSurface).
+// dear_imgui_sdl3::init_for_vulkan(imgui, &window)?;
+
+// Install renderer callbacks (do this after the renderer is in its final memory location).
+ash_mvp::enable(
+    renderer,
+    imgui,
+    entry,
+    instance,
+    physical_device,
+    present_queue,
+    graphics_queue_family_index,
+    present_queue_family_index,
+);
+
+// Each frame (after rendering/presenting the main window):
+imgui.update_platform_windows();
+imgui.render_platform_windows_default();
+# Ok(()) }
+```
+
 ## sRGB / Gamma
 
 This backend follows the same approach as the WGPU backend in this repo:

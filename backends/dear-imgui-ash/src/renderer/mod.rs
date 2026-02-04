@@ -3,6 +3,8 @@
 mod allocator;
 #[cfg(feature = "multi-viewport-winit")]
 pub mod multi_viewport;
+#[cfg(feature = "multi-viewport-sdl3")]
+pub mod multi_viewport_sdl3;
 mod shaders;
 mod vulkan;
 
@@ -72,7 +74,7 @@ pub struct DynamicRendering {
     pub depth_attachment_format: Option<vk::Format>,
 }
 
-#[cfg(feature = "multi-viewport-winit")]
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 struct ViewportPipeline {
     pipeline: vk::Pipeline,
     #[cfg(not(feature = "dynamic-rendering"))]
@@ -205,9 +207,9 @@ pub struct AshRenderer {
     frames: Frames,
     destroyed: bool,
     in_flight_uploads: VecDeque<InFlightUpload>,
-    #[cfg(feature = "multi-viewport-winit")]
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     viewport_pipelines: HashMap<vk::Format, ViewportPipeline>,
-    #[cfg(feature = "multi-viewport-winit")]
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     viewport_clear_color: [f32; 4],
 }
 
@@ -226,7 +228,7 @@ impl AshRenderer {
         let mut flags = io.backend_flags();
         flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
         flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
-        #[cfg(feature = "multi-viewport-winit")]
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
         {
             flags.insert(BackendFlags::RENDERER_HAS_VIEWPORTS);
         }
@@ -365,9 +367,9 @@ impl AshRenderer {
             frames: Frames::new(options.in_flight_frames),
             destroyed: false,
             in_flight_uploads: VecDeque::new(),
-            #[cfg(feature = "multi-viewport-winit")]
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_pipelines: HashMap::new(),
-            #[cfg(feature = "multi-viewport-winit")]
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
         };
 
@@ -718,13 +720,13 @@ impl AshRenderer {
     }
 
     /// Set clear color for secondary viewports (multi-viewport mode).
-    #[cfg(feature = "multi-viewport-winit")]
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub fn set_viewport_clear_color(&mut self, color: [f32; 4]) {
         self.viewport_clear_color = color;
     }
 
     /// Get clear color for secondary viewports (multi-viewport mode).
-    #[cfg(feature = "multi-viewport-winit")]
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub fn viewport_clear_color(&self) -> [f32; 4] {
         self.viewport_clear_color
     }
@@ -739,7 +741,7 @@ impl AshRenderer {
             })
     }
 
-    #[cfg(feature = "multi-viewport-winit")]
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     fn gamma_for_format(&self, format: vk::Format) -> f32 {
         self.options
             .color_gamma_override
@@ -750,7 +752,7 @@ impl AshRenderer {
             })
     }
 
-    #[cfg(feature = "multi-viewport-winit")]
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     fn viewport_pipeline(&mut self, format: vk::Format) -> RendererResult<&ViewportPipeline> {
         if self.viewport_pipelines.contains_key(&format) {
             return Ok(self
@@ -1194,10 +1196,13 @@ impl AshRenderer {
         }
 
         unsafe {
-            #[cfg(feature = "multi-viewport-winit")]
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             {
                 // Ensure callbacks cannot reach this renderer during teardown.
+                #[cfg(feature = "multi-viewport-winit")]
                 multi_viewport::clear_for_drop(self as *mut _);
+                #[cfg(feature = "multi-viewport-sdl3")]
+                multi_viewport_sdl3::clear_for_drop(self as *mut _);
 
                 let viewport_pipelines = std::mem::take(&mut self.viewport_pipelines);
                 for (_, vp) in viewport_pipelines {
@@ -1606,7 +1611,7 @@ fn clamp_rect(rect: dear_imgui_rs::texture::TextureRect, tw: u32, th: u32) -> (u
     (x, y, w.min(tw - x), h.min(th - y))
 }
 
-#[cfg(feature = "multi-viewport-winit")]
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 fn is_srgb_format(format: vk::Format) -> bool {
     matches!(
         format,
@@ -1614,7 +1619,10 @@ fn is_srgb_format(format: vk::Format) -> bool {
     )
 }
 
-#[cfg(all(feature = "multi-viewport-winit", not(feature = "dynamic-rendering")))]
+#[cfg(all(
+    any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
+    not(feature = "dynamic-rendering")
+))]
 fn create_viewport_render_pass(
     device: &Device,
     format: vk::Format,
