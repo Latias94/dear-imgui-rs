@@ -2,6 +2,12 @@ use std::path::PathBuf;
 
 use crate::core::{ClickAction, SortBy};
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Modifiers {
+    pub(crate) ctrl: bool,
+    pub(crate) shift: bool,
+}
+
 /// Domain events for driving the in-UI file browser.
 ///
 /// These events are intended to be emitted by the UI layer (Dear ImGui) and
@@ -20,13 +26,24 @@ pub(crate) enum BrowserEvent {
     SetShowHidden(bool),
     SetActiveFilter(Option<usize>),
     SetSearch(String),
-    SetSort { by: SortBy, ascending: bool },
+    SetSort {
+        by: SortBy,
+        ascending: bool,
+    },
     SetClickAction(ClickAction),
     SetDoubleClick(bool),
 
-    ClickEntry { name: String, is_dir: bool },
-    DoubleClickEntry { name: String, is_dir: bool },
+    ClickEntry {
+        name: String,
+        is_dir: bool,
+        modifiers: Modifiers,
+    },
+    DoubleClickEntry {
+        name: String,
+        is_dir: bool,
+    },
 
+    SelectAll,
     Confirm,
     Cancel,
 }

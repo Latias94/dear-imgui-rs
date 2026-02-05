@@ -8,6 +8,7 @@ use crate::core::{
 ///
 /// This is intentionally independent of ImGui types to keep the core testable.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct FileBrowserState {
     /// Whether to draw the browser (show/hide)
     pub visible: bool,
@@ -61,6 +62,10 @@ pub struct FileBrowserState {
     pub empty_hint_color: [f32; 4],
     /// Custom static hint message when entries list is empty; if None, a default message is built
     pub empty_hint_static_message: Option<String>,
+
+    pub(crate) focused_name: Option<String>,
+    pub(crate) selection_anchor_name: Option<String>,
+    pub(crate) view_names: Vec<String>,
 }
 
 impl FileBrowserState {
@@ -121,6 +126,10 @@ impl FileBrowserState {
             empty_hint_enabled: true,
             empty_hint_color: [0.7, 0.7, 0.7, 1.0],
             empty_hint_static_message: None,
+
+            focused_name: None,
+            selection_anchor_name: None,
+            view_names: Vec::new(),
         }
     }
 

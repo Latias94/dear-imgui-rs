@@ -70,6 +70,20 @@ pub(crate) fn toggle_select_name(list: &mut Vec<String>, name: &str) {
     }
 }
 
+fn select_single_by_name(state: &mut FileBrowserState, name: String) {
+    state.selected.clear();
+    state.selected.push(name.clone());
+    state.focused_name = Some(name.clone());
+    state.selection_anchor_name = Some(name);
+}
+
+fn select_range_by_name(view_names: &[String], anchor: &str, target: &str) -> Option<Vec<String>> {
+    let ia = view_names.iter().position(|s| s == anchor)?;
+    let it = view_names.iter().position(|s| s == target)?;
+    let (lo, hi) = if ia <= it { (ia, it) } else { (it, ia) };
+    Some(view_names[lo..=hi].to_vec())
+}
+
 pub(crate) fn finalize_selection(
     mode: DialogMode,
     cwd: &Path,
@@ -127,6 +141,9 @@ pub(crate) fn apply_event_with_fs(
         }
         BrowserEvent::NavigateTo(p) => {
             state.cwd = p;
+            state.selected.clear();
+            state.focused_name = None;
+            state.selection_anchor_name = None;
         }
         BrowserEvent::StartPathEdit => {
             state.path_edit = true;
@@ -184,23 +201,47 @@ pub(crate) fn apply_event_with_fs(
         BrowserEvent::SetDoubleClick(v) => {
             state.double_click = v;
         }
-        BrowserEvent::ClickEntry { name, is_dir } => {
+        BrowserEvent::ClickEntry {
+            name,
+            is_dir,
+            modifiers,
+        } => {
             if is_dir {
                 match state.click_action {
                     crate::core::ClickAction::Select => {
-                        state.selected.clear();
-                        state.selected.push(name);
+                        select_single_by_name(state, name);
                     }
                     crate::core::ClickAction::Navigate => {
                         state.cwd.push(&name);
                         state.selected.clear();
+                        state.focused_name = None;
+                        state.selection_anchor_name = None;
                     }
                 }
             } else {
-                if !state.allow_multi {
-                    state.selected.clear();
+                if modifiers.shift {
+                    if let Some(anchor) = state.selection_anchor_name.clone() {
+                        if let Some(range) = select_range_by_name(&state.view_names, &anchor, &name)
+                        {
+                            state.selected = range;
+                            state.focused_name = Some(name);
+                            return;
+                        }
+                    }
+                    // Fallback if range selection isn't possible.
+                    select_single_by_name(state, name);
+                    return;
                 }
+
+                if !state.allow_multi || !modifiers.ctrl {
+                    select_single_by_name(state, name);
+                    return;
+                }
+
+                // Ctrl toggle selection
                 toggle_select_name(&mut state.selected, &name);
+                state.focused_name = Some(name.clone());
+                state.selection_anchor_name = Some(name);
             }
         }
         BrowserEvent::DoubleClickEntry { name, is_dir } => {
@@ -219,6 +260,11 @@ pub(crate) fn apply_event_with_fs(
                         state.ui_error = Some(err.to_string());
                     }
                 }
+            }
+        }
+        BrowserEvent::SelectAll => {
+            if state.allow_multi {
+                state.selected = state.view_names.clone();
             }
         }
         BrowserEvent::Confirm => {
@@ -348,7 +394,12 @@ pub(crate) fn read_entries_with_fs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser_events::Modifiers;
     use crate::core::ClickAction;
+
+    fn mods(ctrl: bool, shift: bool) -> Modifiers {
+        Modifiers { ctrl, shift }
+    }
 
     #[test]
     fn cancel_sets_result_and_hides() {
@@ -370,6 +421,7 @@ mod tests {
             BrowserEvent::ClickEntry {
                 name: "a.txt".into(),
                 is_dir: false,
+                modifiers: mods(true, false),
             },
         );
         assert_eq!(state.selected, vec!["a.txt"]);
@@ -378,6 +430,7 @@ mod tests {
             BrowserEvent::ClickEntry {
                 name: "a.txt".into(),
                 is_dir: false,
+                modifiers: mods(true, false),
             },
         );
         assert!(state.selected.is_empty());
@@ -392,6 +445,7 @@ mod tests {
             BrowserEvent::ClickEntry {
                 name: "a.txt".into(),
                 is_dir: false,
+                modifiers: mods(false, false),
             },
         );
         apply_event(
@@ -399,6 +453,7 @@ mod tests {
             BrowserEvent::ClickEntry {
                 name: "b.txt".into(),
                 is_dir: false,
+                modifiers: mods(false, false),
             },
         );
         assert_eq!(state.selected, vec!["b.txt"]);
@@ -414,9 +469,53 @@ mod tests {
             BrowserEvent::ClickEntry {
                 name: "sub".into(),
                 is_dir: true,
+                modifiers: mods(false, false),
             },
         );
         assert!(state.selected.is_empty());
         assert!(state.cwd.ends_with("sub"));
+    }
+
+    #[test]
+    fn shift_click_selects_a_range_in_view_order() {
+        let mut state = FileBrowserState::new(DialogMode::OpenFiles);
+        state.allow_multi = true;
+        state.view_names = vec![
+            "a.txt".into(),
+            "b.txt".into(),
+            "c.txt".into(),
+            "d.txt".into(),
+            "e.txt".into(),
+        ];
+
+        apply_event(
+            &mut state,
+            BrowserEvent::ClickEntry {
+                name: "b.txt".into(),
+                is_dir: false,
+                modifiers: mods(false, false),
+            },
+        );
+        assert_eq!(state.selected, vec!["b.txt"]);
+
+        apply_event(
+            &mut state,
+            BrowserEvent::ClickEntry {
+                name: "e.txt".into(),
+                is_dir: false,
+                modifiers: mods(false, true),
+            },
+        );
+        assert_eq!(state.selected, vec!["b.txt", "c.txt", "d.txt", "e.txt"]);
+    }
+
+    #[test]
+    fn ctrl_a_selects_all_when_multi_select_enabled() {
+        let mut state = FileBrowserState::new(DialogMode::OpenFiles);
+        state.allow_multi = true;
+        state.view_names = vec!["a".into(), "b".into(), "c".into()];
+
+        apply_event(&mut state, BrowserEvent::SelectAll);
+        assert_eq!(state.selected, vec!["a", "b", "c"]);
     }
 }

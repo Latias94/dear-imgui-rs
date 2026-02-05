@@ -289,11 +289,15 @@ fn draw_contents_with_fs(
     // Keyboard shortcuts (only when the host window is focused)
     if state.visible && ui.is_window_focused() {
         let ctrl = ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl);
+        let shift = ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift);
         if ctrl && ui.is_key_pressed(Key::L) {
             apply_event_with_fs(state, BrowserEvent::StartPathEdit, fs);
         }
         if ctrl && ui.is_key_pressed(Key::F) {
             apply_event_with_fs(state, BrowserEvent::RequestSearchFocus, fs);
+        }
+        if ctrl && ui.is_key_pressed(Key::A) && !shift {
+            apply_event_with_fs(state, BrowserEvent::SelectAll, fs);
         }
         if !ui.io().want_capture_keyboard() && ui.is_key_pressed(Key::Backspace) {
             apply_event_with_fs(state, BrowserEvent::NavigateUp, fs);
@@ -470,6 +474,7 @@ fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2], fs: &d
                 state.sort_ascending,
                 state.dirs_first,
             );
+            state.view_names = entries.iter().map(|e| e.name.clone()).collect();
 
             // Rows
             if entries.is_empty() {
@@ -512,11 +517,17 @@ fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2], fs: &d
                         .span_all_columns(false)
                         .build()
                     {
+                        let modifiers = crate::browser_events::Modifiers {
+                            ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
+                            shift: ui.is_key_down(Key::LeftShift)
+                                || ui.is_key_down(Key::RightShift),
+                        };
                         apply_event_with_fs(
                             state,
                             BrowserEvent::ClickEntry {
                                 name: e.name.clone(),
                                 is_dir: e.is_dir,
+                                modifiers,
                             },
                             fs,
                         );
