@@ -39,7 +39,8 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - Breadcrumbs with automatic compression on long paths
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
-  - Keyboard shortcuts: Enter, Backspace, Ctrl+L (path), Ctrl+F (search)
+  - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all
+  - Keyboard navigation: Up/Down arrows + Enter, Backspace, Ctrl+L (path), Ctrl+F (search)
   - Empty-state hint with configurable color/message
   - CJK/emoji supported via user-provided fonts
 - Unified `Selection` + `FileDialogError` across backends
