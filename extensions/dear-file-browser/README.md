@@ -15,6 +15,11 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 - Native backend: https://github.com/PolyMeilex/rfd
 - In-UI: Pure Dear ImGui implementation (no C API)
 
+## Fearless Refactor (IGFD-Grade)
+
+- Architecture: `docs/FEARLESS_REFACTOR_ARCHITECTURE.md`
+- Roadmap / TODO: `docs/FEARLESS_REFACTOR_TODO_MILESTONES.md`
+
 ## Compatibility
 
 | Item          | Version |
@@ -89,6 +94,52 @@ ui.window("Open")
             }
         }
     });
+```
+
+## Embedding (No Host Window)
+
+If you want to embed the browser into an existing window/popup/tab, draw only the contents:
+
+```rust
+ui.window("My Panel").build(|| {
+    if let Some(res) = ui.file_browser().draw_contents(&mut state) {
+        // handle res
+    }
+});
+```
+
+## Custom Window Host
+
+To customize the hosting ImGui window (title/size), use `WindowHostConfig`:
+
+```rust
+use dear_file_browser::WindowHostConfig;
+
+let cfg = WindowHostConfig {
+    title: "Open Asset".into(),
+    initial_size: [900.0, 600.0],
+    size_condition: dear_imgui_rs::Condition::FirstUseEver,
+};
+
+if let Some(res) = ui.file_browser().show_windowed(&mut state, &cfg) {
+    // handle res
+}
+```
+
+## Managing Multiple Dialogs
+
+For an IGFD-style workflow (open now, display later; multiple dialogs concurrently), use `DialogManager`:
+
+```rust
+use dear_file_browser::{DialogManager, DialogMode};
+
+let mut mgr = DialogManager::new();
+let open_id = mgr.open_browser(DialogMode::OpenFile);
+
+// Later, per-frame:
+if let Some(res) = mgr.show_browser(ui, open_id) {
+    // res: Result<Selection, FileDialogError>
+}
 ```
 
 ## WASM
