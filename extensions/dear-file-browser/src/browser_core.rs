@@ -1,12 +1,28 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::browser_events::BrowserEvent;
 use crate::browser_state::FileBrowserState;
 use crate::core::{DialogMode, FileDialogError, FileFilter, Selection, SortBy};
+use crate::fs::{FileSystem, StdFileSystem};
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct EntryId(PathBuf);
+
+impl EntryId {
+    pub(crate) fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
+
+    pub(crate) fn as_path(&self) -> &Path {
+        &self.0
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct BrowserEntry {
+    pub(crate) id: EntryId,
     pub(crate) name: String,
+    pub(crate) path: PathBuf,
     pub(crate) is_dir: bool,
     pub(crate) size: Option<u64>,
     pub(crate) modified: Option<std::time::SystemTime>,
@@ -96,6 +112,14 @@ pub(crate) fn finalize_selection(
 }
 
 pub(crate) fn apply_event(state: &mut FileBrowserState, ev: BrowserEvent) {
+    apply_event_with_fs(state, ev, &StdFileSystem);
+}
+
+pub(crate) fn apply_event_with_fs(
+    state: &mut FileBrowserState,
+    ev: BrowserEvent,
+    fs: &dyn FileSystem,
+) {
     match ev {
         BrowserEvent::NavigateUp => {
             let _ = state.cwd.pop();
@@ -112,10 +136,10 @@ pub(crate) fn apply_event(state: &mut FileBrowserState, ev: BrowserEvent) {
         BrowserEvent::SubmitPathEdit => {
             let input = state.path_edit_buffer.trim();
             let raw_p = std::path::PathBuf::from(input);
-            let p = std::fs::canonicalize(&raw_p).unwrap_or(raw_p.clone());
-            match std::fs::metadata(&p) {
+            let p = fs.canonicalize(&raw_p).unwrap_or(raw_p.clone());
+            match fs.metadata(&p) {
                 Ok(md) => {
-                    if md.is_dir() {
+                    if md.is_dir {
                         state.cwd = p;
                         state.selected.clear();
                         state.path_edit = false;
@@ -204,7 +228,8 @@ pub(crate) fn apply_event(state: &mut FileBrowserState, ev: BrowserEvent) {
                 && state.selected.len() == 1
             {
                 let sel = state.selected[0].clone();
-                let is_dir = state.cwd.join(&sel).is_dir();
+                let p = state.cwd.join(&sel);
+                let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
                 if is_dir {
                     state.cwd.push(sel);
                     state.selected.clear();
@@ -291,30 +316,30 @@ pub(crate) fn sort_entries_in_place(
 }
 
 pub(crate) fn read_entries(dir: &Path, show_hidden: bool) -> Vec<BrowserEntry> {
+    read_entries_with_fs(&StdFileSystem, dir, show_hidden)
+}
+
+pub(crate) fn read_entries_with_fs(
+    fs: &dyn FileSystem,
+    dir: &Path,
+    show_hidden: bool,
+) -> Vec<BrowserEntry> {
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else {
+    let Ok(rd) = fs.read_dir(dir) else {
         return out;
     };
-    for e in rd.flatten() {
-        let Ok(ft) = e.file_type() else {
-            continue;
-        };
-        let name = e.file_name().to_string_lossy().to_string();
-        if !show_hidden && name.starts_with('.') {
+    for e in rd {
+        if !show_hidden && e.name.starts_with('.') {
             continue;
         }
-        let meta = e.metadata().ok();
-        let modified = meta.as_ref().and_then(|m| m.modified().ok());
-        let size = if ft.is_file() {
-            meta.as_ref().map(|m| m.len())
-        } else {
-            None
-        };
+        let id = EntryId::new(e.path.clone());
         out.push(BrowserEntry {
-            name,
-            is_dir: ft.is_dir(),
-            size,
-            modified,
+            id,
+            name: e.name,
+            path: e.path,
+            is_dir: e.is_dir,
+            size: e.size,
+            modified: e.modified,
         });
     }
     out

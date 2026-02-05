@@ -21,6 +21,8 @@ mod browser_state;
 mod core;
 #[cfg(feature = "imgui")]
 mod dialog_manager;
+#[cfg(feature = "imgui")]
+mod fs;
 #[cfg(feature = "native-rfd")]
 mod native;
 #[cfg(feature = "imgui")]
@@ -32,5 +34,7 @@ pub use core::{
 };
 #[cfg(feature = "imgui")]
 pub use dialog_manager::{DialogId, DialogManager};
+#[cfg(feature = "imgui")]
+pub use fs::{FileSystem, FsEntry, FsMetadata, StdFileSystem};
 #[cfg(feature = "imgui")]
 pub use ui::{FileBrowserState, FileDialogExt, WindowHostConfig};

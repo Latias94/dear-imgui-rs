@@ -3,13 +3,14 @@ use std::path::{Path, PathBuf};
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton};
 
-use crate::browser_core::apply_event;
 use crate::browser_core::{
-    BrowserEntry, filter_entries_in_place, read_entries, sort_entries_in_place,
+    BrowserEntry, apply_event_with_fs, filter_entries_in_place, read_entries_with_fs,
+    sort_entries_in_place,
 };
 use crate::browser_events::BrowserEvent;
 pub use crate::browser_state::FileBrowserState;
 use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy};
+use crate::fs::{FileSystem, StdFileSystem};
 
 /// Configuration for hosting the file browser in an ImGui window.
 #[derive(Clone, Debug)]
@@ -66,7 +67,16 @@ impl<'ui> FileBrowser<'ui> {
         &self,
         state: &mut FileBrowserState,
     ) -> Option<Result<Selection, FileDialogError>> {
-        draw_contents(self.ui, state)
+        self.draw_contents_with_fs(state, &StdFileSystem)
+    }
+
+    /// Draw only the contents of the file browser (no window/modal host) using a custom filesystem.
+    pub fn draw_contents_with_fs(
+        &self,
+        state: &mut FileBrowserState,
+        fs: &dyn FileSystem,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        draw_contents_with_fs(self.ui, state, fs)
     }
 
     /// Draw the file browser in a standard ImGui window with default host config.
@@ -83,6 +93,16 @@ impl<'ui> FileBrowser<'ui> {
         state: &mut FileBrowserState,
         cfg: &WindowHostConfig,
     ) -> Option<Result<Selection, FileDialogError>> {
+        self.show_windowed_with_fs(state, cfg, &StdFileSystem)
+    }
+
+    /// Draw the file browser in a standard ImGui window using a custom filesystem.
+    pub fn show_windowed_with_fs(
+        &self,
+        state: &mut FileBrowserState,
+        cfg: &WindowHostConfig,
+        fs: &dyn FileSystem,
+    ) -> Option<Result<Selection, FileDialogError>> {
         if !state.visible {
             return None;
         }
@@ -92,7 +112,7 @@ impl<'ui> FileBrowser<'ui> {
             .window(&cfg.title)
             .size(cfg.initial_size, cfg.size_condition)
             .build(|| {
-                out = draw_contents(self.ui, state);
+                out = draw_contents_with_fs(self.ui, state, fs);
             });
         out
     }
@@ -102,20 +122,28 @@ fn draw_contents(
     ui: &Ui,
     state: &mut FileBrowserState,
 ) -> Option<Result<Selection, FileDialogError>> {
+    draw_contents_with_fs(ui, state, &StdFileSystem)
+}
+
+fn draw_contents_with_fs(
+    ui: &Ui,
+    state: &mut FileBrowserState,
+    fs: &dyn FileSystem,
+) -> Option<Result<Selection, FileDialogError>> {
     if !state.visible {
         return None;
     }
 
     // Top toolbar: Up, Refresh, Hidden toggle, Breadcrumbs, Filter, Search
     if ui.button("Up") {
-        apply_event(state, BrowserEvent::NavigateUp);
+        apply_event_with_fs(state, BrowserEvent::NavigateUp, fs);
     }
     ui.same_line();
     if ui.button("Refresh") { /* rescan happens each frame */ }
     ui.same_line();
     let mut show_hidden = state.show_hidden;
     if ui.checkbox("Hidden", &mut show_hidden) {
-        apply_event(state, BrowserEvent::SetShowHidden(show_hidden));
+        apply_event_with_fs(state, BrowserEvent::SetShowHidden(show_hidden), fs);
     }
     ui.same_line();
     // Breadcrumbs or Path Edit
@@ -128,15 +156,15 @@ fn draw_contents(
             .build();
         ui.same_line();
         if ui.button("Go") {
-            apply_event(state, BrowserEvent::SubmitPathEdit);
+            apply_event_with_fs(state, BrowserEvent::SubmitPathEdit, fs);
         }
         ui.same_line();
         if ui.button("Cancel") {
-            apply_event(state, BrowserEvent::CancelPathEdit);
+            apply_event_with_fs(state, BrowserEvent::CancelPathEdit, fs);
         }
     } else {
         if let Some(p) = draw_breadcrumbs(ui, &state.cwd, state.breadcrumbs_max_segments) {
-            apply_event(state, BrowserEvent::NavigateTo(p));
+            apply_event_with_fs(state, BrowserEvent::NavigateTo(p), fs);
         }
     }
     // Search box (aligned to the right)
@@ -147,7 +175,7 @@ fn draw_contents(
     }
     let search_changed = ui.input_text("Search", &mut state.search).build();
     if search_changed {
-        apply_event(state, BrowserEvent::SetSearch(state.search.clone()));
+        apply_event_with_fs(state, BrowserEvent::SetSearch(state.search.clone()), fs);
     }
 
     ui.separator();
@@ -164,20 +192,20 @@ fn draw_contents(
                     new_cwd = draw_quick_locations(ui);
                 });
             if let Some(p) = new_cwd {
-                apply_event(state, BrowserEvent::NavigateTo(p));
+                apply_event_with_fs(state, BrowserEvent::NavigateTo(p), fs);
             }
             ui.same_line();
             ui.child_window("file_list")
                 .size([avail[0] - left_w - 8.0, avail[1] - 80.0])
                 .build(ui, || {
-                    draw_file_table(ui, state, [avail[0] - left_w - 8.0, avail[1] - 110.0]);
+                    draw_file_table(ui, state, [avail[0] - left_w - 8.0, avail[1] - 110.0], fs);
                 });
         }
         LayoutStyle::Minimal => {
             ui.child_window("file_list_min")
                 .size([avail[0], avail[1] - 80.0])
                 .build(ui, || {
-                    draw_file_table(ui, state, [avail[0], avail[1] - 110.0]);
+                    draw_file_table(ui, state, [avail[0], avail[1] - 110.0], fs);
                 });
         }
     }
@@ -218,7 +246,7 @@ fn draw_contents(
             }
         }
         if next_active_filter != state.active_filter {
-            apply_event(state, BrowserEvent::SetActiveFilter(next_active_filter));
+            apply_event_with_fs(state, BrowserEvent::SetActiveFilter(next_active_filter), fs);
         }
     }
 
@@ -239,18 +267,18 @@ fn draw_contents(
         } else {
             ClickAction::Select
         };
-        apply_event(state, BrowserEvent::SetClickAction(next));
+        apply_event_with_fs(state, BrowserEvent::SetClickAction(next), fs);
     }
     ui.same_line();
     let mut dbl = state.double_click;
     if ui.checkbox("DblClick confirm", &mut dbl) {
-        apply_event(state, BrowserEvent::SetDoubleClick(dbl));
+        apply_event_with_fs(state, BrowserEvent::SetDoubleClick(dbl), fs);
     }
 
     if cancel {
-        apply_event(state, BrowserEvent::Cancel);
+        apply_event_with_fs(state, BrowserEvent::Cancel, fs);
     } else if confirm {
-        apply_event(state, BrowserEvent::Confirm);
+        apply_event_with_fs(state, BrowserEvent::Confirm, fs);
     }
 
     if let Some(err) = &state.ui_error {
@@ -262,16 +290,16 @@ fn draw_contents(
     if state.visible && ui.is_window_focused() {
         let ctrl = ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl);
         if ctrl && ui.is_key_pressed(Key::L) {
-            apply_event(state, BrowserEvent::StartPathEdit);
+            apply_event_with_fs(state, BrowserEvent::StartPathEdit, fs);
         }
         if ctrl && ui.is_key_pressed(Key::F) {
-            apply_event(state, BrowserEvent::RequestSearchFocus);
+            apply_event_with_fs(state, BrowserEvent::RequestSearchFocus, fs);
         }
         if !ui.io().want_capture_keyboard() && ui.is_key_pressed(Key::Backspace) {
-            apply_event(state, BrowserEvent::NavigateUp);
+            apply_event_with_fs(state, BrowserEvent::NavigateUp, fs);
         }
         if !state.path_edit && ui.is_key_pressed(Key::Enter) {
-            apply_event(state, BrowserEvent::Confirm);
+            apply_event_with_fs(state, BrowserEvent::Confirm, fs);
         }
     }
 
@@ -373,9 +401,9 @@ fn draw_quick_locations(ui: &Ui) -> Option<PathBuf> {
     out
 }
 
-fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2]) {
+fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2], fs: &dyn FileSystem) {
     // Gather entries
-    let mut entries: Vec<BrowserEntry> = read_entries(&state.cwd, state.show_hidden);
+    let mut entries: Vec<BrowserEntry> = read_entries_with_fs(fs, &state.cwd, state.show_hidden);
     filter_entries_in_place(
         &mut entries,
         state.mode,
@@ -426,7 +454,11 @@ fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2]) {
                             (2, SortDirection::Descending) => (SortBy::Modified, false),
                             _ => (state.sort_by, state.sort_ascending),
                         };
-                        apply_event(state, BrowserEvent::SetSort { by, ascending: asc });
+                        apply_event_with_fs(
+                            state,
+                            BrowserEvent::SetSort { by, ascending: asc },
+                            fs,
+                        );
                     }
                     specs.clear_dirty();
                 }
@@ -480,12 +512,13 @@ fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2]) {
                         .span_all_columns(false)
                         .build()
                     {
-                        apply_event(
+                        apply_event_with_fs(
                             state,
                             BrowserEvent::ClickEntry {
                                 name: e.name.clone(),
                                 is_dir: e.is_dir,
                             },
+                            fs,
                         );
                     }
                     // Optional: Double-click behavior (navigate into dir or confirm selection)
@@ -493,12 +526,13 @@ fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2]) {
                         && ui.is_item_hovered()
                         && ui.is_mouse_double_clicked(MouseButton::Left)
                     {
-                        apply_event(
+                        apply_event_with_fs(
                             state,
                             BrowserEvent::DoubleClickEntry {
                                 name: e.name.clone(),
                                 is_dir: e.is_dir,
                             },
+                            fs,
                         );
                     }
                     // Size
