@@ -262,6 +262,62 @@ pub(crate) fn apply_event_with_fs(
                 }
             }
         }
+        BrowserEvent::MoveFocus { delta, modifiers } => {
+            if state.view_names.is_empty() {
+                return;
+            }
+
+            let len = state.view_names.len();
+            let current_idx = state
+                .focused_name
+                .as_ref()
+                .and_then(|n| state.view_names.iter().position(|s| s == n));
+
+            let next_idx = match current_idx {
+                Some(i) => {
+                    let next = i as i32 + delta;
+                    next.clamp(0, (len - 1) as i32) as usize
+                }
+                None => {
+                    if delta >= 0 {
+                        0
+                    } else {
+                        len - 1
+                    }
+                }
+            };
+
+            let target = state.view_names[next_idx].clone();
+            if modifiers.shift {
+                let anchor = state
+                    .selection_anchor_name
+                    .clone()
+                    .or_else(|| state.focused_name.clone())
+                    .unwrap_or_else(|| target.clone());
+                if state.selection_anchor_name.is_none() {
+                    state.selection_anchor_name = Some(anchor.clone());
+                }
+
+                if let Some(range) = select_range_by_name(&state.view_names, &anchor, &target) {
+                    state.selected = range;
+                    state.focused_name = Some(target);
+                } else {
+                    select_single_by_name(state, target);
+                }
+            } else {
+                select_single_by_name(state, target);
+            }
+        }
+        BrowserEvent::ActivateFocused => {
+            if state.selected.is_empty() {
+                if let Some(name) = state.focused_name.clone() {
+                    state.selected.push(name);
+                }
+            }
+            if !state.selected.is_empty() {
+                apply_event_with_fs(state, BrowserEvent::Confirm, fs);
+            }
+        }
         BrowserEvent::SelectAll => {
             if state.allow_multi {
                 state.selected = state.view_names.clone();
@@ -517,5 +573,73 @@ mod tests {
 
         apply_event(&mut state, BrowserEvent::SelectAll);
         assert_eq!(state.selected, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn move_focus_selects_first_when_unfocused() {
+        let mut state = FileBrowserState::new(DialogMode::OpenFiles);
+        state.allow_multi = true;
+        state.view_names = vec!["a".into(), "b".into(), "c".into()];
+
+        apply_event(
+            &mut state,
+            BrowserEvent::MoveFocus {
+                delta: 1,
+                modifiers: mods(false, false),
+            },
+        );
+        assert_eq!(state.selected, vec!["a"]);
+        assert_eq!(state.focused_name.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn move_focus_with_shift_extends_range() {
+        let mut state = FileBrowserState::new(DialogMode::OpenFiles);
+        state.allow_multi = true;
+        state.view_names = vec!["a".into(), "b".into(), "c".into(), "d".into()];
+
+        apply_event(
+            &mut state,
+            BrowserEvent::ClickEntry {
+                name: "b".into(),
+                is_dir: false,
+                modifiers: mods(false, false),
+            },
+        );
+
+        apply_event(
+            &mut state,
+            BrowserEvent::MoveFocus {
+                delta: 2,
+                modifiers: mods(false, true),
+            },
+        );
+        assert_eq!(state.selected, vec!["b", "c", "d"]);
+        assert_eq!(state.focused_name.as_deref(), Some("d"));
+    }
+
+    #[test]
+    fn activate_focused_confirms_selection() {
+        let mut state = FileBrowserState::new(DialogMode::OpenFile);
+        state.view_names = vec!["a.txt".into()];
+        state.allow_multi = false;
+
+        apply_event(
+            &mut state,
+            BrowserEvent::ClickEntry {
+                name: "a.txt".into(),
+                is_dir: false,
+                modifiers: mods(false, false),
+            },
+        );
+        apply_event(&mut state, BrowserEvent::ActivateFocused);
+
+        assert!(!state.visible);
+        let sel = state.result.unwrap().unwrap();
+        assert_eq!(sel.paths.len(), 1);
+        assert_eq!(
+            sel.paths[0].file_name().and_then(|s| s.to_str()),
+            Some("a.txt")
+        );
     }
 }

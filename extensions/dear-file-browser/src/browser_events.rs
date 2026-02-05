@@ -43,6 +43,12 @@ pub(crate) enum BrowserEvent {
         is_dir: bool,
     },
 
+    MoveFocus {
+        delta: i32,
+        modifiers: Modifiers,
+    },
+    ActivateFocused,
+
     SelectAll,
     Confirm,
     Cancel,

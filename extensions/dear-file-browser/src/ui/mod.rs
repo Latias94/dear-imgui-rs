@@ -289,21 +289,17 @@ fn draw_contents_with_fs(
     // Keyboard shortcuts (only when the host window is focused)
     if state.visible && ui.is_window_focused() {
         let ctrl = ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl);
-        let shift = ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift);
         if ctrl && ui.is_key_pressed(Key::L) {
             apply_event_with_fs(state, BrowserEvent::StartPathEdit, fs);
         }
         if ctrl && ui.is_key_pressed(Key::F) {
             apply_event_with_fs(state, BrowserEvent::RequestSearchFocus, fs);
         }
-        if ctrl && ui.is_key_pressed(Key::A) && !shift {
-            apply_event_with_fs(state, BrowserEvent::SelectAll, fs);
-        }
         if !ui.io().want_capture_keyboard() && ui.is_key_pressed(Key::Backspace) {
             apply_event_with_fs(state, BrowserEvent::NavigateUp, fs);
         }
-        if !state.path_edit && ui.is_key_pressed(Key::Enter) {
-            apply_event_with_fs(state, BrowserEvent::Confirm, fs);
+        if !state.path_edit && !ui.io().want_text_input() && ui.is_key_pressed(Key::Enter) {
+            apply_event_with_fs(state, BrowserEvent::ActivateFocused, fs);
         }
     }
 
@@ -475,6 +471,37 @@ fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2], fs: &d
                 state.dirs_first,
             );
             state.view_names = entries.iter().map(|e| e.name.clone()).collect();
+
+            if ui.is_window_focused() && !ui.io().want_text_input() {
+                let modifiers = crate::browser_events::Modifiers {
+                    ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
+                    shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
+                };
+
+                if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
+                    apply_event_with_fs(state, BrowserEvent::SelectAll, fs);
+                }
+                if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
+                    apply_event_with_fs(
+                        state,
+                        BrowserEvent::MoveFocus {
+                            delta: -1,
+                            modifiers,
+                        },
+                        fs,
+                    );
+                }
+                if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
+                    apply_event_with_fs(
+                        state,
+                        BrowserEvent::MoveFocus {
+                            delta: 1,
+                            modifiers,
+                        },
+                        fs,
+                    );
+                }
+            }
 
             // Rows
             if entries.is_empty() {
