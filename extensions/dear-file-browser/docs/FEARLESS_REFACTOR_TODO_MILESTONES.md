@@ -27,11 +27,16 @@ Goal: establish safety nets and constraints before moving code.
 
 ### Epic 0.2 — Refactor constraints
 
-- [ ] Task: Define feature flags upfront (placeholders ok)
-  - `regex-filters` (optional)
-  - `thumbnails` (optional)
-  - `thumbnails-image` (optional, depends on `image`)
-  - Acceptance: `Cargo.toml` documents future flags (even if unused initially).
+- [x] Task: Define feature flags upfront (placeholders ok)
+  - Current:
+    - `imgui` (ImGui backend; includes `regex`)
+    - `native-rfd` (native OS dialogs via `rfd`)
+    - `tracing` (internal spans)
+    - `thumbnails-image` (optional decoding via `image`)
+  - Planned (as-needed):
+    - `style-callback` (dynamic file style provider)
+    - `filters-igfd-parser` (parse IGFD string filter syntax like `Name{...}`)
+  - Acceptance: `Cargo.toml` has a documented place for new feature switches and builds without optional deps.
 
 Exit criteria:
 
@@ -68,8 +73,12 @@ Goal: move domain logic out of ImGui rendering into a core module.
 
 ### Epic 2.1 — Create core models
 
-- [ ] Task: Introduce `EntryId`, `FileMeta`, `DirSnapshot`
-  - Acceptance: UI no longer stores entries as ad-hoc structs local to rendering.
+- [x] Task: Extract `FileDialogCore` (no ImGui types) and drive it from UI
+  - Acceptance: selection/navigation/filter/sort/save policies live in core and are unit-testable.
+- [ ] Task: Introduce stable identities (`EntryId`) + richer metadata (`FileMeta`) + `DirSnapshot`
+  - Acceptance: selection/focus/anchor no longer depend on entry base names (handles duplicates and renames robustly).
+- [ ] Task: Switch selection storage to IDs (`IndexSet<EntryId>`) with `focused` + `anchor`
+  - Acceptance: Ctrl/Shift range semantics are covered by unit tests and remain stable under sorting/filtering.
 
 ### Epic 2.2 — Event model
 
@@ -78,8 +87,10 @@ Goal: move domain logic out of ImGui rendering into a core module.
 
 ### Epic 2.3 — State machine
 
-- [ ] Task: Create `FileDialogCore` with `handle_event`, `view`, `take_result`.
-  - Acceptance: existing UI uses core view model to render the main table and breadcrumb/path edit.
+- [x] Task: Core produces a deterministic `Result` and supports overwrite confirmation flow
+  - Acceptance: core can be driven without ImGui to reach ConfirmOverwrite/Finished.
+- [ ] Task: Add explicit `handle_event` + `ViewModel` outputs (optional but recommended)
+  - Acceptance: UI becomes mostly “render view + translate input to events”.
 
 Exit criteria:
 
@@ -116,13 +127,20 @@ Goal: allow alternative filesystem backends and system devices integration.
 
 ### Epic 4.1 — `FileSystem` trait + default implementation
 
-- [x] Task: Add `FileSystem` trait (read_dir, drives/devices, canonicalize, exists, is_dir, mkdir if needed)
-  - Acceptance: default uses `std::fs`.
+- [x] Task: Add a minimal `FileSystem` trait (`read_dir`, `canonicalize`, `metadata`, `create_dir`)
+  - Acceptance: default uses `std::fs` and tests can swap in a mock filesystem.
 
 ### Epic 4.2 — Replace direct `std::fs` usage in core/UI
 
 - [x] Task: all filesystem accesses go through `FileSystem`
   - Acceptance: no `std::fs::read_dir` inside UI module.
+
+### Epic 4.3 — Expand filesystem operations (parity enabler)
+
+- [ ] Task: extend `FileSystem` with optional operations:
+  - `rename`, `remove_file`, `remove_dir`, `create_dir_all`
+  - `exists`, `is_dir` convenience (or richer `metadata`)
+  - Acceptance: the UI can implement rename/delete/new-folder reliably without `std::fs` calls.
 
 Exit criteria:
 
@@ -148,8 +166,8 @@ Goal: implement an IGFD-like Places pane with groups and persistence.
 
 ### Epic 5.3 — System devices integration
 
-- [x] Task: default "Devices" group from `FileSystem::drives()/devices()`
-  - Acceptance: Windows shows drives; other OS provide at least root/home entries.
+- [x] Task: default "Devices" group in Places
+  - Acceptance: Windows shows drives; other OS provide at least root/home entries (best-effort).
 
 Exit criteria:
 
@@ -172,6 +190,14 @@ Goal: bring selection and keyboard navigation close to IGFD.
 - [x] Task: Shift-click selects ranges
 - [x] Task: Ctrl+A selects all visible
   - Acceptance: works with filtering/search (visible set only).
+- [ ] Task: support a selection cap (`max_selection`)
+  - Notes:
+    - IGFD supports `0 => infinite`, `1 => single`, `n => n files`.
+    - We should support this independently from `DialogMode` (i.e. `OpenFiles` + cap = `n`).
+  - Acceptance:
+    - core never holds more than `max_selection` selected file entries
+    - confirm is blocked (or selection is auto-trimmed deterministically) when cap would be exceeded
+    - unit tests cover Ctrl/Shift behavior under the cap
 
 ### Epic 6.3 — Keyboard navigation
 
@@ -318,6 +344,8 @@ Goal: close remaining UX gaps vs IGFD and document final API.
 ### Epic 12.2 — Directory creation (optional)
 
 - [x] Task: "New Folder" action with validation and error handling
+- [x] Task: after creating, auto-select + reveal the new folder in the list/grid
+  - Acceptance: next frame scrolls the list to the created folder and keyboard navigation continues from it.
 
 ### Epic 12.3 — Documentation & migration notes
 
@@ -332,6 +360,73 @@ Goal: close remaining UX gaps vs IGFD and document final API.
 Exit criteria:
 
 - A parity checklist is completed with remaining known deviations documented.
+
+---
+
+## Milestone 13 — Validation Buttons & Host Polish
+
+Goal: reach IGFD-grade “dialog feel” by making the bottom action row configurable and closing host gaps.
+
+### Epic 13.1 — Validation buttons layout/config
+
+- [ ] Task: add a `ValidationButtonsConfig` to UI state:
+  - placement (left/right), order (Ok/Cancel vs Cancel/Ok), inversion, per-button width
+  - label overrides (e.g. "Open", "Save", "Select")
+  - Acceptance: a demo shows IGFD-like button tuning without forking UI code.
+
+### Epic 13.2 — First-class modal host (optional convenience)
+
+- [ ] Task: add `show_modal_windowed()` (or a `ModalHostConfig`) that hosts `draw_contents()` inside a modal popup
+  - Acceptance: callers can get IGFD-style modal behavior without manually wiring popup open/close logic.
+
+Exit criteria:
+
+- “Ok/Cancel” row is configurable and can match IGFD UX expectations.
+
+---
+
+## Milestone 14 — File Operations (Rename/Delete)
+
+Goal: close the largest feature gap vs IGFD by adding core-supported file operations.
+
+### Epic 14.1 — Rename
+
+- [ ] Task: add an inline rename flow (F2 / context menu)
+  - Acceptance:
+    - rename uses `FileSystem::rename` (no direct `std::fs`)
+    - selection + focus transfer to the renamed entry
+    - handles collision / invalid name with user-visible error
+
+### Epic 14.2 — Delete
+
+- [ ] Task: add a delete flow (Del / context menu) with confirmation
+  - Acceptance:
+    - delete uses `remove_file` / `remove_dir` and shows a confirmation modal
+    - after delete, directory cache is invalidated and selection is updated deterministically
+
+Exit criteria:
+
+- Users can do common file management tasks without leaving the dialog.
+
+---
+
+## Milestone 15 — Sorting & Columns (Extension, Type, Natural)
+
+Goal: match IGFD’s “natural sorting for filenames and extension on demand” and improve scanability.
+
+### Epic 15.1 — Sort by extension
+
+- [ ] Task: add `SortBy::Extension` (multi-layer aware)
+  - Acceptance: `.tar.gz` and `.vcxproj.filters` sort as expected; natural mode optional.
+
+### Epic 15.2 — Optional columns & tuning
+
+- [ ] Task: add column visibility knobs (Size/Modified/Preview) and persist per dialog instance
+  - Acceptance: callers can hide “Modified” and run a compact list view.
+
+Exit criteria:
+
+- Sorting and list columns can be tuned to closely resemble IGFD setups.
 
 ---
 

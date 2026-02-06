@@ -8,11 +8,12 @@ Scope: **the ImGui-embedded browser/dialog** (not OS-native dialogs via `rfd`, w
 
 ## 1. Context & Motivation
 
-Current `dear-file-browser` is intentionally lightweight:
+`dear-file-browser` started lightweight but is actively evolving toward an IGFD-grade dialog:
 
-- A single `FileDialogState` that directly renders a fixed ImGui window (`show_*()` via `FileDialogExt`).
-- Basic navigation (breadcrumbs + Ctrl+L path edit), search, sorting, and simple extension filters.
-- A small "quick locations" pane (home/root/drives).
+- `FileDialogCore` (domain logic) + `FileDialogUiState` (transient UI state).
+- `DialogManager` for multi-instance Open/Display-style workflows.
+- Places (devices + bookmarks) with export/import, custom panes, file styles, and thumbnails.
+- Advanced filters (multi-layer extensions, wildcard `*`/`?`, `((...))` regex tokens) and natural sorting.
 
 IGFD, in contrast, is a full dialog system with:
 
@@ -30,6 +31,34 @@ This refactor aims to adopt IGFD’s **capabilities and concepts** while keeping
 - A Rust-first API surface.
 - Renderer/backend agnostic thumbnail handling.
 - Testable business logic (core) without depending on Dear ImGui types.
+
+---
+
+## 1.1 IGFD Parity Snapshot
+
+This table maps IGFD’s headline feature list to the current ImGui backend of `dear-file-browser`.
+The goal is *capability parity*, not necessarily API/flag parity.
+
+Legend: ✅ done, 🟡 partial, ❌ missing / planned.
+
+| IGFD capability | dear-file-browser | Notes / gaps |
+|---|---:|---|
+| Call/Display split + multi instances | ✅ | `DialogManager` + stable ids. |
+| Custom pane that can block confirm | ✅ | `CustomPane` + `ConfirmGate`. |
+| File styles (type/ext/name/contains/regex/…) | ✅ | Rule-based registry; callback-based provider + font mapping TBD. |
+| Multi-selection (Ctrl/Shift) + Ctrl+A | ✅ | Unlimited multi-select for `OpenFiles`; no “max N” cap yet. |
+| Keyboard navigation + type-to-select | ✅ | Works in list & grid. |
+| Places: devices + bookmarks + custom groups | 🟡 | Devices + bookmarks exist; interactive editing (add/remove/rename groups/items) is not complete. |
+| Directory manual entry (right-click breadcrumb) | ✅ | Supported. |
+| “Parallel directory” popup on path separator | ✅ | Supported via breadcrumb separator popup. |
+| Confirm overwrite (Save) | ✅ | `SavePolicy` + modal prompt. |
+| Result modes (path+name+selection, ext policies) | 🟡 | Returns `Selection { paths }`; extension policy matches IGFD intent; no “GetFileName-only” convenience yet. |
+| Thumbnails + GPU lifecycle hooks | ✅ | Pipeline + LRU + optional `thumbnails-image` decoding + backend upload/destroy. |
+| Embedded / custom host | ✅ | `draw_contents*()` + window host config; “modal host” can be caller-owned (popup/modal). |
+| Validation buttons tuning (placement/width/invert) | ❌ | Needs a “buttons layout” config and UI refactor. |
+| Filter groups / collection syntax (`Name{...}`) | 🟡 | Multiple named filters exist; no IGFD-string parser/collection syntax yet. |
+| Natural sort for extensions on demand | 🟡 | Natural sort for names exists; “Sort by extension” is not implemented. |
+| File operations (rename/delete/copy/paste, etc.) | ❌ | Currently only “New Folder”; FS trait needs expansion. |
 
 ---
 
