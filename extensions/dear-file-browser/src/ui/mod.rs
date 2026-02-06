@@ -121,73 +121,28 @@ impl<'ui> FileBrowser<'ui> {
         &self,
         state: &mut FileDialogState,
     ) -> Option<Result<Selection, FileDialogError>> {
-        self.draw_contents_with_fs(state, &StdFileSystem)
+        self.draw_contents_with(state, &StdFileSystem, None, None)
     }
 
-    /// Draw only the contents of the file browser (no window/modal host) using a custom filesystem.
-    pub fn draw_contents_with_fs(
-        &self,
-        state: &mut FileDialogState,
-        fs: &dyn FileSystem,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        draw_contents_with_fs_and_hooks(self.ui, state, fs, None, None)
-    }
-
-    /// Draw only the contents of the file browser (no window/modal host) with a thumbnail backend.
+    /// Draw only the contents of the file browser (no window/modal host) with explicit hooks.
     ///
-    /// When `state.ui.thumbnails_enabled` is true, the UI will request thumbnails for visible
-    /// entries and call `maintain()` each frame to decode/upload and destroy evicted textures.
-    pub fn draw_contents_with_thumbnail_backend(
-        &self,
-        state: &mut FileDialogState,
-        backend: &mut ThumbnailBackend<'_>,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        self.draw_contents_with_fs_and_thumbnail_backend(state, &StdFileSystem, backend)
-    }
-
-    /// Draw only the contents of the file browser (no window/modal host) using a custom filesystem
-    /// and a thumbnail backend.
-    pub fn draw_contents_with_fs_and_thumbnail_backend(
+    /// - `fs`: filesystem backend used by core operations.
+    /// - `custom_pane`: optional custom pane that can render extra UI and block confirm.
+    /// - `thumbnails_backend`: optional backend for thumbnail decode/upload lifecycle.
+    pub fn draw_contents_with(
         &self,
         state: &mut FileDialogState,
         fs: &dyn FileSystem,
-        backend: &mut ThumbnailBackend<'_>,
+        mut custom_pane: Option<&mut dyn CustomPane>,
+        mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
     ) -> Option<Result<Selection, FileDialogError>> {
-        draw_contents_with_fs_and_hooks(self.ui, state, fs, None, Some(backend))
-    }
-
-    /// Draw only the contents of the file browser (no window/modal host) with a custom pane.
-    ///
-    /// The pane can draw additional UI below the file list and can block confirmation.
-    pub fn draw_contents_with_custom_pane(
-        &self,
-        state: &mut FileDialogState,
-        custom_pane: &mut dyn CustomPane,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        self.draw_contents_with_fs_and_custom_pane(state, &StdFileSystem, custom_pane)
-    }
-
-    /// Draw only the contents of the file browser (no window/modal host) using a custom filesystem
-    /// and a custom pane.
-    pub fn draw_contents_with_fs_and_custom_pane(
-        &self,
-        state: &mut FileDialogState,
-        fs: &dyn FileSystem,
-        custom_pane: &mut dyn CustomPane,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        draw_contents_with_fs_and_hooks(self.ui, state, fs, Some(custom_pane), None)
-    }
-
-    /// Draw only the contents of the file browser (no window/modal host) using a custom filesystem,
-    /// a custom pane and a thumbnail backend.
-    pub fn draw_contents_with_fs_and_custom_pane_and_thumbnail_backend(
-        &self,
-        state: &mut FileDialogState,
-        fs: &dyn FileSystem,
-        custom_pane: &mut dyn CustomPane,
-        backend: &mut ThumbnailBackend<'_>,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        draw_contents_with_fs_and_hooks(self.ui, state, fs, Some(custom_pane), Some(backend))
+        draw_contents_with_fs_and_hooks(
+            self.ui,
+            state,
+            fs,
+            custom_pane.take(),
+            thumbnails_backend.take(),
+        )
     }
 
     /// Draw the file browser in a standard ImGui window with default host config.
@@ -204,22 +159,11 @@ impl<'ui> FileBrowser<'ui> {
         state: &mut FileDialogState,
         cfg: &WindowHostConfig,
     ) -> Option<Result<Selection, FileDialogError>> {
-        self.show_windowed_with_fs(state, cfg, &StdFileSystem)
+        self.show_windowed_with(state, cfg, &StdFileSystem, None, None)
     }
 
-    /// Draw the file browser in a standard ImGui window using a custom filesystem.
-    pub fn show_windowed_with_fs(
-        &self,
-        state: &mut FileDialogState,
-        cfg: &WindowHostConfig,
-        fs: &dyn FileSystem,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        self.show_windowed_with_fs_and_hooks(state, cfg, fs, None, None)
-    }
-
-    /// Draw the file browser in a standard ImGui window using a custom filesystem, custom pane,
-    /// and/or thumbnail backend.
-    pub fn show_windowed_with_fs_and_hooks(
+    /// Draw the file browser in a standard ImGui window with explicit hooks.
+    pub fn show_windowed_with(
         &self,
         state: &mut FileDialogState,
         cfg: &WindowHostConfig,
@@ -260,22 +204,11 @@ impl<'ui> FileBrowser<'ui> {
         state: &mut FileDialogState,
     ) -> Option<Result<Selection, FileDialogError>> {
         let cfg = ModalHostConfig::for_mode(state.core.mode);
-        self.show_modal_with_fs(state, &cfg, &StdFileSystem)
+        self.show_modal_with(state, &cfg, &StdFileSystem, None, None)
     }
 
-    /// Draw the file browser in an ImGui modal popup using the given host configuration.
-    pub fn show_modal_with_fs(
-        &self,
-        state: &mut FileDialogState,
-        cfg: &ModalHostConfig,
-        fs: &dyn FileSystem,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        self.show_modal_with_fs_and_hooks(state, cfg, fs, None, None)
-    }
-
-    /// Draw the file browser in an ImGui modal popup using a custom filesystem, custom pane,
-    /// and/or thumbnail backend.
-    pub fn show_modal_with_fs_and_hooks(
+    /// Draw the file browser in an ImGui modal popup with explicit hooks.
+    pub fn show_modal_with(
         &self,
         state: &mut FileDialogState,
         cfg: &ModalHostConfig,
@@ -330,38 +263,6 @@ impl<'ui> FileBrowser<'ui> {
             self.ui.close_current_popup();
         }
         out
-    }
-
-    /// Draw the file browser in a standard ImGui window using a custom filesystem and custom pane.
-    pub fn show_windowed_with_fs_and_custom_pane(
-        &self,
-        state: &mut FileDialogState,
-        cfg: &WindowHostConfig,
-        fs: &dyn FileSystem,
-        custom_pane: Option<&mut dyn CustomPane>,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        self.show_windowed_with_fs_and_hooks(state, cfg, fs, custom_pane, None)
-    }
-
-    /// Draw the file browser in a standard ImGui window using a thumbnail backend.
-    pub fn show_windowed_with_thumbnail_backend(
-        &self,
-        state: &mut FileDialogState,
-        cfg: &WindowHostConfig,
-        backend: &mut ThumbnailBackend<'_>,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        self.show_windowed_with_fs_and_thumbnail_backend(state, cfg, &StdFileSystem, backend)
-    }
-
-    /// Draw the file browser in a standard ImGui window using a custom filesystem and thumbnail backend.
-    pub fn show_windowed_with_fs_and_thumbnail_backend(
-        &self,
-        state: &mut FileDialogState,
-        cfg: &WindowHostConfig,
-        fs: &dyn FileSystem,
-        backend: &mut ThumbnailBackend<'_>,
-    ) -> Option<Result<Selection, FileDialogError>> {
-        self.show_windowed_with_fs_and_hooks(state, cfg, fs, None, Some(backend))
     }
 }
 

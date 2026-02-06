@@ -248,7 +248,10 @@ let cfg = ModalHostConfig {
 };
 
 let fs = dear_file_browser::StdFileSystem;
-if let Some(res) = ui.file_browser().show_modal_with_fs(&mut state, &cfg, &fs) {
+if let Some(res) = ui
+    .file_browser()
+    .show_modal_with(&mut state, &cfg, &fs, None, None)
+{
     // handle res
 }
 ```
@@ -312,7 +315,7 @@ impl CustomPane for MyPane {
 let mut pane = MyPane::default();
 if let Some(res) = ui
     .file_browser()
-    .draw_contents_with_custom_pane(&mut state, &mut pane)
+    .draw_contents_with(&mut state, &dear_file_browser::StdFileSystem, Some(&mut pane), None)
 {
     // handle res
 }
@@ -452,7 +455,9 @@ let mut backend = ThumbnailBackend {
 };
 
 // The UI will call `state.ui.thumbnails.maintain(&mut backend)` internally when drawing.
-let _ = ui.file_browser().draw_contents_with_thumbnail_backend(&mut state, &mut backend);
+let _ = ui
+    .file_browser()
+    .draw_contents_with(&mut state, &dear_file_browser::StdFileSystem, None, Some(&mut backend));
 ```
 
 Optional decoder (`thumbnails-image` feature):

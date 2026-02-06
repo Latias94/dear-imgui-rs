@@ -94,7 +94,7 @@ impl DialogManager {
         let cfg = WindowHostConfig::for_mode(state.core.mode);
         let res = ui
             .file_browser()
-            .show_windowed_with_fs(state, &cfg, self.fs.as_ref());
+            .show_windowed_with(state, &cfg, self.fs.as_ref(), None, None);
         if res.is_some() {
             self.browsers.remove(&id);
         }
@@ -114,7 +114,7 @@ impl DialogManager {
         let state = self.browsers.get_mut(&id)?;
         let res = ui
             .file_browser()
-            .show_windowed_with_fs(state, cfg, self.fs.as_ref());
+            .show_windowed_with(state, cfg, self.fs.as_ref(), None, None);
         if res.is_some() {
             self.browsers.remove(&id);
         }
@@ -133,7 +133,7 @@ impl DialogManager {
         let state = self.browsers.get_mut(&id)?;
         let res = ui
             .file_browser()
-            .draw_contents_with_fs(state, self.fs.as_ref());
+            .draw_contents_with(state, self.fs.as_ref(), None, None);
         if res.is_some() {
             self.browsers.remove(&id);
         }
