@@ -5,6 +5,13 @@ use crate::core::{
 };
 use crate::places::Places;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PlacesIoMode {
+    #[default]
+    Export,
+    Import,
+}
+
 /// State for the in-UI file browser.
 ///
 /// This is intentionally independent of ImGui types to keep the core testable.
@@ -66,6 +73,11 @@ pub struct FileBrowserState {
 
     /// User-defined places shown in the left pane (bookmarks).
     pub places: Places,
+
+    pub(crate) places_io_mode: PlacesIoMode,
+    pub(crate) places_io_buffer: String,
+    pub(crate) places_io_open_next: bool,
+    pub(crate) places_io_error: Option<String>,
 
     pub(crate) focused_name: Option<String>,
     pub(crate) selection_anchor_name: Option<String>,
@@ -131,6 +143,10 @@ impl FileBrowserState {
             empty_hint_color: [0.7, 0.7, 0.7, 1.0],
             empty_hint_static_message: None,
             places: Places::default(),
+            places_io_mode: PlacesIoMode::Export,
+            places_io_buffer: String::new(),
+            places_io_open_next: false,
+            places_io_error: None,
 
             focused_name: None,
             selection_anchor_name: None,

@@ -11,6 +11,7 @@ use crate::browser_events::BrowserEvent;
 pub use crate::browser_state::FileBrowserState;
 use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy};
 use crate::fs::{FileSystem, StdFileSystem};
+use crate::places::Places;
 
 /// Configuration for hosting the file browser in an ImGui window.
 #[derive(Clone, Debug)]
@@ -209,6 +210,8 @@ fn draw_contents_with_fs(
                 });
         }
     }
+
+    draw_places_io_modal(ui, state);
 
     ui.separator();
     // Footer: file name (Save) + buttons
@@ -426,7 +429,95 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileBrowserState) -> Option<PathBuf
     if ui.button("+ Add current") {
         state.places.add_bookmark_path(state.cwd.clone());
     }
+    ui.same_line();
+    if ui.button("Export") {
+        state.places_io_mode = crate::browser_state::PlacesIoMode::Export;
+        state.places_io_buffer = state.places.serialize_compact();
+        state.places_io_error = None;
+        state.places_io_open_next = true;
+    }
+    ui.same_line();
+    if ui.button("Import") {
+        state.places_io_mode = crate::browser_state::PlacesIoMode::Import;
+        state.places_io_buffer.clear();
+        state.places_io_error = None;
+        state.places_io_open_next = true;
+    }
     out
+}
+
+fn draw_places_io_modal(ui: &Ui, state: &mut FileBrowserState) {
+    if state.places_io_open_next {
+        ui.open_popup("Places");
+        state.places_io_open_next = false;
+    }
+
+    if let Some(_popup) = ui.begin_modal_popup("Places") {
+        let is_export = state.places_io_mode == crate::browser_state::PlacesIoMode::Export;
+
+        ui.text("Bookmarks persistence (compact format)");
+        ui.separator();
+
+        if ui.button("Export") {
+            state.places_io_mode = crate::browser_state::PlacesIoMode::Export;
+            state.places_io_buffer = state.places.serialize_compact();
+            state.places_io_error = None;
+        }
+        ui.same_line();
+        if ui.button("Import") {
+            state.places_io_mode = crate::browser_state::PlacesIoMode::Import;
+            state.places_io_error = None;
+        }
+        ui.same_line();
+        if ui.button("Close") {
+            ui.close_current_popup();
+            state.places_io_error = None;
+        }
+
+        ui.separator();
+
+        let avail = ui.content_region_avail();
+        let size = [avail[0].max(200.0), (avail[1] - 70.0).max(120.0)];
+        if is_export {
+            ui.input_text_multiline("##places_export", &mut state.places_io_buffer, size)
+                .read_only(true)
+                .build();
+        } else {
+            ui.input_text_multiline("##places_import", &mut state.places_io_buffer, size)
+                .build();
+
+            if ui.button("Replace") {
+                match Places::deserialize_compact(&state.places_io_buffer) {
+                    Ok(p) => {
+                        state.places = p;
+                        state.places_io_error = None;
+                    }
+                    Err(e) => {
+                        state.places_io_error = Some(e.to_string());
+                    }
+                }
+            }
+            ui.same_line();
+            if ui.button("Merge") {
+                match Places::deserialize_compact(&state.places_io_buffer) {
+                    Ok(p) => {
+                        for bm in p.bookmarks {
+                            state.places.add_bookmark(bm.label, bm.path);
+                        }
+                        state.places_io_error = None;
+                    }
+                    Err(e) => {
+                        state.places_io_error = Some(e.to_string());
+                    }
+                }
+            }
+        }
+
+        if let Some(err) = &state.places_io_error {
+            ui.separator();
+            ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
+        }
+    }
 }
 
 fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2], fs: &dyn FileSystem) {
