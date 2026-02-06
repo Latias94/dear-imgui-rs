@@ -5,7 +5,7 @@ use crate::core::{
     ClickAction, DialogMode, ExtensionPolicy, FileDialogError, FileFilter, SavePolicy, Selection,
     SortBy,
 };
-use crate::fs::FileSystem;
+use crate::fs::{FileSystem, FsEntry};
 use crate::places::Places;
 use indexmap::IndexSet;
 use regex::RegexBuilder;
@@ -103,6 +103,42 @@ impl EntryId {
         let mut hasher = DefaultHasher::new();
         hasher.write(path.to_string_lossy().as_bytes());
         Self::new(hasher.finish())
+    }
+}
+
+/// Decision returned by a scan hook for one filesystem entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScanHookAction {
+    /// Keep the entry in the directory snapshot.
+    Keep,
+    /// Drop the entry before filter/sort/view processing.
+    Drop,
+}
+
+type ScanHookFn = dyn FnMut(&mut FsEntry) -> ScanHookAction + 'static;
+
+struct ScanHook {
+    inner: Box<ScanHookFn>,
+}
+
+impl std::fmt::Debug for ScanHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScanHook").finish_non_exhaustive()
+    }
+}
+
+impl ScanHook {
+    fn new<F>(hook: F) -> Self
+    where
+        F: FnMut(&mut FsEntry) -> ScanHookAction + 'static,
+    {
+        Self {
+            inner: Box::new(hook),
+        }
+    }
+
+    fn apply(&mut self, entry: &mut FsEntry) -> ScanHookAction {
+        (self.inner)(entry)
     }
 }
 
@@ -212,6 +248,7 @@ pub struct FileDialogCore {
     view_ids: Vec<EntryId>,
     entries: Vec<DirEntry>,
 
+    scan_hook: Option<ScanHook>,
     dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
     last_view_key: Option<ViewKey>,
@@ -246,6 +283,7 @@ impl FileDialogCore {
             view_names: Vec::new(),
             view_ids: Vec::new(),
             entries: Vec::new(),
+            scan_hook: None,
             dir_snapshot: DirSnapshot {
                 cwd: PathBuf::new(),
                 entry_count: 0,
@@ -321,6 +359,29 @@ impl FileDialogCore {
     pub fn invalidate_dir_cache(&mut self) {
         self.dir_snapshot_dirty = true;
         self.last_view_key = None;
+    }
+
+    /// Installs a scan hook that can mutate or drop filesystem entries.
+    ///
+    /// The hook runs before filtering/sorting and before snapshot ids are built.
+    /// Calling this invalidates the directory cache.
+    pub fn set_scan_hook<F>(&mut self, hook: F)
+    where
+        F: FnMut(&mut FsEntry) -> ScanHookAction + 'static,
+    {
+        self.scan_hook = Some(ScanHook::new(hook));
+        self.invalidate_dir_cache();
+    }
+
+    /// Clears the scan hook and reverts to raw filesystem entries.
+    ///
+    /// Calling this invalidates the directory cache.
+    pub fn clear_scan_hook(&mut self) {
+        if self.scan_hook.is_none() {
+            return;
+        }
+        self.scan_hook = None;
+        self.invalidate_dir_cache();
     }
 
     /// Returns the final result once the user confirms/cancels, and clears it.
@@ -456,7 +517,7 @@ impl FileDialogCore {
             return;
         }
 
-        self.dir_snapshot = read_entries_snapshot_with_fs(fs, &self.cwd);
+        self.dir_snapshot = read_entries_snapshot_with_fs(fs, &self.cwd, self.scan_hook.as_mut());
         self.dir_snapshot_dirty = false;
         // Always rebuild the view after a filesystem refresh even if the view inputs didn't change.
         self.last_view_key = None;
@@ -1253,7 +1314,35 @@ fn entry_id_from_path(path: &Path, is_dir: bool) -> EntryId {
     EntryId::new(hasher.finish())
 }
 
-fn read_entries_snapshot_with_fs(fs: &dyn FileSystem, dir: &Path) -> DirSnapshot {
+fn sanitize_scanned_entry(mut entry: FsEntry, dir: &Path) -> Option<FsEntry> {
+    if entry.path.as_os_str().is_empty() {
+        if entry.name.trim().is_empty() {
+            return None;
+        }
+        entry.path = dir.join(&entry.name);
+    }
+
+    if entry.name.trim().is_empty() {
+        let inferred_name = entry
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .filter(|n| !n.is_empty())?;
+        entry.name = inferred_name;
+    }
+
+    if entry.is_dir {
+        entry.size = None;
+    }
+
+    Some(entry)
+}
+
+fn read_entries_snapshot_with_fs(
+    fs: &dyn FileSystem,
+    dir: &Path,
+    mut scan_hook: Option<&mut ScanHook>,
+) -> DirSnapshot {
     let mut out = Vec::new();
     let Ok(rd) = fs.read_dir(dir) else {
         return DirSnapshot {
@@ -1262,16 +1351,26 @@ fn read_entries_snapshot_with_fs(fs: &dyn FileSystem, dir: &Path) -> DirSnapshot
             entries: out,
         };
     };
-    for e in rd {
+    for mut entry in rd {
+        if let Some(hook) = scan_hook.as_deref_mut() {
+            if matches!(hook.apply(&mut entry), ScanHookAction::Drop) {
+                continue;
+            }
+        }
+
+        let Some(entry) = sanitize_scanned_entry(entry, dir) else {
+            continue;
+        };
+
         let meta = FileMeta {
-            is_dir: e.is_dir,
-            size: e.size,
-            modified: e.modified,
+            is_dir: entry.is_dir,
+            size: entry.size,
+            modified: entry.modified,
         };
         out.push(DirEntry {
-            id: entry_id_from_path(&e.path, meta.is_dir),
-            name: e.name,
-            path: e.path,
+            id: entry_id_from_path(&entry.path, meta.is_dir),
+            name: entry.name,
+            path: entry.path,
             is_dir: meta.is_dir,
             size: meta.size,
             modified: meta.modified,
@@ -1289,6 +1388,7 @@ mod tests {
     use super::*;
     use crate::fs::StdFileSystem;
     use std::cell::Cell;
+    use std::time::Duration;
 
     fn mods(ctrl: bool, shift: bool) -> Modifiers {
         Modifiers { ctrl, shift }
@@ -1809,6 +1909,136 @@ mod tests {
         assert!(core.pending_overwrite().is_none());
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
+    }
+
+    #[test]
+    fn scan_hook_can_drop_entries_before_snapshot() {
+        let fs = TestFs {
+            entries: vec![
+                crate::fs::FsEntry {
+                    name: "keep.txt".into(),
+                    path: PathBuf::from("/tmp/keep.txt"),
+                    is_dir: false,
+                    size: Some(1),
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "drop.txt".into(),
+                    path: PathBuf::from("/tmp/drop.txt"),
+                    is_dir: false,
+                    size: Some(2),
+                    modified: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_hook(|entry| {
+            if entry.name == "drop.txt" {
+                ScanHookAction::Drop
+            } else {
+                ScanHookAction::Keep
+            }
+        });
+
+        core.rescan_if_needed(&fs);
+
+        let names: Vec<&str> = core
+            .entries()
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["keep.txt"]);
+        assert_eq!(core.dir_snapshot.entry_count, 1);
+    }
+
+    #[test]
+    fn scan_hook_can_mutate_entry_metadata() {
+        let fs = TestFs {
+            entries: vec![crate::fs::FsEntry {
+                name: "a.txt".into(),
+                path: PathBuf::from("/tmp/a.txt"),
+                is_dir: false,
+                size: Some(12),
+                modified: Some(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(7)),
+            }],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_hook(|entry| {
+            entry.name = "renamed.log".to_string();
+            entry.path = PathBuf::from("/tmp/renamed.log");
+            entry.size = Some(99);
+            entry.modified = None;
+            ScanHookAction::Keep
+        });
+
+        core.rescan_if_needed(&fs);
+
+        let entry = core
+            .entries()
+            .iter()
+            .find(|entry| entry.name == "renamed.log")
+            .expect("mutated entry should exist");
+        assert_eq!(entry.path, PathBuf::from("/tmp/renamed.log"));
+        assert_eq!(entry.size, Some(99));
+        assert_eq!(entry.modified, None);
+    }
+
+    #[test]
+    fn scan_hook_invalid_mutation_is_skipped_safely() {
+        let fs = TestFs {
+            entries: vec![crate::fs::FsEntry {
+                name: "a.txt".into(),
+                path: PathBuf::from("/tmp/a.txt"),
+                is_dir: false,
+                size: Some(12),
+                modified: None,
+            }],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_hook(|entry| {
+            entry.name.clear();
+            entry.path = PathBuf::new();
+            ScanHookAction::Keep
+        });
+
+        core.rescan_if_needed(&fs);
+
+        assert!(core.entries().is_empty());
+        assert_eq!(core.dir_snapshot.entry_count, 0);
+    }
+
+    #[test]
+    fn clear_scan_hook_restores_raw_listing() {
+        let fs = TestFs {
+            entries: vec![crate::fs::FsEntry {
+                name: "a.txt".into(),
+                path: PathBuf::from("/tmp/a.txt"),
+                is_dir: false,
+                size: Some(1),
+                modified: None,
+            }],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_hook(|_| ScanHookAction::Drop);
+        core.rescan_if_needed(&fs);
+        assert!(core.entries().is_empty());
+
+        core.clear_scan_hook();
+        core.rescan_if_needed(&fs);
+        assert_eq!(core.entries().len(), 1);
+        assert_eq!(core.entries()[0].name, "a.txt");
     }
 
     #[test]

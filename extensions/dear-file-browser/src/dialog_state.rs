@@ -686,6 +686,21 @@ impl FileDialogState {
     pub fn is_open(&self) -> bool {
         self.ui.visible
     }
+
+    /// Installs a scan hook on the core listing pipeline.
+    ///
+    /// The hook runs during directory scan and can mutate or drop entries.
+    pub fn set_scan_hook<F>(&mut self, hook: F)
+    where
+        F: FnMut(&mut crate::FsEntry) -> crate::ScanHookAction + 'static,
+    {
+        self.core.set_scan_hook(hook);
+    }
+
+    /// Clears the scan hook and restores raw filesystem listing.
+    pub fn clear_scan_hook(&mut self) {
+        self.core.clear_scan_hook();
+    }
 }
 
 #[cfg(test)]

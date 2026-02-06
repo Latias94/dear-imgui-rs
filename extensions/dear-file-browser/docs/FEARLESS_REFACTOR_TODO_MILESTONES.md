@@ -20,17 +20,16 @@ Current parity status vs IGFD (excluding C API by product decision):
   - explicit dialog lifecycle API: `FileDialogState::open/reopen/close/is_open` (commit: `c31ab9a`)
   - ID-first cleanup for rename/delete modal state (commit: `bfc9609`)
   - centralized selected path/count readback in core (`selected_entry_paths`, `selected_entry_counts`) (commit: `a21b0df`)
+  - scan-time entry hook in core/state API (`set_scan_hook` / `clear_scan_hook`) with keep/drop + mutation tests (commit: pending)
 - Remaining high-priority gaps (non-C API):
-  - scan-time entry callback (IGFD `userFileAttributes` equivalent)
   - symlink/link metadata and style kind parity (`Dir/File/Link`)
   - dialog min/max size constraints in host config
 
 Execution plan (next implementation wave):
 
-1. P0: scan hook API + core scan integration + unit tests
-2. P1: link/symlink metadata pipeline + style parity
-3. P1: host-level size constraints (`min_size` / `max_size`) for window + modal
-4. P2: parity/deviation doc finalization and follow-up optimization backlog
+1. P1: link/symlink metadata pipeline + style parity
+2. P1: host-level size constraints (`min_size` / `max_size`) for window + modal
+3. P2: parity/deviation doc finalization and follow-up optimization backlog
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -493,7 +492,7 @@ Goal: close remaining feature gaps vs IGFD while keeping a Rust-first API.
 
 ### Epic 16.1 - Scan-time entry hook (IGFD `userFileAttributes` equivalent)
 
-- [ ] Task: add a scan hook API to mutate/drop entries during directory scan
+- [x] Task: add a scan hook API to mutate/drop entries during directory scan
   - Scope:
     - callback can adjust entry metadata (e.g. size/modified/name/path)
     - callback can drop an entry before it reaches filter/sort/view
@@ -501,6 +500,8 @@ Goal: close remaining feature gaps vs IGFD while keeping a Rust-first API.
     - hook runs in core scan pipeline (filesystem-agnostic)
     - invalid mutations are handled safely
     - unit tests cover keep/drop and metadata mutation behavior
+  - Notes:
+    - public API exposed on both `FileDialogCore` and `FileDialogState`
 
 ### Epic 16.2 - Link/Symlink parity in metadata + style
 
@@ -549,7 +550,7 @@ Use this as a tracking table for final validation.
 - [x] File styles: by type/ext/name/regex + callback + optional font mapping
 - [x] Custom pane: per filter + blocks confirm
 - [x] Thumbnails: decode + GPU lifecycle + grid view
-- [ ] Scan-time entry callback parity (userFileAttributes-like)
+- [x] Scan-time entry callback parity (userFileAttributes-like)
 - [ ] Link/symlink-specific metadata + style parity
 - [ ] Window/modal min-max constraints parity
 
