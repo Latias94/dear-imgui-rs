@@ -62,7 +62,11 @@ impl FileDialog {
                 }
             }
             DialogMode::OpenFiles => {
-                if let Some(v) = self.to_rfd().pick_files() {
+                if !self.allow_multi {
+                    if let Some(p) = self.to_rfd().pick_file() {
+                        sel.paths.push(p);
+                    }
+                } else if let Some(v) = self.to_rfd().pick_files() {
                     sel.paths.extend(v);
                 }
             }
@@ -76,6 +80,9 @@ impl FileDialog {
                     sel.paths.push(p);
                 }
             }
+        }
+        if let Some(max) = self.max_selection.filter(|&m| m > 0) {
+            sel.paths.truncate(max);
         }
         if sel.paths.is_empty() {
             Err(FileDialogError::Cancelled)
@@ -112,10 +119,17 @@ impl FileDialog {
                 if let Some(name) = self.default_name.as_deref() {
                     a = a.set_file_name(name);
                 }
-                let v = a.pick_files().await;
-                if let Some(v) = v {
-                    sel.paths
-                        .extend(v.into_iter().map(|h| h.path().to_path_buf()));
+                if !self.allow_multi {
+                    let f = a.pick_file().await;
+                    if let Some(h) = f {
+                        sel.paths.push(h.path().to_path_buf());
+                    }
+                } else {
+                    let v = a.pick_files().await;
+                    if let Some(v) = v {
+                        sel.paths
+                            .extend(v.into_iter().map(|h| h.path().to_path_buf()));
+                    }
                 }
             }
             DialogMode::PickFolder => {
@@ -141,6 +155,9 @@ impl FileDialog {
                     sel.paths.push(h.path().to_path_buf());
                 }
             }
+        }
+        if let Some(max) = self.max_selection.filter(|&m| m > 0) {
+            sel.paths.truncate(max);
         }
         if sel.paths.is_empty() {
             Err(FileDialogError::Cancelled)

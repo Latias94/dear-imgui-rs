@@ -96,6 +96,11 @@ pub struct FileDialogCore {
     pub dirs_first: bool,
     /// Allow selecting multiple files.
     pub allow_multi: bool,
+    /// Optional cap for maximum number of selected files (OpenFiles mode).
+    ///
+    /// - `None` => no limit
+    /// - `Some(1)` => single selection
+    pub max_selection: Option<usize>,
     /// Show dotfiles (simple heuristic).
     pub show_hidden: bool,
     /// Double-click navigates/confirm (directories/files).
@@ -135,6 +140,7 @@ impl FileDialogCore {
             sort_ascending: true,
             dirs_first: true,
             allow_multi: matches!(mode, DialogMode::OpenFiles),
+            max_selection: None,
             show_hidden: false,
             double_click: true,
             places: Places::default(),
@@ -258,9 +264,12 @@ impl FileDialogCore {
 
     /// Applies Ctrl+A style selection to all currently visible entries.
     pub(crate) fn select_all(&mut self) {
-        if self.allow_multi {
-            self.selected = self.view_names.clone();
+        let cap = self.selection_cap();
+        if cap <= 1 {
+            return;
         }
+        let take = self.view_names.len().min(cap);
+        self.selected = self.view_names.iter().take(take).cloned().collect();
     }
 
     /// Moves keyboard focus up/down within the current view.
@@ -299,7 +308,12 @@ impl FileDialogCore {
                 self.selection_anchor_name = Some(anchor.clone());
             }
 
-            if let Some(range) = select_range_by_name(&self.view_names, &anchor, &target) {
+            if let Some(range) = select_range_by_name_capped(
+                &self.view_names,
+                &anchor,
+                &target,
+                self.selection_cap(),
+            ) {
                 self.selected = range;
                 self.focused_name = Some(target);
             } else {
@@ -341,7 +355,12 @@ impl FileDialogCore {
 
         if modifiers.shift {
             if let Some(anchor) = self.selection_anchor_name.clone() {
-                if let Some(range) = select_range_by_name(&self.view_names, &anchor, &name) {
+                if let Some(range) = select_range_by_name_capped(
+                    &self.view_names,
+                    &anchor,
+                    &name,
+                    self.selection_cap(),
+                ) {
                     self.selected = range;
                     self.focused_name = Some(name);
                     return;
@@ -352,7 +371,7 @@ impl FileDialogCore {
             return;
         }
 
-        if !self.allow_multi || !modifiers.ctrl {
+        if self.selection_cap() <= 1 || !modifiers.ctrl {
             self.select_single_by_name(name);
             return;
         }
@@ -360,6 +379,7 @@ impl FileDialogCore {
         toggle_select_name(&mut self.selected, &name);
         self.focused_name = Some(name.clone());
         self.selection_anchor_name = Some(name);
+        self.enforce_selection_cap();
     }
 
     /// Handles a double-click on an entry row.
@@ -495,6 +515,23 @@ impl FileDialogCore {
         self.selection_anchor_name = Some(name);
     }
 
+    fn selection_cap(&self) -> usize {
+        if !self.allow_multi {
+            return 1;
+        }
+        self.max_selection.unwrap_or(usize::MAX).max(1)
+    }
+
+    fn enforce_selection_cap(&mut self) {
+        let cap = self.selection_cap();
+        if cap == usize::MAX || self.selected.len() <= cap {
+            return;
+        }
+        while self.selected.len() > cap {
+            self.selected.remove(0);
+        }
+    }
+
     fn retain_selected_visible(&mut self) {
         if self.selected.is_empty() || self.view_names.is_empty() {
             return;
@@ -506,6 +543,7 @@ impl FileDialogCore {
             }
         }
         self.selected = keep;
+        self.enforce_selection_cap();
     }
 }
 
@@ -725,11 +763,25 @@ fn toggle_select_name(list: &mut Vec<String>, name: &str) {
     }
 }
 
-fn select_range_by_name(view_names: &[String], anchor: &str, target: &str) -> Option<Vec<String>> {
+fn select_range_by_name_capped(
+    view_names: &[String],
+    anchor: &str,
+    target: &str,
+    cap: usize,
+) -> Option<Vec<String>> {
     let ia = view_names.iter().position(|s| s == anchor)?;
     let it = view_names.iter().position(|s| s == target)?;
     let (lo, hi) = if ia <= it { (ia, it) } else { (it, ia) };
-    Some(view_names[lo..=hi].to_vec())
+    let mut range = view_names[lo..=hi].to_vec();
+    if cap != usize::MAX && range.len() > cap {
+        if it >= ia {
+            let start = range.len() - cap;
+            range = range[start..].to_vec();
+        } else {
+            range.truncate(cap);
+        }
+    }
+    Some(range)
 }
 
 fn finalize_selection(
@@ -1070,6 +1122,44 @@ mod tests {
         core.view_names = vec!["a".into(), "b".into(), "c".into()];
         core.select_all();
         assert_eq!(core.selected, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn ctrl_a_respects_max_selection_cap() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.allow_multi = true;
+        core.max_selection = Some(2);
+        core.view_names = vec!["a".into(), "b".into(), "c".into()];
+        core.select_all();
+        assert_eq!(core.selected, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn shift_click_respects_max_selection_cap_and_keeps_target() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.allow_multi = true;
+        core.max_selection = Some(2);
+        core.view_names = vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()];
+        core.click_entry("b".into(), false, mods(false, false));
+        core.click_entry("e".into(), false, mods(false, true));
+        assert_eq!(core.selected, vec!["d", "e"]);
+
+        core.click_entry("d".into(), false, mods(false, false));
+        core.click_entry("b".into(), false, mods(false, true));
+        assert_eq!(core.selected, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn ctrl_click_caps_by_dropping_oldest_selected() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.allow_multi = true;
+        core.max_selection = Some(2);
+        core.view_names = vec!["a".into(), "b".into(), "c".into()];
+        core.click_entry("a".into(), false, mods(false, false));
+        core.click_entry("b".into(), false, mods(true, false));
+        assert_eq!(core.selected, vec!["a", "b"]);
+        core.click_entry("c".into(), false, mods(true, false));
+        assert_eq!(core.selected, vec!["b", "c"]);
     }
 
     #[test]

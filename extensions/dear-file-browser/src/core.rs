@@ -374,6 +374,7 @@ pub struct FileDialog {
     pub(crate) start_dir: Option<PathBuf>,
     pub(crate) default_name: Option<String>,
     pub(crate) allow_multi: bool,
+    pub(crate) max_selection: Option<usize>,
     pub(crate) filters: Vec<FileFilter>,
     pub(crate) show_hidden: bool,
 }
@@ -387,6 +388,7 @@ impl FileDialog {
             start_dir: None,
             default_name: None,
             allow_multi: matches!(mode, DialogMode::OpenFiles),
+            max_selection: None,
             filters: Vec::new(),
             show_hidden: false,
         }
@@ -410,6 +412,21 @@ impl FileDialog {
     /// Allow multi selection (only for OpenFiles)
     pub fn multi_select(mut self, yes: bool) -> Self {
         self.allow_multi = yes;
+        self
+    }
+
+    /// Limit the maximum number of selected files (IGFD `countSelectionMax`-like).
+    ///
+    /// - `0` means "infinite" (no limit).
+    /// - `1` behaves like a single-selection dialog.
+    ///
+    /// Note: native dialogs may not be able to enforce the limit interactively;
+    /// results are clamped best-effort.
+    pub fn max_selection(mut self, max: usize) -> Self {
+        self.max_selection = if max == 0 { None } else { Some(max) };
+        if max == 1 {
+            self.allow_multi = false;
+        }
         self
     }
     /// Show hidden files in ImGui browser (native follows OS behavior)
