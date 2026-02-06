@@ -49,7 +49,10 @@ pub use dialog_manager::{DialogId, DialogManager};
 #[cfg(feature = "imgui")]
 pub use dialog_state::FileListViewMode;
 #[cfg(feature = "imgui")]
-pub use dialog_state::{FileDialogState, FileDialogUiState};
+pub use dialog_state::{
+    FileDialogState, FileDialogUiState, ValidationButtonsAlign, ValidationButtonsConfig,
+    ValidationButtonsOrder,
+};
 #[cfg(feature = "imgui")]
 pub use file_style::{EntryKind, FileStyle, FileStyleRegistry, StyleMatcher, StyleRule};
 #[cfg(feature = "imgui")]
@@ -66,4 +69,4 @@ pub use thumbnails::{
 #[cfg(feature = "thumbnails-image")]
 pub use thumbnails_image::ImageThumbnailProvider;
 #[cfg(feature = "imgui")]
-pub use ui::{FileDialogExt, WindowHostConfig};
+pub use ui::{FileDialogExt, ModalHostConfig, WindowHostConfig};

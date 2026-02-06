@@ -18,6 +18,59 @@ impl Default for FileListViewMode {
     }
 }
 
+/// Alignment of the validation button row (Ok/Cancel).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ValidationButtonsAlign {
+    /// Align buttons to the left side of the row.
+    #[default]
+    Left,
+    /// Align buttons to the right side of the row.
+    Right,
+}
+
+/// Button ordering for the validation row (Ok/Cancel).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ValidationButtonsOrder {
+    /// Confirm button, then Cancel.
+    #[default]
+    ConfirmCancel,
+    /// Cancel button, then Confirm.
+    CancelConfirm,
+}
+
+/// Configuration for the validation button row (Ok/Cancel).
+#[derive(Clone, Debug)]
+pub struct ValidationButtonsConfig {
+    /// Row alignment (left/right).
+    pub align: ValidationButtonsAlign,
+    /// Button ordering.
+    pub order: ValidationButtonsOrder,
+    /// Optional confirm label override (defaults to "Open"/"Save"/"Select").
+    pub confirm_label: Option<String>,
+    /// Optional cancel label override (defaults to "Cancel").
+    pub cancel_label: Option<String>,
+    /// Optional width applied to both buttons (in pixels).
+    pub button_width: Option<f32>,
+    /// Optional confirm button width override (in pixels).
+    pub confirm_width: Option<f32>,
+    /// Optional cancel button width override (in pixels).
+    pub cancel_width: Option<f32>,
+}
+
+impl Default for ValidationButtonsConfig {
+    fn default() -> Self {
+        Self {
+            align: ValidationButtonsAlign::Left,
+            order: ValidationButtonsOrder::ConfirmCancel,
+            confirm_label: None,
+            cancel_label: None,
+            button_width: None,
+            confirm_width: None,
+            cancel_width: None,
+        }
+    }
+}
+
 /// Places import/export modal mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum PlacesIoMode {
@@ -38,6 +91,8 @@ pub struct FileDialogUiState {
     pub visible: bool,
     /// Layout style for the dialog UI.
     pub layout: LayoutStyle,
+    /// Validation button row configuration (Ok/Cancel).
+    pub validation_buttons: ValidationButtonsConfig,
     /// File list view mode (list vs grid).
     pub file_list_view: FileListViewMode,
     /// Max breadcrumb segments to display (compress with ellipsis when exceeded).
@@ -121,6 +176,7 @@ impl Default for FileDialogUiState {
         Self {
             visible: true,
             layout: LayoutStyle::Standard,
+            validation_buttons: ValidationButtonsConfig::default(),
             file_list_view: FileListViewMode::default(),
             breadcrumbs_max_segments: 6,
             empty_hint_enabled: true,

@@ -11,6 +11,7 @@ use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, DirEntry, Modifiers};
 use crate::dialog_state::FileDialogState;
 use crate::dialog_state::FileListViewMode;
+use crate::dialog_state::{ValidationButtonsAlign, ValidationButtonsOrder};
 use crate::file_style::EntryKind;
 use crate::fs::{FileSystem, StdFileSystem};
 use crate::places::Places;
@@ -37,6 +38,36 @@ impl WindowHostConfig {
         };
         Self {
             title: title.to_string(),
+            initial_size: [760.0, 520.0],
+            size_condition: dear_imgui_rs::Condition::FirstUseEver,
+        }
+    }
+}
+
+/// Configuration for hosting the file browser in an ImGui modal popup.
+///
+/// `popup_label` must be stable across frames. For multiple concurrent dialogs,
+/// ensure the label includes a unique ID suffix (ImGui `###` syntax is fine).
+#[derive(Clone, Debug)]
+pub struct ModalHostConfig {
+    /// Modal popup label/title (supports `###` id suffix).
+    pub popup_label: String,
+    /// Initial modal size (used with `size_condition`).
+    pub initial_size: [f32; 2],
+    /// Condition used when setting the popup size.
+    pub size_condition: dear_imgui_rs::Condition,
+}
+
+impl ModalHostConfig {
+    /// Default modal host configuration for the given dialog mode.
+    pub fn for_mode(mode: DialogMode) -> Self {
+        let title = match mode {
+            DialogMode::OpenFile | DialogMode::OpenFiles => "Open",
+            DialogMode::PickFolder => "Select Folder",
+            DialogMode::SaveFile => "Save",
+        };
+        Self {
+            popup_label: format!("{title}###FileBrowserModal"),
             initial_size: [760.0, 520.0],
             size_condition: dear_imgui_rs::Condition::FirstUseEver,
         }
@@ -194,6 +225,69 @@ impl<'ui> FileBrowser<'ui> {
                     thumbnails_backend.take(),
                 );
             });
+        out
+    }
+
+    /// Draw the file browser in an ImGui modal popup with default host config.
+    /// Returns Some(result) once the user confirms/cancels; None otherwise.
+    pub fn show_modal(
+        &self,
+        state: &mut FileDialogState,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        let cfg = ModalHostConfig::for_mode(state.core.mode);
+        self.show_modal_with_fs(state, &cfg, &StdFileSystem)
+    }
+
+    /// Draw the file browser in an ImGui modal popup using the given host configuration.
+    pub fn show_modal_with_fs(
+        &self,
+        state: &mut FileDialogState,
+        cfg: &ModalHostConfig,
+        fs: &dyn FileSystem,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        self.show_modal_with_fs_and_hooks(state, cfg, fs, None, None)
+    }
+
+    /// Draw the file browser in an ImGui modal popup using a custom filesystem, custom pane,
+    /// and/or thumbnail backend.
+    pub fn show_modal_with_fs_and_hooks(
+        &self,
+        state: &mut FileDialogState,
+        cfg: &ModalHostConfig,
+        fs: &dyn FileSystem,
+        mut custom_pane: Option<&mut dyn CustomPane>,
+        mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        if !state.ui.visible {
+            return None;
+        }
+
+        if !self.ui.is_popup_open(&cfg.popup_label) {
+            self.ui.open_popup(&cfg.popup_label);
+        }
+
+        unsafe {
+            let size_vec = sys::ImVec2 {
+                x: cfg.initial_size[0],
+                y: cfg.initial_size[1],
+            };
+            sys::igSetNextWindowSize(size_vec, cfg.size_condition as i32);
+        }
+
+        let Some(_popup) = self.ui.begin_modal_popup(&cfg.popup_label) else {
+            return None;
+        };
+
+        let out = draw_contents_with_fs_and_hooks(
+            self.ui,
+            state,
+            fs,
+            custom_pane.take(),
+            thumbnails_backend.take(),
+        );
+        if out.is_some() {
+            self.ui.close_current_popup();
+        }
         out
     }
 
@@ -517,23 +611,6 @@ fn draw_contents_with_fs_and_hooks(
         }
     }
 
-    let confirm_label = match state.core.mode {
-        DialogMode::OpenFile | DialogMode::OpenFiles => "Open",
-        DialogMode::PickFolder => "Select",
-        DialogMode::SaveFile => "Save",
-    };
-    let _disabled = ui.begin_disabled_with_cond(!confirm_gate.can_confirm);
-    let confirm = ui.button(confirm_label);
-    drop(_disabled);
-    if !confirm_gate.can_confirm {
-        if let Some(msg) = confirm_gate.message.as_deref() {
-            ui.same_line();
-            ui.text_disabled(msg);
-        }
-    }
-    ui.same_line();
-    let cancel = ui.button("Cancel");
-    ui.same_line();
     // Click behavior toggle
     let mut nav_on_click = matches!(state.core.click_action, ClickAction::Navigate);
     if ui.checkbox("Navigate on click", &mut nav_on_click) {
@@ -548,6 +625,16 @@ fn draw_contents_with_fs_and_hooks(
     if ui.checkbox("DblClick confirm", &mut dbl) {
         state.core.double_click = dbl;
     }
+
+    if !confirm_gate.can_confirm {
+        if let Some(msg) = confirm_gate.message.as_deref() {
+            ui.same_line();
+            ui.text_disabled(msg);
+        }
+    }
+
+    ui.new_line();
+    let (confirm, cancel) = draw_validation_buttons_row(ui, state, &confirm_gate);
 
     // Keyboard shortcuts (only when the host window is focused)
     if state.ui.visible && ui.is_window_focused() {
@@ -606,6 +693,69 @@ fn draw_contents_with_fs_and_hooks(
         state.ui.visible = false;
     }
     out
+}
+
+fn draw_validation_buttons_row(
+    ui: &Ui,
+    state: &mut FileDialogState,
+    gate: &ConfirmGate,
+) -> (bool, bool) {
+    let default_confirm = match state.core.mode {
+        DialogMode::OpenFile | DialogMode::OpenFiles => "Open",
+        DialogMode::PickFolder => "Select",
+        DialogMode::SaveFile => "Save",
+    };
+    let cfg = &state.ui.validation_buttons;
+    let confirm_label = cfg.confirm_label.as_deref().unwrap_or(default_confirm);
+    let cancel_label = cfg.cancel_label.as_deref().unwrap_or("Cancel");
+
+    let style = ui.clone_style();
+    let spacing_x = style.item_spacing()[0];
+    let pad_x = style.frame_padding()[0];
+    let font = ui.current_font();
+    let font_size = ui.current_font_size();
+
+    let calc_button_width = |label: &str| -> f32 {
+        let text_w = font.calc_text_size(font_size, f32::MAX, 0.0, label)[0];
+        text_w + pad_x * 2.0
+    };
+
+    let base_w = cfg.button_width;
+    let confirm_w = cfg
+        .confirm_width
+        .or(base_w)
+        .unwrap_or_else(|| calc_button_width(confirm_label));
+    let cancel_w = cfg
+        .cancel_width
+        .or(base_w)
+        .unwrap_or_else(|| calc_button_width(cancel_label));
+
+    let group_w = confirm_w + cancel_w + spacing_x;
+    if cfg.align == ValidationButtonsAlign::Right {
+        let start_x = ui.cursor_pos_x();
+        let avail_w = ui.content_region_avail_width();
+        let x = (start_x + avail_w - group_w).max(start_x);
+        ui.set_cursor_pos_x(x);
+    }
+
+    match cfg.order {
+        ValidationButtonsOrder::ConfirmCancel => {
+            let _disabled = ui.begin_disabled_with_cond(!gate.can_confirm);
+            let confirm_clicked = ui.button_with_size(confirm_label, [confirm_w, 0.0]);
+            drop(_disabled);
+            ui.same_line();
+            let cancel_clicked = ui.button_with_size(cancel_label, [cancel_w, 0.0]);
+            (confirm_clicked, cancel_clicked)
+        }
+        ValidationButtonsOrder::CancelConfirm => {
+            let cancel_clicked = ui.button_with_size(cancel_label, [cancel_w, 0.0]);
+            ui.same_line();
+            let _disabled = ui.begin_disabled_with_cond(!gate.can_confirm);
+            let confirm_clicked = ui.button_with_size(confirm_label, [confirm_w, 0.0]);
+            drop(_disabled);
+            (confirm_clicked, cancel_clicked)
+        }
+    }
 }
 
 fn draw_confirm_overwrite_modal(ui: &Ui, state: &mut FileDialogState) {
