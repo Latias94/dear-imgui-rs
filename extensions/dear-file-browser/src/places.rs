@@ -182,6 +182,62 @@ impl Places {
         true
     }
 
+    /// Adds a group if it does not exist.
+    /// Returns `true` if the group was added.
+    pub fn add_group(&mut self, label: impl Into<String>) -> bool {
+        let label = label.into();
+        if self.groups.iter().any(|g| g.label == label) {
+            return false;
+        }
+        self.groups.push(PlaceGroup::new(label));
+        true
+    }
+
+    /// Removes a group by exact label match.
+    /// Returns `true` if a group was removed.
+    pub fn remove_group(&mut self, label: &str) -> bool {
+        let Some(i) = self.groups.iter().position(|g| g.label == label) else {
+            return false;
+        };
+        self.groups.remove(i);
+        true
+    }
+
+    /// Renames a group by exact label match.
+    /// Returns `true` if the group was found and renamed.
+    pub fn rename_group(&mut self, from: &str, to: impl Into<String>) -> bool {
+        let to = to.into();
+        if self.groups.iter().any(|g| g.label == to) {
+            return false;
+        }
+        let Some(g) = self.groups.iter_mut().find(|g| g.label == from) else {
+            return false;
+        };
+        g.label = to;
+        true
+    }
+
+    /// Edits a place identified by its current path within a group.
+    ///
+    /// Returns `true` if a place was found and updated.
+    pub fn edit_place_by_path(
+        &mut self,
+        group_label: &str,
+        from_path: &Path,
+        new_label: impl Into<String>,
+        new_path: PathBuf,
+    ) -> bool {
+        let Some(g) = self.groups.iter_mut().find(|g| g.label == group_label) else {
+            return false;
+        };
+        let Some(i) = g.places.iter().position(|p| p.path == from_path) else {
+            return false;
+        };
+        g.places[i].label = new_label.into();
+        g.places[i].path = new_path;
+        true
+    }
+
     /// Serializes places into a compact, line-based format.
     ///
     /// Each line is `group<TAB>origin<TAB>label<TAB>path` with escaped special characters.
@@ -438,5 +494,37 @@ mod tests {
     fn compact_parse_rejects_missing_separator() {
         let err = Places::deserialize_compact("abc").unwrap_err();
         assert_eq!(err.line, 1);
+    }
+
+    #[test]
+    fn group_add_rename_remove_roundtrip() {
+        let mut p = Places::new();
+        assert!(p.add_group("MyGroup"));
+        assert!(!p.add_group("MyGroup"));
+
+        assert!(p.rename_group("MyGroup", "MyGroup2"));
+        assert!(!p.rename_group("MyGroup2", Places::SYSTEM_GROUP));
+        assert!(!p.rename_group("Missing", "X"));
+
+        assert!(p.remove_group("MyGroup2"));
+        assert!(!p.remove_group("MyGroup2"));
+    }
+
+    #[test]
+    fn edit_place_by_path_updates_label_and_path() {
+        let mut p = Places::new();
+        p.groups.clear();
+        p.add_place("G", Place::user("A", PathBuf::from("/tmp/a")));
+        assert!(p.edit_place_by_path("G", Path::new("/tmp/a"), "B", PathBuf::from("/tmp/b")));
+        let g = p.groups.iter().find(|g| g.label == "G").unwrap();
+        assert_eq!(g.places.len(), 1);
+        assert_eq!(g.places[0].label, "B");
+        assert_eq!(g.places[0].path, PathBuf::from("/tmp/b"));
+        assert!(!p.edit_place_by_path(
+            "G",
+            Path::new("/tmp/missing"),
+            "C",
+            PathBuf::from("/tmp/c")
+        ));
     }
 }

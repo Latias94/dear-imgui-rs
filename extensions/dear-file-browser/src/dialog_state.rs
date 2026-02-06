@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::core::{DialogMode, LayoutStyle};
 use crate::dialog_core::FileDialogCore;
 use crate::file_style::FileStyleRegistry;
@@ -79,6 +81,22 @@ pub(crate) enum PlacesIoMode {
     Export,
     /// Import places from a text buffer.
     Import,
+}
+
+/// Places edit modal mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PlacesEditMode {
+    /// Create a new user group.
+    #[default]
+    AddGroup,
+    /// Rename an existing group.
+    RenameGroup,
+    /// Add a new user place into a group.
+    AddPlace,
+    /// Edit an existing user place (label/path).
+    EditPlace,
+    /// Confirm removing a group.
+    RemoveGroupConfirm,
 }
 
 /// UI-only state for hosting a [`FileDialogCore`] in Dear ImGui.
@@ -167,6 +185,25 @@ pub struct FileDialogUiState {
     /// Error string shown inside the places modal.
     pub(crate) places_io_error: Option<String>,
 
+    /// Places edit modal mode.
+    pub(crate) places_edit_mode: PlacesEditMode,
+    /// Open the places edit modal on next frame.
+    pub(crate) places_edit_open_next: bool,
+    /// Focus the first input in the places edit modal on next frame.
+    pub(crate) places_edit_focus_next: bool,
+    /// Error string shown inside the places edit modal.
+    pub(crate) places_edit_error: Option<String>,
+    /// Target group label (add/edit place, rename/remove group).
+    pub(crate) places_edit_group: String,
+    /// Source group label (rename/remove group).
+    pub(crate) places_edit_group_from: Option<String>,
+    /// Source place path for editing (stable identity).
+    pub(crate) places_edit_place_from_path: Option<PathBuf>,
+    /// Place label buffer (add/edit place).
+    pub(crate) places_edit_place_label: String,
+    /// Place path buffer (add/edit place).
+    pub(crate) places_edit_place_path: String,
+
     pub(crate) type_select_buffer: String,
     pub(crate) type_select_last_input: Option<std::time::Instant>,
 }
@@ -213,6 +250,15 @@ impl Default for FileDialogUiState {
             places_io_open_next: false,
             places_io_include_code: false,
             places_io_error: None,
+            places_edit_mode: PlacesEditMode::default(),
+            places_edit_open_next: false,
+            places_edit_focus_next: false,
+            places_edit_error: None,
+            places_edit_group: String::new(),
+            places_edit_group_from: None,
+            places_edit_place_from_path: None,
+            places_edit_place_label: String::new(),
+            places_edit_place_path: String::new(),
             type_select_buffer: String::new(),
             type_select_last_input: None,
         }

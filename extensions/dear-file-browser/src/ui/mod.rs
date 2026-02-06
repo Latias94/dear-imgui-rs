@@ -14,7 +14,7 @@ use crate::dialog_state::FileListViewMode;
 use crate::dialog_state::{ValidationButtonsAlign, ValidationButtonsOrder};
 use crate::file_style::EntryKind;
 use crate::fs::{FileSystem, StdFileSystem};
-use crate::places::Places;
+use crate::places::{Place, PlaceOrigin, Places};
 use crate::thumbnails::ThumbnailBackend;
 
 /// Configuration for hosting the file browser in an ImGui window.
@@ -565,6 +565,7 @@ fn draw_contents_with_fs_and_hooks(
     }
 
     draw_places_io_modal(ui, state);
+    draw_places_edit_modal(ui, state, fs);
     draw_new_folder_modal(ui, state, fs);
     draw_rename_modal(ui, state, fs);
     draw_delete_confirm_modal(ui, state, fs);
@@ -1207,6 +1208,15 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf>
         state.core.places.add_bookmark_path(state.core.cwd.clone());
     }
     ui.same_line();
+    if ui.button("+ Group") {
+        state.ui.places_edit_mode = crate::dialog_state::PlacesEditMode::AddGroup;
+        state.ui.places_edit_group.clear();
+        state.ui.places_edit_group_from = None;
+        state.ui.places_edit_error = None;
+        state.ui.places_edit_open_next = true;
+        state.ui.places_edit_focus_next = true;
+    }
+    ui.same_line();
     if ui.button("Refresh") {
         state.core.places.refresh_system_places();
     }
@@ -1233,9 +1243,28 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf>
 
     ui.separator();
 
-    let mut remove: Option<(String, PathBuf)> = None;
-    for (gi, g) in state.core.places.groups.iter().enumerate() {
+    let groups = state.core.places.groups.clone();
+    let mut remove_place: Option<(String, PathBuf)> = None;
+    let mut edit_req: Option<PlacesEditRequest> = None;
+    for (gi, g) in groups.iter().enumerate() {
         let open = ui.collapsing_header(&g.label, TreeNodeFlags::DEFAULT_OPEN);
+        if let Some(_popup) = ui.begin_popup_context_item() {
+            let is_system = g.label == Places::SYSTEM_GROUP;
+            let is_reserved = is_system || g.label == Places::BOOKMARKS_GROUP;
+
+            if ui.menu_item_enabled_selected("Add place...", None::<&str>, false, !is_system) {
+                edit_req = Some(PlacesEditRequest::add_place(&g.label, &state.core.cwd));
+                ui.close_current_popup();
+            }
+            if ui.menu_item_enabled_selected("Rename group...", None::<&str>, false, !is_reserved) {
+                edit_req = Some(PlacesEditRequest::rename_group(&g.label));
+                ui.close_current_popup();
+            }
+            if ui.menu_item_enabled_selected("Remove group...", None::<&str>, false, !is_reserved) {
+                edit_req = Some(PlacesEditRequest::remove_group_confirm(&g.label));
+                ui.close_current_popup();
+            }
+        }
         if !open {
             continue;
         }
@@ -1253,16 +1282,103 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf>
             if let Some(_popup) = ui.begin_popup_context_item() {
                 ui.text_disabled(&p.path.display().to_string());
                 ui.separator();
-                if ui.menu_item("Remove") {
-                    remove = Some((g.label.clone(), p.path.clone()));
+                let editable = p.origin == PlaceOrigin::User && g.label != Places::SYSTEM_GROUP;
+                if ui.menu_item_enabled_selected("Edit...", None::<&str>, false, editable) {
+                    edit_req = Some(PlacesEditRequest::edit_place(&g.label, p));
+                    ui.close_current_popup();
+                }
+                if ui.menu_item_enabled_selected("Remove", None::<&str>, false, editable) {
+                    remove_place = Some((g.label.clone(), p.path.clone()));
                 }
             }
         }
     }
-    if let Some((g, p)) = remove {
+    if let Some((g, p)) = remove_place {
         state.core.places.remove_place_path(&g, &p);
     }
+    if let Some(req) = edit_req {
+        req.apply_to_state(&mut state.ui);
+    }
     out
+}
+
+#[derive(Clone, Debug)]
+struct PlacesEditRequest {
+    mode: crate::dialog_state::PlacesEditMode,
+    group: String,
+    group_from: Option<String>,
+    place_from_path: Option<PathBuf>,
+    place_label: String,
+    place_path: String,
+    focus: bool,
+}
+
+impl PlacesEditRequest {
+    fn add_place(group: &str, cwd: &Path) -> Self {
+        let label = cwd
+            .file_name()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| cwd.display().to_string());
+        Self {
+            mode: crate::dialog_state::PlacesEditMode::AddPlace,
+            group: group.to_string(),
+            group_from: None,
+            place_from_path: None,
+            place_label: label,
+            place_path: cwd.display().to_string(),
+            focus: true,
+        }
+    }
+
+    fn edit_place(group: &str, p: &Place) -> Self {
+        Self {
+            mode: crate::dialog_state::PlacesEditMode::EditPlace,
+            group: group.to_string(),
+            group_from: None,
+            place_from_path: Some(p.path.clone()),
+            place_label: p.label.clone(),
+            place_path: p.path.display().to_string(),
+            focus: true,
+        }
+    }
+
+    fn rename_group(group: &str) -> Self {
+        Self {
+            mode: crate::dialog_state::PlacesEditMode::RenameGroup,
+            group: group.to_string(),
+            group_from: Some(group.to_string()),
+            place_from_path: None,
+            place_label: String::new(),
+            place_path: String::new(),
+            focus: true,
+        }
+    }
+
+    fn remove_group_confirm(group: &str) -> Self {
+        Self {
+            mode: crate::dialog_state::PlacesEditMode::RemoveGroupConfirm,
+            group: group.to_string(),
+            group_from: Some(group.to_string()),
+            place_from_path: None,
+            place_label: String::new(),
+            place_path: String::new(),
+            focus: false,
+        }
+    }
+
+    fn apply_to_state(self, ui: &mut crate::FileDialogUiState) {
+        ui.places_edit_mode = self.mode;
+        ui.places_edit_group = self.group;
+        ui.places_edit_group_from = self.group_from;
+        ui.places_edit_place_from_path = self.place_from_path;
+        ui.places_edit_place_label = self.place_label;
+        ui.places_edit_place_path = self.place_path;
+        ui.places_edit_error = None;
+        ui.places_edit_open_next = true;
+        ui.places_edit_focus_next = self.focus;
+    }
 }
 
 fn draw_places_io_modal(ui: &Ui, state: &mut FileDialogState) {
@@ -2019,6 +2135,241 @@ fn humanize_duration(d: std::time::Duration) -> String {
     }
     let days = secs / DAY;
     format!("{}d ago", days)
+}
+
+fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
+    const POPUP_ID: &str = "Edit Places";
+    if state.ui.places_edit_open_next {
+        ui.open_popup(POPUP_ID);
+        state.ui.places_edit_open_next = false;
+    }
+
+    let Some(_popup) = ui.begin_modal_popup(POPUP_ID) else {
+        return;
+    };
+
+    use crate::dialog_state::PlacesEditMode;
+    let mode = state.ui.places_edit_mode;
+    match mode {
+        PlacesEditMode::AddGroup => {
+            ui.text("Create a new places group:");
+            ui.separator();
+            if state.ui.places_edit_focus_next {
+                ui.set_keyboard_focus_here();
+                state.ui.places_edit_focus_next = false;
+            }
+            ui.input_text("Group", &mut state.ui.places_edit_group)
+                .build();
+
+            let create = ui.button("Create");
+            ui.same_line();
+            let cancel = ui.button("Cancel");
+            if cancel {
+                state.ui.places_edit_error = None;
+                ui.close_current_popup();
+                return;
+            }
+            if create {
+                state.ui.places_edit_error = None;
+                let label = state.ui.places_edit_group.trim();
+                if label.is_empty() {
+                    state.ui.places_edit_error = Some("Group name is empty".into());
+                } else if label == Places::SYSTEM_GROUP || label == Places::BOOKMARKS_GROUP {
+                    state.ui.places_edit_error = Some("Group name is reserved".into());
+                } else if state.core.places.groups.iter().any(|g| g.label == label) {
+                    state.ui.places_edit_error = Some("Group already exists".into());
+                } else {
+                    state.core.places.add_group(label.to_string());
+                    ui.close_current_popup();
+                }
+            }
+        }
+        PlacesEditMode::RenameGroup => {
+            let Some(from) = state.ui.places_edit_group_from.clone() else {
+                ui.text_disabled("Missing source group.");
+                if ui.button("Close") {
+                    ui.close_current_popup();
+                }
+                return;
+            };
+            ui.text("Rename group:");
+            ui.text_disabled(&from);
+            ui.separator();
+            if state.ui.places_edit_focus_next {
+                ui.set_keyboard_focus_here();
+                state.ui.places_edit_focus_next = false;
+            }
+            ui.input_text("To", &mut state.ui.places_edit_group).build();
+
+            let rename = ui.button("Rename");
+            ui.same_line();
+            let cancel = ui.button("Cancel");
+            if cancel {
+                state.ui.places_edit_error = None;
+                ui.close_current_popup();
+                return;
+            }
+            if rename {
+                state.ui.places_edit_error = None;
+                let to = state.ui.places_edit_group.trim();
+                if to.is_empty() {
+                    state.ui.places_edit_error = Some("Target group name is empty".into());
+                } else if to == Places::SYSTEM_GROUP || to == Places::BOOKMARKS_GROUP {
+                    state.ui.places_edit_error = Some("Target group name is reserved".into());
+                } else if to == from.as_str() {
+                    state.ui.places_edit_error = Some("Target group name is unchanged".into());
+                } else if state.core.places.groups.iter().any(|g| g.label == to) {
+                    state.ui.places_edit_error = Some("Target group already exists".into());
+                } else if !state.core.places.rename_group(&from, to.to_string()) {
+                    state.ui.places_edit_error = Some("Group not found".into());
+                } else {
+                    ui.close_current_popup();
+                }
+            }
+        }
+        PlacesEditMode::RemoveGroupConfirm => {
+            let Some(group) = state.ui.places_edit_group_from.clone() else {
+                ui.text_disabled("Missing group.");
+                if ui.button("Close") {
+                    ui.close_current_popup();
+                }
+                return;
+            };
+
+            let places_count = state
+                .core
+                .places
+                .groups
+                .iter()
+                .find(|g| g.label == group)
+                .map(|g| g.places.len())
+                .unwrap_or(0);
+
+            ui.text("Remove group?");
+            ui.separator();
+            ui.text(format!("Group: {group}"));
+            ui.text_disabled(format!("Places: {places_count}"));
+            ui.separator();
+            let remove = ui.button("Remove");
+            ui.same_line();
+            let cancel = ui.button("Cancel");
+            if cancel {
+                state.ui.places_edit_error = None;
+                ui.close_current_popup();
+                return;
+            }
+            if remove {
+                state.ui.places_edit_error = None;
+                if group == Places::SYSTEM_GROUP || group == Places::BOOKMARKS_GROUP {
+                    state.ui.places_edit_error = Some("Cannot remove reserved group".into());
+                } else if !state.core.places.remove_group(&group) {
+                    state.ui.places_edit_error = Some("Group not found".into());
+                } else {
+                    ui.close_current_popup();
+                }
+            }
+        }
+        PlacesEditMode::AddPlace | PlacesEditMode::EditPlace => {
+            let is_add = mode == PlacesEditMode::AddPlace;
+            let group = state.ui.places_edit_group.clone();
+            ui.text(if is_add { "Add place:" } else { "Edit place:" });
+            ui.text_disabled(&group);
+            ui.separator();
+
+            if state.ui.places_edit_focus_next {
+                ui.set_keyboard_focus_here();
+                state.ui.places_edit_focus_next = false;
+            }
+            ui.input_text("Label", &mut state.ui.places_edit_place_label)
+                .build();
+            ui.input_text("Path", &mut state.ui.places_edit_place_path)
+                .build();
+
+            let ok_label = if is_add { "Add" } else { "Save" };
+            let ok = ui.button(ok_label);
+            ui.same_line();
+            let cancel = ui.button("Cancel");
+            if cancel {
+                state.ui.places_edit_error = None;
+                ui.close_current_popup();
+                return;
+            }
+
+            if ok {
+                state.ui.places_edit_error = None;
+                let path_s = state.ui.places_edit_place_path.trim();
+                if path_s.is_empty() {
+                    state.ui.places_edit_error = Some("Path is empty".into());
+                } else {
+                    let raw = PathBuf::from(path_s);
+                    let p = fs.canonicalize(&raw).unwrap_or(raw);
+                    let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
+                    if !is_dir {
+                        state.ui.places_edit_error =
+                            Some("Path does not exist or is not a directory".into());
+                    } else {
+                        let mut label = state.ui.places_edit_place_label.trim().to_string();
+                        if label.is_empty() {
+                            label = p
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| p.display().to_string());
+                        }
+
+                        let group_places = state
+                            .core
+                            .places
+                            .groups
+                            .iter()
+                            .find(|g| g.label == group)
+                            .map(|g| g.places.clone())
+                            .unwrap_or_default();
+
+                        let from_path = state.ui.places_edit_place_from_path.clone();
+                        let is_duplicate = group_places.iter().any(|x| {
+                            if let Some(from) = &from_path {
+                                if x.path == *from {
+                                    return false;
+                                }
+                            }
+                            x.path == p
+                        });
+                        if is_duplicate {
+                            state.ui.places_edit_error =
+                                Some("Place already exists in group".into());
+                        } else if is_add {
+                            state
+                                .core
+                                .places
+                                .add_place(group, Place::new(label, p, PlaceOrigin::User));
+                            ui.close_current_popup();
+                        } else {
+                            let Some(from_path) = from_path else {
+                                state.ui.places_edit_error = Some("Missing source place".into());
+                                return;
+                            };
+                            if !state
+                                .core
+                                .places
+                                .edit_place_by_path(&group, &from_path, label, p)
+                            {
+                                state.ui.places_edit_error = Some("Place not found".into());
+                            } else {
+                                ui.close_current_popup();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(err) = &state.ui.places_edit_error {
+        ui.separator();
+        ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
+    }
 }
 
 // Places helpers live in `places.rs`.
