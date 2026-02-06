@@ -62,6 +62,13 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 
 ---
 
+Parity status note (2026-02-06, non-C-API scope):
+
+- Closed recently: explicit lifecycle helpers (`open/reopen/close/is_open`), ID-first rename/delete target model, selected path/count readback in core.
+- Remaining high-priority gaps: scan-time entry hook (`userFileAttributes`-like), link/symlink metadata+style parity, host min/max size constraints.
+- Product scope note: C API parity is intentionally excluded for this refactor wave.
+
+---
 ## 2. Design Principles
 
 1. **Decouple core logic from ImGui rendering**

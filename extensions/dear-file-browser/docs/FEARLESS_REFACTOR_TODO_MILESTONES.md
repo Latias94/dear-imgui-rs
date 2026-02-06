@@ -11,6 +11,28 @@ Conventions used here:
 
 ---
 
+## Status Snapshot (2026-02-06)
+
+Current parity status vs IGFD (excluding C API by product decision):
+
+- Completed parity scope (non-C API): host split (`draw_contents` + window/modal/embed), Open/Display split (`DialogManager`), places persistence, selection UX, filters (wildcard/regex/collections), save policies, file operations, file styles, thumbnails, custom pane, entry-id-first selection model.
+- Recently completed:
+  - explicit dialog lifecycle API: `FileDialogState::open/reopen/close/is_open` (commit: `c31ab9a`)
+  - ID-first cleanup for rename/delete modal state (commit: `bfc9609`)
+  - centralized selected path/count readback in core (`selected_entry_paths`, `selected_entry_counts`) (commit: `a21b0df`)
+- Remaining high-priority gaps (non-C API):
+  - scan-time entry callback (IGFD `userFileAttributes` equivalent)
+  - symlink/link metadata and style kind parity (`Dir/File/Link`)
+  - dialog min/max size constraints in host config
+
+Execution plan (next implementation wave):
+
+1. P0: scan hook API + core scan integration + unit tests
+2. P1: link/symlink metadata pipeline + style parity
+3. P1: host-level size constraints (`min_size` / `max_size`) for window + modal
+4. P2: parity/deviation doc finalization and follow-up optimization backlog
+
+---
 ## Milestone 0 — Baseline & Refactor Safety Net
 
 Goal: establish safety nets and constraints before moving code.
@@ -107,6 +129,8 @@ Goal: enable multiple dialogs concurrently and decouple "open" from "display".
 
 - [x] Task: Implement `DialogManager::open(req) -> DialogId`
   - Acceptance: you can open two dialogs with different configuration and drive them independently.
+- [x] Task: add explicit state lifecycle helpers (`FileDialogState::open/reopen/close/is_open`)
+  - Acceptance: reopening follows IGFD-style `OpenDialog -> Display -> Close` semantics.
 
 ### Epic 3.2 — OpenRequest / Result typing
 
@@ -463,11 +487,58 @@ Exit criteria:
 
 ---
 
+## Milestone 16 - Final Non-C-API Parity Closure
+
+Goal: close remaining feature gaps vs IGFD while keeping a Rust-first API.
+
+### Epic 16.1 - Scan-time entry hook (IGFD `userFileAttributes` equivalent)
+
+- [ ] Task: add a scan hook API to mutate/drop entries during directory scan
+  - Scope:
+    - callback can adjust entry metadata (e.g. size/modified/name/path)
+    - callback can drop an entry before it reaches filter/sort/view
+  - Acceptance:
+    - hook runs in core scan pipeline (filesystem-agnostic)
+    - invalid mutations are handled safely
+    - unit tests cover keep/drop and metadata mutation behavior
+
+### Epic 16.2 - Link/Symlink parity in metadata + style
+
+- [ ] Task: extend entry metadata with link/symlink kind
+  - Scope:
+    - extend filesystem metadata surface
+    - add `EntryKind::Link` (or equivalent) to style matcher
+  - Acceptance:
+    - link entries can be styled separately from files/dirs
+    - existing file/dir style matching behavior stays stable
+
+### Epic 16.3 - Host constraints parity
+
+- [ ] Task: add dialog size constraints to host configs
+  - Scope:
+    - `WindowHostConfig` / `ModalHostConfig` support `min_size` and `max_size`
+  - Acceptance:
+    - constraints are applied consistently in window and modal hosts
+    - documented with a compact usage example
+
+### Epic 16.4 - API polish and docs
+
+- [ ] Task: publish a concise parity/deviation doc (non-C-API scope)
+  - Acceptance:
+    - remaining deviations are explicit and intentional
+    - roadmap reflects realistic post-parity improvements
+
+Exit criteria:
+
+- High-priority non-C-API gaps are either closed or explicitly deferred with rationale.
+
+---
 ## Parity Checklist (IGFD → dear-file-browser)
 
 Use this as a tracking table for final validation.
 
 - [x] Multiple dialogs concurrently (manager + ids)
+- [x] Open/display lifecycle helpers on state (`open/reopen/close/is_open`)
 - [x] Host flexibility: window/modal/popup/embed (modal can be caller-hosted via `draw_contents`)
 - [x] Places: groups + editable + persistence + devices
 - [x] Selection: ctrl/shift, ctrl+a, keyboard navigation, type-to-select
@@ -478,6 +549,9 @@ Use this as a tracking table for final validation.
 - [x] File styles: by type/ext/name/regex + callback + optional font mapping
 - [x] Custom pane: per filter + blocks confirm
 - [x] Thumbnails: decode + GPU lifecycle + grid view
+- [ ] Scan-time entry callback parity (userFileAttributes-like)
+- [ ] Link/symlink-specific metadata + style parity
+- [ ] Window/modal min-max constraints parity
 
 ---
 
