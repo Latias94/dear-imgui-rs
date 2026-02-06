@@ -73,6 +73,24 @@ impl Default for ValidationButtonsConfig {
     }
 }
 
+/// Clipboard operation kind used by the in-UI file browser.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipboardOp {
+    /// Copy sources into the destination directory on paste.
+    Copy,
+    /// Move sources into the destination directory on paste.
+    Cut,
+}
+
+/// In-dialog clipboard for file operations (copy/cut/paste).
+#[derive(Clone, Debug)]
+pub struct FileClipboard {
+    /// Operation kind.
+    pub op: ClipboardOp,
+    /// Absolute source paths captured when the clipboard was populated.
+    pub sources: Vec<PathBuf>,
+}
+
 /// Places import/export modal mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum PlacesIoMode {
@@ -157,6 +175,8 @@ pub struct FileDialogUiState {
     pub delete_recursive: bool,
     /// Error string shown inside the delete modal.
     pub delete_error: Option<String>,
+    /// Clipboard state for copy/cut/paste operations.
+    pub clipboard: Option<FileClipboard>,
     /// Reveal (scroll to) a specific entry name on the next draw, then clear.
     pub(crate) reveal_name_next: Option<String>,
     /// Style registry used to decorate the file list (icons/colors/tooltips).
@@ -239,6 +259,7 @@ impl Default for FileDialogUiState {
             delete_targets: Vec::new(),
             delete_recursive: false,
             delete_error: None,
+            clipboard: None,
             reveal_name_next: None,
             file_styles: FileStyleRegistry::default(),
             thumbnails_enabled: false,

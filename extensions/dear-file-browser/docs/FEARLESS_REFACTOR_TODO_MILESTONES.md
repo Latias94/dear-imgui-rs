@@ -393,7 +393,7 @@ Exit criteria:
 
 ---
 
-## Milestone 14 — File Operations (Rename/Delete)
+## Milestone 14 — File Operations (Rename/Delete/Clipboard)
 
 Goal: close the largest feature gap vs IGFD by adding core-supported file operations.
 
@@ -412,7 +412,15 @@ Goal: close the largest feature gap vs IGFD by adding core-supported file operat
     - delete uses `remove_file` / `remove_dir` and shows a confirmation modal
     - after delete, directory cache is invalidated and selection is updated deterministically
   - Notes:
-    - current implementation deletes directories only when empty (non-recursive)
+    - directory deletion supports an opt-in recursive toggle
+
+### Epic 14.3 — Clipboard (Copy/Cut/Paste)
+
+- [x] Task: implement copy/cut/paste (Ctrl+C / Ctrl+X / Ctrl+V + context menu)
+  - Acceptance:
+    - paste uses `FileSystem` operations only (no direct `std::fs`)
+    - copy allocates a unique name in the destination directory (`(copy)`, `(copy 2)`, ...)
+    - cut clears the clipboard after a successful paste
 
 Exit criteria:
 
@@ -451,6 +459,7 @@ Use this as a tracking table for final validation.
 - [x] Sorting: natural name ordering (e.g. `file2` < `file10`)
 - [x] Save: confirm overwrite + extension policy
 - [x] Filters: collections + regex (optional) + multi-layer extensions
+- [x] File operations: rename/delete/copy/cut/paste (recursive delete opt-in)
 - [ ] File styles: by type/ext/name/regex + callback (callback/font TBD)
 - [x] Custom pane: per filter + blocks confirm
 - [x] Thumbnails: decode + GPU lifecycle + grid view

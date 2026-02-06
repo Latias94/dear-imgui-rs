@@ -25,6 +25,8 @@ mod dialog_state;
 mod file_style;
 #[cfg(feature = "imgui")]
 mod fs;
+#[cfg(feature = "imgui")]
+mod fs_ops;
 #[cfg(feature = "native-rfd")]
 mod native;
 #[cfg(feature = "imgui")]
@@ -50,8 +52,8 @@ pub use dialog_manager::{DialogId, DialogManager};
 pub use dialog_state::FileListViewMode;
 #[cfg(feature = "imgui")]
 pub use dialog_state::{
-    FileDialogState, FileDialogUiState, ValidationButtonsAlign, ValidationButtonsConfig,
-    ValidationButtonsOrder,
+    ClipboardOp, FileClipboard, FileDialogState, FileDialogUiState, ValidationButtonsAlign,
+    ValidationButtonsConfig, ValidationButtonsOrder,
 };
 #[cfg(feature = "imgui")]
 pub use file_style::{EntryKind, FileStyle, FileStyleRegistry, StyleMatcher, StyleRule};

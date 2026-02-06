@@ -11,9 +11,11 @@ use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, DirEntry, Modifiers};
 use crate::dialog_state::FileDialogState;
 use crate::dialog_state::FileListViewMode;
+use crate::dialog_state::{ClipboardOp, FileClipboard};
 use crate::dialog_state::{ValidationButtonsAlign, ValidationButtonsOrder};
 use crate::file_style::EntryKind;
 use crate::fs::{FileSystem, StdFileSystem};
+use crate::fs_ops::{copy_tree, move_tree, unique_child_name};
 use crate::places::{Place, PlaceOrigin, Places};
 use crate::thumbnails::ThumbnailBackend;
 
@@ -1048,6 +1050,89 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
     }
 }
 
+fn clipboard_set_from_selection(state: &mut FileDialogState, op: ClipboardOp) {
+    if state.core.selected.is_empty() {
+        return;
+    }
+
+    let sources = state
+        .core
+        .selected
+        .iter()
+        .map(|name| state.core.cwd.join(name))
+        .collect();
+    state.ui.clipboard = Some(FileClipboard { op, sources });
+}
+
+fn clipboard_paste_into_cwd(
+    state: &mut FileDialogState,
+    fs: &dyn FileSystem,
+) -> Result<(), String> {
+    let Some(cb) = state.ui.clipboard.clone() else {
+        return Ok(());
+    };
+    if cb.sources.is_empty() {
+        return Ok(());
+    }
+
+    let dest_dir = state.core.cwd.clone();
+    let mut created: Vec<String> = Vec::new();
+
+    for src in &cb.sources {
+        let name = src
+            .file_name()
+            .ok_or_else(|| format!("Invalid source path: {}", src.display()))?
+            .to_string_lossy()
+            .to_string();
+
+        let dest_name = match cb.op {
+            ClipboardOp::Copy => unique_child_name(fs, &dest_dir, &name)
+                .map_err(|e| format!("Failed to allocate a unique name for '{name}': {e}"))?,
+            ClipboardOp::Cut => name.clone(),
+        };
+        let dest = dest_dir.join(&dest_name);
+
+        if dest == *src {
+            continue;
+        }
+        if dest.starts_with(src) {
+            return Err(format!("Refusing to paste '{name}' into itself"));
+        }
+        if matches!(cb.op, ClipboardOp::Cut) && fs.metadata(&dest).is_ok() {
+            return Err(format!("Target already exists: '{dest_name}'"));
+        }
+
+        let r = match cb.op {
+            ClipboardOp::Copy => copy_tree(fs, src, &dest),
+            ClipboardOp::Cut => move_tree(fs, src, &dest),
+        };
+        if let Err(e) = r {
+            return Err(format!("Failed to paste '{name}': {e}"));
+        }
+
+        created.push(dest_name);
+    }
+
+    if created.is_empty() {
+        return Ok(());
+    }
+
+    state.core.invalidate_dir_cache();
+
+    let first = created[0].clone();
+    state.core.focus_and_select_by_name(first.clone());
+    if created.len() > 1 {
+        state.core.selected = created;
+    }
+    state.ui.reveal_name_next = Some(first);
+
+    if matches!(cb.op, ClipboardOp::Cut) {
+        state.ui.clipboard = None;
+    }
+
+    Ok(())
+}
+
 fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
     let input = state.ui.path_edit_buffer.trim();
     let raw_p = std::path::PathBuf::from(input);
@@ -1614,6 +1699,18 @@ fn draw_file_table_view(
             if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
                 state.core.select_all();
             }
+            if modifiers.ctrl && ui.is_key_pressed(Key::C) && !modifiers.shift {
+                clipboard_set_from_selection(state, ClipboardOp::Copy);
+            }
+            if modifiers.ctrl && ui.is_key_pressed(Key::X) && !modifiers.shift {
+                clipboard_set_from_selection(state, ClipboardOp::Cut);
+            }
+            if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
+                state.ui.ui_error = None;
+                if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                    state.ui.ui_error = Some(e);
+                }
+            }
             if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
                 state.core.move_focus(-1, modifiers);
             }
@@ -1712,6 +1809,31 @@ fn draw_file_table_view(
                 if !selected {
                     state.core.focus_and_select_by_name(e.name.clone());
                 }
+                let has_selection = !state.core.selected.is_empty();
+                let can_paste = state
+                    .ui
+                    .clipboard
+                    .as_ref()
+                    .map(|c| !c.sources.is_empty())
+                    .unwrap_or(false);
+
+                if ui.menu_item_enabled_selected("Copy", Some("Ctrl+C"), false, has_selection) {
+                    clipboard_set_from_selection(state, ClipboardOp::Copy);
+                    ui.close_current_popup();
+                }
+                if ui.menu_item_enabled_selected("Cut", Some("Ctrl+X"), false, has_selection) {
+                    clipboard_set_from_selection(state, ClipboardOp::Cut);
+                    ui.close_current_popup();
+                }
+                if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
+                    state.ui.ui_error = None;
+                    if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                        state.ui.ui_error = Some(e);
+                    }
+                    ui.close_current_popup();
+                }
+
+                ui.separator();
                 let can_rename = state.core.selected.len() == 1;
                 if ui.menu_item_enabled_selected("Rename", Some("F2"), false, can_rename) {
                     state.ui.rename_target = Some(state.core.selected[0].clone());
@@ -1765,6 +1887,22 @@ fn draw_file_table_view(
             if state.ui.reveal_name_next.as_deref() == Some(e.name.as_str()) {
                 ui.set_scroll_here_y(0.5);
                 state.ui.reveal_name_next = None;
+            }
+        }
+
+        if let Some(_popup) = ui.begin_popup_context_window() {
+            let can_paste = state
+                .ui
+                .clipboard
+                .as_ref()
+                .map(|c| !c.sources.is_empty())
+                .unwrap_or(false);
+            if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
+                state.ui.ui_error = None;
+                if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                    state.ui.ui_error = Some(e);
+                }
+                ui.close_current_popup();
             }
         }
     });
@@ -1842,6 +1980,18 @@ fn draw_file_grid_view(
 
                 if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
                     state.core.select_all();
+                }
+                if modifiers.ctrl && ui.is_key_pressed(Key::C) && !modifiers.shift {
+                    clipboard_set_from_selection(state, ClipboardOp::Copy);
+                }
+                if modifiers.ctrl && ui.is_key_pressed(Key::X) && !modifiers.shift {
+                    clipboard_set_from_selection(state, ClipboardOp::Cut);
+                }
+                if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
+                    state.ui.ui_error = None;
+                    if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                        state.ui.ui_error = Some(e);
+                    }
                 }
                 if ui.is_key_pressed_with_repeat(Key::LeftArrow, true) {
                     state.core.move_focus(-1, modifiers);
@@ -1971,6 +2121,42 @@ fn draw_file_grid_view(
                         if !selected {
                             state.core.focus_and_select_by_name(e.name.clone());
                         }
+                        let has_selection = !state.core.selected.is_empty();
+                        let can_paste = state
+                            .ui
+                            .clipboard
+                            .as_ref()
+                            .map(|c| !c.sources.is_empty())
+                            .unwrap_or(false);
+
+                        if ui.menu_item_enabled_selected(
+                            "Copy",
+                            Some("Ctrl+C"),
+                            false,
+                            has_selection,
+                        ) {
+                            clipboard_set_from_selection(state, ClipboardOp::Copy);
+                            ui.close_current_popup();
+                        }
+                        if ui.menu_item_enabled_selected(
+                            "Cut",
+                            Some("Ctrl+X"),
+                            false,
+                            has_selection,
+                        ) {
+                            clipboard_set_from_selection(state, ClipboardOp::Cut);
+                            ui.close_current_popup();
+                        }
+                        if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste)
+                        {
+                            state.ui.ui_error = None;
+                            if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                                state.ui.ui_error = Some(e);
+                            }
+                            ui.close_current_popup();
+                        }
+
+                        ui.separator();
                         let can_rename = state.core.selected.len() == 1;
                         if ui.menu_item_enabled_selected("Rename", Some("F2"), false, can_rename) {
                             state.ui.rename_target = Some(state.core.selected[0].clone());
@@ -1994,6 +2180,21 @@ fn draw_file_grid_view(
                             *request_confirm = true;
                         }
                     }
+                }
+            }
+            if let Some(_popup) = ui.begin_popup_context_window() {
+                let can_paste = state
+                    .ui
+                    .clipboard
+                    .as_ref()
+                    .map(|c| !c.sources.is_empty())
+                    .unwrap_or(false);
+                if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
+                    state.ui.ui_error = None;
+                    if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                        state.ui.ui_error = Some(e);
+                    }
+                    ui.close_current_popup();
                 }
             }
         });

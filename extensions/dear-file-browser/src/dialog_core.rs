@@ -1073,6 +1073,13 @@ mod tests {
                 "remove_dir_all not supported in TestFs",
             ))
         }
+
+        fn copy_file(&self, _from: &Path, _to: &Path) -> std::io::Result<u64> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "copy_file not supported in TestFs",
+            ))
+        }
     }
 
     #[test]

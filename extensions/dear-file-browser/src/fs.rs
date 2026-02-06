@@ -43,6 +43,10 @@ pub trait FileSystem {
     fn remove_dir(&self, path: &Path) -> std::io::Result<()>;
     /// Remove a directory and all of its contents (recursive).
     fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
+    /// Copy a file.
+    ///
+    /// Returns the number of bytes copied (mirrors `std::fs::copy`).
+    fn copy_file(&self, from: &Path, to: &Path) -> std::io::Result<u64>;
 }
 
 /// Default filesystem implementation using `std::fs`.
@@ -111,5 +115,9 @@ impl FileSystem for StdFileSystem {
 
     fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
         std::fs::remove_dir_all(path)
+    }
+
+    fn copy_file(&self, from: &Path, to: &Path) -> std::io::Result<u64> {
+        std::fs::copy(from, to)
     }
 }

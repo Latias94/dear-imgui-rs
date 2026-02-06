@@ -35,6 +35,25 @@ fn std_fs_rename_and_remove_file() {
 }
 
 #[test]
+fn std_fs_copy_file() {
+    let fs = StdFileSystem;
+    let dir = unique_temp_dir("copy_file");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let from = dir.join("a.txt");
+    let to = dir.join("b.txt");
+    std::fs::write(&from, b"hello").unwrap();
+
+    let n = fs.copy_file(&from, &to).unwrap();
+    assert_eq!(n, 5);
+    assert!(to.exists());
+    assert_eq!(std::fs::read(&to).unwrap(), b"hello");
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn std_fs_remove_dir() {
     let fs = StdFileSystem;
     let dir = unique_temp_dir("remove_dir");
