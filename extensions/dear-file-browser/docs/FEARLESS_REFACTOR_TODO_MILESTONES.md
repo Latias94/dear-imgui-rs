@@ -235,6 +235,14 @@ Goal: add IGFD-like save behavior.
 - [x] Task: UI shows confirmation modal/popup controlled by host
   - Acceptance: can cancel overwrite and return to dialog without losing state.
 
+### Epic 7.3 — Result convenience modes
+
+- [x] Task: add IGFD-style convenience accessors on `Selection`
+  - `file_path_name()` (GetFilePathName-like)
+  - `file_name()` (GetFileName-like)
+  - `selection_named_paths()` (GetSelection-like)
+  - Acceptance: helper APIs are covered by unit tests and documented in README.
+
 Exit criteria:
 
 - Save mode matches expected behavior for overwrite confirmation and extension handling.

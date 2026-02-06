@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// Errors returned when parsing IGFD-style filter strings.
@@ -283,6 +283,63 @@ pub struct Selection {
     pub paths: Vec<PathBuf>,
 }
 
+impl Selection {
+    /// Returns true when no path was selected.
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
+    /// Returns the number of selected paths.
+    pub fn len(&self) -> usize {
+        self.paths.len()
+    }
+
+    /// Returns selected paths as a slice.
+    pub fn paths(&self) -> &[PathBuf] {
+        &self.paths
+    }
+
+    /// Consumes the selection and returns owned paths.
+    pub fn into_paths(self) -> Vec<PathBuf> {
+        self.paths
+    }
+
+    /// IGFD-like convenience: get the first selected full path.
+    ///
+    /// This corresponds to `GetFilePathName()` semantics for single selection.
+    /// For multi-selection, this returns the first selected path in stable order.
+    pub fn file_path_name(&self) -> Option<&Path> {
+        self.paths.first().map(PathBuf::as_path)
+    }
+
+    /// IGFD-like convenience: get the first selected base file name.
+    ///
+    /// This corresponds to `GetFileName()` semantics for single selection.
+    /// For multi-selection, this returns the first selected file name.
+    pub fn file_name(&self) -> Option<&str> {
+        self.file_path_name()
+            .and_then(Path::file_name)
+            .and_then(|v| v.to_str())
+    }
+
+    /// IGFD-like convenience: get all selected `(file_name, full_path)` pairs.
+    ///
+    /// This is a Rust-friendly equivalent of `GetSelection()`.
+    pub fn selection_named_paths(&self) -> Vec<(String, PathBuf)> {
+        self.paths
+            .iter()
+            .map(|path| {
+                let name = path
+                    .file_name()
+                    .and_then(|v| v.to_str())
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| path.display().to_string());
+                (name, path.clone())
+            })
+            .collect()
+    }
+}
+
 /// Errors returned by file dialogs and in-UI browser
 #[derive(Error, Debug)]
 pub enum FileDialogError {
@@ -561,5 +618,39 @@ mod tests {
         let v = FileFilter::parse_igfd("Rx{((a,b)),.txt}").unwrap();
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].extensions, vec!["((a,b))", ".txt"]);
+    }
+
+    #[test]
+    fn selection_convenience_accessors_for_single_path() {
+        let sel = Selection {
+            paths: vec![PathBuf::from("/tmp/demo.txt")],
+        };
+        assert!(!sel.is_empty());
+        assert_eq!(sel.len(), 1);
+        assert_eq!(sel.file_name(), Some("demo.txt"));
+        assert_eq!(sel.file_path_name(), Some(Path::new("/tmp/demo.txt")));
+        assert_eq!(sel.paths(), &[PathBuf::from("/tmp/demo.txt")]);
+    }
+
+    #[test]
+    fn selection_named_paths_for_multi_selection() {
+        let sel = Selection {
+            paths: vec![PathBuf::from("/a/one.txt"), PathBuf::from("/b/two.bin")],
+        };
+        let pairs = sel.selection_named_paths();
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].0, "one.txt");
+        assert_eq!(pairs[0].1, PathBuf::from("/a/one.txt"));
+        assert_eq!(pairs[1].0, "two.bin");
+        assert_eq!(pairs[1].1, PathBuf::from("/b/two.bin"));
+    }
+
+    #[test]
+    fn selection_into_paths_moves_owned_paths() {
+        let sel = Selection {
+            paths: vec![PathBuf::from("a"), PathBuf::from("b")],
+        };
+        let out = sel.into_paths();
+        assert_eq!(out, vec![PathBuf::from("a"), PathBuf::from("b")]);
     }
 }

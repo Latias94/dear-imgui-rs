@@ -52,7 +52,7 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 | Directory manual entry (right-click breadcrumb) | ✅ | Supported. |
 | “Parallel directory” popup on path separator | ✅ | Supported via breadcrumb separator popup. |
 | Confirm overwrite (Save) | ✅ | `SavePolicy` + modal prompt. |
-| Result modes (path+name+selection, ext policies) | 🟡 | Returns `Selection { paths }`; extension policy matches IGFD intent; no “GetFileName-only” convenience yet. |
+| Result modes (path+name+selection, ext policies) | ✅ | `Selection { paths }` + convenience helpers: `file_path_name()`, `file_name()`, `selection_named_paths()`; extension policy matches IGFD intent. |
 | Thumbnails + GPU lifecycle hooks | ✅ | Pipeline + LRU + optional `thumbnails-image` decoding + backend upload/destroy. |
 | Embedded / custom host | ✅ | `draw_contents*()` + window host config + `show_modal*()` convenience. |
 | Validation buttons tuning (placement/width/invert) | ✅ | `ValidationButtonsConfig` (align/order/width/labels). |

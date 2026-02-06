@@ -106,6 +106,21 @@ ui.window("Open")
     });
 ```
 
+## Result Convenience (IGFD-style)
+
+`Selection` keeps `paths: Vec<PathBuf>` as the canonical result model, and also provides
+IGFD-style convenience helpers:
+
+```rust
+let selection = FileDialog::new(DialogMode::OpenFile)
+    .backend(Backend::Auto)
+    .open_blocking()?;
+
+let full_path = selection.file_path_name();           // like GetFilePathName()
+let base_name = selection.file_name();                // like GetFileName()
+let named = selection.selection_named_paths();        // like GetSelection()
+```
+
 ## Filters
 
 `FileFilter` supports a simple extension list API (case-insensitive, without leading dots):
