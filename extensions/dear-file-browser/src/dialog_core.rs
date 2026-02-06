@@ -13,6 +13,9 @@ use crate::places::Places;
 use indexmap::IndexSet;
 use regex::RegexBuilder;
 
+#[cfg(feature = "tracing")]
+use tracing::trace;
+
 /// Keyboard/mouse modifier keys used by selection/navigation logic.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Modifiers {
@@ -648,6 +651,7 @@ pub struct FileDialogCore {
     scan_policy: ScanPolicy,
     scan_status: ScanStatus,
     scan_generation: u64,
+    scan_started_at: Option<std::time::Instant>,
     scan_runtime: ScanRuntime,
     dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
@@ -687,6 +691,7 @@ impl FileDialogCore {
             scan_policy: ScanPolicy::default(),
             scan_status: ScanStatus::default(),
             scan_generation: 0,
+            scan_started_at: None,
             scan_runtime: ScanRuntime::from_policy(ScanPolicy::default()),
             dir_snapshot: DirSnapshot {
                 cwd: PathBuf::new(),
@@ -926,6 +931,13 @@ impl FileDialogCore {
             return;
         }
 
+        let rebuild_reason = if self.last_view_key.is_none() {
+            "snapshot_or_forced"
+        } else {
+            "view_inputs_changed"
+        };
+        let rebuild_started_at = std::time::Instant::now();
+
         let mut entries = self.dir_snapshot.entries.clone();
         filter_entries_in_place(
             &mut entries,
@@ -946,6 +958,12 @@ impl FileDialogCore {
         self.entries = entries;
         self.retain_selected_visible();
         self.last_view_key = Some(key);
+
+        trace_projector_rebuild(
+            rebuild_reason,
+            self.entries.len(),
+            rebuild_started_at.elapsed().as_micros(),
+        );
     }
 
     fn refresh_dir_snapshot_if_needed(&mut self, fs: &dyn FileSystem) {
@@ -982,16 +1000,23 @@ impl FileDialogCore {
     fn begin_scan_request(&mut self) -> ScanRequest {
         let generation = self.scan_generation.saturating_add(1);
         self.scan_generation = generation;
-        ScanRequest {
+        let request = ScanRequest {
             generation,
             cwd: self.cwd.clone(),
             scan_policy: self.scan_policy,
             submitted_at: std::time::Instant::now(),
-        }
+        };
+        trace_scan_requested(&request);
+        request
     }
 
     fn apply_runtime_batch(&mut self, runtime_batch: RuntimeBatch) {
         if runtime_batch.generation != self.scan_generation {
+            trace_scan_dropped_stale_batch(
+                runtime_batch.generation,
+                self.scan_generation,
+                "runtime_batch",
+            );
             return;
         }
 
@@ -1000,12 +1025,14 @@ impl FileDialogCore {
                 self.dir_snapshot = empty_snapshot_for_cwd(&cwd);
                 self.last_view_key = None;
                 self.apply_scan_batch(ScanBatch::begin(runtime_batch.generation));
+                trace_scan_batch_applied(runtime_batch.generation, 0, "begin");
             }
             RuntimeBatchKind::ReplaceSnapshot { snapshot } => {
                 let loaded = snapshot.entry_count;
                 self.dir_snapshot = snapshot;
                 self.last_view_key = None;
                 self.apply_scan_batch(ScanBatch::entries(runtime_batch.generation, loaded, false));
+                trace_scan_batch_applied(runtime_batch.generation, loaded, "replace_snapshot");
             }
             RuntimeBatchKind::AppendEntries {
                 cwd,
@@ -1015,34 +1042,48 @@ impl FileDialogCore {
                 if self.dir_snapshot.cwd != cwd {
                     self.dir_snapshot = empty_snapshot_for_cwd(&cwd);
                 }
+                let batch_entries = entries.len();
                 self.dir_snapshot.entries.extend(entries);
                 self.dir_snapshot.entry_count = self.dir_snapshot.entries.len();
                 self.last_view_key = None;
                 self.apply_scan_batch(ScanBatch::entries(runtime_batch.generation, loaded, false));
+                trace_scan_batch_applied(runtime_batch.generation, batch_entries, "append_entries");
             }
             RuntimeBatchKind::Complete { loaded } => {
                 self.last_view_key = None;
                 self.apply_scan_batch(ScanBatch::complete(runtime_batch.generation, loaded));
+                trace_scan_batch_applied(runtime_batch.generation, 0, "complete");
             }
             RuntimeBatchKind::Error { cwd, message } => {
                 self.dir_snapshot = empty_snapshot_for_cwd(&cwd);
                 self.last_view_key = None;
                 self.apply_scan_batch(ScanBatch::error(runtime_batch.generation, message));
+                trace_scan_batch_applied(runtime_batch.generation, 0, "error");
             }
         }
     }
 
     fn apply_scan_batch(&mut self, batch: ScanBatch) {
         if batch.generation != self.scan_generation {
+            trace_scan_dropped_stale_batch(batch.generation, self.scan_generation, "scan_batch");
             return;
         }
 
         self.scan_status = match batch.kind {
-            ScanBatchKind::Begin => ScanStatus::Scanning {
-                generation: batch.generation,
-            },
+            ScanBatchKind::Begin => {
+                self.scan_started_at = Some(std::time::Instant::now());
+                ScanStatus::Scanning {
+                    generation: batch.generation,
+                }
+            }
             ScanBatchKind::Entries { loaded } => {
                 if batch.is_final {
+                    let duration_ms = self
+                        .scan_started_at
+                        .take()
+                        .map(|started| started.elapsed().as_millis())
+                        .unwrap_or(0);
+                    trace_scan_completed(batch.generation, loaded, duration_ms);
                     ScanStatus::Complete {
                         generation: batch.generation,
                         loaded,
@@ -1054,14 +1095,25 @@ impl FileDialogCore {
                     }
                 }
             }
-            ScanBatchKind::Complete { loaded } => ScanStatus::Complete {
-                generation: batch.generation,
-                loaded,
-            },
-            ScanBatchKind::Error { message } => ScanStatus::Failed {
-                generation: batch.generation,
-                message,
-            },
+            ScanBatchKind::Complete { loaded } => {
+                let duration_ms = self
+                    .scan_started_at
+                    .take()
+                    .map(|started| started.elapsed().as_millis())
+                    .unwrap_or(0);
+                trace_scan_completed(batch.generation, loaded, duration_ms);
+                ScanStatus::Complete {
+                    generation: batch.generation,
+                    loaded,
+                }
+            }
+            ScanBatchKind::Error { message } => {
+                self.scan_started_at = None;
+                ScanStatus::Failed {
+                    generation: batch.generation,
+                    message,
+                }
+            }
         };
     }
 
@@ -1949,6 +2001,69 @@ fn empty_snapshot_for_cwd(cwd: &Path) -> DirSnapshot {
         entries: Vec::new(),
     }
 }
+
+#[cfg(feature = "tracing")]
+fn trace_scan_requested(request: &ScanRequest) {
+    trace!(
+        event = "scan.requested",
+        generation = request.generation,
+        cwd = %request.cwd.display(),
+        ?request.scan_policy,
+        "scan requested"
+    );
+}
+
+#[cfg(not(feature = "tracing"))]
+fn trace_scan_requested(_request: &ScanRequest) {}
+
+#[cfg(feature = "tracing")]
+fn trace_scan_batch_applied(generation: u64, entries: usize, kind: &'static str) {
+    trace!(
+        event = "scan.batch_applied",
+        generation, entries, kind, "scan batch applied"
+    );
+}
+
+#[cfg(not(feature = "tracing"))]
+fn trace_scan_batch_applied(_generation: u64, _entries: usize, _kind: &'static str) {}
+
+#[cfg(feature = "tracing")]
+fn trace_scan_completed(generation: u64, total_entries: usize, duration_ms: u128) {
+    trace!(
+        event = "scan.completed",
+        generation, total_entries, duration_ms, "scan completed"
+    );
+}
+
+#[cfg(not(feature = "tracing"))]
+fn trace_scan_completed(_generation: u64, _total_entries: usize, _duration_ms: u128) {}
+
+#[cfg(feature = "tracing")]
+fn trace_scan_dropped_stale_batch(generation: u64, current_generation: u64, source: &'static str) {
+    trace!(
+        event = "scan.dropped_stale_batch",
+        generation, current_generation, source, "scan dropped stale batch"
+    );
+}
+
+#[cfg(not(feature = "tracing"))]
+fn trace_scan_dropped_stale_batch(
+    _generation: u64,
+    _current_generation: u64,
+    _source: &'static str,
+) {
+}
+
+#[cfg(feature = "tracing")]
+fn trace_projector_rebuild(reason: &'static str, visible_entries: usize, duration_us: u128) {
+    trace!(
+        event = "projector.rebuild",
+        reason, visible_entries, duration_us, "projector rebuilt"
+    );
+}
+
+#[cfg(not(feature = "tracing"))]
+fn trace_projector_rebuild(_reason: &'static str, _visible_entries: usize, _duration_us: u128) {}
 
 #[cfg(test)]
 mod tests {

@@ -32,9 +32,9 @@ Current parity status vs IGFD (excluding C API by product decision):
 
 Execution plan (next implementation wave):
 
-1. P2 Stage D: add tracing/metrics for scan and projection lifecycle
-2. P2 Stage E: record baseline perf data for large directories
-3. P2 Stage F: tune UX/perf defaults and publish migration snippets
+1. P2 Stage D: add synthetic perf tests and baseline data for large directories
+2. P2 Stage E: tune UX/perf defaults for incremental scanning
+3. P2 Stage F: publish migration snippets and rollout notes
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -589,7 +589,7 @@ Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
 
 ### Epic 17.4 - Observability and tuning (Stage D)
 
-- [ ] Task: add tracing events for scan/projection lifecycle
+- [x] Task: add tracing events for scan/projection lifecycle
   - Acceptance:
     - key events include `scan.requested`, `scan.batch_applied`, `scan.completed`, `scan.dropped_stale_batch`
 - [ ] Task: add optional synthetic performance tests (10k+/50k entries)

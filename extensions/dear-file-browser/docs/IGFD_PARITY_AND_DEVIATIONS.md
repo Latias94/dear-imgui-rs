@@ -58,5 +58,6 @@ Last updated: 2026-02-06
 - Completed: Stage A scaffolding (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`) and generation-owned sync scan flow in `FileDialogCore`.
 - Completed: Stage B runtime abstraction (`ScanRuntime` with `SyncRuntime`/`WorkerRuntime`) and stale-generation supersession behavior.
 - Completed: Stage C bounded per-frame batch apply + incremental selection reconciliation stability.
-- Next: add tracing metrics/events and benchmark baselines for large directories.
+- Completed: Stage D tracing metrics/events (`scan.requested`, `scan.batch_applied`, `scan.completed`, `scan.dropped_stale_batch`, `projector.rebuild`).
+- Next: add benchmark baselines for large directories.
 - Continue UX polish and migration snippets without changing parity guarantees.
