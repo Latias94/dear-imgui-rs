@@ -578,11 +578,15 @@ fn draw_contents_with_fs_and_hooks(
                                 .build(ui, || {
                                     let selected_entry_ids = state.core.selected_entry_ids();
                                     let selected_paths = selected_entry_paths_from_ids(state);
+                                    let (selected_files_count, selected_dirs_count) =
+                                        selected_entry_counts_from_ids(state);
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
                                         selected_entry_ids: &selected_entry_ids,
                                         selected_paths: &selected_paths,
+                                        selected_files_count,
+                                        selected_dirs_count,
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core
@@ -630,11 +634,15 @@ fn draw_contents_with_fs_and_hooks(
                                 .build(ui, || {
                                     let selected_entry_ids = state.core.selected_entry_ids();
                                     let selected_paths = selected_entry_paths_from_ids(state);
+                                    let (selected_files_count, selected_dirs_count) =
+                                        selected_entry_counts_from_ids(state);
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
                                         selected_entry_ids: &selected_entry_ids,
                                         selected_paths: &selected_paths,
+                                        selected_files_count,
+                                        selected_dirs_count,
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core
@@ -1159,6 +1167,22 @@ fn selected_entry_paths_from_ids(state: &FileDialogState) -> Vec<PathBuf> {
                 .map(|entry| entry.path.clone())
         })
         .collect()
+}
+
+fn selected_entry_counts_from_ids(state: &FileDialogState) -> (usize, usize) {
+    let entries = state.core.entries();
+    state
+        .core
+        .selected_entry_ids()
+        .into_iter()
+        .filter_map(|id| entries.iter().find(|entry| entry.id == id))
+        .fold((0usize, 0usize), |(files, dirs), entry| {
+            if entry.is_dir {
+                (files, dirs + 1)
+            } else {
+                (files + 1, dirs)
+            }
+        })
 }
 
 fn open_rename_modal_from_selection(state: &mut FileDialogState) {

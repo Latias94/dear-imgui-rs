@@ -54,6 +54,8 @@ The custom pane context is now ID-first as well:
 - removed: `selected_names: &[String]`
 - added: `selected_entry_ids: &[EntryId]`
 - added: `selected_paths: &[PathBuf]`
+- added: `selected_files_count: usize`
+- added: `selected_dirs_count: usize`
 
 ## Migration patterns
 

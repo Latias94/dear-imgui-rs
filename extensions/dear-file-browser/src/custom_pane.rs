@@ -19,6 +19,10 @@ pub struct CustomPaneCtx<'a> {
     pub selected_entry_ids: &'a [EntryId],
     /// Selected entry paths in deterministic selection order.
     pub selected_paths: &'a [PathBuf],
+    /// Number of selected files in the current snapshot.
+    pub selected_files_count: usize,
+    /// Number of selected directories in the current snapshot.
+    pub selected_dirs_count: usize,
     /// Current save filename buffer (SaveFile mode).
     pub save_name: &'a str,
     /// Active filter (None = "All files").

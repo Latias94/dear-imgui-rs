@@ -268,6 +268,7 @@ impl CustomPane for MyPane {
     fn draw(&mut self, ui: &dear_imgui_rs::Ui, ctx: CustomPaneCtx<'_>) -> ConfirmGate {
         ui.checkbox("Require selection", &mut self.must_select);
         ui.text(format!("selected paths: {}", ctx.selected_paths.len()));
+        ui.text(format!("files: {}, dirs: {}", ctx.selected_files_count, ctx.selected_dirs_count));
         if self.must_select && ctx.selected_paths.is_empty() {
             ConfirmGate {
                 can_confirm: false,
