@@ -140,10 +140,13 @@ Goal: allow alternative filesystem backends and system devices integration.
 - [x] Task: extend `FileSystem` with basic file operations:
   - `rename`, `remove_file`, `remove_dir`
   - Acceptance: the UI can implement rename/delete/new-folder without `std::fs` calls.
+- [x] Task: add recursive directory delete (opt-in)
+  - Add `remove_dir_all` to `FileSystem`
+  - Expose a "Recursive" toggle in the Delete confirmation modal
+  - Acceptance: deleting a non-empty directory succeeds when recursive is enabled (covered by a test).
 - [ ] Task: extend `FileSystem` with “quality of life” operations (as needed):
   - `create_dir_all` (for recursive mkdir)
   - `exists` convenience (or richer `metadata`)
-  - recursive delete helpers (opt-in)
   - Acceptance: advanced file operations don’t require leaking platform-specific IO details into UI.
 
 Exit criteria:

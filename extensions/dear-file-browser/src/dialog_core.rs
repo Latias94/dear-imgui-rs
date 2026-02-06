@@ -1066,6 +1066,13 @@ mod tests {
                 "remove_dir not supported in TestFs",
             ))
         }
+
+        fn remove_dir_all(&self, _path: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "remove_dir_all not supported in TestFs",
+            ))
+        }
     }
 
     #[test]

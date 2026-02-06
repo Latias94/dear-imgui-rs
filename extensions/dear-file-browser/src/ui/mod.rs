@@ -948,6 +948,7 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
 
     if state.ui.delete_open_next {
         state.ui.delete_open_next = false;
+        state.ui.delete_recursive = false;
         if !ui.is_popup_open(POPUP_ID) {
             ui.open_popup(POPUP_ID);
         }
@@ -986,22 +987,42 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
         }
 
         ui.separator();
+
+        let any_dir = state.ui.delete_targets.iter().any(|name| {
+            let p = state.core.cwd.join(name);
+            fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false)
+        });
+        if any_dir {
+            ui.checkbox("Recursive", &mut state.ui.delete_recursive);
+            ui.same_line();
+            ui.text_disabled("Delete directories with contents");
+        } else {
+            state.ui.delete_recursive = false;
+        }
+
+        ui.separator();
         let del = ui.button("Delete");
         ui.same_line();
         let cancel = ui.button("Cancel");
         if cancel {
             state.ui.delete_error = None;
             state.ui.delete_targets.clear();
+            state.ui.delete_recursive = false;
             ui.close_current_popup();
         }
 
         if del {
             state.ui.delete_error = None;
+            let recursive = state.ui.delete_recursive;
             for name in &state.ui.delete_targets {
                 let p = state.core.cwd.join(name);
                 let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
                 let r = if is_dir {
-                    fs.remove_dir(&p)
+                    if recursive {
+                        fs.remove_dir_all(&p)
+                    } else {
+                        fs.remove_dir(&p)
+                    }
                 } else {
                     fs.remove_file(&p)
                 };
@@ -1015,6 +1036,7 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
                 state.core.selected.clear();
                 state.core.invalidate_dir_cache();
                 state.ui.delete_targets.clear();
+                state.ui.delete_recursive = false;
                 ui.close_current_popup();
             }
         }

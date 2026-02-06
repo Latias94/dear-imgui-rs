@@ -41,6 +41,8 @@ pub trait FileSystem {
     fn remove_file(&self, path: &Path) -> std::io::Result<()>;
     /// Remove an empty directory.
     fn remove_dir(&self, path: &Path) -> std::io::Result<()>;
+    /// Remove a directory and all of its contents (recursive).
+    fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
 }
 
 /// Default filesystem implementation using `std::fs`.
@@ -105,5 +107,9 @@ impl FileSystem for StdFileSystem {
 
     fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
         std::fs::remove_dir(path)
+    }
+
+    fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::remove_dir_all(path)
     }
 }

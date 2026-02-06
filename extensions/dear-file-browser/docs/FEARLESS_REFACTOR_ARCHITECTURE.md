@@ -58,7 +58,7 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 | Validation buttons tuning (placement/width/invert) | ✅ | `ValidationButtonsConfig` (align/order/width/labels). |
 | Filter groups / collection syntax (`Name{...}`) | ✅ | `FileFilter::parse_igfd()` / `FileDialog::filters_igfd()` support `Name{...}` collections and simple lists. |
 | Natural sort for extensions on demand | ✅ | “Ext” column supports sorting by full extension using natural order. |
-| File operations (rename/delete/copy/paste, etc.) | 🟡 | Rename + delete exist (delete dirs must be empty); copy/cut/paste/clipboard still missing. |
+| File operations (rename/delete/copy/paste, etc.) | 🟡 | Rename + delete exist (delete supports optional recursive directories); copy/cut/paste/clipboard still missing. |
 
 ---
 

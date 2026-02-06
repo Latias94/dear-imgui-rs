@@ -49,3 +49,22 @@ fn std_fs_remove_dir() {
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn std_fs_remove_dir_all() {
+    let fs = StdFileSystem;
+    let dir = unique_temp_dir("remove_dir_all");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let sub = dir.join("sub");
+    let sub2 = sub.join("nested");
+    std::fs::create_dir_all(&sub2).unwrap();
+    std::fs::write(sub.join("a.txt"), b"hello").unwrap();
+    std::fs::write(sub2.join("b.txt"), b"world").unwrap();
+
+    fs.remove_dir_all(&sub).unwrap();
+    assert!(!sub.exists());
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}

@@ -153,6 +153,8 @@ pub struct FileDialogUiState {
     pub delete_open_next: bool,
     /// Pending delete targets (relative to cwd).
     pub delete_targets: Vec<String>,
+    /// Whether directory deletion should be recursive (`remove_dir_all`) instead of requiring empty directories.
+    pub delete_recursive: bool,
     /// Error string shown inside the delete modal.
     pub delete_error: Option<String>,
     /// Reveal (scroll to) a specific entry name on the next draw, then clear.
@@ -235,6 +237,7 @@ impl Default for FileDialogUiState {
             rename_error: None,
             delete_open_next: false,
             delete_targets: Vec::new(),
+            delete_recursive: false,
             delete_error: None,
             reveal_name_next: None,
             file_styles: FileStyleRegistry::default(),
