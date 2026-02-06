@@ -32,9 +32,9 @@ Current parity status vs IGFD (excluding C API by product decision):
 
 Execution plan (next implementation wave):
 
-1. P2 Stage C: optimize projection path + bounded per-frame apply path
-2. P2 Stage D: add tracing/metrics and baseline perf data for large directories
-3. P2 Stage E: tune UX/perf defaults and publish migration snippets
+1. P2 Stage D: add tracing/metrics for scan and projection lifecycle
+2. P2 Stage E: record baseline perf data for large directories
+3. P2 Stage F: tune UX/perf defaults and publish migration snippets
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -579,10 +579,10 @@ Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
 
 ### Epic 17.3 - Projection/selection stability under partial data (Stage C)
 
-- [ ] Task: add bounded per-frame batch apply budget
+- [x] Task: add bounded per-frame batch apply budget
   - Acceptance:
     - UI frame budget remains stable under large scans
-- [ ] Task: stabilize selection/anchor/focus reconciliation during incremental updates
+- [x] Task: stabilize selection/anchor/focus reconciliation during incremental updates
   - Acceptance:
     - selected IDs persist when entries remain resolvable
     - unresolved IDs are dropped deterministically

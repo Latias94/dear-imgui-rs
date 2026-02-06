@@ -1021,6 +1021,7 @@ impl FileDialogCore {
                 self.apply_scan_batch(ScanBatch::entries(runtime_batch.generation, loaded, false));
             }
             RuntimeBatchKind::Complete { loaded } => {
+                self.last_view_key = None;
                 self.apply_scan_batch(ScanBatch::complete(runtime_batch.generation, loaded));
             }
             RuntimeBatchKind::Error { cwd, message } => {
@@ -1384,28 +1385,48 @@ impl FileDialogCore {
     }
 
     fn retain_selected_visible(&mut self) {
-        if self.selected_ids.is_empty() || self.view_ids.is_empty() {
+        if self.selected_ids.is_empty() {
             return;
         }
 
-        self.selected_ids
-            .retain(|id| self.view_ids.iter().any(|visible| visible == id));
-        self.enforce_selection_cap();
+        let allow_unresolved = self.allow_unresolved_selection();
+        if !allow_unresolved {
+            self.selected_ids
+                .retain(|id| self.view_ids.iter().any(|visible| visible == id));
+            self.enforce_selection_cap();
+        }
 
-        if self
-            .focused_id
-            .map(|id| self.view_ids.iter().all(|visible| *visible != id))
-            .unwrap_or(false)
+        if self.view_ids.is_empty() {
+            if !allow_unresolved {
+                self.focused_id = None;
+                self.selection_anchor_id = None;
+            }
+            return;
+        }
+
+        if !allow_unresolved
+            && self
+                .focused_id
+                .map(|id| self.view_ids.iter().all(|visible| *visible != id))
+                .unwrap_or(false)
         {
             self.focused_id = self.selected_ids.iter().next_back().copied();
         }
-        if self
-            .selection_anchor_id
-            .map(|id| self.view_ids.iter().all(|visible| *visible != id))
-            .unwrap_or(false)
+        if !allow_unresolved
+            && self
+                .selection_anchor_id
+                .map(|id| self.view_ids.iter().all(|visible| *visible != id))
+                .unwrap_or(false)
         {
             self.selection_anchor_id = self.focused_id;
         }
+    }
+
+    fn allow_unresolved_selection(&self) -> bool {
+        matches!(
+            self.scan_status,
+            ScanStatus::Scanning { .. } | ScanStatus::Partial { .. }
+        )
     }
 }
 
@@ -2082,7 +2103,7 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         set_view_files(&mut core, &["a.txt"]);
 
-        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
+        let missing = entry_id_from_path(Path::new("/tmp/missing.txt"), false, false);
         assert!(core.entry_path_by_id(missing).is_none());
     }
     #[test]
@@ -2091,7 +2112,7 @@ mod tests {
         set_view_files(&mut core, &["a.txt", "b.txt"]);
 
         let a = entry_id(&core, "a.txt");
-        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
+        let missing = entry_id_from_path(Path::new("/tmp/missing.txt"), false, false);
         core.replace_selection_by_ids([a, missing]);
 
         assert_eq!(
@@ -2113,7 +2134,7 @@ mod tests {
 
         let a = entry_id(&core, "a.txt");
         let folder = entry_id(&core, "folder");
-        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
+        let missing = entry_id_from_path(Path::new("/tmp/missing.txt"), false, false);
         core.replace_selection_by_ids([a, folder, missing]);
 
         assert_eq!(core.selected_entry_counts(), (1, 1));
@@ -2806,6 +2827,107 @@ mod tests {
         assert_eq!(names, vec!["new.txt"]);
         assert_eq!(fs_old.read_dir_calls.get(), 1);
         assert_eq!(fs_new.read_dir_calls.get(), 1);
+    }
+
+    #[test]
+    fn incremental_scan_keeps_unresolved_selection_until_entry_arrives() {
+        let fs = TestFs {
+            entries: vec![
+                crate::fs::FsEntry {
+                    name: "a.txt".into(),
+                    path: PathBuf::from("/tmp/a.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "b.txt".into(),
+                    path: PathBuf::from("/tmp/b.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "c.txt".into(),
+                    path: PathBuf::from("/tmp/c.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let delayed = entry_id_from_path(Path::new("/tmp/c.txt"), false, false);
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 1 });
+        core.focus_and_select_by_id(delayed);
+
+        core.rescan_if_needed(&fs);
+        core.rescan_if_needed(&fs);
+        assert_eq!(core.selected_entry_ids(), vec![delayed]);
+        assert!(core.selected_entry_paths().is_empty());
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(core.selected_entry_ids(), vec![delayed]);
+        assert!(core.selected_entry_paths().is_empty());
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(core.selected_entry_ids(), vec![delayed]);
+        assert_eq!(
+            core.selected_entry_paths(),
+            vec![PathBuf::from("/tmp/c.txt")]
+        );
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Complete {
+                generation: 1,
+                loaded: 3,
+            }
+        );
+        assert_eq!(core.selected_entry_ids(), vec![delayed]);
+    }
+
+    #[test]
+    fn complete_scan_drops_missing_selection_ids() {
+        let fs = TestFs {
+            entries: vec![crate::fs::FsEntry {
+                name: "a.txt".into(),
+                path: PathBuf::from("/tmp/a.txt"),
+                is_dir: false,
+                is_symlink: false,
+                size: None,
+                modified: None,
+            }],
+            ..Default::default()
+        };
+
+        let missing = entry_id_from_path(Path::new("/tmp/missing.txt"), false, false);
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 1 });
+        core.focus_and_select_by_id(missing);
+
+        core.rescan_if_needed(&fs);
+        core.rescan_if_needed(&fs);
+        assert_eq!(core.selected_entry_ids(), vec![missing]);
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Complete {
+                generation: 1,
+                loaded: 1,
+            }
+        );
+        assert!(core.selected_entry_ids().is_empty());
+        assert_eq!(core.focused_entry_id(), None);
     }
 
     #[test]
