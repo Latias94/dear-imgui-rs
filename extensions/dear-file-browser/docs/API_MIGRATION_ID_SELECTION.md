@@ -47,6 +47,13 @@ Read-only name view APIs remain:
 - `selected_names() -> Vec<String>`
 - `first_selected_name() -> Option<&str>`
 
+### `CustomPaneCtx` API
+
+The custom pane context is now ID-first as well:
+
+- removed: `selected_names: &[String]`
+- added: `selected_entry_ids: &[EntryId]`
+
 ## Migration patterns
 
 ### 1) Event-driven replacement

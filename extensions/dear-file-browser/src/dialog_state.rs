@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use dear_imgui_rs::FontId;
 
 use crate::core::{DialogMode, LayoutStyle};
-use crate::dialog_core::FileDialogCore;
+use crate::dialog_core::{EntryId, FileDialogCore};
 use crate::file_style::FileStyleRegistry;
 use crate::thumbnails::{ThumbnailCache, ThumbnailCacheConfig};
 
@@ -527,8 +527,8 @@ pub struct FileDialogUiState {
     pub(crate) paste_job: Option<PendingPasteJob>,
     /// Open the paste conflict modal on next frame.
     pub(crate) paste_conflict_open_next: bool,
-    /// Reveal (scroll to) a specific entry name on the next draw, then clear.
-    pub(crate) reveal_name_next: Option<String>,
+    /// Reveal (scroll to) a specific entry id on the next draw, then clear.
+    pub(crate) reveal_id_next: Option<EntryId>,
     /// Style registry used to decorate the file list (icons/colors/tooltips).
     pub file_styles: FileStyleRegistry,
     /// Enable thumbnails in the file list (adds a Preview column).
@@ -614,7 +614,7 @@ impl Default for FileDialogUiState {
             file_style_fonts: std::collections::HashMap::new(),
             paste_job: None,
             paste_conflict_open_next: false,
-            reveal_name_next: None,
+            reveal_id_next: None,
             file_styles: FileStyleRegistry::default(),
             thumbnails_enabled: false,
             thumbnail_size: [32.0, 32.0],

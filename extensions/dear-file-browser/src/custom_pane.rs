@@ -3,7 +3,7 @@ use std::path::Path;
 use dear_imgui_rs::Ui;
 
 use crate::core::{DialogMode, FileFilter};
-use crate::dialog_core::ConfirmGate;
+use crate::dialog_core::{ConfirmGate, EntryId};
 
 /// Context passed to a [`CustomPane`] while rendering.
 ///
@@ -15,8 +15,8 @@ pub struct CustomPaneCtx<'a> {
     pub mode: DialogMode,
     /// Current working directory.
     pub cwd: &'a Path,
-    /// Selected entry base names (relative to `cwd`).
-    pub selected_names: &'a [String],
+    /// Selected entry IDs in deterministic selection order.
+    pub selected_entry_ids: &'a [EntryId],
     /// Current save filename buffer (SaveFile mode).
     pub save_name: &'a str,
     /// Active filter (None = "All files").

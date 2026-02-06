@@ -576,11 +576,11 @@ fn draw_contents_with_fs_and_hooks(
                                 .size([inner[0], pane_h])
                                 .border(true)
                                 .build(ui, || {
-                                    let selected_names = state.core.selected_names();
+                                    let selected_entry_ids = state.core.selected_entry_ids();
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
-                                        selected_names: &selected_names,
+                                        selected_entry_ids: &selected_entry_ids,
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core
@@ -626,11 +626,11 @@ fn draw_contents_with_fs_and_hooks(
                                 .size([inner[0], pane_h])
                                 .border(true)
                                 .build(ui, || {
-                                    let selected_names = state.core.selected_names();
+                                    let selected_entry_ids = state.core.selected_entry_ids();
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
-                                        selected_names: &selected_names,
+                                        selected_entry_ids: &selected_entry_ids,
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core
@@ -923,8 +923,9 @@ fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSyst
                 match fs.create_dir(&path) {
                     Ok(()) => {
                         state.ui.new_folder_name.clear();
-                        state.core.focus_and_select_by_id(EntryId::from_path(&path));
-                        state.ui.reveal_name_next = Some(name);
+                        let id = EntryId::from_path(&path);
+                        state.core.focus_and_select_by_id(id);
+                        state.ui.reveal_id_next = Some(id);
                         state.core.invalidate_dir_cache();
                         ui.close_current_popup();
                     }
@@ -1005,10 +1006,9 @@ fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) 
                 } else {
                     match fs.rename(&from_path, &to_path) {
                         Ok(()) => {
-                            state
-                                .core
-                                .focus_and_select_by_id(EntryId::from_path(&to_path));
-                            state.ui.reveal_name_next = Some(to_name);
+                            let id = EntryId::from_path(&to_path);
+                            state.core.focus_and_select_by_id(id);
+                            state.ui.reveal_id_next = Some(id);
                             state.core.invalidate_dir_cache();
                             state.ui.rename_target = None;
                             state.ui.rename_to.clear();
@@ -1177,14 +1177,14 @@ fn try_complete_paste_job(state: &mut FileDialogState) {
 
     state.core.invalidate_dir_cache();
 
-    let first = job.created[0].clone();
     let selected_ids = job
         .created
         .iter()
         .map(|name| EntryId::from_path(&state.core.cwd.join(name)))
         .collect::<Vec<_>>();
+    let reveal_id = selected_ids.first().copied();
     state.core.replace_selection_by_ids(selected_ids);
-    state.ui.reveal_name_next = Some(first);
+    state.ui.reveal_id_next = reveal_id;
 
     if matches!(job.clipboard.op, ClipboardOp::Cut) {
         state.ui.clipboard = None;
@@ -2547,9 +2547,9 @@ fn draw_file_table_view(
                 }
             }
 
-            if state.ui.reveal_name_next.as_deref() == Some(e.name.as_str()) {
+            if state.ui.reveal_id_next == Some(e.id) {
                 ui.set_scroll_here_y(0.5);
-                state.ui.reveal_name_next = None;
+                state.ui.reveal_id_next = None;
             }
         }
 
@@ -2730,9 +2730,9 @@ fn draw_file_grid_view(
                     let img_min = [item_min[0] + pad, item_min[1] + pad];
                     let img_max = [img_min[0] + thumb[0], img_min[1] + thumb[1]];
 
-                    if state.ui.reveal_name_next.as_deref() == Some(e.name.as_str()) {
+                    if state.ui.reveal_id_next == Some(e.id) {
                         ui.set_scroll_here_y(0.5);
-                        state.ui.reveal_name_next = None;
+                        state.ui.reveal_id_next = None;
                     }
 
                     if state.ui.thumbnails_enabled && !e.is_dir {

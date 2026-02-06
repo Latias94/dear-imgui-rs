@@ -267,7 +267,7 @@ struct MyPane {
 impl CustomPane for MyPane {
     fn draw(&mut self, ui: &dear_imgui_rs::Ui, ctx: CustomPaneCtx<'_>) -> ConfirmGate {
         ui.checkbox("Require selection", &mut self.must_select);
-        if self.must_select && ctx.selected_names.is_empty() {
+        if self.must_select && ctx.selected_entry_ids.is_empty() {
             ConfirmGate {
                 can_confirm: false,
                 message: Some("Select at least one entry".into()),
