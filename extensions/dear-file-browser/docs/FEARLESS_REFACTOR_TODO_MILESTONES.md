@@ -24,13 +24,17 @@ Current parity status vs IGFD (excluding C API by product decision):
   - host-level size constraints (`min_size` / `max_size`) for window/modal configs (commit: `591cb49`)
   - parity/deviation baseline document (`docs/IGFD_PARITY_AND_DEVIATIONS.md`) (commit: `975f1dc`)
   - unified host/content entrypoints (`*_with` API) to remove redundant method matrix (commit: `60b4a12`)
+  - P2 performance/async architecture design doc (scan coordinator/runtime + generation model) (docs-only)
 - Remaining high-priority gaps (non-C API):
   - none in core feature parity scope
+- P2 design baseline:
+  - published `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md` for async/incremental scanning architecture
 
 Execution plan (next implementation wave):
 
-1. P2: post-parity optimization backlog curation
-2. P2: optional async/enumeration evolution design
+1. P2 Stage A: land scan scaffolding (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`) with sync runtime parity
+2. P2 Stage B: add optional worker runtime + generation-safe stale batch dropping
+3. P2 Stage C: optimize projection path + add tracing/metrics for large directories
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -542,6 +546,61 @@ Exit criteria:
 
 - High-priority non-C-API gaps are either closed or explicitly deferred with rationale.
 - Current status: closed in core scope; only post-parity optimization items remain.
+
+---
+
+## Milestone 17 - P2 Performance and Async Enumeration Foundation
+
+Goal: keep parity behavior stable while making large-directory navigation responsive and observable.
+
+Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
+
+### Epic 17.1 - Scan pipeline scaffolding (Stage A)
+
+- [ ] Task: introduce scan contracts in core (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`)
+  - Acceptance:
+    - types are internal-first and unit-testable
+    - default behavior remains synchronous and deterministic
+- [ ] Task: add generation-based request ownership in `FileDialogCore`
+  - Acceptance:
+    - each rescan increments generation
+    - stale generations are ignored in batch apply path
+
+### Epic 17.2 - Optional worker runtime (Stage B)
+
+- [ ] Task: add `ScanRuntime` abstraction with `SyncRuntime` + `WorkerRuntime`
+  - Acceptance:
+    - sync path remains baseline fallback
+    - worker path can emit partial batches
+- [ ] Task: add cancellation + stale-batch drop guarantees
+  - Acceptance:
+    - switching directories quickly does not leak stale entries
+    - tests cover `N` -> `N+1` request supersession
+
+### Epic 17.3 - Projection/selection stability under partial data (Stage C)
+
+- [ ] Task: add bounded per-frame batch apply budget
+  - Acceptance:
+    - UI frame budget remains stable under large scans
+- [ ] Task: stabilize selection/anchor/focus reconciliation during incremental updates
+  - Acceptance:
+    - selected IDs persist when entries remain resolvable
+    - unresolved IDs are dropped deterministically
+
+### Epic 17.4 - Observability and tuning (Stage D)
+
+- [ ] Task: add tracing events for scan/projection lifecycle
+  - Acceptance:
+    - key events include `scan.requested`, `scan.batch_applied`, `scan.completed`, `scan.dropped_stale_batch`
+- [ ] Task: add optional synthetic performance tests (10k+/50k entries)
+  - Acceptance:
+    - baseline numbers are recorded for before/after comparisons
+
+Exit criteria:
+
+- Incremental/background scan mode is available and generation-safe.
+- Large directory scans no longer block UI interaction.
+- Scan/projection costs are observable via tracing metrics.
 
 ---
 ## Parity Checklist (IGFD → dear-file-browser)

@@ -415,6 +415,11 @@ When confirming in save mode:
 
 ## 15. Performance Considerations
 
+Detailed post-parity implementation design (scan coordinator/runtime, generation invalidation,
+partial batches, bounded per-frame work, observability) is documented in:
+
+- `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
+
 ### 15.1 Directory enumeration
 
 Baseline:

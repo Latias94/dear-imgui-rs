@@ -18,6 +18,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 ## Fearless Refactor (IGFD-Grade)
 
 - Architecture: `docs/FEARLESS_REFACTOR_ARCHITECTURE.md`
+- P2 performance/async design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
 - Roadmap / TODO: `docs/FEARLESS_REFACTOR_TODO_MILESTONES.md`
 - Parity + deviations (non-C-API): `docs/IGFD_PARITY_AND_DEVIATIONS.md`
 

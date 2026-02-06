@@ -54,6 +54,7 @@ Last updated: 2026-02-06
 
 ## Post-Parity Backlog (P2)
 
-- Publish migration snippets for common IGFD -> Rust patterns.
-- Add advanced performance/scalability notes (large directories, async scan evolution).
-- Continue UX polish without changing parity guarantees.
+- Published: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md` (ScanCoordinator/ScanRuntime + generation-safe incremental scanning model).
+- Next: implement Stage A scaffolding (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`) behind the current synchronous runtime.
+- Next: add optional worker runtime with stale-batch drop guarantees and bounded per-frame processing.
+- Continue UX polish and migration snippets without changing parity guarantees.
