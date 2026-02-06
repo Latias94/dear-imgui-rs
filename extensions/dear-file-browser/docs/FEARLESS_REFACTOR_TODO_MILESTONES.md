@@ -23,7 +23,7 @@ Current parity status vs IGFD (excluding C API by product decision):
   - scan-time entry hook in core/state API (`set_scan_hook` / `clear_scan_hook`) with keep/drop + mutation tests (commit: `b03632b`)
   - host-level size constraints (`min_size` / `max_size`) for window/modal configs (commit: `591cb49`)
   - parity/deviation baseline document (`docs/IGFD_PARITY_AND_DEVIATIONS.md`) (commit: `975f1dc`)
-  - unified host/content entrypoints (`*_with` API) to remove redundant method matrix (commit: pending)
+  - unified host/content entrypoints (`*_with` API) to remove redundant method matrix (commit: `60b4a12`)
 - Remaining high-priority gaps (non-C API):
   - none in core feature parity scope
 
