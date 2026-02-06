@@ -371,14 +371,6 @@ impl FileDialogCore {
         !self.selected_ids.is_empty()
     }
 
-    /// Returns the first selected entry base name, if any.
-    pub fn first_selected_name(&self) -> Option<&str> {
-        self.selected_ids
-            .iter()
-            .next()
-            .and_then(|id| self.name_for_id(*id))
-    }
-
     /// Returns selected entry base names in deterministic selection order.
     pub fn selected_names(&self) -> Vec<String> {
         self.selected_ids

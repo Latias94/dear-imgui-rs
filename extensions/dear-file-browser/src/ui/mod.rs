@@ -740,13 +740,7 @@ fn draw_contents_with_fs_and_hooks(
             );
         }
         if !ui.io().want_text_input() && ui.is_key_pressed(Key::F2) {
-            if let Some(selected_name) = state.core.first_selected_name() {
-                state.ui.rename_target = Some(selected_name.to_string());
-                state.ui.rename_to = selected_name.to_string();
-                state.ui.rename_error = None;
-                state.ui.rename_open_next = true;
-                state.ui.rename_focus_next = true;
-            }
+            open_rename_modal_from_selection(state);
         }
         if !ui.io().want_text_input() && ui.is_key_pressed(Key::Delete) {
             if state.core.has_selection() {
@@ -1161,6 +1155,20 @@ fn selected_entry_paths_from_ids(state: &FileDialogState) -> Vec<PathBuf> {
                 .map(|entry| entry.path.clone())
         })
         .collect()
+}
+
+fn open_rename_modal_from_selection(state: &mut FileDialogState) {
+    if state.core.selected_len() != 1 {
+        return;
+    }
+    let Some(rename_target) = selected_entry_names_from_ids(state).into_iter().next() else {
+        return;
+    };
+    state.ui.rename_target = Some(rename_target.clone());
+    state.ui.rename_to = rename_target;
+    state.ui.rename_error = None;
+    state.ui.rename_open_next = true;
+    state.ui.rename_focus_next = true;
 }
 
 fn open_delete_modal_from_selection(state: &mut FileDialogState) {
@@ -2528,13 +2536,7 @@ fn draw_file_table_view(
                                 false,
                                 can_rename,
                             ) {
-                                if let Some(selected_name) = state.core.first_selected_name() {
-                                    state.ui.rename_target = Some(selected_name.to_string());
-                                    state.ui.rename_to = selected_name.to_string();
-                                }
-                                state.ui.rename_error = None;
-                                state.ui.rename_open_next = true;
-                                state.ui.rename_focus_next = true;
+                                open_rename_modal_from_selection(state);
                                 ui.close_current_popup();
                             }
                             if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
@@ -2880,13 +2882,7 @@ fn draw_file_grid_view(
                         ui.separator();
                         let can_rename = state.core.selected_len() == 1;
                         if ui.menu_item_enabled_selected("Rename", Some("F2"), false, can_rename) {
-                            if let Some(selected_name) = state.core.first_selected_name() {
-                                state.ui.rename_target = Some(selected_name.to_string());
-                                state.ui.rename_to = selected_name.to_string();
-                            }
-                            state.ui.rename_error = None;
-                            state.ui.rename_open_next = true;
-                            state.ui.rename_focus_next = true;
+                            open_rename_modal_from_selection(state);
                             ui.close_current_popup();
                         }
                         if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {

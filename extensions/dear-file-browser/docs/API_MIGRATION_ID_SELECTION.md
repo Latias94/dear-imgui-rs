@@ -45,7 +45,6 @@ Canonical ID-first APIs:
 Read-only name view APIs remain:
 
 - `selected_names() -> Vec<String>`
-- `first_selected_name() -> Option<&str>`
 
 ### `CustomPaneCtx` API
 
