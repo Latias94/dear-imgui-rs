@@ -472,6 +472,8 @@ fn draw_contents_with_fs_and_hooks(
 
     draw_places_io_modal(ui, state);
     draw_new_folder_modal(ui, state, fs);
+    draw_rename_modal(ui, state, fs);
+    draw_delete_confirm_modal(ui, state, fs);
 
     ui.separator();
     // Footer: file name (Save) + buttons
@@ -563,6 +565,22 @@ fn draw_contents_with_fs_and_hooks(
         }
         if !state.ui.path_edit && !ui.io().want_text_input() && ui.is_key_pressed(Key::Enter) {
             request_confirm |= state.core.activate_focused();
+        }
+        if !ui.io().want_text_input() && ui.is_key_pressed(Key::F2) {
+            if state.core.selected.len() == 1 {
+                state.ui.rename_target = Some(state.core.selected[0].clone());
+                state.ui.rename_to = state.core.selected[0].clone();
+                state.ui.rename_error = None;
+                state.ui.rename_open_next = true;
+                state.ui.rename_focus_next = true;
+            }
+        }
+        if !ui.io().want_text_input() && ui.is_key_pressed(Key::Delete) {
+            if !state.core.selected.is_empty() {
+                state.ui.delete_targets = state.core.selected.clone();
+                state.ui.delete_error = None;
+                state.ui.delete_open_next = true;
+            }
         }
     }
 
@@ -683,6 +701,174 @@ fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSyst
         }
 
         if let Some(err) = &state.ui.new_folder_error {
+            ui.separator();
+            ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
+        }
+    }
+}
+
+fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
+    const POPUP_ID: &str = "Rename";
+
+    if state.ui.rename_open_next {
+        state.ui.rename_open_next = false;
+        if !ui.is_popup_open(POPUP_ID) {
+            ui.open_popup(POPUP_ID);
+        }
+    }
+
+    if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
+        let Some(from_name) = state.ui.rename_target.clone() else {
+            ui.text_disabled("No entry selected for rename.");
+            if ui.button("Close") {
+                ui.close_current_popup();
+            }
+            return;
+        };
+
+        ui.text("Rename in:");
+        ui.text_disabled(state.core.cwd.display().to_string());
+        ui.separator();
+        ui.text(format!("From: {from_name}"));
+
+        if state.ui.rename_focus_next {
+            ui.set_keyboard_focus_here();
+            state.ui.rename_focus_next = false;
+        }
+        ui.input_text("To", &mut state.ui.rename_to).build();
+
+        let rename = ui.button("Rename");
+        ui.same_line();
+        let cancel = ui.button("Cancel");
+        if cancel {
+            state.ui.rename_error = None;
+            state.ui.rename_target = None;
+            ui.close_current_popup();
+        }
+
+        if rename {
+            state.ui.rename_error = None;
+            let to_name = state.ui.rename_to.trim();
+            let invalid = to_name.is_empty()
+                || to_name == "."
+                || to_name == ".."
+                || to_name.contains('/')
+                || to_name.contains('\\')
+                || to_name.contains('\0');
+            if invalid {
+                state.ui.rename_error = Some("Invalid target name".into());
+            } else if to_name == from_name.as_str() {
+                state.ui.rename_error = Some("Target name is unchanged".into());
+            } else {
+                let to_name = to_name.to_string();
+                let from_path = state.core.cwd.join(&from_name);
+                let to_path = state.core.cwd.join(&to_name);
+
+                if fs.metadata(&to_path).is_ok() {
+                    state.ui.rename_error = Some("Target already exists".into());
+                } else {
+                    match fs.rename(&from_path, &to_path) {
+                        Ok(()) => {
+                            state.core.focus_and_select_by_name(to_name.clone());
+                            state.ui.reveal_name_next = Some(to_name);
+                            state.core.invalidate_dir_cache();
+                            state.ui.rename_target = None;
+                            state.ui.rename_to.clear();
+                            ui.close_current_popup();
+                        }
+                        Err(e) => {
+                            state.ui.rename_error =
+                                Some(format!("Failed to rename '{from_name}': {e}"));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(err) = &state.ui.rename_error {
+            ui.separator();
+            ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
+        }
+    }
+}
+
+fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
+    const POPUP_ID: &str = "Delete";
+
+    if state.ui.delete_open_next {
+        state.ui.delete_open_next = false;
+        if !ui.is_popup_open(POPUP_ID) {
+            ui.open_popup(POPUP_ID);
+        }
+    }
+
+    if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
+        if state.ui.delete_targets.is_empty() {
+            ui.text_disabled("No entries selected for deletion.");
+            if ui.button("Close") {
+                ui.close_current_popup();
+            }
+            return;
+        }
+
+        ui.text(format!(
+            "Delete {} entr{} in:",
+            state.ui.delete_targets.len(),
+            if state.ui.delete_targets.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            }
+        ));
+        ui.text_disabled(state.core.cwd.display().to_string());
+        ui.separator();
+
+        let preview_n = 6usize.min(state.ui.delete_targets.len());
+        for n in state.ui.delete_targets.iter().take(preview_n) {
+            ui.text(n);
+        }
+        if state.ui.delete_targets.len() > preview_n {
+            ui.text_disabled(format!(
+                "... and {} more",
+                state.ui.delete_targets.len() - preview_n
+            ));
+        }
+
+        ui.separator();
+        let del = ui.button("Delete");
+        ui.same_line();
+        let cancel = ui.button("Cancel");
+        if cancel {
+            state.ui.delete_error = None;
+            state.ui.delete_targets.clear();
+            ui.close_current_popup();
+        }
+
+        if del {
+            state.ui.delete_error = None;
+            for name in &state.ui.delete_targets {
+                let p = state.core.cwd.join(name);
+                let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
+                let r = if is_dir {
+                    fs.remove_dir(&p)
+                } else {
+                    fs.remove_file(&p)
+                };
+                if let Err(e) = r {
+                    state.ui.delete_error = Some(format!("Failed to delete '{name}': {e}"));
+                    break;
+                }
+            }
+
+            if state.ui.delete_error.is_none() {
+                state.core.selected.clear();
+                state.core.invalidate_dir_cache();
+                state.ui.delete_targets.clear();
+                ui.close_current_popup();
+            }
+        }
+
+        if let Some(err) = &state.ui.delete_error {
             ui.separator();
             ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
         }
@@ -1224,6 +1410,27 @@ fn draw_file_table_view(
                 }
             }
 
+            if let Some(_popup) = ui.begin_popup_context_item() {
+                if !selected {
+                    state.core.focus_and_select_by_name(e.name.clone());
+                }
+                let can_rename = state.core.selected.len() == 1;
+                if ui.menu_item_enabled_selected("Rename", Some("F2"), false, can_rename) {
+                    state.ui.rename_target = Some(state.core.selected[0].clone());
+                    state.ui.rename_to = state.core.selected[0].clone();
+                    state.ui.rename_error = None;
+                    state.ui.rename_open_next = true;
+                    state.ui.rename_focus_next = true;
+                    ui.close_current_popup();
+                }
+                if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
+                    state.ui.delete_targets = state.core.selected.clone();
+                    state.ui.delete_error = None;
+                    state.ui.delete_open_next = true;
+                    ui.close_current_popup();
+                }
+            }
+
             if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
                 state.ui.ui_error = None;
                 if state.core.double_click_entry(e.name.clone(), e.is_dir) {
@@ -1450,6 +1657,27 @@ fn draw_file_grid_view(
                     if ui.is_item_hovered() {
                         if let Some(t) = tooltip.as_deref() {
                             ui.tooltip_text(t);
+                        }
+                    }
+
+                    if let Some(_popup) = ui.begin_popup_context_item() {
+                        if !selected {
+                            state.core.focus_and_select_by_name(e.name.clone());
+                        }
+                        let can_rename = state.core.selected.len() == 1;
+                        if ui.menu_item_enabled_selected("Rename", Some("F2"), false, can_rename) {
+                            state.ui.rename_target = Some(state.core.selected[0].clone());
+                            state.ui.rename_to = state.core.selected[0].clone();
+                            state.ui.rename_error = None;
+                            state.ui.rename_open_next = true;
+                            state.ui.rename_focus_next = true;
+                            ui.close_current_popup();
+                        }
+                        if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
+                            state.ui.delete_targets = state.core.selected.clone();
+                            state.ui.delete_error = None;
+                            state.ui.delete_open_next = true;
+                            ui.close_current_popup();
                         }
                     }
 

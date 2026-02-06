@@ -35,6 +35,12 @@ pub trait FileSystem {
     fn metadata(&self, path: &Path) -> std::io::Result<FsMetadata>;
     /// Create a directory.
     fn create_dir(&self, path: &Path) -> std::io::Result<()>;
+    /// Rename/move a path.
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+    /// Remove a file.
+    fn remove_file(&self, path: &Path) -> std::io::Result<()>;
+    /// Remove an empty directory.
+    fn remove_dir(&self, path: &Path) -> std::io::Result<()>;
 }
 
 /// Default filesystem implementation using `std::fs`.
@@ -87,5 +93,17 @@ impl FileSystem for StdFileSystem {
 
     fn create_dir(&self, path: &Path) -> std::io::Result<()> {
         std::fs::create_dir(path)
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::rename(from, to)
+    }
+
+    fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
+
+    fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::remove_dir(path)
     }
 }

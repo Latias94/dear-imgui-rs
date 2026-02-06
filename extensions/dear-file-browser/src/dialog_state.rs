@@ -66,6 +66,22 @@ pub struct FileDialogUiState {
     pub new_folder_focus_next: bool,
     /// Error string shown inside the "New Folder" modal.
     pub new_folder_error: Option<String>,
+    /// Open the "Rename" modal on next frame.
+    pub rename_open_next: bool,
+    /// Focus the rename input on next frame.
+    pub rename_focus_next: bool,
+    /// Rename target entry name (relative to cwd).
+    pub rename_target: Option<String>,
+    /// Rename "to" buffer.
+    pub rename_to: String,
+    /// Error string shown inside the rename modal.
+    pub rename_error: Option<String>,
+    /// Open the "Delete" confirmation modal on next frame.
+    pub delete_open_next: bool,
+    /// Pending delete targets (relative to cwd).
+    pub delete_targets: Vec<String>,
+    /// Error string shown inside the delete modal.
+    pub delete_error: Option<String>,
     /// Reveal (scroll to) a specific entry name on the next draw, then clear.
     pub(crate) reveal_name_next: Option<String>,
     /// Style registry used to decorate the file list (icons/colors/tooltips).
@@ -119,6 +135,14 @@ impl Default for FileDialogUiState {
             new_folder_name: String::new(),
             new_folder_focus_next: false,
             new_folder_error: None,
+            rename_open_next: false,
+            rename_focus_next: false,
+            rename_target: None,
+            rename_to: String::new(),
+            rename_error: None,
+            delete_open_next: false,
+            delete_targets: Vec::new(),
+            delete_error: None,
             reveal_name_next: None,
             file_styles: FileStyleRegistry::default(),
             thumbnails_enabled: false,

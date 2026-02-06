@@ -980,6 +980,27 @@ mod tests {
                 "create_dir not supported in TestFs",
             ))
         }
+
+        fn rename(&self, _from: &Path, _to: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "rename not supported in TestFs",
+            ))
+        }
+
+        fn remove_file(&self, _path: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "remove_file not supported in TestFs",
+            ))
+        }
+
+        fn remove_dir(&self, _path: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "remove_dir not supported in TestFs",
+            ))
+        }
     }
 
     #[test]
