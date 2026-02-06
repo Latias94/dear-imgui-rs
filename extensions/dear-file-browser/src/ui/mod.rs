@@ -290,6 +290,13 @@ fn draw_contents_with_fs_and_hooks(
     ui.same_line();
     if ui.button("Refresh") { /* rescan happens each frame */ }
     ui.same_line();
+    if ui.button("New Folder") {
+        state.ui.new_folder_open_next = true;
+        state.ui.new_folder_name.clear();
+        state.ui.new_folder_error = None;
+        state.ui.new_folder_focus_next = true;
+    }
+    ui.same_line();
     let mut show_hidden = state.core.show_hidden;
     if ui.checkbox("Hidden", &mut show_hidden) {
         state.core.show_hidden = show_hidden;
@@ -444,6 +451,7 @@ fn draw_contents_with_fs_and_hooks(
     }
 
     draw_places_io_modal(ui, state);
+    draw_new_folder_modal(ui, state, fs);
 
     ui.separator();
     // Footer: file name (Save) + buttons
@@ -593,6 +601,68 @@ fn draw_confirm_overwrite_modal(ui: &Ui, state: &mut FileDialogState) {
             ui.close_current_popup();
         }
     });
+}
+
+fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
+    const POPUP_ID: &str = "New Folder";
+
+    if state.ui.new_folder_open_next {
+        state.ui.new_folder_open_next = false;
+        if !ui.is_popup_open(POPUP_ID) {
+            ui.open_popup(POPUP_ID);
+        }
+    }
+
+    if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
+        ui.text("Create a new folder in:");
+        ui.text_disabled(state.core.cwd.display().to_string());
+        ui.separator();
+
+        if state.ui.new_folder_focus_next {
+            ui.set_keyboard_focus_here();
+            state.ui.new_folder_focus_next = false;
+        }
+        ui.input_text("Name", &mut state.ui.new_folder_name).build();
+
+        let create = ui.button("Create");
+        ui.same_line();
+        let cancel = ui.button("Cancel");
+        if cancel {
+            state.ui.new_folder_error = None;
+            ui.close_current_popup();
+        }
+
+        if create {
+            state.ui.new_folder_error = None;
+            let name = state.ui.new_folder_name.trim();
+            let invalid = name.is_empty()
+                || name == "."
+                || name == ".."
+                || name.contains('/')
+                || name.contains('\\')
+                || name.contains('\0');
+            if invalid {
+                state.ui.new_folder_error = Some("Invalid folder name".into());
+            } else {
+                let path = state.core.cwd.join(name);
+                match fs.create_dir(&path) {
+                    Ok(()) => {
+                        state.ui.new_folder_name.clear();
+                        ui.close_current_popup();
+                    }
+                    Err(e) => {
+                        state.ui.new_folder_error =
+                            Some(format!("Failed to create '{}': {}", name, e));
+                    }
+                }
+            }
+        }
+
+        if let Some(err) = &state.ui.new_folder_error {
+            ui.separator();
+            ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
+        }
+    }
 }
 
 fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {

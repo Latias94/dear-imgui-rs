@@ -680,6 +680,13 @@ mod tests {
                 .cloned()
                 .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not found"))
         }
+
+        fn create_dir(&self, _path: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "create_dir not supported in TestFs",
+            ))
+        }
     }
 
     #[test]

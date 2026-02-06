@@ -310,7 +310,7 @@ Goal: close remaining UX gaps vs IGFD and document final API.
 
 ### Epic 12.2 — Directory creation (optional)
 
-- [ ] Task: "New Folder" action with validation and error handling
+- [x] Task: "New Folder" action with validation and error handling
 
 ### Epic 12.3 — Documentation & migration notes
 

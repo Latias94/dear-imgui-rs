@@ -41,6 +41,14 @@ pub struct FileDialogUiState {
     pub focus_search_next: bool,
     /// Error string to display in UI (non-fatal).
     pub ui_error: Option<String>,
+    /// Open the "New Folder" modal on next frame.
+    pub new_folder_open_next: bool,
+    /// New folder name buffer (used by the "New Folder" modal).
+    pub new_folder_name: String,
+    /// Focus the new folder input on next frame.
+    pub new_folder_focus_next: bool,
+    /// Error string shown inside the "New Folder" modal.
+    pub new_folder_error: Option<String>,
     /// Style registry used to decorate the file list (icons/colors/tooltips).
     pub file_styles: FileStyleRegistry,
     /// Enable thumbnails in the file list (adds a Preview column).
@@ -87,6 +95,10 @@ impl Default for FileDialogUiState {
             focus_path_edit_next: false,
             focus_search_next: false,
             ui_error: None,
+            new_folder_open_next: false,
+            new_folder_name: String::new(),
+            new_folder_focus_next: false,
+            new_folder_error: None,
             file_styles: FileStyleRegistry::default(),
             thumbnails_enabled: false,
             thumbnail_size: [32.0, 32.0],

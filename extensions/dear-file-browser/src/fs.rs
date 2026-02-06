@@ -33,6 +33,8 @@ pub trait FileSystem {
     fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf>;
     /// Fetch minimal metadata for a path.
     fn metadata(&self, path: &Path) -> std::io::Result<FsMetadata>;
+    /// Create a directory.
+    fn create_dir(&self, path: &Path) -> std::io::Result<()>;
 }
 
 /// Default filesystem implementation using `std::fs`.
@@ -81,5 +83,9 @@ impl FileSystem for StdFileSystem {
         Ok(FsMetadata {
             is_dir: md.is_dir(),
         })
+    }
+
+    fn create_dir(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::create_dir(path)
     }
 }
