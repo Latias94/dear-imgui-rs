@@ -10,9 +10,9 @@ use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selecti
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, DirEntry, Modifiers};
 use crate::dialog_state::FileDialogState;
-use crate::dialog_state::FileListViewMode;
 use crate::dialog_state::{
-    ClipboardOp, FileClipboard, PasteConflictAction, PasteConflictPrompt, PendingPasteJob,
+    ClipboardOp, FileClipboard, FileListColumnsConfig, FileListDataColumn, FileListViewMode,
+    PasteConflictAction, PasteConflictPrompt, PendingPasteJob,
 };
 use crate::dialog_state::{ValidationButtonsAlign, ValidationButtonsOrder};
 use crate::file_style::EntryKind;
@@ -450,6 +450,74 @@ fn draw_contents_with_fs_and_hooks(
             ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
             ui.checkbox("Size", &mut state.ui.file_list_columns.show_size);
             ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
+
+            ui.separator();
+            ui.text("Order presets:");
+            let current_order = state.ui.file_list_columns.normalized_order();
+            if ui
+                .selectable_config("Name | Ext | Size | Modified")
+                .selected(
+                    current_order
+                        == [
+                            FileListDataColumn::Name,
+                            FileListDataColumn::Extension,
+                            FileListDataColumn::Size,
+                            FileListDataColumn::Modified,
+                        ],
+                )
+                .build()
+            {
+                state.ui.file_list_columns.order = [
+                    FileListDataColumn::Name,
+                    FileListDataColumn::Extension,
+                    FileListDataColumn::Size,
+                    FileListDataColumn::Modified,
+                ];
+            }
+            if ui
+                .selectable_config("Name | Size | Modified | Ext")
+                .selected(
+                    current_order
+                        == [
+                            FileListDataColumn::Name,
+                            FileListDataColumn::Size,
+                            FileListDataColumn::Modified,
+                            FileListDataColumn::Extension,
+                        ],
+                )
+                .build()
+            {
+                state.ui.file_list_columns.order = [
+                    FileListDataColumn::Name,
+                    FileListDataColumn::Size,
+                    FileListDataColumn::Modified,
+                    FileListDataColumn::Extension,
+                ];
+            }
+            if ui
+                .selectable_config("Name | Modified | Size | Ext")
+                .selected(
+                    current_order
+                        == [
+                            FileListDataColumn::Name,
+                            FileListDataColumn::Modified,
+                            FileListDataColumn::Size,
+                            FileListDataColumn::Extension,
+                        ],
+                )
+                .build()
+            {
+                state.ui.file_list_columns.order = [
+                    FileListDataColumn::Name,
+                    FileListDataColumn::Modified,
+                    FileListDataColumn::Size,
+                    FileListDataColumn::Extension,
+                ];
+            }
+
+            if ui.small_button("Reset columns") {
+                state.ui.file_list_columns = FileListColumnsConfig::default();
+            }
         }
     }
     ui.same_line();
@@ -1796,38 +1864,132 @@ fn draw_file_table(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ListColumnLayout {
+    data_columns: Vec<FileListDataColumn>,
     name: i16,
-    ext: i16,
+    extension: i16,
     size: Option<i16>,
     modified: Option<i16>,
 }
 
-fn list_column_layout(
-    show_preview: bool,
-    show_size: bool,
-    show_modified: bool,
-) -> ListColumnLayout {
-    let mut index = if show_preview { 1 } else { 0 };
-    let name = index;
-    index += 1;
-    let ext = index;
-    index += 1;
-    let size = if show_size {
-        let column_index = index;
+fn list_column_layout(show_preview: bool, config: &FileListColumnsConfig) -> ListColumnLayout {
+    let mut data_columns = Vec::with_capacity(4);
+    for column in config.normalized_order() {
+        match column {
+            FileListDataColumn::Name | FileListDataColumn::Extension => data_columns.push(column),
+            FileListDataColumn::Size if config.show_size => data_columns.push(column),
+            FileListDataColumn::Modified if config.show_modified => data_columns.push(column),
+            _ => {}
+        }
+    }
+
+    let mut index: i16 = if show_preview { 1 } else { 0 };
+    let mut name = None;
+    let mut extension = None;
+    let mut size = None;
+    let mut modified = None;
+
+    for column in &data_columns {
+        match column {
+            FileListDataColumn::Name => name = Some(index),
+            FileListDataColumn::Extension => extension = Some(index),
+            FileListDataColumn::Size => size = Some(index),
+            FileListDataColumn::Modified => modified = Some(index),
+        }
         index += 1;
-        Some(column_index)
-    } else {
-        None
-    };
-    let modified = if show_modified { Some(index) } else { None };
+    }
+
     ListColumnLayout {
-        name,
-        ext,
+        data_columns,
+        name: name.expect("name column should always be present"),
+        extension: extension.expect("extension column should always be present"),
         size,
         modified,
     }
+}
+
+fn validated_column_weight(override_weight: Option<f32>, default_weight: f32) -> f32 {
+    match override_weight {
+        Some(weight) if weight.is_finite() && weight > 0.0 => weight,
+        _ => default_weight,
+    }
+}
+
+fn default_preview_column_weight() -> f32 {
+    0.12
+}
+
+fn default_data_column_weight(
+    column: FileListDataColumn,
+    show_preview: bool,
+    show_size: bool,
+    show_modified: bool,
+) -> f32 {
+    match column {
+        FileListDataColumn::Name => {
+            if show_size || show_modified {
+                if show_preview { 0.52 } else { 0.56 }
+            } else if show_preview {
+                0.88
+            } else {
+                0.92
+            }
+        }
+        FileListDataColumn::Extension => {
+            if show_size || show_modified {
+                0.12
+            } else {
+                0.08
+            }
+        }
+        FileListDataColumn::Size => {
+            if show_modified {
+                0.16
+            } else {
+                0.2
+            }
+        }
+        FileListDataColumn::Modified => {
+            if show_size {
+                0.2
+            } else {
+                0.24
+            }
+        }
+    }
+}
+
+fn column_weight_override(
+    config: &FileListColumnsConfig,
+    column: FileListDataColumn,
+) -> Option<f32> {
+    match column {
+        FileListDataColumn::Name => config.weight_overrides.name,
+        FileListDataColumn::Extension => config.weight_overrides.extension,
+        FileListDataColumn::Size => config.weight_overrides.size,
+        FileListDataColumn::Modified => config.weight_overrides.modified,
+    }
+}
+
+fn resolved_preview_column_weight(config: &FileListColumnsConfig) -> f32 {
+    validated_column_weight(
+        config.weight_overrides.preview,
+        default_preview_column_weight(),
+    )
+}
+
+fn resolved_data_column_weight(
+    config: &FileListColumnsConfig,
+    column: FileListDataColumn,
+    show_preview: bool,
+    show_size: bool,
+    show_modified: bool,
+) -> f32 {
+    validated_column_weight(
+        column_weight_override(config, column),
+        default_data_column_weight(column, show_preview, show_size, show_modified),
+    )
 }
 
 fn draw_file_table_view(
@@ -1852,55 +2014,72 @@ fn draw_file_table_view(
         | TableFlags::SCROLL_Y
         | TableFlags::SIZING_STRETCH_PROP
         | TableFlags::SORTABLE; // enable built-in header sorting
-    let show_preview = state.ui.thumbnails_enabled && state.ui.file_list_columns.show_preview;
-    let show_size = state.ui.file_list_columns.show_size;
-    let show_modified = state.ui.file_list_columns.show_modified;
+    let columns_config = &state.ui.file_list_columns;
+    let show_preview = state.ui.thumbnails_enabled && columns_config.show_preview;
+    let show_size = columns_config.show_size;
+    let show_modified = columns_config.show_modified;
+    let layout = list_column_layout(show_preview, columns_config);
+
     let mut table = ui.table("file_table").flags(flags).outer_size(size);
     if show_preview {
         table = table
             .column("Preview")
             .flags(TableColumnFlags::NO_SORT | TableColumnFlags::NO_RESIZE)
-            .weight(0.12)
-            .done();
-    }
-    table = table
-        .column("Name")
-        .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
-        .user_id(0)
-        .weight(if show_size || show_modified {
-            if show_preview { 0.52 } else { 0.56 }
-        } else {
-            if show_preview { 0.88 } else { 0.92 }
-        })
-        .done();
-
-    table = table
-        .column("Ext")
-        .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
-        .user_id(1)
-        .weight(if show_size || show_modified {
-            0.12
-        } else {
-            0.08
-        })
-        .done();
-
-    if show_size {
-        table = table
-            .column("Size")
-            .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
-            .user_id(2)
-            .weight(if show_modified { 0.16 } else { 0.2 })
+            .weight(resolved_preview_column_weight(columns_config))
             .done();
     }
 
-    if show_modified {
-        table = table
-            .column("Modified")
-            .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
-            .user_id(3)
-            .weight(if show_size { 0.2 } else { 0.24 })
-            .done();
+    for column in &layout.data_columns {
+        table = match column {
+            FileListDataColumn::Name => table
+                .column("Name")
+                .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
+                .user_id(0)
+                .weight(resolved_data_column_weight(
+                    columns_config,
+                    *column,
+                    show_preview,
+                    show_size,
+                    show_modified,
+                ))
+                .done(),
+            FileListDataColumn::Extension => table
+                .column("Ext")
+                .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
+                .user_id(1)
+                .weight(resolved_data_column_weight(
+                    columns_config,
+                    *column,
+                    show_preview,
+                    show_size,
+                    show_modified,
+                ))
+                .done(),
+            FileListDataColumn::Size => table
+                .column("Size")
+                .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
+                .user_id(2)
+                .weight(resolved_data_column_weight(
+                    columns_config,
+                    *column,
+                    show_preview,
+                    show_size,
+                    show_modified,
+                ))
+                .done(),
+            FileListDataColumn::Modified => table
+                .column("Modified")
+                .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
+                .user_id(3)
+                .weight(resolved_data_column_weight(
+                    columns_config,
+                    *column,
+                    show_preview,
+                    show_size,
+                    show_modified,
+                ))
+                .done(),
+        };
     }
 
     table = table.headers(true);
@@ -1910,14 +2089,13 @@ fn draw_file_table_view(
         if let Some(mut specs) = ui.table_get_sort_specs() {
             if specs.is_dirty() {
                 if let Some(s) = specs.iter().next() {
-                    let layout = list_column_layout(show_preview, show_size, show_modified);
                     let (by, asc) = match (s.column_index, s.sort_direction) {
                         (i, SortDirection::Ascending) if i == layout.name => (SortBy::Name, true),
                         (i, SortDirection::Descending) if i == layout.name => (SortBy::Name, false),
-                        (i, SortDirection::Ascending) if i == layout.ext => {
+                        (i, SortDirection::Ascending) if i == layout.extension => {
                             (SortBy::Extension, true)
                         }
-                        (i, SortDirection::Descending) if i == layout.ext => {
+                        (i, SortDirection::Descending) if i == layout.extension => {
                             (SortBy::Extension, false)
                         }
                         (i, SortDirection::Ascending) if layout.size == Some(i) => {
@@ -1981,6 +2159,10 @@ fn draw_file_table_view(
         if entries.is_empty() {
             if state.ui.empty_hint_enabled {
                 ui.table_next_row();
+                if show_preview {
+                    ui.table_next_column();
+                    ui.text("");
+                }
                 ui.table_next_column();
                 let msg = if let Some(custom) = &state.ui.empty_hint_static_message {
                     custom.clone()
@@ -2015,7 +2197,6 @@ fn draw_file_table_view(
                 ui.table_next_column();
                 draw_thumbnail_cell(ui, state, e);
             }
-            ui.table_next_column();
 
             let selected = state.core.selected.iter().any(|s| s == &e.name);
             let visual = style_visual_for_entry(state, e);
@@ -2024,116 +2205,142 @@ fn draw_file_table_view(
             if let Some(icon) = visual.icon.as_deref() {
                 label = format!("{icon} {label}");
             }
-            let _font = visual.font_id.map(|id| ui.push_font(id));
-            let _color = visual
-                .text_color
-                .map(TextColorToken::push)
-                .unwrap_or_else(TextColorToken::none);
-            {
-                if ui
-                    .selectable_config(label)
-                    .selected(selected)
-                    .span_all_columns(false)
-                    .build()
-                {
-                    let modifiers = Modifiers {
-                        ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
-                        shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
-                    };
-                    state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
-                    if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
-                        state.core.save_name = e.name.clone();
-                    }
-                }
-            }
 
-            if ui.is_item_hovered() {
-                if let Some(t) = visual.tooltip.as_deref() {
-                    ui.tooltip_text(t);
-                }
-            }
-
-            if let Some(_popup) = ui.begin_popup_context_item() {
-                if !selected {
-                    state.core.focus_and_select_by_name(e.name.clone());
-                }
-                let has_selection = !state.core.selected.is_empty();
-                let can_paste = state
-                    .ui
-                    .clipboard
-                    .as_ref()
-                    .map(|c| !c.sources.is_empty())
-                    .unwrap_or(false);
-
-                if ui.menu_item_enabled_selected("Copy", Some("Ctrl+C"), false, has_selection) {
-                    clipboard_set_from_selection(state, ClipboardOp::Copy);
-                    ui.close_current_popup();
-                }
-                if ui.menu_item_enabled_selected("Cut", Some("Ctrl+X"), false, has_selection) {
-                    clipboard_set_from_selection(state, ClipboardOp::Cut);
-                    ui.close_current_popup();
-                }
-                if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
-                    state.ui.ui_error = None;
-                    start_paste_into_cwd(state);
-                    if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
-                        state.ui.ui_error = Some(e);
-                        state.ui.paste_job = None;
-                    }
-                    ui.close_current_popup();
-                }
-
-                ui.separator();
-                let can_rename = state.core.selected.len() == 1;
-                if ui.menu_item_enabled_selected("Rename", Some("F2"), false, can_rename) {
-                    state.ui.rename_target = Some(state.core.selected[0].clone());
-                    state.ui.rename_to = state.core.selected[0].clone();
-                    state.ui.rename_error = None;
-                    state.ui.rename_open_next = true;
-                    state.ui.rename_focus_next = true;
-                    ui.close_current_popup();
-                }
-                if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
-                    state.ui.delete_targets = state.core.selected.clone();
-                    state.ui.delete_error = None;
-                    state.ui.delete_open_next = true;
-                    ui.close_current_popup();
-                }
-            }
-
-            if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
-                state.ui.ui_error = None;
-                if state.core.double_click_entry(e.name.clone(), e.is_dir) {
-                    *request_confirm = true;
-                }
-            }
-
-            ui.table_next_column();
-            if e.is_dir {
-                ui.text("");
-            } else if let Some(i) = e.name.find('.') {
-                ui.text(&e.name[i..]);
-            } else {
-                ui.text("");
-            }
-
-            if show_size {
+            for column in &layout.data_columns {
                 ui.table_next_column();
-                ui.text(match e.size {
-                    Some(s) => format_size(s),
-                    None => String::new(),
-                });
-            }
+                match column {
+                    FileListDataColumn::Name => {
+                        let _font = visual.font_id.map(|id| ui.push_font(id));
+                        let _color = visual
+                            .text_color
+                            .map(TextColorToken::push)
+                            .unwrap_or_else(TextColorToken::none);
+                        {
+                            if ui
+                                .selectable_config(label.as_str())
+                                .selected(selected)
+                                .span_all_columns(false)
+                                .build()
+                            {
+                                let modifiers = Modifiers {
+                                    ctrl: ui.is_key_down(Key::LeftCtrl)
+                                        || ui.is_key_down(Key::RightCtrl),
+                                    shift: ui.is_key_down(Key::LeftShift)
+                                        || ui.is_key_down(Key::RightShift),
+                                };
+                                state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
+                                if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
+                                    state.core.save_name = e.name.clone();
+                                }
+                            }
+                        }
 
-            if show_modified {
-                ui.table_next_column();
-                let modified_str = format_modified_ago(e.modified);
-                ui.text(&modified_str);
-                if ui.is_item_hovered() {
-                    if let Some(m) = e.modified {
-                        use chrono::{DateTime, Local};
-                        let dt: DateTime<Local> = DateTime::<Local>::from(m);
-                        ui.tooltip_text(dt.format("%Y-%m-%d %H:%M:%S").to_string());
+                        if ui.is_item_hovered() {
+                            if let Some(t) = visual.tooltip.as_deref() {
+                                ui.tooltip_text(t);
+                            }
+                        }
+
+                        if let Some(_popup) = ui.begin_popup_context_item() {
+                            if !selected {
+                                state.core.focus_and_select_by_name(e.name.clone());
+                            }
+                            let has_selection = !state.core.selected.is_empty();
+                            let can_paste = state
+                                .ui
+                                .clipboard
+                                .as_ref()
+                                .map(|c| !c.sources.is_empty())
+                                .unwrap_or(false);
+
+                            if ui.menu_item_enabled_selected(
+                                "Copy",
+                                Some("Ctrl+C"),
+                                false,
+                                has_selection,
+                            ) {
+                                clipboard_set_from_selection(state, ClipboardOp::Copy);
+                                ui.close_current_popup();
+                            }
+                            if ui.menu_item_enabled_selected(
+                                "Cut",
+                                Some("Ctrl+X"),
+                                false,
+                                has_selection,
+                            ) {
+                                clipboard_set_from_selection(state, ClipboardOp::Cut);
+                                ui.close_current_popup();
+                            }
+                            if ui.menu_item_enabled_selected(
+                                "Paste",
+                                Some("Ctrl+V"),
+                                false,
+                                can_paste,
+                            ) {
+                                state.ui.ui_error = None;
+                                start_paste_into_cwd(state);
+                                if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
+                                    state.ui.ui_error = Some(e);
+                                    state.ui.paste_job = None;
+                                }
+                                ui.close_current_popup();
+                            }
+
+                            ui.separator();
+                            let can_rename = state.core.selected.len() == 1;
+                            if ui.menu_item_enabled_selected(
+                                "Rename",
+                                Some("F2"),
+                                false,
+                                can_rename,
+                            ) {
+                                state.ui.rename_target = Some(state.core.selected[0].clone());
+                                state.ui.rename_to = state.core.selected[0].clone();
+                                state.ui.rename_error = None;
+                                state.ui.rename_open_next = true;
+                                state.ui.rename_focus_next = true;
+                                ui.close_current_popup();
+                            }
+                            if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
+                                state.ui.delete_targets = state.core.selected.clone();
+                                state.ui.delete_error = None;
+                                state.ui.delete_open_next = true;
+                                ui.close_current_popup();
+                            }
+                        }
+
+                        if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
+                            state.ui.ui_error = None;
+                            if state.core.double_click_entry(e.name.clone(), e.is_dir) {
+                                *request_confirm = true;
+                            }
+                        }
+                    }
+                    FileListDataColumn::Extension => {
+                        if e.is_dir {
+                            ui.text("");
+                        } else if let Some(i) = e.name.find('.') {
+                            ui.text(&e.name[i..]);
+                        } else {
+                            ui.text("");
+                        }
+                    }
+                    FileListDataColumn::Size => {
+                        ui.text(match e.size {
+                            Some(s) => format_size(s),
+                            None => String::new(),
+                        });
+                    }
+                    FileListDataColumn::Modified => {
+                        let modified_str = format_modified_ago(e.modified);
+                        ui.text(&modified_str);
+                        if ui.is_item_hovered() {
+                            if let Some(m) = e.modified {
+                                use chrono::{DateTime, Local};
+                                let dt: DateTime<Local> = DateTime::<Local>::from(m);
+                                ui.tooltip_text(dt.format("%Y-%m-%d %H:%M:%S").to_string());
+                            }
+                        }
                     }
                 }
             }
@@ -2875,14 +3082,43 @@ fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSys
 #[cfg(test)]
 mod tests {
     use super::{ListColumnLayout, list_column_layout};
+    use crate::dialog_state::{FileListColumnsConfig, FileListDataColumn};
+
+    fn columns_config(
+        show_size: bool,
+        show_modified: bool,
+        order: [FileListDataColumn; 4],
+    ) -> FileListColumnsConfig {
+        let mut cfg = FileListColumnsConfig::default();
+        cfg.show_size = show_size;
+        cfg.show_modified = show_modified;
+        cfg.order = order;
+        cfg
+    }
 
     #[test]
     fn list_column_layout_all_columns_visible_without_preview() {
+        let cfg = columns_config(
+            true,
+            true,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+            ],
+        );
         assert_eq!(
-            list_column_layout(false, true, true),
+            list_column_layout(false, &cfg),
             ListColumnLayout {
+                data_columns: vec![
+                    FileListDataColumn::Name,
+                    FileListDataColumn::Extension,
+                    FileListDataColumn::Size,
+                    FileListDataColumn::Modified,
+                ],
                 name: 0,
-                ext: 1,
+                extension: 1,
                 size: Some(2),
                 modified: Some(3),
             }
@@ -2891,11 +3127,27 @@ mod tests {
 
     #[test]
     fn list_column_layout_all_columns_visible_with_preview() {
+        let cfg = columns_config(
+            true,
+            true,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+            ],
+        );
         assert_eq!(
-            list_column_layout(true, true, true),
+            list_column_layout(true, &cfg),
             ListColumnLayout {
+                data_columns: vec![
+                    FileListDataColumn::Name,
+                    FileListDataColumn::Extension,
+                    FileListDataColumn::Size,
+                    FileListDataColumn::Modified,
+                ],
                 name: 1,
-                ext: 2,
+                extension: 2,
                 size: Some(3),
                 modified: Some(4),
             }
@@ -2904,11 +3156,26 @@ mod tests {
 
     #[test]
     fn list_column_layout_hides_size_column() {
+        let cfg = columns_config(
+            false,
+            true,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+            ],
+        );
         assert_eq!(
-            list_column_layout(false, false, true),
+            list_column_layout(false, &cfg),
             ListColumnLayout {
+                data_columns: vec![
+                    FileListDataColumn::Name,
+                    FileListDataColumn::Extension,
+                    FileListDataColumn::Modified,
+                ],
                 name: 0,
-                ext: 1,
+                extension: 1,
                 size: None,
                 modified: Some(2),
             }
@@ -2917,11 +3184,26 @@ mod tests {
 
     #[test]
     fn list_column_layout_hides_modified_column() {
+        let cfg = columns_config(
+            true,
+            false,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+            ],
+        );
         assert_eq!(
-            list_column_layout(false, true, false),
+            list_column_layout(false, &cfg),
             ListColumnLayout {
+                data_columns: vec![
+                    FileListDataColumn::Name,
+                    FileListDataColumn::Extension,
+                    FileListDataColumn::Size,
+                ],
                 name: 0,
-                ext: 1,
+                extension: 1,
                 size: Some(2),
                 modified: None,
             }
@@ -2930,13 +3212,53 @@ mod tests {
 
     #[test]
     fn list_column_layout_hides_size_and_modified_columns() {
+        let cfg = columns_config(
+            false,
+            false,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+            ],
+        );
         assert_eq!(
-            list_column_layout(false, false, false),
+            list_column_layout(false, &cfg),
             ListColumnLayout {
+                data_columns: vec![FileListDataColumn::Name, FileListDataColumn::Extension],
                 name: 0,
-                ext: 1,
+                extension: 1,
                 size: None,
                 modified: None,
+            }
+        );
+    }
+
+    #[test]
+    fn list_column_layout_respects_custom_order() {
+        let cfg = columns_config(
+            true,
+            true,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+                FileListDataColumn::Extension,
+            ],
+        );
+        assert_eq!(
+            list_column_layout(false, &cfg),
+            ListColumnLayout {
+                data_columns: vec![
+                    FileListDataColumn::Name,
+                    FileListDataColumn::Size,
+                    FileListDataColumn::Modified,
+                    FileListDataColumn::Extension,
+                ],
+                name: 0,
+                extension: 3,
+                size: Some(1),
+                modified: Some(2),
             }
         );
     }

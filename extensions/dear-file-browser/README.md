@@ -109,6 +109,26 @@ ui.window("Open")
     });
 ```
 
+## List Column Preferences
+
+List-view columns can be tuned per dialog instance:
+
+```rust
+use dear_file_browser::{FileListColumnsConfig, FileListDataColumn};
+
+state.ui.file_list_columns.order = [
+    FileListDataColumn::Name,
+    FileListDataColumn::Size,
+    FileListDataColumn::Modified,
+    FileListDataColumn::Extension,
+];
+state.ui.file_list_columns.weight_overrides.name = Some(0.60);
+state.ui.file_list_columns.weight_overrides.size = Some(0.18);
+
+let persisted = state.ui.file_list_columns.serialize_compact();
+let restored = FileListColumnsConfig::deserialize_compact(&persisted)?;
+state.ui.file_list_columns = restored;
+```
 ## Result Convenience (IGFD-style)
 
 `Selection` keeps `paths: Vec<PathBuf>` as the canonical result model, and also provides

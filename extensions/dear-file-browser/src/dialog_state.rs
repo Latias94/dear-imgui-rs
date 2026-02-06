@@ -16,8 +16,72 @@ pub enum FileListViewMode {
     Grid,
 }
 
+/// Data column identifier for list view (excluding optional preview thumbnail column).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FileListDataColumn {
+    /// File name (main selectable cell).
+    Name,
+    /// File extension (derived from name).
+    Extension,
+    /// File size.
+    Size,
+    /// Last-modified timestamp.
+    Modified,
+}
+
+impl FileListDataColumn {
+    fn compact_token(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Extension => "ext",
+            Self::Size => "size",
+            Self::Modified => "modified",
+        }
+    }
+
+    fn from_compact_token(token: &str) -> Option<Self> {
+        match token {
+            "name" => Some(Self::Name),
+            "ext" => Some(Self::Extension),
+            "size" => Some(Self::Size),
+            "modified" => Some(Self::Modified),
+            _ => None,
+        }
+    }
+}
+
+/// Optional per-column width overrides for list view.
+///
+/// Values are interpreted as ImGui table stretch weights and must be finite and positive.
+/// When an override is `None`, the built-in heuristic weight is used.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileListColumnWeightOverrides {
+    /// Preview (thumbnail) column weight.
+    pub preview: Option<f32>,
+    /// Name column weight.
+    pub name: Option<f32>,
+    /// Extension column weight.
+    pub extension: Option<f32>,
+    /// Size column weight.
+    pub size: Option<f32>,
+    /// Modified column weight.
+    pub modified: Option<f32>,
+}
+
+impl Default for FileListColumnWeightOverrides {
+    fn default() -> Self {
+        Self {
+            preview: None,
+            name: None,
+            extension: None,
+            size: None,
+            modified: None,
+        }
+    }
+}
+
 /// Column visibility configuration for list view.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FileListColumnsConfig {
     /// Show preview column in list view when thumbnails are enabled.
     pub show_preview: bool,
@@ -25,6 +89,125 @@ pub struct FileListColumnsConfig {
     pub show_size: bool,
     /// Show modified time column in list view.
     pub show_modified: bool,
+    /// Render order for data columns (Name/Extension/Size/Modified).
+    ///
+    /// Name/Extension are always shown, while Size/Modified still obey visibility flags.
+    pub order: [FileListDataColumn; 4],
+    /// Optional per-column stretch-weight overrides.
+    pub weight_overrides: FileListColumnWeightOverrides,
+}
+
+/// Error returned by [`FileListColumnsConfig::deserialize_compact`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileListColumnsDeserializeError {
+    msg: String,
+}
+
+impl FileListColumnsDeserializeError {
+    fn new(msg: impl Into<String>) -> Self {
+        Self { msg: msg.into() }
+    }
+}
+
+impl std::fmt::Display for FileListColumnsDeserializeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "file list columns deserialize error: {}", self.msg)
+    }
+}
+
+impl std::error::Error for FileListColumnsDeserializeError {}
+
+impl FileListColumnsConfig {
+    /// Serializes list-column preferences to a compact string.
+    ///
+    /// This is dependency-free (no serde) and intended for app-level persistence.
+    pub fn serialize_compact(&self) -> String {
+        let order = self
+            .normalized_order()
+            .iter()
+            .map(|c| c.compact_token())
+            .collect::<Vec<_>>()
+            .join(",");
+        let weights = [
+            self.weight_overrides.preview,
+            self.weight_overrides.name,
+            self.weight_overrides.extension,
+            self.weight_overrides.size,
+            self.weight_overrides.modified,
+        ]
+        .into_iter()
+        .map(|v| {
+            v.map(|w| format!("{w:.4}"))
+                .unwrap_or_else(|| "auto".to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+        format!(
+            "v1;preview={};size={};modified={};order={};weights={}",
+            u8::from(self.show_preview),
+            u8::from(self.show_size),
+            u8::from(self.show_modified),
+            order,
+            weights,
+        )
+    }
+
+    /// Deserializes list-column preferences from [`Self::serialize_compact`] format.
+    pub fn deserialize_compact(input: &str) -> Result<Self, FileListColumnsDeserializeError> {
+        let mut version_ok = false;
+        let mut preview = None;
+        let mut size = None;
+        let mut modified = None;
+        let mut order = None;
+        let mut weights = None;
+
+        for token in input.split(';').filter(|s| !s.trim().is_empty()) {
+            if token == "v1" {
+                version_ok = true;
+                continue;
+            }
+            let (key, value) = token.split_once('=').ok_or_else(|| {
+                FileListColumnsDeserializeError::new(format!("invalid token `{token}`"))
+            })?;
+            match key {
+                "preview" => preview = Some(parse_compact_bool(value)?),
+                "size" => size = Some(parse_compact_bool(value)?),
+                "modified" => modified = Some(parse_compact_bool(value)?),
+                "order" => order = Some(parse_compact_order(value)?),
+                "weights" => weights = Some(parse_compact_weights(value)?),
+                _ => {
+                    return Err(FileListColumnsDeserializeError::new(format!(
+                        "unknown key `{key}`"
+                    )));
+                }
+            }
+        }
+
+        if !version_ok {
+            return Err(FileListColumnsDeserializeError::new(
+                "missing or unsupported version token",
+            ));
+        }
+
+        Ok(Self {
+            show_preview: preview
+                .ok_or_else(|| FileListColumnsDeserializeError::new("missing key `preview`"))?,
+            show_size: size
+                .ok_or_else(|| FileListColumnsDeserializeError::new("missing key `size`"))?,
+            show_modified: modified
+                .ok_or_else(|| FileListColumnsDeserializeError::new("missing key `modified`"))?,
+            order: order
+                .ok_or_else(|| FileListColumnsDeserializeError::new("missing key `order`"))?,
+            weight_overrides: weights
+                .ok_or_else(|| FileListColumnsDeserializeError::new("missing key `weights`"))?,
+        })
+    }
+
+    /// Returns a deterministic valid order (dedup + append missing columns).
+    pub fn normalized_order(&self) -> [FileListDataColumn; 4] {
+        normalized_order(self.order)
+    }
 }
 
 impl Default for FileListColumnsConfig {
@@ -33,8 +216,103 @@ impl Default for FileListColumnsConfig {
             show_preview: true,
             show_size: true,
             show_modified: true,
+            order: [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+            ],
+            weight_overrides: FileListColumnWeightOverrides::default(),
         }
     }
+}
+
+fn normalized_order(order: [FileListDataColumn; 4]) -> [FileListDataColumn; 4] {
+    let mut out = Vec::with_capacity(4);
+    for c in order {
+        if !out.contains(&c) {
+            out.push(c);
+        }
+    }
+    for c in [
+        FileListDataColumn::Name,
+        FileListDataColumn::Extension,
+        FileListDataColumn::Size,
+        FileListDataColumn::Modified,
+    ] {
+        if !out.contains(&c) {
+            out.push(c);
+        }
+    }
+    [out[0], out[1], out[2], out[3]]
+}
+
+fn parse_compact_bool(value: &str) -> Result<bool, FileListColumnsDeserializeError> {
+    match value {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err(FileListColumnsDeserializeError::new(format!(
+            "invalid bool value `{value}`"
+        ))),
+    }
+}
+
+fn parse_compact_order(
+    value: &str,
+) -> Result<[FileListDataColumn; 4], FileListColumnsDeserializeError> {
+    let cols = value
+        .split(',')
+        .map(FileListDataColumn::from_compact_token)
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| FileListColumnsDeserializeError::new("invalid column token in `order`"))?;
+    if cols.len() != 4 {
+        return Err(FileListColumnsDeserializeError::new(
+            "`order` must contain exactly 4 columns",
+        ));
+    }
+    let order = [cols[0], cols[1], cols[2], cols[3]];
+    let normalized = normalized_order(order);
+    if normalized != order {
+        return Err(FileListColumnsDeserializeError::new(
+            "`order` must contain each column exactly once",
+        ));
+    }
+    Ok(order)
+}
+
+fn parse_compact_optional_weight(
+    value: &str,
+) -> Result<Option<f32>, FileListColumnsDeserializeError> {
+    if value.eq_ignore_ascii_case("auto") {
+        return Ok(None);
+    }
+    let parsed = value.parse::<f32>().map_err(|_| {
+        FileListColumnsDeserializeError::new(format!("invalid weight value `{value}`"))
+    })?;
+    if !parsed.is_finite() || parsed <= 0.0 {
+        return Err(FileListColumnsDeserializeError::new(format!(
+            "weight must be finite and > 0, got `{value}`"
+        )));
+    }
+    Ok(Some(parsed))
+}
+
+fn parse_compact_weights(
+    value: &str,
+) -> Result<FileListColumnWeightOverrides, FileListColumnsDeserializeError> {
+    let parts: Vec<&str> = value.split(',').collect();
+    if parts.len() != 5 {
+        return Err(FileListColumnsDeserializeError::new(
+            "`weights` must contain exactly 5 values",
+        ));
+    }
+    Ok(FileListColumnWeightOverrides {
+        preview: parse_compact_optional_weight(parts[0])?,
+        name: parse_compact_optional_weight(parts[1])?,
+        extension: parse_compact_optional_weight(parts[2])?,
+        size: parse_compact_optional_weight(parts[3])?,
+        modified: parse_compact_optional_weight(parts[4])?,
+    })
 }
 
 impl Default for FileListViewMode {
@@ -381,5 +659,76 @@ impl FileDialogState {
             core: FileDialogCore::new(mode),
             ui: FileDialogUiState::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_list_columns_compact_roundtrip() {
+        let cfg = FileListColumnsConfig {
+            show_preview: false,
+            show_size: true,
+            show_modified: false,
+            order: [
+                FileListDataColumn::Name,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+                FileListDataColumn::Extension,
+            ],
+            weight_overrides: FileListColumnWeightOverrides {
+                preview: Some(0.15),
+                name: Some(0.61),
+                extension: Some(0.1),
+                size: Some(0.17),
+                modified: None,
+            },
+        };
+
+        let encoded = cfg.serialize_compact();
+        let decoded = FileListColumnsConfig::deserialize_compact(&encoded).unwrap();
+        assert_eq!(decoded, cfg);
+    }
+
+    #[test]
+    fn file_list_columns_deserialize_rejects_duplicate_order_entries() {
+        let err = FileListColumnsConfig::deserialize_compact(
+            "v1;preview=1;size=1;modified=1;order=name,name,size,modified;weights=auto,auto,auto,auto,auto",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("order` must contain each column exactly once")
+        );
+    }
+
+    #[test]
+    fn file_list_columns_deserialize_rejects_non_positive_weight() {
+        let err = FileListColumnsConfig::deserialize_compact(
+            "v1;preview=1;size=1;modified=1;order=name,ext,size,modified;weights=auto,0,auto,auto,auto",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("weight must be finite and > 0"));
+    }
+
+    #[test]
+    fn file_list_columns_normalized_order_dedupes_and_fills_missing() {
+        let normalized = normalized_order([
+            FileListDataColumn::Name,
+            FileListDataColumn::Name,
+            FileListDataColumn::Modified,
+            FileListDataColumn::Modified,
+        ]);
+        assert_eq!(
+            normalized,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Modified,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+            ]
+        );
     }
 }
