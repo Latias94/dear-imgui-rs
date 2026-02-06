@@ -102,6 +102,22 @@ ui.window("Open")
     });
 ```
 
+## Filters
+
+`FileFilter` supports a simple extension list API (case-insensitive, without leading dots):
+
+```rust
+use dear_file_browser::FileFilter;
+let images = FileFilter::new("Images", vec!["png".into(), "jpg".into(), "jpeg".into()]);
+```
+
+ImGui backend advanced tokens (native `rfd` ignores non-plain extensions):
+
+- Wildcards (`*` / `?`) are matched against the full extension string (e.g. `".tar.gz"`):
+  - `".vcx.*"`, `".*.filters"`, `".*"`
+- Regex tokens wrapped in `((...))` are matched against the full base name (case-insensitive):
+  - `"((^imgui_.*\\.rs$))"`
+
 ## Embedding (No Host Window)
 
 If you want to embed the browser into an existing window/popup/tab, draw only the contents:

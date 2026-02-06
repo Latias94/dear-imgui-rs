@@ -37,6 +37,12 @@ impl Default for Backend {
 /// leading dot. Multi-layer extensions are supported by including dots in the
 /// extension string (e.g. `"vcxproj.filters"`).
 ///
+/// Advanced patterns (ImGui backend only):
+/// - Wildcards: tokens containing `*` or `?` are treated like IGFD's asterisk filters and matched
+///   against the full extension string (e.g. `".vcx.*"`, `".*.filters"`, `"*.*"`).
+/// - Regex: tokens wrapped in `((` ... `))` are treated as regular expressions and matched
+///   against the full base name (case-insensitive).
+///
 /// The variants created from tuples will be normalized to lowercase
 /// automatically.
 #[derive(Clone, Debug, Default)]
@@ -56,8 +62,14 @@ impl FileFilter {
         let mut extensions: Vec<String> = exts.into();
         // Normalize to lowercase so matching is case-insensitive even if callers
         // provide mixed-case extensions.
-        for ext in &mut extensions {
-            *ext = ext.to_lowercase();
+        //
+        // Note: keep regex patterns verbatim; lowercasing can change regex meaning
+        // (e.g. Unicode categories like `\\p{Lu}`).
+        for token in &mut extensions {
+            if is_regex_token(token) {
+                continue;
+            }
+            *token = token.to_lowercase();
         }
         Self {
             name: name.into(),
@@ -70,9 +82,24 @@ impl From<(&str, &[&str])> for FileFilter {
     fn from(value: (&str, &[&str])) -> Self {
         Self {
             name: value.0.to_owned(),
-            extensions: value.1.iter().map(|s| s.to_lowercase()).collect(),
+            extensions: value
+                .1
+                .iter()
+                .map(|s| {
+                    if is_regex_token(s) {
+                        (*s).to_string()
+                    } else {
+                        s.to_lowercase()
+                    }
+                })
+                .collect(),
         }
     }
+}
+
+fn is_regex_token(token: &str) -> bool {
+    let t = token.trim();
+    t.starts_with("((") && t.ends_with("))") && t.len() >= 4
 }
 
 /// Selection result containing one or more paths
@@ -289,11 +316,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn file_filter_new_normalizes_extensions_to_lowercase() {
+    fn file_filter_new_normalizes_extensions_to_lowercase_but_preserves_regex() {
         let f = FileFilter::new(
             "Images",
-            vec!["PNG".to_string(), "Jpg".to_string(), "gif".to_string()],
+            vec![
+                "PNG".to_string(),
+                "Jpg".to_string(),
+                "gif".to_string(),
+                "((\\p{Lu}+))".to_string(),
+            ],
         );
-        assert_eq!(f.extensions, vec!["png", "jpg", "gif"]);
+        assert_eq!(f.extensions, vec!["png", "jpg", "gif", "((\\p{Lu}+))"]);
     }
 }

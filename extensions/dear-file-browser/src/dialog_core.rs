@@ -6,6 +6,7 @@ use crate::core::{
 };
 use crate::fs::FileSystem;
 use crate::places::Places;
+use regex::RegexBuilder;
 
 /// Keyboard/mouse modifier keys used by selection/navigation logic.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -468,16 +469,146 @@ fn effective_filters(filters: &[FileFilter], active_filter: Option<usize>) -> Ve
     }
 }
 
+#[derive(Debug)]
+enum FilterMatcher {
+    Any,
+    Extension(String),
+    ExtensionGlob(String),
+    NameRegex(regex::Regex),
+}
+
+fn compile_filter_matchers(filters: &[FileFilter]) -> Vec<FilterMatcher> {
+    let mut out = Vec::new();
+    for f in filters {
+        for token in &f.extensions {
+            let t = token.trim();
+            if t.is_empty() {
+                continue;
+            }
+
+            if let Some(re) = parse_regex_token(t) {
+                let built = RegexBuilder::new(re)
+                    .case_insensitive(true)
+                    .build()
+                    .map(FilterMatcher::NameRegex);
+                if let Ok(m) = built {
+                    out.push(m);
+                }
+                continue;
+            }
+
+            if t == "*" {
+                out.push(FilterMatcher::Any);
+                continue;
+            }
+
+            if t.contains('*') || t.contains('?') {
+                let p = normalize_extension_glob(t);
+                out.push(FilterMatcher::ExtensionGlob(p));
+                continue;
+            }
+
+            if let Some(ext) = plain_extension_token(t) {
+                out.push(FilterMatcher::Extension(ext.to_string()));
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
 fn matches_filters(name: &str, filters: &[FileFilter]) -> bool {
-    if filters.is_empty() {
+    let matchers = compile_filter_matchers(filters);
+    matches_filter_matchers(name, &matchers)
+}
+
+fn matches_filter_matchers(name: &str, matchers: &[FilterMatcher]) -> bool {
+    if matchers.is_empty() {
         return true;
     }
     let name_lower = name.to_lowercase();
-    filters.iter().any(|f| {
-        f.extensions
-            .iter()
-            .any(|ext| has_extension_suffix(&name_lower, ext))
+    let ext_full = full_extension_lower(&name_lower);
+
+    matchers.iter().any(|m| match m {
+        FilterMatcher::Any => true,
+        FilterMatcher::Extension(ext) => has_extension_suffix(&name_lower, ext),
+        FilterMatcher::ExtensionGlob(pat) => wildcard_match(pat.as_str(), ext_full),
+        FilterMatcher::NameRegex(re) => re.is_match(name),
     })
+}
+
+fn parse_regex_token(token: &str) -> Option<&str> {
+    let t = token.trim();
+    if t.starts_with("((") && t.ends_with("))") && t.len() >= 4 {
+        Some(&t[2..t.len() - 2])
+    } else {
+        None
+    }
+}
+
+fn plain_extension_token(token: &str) -> Option<&str> {
+    let t = token.trim().trim_start_matches('.');
+    if t.is_empty() {
+        return None;
+    }
+    if parse_regex_token(t).is_some() {
+        return None;
+    }
+    if t.contains('*') || t.contains('?') {
+        return None;
+    }
+    Some(t)
+}
+
+fn normalize_extension_glob(token: &str) -> String {
+    let t = token.trim().to_lowercase();
+    if t.starts_with('.') || t.starts_with('*') || t.starts_with('?') {
+        t
+    } else {
+        format!(".{t}")
+    }
+}
+
+fn full_extension_lower(name_lower: &str) -> &str {
+    name_lower.find('.').map(|i| &name_lower[i..]).unwrap_or("")
+}
+
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    // Basic glob matcher supporting `*` and `?`.
+    //
+    // - `*` matches any sequence (including empty)
+    // - `?` matches any single byte
+    let p = pattern.as_bytes();
+    let t = text.as_bytes();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let mut star_pi: Option<usize> = None;
+    let mut star_ti: usize = 0;
+
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == b'?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+            continue;
+        }
+        if pi < p.len() && p[pi] == b'*' {
+            star_pi = Some(pi);
+            pi += 1;
+            star_ti = ti;
+            continue;
+        }
+        if let Some(sp) = star_pi {
+            pi = sp + 1;
+            star_ti += 1;
+            ti = star_ti;
+            continue;
+        }
+        return false;
+    }
+
+    while pi < p.len() && p[pi] == b'*' {
+        pi += 1;
+    }
+    pi == p.len()
 }
 
 fn has_extension_suffix(name_lower: &str, ext: &str) -> bool {
@@ -521,6 +652,7 @@ fn finalize_selection(
 ) -> Result<Selection, FileDialogError> {
     let mut sel = Selection { paths: Vec::new() };
     let eff_filters = effective_filters(filters, active_filter);
+    let matchers = compile_filter_matchers(&eff_filters);
     match mode {
         DialogMode::PickFolder => {
             sel.paths.push(cwd.to_path_buf());
@@ -530,7 +662,7 @@ fn finalize_selection(
                 return Err(FileDialogError::InvalidPath("no selection".into()));
             }
             for n in selected_names {
-                if !matches_filters(&n, &eff_filters) {
+                if !matches_filter_matchers(&n, &matchers) {
                     continue;
                 }
                 sel.paths.push(cwd.join(n));
@@ -560,8 +692,8 @@ fn normalize_save_name(save_name: &str, filters: &[FileFilter], policy: Extensio
 
     let default_ext = filters
         .first()
-        .and_then(|f| f.extensions.first())
-        .map(|s| s.as_str());
+        .and_then(|f| f.extensions.iter().find_map(|s| plain_extension_token(s)))
+        .map(|s| s.trim_start_matches('.'));
     let Some(default_ext) = default_ext else {
         return name;
     };
@@ -593,6 +725,7 @@ fn filter_entries_in_place(
     search: &str,
 ) {
     let display_filters = effective_filters(filters, active_filter);
+    let matchers = compile_filter_matchers(&display_filters);
     let search_lower = if search.is_empty() {
         None
     } else {
@@ -602,7 +735,7 @@ fn filter_entries_in_place(
         let pass_kind = if matches!(mode, DialogMode::PickFolder) {
             e.is_dir
         } else {
-            e.is_dir || matches_filters(&e.name, &display_filters)
+            e.is_dir || matches_filter_matchers(&e.name, &matchers)
         };
         let pass_search = match &search_lower {
             None => true,
@@ -623,12 +756,76 @@ fn sort_entries_in_place(
             return b.is_dir.cmp(&a.is_dir);
         }
         let ord = match sort_by {
-            SortBy::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            SortBy::Name => {
+                let al = a.name.to_lowercase();
+                let bl = b.name.to_lowercase();
+                natural_cmp_lower(&al, &bl)
+            }
             SortBy::Size => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
             SortBy::Modified => a.modified.cmp(&b.modified),
         };
         if sort_ascending { ord } else { ord.reverse() }
     });
+}
+
+fn natural_cmp_lower(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let (mut i, mut j) = (0usize, 0usize);
+
+    while i < ab.len() && j < bb.len() {
+        let ca = ab[i];
+        let cb = bb[j];
+
+        if ca.is_ascii_digit() && cb.is_ascii_digit() {
+            let (a_end, a_trim, a_trim_end) = scan_number(ab, i);
+            let (b_end, b_trim, b_trim_end) = scan_number(bb, j);
+
+            let a_len = a_trim_end.saturating_sub(a_trim);
+            let b_len = b_trim_end.saturating_sub(b_trim);
+
+            let ord = match a_len.cmp(&b_len) {
+                Ordering::Equal => ab[a_trim..a_trim_end].cmp(&bb[b_trim..b_trim_end]),
+                o => o,
+            };
+
+            if ord != Ordering::Equal {
+                return ord;
+            }
+
+            // Same numeric value: shorter (fewer leading zeros) sorts first.
+            let ord = (a_end - i).cmp(&(b_end - j));
+            if ord != Ordering::Equal {
+                return ord;
+            }
+
+            i = a_end;
+            j = b_end;
+            continue;
+        }
+
+        if ca != cb {
+            return ca.cmp(&cb);
+        }
+        i += 1;
+        j += 1;
+    }
+
+    a.len().cmp(&b.len())
+}
+
+fn scan_number(bytes: &[u8], start: usize) -> (usize, usize, usize) {
+    let mut end = start;
+    while end < bytes.len() && bytes[end].is_ascii_digit() {
+        end += 1;
+    }
+    let mut trim = start;
+    while trim < end && bytes[trim] == b'0' {
+        trim += 1;
+    }
+    let trim_end = if trim == end { end } else { end };
+    (end, trim, trim_end)
 }
 
 fn read_entries_with_fs(fs: &dyn FileSystem, dir: &Path, show_hidden: bool) -> Vec<DirEntry> {
@@ -819,6 +1016,58 @@ mod tests {
         assert!(matches_filters("proj.vcxproj.filters", &filters));
         assert!(!matches_filters("proj.vcxproj", &filters));
         assert!(!matches_filters("vcxproj.filters", &filters));
+    }
+
+    #[test]
+    fn matches_filters_supports_extension_globs() {
+        let filters = vec![FileFilter::new(
+            "VS-ish",
+            vec![".vcx*".to_string(), ".*.filters".to_string()],
+        )];
+        assert!(matches_filters("proj.vcxproj.filters", &filters));
+        assert!(matches_filters("proj.vcxproj", &filters));
+        assert!(!matches_filters("README", &filters));
+    }
+
+    #[test]
+    fn matches_filters_supports_regex_tokens() {
+        let filters = vec![FileFilter::new(
+            "Re",
+            vec![r"((^imgui_.*\.rs$))".to_string()],
+        )];
+        assert!(matches_filters("imgui_demo.rs", &filters));
+        assert!(matches_filters("ImGui_DEMO.RS", &filters));
+        assert!(!matches_filters("demo_imgui.rs", &filters));
+    }
+
+    #[test]
+    fn natural_sort_orders_digit_runs() {
+        let mut entries = vec![
+            DirEntry {
+                name: "file10.txt".into(),
+                path: PathBuf::from("/tmp/file10.txt"),
+                is_dir: false,
+                size: None,
+                modified: None,
+            },
+            DirEntry {
+                name: "file2.txt".into(),
+                path: PathBuf::from("/tmp/file2.txt"),
+                is_dir: false,
+                size: None,
+                modified: None,
+            },
+            DirEntry {
+                name: "file1.txt".into(),
+                path: PathBuf::from("/tmp/file1.txt"),
+                is_dir: false,
+                size: None,
+                modified: None,
+            },
+        ];
+        sort_entries_in_place(&mut entries, SortBy::Name, true, false);
+        let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
+        assert_eq!(names, vec!["file1.txt", "file2.txt", "file10.txt"]);
     }
 
     #[test]

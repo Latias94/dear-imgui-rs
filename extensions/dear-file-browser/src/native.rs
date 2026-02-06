@@ -29,8 +29,15 @@ impl FileDialog {
             d = d.set_file_name(name);
         }
         for f in &self.filters {
-            let exts: Vec<&str> = f.extensions.iter().map(|s| s.as_str()).collect();
-            d = d.add_filter(&f.name, &exts);
+            let exts_owned: Vec<String> = f
+                .extensions
+                .iter()
+                .filter_map(|s| plain_extension_for_native(s))
+                .collect();
+            let exts: Vec<&str> = exts_owned.iter().map(|s| s.as_str()).collect();
+            if !exts.is_empty() {
+                d = d.add_filter(&f.name, &exts);
+            }
         }
         d
     }
@@ -141,4 +148,26 @@ impl FileDialog {
             Ok(sel)
         }
     }
+}
+
+fn is_plain_extension_token(token: &str) -> bool {
+    let t = token.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if t.starts_with("((") && t.ends_with("))") {
+        return false;
+    }
+    !(t.contains('*') || t.contains('?'))
+}
+
+fn plain_extension_for_native(token: &str) -> Option<String> {
+    if !is_plain_extension_token(token) {
+        return None;
+    }
+    let t = token.trim().trim_start_matches('.');
+    if t.is_empty() {
+        return None;
+    }
+    Some(t.to_lowercase())
 }

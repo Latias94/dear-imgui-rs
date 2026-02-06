@@ -218,6 +218,8 @@ Goal: support richer filter syntax and multi-layer extensions.
 
 ### Epic 8.2 — IGFD-style filter parser (optional)
 
+- [x] Task: support `*`/`?` wildcard tokens and `((...))` regex tokens in `FileFilter` (ImGui)
+  - Acceptance: `".vcx.*"` and `"((^imgui_.*\\.rs$))"` match as expected.
 - [ ] Task: `FilterSpec::parse_igfd(str)` with:
   - collections: `Name{...}`
   - commas with parentheses rules
@@ -336,8 +338,9 @@ Use this as a tracking table for final validation.
 - [x] Host flexibility: window/modal/popup/embed (modal can be caller-hosted via `draw_contents`)
 - [x] Places: groups + editable + persistence + devices
 - [x] Selection: ctrl/shift, ctrl+a, keyboard navigation, type-to-select
+- [x] Sorting: natural name ordering (e.g. `file2` < `file10`)
 - [x] Save: confirm overwrite + extension policy
-- [ ] Filters: collections + regex (optional) + multi-layer extensions (multi-layer done; regex TBD)
+- [ ] Filters: collections + regex (optional) + multi-layer extensions (multi-layer/regex/wildcards done; collections/parser TBD)
 - [ ] File styles: by type/ext/name/regex + callback
 - [x] Custom pane: per filter + blocks confirm
 - [ ] Thumbnails: decode + GPU lifecycle + grid view (list preview done; grid view TBD)

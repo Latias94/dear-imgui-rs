@@ -793,6 +793,7 @@ dependencies = [
  "dear-imgui-rs",
  "image",
  "pollster",
+ "regex",
  "rfd",
  "thiserror 2.0.17",
  "tracing",
