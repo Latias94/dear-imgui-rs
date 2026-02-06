@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 pub struct FsMetadata {
     /// Whether the path refers to a directory.
     pub is_dir: bool,
+    /// Whether the path itself is a symbolic link.
+    pub is_symlink: bool,
 }
 
 /// Directory entry returned by [`FileSystem::read_dir`].
@@ -16,7 +18,9 @@ pub struct FsEntry {
     pub path: PathBuf,
     /// Whether this entry is a directory.
     pub is_dir: bool,
-    /// File size in bytes (only for files; `None` for directories or when unavailable).
+    /// Whether this entry itself is a symbolic link.
+    pub is_symlink: bool,
+    /// File size in bytes (files and file-links only; `None` for directories or when unavailable).
     pub size: Option<u64>,
     /// Last modified timestamp (when available).
     pub modified: Option<std::time::SystemTime>,
@@ -70,15 +74,18 @@ impl FileSystem for StdFileSystem {
             let path = e.path();
             let meta = e.metadata().ok();
             let modified = meta.as_ref().and_then(|m| m.modified().ok());
-            let size = if ft.is_file() {
-                meta.as_ref().map(|m| m.len())
-            } else {
+            let is_dir = ft.is_dir();
+            let is_symlink = ft.is_symlink();
+            let size = if is_dir {
                 None
+            } else {
+                meta.as_ref().filter(|m| m.is_file()).map(|m| m.len())
             };
             out.push(FsEntry {
                 name,
                 path,
-                is_dir: ft.is_dir(),
+                is_dir,
+                is_symlink,
                 size,
                 modified,
             });
@@ -92,8 +99,10 @@ impl FileSystem for StdFileSystem {
 
     fn metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
         let md = std::fs::metadata(path)?;
+        let link_md = std::fs::symlink_metadata(path)?;
         Ok(FsMetadata {
             is_dir: md.is_dir(),
+            is_symlink: link_md.file_type().is_symlink(),
         })
     }
 

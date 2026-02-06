@@ -6,8 +6,10 @@ use std::sync::Arc;
 pub enum EntryKind {
     /// Directory.
     Dir,
-    /// File.
+    /// Regular file.
     File,
+    /// Symbolic link.
+    Link,
 }
 
 /// A style applied to an entry in the file list.
@@ -62,6 +64,8 @@ pub enum StyleMatcher {
     AnyDir,
     /// Match any file.
     AnyFile,
+    /// Match any symbolic link.
+    AnyLink,
     /// Match a file extension (case-insensitive, without leading dot).
     Extension(String),
     /// Match by exact base name (case-insensitive).
@@ -88,8 +92,9 @@ impl StyleMatcher {
         match self {
             Self::AnyDir => matches!(kind, EntryKind::Dir),
             Self::AnyFile => matches!(kind, EntryKind::File),
+            Self::AnyLink => matches!(kind, EntryKind::Link),
             Self::Extension(ext) => {
-                if !matches!(kind, EntryKind::File) {
+                if matches!(kind, EntryKind::Dir) {
                     return false;
                 }
                 has_extension_suffix(name_lower, ext.as_str())
@@ -162,6 +167,11 @@ impl FileStyleRegistry {
     /// Convenience: style all files.
     pub fn push_file_style(&mut self, style: FileStyle) {
         self.push_rule(StyleMatcher::AnyFile, style);
+    }
+
+    /// Convenience: style all symbolic links.
+    pub fn push_link_style(&mut self, style: FileStyle) {
+        self.push_rule(StyleMatcher::AnyLink, style);
     }
 
     /// Convenience: style a specific extension (case-insensitive, without leading dot).
@@ -332,6 +342,37 @@ mod tests {
                 .is_some()
         );
         assert!(reg.style_for("a.png", EntryKind::Dir).is_none());
+    }
+
+    #[test]
+    fn link_matcher_targets_only_link_entries() {
+        let mut reg = FileStyleRegistry::default();
+        reg.push_link_style(FileStyle {
+            text_color: Some([0.9, 0.5, 0.1, 1.0]),
+            icon: Some("[LNK]".into()),
+            tooltip: None,
+            font_token: None,
+        });
+
+        assert!(reg.style_for("link_to_asset", EntryKind::Link).is_some());
+        assert!(reg.style_for("link_to_asset", EntryKind::File).is_none());
+        assert!(reg.style_for("link_to_asset", EntryKind::Dir).is_none());
+    }
+
+    #[test]
+    fn extension_style_applies_to_link_entries() {
+        let mut reg = FileStyleRegistry::default();
+        reg.push_extension_style(
+            "txt",
+            FileStyle {
+                text_color: Some([0.2, 0.7, 0.9, 1.0]),
+                icon: None,
+                tooltip: None,
+                font_token: None,
+            },
+        );
+
+        assert!(reg.style_for("note.txt", EntryKind::Link).is_some());
     }
 
     #[test]

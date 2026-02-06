@@ -147,6 +147,8 @@ impl ScanHook {
 pub struct FileMeta {
     /// Whether this entry is a directory.
     pub is_dir: bool,
+    /// Whether this entry is a symbolic link.
+    pub is_symlink: bool,
     /// File size in bytes (files only).
     pub size: Option<u64>,
     /// Last modified timestamp.
@@ -175,6 +177,8 @@ pub(crate) struct DirEntry {
     pub(crate) path: PathBuf,
     /// Whether this entry is a directory.
     pub(crate) is_dir: bool,
+    /// Whether this entry itself is a symbolic link.
+    pub(crate) is_symlink: bool,
     /// File size in bytes (files only).
     pub(crate) size: Option<u64>,
     /// Last modified timestamp.
@@ -1307,10 +1311,11 @@ fn scan_number(bytes: &[u8], start: usize) -> (usize, usize, usize) {
     (end, trim, trim_end)
 }
 
-fn entry_id_from_path(path: &Path, is_dir: bool) -> EntryId {
+fn entry_id_from_path(path: &Path, is_dir: bool, is_symlink: bool) -> EntryId {
     let mut hasher = DefaultHasher::new();
     hasher.write(path.to_string_lossy().as_bytes());
     hasher.write_u8(if is_dir { 1 } else { 0 });
+    hasher.write_u8(if is_symlink { 1 } else { 0 });
     EntryId::new(hasher.finish())
 }
 
@@ -1364,14 +1369,16 @@ fn read_entries_snapshot_with_fs(
 
         let meta = FileMeta {
             is_dir: entry.is_dir,
+            is_symlink: entry.is_symlink,
             size: entry.size,
             modified: entry.modified,
         };
         out.push(DirEntry {
-            id: entry_id_from_path(&entry.path, meta.is_dir),
+            id: entry_id_from_path(&entry.path, meta.is_dir, meta.is_symlink),
             name: entry.name,
             path: entry.path,
             is_dir: meta.is_dir,
+            is_symlink: meta.is_symlink,
             size: meta.size,
             modified: meta.modified,
         });
@@ -1397,10 +1404,11 @@ mod tests {
     fn make_file_entry(name: &str) -> DirEntry {
         let path = PathBuf::from("/tmp").join(name);
         DirEntry {
-            id: entry_id_from_path(&path, false),
+            id: entry_id_from_path(&path, false, false),
             name: name.to_string(),
             path,
             is_dir: false,
+            is_symlink: false,
             size: None,
             modified: None,
         }
@@ -1409,10 +1417,11 @@ mod tests {
     fn make_dir_entry(name: &str) -> DirEntry {
         let path = PathBuf::from("/tmp").join(name);
         DirEntry {
-            id: entry_id_from_path(&path, true),
+            id: entry_id_from_path(&path, true, false),
             name: name.to_string(),
             path,
             is_dir: true,
+            is_symlink: false,
             size: None,
             modified: None,
         }
@@ -1897,7 +1906,10 @@ mod tests {
         let mut fs = TestFs::default();
         fs.meta.insert(
             PathBuf::from("/tmp/asset.png"),
-            crate::fs::FsMetadata { is_dir: false },
+            crate::fs::FsMetadata {
+                is_dir: false,
+                is_symlink: false,
+            },
         );
 
         let gate = ConfirmGate::default();
@@ -1919,6 +1931,7 @@ mod tests {
                     name: "keep.txt".into(),
                     path: PathBuf::from("/tmp/keep.txt"),
                     is_dir: false,
+                    is_symlink: false,
                     size: Some(1),
                     modified: None,
                 },
@@ -1926,6 +1939,7 @@ mod tests {
                     name: "drop.txt".into(),
                     path: PathBuf::from("/tmp/drop.txt"),
                     is_dir: false,
+                    is_symlink: false,
                     size: Some(2),
                     modified: None,
                 },
@@ -1961,6 +1975,7 @@ mod tests {
                 name: "a.txt".into(),
                 path: PathBuf::from("/tmp/a.txt"),
                 is_dir: false,
+                is_symlink: false,
                 size: Some(12),
                 modified: Some(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(7)),
             }],
@@ -1996,6 +2011,7 @@ mod tests {
                 name: "a.txt".into(),
                 path: PathBuf::from("/tmp/a.txt"),
                 is_dir: false,
+                is_symlink: false,
                 size: Some(12),
                 modified: None,
             }],
@@ -2023,6 +2039,7 @@ mod tests {
                 name: "a.txt".into(),
                 path: PathBuf::from("/tmp/a.txt"),
                 is_dir: false,
+                is_symlink: false,
                 size: Some(1),
                 modified: None,
             }],
@@ -2049,6 +2066,7 @@ mod tests {
                     name: "a.txt".into(),
                     path: PathBuf::from("/tmp/a.txt"),
                     is_dir: false,
+                    is_symlink: false,
                     size: None,
                     modified: None,
                 },
@@ -2056,6 +2074,7 @@ mod tests {
                     name: "b.txt".into(),
                     path: PathBuf::from("/tmp/b.txt"),
                     is_dir: false,
+                    is_symlink: false,
                     size: None,
                     modified: None,
                 },
@@ -2063,6 +2082,7 @@ mod tests {
                     name: ".hidden".into(),
                     path: PathBuf::from("/tmp/.hidden"),
                     is_dir: false,
+                    is_symlink: false,
                     size: None,
                     modified: None,
                 },

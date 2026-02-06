@@ -33,6 +33,10 @@ pub struct WindowHostConfig {
     pub initial_size: [f32; 2],
     /// Condition used when setting the window size
     pub size_condition: dear_imgui_rs::Condition,
+    /// Optional minimum size constraint.
+    pub min_size: Option<[f32; 2]>,
+    /// Optional maximum size constraint.
+    pub max_size: Option<[f32; 2]>,
 }
 
 impl WindowHostConfig {
@@ -47,6 +51,8 @@ impl WindowHostConfig {
             title: title.to_string(),
             initial_size: [760.0, 520.0],
             size_condition: dear_imgui_rs::Condition::FirstUseEver,
+            min_size: None,
+            max_size: None,
         }
     }
 }
@@ -63,6 +69,10 @@ pub struct ModalHostConfig {
     pub initial_size: [f32; 2],
     /// Condition used when setting the popup size.
     pub size_condition: dear_imgui_rs::Condition,
+    /// Optional minimum size constraint.
+    pub min_size: Option<[f32; 2]>,
+    /// Optional maximum size constraint.
+    pub max_size: Option<[f32; 2]>,
 }
 
 impl ModalHostConfig {
@@ -77,6 +87,8 @@ impl ModalHostConfig {
             popup_label: format!("{title}###FileBrowserModal"),
             initial_size: [760.0, 520.0],
             size_condition: dear_imgui_rs::Condition::FirstUseEver,
+            min_size: None,
+            max_size: None,
         }
     }
 }
@@ -220,18 +232,24 @@ impl<'ui> FileBrowser<'ui> {
         }
 
         let mut out: Option<Result<Selection, FileDialogError>> = None;
-        self.ui
+        let mut window = self
+            .ui
             .window(&cfg.title)
-            .size(cfg.initial_size, cfg.size_condition)
-            .build(|| {
-                out = draw_contents_with_fs_and_hooks(
-                    self.ui,
-                    state,
-                    fs,
-                    custom_pane.take(),
-                    thumbnails_backend.take(),
-                );
-            });
+            .size(cfg.initial_size, cfg.size_condition);
+        if let Some((min_size, max_size)) =
+            resolve_host_size_constraints(cfg.min_size, cfg.max_size)
+        {
+            window = window.size_constraints(min_size, max_size);
+        }
+        window.build(|| {
+            out = draw_contents_with_fs_and_hooks(
+                self.ui,
+                state,
+                fs,
+                custom_pane.take(),
+                thumbnails_backend.take(),
+            );
+        });
         out
     }
 
@@ -271,6 +289,22 @@ impl<'ui> FileBrowser<'ui> {
 
         if !self.ui.is_popup_open(&cfg.popup_label) {
             self.ui.open_popup(&cfg.popup_label);
+        }
+
+        if let Some((min_size, max_size)) =
+            resolve_host_size_constraints(cfg.min_size, cfg.max_size)
+        {
+            unsafe {
+                let min_vec = sys::ImVec2_c {
+                    x: min_size[0],
+                    y: min_size[1],
+                };
+                let max_vec = sys::ImVec2_c {
+                    x: max_size[0],
+                    y: max_size[1],
+                };
+                sys::igSetNextWindowSizeConstraints(min_vec, max_vec, None, std::ptr::null_mut());
+            }
         }
 
         unsafe {
@@ -342,8 +376,40 @@ struct StyleVisual {
     font_id: Option<dear_imgui_rs::FontId>,
 }
 
+fn resolve_host_size_constraints(
+    min_size: Option<[f32; 2]>,
+    max_size: Option<[f32; 2]>,
+) -> Option<([f32; 2], [f32; 2])> {
+    if min_size.is_none() && max_size.is_none() {
+        return None;
+    }
+
+    let sanitize = |value: f32, fallback: f32| -> f32 {
+        if value.is_finite() {
+            value.max(0.0)
+        } else {
+            fallback
+        }
+    };
+
+    let mut min = min_size.unwrap_or([0.0, 0.0]);
+    min[0] = sanitize(min[0], 0.0);
+    min[1] = sanitize(min[1], 0.0);
+
+    let mut max = max_size.unwrap_or([f32::MAX, f32::MAX]);
+    max[0] = sanitize(max[0], f32::MAX);
+    max[1] = sanitize(max[1], f32::MAX);
+
+    max[0] = max[0].max(min[0]);
+    max[1] = max[1].max(min[1]);
+
+    Some((min, max))
+}
+
 fn style_visual_for_entry(state: &mut FileDialogState, e: &DirEntry) -> StyleVisual {
-    let kind = if e.is_dir {
+    let kind = if e.is_symlink {
+        EntryKind::Link
+    } else if e.is_dir {
         EntryKind::Dir
     } else {
         EntryKind::File
@@ -3390,7 +3456,7 @@ fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSys
 mod tests {
     use super::{
         ListColumnLayout, list_column_layout, open_delete_modal_from_selection,
-        open_rename_modal_from_selection,
+        open_rename_modal_from_selection, resolve_host_size_constraints,
     };
     use crate::core::DialogMode;
     use crate::dialog_core::EntryId;
@@ -3410,6 +3476,31 @@ mod tests {
         cfg.show_modified = show_modified;
         cfg.order = order;
         cfg
+    }
+
+    #[test]
+    fn resolve_host_size_constraints_returns_none_when_unset() {
+        assert!(resolve_host_size_constraints(None, None).is_none());
+    }
+
+    #[test]
+    fn resolve_host_size_constraints_supports_one_sided_values() {
+        let (min, max) = resolve_host_size_constraints(Some([200.0, 150.0]), None).unwrap();
+        assert_eq!(min, [200.0, 150.0]);
+        assert_eq!(max, [f32::MAX, f32::MAX]);
+
+        let (min, max) = resolve_host_size_constraints(None, Some([900.0, 700.0])).unwrap();
+        assert_eq!(min, [0.0, 0.0]);
+        assert_eq!(max, [900.0, 700.0]);
+    }
+
+    #[test]
+    fn resolve_host_size_constraints_normalizes_invalid_values() {
+        let (min, max) =
+            resolve_host_size_constraints(Some([300.0, f32::NAN]), Some([100.0, f32::INFINITY]))
+                .unwrap();
+        assert_eq!(min, [300.0, 0.0]);
+        assert_eq!(max, [300.0, f32::MAX]);
     }
 
     #[derive(Clone, Default)]
@@ -3432,6 +3523,7 @@ mod tests {
                 .find(|entry| entry.path == path)
                 .map(|entry| FsMetadata {
                     is_dir: entry.is_dir,
+                    is_symlink: entry.is_symlink,
                 })
                 .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not found"))
         }
@@ -3490,6 +3582,7 @@ mod tests {
             name,
             path,
             is_dir: false,
+            is_symlink: false,
             size: None,
             modified: None,
         }

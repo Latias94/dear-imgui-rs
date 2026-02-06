@@ -20,16 +20,15 @@ Current parity status vs IGFD (excluding C API by product decision):
   - explicit dialog lifecycle API: `FileDialogState::open/reopen/close/is_open` (commit: `c31ab9a`)
   - ID-first cleanup for rename/delete modal state (commit: `bfc9609`)
   - centralized selected path/count readback in core (`selected_entry_paths`, `selected_entry_counts`) (commit: `a21b0df`)
-  - scan-time entry hook in core/state API (`set_scan_hook` / `clear_scan_hook`) with keep/drop + mutation tests (commit: pending)
+  - scan-time entry hook in core/state API (`set_scan_hook` / `clear_scan_hook`) with keep/drop + mutation tests (commit: `b03632b`)
+  - host-level size constraints (`min_size` / `max_size`) for window/modal configs (commit: pending)
 - Remaining high-priority gaps (non-C API):
-  - symlink/link metadata and style kind parity (`Dir/File/Link`)
-  - dialog min/max size constraints in host config
+  - none in core feature parity scope; remaining work is API polish/docs
 
 Execution plan (next implementation wave):
 
-1. P1: link/symlink metadata pipeline + style parity
-2. P1: host-level size constraints (`min_size` / `max_size`) for window + modal
-3. P2: parity/deviation doc finalization and follow-up optimization backlog
+1. P2: parity/deviation doc finalization
+2. P2: post-parity optimization backlog curation
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -505,22 +504,27 @@ Goal: close remaining feature gaps vs IGFD while keeping a Rust-first API.
 
 ### Epic 16.2 - Link/Symlink parity in metadata + style
 
-- [ ] Task: extend entry metadata with link/symlink kind
+- [x] Task: extend entry metadata with link/symlink kind
   - Scope:
     - extend filesystem metadata surface
     - add `EntryKind::Link` (or equivalent) to style matcher
   - Acceptance:
     - link entries can be styled separately from files/dirs
     - existing file/dir style matching behavior stays stable
+  - Notes:
+    - `FsEntry`/`FsMetadata` now include symlink metadata
+    - `EntryKind::Link` + `StyleMatcher::AnyLink` are available in style registry
 
 ### Epic 16.3 - Host constraints parity
 
-- [ ] Task: add dialog size constraints to host configs
+- [x] Task: add dialog size constraints to host configs
   - Scope:
     - `WindowHostConfig` / `ModalHostConfig` support `min_size` and `max_size`
   - Acceptance:
     - constraints are applied consistently in window and modal hosts
     - documented with a compact usage example
+  - Notes:
+    - supports one-sided constraints (`min`-only / `max`-only) with safe normalization
 
 ### Epic 16.4 - API polish and docs
 
@@ -551,8 +555,8 @@ Use this as a tracking table for final validation.
 - [x] Custom pane: per filter + blocks confirm
 - [x] Thumbnails: decode + GPU lifecycle + grid view
 - [x] Scan-time entry callback parity (userFileAttributes-like)
-- [ ] Link/symlink-specific metadata + style parity
-- [ ] Window/modal min-max constraints parity
+- [x] Link/symlink-specific metadata + style parity
+- [x] Window/modal min-max constraints parity
 
 ---
 

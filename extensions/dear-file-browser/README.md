@@ -222,6 +222,8 @@ let cfg = WindowHostConfig {
     title: "Open Asset".into(),
     initial_size: [900.0, 600.0],
     size_condition: dear_imgui_rs::Condition::FirstUseEver,
+    min_size: Some([640.0, 420.0]),
+    max_size: Some([1600.0, 1000.0]),
 };
 
 if let Some(res) = ui.file_browser().show_windowed(&mut state, &cfg) {
@@ -240,6 +242,8 @@ let cfg = ModalHostConfig {
     popup_label: "Open Asset###asset_modal".into(),
     initial_size: [900.0, 600.0],
     size_condition: dear_imgui_rs::Condition::FirstUseEver,
+    min_size: Some([640.0, 420.0]),
+    max_size: Some([1600.0, 1000.0]),
 };
 
 let fs = dear_file_browser::StdFileSystem;
@@ -346,6 +350,12 @@ state.ui.file_styles.push_rule(
         font_token: None,
     },
 );
+state.ui.file_styles.push_link_style(FileStyle {
+    icon: Some("[LNK]".into()),
+    text_color: Some([0.8, 0.6, 1.0, 1.0]),
+    tooltip: Some("Symbolic link".into()),
+    font_token: None,
+});
 state.ui.file_styles.push_extension_style(
     "png",
     FileStyle {
