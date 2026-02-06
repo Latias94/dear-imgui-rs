@@ -21,14 +21,14 @@ Current parity status vs IGFD (excluding C API by product decision):
   - ID-first cleanup for rename/delete modal state (commit: `bfc9609`)
   - centralized selected path/count readback in core (`selected_entry_paths`, `selected_entry_counts`) (commit: `a21b0df`)
   - scan-time entry hook in core/state API (`set_scan_hook` / `clear_scan_hook`) with keep/drop + mutation tests (commit: `b03632b`)
-  - host-level size constraints (`min_size` / `max_size`) for window/modal configs (commit: pending)
+  - host-level size constraints (`min_size` / `max_size`) for window/modal configs (commit: `591cb49`)
+  - parity/deviation baseline document (`docs/IGFD_PARITY_AND_DEVIATIONS.md`) (commit: pending)
 - Remaining high-priority gaps (non-C API):
-  - none in core feature parity scope; remaining work is API polish/docs
+  - none in core feature parity scope
 
 Execution plan (next implementation wave):
 
-1. P2: parity/deviation doc finalization
-2. P2: post-parity optimization backlog curation
+1. P2: post-parity optimization backlog curation
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -528,14 +528,17 @@ Goal: close remaining feature gaps vs IGFD while keeping a Rust-first API.
 
 ### Epic 16.4 - API polish and docs
 
-- [ ] Task: publish a concise parity/deviation doc (non-C-API scope)
+- [x] Task: publish a concise parity/deviation doc (non-C-API scope)
   - Acceptance:
     - remaining deviations are explicit and intentional
     - roadmap reflects realistic post-parity improvements
+  - Notes:
+    - published as `docs/IGFD_PARITY_AND_DEVIATIONS.md`
 
 Exit criteria:
 
 - High-priority non-C-API gaps are either closed or explicitly deferred with rationale.
+- Current status: closed in core scope; only post-parity optimization items remain.
 
 ---
 ## Parity Checklist (IGFD → dear-file-browser)

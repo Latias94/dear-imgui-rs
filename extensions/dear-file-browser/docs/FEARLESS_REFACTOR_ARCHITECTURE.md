@@ -64,8 +64,8 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 
 Parity status note (2026-02-06, non-C-API scope):
 
-- Closed recently: explicit lifecycle helpers (`open/reopen/close/is_open`), ID-first rename/delete target model, selected path/count readback in core, scan-time entry hook (`set_scan_hook` / `clear_scan_hook`), link/symlink metadata+style parity (`EntryKind::Link`), and host min/max constraints.
-- Remaining high-priority gaps: parity/deviation docs and post-parity API polish.
+- Closed recently: explicit lifecycle helpers (`open/reopen/close/is_open`), ID-first rename/delete target model, selected path/count readback in core, scan-time entry hook (`set_scan_hook` / `clear_scan_hook`), link/symlink metadata+style parity (`EntryKind::Link`), host min/max constraints, and parity/deviation baseline docs.
+- Remaining high-priority gaps: none in non-C-API core parity scope; only post-parity API polish remains.
 - Product scope note: C API parity is intentionally excluded for this refactor wave.
 
 ---

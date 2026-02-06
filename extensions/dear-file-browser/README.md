@@ -19,6 +19,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 - Architecture: `docs/FEARLESS_REFACTOR_ARCHITECTURE.md`
 - Roadmap / TODO: `docs/FEARLESS_REFACTOR_TODO_MILESTONES.md`
+- Parity + deviations (non-C-API): `docs/IGFD_PARITY_AND_DEVIATIONS.md`
 
 ## Compatibility
 
