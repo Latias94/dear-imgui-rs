@@ -365,7 +365,7 @@ Goal: close remaining UX gaps vs IGFD and document final API.
 
 ### Epic 12.3 — Documentation & migration notes
 
-- [x] Task: document new API, and deprecate old APIs with a clear migration path (see `docs/API_MIGRATION_ID_SELECTION.md`)
+- [x] Task: document new API and fully remove old name-based selection APIs (see `docs/API_MIGRATION_ID_SELECTION.md`)
 - [ ] Task: add examples covering:
   - embedded host
   - custom pane

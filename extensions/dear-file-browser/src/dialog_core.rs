@@ -97,6 +97,13 @@ impl EntryId {
     fn new(value: u64) -> Self {
         Self(value)
     }
+
+    /// Build a stable entry id from an absolute or relative path.
+    pub fn from_path(path: &Path) -> Self {
+        let mut hasher = DefaultHasher::new();
+        hasher.write(path.to_string_lossy().as_bytes());
+        Self::new(hasher.finish())
+    }
 }
 
 /// Rich metadata attached to a filesystem entry.
@@ -199,8 +206,6 @@ pub struct FileDialogCore {
 
     result: Option<Result<Selection, FileDialogError>>,
     pending_overwrite: Option<Selection>,
-    focused_name: Option<String>,
-    selection_anchor_name: Option<String>,
     focused_id: Option<EntryId>,
     selection_anchor_id: Option<EntryId>,
     view_names: Vec<String>,
@@ -210,8 +215,6 @@ pub struct FileDialogCore {
     dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
     last_view_key: Option<ViewKey>,
-
-    pending_selected_names: Vec<String>,
 }
 
 impl FileDialogCore {
@@ -238,8 +241,6 @@ impl FileDialogCore {
             save_policy: SavePolicy::default(),
             result: None,
             pending_overwrite: None,
-            focused_name: None,
-            selection_anchor_name: None,
             focused_id: None,
             selection_anchor_id: None,
             view_names: Vec::new(),
@@ -252,7 +253,6 @@ impl FileDialogCore {
             },
             dir_snapshot_dirty: true,
             last_view_key: None,
-            pending_selected_names: Vec::new(),
         }
     }
 
@@ -339,40 +339,19 @@ impl FileDialogCore {
         self.select_single_by_id(id);
     }
 
-    /// Selects and focuses a single entry by base name.
-    ///
-    /// This is used by internal UI flows that create/rename entries before id mapping
-    /// can be resolved on the next rescan.
-    pub(crate) fn focus_and_select_by_name(&mut self, name: impl Into<String>) {
-        self.select_single_by_name(name.into());
-    }
-
     /// Replace selection by entry ids.
     pub fn replace_selection_by_ids<I>(&mut self, ids: I)
     where
         I: IntoIterator<Item = EntryId>,
     {
-        self.pending_selected_names.clear();
         self.selected_ids.clear();
         for id in ids {
-            if self.name_for_id(id).is_some() {
-                self.selected_ids.insert(id);
-            }
+            self.selected_ids.insert(id);
         }
         self.enforce_selection_cap();
         let last = self.selected_ids.iter().next_back().copied();
         self.focused_id = last;
         self.selection_anchor_id = last;
-        self.sync_name_mirrors_from_ids();
-    }
-
-    /// Replace selection by entry names (used by internal multi-create/paste flows).
-    pub(crate) fn replace_selection_by_names(&mut self, names: Vec<String>) {
-        self.pending_selected_names = names;
-        self.selected_ids.clear();
-        self.focused_id = None;
-        self.selection_anchor_id = None;
-        self.sync_name_mirrors_from_ids();
     }
 
     /// Clear current selection, focus and anchor.
@@ -380,8 +359,6 @@ impl FileDialogCore {
         self.selected_ids.clear();
         self.focused_id = None;
         self.selection_anchor_id = None;
-        self.pending_selected_names.clear();
-        self.sync_name_mirrors_from_ids();
     }
 
     /// Returns the number of currently selected entries.
@@ -400,15 +377,10 @@ impl FileDialogCore {
             .iter()
             .next()
             .and_then(|id| self.name_for_id(*id))
-            .or_else(|| self.pending_selected_names.first().map(String::as_str))
     }
 
     /// Returns selected entry base names in deterministic selection order.
     pub fn selected_names(&self) -> Vec<String> {
-        if self.selected_ids.is_empty() {
-            return self.pending_selected_names.clone();
-        }
-
         self.selected_ids
             .iter()
             .filter_map(|id| self.name_for_id(*id).map(|name| name.to_string()))
@@ -423,16 +395,6 @@ impl FileDialogCore {
     /// Returns the currently focused entry id, if any.
     pub fn focused_entry_id(&self) -> Option<EntryId> {
         self.focused_id
-    }
-
-    /// Resolves an entry id from its base name in the current view/snapshot.
-    pub fn entry_id_by_name(&self, name: &str) -> Option<EntryId> {
-        self.id_for_name(name)
-    }
-
-    /// Resolves an entry base name from an entry id in the current view/snapshot.
-    pub fn entry_name_by_id(&self, id: EntryId) -> Option<&str> {
-        self.name_for_id(id)
     }
 
     pub(crate) fn is_selected_id(&self, id: EntryId) -> bool {
@@ -466,9 +428,7 @@ impl FileDialogCore {
         self.view_names = entries.iter().map(|e| e.name.clone()).collect();
         self.view_ids = entries.iter().map(DirEntry::stable_id).collect();
         self.entries = entries;
-        self.resolve_pending_selected_names();
         self.retain_selected_visible();
-        self.sync_name_mirrors_from_ids();
         self.last_view_key = Some(key);
     }
 
@@ -485,24 +445,6 @@ impl FileDialogCore {
         self.last_view_key = None;
     }
 
-    fn resolve_pending_selected_names(&mut self) {
-        if self.pending_selected_names.is_empty() {
-            return;
-        }
-        let pending = std::mem::take(&mut self.pending_selected_names);
-        self.selected_ids.clear();
-        for name in pending {
-            if let Some(id) = self.id_for_name(name.as_str()) {
-                self.selected_ids.insert(id);
-            }
-        }
-        self.enforce_selection_cap();
-        let last = self.selected_ids.iter().next_back().copied();
-        self.focused_id = last;
-        self.selection_anchor_id = last;
-        self.sync_name_mirrors_from_ids();
-    }
-
     fn entry_by_id(&self, id: EntryId) -> Option<&DirEntry> {
         self.entries.iter().find(|entry| entry.id == id)
     }
@@ -516,28 +458,6 @@ impl FileDialogCore {
                     .position(|candidate| *candidate == id)
                     .and_then(|index| self.view_names.get(index).map(String::as_str))
             })
-    }
-
-    fn id_for_name(&self, name: &str) -> Option<EntryId> {
-        self.entries
-            .iter()
-            .find(|entry| entry.name == name)
-            .map(DirEntry::stable_id)
-            .or_else(|| {
-                self.view_names
-                    .iter()
-                    .position(|candidate| candidate == name)
-                    .and_then(|index| self.view_ids.get(index).copied())
-            })
-    }
-
-    fn sync_name_mirrors_from_ids(&mut self) {
-        self.focused_name = self
-            .focused_id
-            .and_then(|id| self.name_for_id(id).map(ToOwned::to_owned));
-        self.selection_anchor_name = self
-            .selection_anchor_id
-            .and_then(|id| self.name_for_id(id).map(ToOwned::to_owned));
     }
 
     /// Select the next entry whose base name starts with the given prefix (case-insensitive).
@@ -584,8 +504,6 @@ impl FileDialogCore {
         let last = self.selected_ids.iter().next_back().copied();
         self.focused_id = last;
         self.selection_anchor_id = last;
-        self.pending_selected_names.clear();
-        self.sync_name_mirrors_from_ids();
     }
 
     /// Moves keyboard focus up/down within the current view.
@@ -629,8 +547,6 @@ impl FileDialogCore {
             ) {
                 self.selected_ids = range.into_iter().collect();
                 self.focused_id = Some(target_id);
-                self.pending_selected_names.clear();
-                self.sync_name_mirrors_from_ids();
             } else {
                 self.select_single_by_id(target_id);
             }
@@ -647,8 +563,6 @@ impl FileDialogCore {
             if let Some(id) = self.focused_id {
                 self.selected_ids.insert(id);
                 self.selection_anchor_id = Some(id);
-                self.pending_selected_names.clear();
-                self.sync_name_mirrors_from_ids();
             }
         }
         !self.selected_ids.is_empty()
@@ -680,8 +594,6 @@ impl FileDialogCore {
                 {
                     self.selected_ids = range.into_iter().collect();
                     self.focused_id = Some(id);
-                    self.pending_selected_names.clear();
-                    self.sync_name_mirrors_from_ids();
                     return;
                 }
             }
@@ -697,9 +609,7 @@ impl FileDialogCore {
         toggle_select_id(&mut self.selected_ids, id);
         self.focused_id = Some(id);
         self.selection_anchor_id = Some(id);
-        self.pending_selected_names.clear();
         self.enforce_selection_cap();
-        self.sync_name_mirrors_from_ids();
     }
 
     /// Handles a double-click on an entry row.
@@ -827,27 +737,11 @@ impl FileDialogCore {
         self.pending_overwrite = None;
     }
 
-    fn select_single_by_name(&mut self, name: String) {
-        if let Some(id) = self.id_for_name(&name) {
-            self.select_single_by_id(id);
-            return;
-        }
-
-        self.pending_selected_names = vec![name.clone()];
-        self.selected_ids.clear();
-        self.focused_id = None;
-        self.selection_anchor_id = None;
-        self.focused_name = Some(name.clone());
-        self.selection_anchor_name = Some(name);
-    }
-
     fn select_single_by_id(&mut self, id: EntryId) {
         self.selected_ids.clear();
         self.selected_ids.insert(id);
         self.focused_id = Some(id);
         self.selection_anchor_id = Some(id);
-        self.pending_selected_names.clear();
-        self.sync_name_mirrors_from_ids();
     }
 
     fn selection_cap(&self) -> usize {
@@ -893,8 +787,6 @@ impl FileDialogCore {
         {
             self.selection_anchor_id = self.focused_id;
         }
-
-        self.sync_name_mirrors_from_ids();
     }
 }
 
@@ -1408,7 +1300,10 @@ mod tests {
     }
 
     fn entry_id(core: &FileDialogCore, name: &str) -> EntryId {
-        core.id_for_name(name)
+        core.entries
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.id)
             .unwrap_or_else(|| panic!("missing entry id for {name}"))
     }
 
@@ -1503,13 +1398,16 @@ mod tests {
     }
 
     #[test]
-    fn focus_and_select_by_name_sets_focus_and_anchor() {
+    fn focus_and_select_by_id_accepts_unresolved_entry_until_rescan() {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.allow_multi = true;
-        core.focus_and_select_by_name("new_folder");
-        assert_eq!(core.selected_names(), vec!["new_folder"]);
-        assert_eq!(core.focused_name.as_deref(), Some("new_folder"));
-        assert_eq!(core.selection_anchor_name.as_deref(), Some("new_folder"));
+
+        let pending = EntryId::from_path(&core.cwd.join("new_folder"));
+        core.focus_and_select_by_id(pending);
+
+        assert_eq!(core.selected_entry_ids(), vec![pending]);
+        assert_eq!(core.focused_entry_id(), Some(pending));
+        assert!(core.selected_names().is_empty());
     }
 
     #[test]
@@ -1601,7 +1499,7 @@ mod tests {
         core.click_entry(entry_id(&core, "b"), mods(false, false));
         core.move_focus(2, mods(false, true));
         assert_eq!(core.selected_names(), vec!["b", "c", "d"]);
-        assert_eq!(core.focused_name.as_deref(), Some("d"));
+        assert_eq!(core.focused_entry_id(), Some(entry_id(&core, "d")));
     }
 
     #[test]
@@ -1789,11 +1687,11 @@ mod tests {
 
         core.select_by_prefix("al");
         assert_eq!(core.selected_names(), vec!["alpine"]);
-        assert_eq!(core.focused_name.as_deref(), Some("alpine"));
+        assert_eq!(core.focused_entry_id(), Some(entry_id(&core, "alpine")));
 
         core.select_by_prefix("al");
         assert_eq!(core.selected_names(), vec!["alpha"]);
-        assert_eq!(core.focused_name.as_deref(), Some("alpha"));
+        assert_eq!(core.focused_entry_id(), Some(entry_id(&core, "alpha")));
     }
 
     #[test]

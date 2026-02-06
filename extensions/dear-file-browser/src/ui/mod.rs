@@ -8,7 +8,7 @@ use dear_imgui_rs::sys;
 
 use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy};
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
-use crate::dialog_core::{ConfirmGate, CoreEvent, CoreEventOutcome, DirEntry, Modifiers};
+use crate::dialog_core::{ConfirmGate, CoreEvent, CoreEventOutcome, DirEntry, EntryId, Modifiers};
 use crate::dialog_state::FileDialogState;
 use crate::dialog_state::{
     ClipboardOp, FileClipboard, FileListColumnsConfig, FileListDataColumn, FileListViewMode,
@@ -923,7 +923,7 @@ fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSyst
                 match fs.create_dir(&path) {
                     Ok(()) => {
                         state.ui.new_folder_name.clear();
-                        state.core.focus_and_select_by_name(name.clone());
+                        state.core.focus_and_select_by_id(EntryId::from_path(&path));
                         state.ui.reveal_name_next = Some(name);
                         state.core.invalidate_dir_cache();
                         ui.close_current_popup();
@@ -1005,7 +1005,9 @@ fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) 
                 } else {
                     match fs.rename(&from_path, &to_path) {
                         Ok(()) => {
-                            state.core.focus_and_select_by_name(to_name.clone());
+                            state
+                                .core
+                                .focus_and_select_by_id(EntryId::from_path(&to_path));
                             state.ui.reveal_name_next = Some(to_name);
                             state.core.invalidate_dir_cache();
                             state.ui.rename_target = None;
@@ -1176,7 +1178,12 @@ fn try_complete_paste_job(state: &mut FileDialogState) {
     state.core.invalidate_dir_cache();
 
     let first = job.created[0].clone();
-    state.core.replace_selection_by_names(job.created);
+    let selected_ids = job
+        .created
+        .iter()
+        .map(|name| EntryId::from_path(&state.core.cwd.join(name)))
+        .collect::<Vec<_>>();
+    state.core.replace_selection_by_ids(selected_ids);
     state.ui.reveal_name_next = Some(first);
 
     if matches!(job.clipboard.op, ClipboardOp::Cut) {

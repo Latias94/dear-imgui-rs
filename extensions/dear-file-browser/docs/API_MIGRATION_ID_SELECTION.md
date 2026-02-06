@@ -1,11 +1,16 @@
-﻿# Selection API Migration (EntryId-first)
+﻿# Selection API Migration (EntryId-only)
 
-This document describes the breaking API changes introduced by the ID-first selection refactor in `dear-file-browser`.
+This document describes the breaking API changes introduced by the EntryId-only selection refactor in `dear-file-browser`.
 
 ## Why this change
 
-Selection, focus, and range anchor are now modeled by stable `EntryId` values, instead of mutable base-name strings.
-This makes selection behavior deterministic under sorting/filtering and robust against duplicate names.
+Selection, focus, and range anchor are now modeled by stable `EntryId` values instead of base-name strings.
+
+Benefits:
+
+- deterministic behavior under sorting/filtering
+- robust handling for duplicate names
+- cleaner state model without name-based fallback mirrors
 
 ## Breaking changes
 
@@ -16,31 +21,33 @@ Removed name-based variants:
 - `CoreEvent::FocusAndSelectByName(String)`
 - `CoreEvent::ReplaceSelectionByNames(Vec<String>)`
 
-Added ID-based variant:
+Canonical write-path variants:
 
+- `CoreEvent::FocusAndSelectById(EntryId)`
 - `CoreEvent::ReplaceSelectionByIds(Vec<EntryId>)`
 
-`CoreEvent::FocusAndSelectById(EntryId)` remains the canonical focus/select event.
+### `FileDialogCore` API
 
-### `FileDialogCore` public API
-
-Removed public name-mutating methods:
+Removed name-based mutating APIs:
 
 - `focus_and_select_by_name(...)`
 - `replace_selection_by_names(...)`
+- `entry_id_by_name(&str) -> Option<EntryId>`
+- `entry_name_by_id(EntryId) -> Option<&str>`
 
-Added ID-first methods:
+Canonical ID-first APIs:
 
 - `focus_and_select_by_id(EntryId)`
 - `replace_selection_by_ids<I: IntoIterator<Item = EntryId>>(...)`
 - `selected_entry_ids() -> Vec<EntryId>`
 - `focused_entry_id() -> Option<EntryId>`
-- `entry_id_by_name(&str) -> Option<EntryId>`
-- `entry_name_by_id(EntryId) -> Option<&str>`
 
-`selected_names()` and `first_selected_name()` are still available as read-only, derived views.
+Read-only name view APIs remain:
 
-## Migration examples
+- `selected_names() -> Vec<String>`
+- `first_selected_name() -> Option<&str>`
+
+## Migration patterns
 
 ### 1) Event-driven replacement
 
@@ -53,7 +60,7 @@ core.handle_event(CoreEvent::ReplaceSelectionByNames(vec!["a.txt".into()]));
 After:
 
 ```rust
-let id = core.entry_id_by_name("a.txt").expect("entry id");
+let id = EntryId::from_path(&core.cwd.join("a.txt"));
 core.handle_event(CoreEvent::ReplaceSelectionByIds(vec![id]));
 ```
 
@@ -68,22 +75,30 @@ core.focus_and_select_by_name("new_folder");
 After:
 
 ```rust
-if let Some(id) = core.entry_id_by_name("new_folder") {
-    core.focus_and_select_by_id(id);
-}
+let id = EntryId::from_path(&core.cwd.join("new_folder"));
+core.focus_and_select_by_id(id);
 ```
 
-### 3) Read selection from IDs
+### 3) Batch selection replacement
+
+Before:
 
 ```rust
-for id in core.selected_entry_ids() {
-    if let Some(name) = core.entry_name_by_id(id) {
-        // use name/path rendering here
-    }
-}
+core.replace_selection_by_names(vec!["a.txt".into(), "b.txt".into()]);
+```
+
+After:
+
+```rust
+let ids = ["a.txt", "b.txt"]
+    .iter()
+    .map(|name| EntryId::from_path(&core.cwd.join(name)))
+    .collect::<Vec<_>>();
+core.replace_selection_by_ids(ids);
 ```
 
 ## Notes
 
-- Internal UI workflows that temporarily operate on names (e.g. create/rename/paste before next rescan) still use crate-private helpers.
-- External API callers should treat `EntryId` as the source of truth for selection state.
+- There is no name-based compatibility layer anymore.
+- For create/rename/paste flows, select by `EntryId::from_path(...)` immediately and let next rescan resolve display names.
+- `selected_names()` is a derived view from current snapshot; if an ID is not visible in the current snapshot, it is omitted from that read view while `selected_entry_ids()` still remains the source of truth.
