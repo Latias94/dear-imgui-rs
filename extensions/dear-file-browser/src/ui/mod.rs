@@ -319,7 +319,7 @@ fn draw_contents_with_fs_and_hooks(
             state.ui.path_edit = false;
         }
     } else {
-        if let Some(p) = draw_breadcrumbs(ui, &state.core.cwd, state.ui.breadcrumbs_max_segments) {
+        if let Some(p) = draw_breadcrumbs(ui, state, fs, state.ui.breadcrumbs_max_segments) {
             state.core.navigate_to(p);
         }
     }
@@ -691,11 +691,16 @@ fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
     }
 }
 
-fn draw_breadcrumbs(ui: &Ui, cwd: &Path, max_segments: usize) -> Option<PathBuf> {
+fn draw_breadcrumbs(
+    ui: &Ui,
+    state: &mut FileDialogState,
+    fs: &dyn FileSystem,
+    max_segments: usize,
+) -> Option<PathBuf> {
     // Build crumbs first to avoid borrowing cwd while mutating it
     let mut crumbs: Vec<(String, PathBuf)> = Vec::new();
     let mut acc = PathBuf::new();
-    for comp in cwd.components() {
+    for comp in state.core.cwd.components() {
         use std::path::Component;
         match comp {
             Component::Prefix(p) => {
@@ -718,23 +723,55 @@ fn draw_breadcrumbs(ui: &Ui, cwd: &Path, max_segments: usize) -> Option<PathBuf>
     let compress = max_segments > 0 && n > max_segments && max_segments >= 3;
     if !compress {
         for (i, (label, path)) in crumbs.iter().enumerate() {
+            let _id = ui.push_id(i as i32);
             if ui.button(label) {
                 new_cwd = Some(path.clone());
             }
+            if let Some(_popup) = ui.begin_popup_context_item() {
+                ui.text_disabled(path.display().to_string());
+                ui.separator();
+                if ui.menu_item("Edit path...") {
+                    state.ui.path_edit = true;
+                    state.ui.path_edit_buffer = path.display().to_string();
+                    state.ui.focus_path_edit_next = true;
+                    ui.close_current_popup();
+                }
+            }
             ui.same_line();
             if i + 1 < n {
-                ui.text(">");
+                if ui.small_button(">") {
+                    ui.open_popup("##breadcrumb_sep_popup");
+                }
+                if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
+                    draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                }
                 ui.same_line();
             }
         }
     } else {
         // First segment
         if let Some((label, path)) = crumbs.first() {
+            let _id = ui.push_id(0i32);
             if ui.button(label) {
                 new_cwd = Some(path.clone());
             }
+            if let Some(_popup) = ui.begin_popup_context_item() {
+                ui.text_disabled(path.display().to_string());
+                ui.separator();
+                if ui.menu_item("Edit path...") {
+                    state.ui.path_edit = true;
+                    state.ui.path_edit_buffer = path.display().to_string();
+                    state.ui.focus_path_edit_next = true;
+                    ui.close_current_popup();
+                }
+            }
             ui.same_line();
-            ui.text(">");
+            if ui.small_button(">") {
+                ui.open_popup("##breadcrumb_sep_popup");
+            }
+            if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
+                draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+            }
             ui.same_line();
         }
         // Ellipsis
@@ -746,18 +783,61 @@ fn draw_breadcrumbs(ui: &Ui, cwd: &Path, max_segments: usize) -> Option<PathBuf>
         let tail = max_segments - 2;
         let start_tail = n.saturating_sub(tail);
         for (i, (label, path)) in crumbs.iter().enumerate().skip(start_tail) {
+            let _id = ui.push_id(i as i32);
             if ui.button(label) {
                 new_cwd = Some(path.clone());
             }
+            if let Some(_popup) = ui.begin_popup_context_item() {
+                ui.text_disabled(path.display().to_string());
+                ui.separator();
+                if ui.menu_item("Edit path...") {
+                    state.ui.path_edit = true;
+                    state.ui.path_edit_buffer = path.display().to_string();
+                    state.ui.focus_path_edit_next = true;
+                    ui.close_current_popup();
+                }
+            }
             ui.same_line();
             if i + 1 < n {
-                ui.text(">");
+                if ui.small_button(">") {
+                    ui.open_popup("##breadcrumb_sep_popup");
+                }
+                if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
+                    draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                }
                 ui.same_line();
             }
         }
     }
     ui.new_line();
     new_cwd
+}
+
+fn draw_breadcrumb_sep_popup(
+    ui: &Ui,
+    fs: &dyn FileSystem,
+    parent: &Path,
+    out: &mut Option<PathBuf>,
+) {
+    let Ok(rd) = fs.read_dir(parent) else {
+        ui.text_disabled("Failed to read directory");
+        return;
+    };
+    let mut dirs: Vec<_> = rd.into_iter().filter(|e| e.is_dir).collect();
+    dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    if dirs.is_empty() {
+        ui.text_disabled("No subdirectories");
+        return;
+    }
+
+    for e in dirs {
+        if ui.selectable_config(&e.name).build() {
+            *out = Some(e.path);
+            ui.close_current_popup();
+            break;
+        }
+    }
 }
 
 fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {

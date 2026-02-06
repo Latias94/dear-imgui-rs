@@ -305,8 +305,8 @@ Goal: close remaining UX gaps vs IGFD and document final API.
 
 ### Epic 12.1 — Breadcrumb advanced interactions
 
-- [ ] Task: right-click path segment manual entry
-- [ ] Task: separator popup for parallel directory selection
+- [x] Task: right-click path segment manual entry
+- [x] Task: separator popup for parallel directory selection
 
 ### Epic 12.2 — Directory creation (optional)
 
