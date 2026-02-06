@@ -82,14 +82,14 @@ Goal: move domain logic out of ImGui rendering into a core module.
 
 ### Epic 2.2 — Event model
 
-- [ ] Task: Define `core::Event` enums and map ImGui input to them.
+- [x] Task: Define `core::Event` enums and map ImGui input to them.
   - Acceptance: core can be driven by unit tests via events.
 
 ### Epic 2.3 — State machine
 
 - [x] Task: Core produces a deterministic `Result` and supports overwrite confirmation flow
   - Acceptance: core can be driven without ImGui to reach ConfirmOverwrite/Finished.
-- [ ] Task: Add explicit `handle_event` + `ViewModel` outputs (optional but recommended)
+- [x] Task: Add explicit `handle_event` + `ViewModel` outputs (optional but recommended)
   - Acceptance: UI becomes mostly “render view + translate input to events”.
 
 Exit criteria:

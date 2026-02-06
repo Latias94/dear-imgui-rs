@@ -45,7 +45,10 @@ pub use core::{
 #[cfg(feature = "imgui")]
 pub use custom_pane::{CustomPane, CustomPaneCtx};
 #[cfg(feature = "imgui")]
-pub use dialog_core::{ConfirmGate, FileDialogCore, Modifiers};
+pub use dialog_core::{
+    ConfirmGate, CoreEvent, CoreEventOutcome, DirSnapshot, EntryId, FileDialogCore, FileMeta,
+    Modifiers,
+};
 #[cfg(feature = "imgui")]
 pub use dialog_manager::{DialogId, DialogManager};
 #[cfg(feature = "imgui")]

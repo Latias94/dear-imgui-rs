@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
-use std::{collections::hash_map::DefaultHasher, hash::Hasher};
+use std::{
+    collections::{HashSet, hash_map::DefaultHasher},
+    hash::Hasher,
+};
 
 use crate::core::{
     ClickAction, DialogMode, ExtensionPolicy, FileDialogError, FileFilter, SavePolicy, Selection,
@@ -16,6 +19,59 @@ pub struct Modifiers {
     pub ctrl: bool,
     /// Shift key held.
     pub shift: bool,
+}
+
+/// Input event for driving the dialog core without direct UI coupling.
+#[derive(Clone, Debug)]
+pub enum CoreEvent {
+    /// Ctrl+A style select all visible entries.
+    SelectAll,
+    /// Move focus by row/column delta.
+    MoveFocus {
+        /// Signed movement in current view order.
+        delta: i32,
+        /// Modifier keys used by selection semantics.
+        modifiers: Modifiers,
+    },
+    /// Click an entry row/cell.
+    ClickEntry {
+        /// Entry base name.
+        name: String,
+        /// Whether entry is directory.
+        is_dir: bool,
+        /// Modifier keys used by selection semantics.
+        modifiers: Modifiers,
+    },
+    /// Double-click an entry row/cell.
+    DoubleClickEntry {
+        /// Entry base name.
+        name: String,
+        /// Whether entry is directory.
+        is_dir: bool,
+    },
+    /// Type-to-select prefix.
+    SelectByPrefix(String),
+    /// Activate focused entry (Enter).
+    ActivateFocused,
+    /// Navigate to parent directory.
+    NavigateUp,
+    /// Navigate to a target directory.
+    NavigateTo(PathBuf),
+    /// Focus and select one entry by base name.
+    FocusAndSelectByName(String),
+    /// Replace current selection by names.
+    ReplaceSelectionByNames(Vec<String>),
+    /// Clear current selection/focus/anchor.
+    ClearSelection,
+}
+
+/// Side effect emitted after applying a [`CoreEvent`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoreEventOutcome {
+    /// No extra action required by host/UI.
+    None,
+    /// Confirmation should be attempted by host/UI.
+    RequestConfirm,
 }
 
 /// Per-frame gate for whether the dialog is allowed to confirm.
@@ -37,6 +93,38 @@ impl Default for ConfirmGate {
             message: None,
         }
     }
+}
+
+/// Stable identifier for a directory entry within dialog snapshots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EntryId(u64);
+
+impl EntryId {
+    fn new(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+/// Rich metadata attached to a filesystem entry.
+#[derive(Clone, Debug)]
+pub struct FileMeta {
+    /// Whether this entry is a directory.
+    pub is_dir: bool,
+    /// File size in bytes (files only).
+    pub size: Option<u64>,
+    /// Last modified timestamp.
+    pub modified: Option<std::time::SystemTime>,
+}
+
+/// Snapshot of one directory listing refresh.
+#[derive(Clone, Debug)]
+pub struct DirSnapshot {
+    /// Directory path used to build this snapshot.
+    pub cwd: PathBuf,
+    /// Number of captured entries in this snapshot.
+    pub entry_count: usize,
+
+    pub(crate) entries: Vec<DirEntry>,
 }
 
 /// A single directory entry in the current directory view.
@@ -63,6 +151,16 @@ impl DirEntry {
             self.name.clone()
         }
     }
+
+    fn stable_id(&self) -> EntryId {
+        let mut hasher = DefaultHasher::new();
+        hasher.write(self.path.as_os_str().to_string_lossy().as_bytes());
+        hasher.write_u8(0);
+        hasher.write(self.name.as_bytes());
+        hasher.write_u8(0);
+        hasher.write_u8(u8::from(self.is_dir));
+        EntryId::new(hasher.finish())
+    }
 }
 
 /// Core state machine for the ImGui-embedded file dialog.
@@ -78,6 +176,7 @@ pub struct FileDialogCore {
     pub cwd: PathBuf,
     /// Selected entry names (relative to cwd).
     pub selected: Vec<String>,
+    selected_ids: Vec<EntryId>,
     /// Optional filename input for SaveFile.
     pub save_name: String,
     /// Filters (lower-case extensions).
@@ -114,13 +213,17 @@ pub struct FileDialogCore {
     pending_overwrite: Option<Selection>,
     focused_name: Option<String>,
     selection_anchor_name: Option<String>,
+    focused_id: Option<EntryId>,
+    selection_anchor_id: Option<EntryId>,
     view_names: Vec<String>,
+    view_ids: Vec<EntryId>,
     entries: Vec<DirEntry>,
 
-    dir_snapshot: Vec<DirEntry>,
-    dir_snapshot_cwd: Option<PathBuf>,
+    dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
     last_view_key: Option<ViewKey>,
+
+    pending_selected_names: Vec<String>,
 }
 
 impl FileDialogCore {
@@ -131,6 +234,7 @@ impl FileDialogCore {
             mode,
             cwd,
             selected: Vec::new(),
+            selected_ids: Vec::new(),
             save_name: String::new(),
             filters: Vec::new(),
             active_filter: None,
@@ -149,18 +253,85 @@ impl FileDialogCore {
             pending_overwrite: None,
             focused_name: None,
             selection_anchor_name: None,
+            focused_id: None,
+            selection_anchor_id: None,
             view_names: Vec::new(),
+            view_ids: Vec::new(),
             entries: Vec::new(),
-            dir_snapshot: Vec::new(),
-            dir_snapshot_cwd: None,
+            dir_snapshot: DirSnapshot {
+                cwd: PathBuf::new(),
+                entry_count: 0,
+                entries: Vec::new(),
+            },
             dir_snapshot_dirty: true,
             last_view_key: None,
+            pending_selected_names: Vec::new(),
         }
     }
 
     /// Returns a snapshot of the current entries list.
     pub(crate) fn entries(&self) -> &[DirEntry] {
         &self.entries
+    }
+
+    /// Apply one core event and return host-facing outcome.
+    pub fn handle_event(&mut self, event: CoreEvent) -> CoreEventOutcome {
+        match event {
+            CoreEvent::SelectAll => {
+                self.select_all();
+                CoreEventOutcome::None
+            }
+            CoreEvent::MoveFocus { delta, modifiers } => {
+                self.move_focus(delta, modifiers);
+                CoreEventOutcome::None
+            }
+            CoreEvent::ClickEntry {
+                name,
+                is_dir,
+                modifiers,
+            } => {
+                self.click_entry(name, is_dir, modifiers);
+                CoreEventOutcome::None
+            }
+            CoreEvent::DoubleClickEntry { name, is_dir } => {
+                if self.double_click_entry(name, is_dir) {
+                    CoreEventOutcome::RequestConfirm
+                } else {
+                    CoreEventOutcome::None
+                }
+            }
+            CoreEvent::SelectByPrefix(prefix) => {
+                self.select_by_prefix(&prefix);
+                CoreEventOutcome::None
+            }
+            CoreEvent::ActivateFocused => {
+                if self.activate_focused() {
+                    CoreEventOutcome::RequestConfirm
+                } else {
+                    CoreEventOutcome::None
+                }
+            }
+            CoreEvent::NavigateUp => {
+                self.navigate_up();
+                CoreEventOutcome::None
+            }
+            CoreEvent::NavigateTo(path) => {
+                self.navigate_to(path);
+                CoreEventOutcome::None
+            }
+            CoreEvent::FocusAndSelectByName(name) => {
+                self.focus_and_select_by_name(name);
+                CoreEventOutcome::None
+            }
+            CoreEvent::ReplaceSelectionByNames(names) => {
+                self.replace_selection_by_names(names);
+                CoreEventOutcome::None
+            }
+            CoreEvent::ClearSelection => {
+                self.clear_selection();
+                CoreEventOutcome::None
+            }
+        }
     }
 
     /// Mark the current directory snapshot as dirty so it will be refreshed on next draw.
@@ -177,9 +348,7 @@ impl FileDialogCore {
     /// Sets the current directory and clears selection/focus.
     pub fn set_cwd(&mut self, cwd: PathBuf) {
         self.cwd = cwd;
-        self.selected.clear();
-        self.focused_name = None;
-        self.selection_anchor_name = None;
+        self.clear_selection();
     }
 
     /// Selects and focuses a single entry by base name.
@@ -188,6 +357,49 @@ impl FileDialogCore {
     /// immediately reveal it (e.g. "New Folder").
     pub fn focus_and_select_by_name(&mut self, name: impl Into<String>) {
         self.select_single_by_name(name.into());
+    }
+
+    /// Replace selection by entry names (used by multi-create/paste flows).
+    pub fn replace_selection_by_names(&mut self, names: Vec<String>) {
+        self.selected.clear();
+        self.selected.extend(names.iter().cloned());
+        self.pending_selected_names = names;
+        self.selected_ids.clear();
+        self.focused_name = None;
+        self.selection_anchor_name = None;
+        self.focused_id = None;
+        self.selection_anchor_id = None;
+    }
+
+    /// Clear current selection, focus and anchor.
+    pub fn clear_selection(&mut self) {
+        self.selected.clear();
+        self.selected_ids.clear();
+        self.focused_name = None;
+        self.selection_anchor_name = None;
+        self.focused_id = None;
+        self.selection_anchor_id = None;
+        self.pending_selected_names.clear();
+    }
+
+    pub(crate) fn selected_len(&self) -> usize {
+        self.selected.len()
+    }
+
+    pub(crate) fn has_selection(&self) -> bool {
+        !self.selected.is_empty()
+    }
+
+    pub(crate) fn first_selected_name(&self) -> Option<&str> {
+        self.selected.first().map(String::as_str)
+    }
+
+    pub(crate) fn selected_names(&self) -> &[String] {
+        &self.selected
+    }
+
+    pub(crate) fn is_selected_name(&self, name: &str) -> bool {
+        self.selected.iter().any(|n| n == name)
     }
 
     /// Refreshes the directory snapshot and view cache if needed.
@@ -199,7 +411,7 @@ impl FileDialogCore {
             return;
         }
 
-        let mut entries = self.dir_snapshot.clone();
+        let mut entries = self.dir_snapshot.entries.clone();
         filter_entries_in_place(
             &mut entries,
             self.mode,
@@ -215,23 +427,71 @@ impl FileDialogCore {
             self.dirs_first,
         );
         self.view_names = entries.iter().map(|e| e.name.clone()).collect();
+        self.view_ids = entries.iter().map(DirEntry::stable_id).collect();
         self.entries = entries;
+        self.resolve_pending_selected_names();
         self.retain_selected_visible();
+        self.sync_id_state_from_names();
         self.last_view_key = Some(key);
     }
 
     fn refresh_dir_snapshot_if_needed(&mut self, fs: &dyn FileSystem) {
-        let cwd_changed = self.dir_snapshot_cwd.as_ref() != Some(&self.cwd);
+        let cwd_changed = self.dir_snapshot.cwd != self.cwd;
         let should_refresh = self.dir_snapshot_dirty || cwd_changed;
         if !should_refresh {
             return;
         }
 
         self.dir_snapshot = read_entries_snapshot_with_fs(fs, &self.cwd);
-        self.dir_snapshot_cwd = Some(self.cwd.clone());
         self.dir_snapshot_dirty = false;
         // Always rebuild the view after a filesystem refresh even if the view inputs didn't change.
         self.last_view_key = None;
+    }
+
+    fn resolve_pending_selected_names(&mut self) {
+        if self.pending_selected_names.is_empty() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.pending_selected_names);
+        self.selected.clear();
+        for name in pending {
+            if self.view_names.iter().any(|visible| visible == &name) {
+                self.selected.push(name);
+            }
+        }
+        self.enforce_selection_cap();
+        if let Some(last) = self.selected.last().cloned() {
+            self.focused_name = Some(last.clone());
+            self.selection_anchor_name = Some(last);
+        }
+    }
+
+    fn id_for_name(&self, name: &str) -> Option<EntryId> {
+        self.entries
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(DirEntry::stable_id)
+    }
+
+    fn sync_id_state_from_names(&mut self) {
+        let mut seen = HashSet::new();
+        let mut ids = Vec::with_capacity(self.selected.len());
+        for name in &self.selected {
+            if let Some(id) = self.id_for_name(name) {
+                if seen.insert(id) {
+                    ids.push(id);
+                }
+            }
+        }
+        self.selected_ids = ids;
+        self.focused_id = self
+            .focused_name
+            .as_deref()
+            .and_then(|name| self.id_for_name(name));
+        self.selection_anchor_id = self
+            .selection_anchor_name
+            .as_deref()
+            .and_then(|name| self.id_for_name(name));
     }
 
     /// Select the next entry whose base name starts with the given prefix (case-insensitive).
@@ -270,6 +530,7 @@ impl FileDialogCore {
         }
         let take = self.view_names.len().min(cap);
         self.selected = self.view_names.iter().take(take).cloned().collect();
+        self.sync_id_state_from_names();
     }
 
     /// Moves keyboard focus up/down within the current view.
@@ -316,6 +577,7 @@ impl FileDialogCore {
             ) {
                 self.selected = range;
                 self.focused_name = Some(target);
+                self.sync_id_state_from_names();
             } else {
                 self.select_single_by_name(target);
             }
@@ -331,6 +593,7 @@ impl FileDialogCore {
         if self.selected.is_empty() {
             if let Some(name) = self.focused_name.clone() {
                 self.selected.push(name);
+                self.sync_id_state_from_names();
             }
         }
         !self.selected.is_empty()
@@ -345,9 +608,7 @@ impl FileDialogCore {
                 }
                 ClickAction::Navigate => {
                     self.cwd.push(&name);
-                    self.selected.clear();
-                    self.focused_name = None;
-                    self.selection_anchor_name = None;
+                    self.clear_selection();
                 }
             }
             return;
@@ -363,6 +624,7 @@ impl FileDialogCore {
                 ) {
                     self.selected = range;
                     self.focused_name = Some(name);
+                    self.sync_id_state_from_names();
                     return;
                 }
             }
@@ -380,6 +642,7 @@ impl FileDialogCore {
         self.focused_name = Some(name.clone());
         self.selection_anchor_name = Some(name);
         self.enforce_selection_cap();
+        self.sync_id_state_from_names();
     }
 
     /// Handles a double-click on an entry row.
@@ -389,15 +652,14 @@ impl FileDialogCore {
         }
         if is_dir {
             self.cwd.push(&name);
-            self.selected.clear();
-            self.focused_name = None;
-            self.selection_anchor_name = None;
+            self.clear_selection();
             return false;
         }
 
         if matches!(self.mode, DialogMode::OpenFile | DialogMode::OpenFiles) {
             self.selected.clear();
             self.selected.push(name);
+            self.sync_id_state_from_names();
             return true;
         }
         false
@@ -406,9 +668,7 @@ impl FileDialogCore {
     /// Navigates one directory up.
     pub(crate) fn navigate_up(&mut self) {
         let _ = self.cwd.pop();
-        self.selected.clear();
-        self.focused_name = None;
-        self.selection_anchor_name = None;
+        self.clear_selection();
     }
 
     /// Navigates to a directory.
@@ -435,9 +695,7 @@ impl FileDialogCore {
             let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
             if is_dir {
                 self.cwd.push(sel);
-                self.selected.clear();
-                self.focused_name = None;
-                self.selection_anchor_name = None;
+                self.clear_selection();
                 return Ok(());
             }
         }
@@ -513,6 +771,7 @@ impl FileDialogCore {
         self.selected.push(name.clone());
         self.focused_name = Some(name.clone());
         self.selection_anchor_name = Some(name);
+        self.sync_id_state_from_names();
     }
 
     fn selection_cap(&self) -> usize {
@@ -544,6 +803,7 @@ impl FileDialogCore {
         }
         self.selected = keep;
         self.enforce_selection_cap();
+        self.sync_id_state_from_names();
     }
 }
 
@@ -988,21 +1248,34 @@ fn scan_number(bytes: &[u8], start: usize) -> (usize, usize, usize) {
     (end, trim, trim_end)
 }
 
-fn read_entries_snapshot_with_fs(fs: &dyn FileSystem, dir: &Path) -> Vec<DirEntry> {
+fn read_entries_snapshot_with_fs(fs: &dyn FileSystem, dir: &Path) -> DirSnapshot {
     let mut out = Vec::new();
     let Ok(rd) = fs.read_dir(dir) else {
-        return out;
+        return DirSnapshot {
+            cwd: dir.to_path_buf(),
+            entry_count: out.len(),
+            entries: out,
+        };
     };
     for e in rd {
-        out.push(DirEntry {
-            name: e.name,
-            path: e.path,
+        let meta = FileMeta {
             is_dir: e.is_dir,
             size: e.size,
             modified: e.modified,
+        };
+        out.push(DirEntry {
+            name: e.name,
+            path: e.path,
+            is_dir: meta.is_dir,
+            size: meta.size,
+            modified: meta.modified,
         });
     }
-    out
+    DirSnapshot {
+        cwd: dir.to_path_buf(),
+        entry_count: out.len(),
+        entries: out,
+    }
 }
 
 #[cfg(test)]
@@ -1185,6 +1458,41 @@ mod tests {
         core.move_focus(2, mods(false, true));
         assert_eq!(core.selected, vec!["b", "c", "d"]);
         assert_eq!(core.focused_name.as_deref(), Some("d"));
+    }
+
+    #[test]
+    fn handle_event_activate_focused_requests_confirm() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.view_names = vec!["a.txt".into()];
+        core.focused_name = Some("a.txt".into());
+
+        let outcome = core.handle_event(CoreEvent::ActivateFocused);
+        assert_eq!(outcome, CoreEventOutcome::RequestConfirm);
+        assert_eq!(core.selected, vec!["a.txt"]);
+    }
+
+    #[test]
+    fn handle_event_double_click_file_requests_confirm() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+
+        let outcome = core.handle_event(CoreEvent::DoubleClickEntry {
+            name: "a.txt".into(),
+            is_dir: false,
+        });
+
+        assert_eq!(outcome, CoreEventOutcome::RequestConfirm);
+        assert_eq!(core.selected, vec!["a.txt"]);
+    }
+
+    #[test]
+    fn handle_event_navigate_up_updates_cwd() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp/child");
+
+        let outcome = core.handle_event(CoreEvent::NavigateUp);
+
+        assert_eq!(outcome, CoreEventOutcome::None);
+        assert_eq!(core.cwd, PathBuf::from("/tmp"));
     }
 
     #[test]

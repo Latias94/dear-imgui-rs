@@ -8,7 +8,7 @@ use dear_imgui_rs::sys;
 
 use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy};
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
-use crate::dialog_core::{ConfirmGate, DirEntry, Modifiers};
+use crate::dialog_core::{ConfirmGate, CoreEvent, CoreEventOutcome, DirEntry, Modifiers};
 use crate::dialog_state::FileDialogState;
 use crate::dialog_state::{
     ClipboardOp, FileClipboard, FileListColumnsConfig, FileListDataColumn, FileListViewMode,
@@ -414,7 +414,7 @@ fn draw_contents_with_fs_and_hooks(
 
     // Top toolbar: Up, Refresh, Hidden toggle, Breadcrumbs, Filter, Search
     if ui.button("Up") {
-        state.core.navigate_up();
+        let _ = state.core.handle_event(CoreEvent::NavigateUp);
     }
     ui.same_line();
     if ui.button("Refresh") {
@@ -513,7 +513,7 @@ fn draw_contents_with_fs_and_hooks(
         }
     } else {
         if let Some(p) = draw_breadcrumbs(ui, state, fs, state.ui.breadcrumbs_max_segments) {
-            state.core.navigate_to(p);
+            let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
         }
     }
     // Search box (aligned to the right)
@@ -541,7 +541,7 @@ fn draw_contents_with_fs_and_hooks(
                     new_cwd = draw_quick_locations(ui, state);
                 });
             if let Some(p) = new_cwd {
-                state.core.navigate_to(p);
+                let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
             }
             ui.same_line();
             ui.child_window("file_list")
@@ -579,7 +579,7 @@ fn draw_contents_with_fs_and_hooks(
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
-                                        selected_names: &state.core.selected,
+                                        selected_names: state.core.selected_names(),
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core
@@ -628,7 +628,7 @@ fn draw_contents_with_fs_and_hooks(
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
-                                        selected_names: &state.core.selected,
+                                        selected_names: state.core.selected_names(),
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core
@@ -729,23 +729,26 @@ fn draw_contents_with_fs_and_hooks(
             state.ui.focus_search_next = true;
         }
         if !ui.io().want_capture_keyboard() && ui.is_key_pressed(Key::Backspace) {
-            state.core.navigate_up();
+            let _ = state.core.handle_event(CoreEvent::NavigateUp);
         }
         if !state.ui.path_edit && !ui.io().want_text_input() && ui.is_key_pressed(Key::Enter) {
-            request_confirm |= state.core.activate_focused();
+            request_confirm |= matches!(
+                state.core.handle_event(CoreEvent::ActivateFocused),
+                CoreEventOutcome::RequestConfirm
+            );
         }
         if !ui.io().want_text_input() && ui.is_key_pressed(Key::F2) {
-            if state.core.selected.len() == 1 {
-                state.ui.rename_target = Some(state.core.selected[0].clone());
-                state.ui.rename_to = state.core.selected[0].clone();
+            if let Some(selected_name) = state.core.first_selected_name() {
+                state.ui.rename_target = Some(selected_name.to_string());
+                state.ui.rename_to = selected_name.to_string();
                 state.ui.rename_error = None;
                 state.ui.rename_open_next = true;
                 state.ui.rename_focus_next = true;
             }
         }
         if !ui.io().want_text_input() && ui.is_key_pressed(Key::Delete) {
-            if !state.core.selected.is_empty() {
-                state.ui.delete_targets = state.core.selected.clone();
+            if state.core.has_selection() {
+                state.ui.delete_targets = state.core.selected_names().to_vec();
                 state.ui.delete_error = None;
                 state.ui.delete_open_next = true;
             }
@@ -1113,7 +1116,7 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
             }
 
             if state.ui.delete_error.is_none() {
-                state.core.selected.clear();
+                state.core.clear_selection();
                 state.core.invalidate_dir_cache();
                 state.ui.delete_targets.clear();
                 state.ui.delete_recursive = false;
@@ -1129,13 +1132,13 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
 }
 
 fn clipboard_set_from_selection(state: &mut FileDialogState, op: ClipboardOp) {
-    if state.core.selected.is_empty() {
+    if !state.core.has_selection() {
         return;
     }
 
     let sources = state
         .core
-        .selected
+        .selected_names()
         .iter()
         .map(|name| state.core.cwd.join(name))
         .collect();
@@ -1172,10 +1175,9 @@ fn try_complete_paste_job(state: &mut FileDialogState) {
     state.core.invalidate_dir_cache();
 
     let first = job.created[0].clone();
-    state.core.focus_and_select_by_name(first.clone());
-    if job.created.len() > 1 {
-        state.core.selected = job.created;
-    }
+    let _ = state
+        .core
+        .handle_event(CoreEvent::ReplaceSelectionByNames(job.created));
     state.ui.reveal_name_next = Some(first);
 
     if matches!(job.clipboard.op, ClipboardOp::Cut) {
@@ -2306,7 +2308,7 @@ fn draw_file_table_view(
             };
 
             if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
-                state.core.select_all();
+                let _ = state.core.handle_event(CoreEvent::SelectAll);
             }
             if modifiers.ctrl && ui.is_key_pressed(Key::C) && !modifiers.shift {
                 clipboard_set_from_selection(state, ClipboardOp::Copy);
@@ -2323,10 +2325,16 @@ fn draw_file_table_view(
                 }
             }
             if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
-                state.core.move_focus(-1, modifiers);
+                let _ = state.core.handle_event(CoreEvent::MoveFocus {
+                    delta: -1,
+                    modifiers,
+                });
             }
             if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
-                state.core.move_focus(1, modifiers);
+                let _ = state.core.handle_event(CoreEvent::MoveFocus {
+                    delta: 1,
+                    modifiers,
+                });
             }
             if state.ui.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
                 handle_type_select(ui, state);
@@ -2377,7 +2385,7 @@ fn draw_file_table_view(
                 draw_thumbnail_cell(ui, state, e);
             }
 
-            let selected = state.core.selected.iter().any(|s| s == &e.name);
+            let selected = state.core.is_selected_name(&e.name);
             let visual = style_visual_for_entry(state, e);
 
             let mut label = e.display_name();
@@ -2407,7 +2415,11 @@ fn draw_file_table_view(
                                     shift: ui.is_key_down(Key::LeftShift)
                                         || ui.is_key_down(Key::RightShift),
                                 };
-                                state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
+                                let _ = state.core.handle_event(CoreEvent::ClickEntry {
+                                    name: e.name.clone(),
+                                    is_dir: e.is_dir,
+                                    modifiers,
+                                });
                                 if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
                                     state.core.save_name = e.name.clone();
                                 }
@@ -2424,7 +2436,7 @@ fn draw_file_table_view(
                             if !selected {
                                 state.core.focus_and_select_by_name(e.name.clone());
                             }
-                            let has_selection = !state.core.selected.is_empty();
+                            let has_selection = state.core.has_selection();
                             let can_paste = state
                                 .ui
                                 .clipboard
@@ -2466,22 +2478,24 @@ fn draw_file_table_view(
                             }
 
                             ui.separator();
-                            let can_rename = state.core.selected.len() == 1;
+                            let can_rename = state.core.selected_len() == 1;
                             if ui.menu_item_enabled_selected(
                                 "Rename",
                                 Some("F2"),
                                 false,
                                 can_rename,
                             ) {
-                                state.ui.rename_target = Some(state.core.selected[0].clone());
-                                state.ui.rename_to = state.core.selected[0].clone();
+                                if let Some(selected_name) = state.core.first_selected_name() {
+                                    state.ui.rename_target = Some(selected_name.to_string());
+                                    state.ui.rename_to = selected_name.to_string();
+                                }
                                 state.ui.rename_error = None;
                                 state.ui.rename_open_next = true;
                                 state.ui.rename_focus_next = true;
                                 ui.close_current_popup();
                             }
                             if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
-                                state.ui.delete_targets = state.core.selected.clone();
+                                state.ui.delete_targets = state.core.selected_names().to_vec();
                                 state.ui.delete_error = None;
                                 state.ui.delete_open_next = true;
                                 ui.close_current_popup();
@@ -2490,9 +2504,13 @@ fn draw_file_table_view(
 
                         if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
                             state.ui.ui_error = None;
-                            if state.core.double_click_entry(e.name.clone(), e.is_dir) {
-                                *request_confirm = true;
-                            }
+                            *request_confirm |= matches!(
+                                state.core.handle_event(CoreEvent::DoubleClickEntry {
+                                    name: e.name.clone(),
+                                    is_dir: e.is_dir,
+                                }),
+                                CoreEventOutcome::RequestConfirm
+                            );
                         }
                     }
                     FileListDataColumn::Extension => {
@@ -2629,7 +2647,7 @@ fn draw_file_grid_view(
                 };
 
                 if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
-                    state.core.select_all();
+                    let _ = state.core.handle_event(CoreEvent::SelectAll);
                 }
                 if modifiers.ctrl && ui.is_key_pressed(Key::C) && !modifiers.shift {
                     clipboard_set_from_selection(state, ClipboardOp::Copy);
@@ -2646,16 +2664,28 @@ fn draw_file_grid_view(
                     }
                 }
                 if ui.is_key_pressed_with_repeat(Key::LeftArrow, true) {
-                    state.core.move_focus(-1, modifiers);
+                    let _ = state.core.handle_event(CoreEvent::MoveFocus {
+                        delta: -1,
+                        modifiers,
+                    });
                 }
                 if ui.is_key_pressed_with_repeat(Key::RightArrow, true) {
-                    state.core.move_focus(1, modifiers);
+                    let _ = state.core.handle_event(CoreEvent::MoveFocus {
+                        delta: 1,
+                        modifiers,
+                    });
                 }
                 if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
-                    state.core.move_focus(-(cols as i32), modifiers);
+                    let _ = state.core.handle_event(CoreEvent::MoveFocus {
+                        delta: -(cols as i32),
+                        modifiers,
+                    });
                 }
                 if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
-                    state.core.move_focus(cols as i32, modifiers);
+                    let _ = state.core.handle_event(CoreEvent::MoveFocus {
+                        delta: cols as i32,
+                        modifiers,
+                    });
                 }
                 if state.ui.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
                     handle_type_select(ui, state);
@@ -2674,7 +2704,7 @@ fn draw_file_grid_view(
                     let e = &entries[item_idx];
                     idx += 1;
 
-                    let selected = state.core.selected.iter().any(|s| s == &e.name);
+                    let selected = state.core.is_selected_name(&e.name);
                     let visual = style_visual_for_entry(state, e);
 
                     let mut label = e.display_name();
@@ -2751,7 +2781,11 @@ fn draw_file_grid_view(
                             shift: ui.is_key_down(Key::LeftShift)
                                 || ui.is_key_down(Key::RightShift),
                         };
-                        state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
+                        let _ = state.core.handle_event(CoreEvent::ClickEntry {
+                            name: e.name.clone(),
+                            is_dir: e.is_dir,
+                            modifiers,
+                        });
                         if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
                             state.core.save_name = e.name.clone();
                         }
@@ -2767,7 +2801,7 @@ fn draw_file_grid_view(
                         if !selected {
                             state.core.focus_and_select_by_name(e.name.clone());
                         }
-                        let has_selection = !state.core.selected.is_empty();
+                        let has_selection = state.core.has_selection();
                         let can_paste = state
                             .ui
                             .clipboard
@@ -2805,17 +2839,19 @@ fn draw_file_grid_view(
                         }
 
                         ui.separator();
-                        let can_rename = state.core.selected.len() == 1;
+                        let can_rename = state.core.selected_len() == 1;
                         if ui.menu_item_enabled_selected("Rename", Some("F2"), false, can_rename) {
-                            state.ui.rename_target = Some(state.core.selected[0].clone());
-                            state.ui.rename_to = state.core.selected[0].clone();
+                            if let Some(selected_name) = state.core.first_selected_name() {
+                                state.ui.rename_target = Some(selected_name.to_string());
+                                state.ui.rename_to = selected_name.to_string();
+                            }
                             state.ui.rename_error = None;
                             state.ui.rename_open_next = true;
                             state.ui.rename_focus_next = true;
                             ui.close_current_popup();
                         }
                         if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
-                            state.ui.delete_targets = state.core.selected.clone();
+                            state.ui.delete_targets = state.core.selected_names().to_vec();
                             state.ui.delete_error = None;
                             state.ui.delete_open_next = true;
                             ui.close_current_popup();
@@ -2824,9 +2860,13 @@ fn draw_file_grid_view(
 
                     if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
                         state.ui.ui_error = None;
-                        if state.core.double_click_entry(e.name.clone(), e.is_dir) {
-                            *request_confirm = true;
-                        }
+                        *request_confirm |= matches!(
+                            state.core.handle_event(CoreEvent::DoubleClickEntry {
+                                name: e.name.clone(),
+                                is_dir: e.is_dir,
+                            }),
+                            CoreEventOutcome::RequestConfirm
+                        );
                     }
                 }
             }
@@ -2900,7 +2940,9 @@ fn handle_type_select(ui: &Ui, state: &mut FileDialogState) {
     }
     state.ui.type_select_buffer.push(ch.to_ascii_lowercase());
     state.ui.type_select_last_input = Some(now);
-    state.core.select_by_prefix(&state.ui.type_select_buffer);
+    let _ = state.core.handle_event(CoreEvent::SelectByPrefix(
+        state.ui.type_select_buffer.clone(),
+    ));
 }
 
 fn collect_type_select_char(ui: &Ui) -> Option<char> {
