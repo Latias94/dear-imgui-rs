@@ -1,10 +1,10 @@
 //! ImGui-embedded File Browser example
-//! - Uses dear-file-browser `FileBrowserState` and `Ui` extension
+//! - Uses dear-file-browser `FileDialogState` and `Ui` extension
 //! - Works on desktop and WASM without native dialogs
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use dear_file_browser::{DialogMode, FileBrowserState, FileDialogExt};
+use dear_file_browser::{DialogMode, FileDialogExt, FileDialogState};
 use dear_imgui_glow::GlowRenderer;
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
@@ -39,7 +39,7 @@ struct AppWindow {
     imgui: ImguiState,
     // demo state
     browser_visible: bool,
-    browser: FileBrowserState,
+    browser: FileDialogState,
     status: String,
 }
 
@@ -95,10 +95,10 @@ impl AppWindow {
         renderer.new_frame()?;
 
         let browser = {
-            let mut st = FileBrowserState::new(DialogMode::OpenFiles);
+            let mut st = FileDialogState::new(DialogMode::OpenFiles);
             let filter =
                 dear_file_browser::FileFilter::from(("Images", &["png", "jpg", "jpeg"][..]));
-            st.set_filters(vec![filter]);
+            st.core.filters = vec![filter];
             st
         };
 
@@ -151,7 +151,7 @@ impl AppWindow {
                     "Show Browser"
                 }) {
                     self.browser_visible = !self.browser_visible;
-                    self.browser.visible = self.browser_visible;
+                    self.browser.ui.visible = self.browser_visible;
                 }
                 ui.same_line();
                 ui.text(&self.status);

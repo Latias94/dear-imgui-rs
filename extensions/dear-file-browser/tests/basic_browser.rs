@@ -1,4 +1,4 @@
-use dear_file_browser::{DialogMode, FileBrowserState, FileDialogExt};
+use dear_file_browser::{DialogMode, FileDialogExt, FileDialogState};
 use dear_imgui_rs::Context;
 
 /// Basic smoke test: create an ImGui context, open a file browser window for a
@@ -18,8 +18,8 @@ fn imgui_file_browser_smoke_test() {
 
     let ui = imgui.frame();
 
-    let mut state = FileBrowserState::new(DialogMode::OpenFile);
-    state.visible = true;
+    let mut state = FileDialogState::new(DialogMode::OpenFile);
+    state.ui.visible = true;
 
     let _ = ui.file_browser().show(&mut state);
 }

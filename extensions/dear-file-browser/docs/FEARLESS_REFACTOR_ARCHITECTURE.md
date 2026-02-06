@@ -10,7 +10,7 @@ Scope: **the ImGui-embedded browser/dialog** (not OS-native dialogs via `rfd`, w
 
 Current `dear-file-browser` is intentionally lightweight:
 
-- A single `FileBrowserState` that directly renders a fixed ImGui window (`show()`).
+- A single `FileDialogState` that directly renders a fixed ImGui window (`show_*()` via `FileDialogExt`).
 - Basic navigation (breadcrumbs + Ctrl+L path edit), search, sorting, and simple extension filters.
 - A small "quick locations" pane (home/root/drives).
 
@@ -402,16 +402,16 @@ Advanced (optional):
 
 ---
 
-## 16. Compatibility & Migration Strategy
+## 16. Migration Strategy (Breaking Changes Allowed)
 
-### 16.1 Keep old API temporarily
+This refactor assumes **no backward compatibility requirement**. The goal is to converge quickly on an IGFD-grade mental model (core/state/host separation) without maintaining legacy wrappers.
 
 Phase the migration:
 
-1) extract current rendering into `ui::draw_contents()` with a host wrapper
-2) introduce `FileDialogCore` and keep `FileBrowserState` as a compatibility wrapper
-3) add `DialogManager` and new entry-point API
-4) deprecate old `show()` entry point after parity improves
+1) extract current rendering into `ui::draw_contents_*()` with a host wrapper
+2) introduce `FileDialogCore` + `FileDialogState` (core + UI-only state)
+3) add `DialogManager` and a stable open/display API surface
+4) iterate on parity features (custom pane, file styles, thumbnails, advanced filters)
 
 ### 16.2 Mapping from current code
 
@@ -465,4 +465,3 @@ This architecture is considered successful when:
 - Custom pane + file styles exist and can block confirmation.
 - Thumbnail pipeline exists and does not hard-depend on any specific renderer backend.
 - Core logic is unit-test covered and does not depend on ImGui types.
-

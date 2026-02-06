@@ -74,16 +74,16 @@ let selection = pollster::block_on(
 # use dear_imgui_rs::*;
 # let mut ctx = Context::create();
 # let ui = ctx.frame();
-use dear_file_browser::{FileBrowserState, FileDialogExt};
-let mut state = FileBrowserState::new(DialogMode::OpenFile);
+use dear_file_browser::{FileDialogExt, FileDialogState};
+let mut state = FileDialogState::new(DialogMode::OpenFile);
 // Optional configuration
-state.layout = LayoutStyle::Standard; // or Minimal
-state.click_action = ClickAction::Select; // or Navigate
-state.double_click = true;
-state.dirs_first = true;
-state.breadcrumbs_max_segments = 6;
-state.empty_hint_enabled = true;
-state.empty_hint_color = [0.7, 0.7, 0.7, 1.0];
+state.ui.layout = LayoutStyle::Standard; // or Minimal
+state.core.click_action = ClickAction::Select; // or Navigate
+state.core.double_click = true;
+state.core.dirs_first = true;
+state.ui.breadcrumbs_max_segments = 6;
+state.ui.empty_hint_enabled = true;
+state.ui.empty_hint_color = [0.7, 0.7, 0.7, 1.0];
 ui.window("Open")
     .size([600.0, 420.0], dear_imgui_rs::Condition::FirstUseEver)
     .build(|| {

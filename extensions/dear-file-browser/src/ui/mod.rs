@@ -4,13 +4,9 @@ use dear_imgui_rs::TreeNodeFlags;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton};
 
-use crate::browser_core::{
-    BrowserEntry, apply_event_with_fs, filter_entries_in_place, read_entries_with_fs,
-    sort_entries_in_place,
-};
-use crate::browser_events::BrowserEvent;
-pub use crate::browser_state::FileBrowserState;
 use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy};
+use crate::dialog_core::{DirEntry, Modifiers};
+use crate::dialog_state::FileDialogState;
 use crate::fs::{FileSystem, StdFileSystem};
 use crate::places::Places;
 
@@ -67,7 +63,7 @@ impl<'ui> FileBrowser<'ui> {
     /// Returns Some(result) once the user confirms/cancels; None otherwise.
     pub fn draw_contents(
         &self,
-        state: &mut FileBrowserState,
+        state: &mut FileDialogState,
     ) -> Option<Result<Selection, FileDialogError>> {
         self.draw_contents_with_fs(state, &StdFileSystem)
     }
@@ -75,7 +71,7 @@ impl<'ui> FileBrowser<'ui> {
     /// Draw only the contents of the file browser (no window/modal host) using a custom filesystem.
     pub fn draw_contents_with_fs(
         &self,
-        state: &mut FileBrowserState,
+        state: &mut FileDialogState,
         fs: &dyn FileSystem,
     ) -> Option<Result<Selection, FileDialogError>> {
         draw_contents_with_fs(self.ui, state, fs)
@@ -83,8 +79,8 @@ impl<'ui> FileBrowser<'ui> {
 
     /// Draw the file browser in a standard ImGui window with default host config.
     /// Returns Some(result) once the user confirms/cancels; None otherwise.
-    pub fn show(&self, state: &mut FileBrowserState) -> Option<Result<Selection, FileDialogError>> {
-        let cfg = WindowHostConfig::for_mode(state.mode);
+    pub fn show(&self, state: &mut FileDialogState) -> Option<Result<Selection, FileDialogError>> {
+        let cfg = WindowHostConfig::for_mode(state.core.mode);
         self.show_windowed(state, &cfg)
     }
 
@@ -92,7 +88,7 @@ impl<'ui> FileBrowser<'ui> {
     /// Returns Some(result) once the user confirms/cancels; None otherwise.
     pub fn show_windowed(
         &self,
-        state: &mut FileBrowserState,
+        state: &mut FileDialogState,
         cfg: &WindowHostConfig,
     ) -> Option<Result<Selection, FileDialogError>> {
         self.show_windowed_with_fs(state, cfg, &StdFileSystem)
@@ -101,11 +97,11 @@ impl<'ui> FileBrowser<'ui> {
     /// Draw the file browser in a standard ImGui window using a custom filesystem.
     pub fn show_windowed_with_fs(
         &self,
-        state: &mut FileBrowserState,
+        state: &mut FileDialogState,
         cfg: &WindowHostConfig,
         fs: &dyn FileSystem,
     ) -> Option<Result<Selection, FileDialogError>> {
-        if !state.visible {
+        if !state.ui.visible {
             return None;
         }
 
@@ -122,69 +118,69 @@ impl<'ui> FileBrowser<'ui> {
 
 fn draw_contents(
     ui: &Ui,
-    state: &mut FileBrowserState,
+    state: &mut FileDialogState,
 ) -> Option<Result<Selection, FileDialogError>> {
     draw_contents_with_fs(ui, state, &StdFileSystem)
 }
 
 fn draw_contents_with_fs(
     ui: &Ui,
-    state: &mut FileBrowserState,
+    state: &mut FileDialogState,
     fs: &dyn FileSystem,
 ) -> Option<Result<Selection, FileDialogError>> {
-    if !state.visible {
+    if !state.ui.visible {
         return None;
     }
 
     // Top toolbar: Up, Refresh, Hidden toggle, Breadcrumbs, Filter, Search
     if ui.button("Up") {
-        apply_event_with_fs(state, BrowserEvent::NavigateUp, fs);
+        state.core.navigate_up();
     }
     ui.same_line();
     if ui.button("Refresh") { /* rescan happens each frame */ }
     ui.same_line();
-    let mut show_hidden = state.show_hidden;
+    let mut show_hidden = state.core.show_hidden;
     if ui.checkbox("Hidden", &mut show_hidden) {
-        apply_event_with_fs(state, BrowserEvent::SetShowHidden(show_hidden), fs);
+        state.core.show_hidden = show_hidden;
     }
     ui.same_line();
     // Breadcrumbs or Path Edit
-    if state.path_edit {
-        if state.focus_path_edit_next {
+    if state.ui.path_edit {
+        if state.ui.focus_path_edit_next {
             ui.set_keyboard_focus_here();
-            state.focus_path_edit_next = false;
+            state.ui.focus_path_edit_next = false;
         }
-        ui.input_text("##path_edit", &mut state.path_edit_buffer)
+        ui.input_text("##path_edit", &mut state.ui.path_edit_buffer)
             .build();
         ui.same_line();
         if ui.button("Go") {
-            apply_event_with_fs(state, BrowserEvent::SubmitPathEdit, fs);
+            submit_path_edit(state, fs);
         }
         ui.same_line();
         if ui.button("Cancel") {
-            apply_event_with_fs(state, BrowserEvent::CancelPathEdit, fs);
+            state.ui.path_edit = false;
         }
     } else {
-        if let Some(p) = draw_breadcrumbs(ui, &state.cwd, state.breadcrumbs_max_segments) {
-            apply_event_with_fs(state, BrowserEvent::NavigateTo(p), fs);
+        if let Some(p) = draw_breadcrumbs(ui, &state.core.cwd, state.ui.breadcrumbs_max_segments) {
+            state.core.navigate_to(p);
         }
     }
     // Search box (aligned to the right)
     ui.same_line();
-    if state.focus_search_next {
+    if state.ui.focus_search_next {
         ui.set_keyboard_focus_here();
-        state.focus_search_next = false;
+        state.ui.focus_search_next = false;
     }
-    let search_changed = ui.input_text("Search", &mut state.search).build();
+    let search_changed = ui.input_text("Search", &mut state.core.search).build();
     if search_changed {
-        apply_event_with_fs(state, BrowserEvent::SetSearch(state.search.clone()), fs);
+        // `rescan()` will apply search filtering.
     }
 
     ui.separator();
 
     // Content region
     let avail = ui.content_region_avail();
-    match state.layout {
+    match state.ui.layout {
         LayoutStyle::Standard => {
             let left_w = 180.0f32;
             let mut new_cwd: Option<PathBuf> = None;
@@ -194,7 +190,7 @@ fn draw_contents_with_fs(
                     new_cwd = draw_quick_locations(ui, state);
                 });
             if let Some(p) = new_cwd {
-                apply_event_with_fs(state, BrowserEvent::NavigateTo(p), fs);
+                state.core.navigate_to(p);
             }
             ui.same_line();
             ui.child_window("file_list")
@@ -216,45 +212,47 @@ fn draw_contents_with_fs(
 
     ui.separator();
     // Footer: file name (Save) + buttons
-    if matches!(state.mode, DialogMode::SaveFile) {
+    if matches!(state.core.mode, DialogMode::SaveFile) {
         ui.text("File name:");
         ui.same_line();
-        ui.input_text("##save_name", &mut state.save_name).build();
+        ui.input_text("##save_name", &mut state.core.save_name)
+            .build();
         ui.same_line();
     }
     // Filter selector (moved to footer like ImGuiFileDialog)
-    if !state.filters.is_empty() && !matches!(state.mode, DialogMode::PickFolder) {
+    if !state.core.filters.is_empty() && !matches!(state.core.mode, DialogMode::PickFolder) {
         ui.same_line();
         let preview = state
+            .core
             .active_filter
-            .and_then(|i| state.filters.get(i))
+            .and_then(|i| state.core.filters.get(i))
             .map(|f| f.name.as_str())
             .unwrap_or("All files");
-        let mut next_active_filter = state.active_filter;
+        let mut next_active_filter = state.core.active_filter;
         if let Some(_c) = ui.begin_combo("Filter", preview) {
             if ui
                 .selectable_config("All files")
-                .selected(state.active_filter.is_none())
+                .selected(state.core.active_filter.is_none())
                 .build()
             {
                 next_active_filter = None;
             }
-            for (i, f) in state.filters.iter().enumerate() {
+            for (i, f) in state.core.filters.iter().enumerate() {
                 if ui
                     .selectable_config(&f.name)
-                    .selected(state.active_filter == Some(i))
+                    .selected(state.core.active_filter == Some(i))
                     .build()
                 {
                     next_active_filter = Some(i);
                 }
             }
         }
-        if next_active_filter != state.active_filter {
-            apply_event_with_fs(state, BrowserEvent::SetActiveFilter(next_active_filter), fs);
+        if next_active_filter != state.core.active_filter {
+            state.core.active_filter = next_active_filter;
         }
     }
 
-    let confirm_label = match state.mode {
+    let confirm_label = match state.core.mode {
         DialogMode::OpenFile | DialogMode::OpenFiles => "Open",
         DialogMode::PickFolder => "Select",
         DialogMode::SaveFile => "Save",
@@ -264,50 +262,87 @@ fn draw_contents_with_fs(
     let cancel = ui.button("Cancel");
     ui.same_line();
     // Click behavior toggle
-    let mut nav_on_click = matches!(state.click_action, ClickAction::Navigate);
+    let mut nav_on_click = matches!(state.core.click_action, ClickAction::Navigate);
     if ui.checkbox("Navigate on click", &mut nav_on_click) {
-        let next = if nav_on_click {
+        state.core.click_action = if nav_on_click {
             ClickAction::Navigate
         } else {
             ClickAction::Select
         };
-        apply_event_with_fs(state, BrowserEvent::SetClickAction(next), fs);
     }
     ui.same_line();
-    let mut dbl = state.double_click;
+    let mut dbl = state.core.double_click;
     if ui.checkbox("DblClick confirm", &mut dbl) {
-        apply_event_with_fs(state, BrowserEvent::SetDoubleClick(dbl), fs);
+        state.core.double_click = dbl;
     }
 
     if cancel {
-        apply_event_with_fs(state, BrowserEvent::Cancel, fs);
+        state.core.cancel();
     } else if confirm {
-        apply_event_with_fs(state, BrowserEvent::Confirm, fs);
+        state.ui.ui_error = None;
+        if let Err(e) = state.core.confirm(fs) {
+            state.ui.ui_error = Some(e.to_string());
+        }
     }
 
-    if let Some(err) = &state.ui_error {
+    if let Some(err) = &state.ui.ui_error {
         ui.separator();
         ui.text_colored([1.0, 0.3, 0.3, 1.0], format!("Error: {err}"));
     }
 
     // Keyboard shortcuts (only when the host window is focused)
-    if state.visible && ui.is_window_focused() {
+    if state.ui.visible && ui.is_window_focused() {
         let ctrl = ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl);
         if ctrl && ui.is_key_pressed(Key::L) {
-            apply_event_with_fs(state, BrowserEvent::StartPathEdit, fs);
+            state.ui.path_edit = true;
+            state.ui.path_edit_buffer = state.core.cwd.display().to_string();
+            state.ui.focus_path_edit_next = true;
         }
         if ctrl && ui.is_key_pressed(Key::F) {
-            apply_event_with_fs(state, BrowserEvent::RequestSearchFocus, fs);
+            state.ui.focus_search_next = true;
         }
         if !ui.io().want_capture_keyboard() && ui.is_key_pressed(Key::Backspace) {
-            apply_event_with_fs(state, BrowserEvent::NavigateUp, fs);
+            state.core.navigate_up();
         }
-        if !state.path_edit && !ui.io().want_text_input() && ui.is_key_pressed(Key::Enter) {
-            apply_event_with_fs(state, BrowserEvent::ActivateFocused, fs);
+        if !state.ui.path_edit && !ui.io().want_text_input() && ui.is_key_pressed(Key::Enter) {
+            state.ui.ui_error = None;
+            if let Err(e) = state.core.activate_focused(fs) {
+                state.ui.ui_error = Some(e.to_string());
+            }
         }
     }
 
-    state.result.take()
+    let out = state.core.take_result();
+    if out.is_some() {
+        state.ui.visible = false;
+    }
+    out
+}
+
+fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
+    let input = state.ui.path_edit_buffer.trim();
+    let raw_p = std::path::PathBuf::from(input);
+    let p = fs.canonicalize(&raw_p).unwrap_or(raw_p.clone());
+    match fs.metadata(&p) {
+        Ok(md) => {
+            if md.is_dir {
+                state.core.set_cwd(p);
+                state.ui.path_edit = false;
+                state.ui.ui_error = None;
+            } else {
+                state.ui.ui_error = Some("Path exists but is not a directory".into());
+            }
+        }
+        Err(e) => {
+            use std::io::ErrorKind::*;
+            let msg = match e.kind() {
+                NotFound => format!("No such directory: {}", input),
+                PermissionDenied => format!("Permission denied: {}", input),
+                _ => format!("Invalid directory '{}': {}", input, e),
+            };
+            state.ui.ui_error = Some(msg);
+        }
+    }
 }
 
 fn draw_breadcrumbs(ui: &Ui, cwd: &Path, max_segments: usize) -> Option<PathBuf> {
@@ -379,39 +414,41 @@ fn draw_breadcrumbs(ui: &Ui, cwd: &Path, max_segments: usize) -> Option<PathBuf>
     new_cwd
 }
 
-fn draw_quick_locations(ui: &Ui, state: &mut FileBrowserState) -> Option<PathBuf> {
+fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
     let mut out: Option<PathBuf> = None;
 
     if ui.button("+ Bookmark") {
-        state.places.add_bookmark_path(state.cwd.clone());
+        state.core.places.add_bookmark_path(state.core.cwd.clone());
     }
     ui.same_line();
     if ui.button("Refresh") {
-        state.places.refresh_system_places();
+        state.core.places.refresh_system_places();
     }
     ui.same_line();
     if ui.button("Export") {
-        state.places_io_mode = crate::browser_state::PlacesIoMode::Export;
-        state.places_io_buffer = state
-            .places
-            .serialize_compact(crate::PlacesSerializeOptions {
-                include_code_places: state.places_io_include_code,
-            });
-        state.places_io_error = None;
-        state.places_io_open_next = true;
+        state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Export;
+        state.ui.places_io_buffer =
+            state
+                .core
+                .places
+                .serialize_compact(crate::PlacesSerializeOptions {
+                    include_code_places: state.ui.places_io_include_code,
+                });
+        state.ui.places_io_error = None;
+        state.ui.places_io_open_next = true;
     }
     ui.same_line();
     if ui.button("Import") {
-        state.places_io_mode = crate::browser_state::PlacesIoMode::Import;
-        state.places_io_buffer.clear();
-        state.places_io_error = None;
-        state.places_io_open_next = true;
+        state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Import;
+        state.ui.places_io_buffer.clear();
+        state.ui.places_io_error = None;
+        state.ui.places_io_open_next = true;
     }
 
     ui.separator();
 
     let mut remove: Option<(String, PathBuf)> = None;
-    for (gi, g) in state.places.groups.iter().enumerate() {
+    for (gi, g) in state.core.places.groups.iter().enumerate() {
         let open = ui.collapsing_header(&g.label, TreeNodeFlags::DEFAULT_OPEN);
         if !open {
             continue;
@@ -437,55 +474,57 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileBrowserState) -> Option<PathBuf
         }
     }
     if let Some((g, p)) = remove {
-        state.places.remove_place_path(&g, &p);
+        state.core.places.remove_place_path(&g, &p);
     }
     out
 }
 
-fn draw_places_io_modal(ui: &Ui, state: &mut FileBrowserState) {
-    if state.places_io_open_next {
+fn draw_places_io_modal(ui: &Ui, state: &mut FileDialogState) {
+    if state.ui.places_io_open_next {
         ui.open_popup("Places");
-        state.places_io_open_next = false;
+        state.ui.places_io_open_next = false;
     }
 
     if let Some(_popup) = ui.begin_modal_popup("Places") {
-        let is_export = state.places_io_mode == crate::browser_state::PlacesIoMode::Export;
+        let is_export = state.ui.places_io_mode == crate::dialog_state::PlacesIoMode::Export;
 
         ui.text("Places persistence (compact format)");
         ui.separator();
 
         if ui.button("Export") {
-            state.places_io_mode = crate::browser_state::PlacesIoMode::Export;
-            state.places_io_buffer =
+            state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Export;
+            state.ui.places_io_buffer =
                 state
+                    .core
                     .places
                     .serialize_compact(crate::PlacesSerializeOptions {
-                        include_code_places: state.places_io_include_code,
+                        include_code_places: state.ui.places_io_include_code,
                     });
-            state.places_io_error = None;
+            state.ui.places_io_error = None;
         }
         ui.same_line();
         if ui.button("Import") {
-            state.places_io_mode = crate::browser_state::PlacesIoMode::Import;
-            state.places_io_error = None;
+            state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Import;
+            state.ui.places_io_error = None;
         }
         ui.same_line();
         if ui.button("Close") {
             ui.close_current_popup();
-            state.places_io_error = None;
+            state.ui.places_io_error = None;
         }
 
         ui.separator();
 
         if is_export {
-            let mut include_code = state.places_io_include_code;
+            let mut include_code = state.ui.places_io_include_code;
             if ui.checkbox("Include code places", &mut include_code) {
-                state.places_io_include_code = include_code;
-                state.places_io_buffer =
+                state.ui.places_io_include_code = include_code;
+                state.ui.places_io_buffer =
                     state
+                        .core
                         .places
                         .serialize_compact(crate::PlacesSerializeOptions {
-                            include_code_places: state.places_io_include_code,
+                            include_code_places: state.ui.places_io_include_code,
                         });
             }
         }
@@ -493,59 +532,51 @@ fn draw_places_io_modal(ui: &Ui, state: &mut FileBrowserState) {
         let avail = ui.content_region_avail();
         let size = [avail[0].max(200.0), (avail[1] - 95.0).max(120.0)];
         if is_export {
-            ui.input_text_multiline("##places_export", &mut state.places_io_buffer, size)
+            ui.input_text_multiline("##places_export", &mut state.ui.places_io_buffer, size)
                 .read_only(true)
                 .build();
         } else {
-            ui.input_text_multiline("##places_import", &mut state.places_io_buffer, size)
+            ui.input_text_multiline("##places_import", &mut state.ui.places_io_buffer, size)
                 .build();
 
             if ui.button("Replace") {
-                match Places::deserialize_compact(&state.places_io_buffer) {
+                match Places::deserialize_compact(&state.ui.places_io_buffer) {
                     Ok(p) => {
-                        state.places = p;
-                        state.places_io_error = None;
+                        state.core.places = p;
+                        state.ui.places_io_error = None;
                     }
                     Err(e) => {
-                        state.places_io_error = Some(e.to_string());
+                        state.ui.places_io_error = Some(e.to_string());
                     }
                 }
             }
             ui.same_line();
             if ui.button("Merge") {
-                match Places::deserialize_compact(&state.places_io_buffer) {
+                match Places::deserialize_compact(&state.ui.places_io_buffer) {
                     Ok(p) => {
                         for g in p.groups {
                             for place in g.places {
-                                state.places.add_place(g.label.clone(), place);
+                                state.core.places.add_place(g.label.clone(), place);
                             }
                         }
-                        state.places_io_error = None;
+                        state.ui.places_io_error = None;
                     }
                     Err(e) => {
-                        state.places_io_error = Some(e.to_string());
+                        state.ui.places_io_error = Some(e.to_string());
                     }
                 }
             }
         }
 
-        if let Some(err) = &state.places_io_error {
+        if let Some(err) = &state.ui.places_io_error {
             ui.separator();
             ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
         }
     }
 }
 
-fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2], fs: &dyn FileSystem) {
-    // Gather entries
-    let mut entries: Vec<BrowserEntry> = read_entries_with_fs(fs, &state.cwd, state.show_hidden);
-    filter_entries_in_place(
-        &mut entries,
-        state.mode,
-        &state.filters,
-        state.active_filter,
-        &state.search,
-    );
+fn draw_file_table(ui: &Ui, state: &mut FileDialogState, size: [f32; 2], fs: &dyn FileSystem) {
+    state.core.rescan(fs);
 
     // Table
     use dear_imgui_rs::{SortDirection, TableColumnFlags, TableFlags};
@@ -587,72 +618,50 @@ fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2], fs: &d
                             (1, SortDirection::Descending) => (SortBy::Size, false),
                             (2, SortDirection::Ascending) => (SortBy::Modified, true),
                             (2, SortDirection::Descending) => (SortBy::Modified, false),
-                            _ => (state.sort_by, state.sort_ascending),
+                            _ => (state.core.sort_by, state.core.sort_ascending),
                         };
-                        apply_event_with_fs(
-                            state,
-                            BrowserEvent::SetSort { by, ascending: asc },
-                            fs,
-                        );
+                        state.core.sort_by = by;
+                        state.core.sort_ascending = asc;
+                        state.core.rescan(fs);
                     }
                     specs.clear_dirty();
                 }
             }
 
-            sort_entries_in_place(
-                &mut entries,
-                state.sort_by,
-                state.sort_ascending,
-                state.dirs_first,
-            );
-            state.view_names = entries.iter().map(|e| e.name.clone()).collect();
-
             if ui.is_window_focused() && !ui.io().want_text_input() {
-                let modifiers = crate::browser_events::Modifiers {
+                let modifiers = Modifiers {
                     ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
                     shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
                 };
 
                 if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
-                    apply_event_with_fs(state, BrowserEvent::SelectAll, fs);
+                    state.core.select_all();
                 }
                 if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
-                    apply_event_with_fs(
-                        state,
-                        BrowserEvent::MoveFocus {
-                            delta: -1,
-                            modifiers,
-                        },
-                        fs,
-                    );
+                    state.core.move_focus(-1, modifiers);
                 }
                 if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
-                    apply_event_with_fs(
-                        state,
-                        BrowserEvent::MoveFocus {
-                            delta: 1,
-                            modifiers,
-                        },
-                        fs,
-                    );
+                    state.core.move_focus(1, modifiers);
                 }
             }
 
-            // Rows
+            // Clone the entry list so we can mutate `state.core` while iterating (selection, navigation).
+            let entries: Vec<DirEntry> = state.core.entries().to_vec();
             if entries.is_empty() {
-                if state.empty_hint_enabled {
+                if state.ui.empty_hint_enabled {
                     ui.table_next_row();
                     ui.table_next_column();
-                    let msg = if let Some(custom) = &state.empty_hint_static_message {
+                    let msg = if let Some(custom) = &state.ui.empty_hint_static_message {
                         custom.clone()
                     } else {
                         let filter_label = state
+                            .core
                             .active_filter
-                            .and_then(|i| state.filters.get(i))
+                            .and_then(|i| state.core.filters.get(i))
                             .map(|f| f.name.as_str())
                             .unwrap_or("All files");
-                        let hidden_label = if state.show_hidden { "on" } else { "off" };
-                        if state.search.is_empty() {
+                        let hidden_label = if state.core.show_hidden { "on" } else { "off" };
+                        if state.core.search.is_empty() {
                             format!(
                                 "No matching entries. Filter: {}, Hidden: {}",
                                 filter_label, hidden_label
@@ -660,70 +669,59 @@ fn draw_file_table(ui: &Ui, state: &mut FileBrowserState, size: [f32; 2], fs: &d
                         } else {
                             format!(
                                 "No matching entries. Filter: {}, Search: '{}', Hidden: {}",
-                                filter_label, state.search, hidden_label
+                                filter_label, state.core.search, hidden_label
                             )
                         }
                     };
-                    ui.text_colored(state.empty_hint_color, msg);
+                    ui.text_colored(state.ui.empty_hint_color, msg);
                 }
-            } else {
-                for e in &entries {
-                    ui.table_next_row();
-                    // Name
-                    ui.table_next_column();
-                    let selected = state.selected.iter().any(|s| s == &e.name);
-                    let label = e.display_name();
-                    if ui
-                        .selectable_config(label)
-                        .selected(selected)
-                        .span_all_columns(false)
-                        .build()
-                    {
-                        let modifiers = crate::browser_events::Modifiers {
-                            ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
-                            shift: ui.is_key_down(Key::LeftShift)
-                                || ui.is_key_down(Key::RightShift),
-                        };
-                        apply_event_with_fs(
-                            state,
-                            BrowserEvent::ClickEntry {
-                                name: e.name.clone(),
-                                is_dir: e.is_dir,
-                                modifiers,
-                            },
-                            fs,
-                        );
+                return;
+            }
+
+            for e in &entries {
+                ui.table_next_row();
+                ui.table_next_column();
+
+                let selected = state.core.selected.iter().any(|s| s == &e.name);
+                let label = e.display_name();
+                if ui
+                    .selectable_config(label)
+                    .selected(selected)
+                    .span_all_columns(false)
+                    .build()
+                {
+                    let modifiers = Modifiers {
+                        ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
+                        shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
+                    };
+                    state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
+                }
+
+                if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
+                    state.ui.ui_error = None;
+                    if let Err(err) = state.core.double_click_entry(e.name.clone(), e.is_dir, fs) {
+                        state.ui.ui_error = Some(err.to_string());
                     }
-                    // Optional: Double-click behavior (navigate into dir or confirm selection)
-                    if state.double_click
-                        && ui.is_item_hovered()
-                        && ui.is_mouse_double_clicked(MouseButton::Left)
-                    {
-                        apply_event_with_fs(
-                            state,
-                            BrowserEvent::DoubleClickEntry {
-                                name: e.name.clone(),
-                                is_dir: e.is_dir,
-                            },
-                            fs,
-                        );
-                    }
-                    // Size
-                    ui.table_next_column();
-                    ui.text(match e.size {
-                        Some(s) => format_size(s),
-                        None => String::new(),
-                    });
-                    // Modified
-                    ui.table_next_column();
-                    let modified_str = format_modified_ago(e.modified);
-                    ui.text(&modified_str);
-                    if ui.is_item_hovered() {
-                        if let Some(m) = e.modified {
-                            use chrono::{DateTime, Local};
-                            let dt: DateTime<Local> = DateTime::<Local>::from(m);
-                            ui.tooltip_text(dt.format("%Y-%m-%d %H:%M:%S").to_string());
-                        }
+                }
+
+                if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
+                    state.core.save_name = e.name.clone();
+                }
+
+                ui.table_next_column();
+                ui.text(match e.size {
+                    Some(s) => format_size(s),
+                    None => String::new(),
+                });
+
+                ui.table_next_column();
+                let modified_str = format_modified_ago(e.modified);
+                ui.text(&modified_str);
+                if ui.is_item_hovered() {
+                    if let Some(m) = e.modified {
+                        use chrono::{DateTime, Local};
+                        let dt: DateTime<Local> = DateTime::<Local>::from(m);
+                        ui.tooltip_text(dt.format("%Y-%m-%d %H:%M:%S").to_string());
                     }
                 }
             }

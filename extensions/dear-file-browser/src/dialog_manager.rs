@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dear_imgui_rs::Ui;
 
-use crate::browser_state::FileBrowserState;
+use crate::dialog_state::FileDialogState;
 use crate::fs::{FileSystem, StdFileSystem};
 use crate::ui::{FileDialogExt, WindowHostConfig};
 use crate::{FileDialogError, Selection};
@@ -19,7 +19,7 @@ pub struct DialogId(u64);
 ///   `show_*` / `draw_*`.
 pub struct DialogManager {
     next_id: u64,
-    browsers: HashMap<DialogId, FileBrowserState>,
+    browsers: HashMap<DialogId, FileDialogState>,
     fs: Box<dyn FileSystem>,
 }
 
@@ -50,11 +50,11 @@ impl DialogManager {
 
     /// Open a new in-UI file browser dialog with a default state.
     pub fn open_browser(&mut self, mode: crate::DialogMode) -> DialogId {
-        self.open_browser_with_state(FileBrowserState::new(mode))
+        self.open_browser_with_state(FileDialogState::new(mode))
     }
 
     /// Open a new in-UI file browser dialog with a fully configured state.
-    pub fn open_browser_with_state(&mut self, state: FileBrowserState) -> DialogId {
+    pub fn open_browser_with_state(&mut self, state: FileDialogState) -> DialogId {
         self.next_id = self.next_id.wrapping_add(1);
         let id = DialogId(self.next_id);
         self.browsers.insert(id, state);
@@ -62,7 +62,7 @@ impl DialogManager {
     }
 
     /// Close an open dialog and return its state (if any).
-    pub fn close(&mut self, id: DialogId) -> Option<FileBrowserState> {
+    pub fn close(&mut self, id: DialogId) -> Option<FileDialogState> {
         self.browsers.remove(&id)
     }
 
@@ -72,12 +72,12 @@ impl DialogManager {
     }
 
     /// Get immutable access to a dialog state.
-    pub fn browser_state(&self, id: DialogId) -> Option<&FileBrowserState> {
+    pub fn dialog_state(&self, id: DialogId) -> Option<&FileDialogState> {
         self.browsers.get(&id)
     }
 
     /// Get mutable access to a dialog state (to tweak filters/layout/etc).
-    pub fn browser_state_mut(&mut self, id: DialogId) -> Option<&mut FileBrowserState> {
+    pub fn dialog_state_mut(&mut self, id: DialogId) -> Option<&mut FileDialogState> {
         self.browsers.get_mut(&id)
     }
 
@@ -91,7 +91,7 @@ impl DialogManager {
         id: DialogId,
     ) -> Option<Result<Selection, FileDialogError>> {
         let state = self.browsers.get_mut(&id)?;
-        let cfg = WindowHostConfig::for_mode(state.mode);
+        let cfg = WindowHostConfig::for_mode(state.core.mode);
         let res = ui
             .file_browser()
             .show_windowed_with_fs(state, &cfg, self.fs.as_ref());
@@ -172,7 +172,7 @@ mod tests {
         assert!(mgr.contains(id2));
 
         let s1 = mgr.close(id1).unwrap();
-        assert_eq!(s1.mode, DialogMode::OpenFile);
+        assert_eq!(s1.core.mode, DialogMode::OpenFile);
         assert!(!mgr.contains(id1));
         assert!(mgr.contains(id2));
     }

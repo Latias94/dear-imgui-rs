@@ -12,15 +12,13 @@
 //! - Native (via `rfd`) for OS dialogs (desktop) and Web File Picker (wasm)
 //! - ImGui (pure-UI) browser that works everywhere and is fully themeable
 
-#[cfg(feature = "imgui")]
-mod browser_core;
-#[cfg(feature = "imgui")]
-mod browser_events;
-#[cfg(feature = "imgui")]
-mod browser_state;
 mod core;
 #[cfg(feature = "imgui")]
+mod dialog_core;
+#[cfg(feature = "imgui")]
 mod dialog_manager;
+#[cfg(feature = "imgui")]
+mod dialog_state;
 #[cfg(feature = "imgui")]
 mod fs;
 #[cfg(feature = "native-rfd")]
@@ -35,7 +33,11 @@ pub use core::{
     Selection, SortBy,
 };
 #[cfg(feature = "imgui")]
+pub use dialog_core::{FileDialogCore, Modifiers};
+#[cfg(feature = "imgui")]
 pub use dialog_manager::{DialogId, DialogManager};
+#[cfg(feature = "imgui")]
+pub use dialog_state::{FileDialogState, FileDialogUiState};
 #[cfg(feature = "imgui")]
 pub use fs::{FileSystem, FsEntry, FsMetadata, StdFileSystem};
 #[cfg(feature = "imgui")]
@@ -43,4 +45,4 @@ pub use places::{
     Place, PlaceGroup, PlaceOrigin, Places, PlacesDeserializeError, PlacesSerializeOptions,
 };
 #[cfg(feature = "imgui")]
-pub use ui::{FileBrowserState, FileDialogExt, WindowHostConfig};
+pub use ui::{FileDialogExt, WindowHostConfig};
