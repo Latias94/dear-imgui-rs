@@ -16,6 +16,27 @@ pub enum FileListViewMode {
     Grid,
 }
 
+/// Column visibility configuration for list view.
+#[derive(Clone, Debug)]
+pub struct FileListColumnsConfig {
+    /// Show preview column in list view when thumbnails are enabled.
+    pub show_preview: bool,
+    /// Show size column in list view.
+    pub show_size: bool,
+    /// Show modified time column in list view.
+    pub show_modified: bool,
+}
+
+impl Default for FileListColumnsConfig {
+    fn default() -> Self {
+        Self {
+            show_preview: true,
+            show_size: true,
+            show_modified: true,
+        }
+    }
+}
+
 impl Default for FileListViewMode {
     fn default() -> Self {
         Self::List
@@ -174,6 +195,8 @@ pub struct FileDialogUiState {
     pub validation_buttons: ValidationButtonsConfig,
     /// File list view mode (list vs grid).
     pub file_list_view: FileListViewMode,
+    /// List-view column visibility configuration.
+    pub file_list_columns: FileListColumnsConfig,
     /// Max breadcrumb segments to display (compress with ellipsis when exceeded).
     pub breadcrumbs_max_segments: usize,
     /// Show a hint row when no entries match filters/search.
@@ -286,6 +309,7 @@ impl Default for FileDialogUiState {
             layout: LayoutStyle::Standard,
             validation_buttons: ValidationButtonsConfig::default(),
             file_list_view: FileListViewMode::default(),
+            file_list_columns: FileListColumnsConfig::default(),
             breadcrumbs_max_segments: 6,
             empty_hint_enabled: true,
             empty_hint_color: [0.7, 0.7, 0.7, 1.0],

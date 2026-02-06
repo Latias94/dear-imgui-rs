@@ -52,8 +52,8 @@ pub use dialog_manager::{DialogId, DialogManager};
 pub use dialog_state::FileListViewMode;
 #[cfg(feature = "imgui")]
 pub use dialog_state::{
-    ClipboardOp, FileClipboard, FileDialogState, FileDialogUiState, ValidationButtonsAlign,
-    ValidationButtonsConfig, ValidationButtonsOrder,
+    ClipboardOp, FileClipboard, FileDialogState, FileDialogUiState, FileListColumnsConfig,
+    ValidationButtonsAlign, ValidationButtonsConfig, ValidationButtonsOrder,
 };
 #[cfg(feature = "imgui")]
 pub use file_style::FileStyleCallback;

@@ -452,7 +452,7 @@ Goal: match IGFD’s “natural sorting for filenames and extension on demand”
 
 ### Epic 15.2 — Optional columns & tuning
 
-- [ ] Task: add column visibility knobs (Size/Modified/Preview) and persist per dialog instance
+- [x] Task: add column visibility knobs (Size/Modified/Preview) and persist per dialog instance
   - Acceptance: callers can hide “Modified” and run a compact list view.
 
 Exit criteria:

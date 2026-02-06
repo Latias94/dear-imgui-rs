@@ -444,6 +444,14 @@ fn draw_contents_with_fs_and_hooks(
         state.ui.file_list_view = FileListViewMode::Grid;
         state.ui.thumbnails_enabled = true;
     }
+    if matches!(state.ui.file_list_view, FileListViewMode::List) {
+        ui.same_line();
+        if let Some(_popup) = ui.begin_combo("Columns", "Configure") {
+            ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
+            ui.checkbox("Size", &mut state.ui.file_list_columns.show_size);
+            ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
+        }
+    }
     ui.same_line();
     let mut show_hidden = state.core.show_hidden;
     if ui.checkbox("Hidden", &mut show_hidden) {
@@ -1788,6 +1796,40 @@ fn draw_file_table(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ListColumnLayout {
+    name: i16,
+    ext: i16,
+    size: Option<i16>,
+    modified: Option<i16>,
+}
+
+fn list_column_layout(
+    show_preview: bool,
+    show_size: bool,
+    show_modified: bool,
+) -> ListColumnLayout {
+    let mut index = if show_preview { 1 } else { 0 };
+    let name = index;
+    index += 1;
+    let ext = index;
+    index += 1;
+    let size = if show_size {
+        let column_index = index;
+        index += 1;
+        Some(column_index)
+    } else {
+        None
+    };
+    let modified = if show_modified { Some(index) } else { None };
+    ListColumnLayout {
+        name,
+        ext,
+        size,
+        modified,
+    }
+}
+
 fn draw_file_table_view(
     ui: &Ui,
     state: &mut FileDialogState,
@@ -1810,7 +1852,9 @@ fn draw_file_table_view(
         | TableFlags::SCROLL_Y
         | TableFlags::SIZING_STRETCH_PROP
         | TableFlags::SORTABLE; // enable built-in header sorting
-    let show_preview = state.ui.thumbnails_enabled;
+    let show_preview = state.ui.thumbnails_enabled && state.ui.file_list_columns.show_preview;
+    let show_size = state.ui.file_list_columns.show_size;
+    let show_modified = state.ui.file_list_columns.show_modified;
     let mut table = ui.table("file_table").flags(flags).outer_size(size);
     if show_preview {
         table = table
@@ -1823,47 +1867,69 @@ fn draw_file_table_view(
         .column("Name")
         .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
         .user_id(0)
-        .weight(if show_preview { 0.52 } else { 0.56 })
-        .done()
+        .weight(if show_size || show_modified {
+            if show_preview { 0.52 } else { 0.56 }
+        } else {
+            if show_preview { 0.88 } else { 0.92 }
+        })
+        .done();
+
+    table = table
         .column("Ext")
         .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
         .user_id(1)
-        .weight(0.12)
-        .done()
-        .column("Size")
-        .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
-        .user_id(2)
-        .weight(0.16)
-        .done()
-        .column("Modified")
-        .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
-        .user_id(3)
-        .weight(0.2)
-        .done()
-        .headers(true);
+        .weight(if show_size || show_modified {
+            0.12
+        } else {
+            0.08
+        })
+        .done();
+
+    if show_size {
+        table = table
+            .column("Size")
+            .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
+            .user_id(2)
+            .weight(if show_modified { 0.16 } else { 0.2 })
+            .done();
+    }
+
+    if show_modified {
+        table = table
+            .column("Modified")
+            .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
+            .user_id(3)
+            .weight(if show_size { 0.2 } else { 0.24 })
+            .done();
+    }
+
+    table = table.headers(true);
 
     table.build(|ui| {
         // Apply ImGui sort specs (single primary sort)
         if let Some(mut specs) = ui.table_get_sort_specs() {
             if specs.is_dirty() {
                 if let Some(s) = specs.iter().next() {
-                    let name_col = if show_preview { 1 } else { 0 };
-                    let ext_col = name_col + 1;
-                    let size_col = name_col + 2;
-                    let modified_col = name_col + 3;
+                    let layout = list_column_layout(show_preview, show_size, show_modified);
                     let (by, asc) = match (s.column_index, s.sort_direction) {
-                        (i, SortDirection::Ascending) if i == name_col => (SortBy::Name, true),
-                        (i, SortDirection::Descending) if i == name_col => (SortBy::Name, false),
-                        (i, SortDirection::Ascending) if i == ext_col => (SortBy::Extension, true),
-                        (i, SortDirection::Descending) if i == ext_col => {
+                        (i, SortDirection::Ascending) if i == layout.name => (SortBy::Name, true),
+                        (i, SortDirection::Descending) if i == layout.name => (SortBy::Name, false),
+                        (i, SortDirection::Ascending) if i == layout.ext => {
+                            (SortBy::Extension, true)
+                        }
+                        (i, SortDirection::Descending) if i == layout.ext => {
                             (SortBy::Extension, false)
                         }
-                        (i, SortDirection::Ascending) if i == size_col => (SortBy::Size, true),
-                        (i, SortDirection::Descending) if i == size_col => (SortBy::Size, false),
-                        (i, SortDirection::Ascending) if i == modified_col => {
+                        (i, SortDirection::Ascending) if layout.size == Some(i) => {
+                            (SortBy::Size, true)
+                        }
+                        (i, SortDirection::Descending) if layout.size == Some(i) => {
+                            (SortBy::Size, false)
+                        }
+                        (i, SortDirection::Ascending) if layout.modified == Some(i) => {
                             (SortBy::Modified, true)
                         }
-                        (i, SortDirection::Descending) if i == modified_col => {
+                        (i, SortDirection::Descending) if layout.modified == Some(i) => {
                             (SortBy::Modified, false)
                         }
                         _ => (state.core.sort_by, state.core.sort_ascending),
@@ -2051,20 +2117,24 @@ fn draw_file_table_view(
                 ui.text("");
             }
 
-            ui.table_next_column();
-            ui.text(match e.size {
-                Some(s) => format_size(s),
-                None => String::new(),
-            });
+            if show_size {
+                ui.table_next_column();
+                ui.text(match e.size {
+                    Some(s) => format_size(s),
+                    None => String::new(),
+                });
+            }
 
-            ui.table_next_column();
-            let modified_str = format_modified_ago(e.modified);
-            ui.text(&modified_str);
-            if ui.is_item_hovered() {
-                if let Some(m) = e.modified {
-                    use chrono::{DateTime, Local};
-                    let dt: DateTime<Local> = DateTime::<Local>::from(m);
-                    ui.tooltip_text(dt.format("%Y-%m-%d %H:%M:%S").to_string());
+            if show_modified {
+                ui.table_next_column();
+                let modified_str = format_modified_ago(e.modified);
+                ui.text(&modified_str);
+                if ui.is_item_hovered() {
+                    if let Some(m) = e.modified {
+                        use chrono::{DateTime, Local};
+                        let dt: DateTime<Local> = DateTime::<Local>::from(m);
+                        ui.tooltip_text(dt.format("%Y-%m-%d %H:%M:%S").to_string());
+                    }
                 }
             }
 
@@ -2801,3 +2871,73 @@ fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSys
 }
 
 // Places helpers live in `places.rs`.
+
+#[cfg(test)]
+mod tests {
+    use super::{ListColumnLayout, list_column_layout};
+
+    #[test]
+    fn list_column_layout_all_columns_visible_without_preview() {
+        assert_eq!(
+            list_column_layout(false, true, true),
+            ListColumnLayout {
+                name: 0,
+                ext: 1,
+                size: Some(2),
+                modified: Some(3),
+            }
+        );
+    }
+
+    #[test]
+    fn list_column_layout_all_columns_visible_with_preview() {
+        assert_eq!(
+            list_column_layout(true, true, true),
+            ListColumnLayout {
+                name: 1,
+                ext: 2,
+                size: Some(3),
+                modified: Some(4),
+            }
+        );
+    }
+
+    #[test]
+    fn list_column_layout_hides_size_column() {
+        assert_eq!(
+            list_column_layout(false, false, true),
+            ListColumnLayout {
+                name: 0,
+                ext: 1,
+                size: None,
+                modified: Some(2),
+            }
+        );
+    }
+
+    #[test]
+    fn list_column_layout_hides_modified_column() {
+        assert_eq!(
+            list_column_layout(false, true, false),
+            ListColumnLayout {
+                name: 0,
+                ext: 1,
+                size: Some(2),
+                modified: None,
+            }
+        );
+    }
+
+    #[test]
+    fn list_column_layout_hides_size_and_modified_columns() {
+        assert_eq!(
+            list_column_layout(false, false, false),
+            ListColumnLayout {
+                name: 0,
+                ext: 1,
+                size: None,
+                modified: None,
+            }
+        );
+    }
+}

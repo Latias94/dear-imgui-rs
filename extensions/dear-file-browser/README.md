@@ -36,6 +36,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - Layouts: `Standard` (quick locations + list) or `Minimal`
   - Filters by extension, substring Search, directories-first (configurable)
   - Sorting by Name/Size/Modified via table headers
+  - List columns: configurable visibility for Preview/Size/Modified (per dialog state)
   - Breadcrumbs with automatic compression on long paths
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
@@ -84,6 +85,8 @@ let mut state = FileDialogState::new(DialogMode::OpenFile);
 // Optional configuration
 state.ui.layout = LayoutStyle::Standard; // or Minimal
 state.ui.file_list_view = FileListViewMode::List; // or Grid (enables thumbnails)
+state.ui.file_list_columns.show_preview = false; // compact list without preview column
+state.ui.file_list_columns.show_modified = false; // optional
 state.core.click_action = ClickAction::Select; // or Navigate
 state.core.double_click = true;
 state.core.dirs_first = true;
