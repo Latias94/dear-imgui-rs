@@ -66,6 +66,8 @@ pub struct FileDialogUiState {
     pub new_folder_focus_next: bool,
     /// Error string shown inside the "New Folder" modal.
     pub new_folder_error: Option<String>,
+    /// Reveal (scroll to) a specific entry name on the next draw, then clear.
+    pub(crate) reveal_name_next: Option<String>,
     /// Style registry used to decorate the file list (icons/colors/tooltips).
     pub file_styles: FileStyleRegistry,
     /// Enable thumbnails in the file list (adds a Preview column).
@@ -117,6 +119,7 @@ impl Default for FileDialogUiState {
             new_folder_name: String::new(),
             new_folder_focus_next: false,
             new_folder_error: None,
+            reveal_name_next: None,
             file_styles: FileStyleRegistry::default(),
             thumbnails_enabled: false,
             thumbnail_size: [32.0, 32.0],

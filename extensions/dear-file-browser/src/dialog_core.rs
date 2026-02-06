@@ -176,6 +176,14 @@ impl FileDialogCore {
         self.selection_anchor_name = None;
     }
 
+    /// Selects and focuses a single entry by base name.
+    ///
+    /// This is useful for UI-driven actions that create a new entry and want to
+    /// immediately reveal it (e.g. "New Folder").
+    pub fn focus_and_select_by_name(&mut self, name: impl Into<String>) {
+        self.select_single_by_name(name.into());
+    }
+
     /// Refreshes the directory snapshot and view cache if needed.
     pub(crate) fn rescan_if_needed(&mut self, fs: &dyn FileSystem) {
         self.refresh_dir_snapshot_if_needed(fs);
@@ -993,6 +1001,16 @@ mod tests {
         assert_eq!(core.selected, vec!["a.txt"]);
         core.click_entry("a.txt".into(), false, mods(true, false));
         assert!(core.selected.is_empty());
+    }
+
+    #[test]
+    fn focus_and_select_by_name_sets_focus_and_anchor() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.allow_multi = true;
+        core.focus_and_select_by_name("new_folder");
+        assert_eq!(core.selected, vec!["new_folder"]);
+        assert_eq!(core.focused_name.as_deref(), Some("new_folder"));
+        assert_eq!(core.selection_anchor_name.as_deref(), Some("new_folder"));
     }
 
     #[test]

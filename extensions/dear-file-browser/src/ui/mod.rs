@@ -664,10 +664,13 @@ fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSyst
             if invalid {
                 state.ui.new_folder_error = Some("Invalid folder name".into());
             } else {
-                let path = state.core.cwd.join(name);
+                let name = name.to_string();
+                let path = state.core.cwd.join(&name);
                 match fs.create_dir(&path) {
                     Ok(()) => {
                         state.ui.new_folder_name.clear();
+                        state.core.focus_and_select_by_name(name.clone());
+                        state.ui.reveal_name_next = Some(name);
                         state.core.invalidate_dir_cache();
                         ui.close_current_popup();
                     }
@@ -1244,6 +1247,11 @@ fn draw_file_table_view(
                     ui.tooltip_text(dt.format("%Y-%m-%d %H:%M:%S").to_string());
                 }
             }
+
+            if state.ui.reveal_name_next.as_deref() == Some(e.name.as_str()) {
+                ui.set_scroll_here_y(0.5);
+                state.ui.reveal_name_next = None;
+            }
         }
     });
 
@@ -1380,6 +1388,11 @@ fn draw_file_grid_view(
                     let item_max = ui.item_rect_max();
                     let img_min = [item_min[0] + pad, item_min[1] + pad];
                     let img_max = [img_min[0] + thumb[0], img_min[1] + thumb[1]];
+
+                    if state.ui.reveal_name_next.as_deref() == Some(e.name.as_str()) {
+                        ui.set_scroll_here_y(0.5);
+                        state.ui.reveal_name_next = None;
+                    }
 
                     if state.ui.thumbnails_enabled && !e.is_dir {
                         let max_size_u32 = [thumb[0].max(1.0) as u32, thumb[1].max(1.0) as u32];
