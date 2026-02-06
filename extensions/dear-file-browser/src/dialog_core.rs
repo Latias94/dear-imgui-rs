@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
-use std::{collections::hash_map::DefaultHasher, hash::Hasher};
+use std::{
+    collections::{VecDeque, hash_map::DefaultHasher},
+    hash::Hasher,
+};
 
 use crate::core::{
     ClickAction, DialogMode, ExtensionPolicy, FileDialogError, FileFilter, SavePolicy, Selection,
@@ -362,6 +365,233 @@ impl DirEntry {
     }
 }
 
+#[derive(Debug)]
+enum ScanRuntime {
+    Sync(SyncScanRuntime),
+    Worker(WorkerScanRuntime),
+}
+
+impl Default for ScanRuntime {
+    fn default() -> Self {
+        Self::Sync(SyncScanRuntime::default())
+    }
+}
+
+impl ScanRuntime {
+    fn from_policy(policy: ScanPolicy) -> Self {
+        match policy {
+            ScanPolicy::Sync => Self::Sync(SyncScanRuntime::default()),
+            ScanPolicy::Incremental { batch_entries } => {
+                Self::Worker(WorkerScanRuntime::new(batch_entries))
+            }
+            ScanPolicy::Background { batch_entries, .. } => {
+                Self::Worker(WorkerScanRuntime::new(batch_entries))
+            }
+        }
+    }
+
+    fn set_policy(&mut self, policy: ScanPolicy) {
+        match policy {
+            ScanPolicy::Sync => {
+                if !matches!(self, Self::Sync(_)) {
+                    *self = Self::Sync(SyncScanRuntime::default());
+                }
+            }
+            ScanPolicy::Incremental { batch_entries }
+            | ScanPolicy::Background { batch_entries, .. } => {
+                if let Self::Worker(runtime) = self {
+                    runtime.set_batch_entries(batch_entries);
+                } else {
+                    *self = Self::Worker(WorkerScanRuntime::new(batch_entries));
+                }
+            }
+        }
+    }
+
+    fn submit(&mut self, request: ScanRequest, result: std::io::Result<DirSnapshot>) {
+        match self {
+            Self::Sync(runtime) => runtime.submit(request, result),
+            Self::Worker(runtime) => runtime.submit(request, result),
+        }
+    }
+
+    fn poll_batch(&mut self) -> Option<RuntimeBatch> {
+        match self {
+            Self::Sync(runtime) => runtime.poll_batch(),
+            Self::Worker(runtime) => runtime.poll_batch(),
+        }
+    }
+
+    fn cancel_generation(&mut self, generation: u64) {
+        match self {
+            Self::Sync(runtime) => runtime.cancel_generation(generation),
+            Self::Worker(runtime) => runtime.cancel_generation(generation),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct SyncScanRuntime {
+    batches: VecDeque<RuntimeBatch>,
+}
+
+impl SyncScanRuntime {
+    fn submit(&mut self, request: ScanRequest, result: std::io::Result<DirSnapshot>) {
+        self.batches.clear();
+        self.batches.push_back(RuntimeBatch {
+            generation: request.generation,
+            kind: RuntimeBatchKind::Begin {
+                cwd: request.cwd.clone(),
+            },
+        });
+
+        match result {
+            Ok(snapshot) => {
+                let loaded = snapshot.entry_count;
+                self.batches.push_back(RuntimeBatch {
+                    generation: request.generation,
+                    kind: RuntimeBatchKind::ReplaceSnapshot { snapshot },
+                });
+                self.batches.push_back(RuntimeBatch {
+                    generation: request.generation,
+                    kind: RuntimeBatchKind::Complete { loaded },
+                });
+            }
+            Err(err) => {
+                self.batches.push_back(RuntimeBatch {
+                    generation: request.generation,
+                    kind: RuntimeBatchKind::Error {
+                        cwd: request.cwd,
+                        message: err.to_string(),
+                    },
+                });
+            }
+        }
+    }
+
+    fn poll_batch(&mut self) -> Option<RuntimeBatch> {
+        self.batches.pop_front()
+    }
+
+    fn cancel_generation(&mut self, generation: u64) {
+        self.batches.retain(|batch| batch.generation != generation);
+    }
+}
+
+#[derive(Debug)]
+struct WorkerScanRuntime {
+    batches: VecDeque<RuntimeBatch>,
+    batch_entries: usize,
+}
+
+impl WorkerScanRuntime {
+    fn new(batch_entries: usize) -> Self {
+        Self {
+            batches: VecDeque::new(),
+            batch_entries: batch_entries.max(1),
+        }
+    }
+
+    fn set_batch_entries(&mut self, batch_entries: usize) {
+        self.batch_entries = batch_entries.max(1);
+    }
+
+    fn submit(&mut self, request: ScanRequest, result: std::io::Result<DirSnapshot>) {
+        self.batches.clear();
+        self.batches.push_back(RuntimeBatch {
+            generation: request.generation,
+            kind: RuntimeBatchKind::Begin {
+                cwd: request.cwd.clone(),
+            },
+        });
+
+        match result {
+            Ok(snapshot) => {
+                let DirSnapshot { cwd, entries, .. } = snapshot;
+                let total = entries.len();
+                let mut loaded = 0usize;
+                let mut chunk = Vec::with_capacity(self.batch_entries);
+                for entry in entries {
+                    chunk.push(entry);
+                    if chunk.len() >= self.batch_entries {
+                        loaded += chunk.len();
+                        self.batches.push_back(RuntimeBatch {
+                            generation: request.generation,
+                            kind: RuntimeBatchKind::AppendEntries {
+                                cwd: cwd.clone(),
+                                entries: std::mem::take(&mut chunk),
+                                loaded,
+                            },
+                        });
+                    }
+                }
+
+                if !chunk.is_empty() {
+                    loaded += chunk.len();
+                    self.batches.push_back(RuntimeBatch {
+                        generation: request.generation,
+                        kind: RuntimeBatchKind::AppendEntries {
+                            cwd: cwd.clone(),
+                            entries: chunk,
+                            loaded,
+                        },
+                    });
+                }
+
+                self.batches.push_back(RuntimeBatch {
+                    generation: request.generation,
+                    kind: RuntimeBatchKind::Complete { loaded: total },
+                });
+            }
+            Err(err) => {
+                self.batches.push_back(RuntimeBatch {
+                    generation: request.generation,
+                    kind: RuntimeBatchKind::Error {
+                        cwd: request.cwd,
+                        message: err.to_string(),
+                    },
+                });
+            }
+        }
+    }
+
+    fn poll_batch(&mut self) -> Option<RuntimeBatch> {
+        self.batches.pop_front()
+    }
+
+    fn cancel_generation(&mut self, generation: u64) {
+        self.batches.retain(|batch| batch.generation != generation);
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeBatch {
+    generation: u64,
+    kind: RuntimeBatchKind,
+}
+
+#[derive(Debug)]
+enum RuntimeBatchKind {
+    Begin {
+        cwd: PathBuf,
+    },
+    ReplaceSnapshot {
+        snapshot: DirSnapshot,
+    },
+    AppendEntries {
+        cwd: PathBuf,
+        entries: Vec<DirEntry>,
+        loaded: usize,
+    },
+    Complete {
+        loaded: usize,
+    },
+    Error {
+        cwd: PathBuf,
+        message: String,
+    },
+}
+
 /// Core state machine for the ImGui-embedded file dialog.
 ///
 /// This type contains only domain state and logic (selection, navigation,
@@ -418,6 +648,7 @@ pub struct FileDialogCore {
     scan_policy: ScanPolicy,
     scan_status: ScanStatus,
     scan_generation: u64,
+    scan_runtime: ScanRuntime,
     dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
     last_view_key: Option<ViewKey>,
@@ -456,6 +687,7 @@ impl FileDialogCore {
             scan_policy: ScanPolicy::default(),
             scan_status: ScanStatus::default(),
             scan_generation: 0,
+            scan_runtime: ScanRuntime::from_policy(ScanPolicy::default()),
             dir_snapshot: DirSnapshot {
                 cwd: PathBuf::new(),
                 entry_count: 0,
@@ -548,6 +780,7 @@ impl FileDialogCore {
             return;
         }
         self.scan_policy = normalized;
+        self.scan_runtime.set_policy(normalized);
         self.invalidate_dir_cache();
     }
 
@@ -718,29 +951,32 @@ impl FileDialogCore {
     fn refresh_dir_snapshot_if_needed(&mut self, fs: &dyn FileSystem) {
         let cwd_changed = self.dir_snapshot.cwd != self.cwd;
         let should_refresh = self.dir_snapshot_dirty || cwd_changed;
-        if !should_refresh {
-            return;
+
+        if should_refresh {
+            let request = self.begin_scan_request();
+            self.scan_runtime
+                .cancel_generation(request.generation.saturating_sub(1));
+            let scan_result =
+                read_entries_snapshot_with_fs(fs, &request.cwd, self.scan_hook.as_mut());
+            self.scan_runtime.submit(request, scan_result);
+            self.dir_snapshot_dirty = false;
         }
 
-        let request = self.begin_scan_request();
-        self.apply_scan_batch(ScanBatch::begin(request.generation));
-
-        match read_entries_snapshot_with_fs(fs, &request.cwd, self.scan_hook.as_mut()) {
-            Ok(snapshot) => {
-                let loaded = snapshot.entry_count;
-                self.dir_snapshot = snapshot;
-                self.apply_scan_batch(ScanBatch::entries(request.generation, loaded, false));
-                self.apply_scan_batch(ScanBatch::complete(request.generation, loaded));
-            }
-            Err(err) => {
-                self.dir_snapshot = empty_snapshot_for_cwd(&request.cwd);
-                self.apply_scan_batch(ScanBatch::error(request.generation, err.to_string()));
-            }
+        let mut budget = self.scan_runtime_batch_budget();
+        while budget > 0 {
+            let Some(runtime_batch) = self.scan_runtime.poll_batch() else {
+                break;
+            };
+            self.apply_runtime_batch(runtime_batch);
+            budget = budget.saturating_sub(1);
         }
+    }
 
-        self.dir_snapshot_dirty = false;
-        // Always rebuild the view after a filesystem refresh even if the view inputs didn't change.
-        self.last_view_key = None;
+    fn scan_runtime_batch_budget(&self) -> usize {
+        match self.scan_policy {
+            ScanPolicy::Sync => usize::MAX,
+            ScanPolicy::Incremental { .. } | ScanPolicy::Background { .. } => 1,
+        }
     }
 
     fn begin_scan_request(&mut self) -> ScanRequest {
@@ -751,6 +987,47 @@ impl FileDialogCore {
             cwd: self.cwd.clone(),
             scan_policy: self.scan_policy,
             submitted_at: std::time::Instant::now(),
+        }
+    }
+
+    fn apply_runtime_batch(&mut self, runtime_batch: RuntimeBatch) {
+        if runtime_batch.generation != self.scan_generation {
+            return;
+        }
+
+        match runtime_batch.kind {
+            RuntimeBatchKind::Begin { cwd } => {
+                self.dir_snapshot = empty_snapshot_for_cwd(&cwd);
+                self.last_view_key = None;
+                self.apply_scan_batch(ScanBatch::begin(runtime_batch.generation));
+            }
+            RuntimeBatchKind::ReplaceSnapshot { snapshot } => {
+                let loaded = snapshot.entry_count;
+                self.dir_snapshot = snapshot;
+                self.last_view_key = None;
+                self.apply_scan_batch(ScanBatch::entries(runtime_batch.generation, loaded, false));
+            }
+            RuntimeBatchKind::AppendEntries {
+                cwd,
+                entries,
+                loaded,
+            } => {
+                if self.dir_snapshot.cwd != cwd {
+                    self.dir_snapshot = empty_snapshot_for_cwd(&cwd);
+                }
+                self.dir_snapshot.entries.extend(entries);
+                self.dir_snapshot.entry_count = self.dir_snapshot.entries.len();
+                self.last_view_key = None;
+                self.apply_scan_batch(ScanBatch::entries(runtime_batch.generation, loaded, false));
+            }
+            RuntimeBatchKind::Complete { loaded } => {
+                self.apply_scan_batch(ScanBatch::complete(runtime_batch.generation, loaded));
+            }
+            RuntimeBatchKind::Error { cwd, message } => {
+                self.dir_snapshot = empty_snapshot_for_cwd(&cwd);
+                self.last_view_key = None;
+                self.apply_scan_batch(ScanBatch::error(runtime_batch.generation, message));
+            }
         }
     }
 
@@ -2381,6 +2658,154 @@ mod tests {
                 loaded: 2,
             }
         );
+    }
+
+    #[test]
+    fn incremental_scan_policy_emits_partial_batches_across_ticks() {
+        let fs = TestFs {
+            entries: vec![
+                crate::fs::FsEntry {
+                    name: "a.txt".into(),
+                    path: PathBuf::from("/tmp/a.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "b.txt".into(),
+                    path: PathBuf::from("/tmp/b.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "c.txt".into(),
+                    path: PathBuf::from("/tmp/c.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 2 });
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(core.scan_generation(), 1);
+        assert_eq!(core.scan_status(), &ScanStatus::Scanning { generation: 1 });
+        assert!(core.entries().is_empty());
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Partial {
+                generation: 1,
+                loaded: 2,
+            }
+        );
+        assert_eq!(core.entries().len(), 2);
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Partial {
+                generation: 1,
+                loaded: 3,
+            }
+        );
+        assert_eq!(core.entries().len(), 3);
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Complete {
+                generation: 1,
+                loaded: 3,
+            }
+        );
+        assert_eq!(core.entries().len(), 3);
+        assert_eq!(fs.read_dir_calls.get(), 1);
+    }
+
+    #[test]
+    fn incremental_scan_supersedes_pending_generation_batches() {
+        let fs_old = TestFs {
+            entries: vec![
+                crate::fs::FsEntry {
+                    name: "old-a.txt".into(),
+                    path: PathBuf::from("/tmp/old-a.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "old-b.txt".into(),
+                    path: PathBuf::from("/tmp/old-b.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let fs_new = TestFs {
+            entries: vec![crate::fs::FsEntry {
+                name: "new.txt".into(),
+                path: PathBuf::from("/tmp/new.txt"),
+                is_dir: false,
+                is_symlink: false,
+                size: None,
+                modified: None,
+            }],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 1 });
+
+        core.rescan_if_needed(&fs_old);
+        core.rescan_if_needed(&fs_old);
+        assert_eq!(core.scan_generation(), 1);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Partial {
+                generation: 1,
+                loaded: 1,
+            }
+        );
+
+        core.request_rescan();
+        core.rescan_if_needed(&fs_new);
+        assert_eq!(core.scan_generation(), 2);
+        assert_eq!(core.scan_status(), &ScanStatus::Scanning { generation: 2 });
+
+        core.rescan_if_needed(&fs_new);
+        core.rescan_if_needed(&fs_new);
+
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Complete {
+                generation: 2,
+                loaded: 1,
+            }
+        );
+        let names: Vec<&str> = core
+            .entries()
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["new.txt"]);
+        assert_eq!(fs_old.read_dir_calls.get(), 1);
+        assert_eq!(fs_new.read_dir_calls.get(), 1);
     }
 
     #[test]

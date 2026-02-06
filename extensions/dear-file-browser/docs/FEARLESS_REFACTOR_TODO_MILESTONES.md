@@ -32,9 +32,9 @@ Current parity status vs IGFD (excluding C API by product decision):
 
 Execution plan (next implementation wave):
 
-1. P2 Stage B: add optional worker runtime + generation-safe stale batch dropping
-2. P2 Stage C: optimize projection path + bounded per-frame apply path
-3. P2 Stage D: add tracing/metrics and baseline perf data for large directories
+1. P2 Stage C: optimize projection path + bounded per-frame apply path
+2. P2 Stage D: add tracing/metrics and baseline perf data for large directories
+3. P2 Stage E: tune UX/perf defaults and publish migration snippets
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -568,11 +568,11 @@ Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
 
 ### Epic 17.2 - Optional worker runtime (Stage B)
 
-- [ ] Task: add `ScanRuntime` abstraction with `SyncRuntime` + `WorkerRuntime`
+- [x] Task: add `ScanRuntime` abstraction with `SyncRuntime` + `WorkerRuntime`
   - Acceptance:
     - sync path remains baseline fallback
     - worker path can emit partial batches
-- [ ] Task: add cancellation + stale-batch drop guarantees
+- [x] Task: add cancellation + stale-batch drop guarantees
   - Acceptance:
     - switching directories quickly does not leak stale entries
     - tests cover `N` -> `N+1` request supersession

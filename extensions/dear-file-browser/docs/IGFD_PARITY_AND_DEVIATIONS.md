@@ -56,6 +56,6 @@ Last updated: 2026-02-06
 
 - Published: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md` (ScanCoordinator/ScanRuntime + generation-safe incremental scanning model).
 - Completed: Stage A scaffolding (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`) and generation-owned sync scan flow in `FileDialogCore`.
-- Next: add optional worker runtime with stale-batch drop guarantees.
+- Completed: Stage B runtime abstraction (`ScanRuntime` with `SyncRuntime`/`WorkerRuntime`) and stale-generation supersession behavior.
 - Next: add bounded per-frame processing + tracing/perf baseline.
 - Continue UX polish and migration snippets without changing parity guarantees.
