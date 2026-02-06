@@ -452,67 +452,27 @@ fn draw_contents_with_fs_and_hooks(
             ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
 
             ui.separator();
-            ui.text("Order presets:");
-            let current_order = state.ui.file_list_columns.normalized_order();
-            if ui
-                .selectable_config("Name | Ext | Size | Modified")
-                .selected(
-                    current_order
-                        == [
-                            FileListDataColumn::Name,
-                            FileListDataColumn::Extension,
-                            FileListDataColumn::Size,
-                            FileListDataColumn::Modified,
-                        ],
-                )
-                .build()
-            {
-                state.ui.file_list_columns.order = [
-                    FileListDataColumn::Name,
-                    FileListDataColumn::Extension,
-                    FileListDataColumn::Size,
-                    FileListDataColumn::Modified,
-                ];
+            ui.text("Order:");
+            let mut order = state.ui.file_list_columns.normalized_order();
+            let mut changed = false;
+            for index in 0..order.len() {
+                let column = order[index];
+                let mut label = data_column_label(column).to_string();
+                if !is_data_column_visible(&state.ui.file_list_columns, column) {
+                    label.push_str(" (hidden)");
+                }
+                ui.text(label);
+                ui.same_line();
+                if ui.small_button(format!("↑##col_order_up_{index}")) {
+                    changed |= move_column_order_up(&mut order, index);
+                }
+                ui.same_line();
+                if ui.small_button(format!("↓##col_order_down_{index}")) {
+                    changed |= move_column_order_down(&mut order, index);
+                }
             }
-            if ui
-                .selectable_config("Name | Size | Modified | Ext")
-                .selected(
-                    current_order
-                        == [
-                            FileListDataColumn::Name,
-                            FileListDataColumn::Size,
-                            FileListDataColumn::Modified,
-                            FileListDataColumn::Extension,
-                        ],
-                )
-                .build()
-            {
-                state.ui.file_list_columns.order = [
-                    FileListDataColumn::Name,
-                    FileListDataColumn::Size,
-                    FileListDataColumn::Modified,
-                    FileListDataColumn::Extension,
-                ];
-            }
-            if ui
-                .selectable_config("Name | Modified | Size | Ext")
-                .selected(
-                    current_order
-                        == [
-                            FileListDataColumn::Name,
-                            FileListDataColumn::Modified,
-                            FileListDataColumn::Size,
-                            FileListDataColumn::Extension,
-                        ],
-                )
-                .build()
-            {
-                state.ui.file_list_columns.order = [
-                    FileListDataColumn::Name,
-                    FileListDataColumn::Modified,
-                    FileListDataColumn::Size,
-                    FileListDataColumn::Extension,
-                ];
+            if changed {
+                state.ui.file_list_columns.order = order;
             }
 
             if ui.small_button("Reset columns") {
@@ -1862,6 +1822,39 @@ fn draw_file_table(
             draw_file_grid_view(ui, state, size, fs, request_confirm, thumbnails_backend)
         }
     }
+}
+
+fn data_column_label(column: FileListDataColumn) -> &'static str {
+    match column {
+        FileListDataColumn::Name => "Name",
+        FileListDataColumn::Extension => "Ext",
+        FileListDataColumn::Size => "Size",
+        FileListDataColumn::Modified => "Modified",
+    }
+}
+
+fn is_data_column_visible(config: &FileListColumnsConfig, column: FileListDataColumn) -> bool {
+    match column {
+        FileListDataColumn::Name | FileListDataColumn::Extension => true,
+        FileListDataColumn::Size => config.show_size,
+        FileListDataColumn::Modified => config.show_modified,
+    }
+}
+
+fn move_column_order_up(order: &mut [FileListDataColumn; 4], index: usize) -> bool {
+    if index == 0 || index >= order.len() {
+        return false;
+    }
+    order.swap(index, index - 1);
+    true
+}
+
+fn move_column_order_down(order: &mut [FileListDataColumn; 4], index: usize) -> bool {
+    if index + 1 >= order.len() {
+        return false;
+    }
+    order.swap(index, index + 1);
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3442,6 +3435,66 @@ mod tests {
                 FileListDataColumn::Modified,
                 FileListDataColumn::Size,
                 FileListDataColumn::Extension,
+            ]
+        );
+    }
+
+    #[test]
+    fn move_column_order_up_swaps_adjacent_items() {
+        let mut order = [
+            FileListDataColumn::Name,
+            FileListDataColumn::Extension,
+            FileListDataColumn::Size,
+            FileListDataColumn::Modified,
+        ];
+        assert!(super::move_column_order_up(&mut order, 2));
+        assert_eq!(
+            order,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Size,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Modified,
+            ]
+        );
+    }
+
+    #[test]
+    fn move_column_order_down_swaps_adjacent_items() {
+        let mut order = [
+            FileListDataColumn::Name,
+            FileListDataColumn::Extension,
+            FileListDataColumn::Size,
+            FileListDataColumn::Modified,
+        ];
+        assert!(super::move_column_order_down(&mut order, 1));
+        assert_eq!(
+            order,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Size,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Modified,
+            ]
+        );
+    }
+
+    #[test]
+    fn move_column_order_up_rejects_first_item() {
+        let mut order = [
+            FileListDataColumn::Name,
+            FileListDataColumn::Extension,
+            FileListDataColumn::Size,
+            FileListDataColumn::Modified,
+        ];
+        assert!(!super::move_column_order_up(&mut order, 0));
+        assert_eq!(
+            order,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
             ]
         );
     }
