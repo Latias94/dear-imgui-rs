@@ -577,10 +577,12 @@ fn draw_contents_with_fs_and_hooks(
                                 .border(true)
                                 .build(ui, || {
                                     let selected_entry_ids = state.core.selected_entry_ids();
+                                    let selected_paths = selected_entry_paths_from_ids(state);
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
                                         selected_entry_ids: &selected_entry_ids,
+                                        selected_paths: &selected_paths,
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core
@@ -627,10 +629,12 @@ fn draw_contents_with_fs_and_hooks(
                                 .border(true)
                                 .build(ui, || {
                                     let selected_entry_ids = state.core.selected_entry_ids();
+                                    let selected_paths = selected_entry_paths_from_ids(state);
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
                                         selected_entry_ids: &selected_entry_ids,
+                                        selected_paths: &selected_paths,
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core

@@ -53,6 +53,7 @@ The custom pane context is now ID-first as well:
 
 - removed: `selected_names: &[String]`
 - added: `selected_entry_ids: &[EntryId]`
+- added: `selected_paths: &[PathBuf]`
 
 ## Migration patterns
 

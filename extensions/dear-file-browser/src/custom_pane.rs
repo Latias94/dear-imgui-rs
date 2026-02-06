@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use dear_imgui_rs::Ui;
 
@@ -17,6 +17,8 @@ pub struct CustomPaneCtx<'a> {
     pub cwd: &'a Path,
     /// Selected entry IDs in deterministic selection order.
     pub selected_entry_ids: &'a [EntryId],
+    /// Selected entry paths in deterministic selection order.
+    pub selected_paths: &'a [PathBuf],
     /// Current save filename buffer (SaveFile mode).
     pub save_name: &'a str,
     /// Active filter (None = "All files").
