@@ -287,6 +287,23 @@ if let Some(res) = ui
 }
 ```
 
+## EntryId Selection Readback
+
+When you need stable selection state before confirm, treat IDs as source-of-truth
+and resolve paths from the current snapshot:
+
+```rust
+let selected_paths = state
+    .core
+    .selected_entry_ids()
+    .into_iter()
+    .filter_map(|id| state.core.entry_path_by_id(id).map(std::path::Path::to_path_buf))
+    .collect::<Vec<_>>();
+```
+
+If an ID is temporarily unresolved (for example right before rescan),
+`entry_path_by_id()` returns `None`.
+
 ## File Styles (ImGui UI)
 
 To decorate entries (folder icon, per-extension colors, tooltips), configure the `FileStyleRegistry`:

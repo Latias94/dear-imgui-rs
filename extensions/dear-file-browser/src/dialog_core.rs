@@ -376,6 +376,14 @@ impl FileDialogCore {
         self.selected_ids.iter().copied().collect()
     }
 
+    /// Resolves an entry path from an entry id in the current snapshot.
+    ///
+    /// Returns `None` when the id is not currently resolvable (for example,
+    /// before the next rescan after create/rename/paste).
+    pub fn entry_path_by_id(&self, id: EntryId) -> Option<&Path> {
+        self.entry_by_id(id).map(|entry| entry.path.as_path())
+    }
+
     /// Returns the currently focused entry id, if any.
     pub fn focused_entry_id(&self) -> Option<EntryId> {
         self.focused_id
@@ -1369,6 +1377,24 @@ mod tests {
                 "copy_file not supported in TestFs",
             ))
         }
+    }
+
+    #[test]
+    fn entry_path_by_id_resolves_visible_entry_path() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        set_view_files(&mut core, &["a.txt", "b.txt"]);
+
+        let b = entry_id(&core, "b.txt");
+        assert_eq!(core.entry_path_by_id(b), Some(Path::new("/tmp/b.txt")));
+    }
+
+    #[test]
+    fn entry_path_by_id_returns_none_for_unresolved_id() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        set_view_files(&mut core, &["a.txt"]);
+
+        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
+        assert!(core.entry_path_by_id(missing).is_none());
     }
 
     #[test]

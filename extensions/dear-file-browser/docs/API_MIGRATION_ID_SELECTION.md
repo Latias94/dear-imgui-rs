@@ -41,6 +41,7 @@ Canonical ID-first APIs:
 - `replace_selection_by_ids<I: IntoIterator<Item = EntryId>>(...)`
 - `selected_entry_ids() -> Vec<EntryId>`
 - `focused_entry_id() -> Option<EntryId>`
+- `entry_path_by_id(EntryId) -> Option<&Path>`
 
 Name read helpers were also removed from public API:
 
@@ -103,8 +104,18 @@ let ids = ["a.txt", "b.txt"]
 core.replace_selection_by_ids(ids);
 ```
 
+### 4) Resolve IDs to paths
+
+```rust
+let selected_paths = core
+    .selected_entry_ids()
+    .into_iter()
+    .filter_map(|id| core.entry_path_by_id(id).map(std::path::Path::to_path_buf))
+    .collect::<Vec<_>>();
+```
+
 ## Notes
 
 - There is no name-based compatibility layer anymore.
 - For create/rename/paste flows, select by `EntryId::from_path(...)` immediately and let next rescan resolve display names.
-- If callers need names/paths before confirm, resolve them from `selected_entry_ids()` against the current entry snapshot owned by the host UI.
+- If callers need paths before confirm, resolve them with `selected_entry_ids()` + `entry_path_by_id()`.
