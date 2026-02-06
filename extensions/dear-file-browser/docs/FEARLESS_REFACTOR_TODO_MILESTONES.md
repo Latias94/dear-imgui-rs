@@ -137,10 +137,14 @@ Goal: allow alternative filesystem backends and system devices integration.
 
 ### Epic 4.3 — Expand filesystem operations (parity enabler)
 
-- [ ] Task: extend `FileSystem` with optional operations:
-  - `rename`, `remove_file`, `remove_dir`, `create_dir_all`
-  - `exists`, `is_dir` convenience (or richer `metadata`)
-  - Acceptance: the UI can implement rename/delete/new-folder reliably without `std::fs` calls.
+- [x] Task: extend `FileSystem` with basic file operations:
+  - `rename`, `remove_file`, `remove_dir`
+  - Acceptance: the UI can implement rename/delete/new-folder without `std::fs` calls.
+- [ ] Task: extend `FileSystem` with “quality of life” operations (as needed):
+  - `create_dir_all` (for recursive mkdir)
+  - `exists` convenience (or richer `metadata`)
+  - recursive delete helpers (opt-in)
+  - Acceptance: advanced file operations don’t require leaking platform-specific IO details into UI.
 
 Exit criteria:
 
@@ -391,7 +395,7 @@ Goal: close the largest feature gap vs IGFD by adding core-supported file operat
 
 ### Epic 14.1 — Rename
 
-- [ ] Task: add an inline rename flow (F2 / context menu)
+- [x] Task: add an inline rename flow (F2 / context menu)
   - Acceptance:
     - rename uses `FileSystem::rename` (no direct `std::fs`)
     - selection + focus transfer to the renamed entry
@@ -399,10 +403,12 @@ Goal: close the largest feature gap vs IGFD by adding core-supported file operat
 
 ### Epic 14.2 — Delete
 
-- [ ] Task: add a delete flow (Del / context menu) with confirmation
+- [x] Task: add a delete flow (Del / context menu) with confirmation
   - Acceptance:
     - delete uses `remove_file` / `remove_dir` and shows a confirmation modal
     - after delete, directory cache is invalidated and selection is updated deterministically
+  - Notes:
+    - current implementation deletes directories only when empty (non-recursive)
 
 Exit criteria:
 

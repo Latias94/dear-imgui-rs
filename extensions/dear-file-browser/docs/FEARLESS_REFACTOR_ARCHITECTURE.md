@@ -58,7 +58,7 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 | Validation buttons tuning (placement/width/invert) | ❌ | Needs a “buttons layout” config and UI refactor. |
 | Filter groups / collection syntax (`Name{...}`) | 🟡 | Multiple named filters exist; no IGFD-string parser/collection syntax yet. |
 | Natural sort for extensions on demand | 🟡 | Natural sort for names exists; “Sort by extension” is not implemented. |
-| File operations (rename/delete/copy/paste, etc.) | ❌ | Currently only “New Folder”; FS trait needs expansion. |
+| File operations (rename/delete/copy/paste, etc.) | 🟡 | Rename + delete exist (delete dirs must be empty); copy/cut/paste/clipboard still missing. |
 
 ---
 
