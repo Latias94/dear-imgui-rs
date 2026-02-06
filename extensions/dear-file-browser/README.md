@@ -109,6 +109,30 @@ ui.window("Open")
     });
 ```
 
+### Reopen Semantics (IGFD-style Open/Display/Close)
+
+Like ImGuiFileDialog's `OpenDialog -> Display -> Close`, this crate exposes explicit dialog visibility helpers on `FileDialogState`:
+
+```rust
+if ui.button("Open File Dialog") {
+    state.open();
+}
+
+if state.is_open() {
+    if let Some(result) = ui.file_browser().show(&mut state) {
+        match result {
+            Ok(sel) => {
+                // use selection
+                let _ = sel;
+            }
+            Err(_e) => {
+                // cancelled or invalid
+            }
+        }
+        state.close();
+    }
+}
+```
 ## List Column Preferences
 
 List-view columns can be tuned per dialog instance. When users drag-resize or drag-reorder list columns, runtime preferences are written back into `state.ui.file_list_columns` automatically:
@@ -444,3 +468,4 @@ Dear ImGui’s default font does not include CJK glyphs or emoji. If your filesy
 ## License
 
 MIT OR Apache-2.0
+

@@ -465,7 +465,7 @@ pub(crate) enum PlacesEditMode {
 /// buffers) and does not affect the core selection/navigation semantics.
 #[derive(Debug)]
 pub struct FileDialogUiState {
-    /// Whether to draw the dialog (show/hide).
+    /// Whether to draw the dialog (show/hide). Prefer [`FileDialogState::open`]/[`FileDialogState::close`].
     pub visible: bool,
     /// Layout style for the dialog UI.
     pub layout: LayoutStyle,
@@ -660,11 +660,55 @@ impl FileDialogState {
             ui: FileDialogUiState::default(),
         }
     }
+
+    /// Opens (or reopens) the dialog.
+    ///
+    /// This mirrors IGFD's `OpenDialog` step before `Display`.
+    pub fn open(&mut self) {
+        self.ui.visible = true;
+    }
+
+    /// Reopens the dialog.
+    ///
+    /// Alias of [`FileDialogState::open`].
+    pub fn reopen(&mut self) {
+        self.open();
+    }
+
+    /// Closes the dialog.
+    ///
+    /// This mirrors IGFD's `Close` call.
+    pub fn close(&mut self) {
+        self.ui.visible = false;
+    }
+
+    /// Returns whether the dialog is currently open.
+    pub fn is_open(&self) -> bool {
+        self.ui.visible
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_close_roundtrip() {
+        let mut state = FileDialogState::new(DialogMode::OpenFile);
+
+        assert!(state.is_open());
+        state.close();
+        assert!(!state.is_open());
+
+        state.open();
+        assert!(state.is_open());
+
+        state.close();
+        assert!(!state.is_open());
+
+        state.reopen();
+        assert!(state.is_open());
+    }
 
     #[test]
     fn file_list_columns_compact_roundtrip() {

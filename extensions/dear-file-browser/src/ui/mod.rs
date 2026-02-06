@@ -780,7 +780,7 @@ fn draw_contents_with_fs_and_hooks(
 
     let out = state.core.take_result();
     if out.is_some() {
-        state.ui.visible = false;
+        state.close();
     }
     out
 }

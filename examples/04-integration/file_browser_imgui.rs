@@ -38,7 +38,6 @@ struct AppWindow {
     context: PossiblyCurrentContext,
     imgui: ImguiState,
     // demo state
-    browser_visible: bool,
     browser: FileDialogState,
     status: String,
 }
@@ -112,7 +111,6 @@ impl AppWindow {
                 renderer,
                 last_frame: Instant::now(),
             },
-            browser_visible: true,
             browser,
             status: String::new(),
         })
@@ -145,19 +143,23 @@ impl AppWindow {
         ui.window("File Browser (ImGui)")
             .size([680.0, 520.0], Condition::FirstUseEver)
             .build(|| {
-                if ui.button(if self.browser_visible {
+                let browser_open = self.browser.is_open();
+                if ui.button(if browser_open {
                     "Hide Browser"
                 } else {
                     "Show Browser"
                 }) {
-                    self.browser_visible = !self.browser_visible;
-                    self.browser.ui.visible = self.browser_visible;
+                    if browser_open {
+                        self.browser.close();
+                    } else {
+                        self.browser.open();
+                    }
                 }
                 ui.same_line();
                 ui.text(&self.status);
 
                 ui.separator();
-                if self.browser_visible {
+                if self.browser.is_open() {
                     if let Some(res) = ui.file_browser().show(&mut self.browser) {
                         match res {
                             Ok(sel) => {

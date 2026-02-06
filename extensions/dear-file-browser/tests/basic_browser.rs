@@ -19,7 +19,7 @@ fn imgui_file_browser_smoke_test() {
     let ui = imgui.frame();
 
     let mut state = FileDialogState::new(DialogMode::OpenFile);
-    state.ui.visible = true;
+    state.open();
 
     let _ = ui.file_browser().show(&mut state);
 }
