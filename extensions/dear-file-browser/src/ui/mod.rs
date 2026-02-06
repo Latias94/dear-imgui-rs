@@ -959,13 +959,33 @@ fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) 
     }
 
     if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
-        let Some(from_name) = state.ui.rename_target.clone() else {
+        let Some(target_id) = state.ui.rename_target_id else {
             ui.text_disabled("No entry selected for rename.");
             if ui.button("Close") {
                 ui.close_current_popup();
             }
             return;
         };
+
+        let Some(from_path) = state
+            .core
+            .entry_path_by_id(target_id)
+            .map(Path::to_path_buf)
+        else {
+            ui.text_disabled("Selected entry is no longer available.");
+            if ui.button("Close") {
+                state.ui.rename_target_id = None;
+                ui.close_current_popup();
+            }
+            return;
+        };
+
+        let from_name = from_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| from_path.display().to_string());
 
         ui.text("Rename in:");
         ui.text_disabled(state.core.cwd.display().to_string());
@@ -983,7 +1003,7 @@ fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) 
         let cancel = ui.button("Cancel");
         if cancel {
             state.ui.rename_error = None;
-            state.ui.rename_target = None;
+            state.ui.rename_target_id = None;
             ui.close_current_popup();
         }
 
@@ -1002,8 +1022,7 @@ fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) 
                 state.ui.rename_error = Some("Target name is unchanged".into());
             } else {
                 let to_name = to_name.to_string();
-                let from_path = state.core.cwd.join(&from_name);
-                let to_path = state.core.cwd.join(&to_name);
+                let to_path = from_path.with_file_name(&to_name);
 
                 if fs.metadata(&to_path).is_ok() {
                     state.ui.rename_error = Some("Target already exists".into());
@@ -1014,7 +1033,7 @@ fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) 
                             state.core.focus_and_select_by_id(id);
                             state.ui.reveal_id_next = Some(id);
                             state.core.invalidate_dir_cache();
-                            state.ui.rename_target = None;
+                            state.ui.rename_target_id = None;
                             state.ui.rename_to.clear();
                             ui.close_current_popup();
                         }
@@ -1046,7 +1065,7 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
     }
 
     if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
-        if state.ui.delete_targets.is_empty() {
+        if state.ui.delete_target_ids.is_empty() {
             ui.text_disabled("No entries selected for deletion.");
             if ui.button("Close") {
                 ui.close_current_popup();
@@ -1054,10 +1073,40 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
             return;
         }
 
+        let delete_targets = state
+            .ui
+            .delete_target_ids
+            .iter()
+            .copied()
+            .filter_map(|id| state.core.entry_path_by_id(id).map(Path::to_path_buf))
+            .collect::<Vec<_>>();
+
+        if delete_targets.len() != state.ui.delete_target_ids.len() {
+            ui.text_disabled("Some selected entries are no longer available.");
+            if ui.button("Close") {
+                state.ui.delete_error = None;
+                state.ui.delete_target_ids.clear();
+                state.ui.delete_recursive = false;
+                ui.close_current_popup();
+            }
+            return;
+        }
+
+        let delete_target_names = delete_targets
+            .iter()
+            .map(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|name| !name.is_empty())
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| path.display().to_string())
+            })
+            .collect::<Vec<_>>();
+
         ui.text(format!(
             "Delete {} entr{} in:",
-            state.ui.delete_targets.len(),
-            if state.ui.delete_targets.len() == 1 {
+            delete_target_names.len(),
+            if delete_target_names.len() == 1 {
                 "y"
             } else {
                 "ies"
@@ -1066,23 +1115,22 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
         ui.text_disabled(state.core.cwd.display().to_string());
         ui.separator();
 
-        let preview_n = 6usize.min(state.ui.delete_targets.len());
-        for n in state.ui.delete_targets.iter().take(preview_n) {
-            ui.text(n);
+        let preview_n = 6usize.min(delete_target_names.len());
+        for name in delete_target_names.iter().take(preview_n) {
+            ui.text(name);
         }
-        if state.ui.delete_targets.len() > preview_n {
+        if delete_target_names.len() > preview_n {
             ui.text_disabled(format!(
                 "... and {} more",
-                state.ui.delete_targets.len() - preview_n
+                delete_target_names.len() - preview_n
             ));
         }
 
         ui.separator();
 
-        let any_dir = state.ui.delete_targets.iter().any(|name| {
-            let p = state.core.cwd.join(name);
-            fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false)
-        });
+        let any_dir = delete_targets
+            .iter()
+            .any(|path| fs.metadata(path).map(|m| m.is_dir).unwrap_or(false));
         if any_dir {
             ui.checkbox("Recursive", &mut state.ui.delete_recursive);
             ui.same_line();
@@ -1097,7 +1145,7 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
         let cancel = ui.button("Cancel");
         if cancel {
             state.ui.delete_error = None;
-            state.ui.delete_targets.clear();
+            state.ui.delete_target_ids.clear();
             state.ui.delete_recursive = false;
             ui.close_current_popup();
         }
@@ -1105,19 +1153,18 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
         if del {
             state.ui.delete_error = None;
             let recursive = state.ui.delete_recursive;
-            for name in &state.ui.delete_targets {
-                let p = state.core.cwd.join(name);
-                let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
-                let r = if is_dir {
+            for (path, name) in delete_targets.iter().zip(delete_target_names.iter()) {
+                let is_dir = fs.metadata(path).map(|m| m.is_dir).unwrap_or(false);
+                let result = if is_dir {
                     if recursive {
-                        fs.remove_dir_all(&p)
+                        fs.remove_dir_all(path)
                     } else {
-                        fs.remove_dir(&p)
+                        fs.remove_dir(path)
                     }
                 } else {
-                    fs.remove_file(&p)
+                    fs.remove_file(path)
                 };
-                if let Err(e) = r {
+                if let Err(e) = result {
                     state.ui.delete_error = Some(format!("Failed to delete '{name}': {e}"));
                     break;
                 }
@@ -1126,7 +1173,7 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
             if state.ui.delete_error.is_none() {
                 state.core.clear_selection();
                 state.core.invalidate_dir_cache();
-                state.ui.delete_targets.clear();
+                state.ui.delete_target_ids.clear();
                 state.ui.delete_recursive = false;
                 ui.close_current_popup();
             }
@@ -1137,21 +1184,6 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
             ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
         }
     }
-}
-
-fn selected_entry_names_from_ids(state: &FileDialogState) -> Vec<String> {
-    let entries = state.core.entries();
-    state
-        .core
-        .selected_entry_ids()
-        .into_iter()
-        .filter_map(|id| {
-            entries
-                .iter()
-                .find(|entry| entry.id == id)
-                .map(|entry| entry.name.clone())
-        })
-        .collect()
 }
 
 fn selected_entry_paths_from_ids(state: &FileDialogState) -> Vec<PathBuf> {
@@ -1189,26 +1221,35 @@ fn open_rename_modal_from_selection(state: &mut FileDialogState) {
     if state.core.selected_len() != 1 {
         return;
     }
-    let Some(rename_target) = selected_entry_names_from_ids(state).into_iter().next() else {
+    let Some(rename_target_id) = state.core.selected_entry_ids().into_iter().next() else {
         return;
     };
-    state.ui.rename_target = Some(rename_target.clone());
-    state.ui.rename_to = rename_target;
+    let Some(rename_to) = state
+        .core
+        .entry_path_by_id(rename_target_id)
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+    else {
+        return;
+    };
+    state.ui.rename_target_id = Some(rename_target_id);
+    state.ui.rename_to = rename_to;
     state.ui.rename_error = None;
     state.ui.rename_open_next = true;
     state.ui.rename_focus_next = true;
 }
 
 fn open_delete_modal_from_selection(state: &mut FileDialogState) {
-    let delete_targets = selected_entry_names_from_ids(state);
-    if delete_targets.is_empty() {
+    let delete_target_ids = state.core.selected_entry_ids();
+    if delete_target_ids.is_empty() {
         return;
     }
-    state.ui.delete_targets = delete_targets;
+    state.ui.delete_target_ids = delete_target_ids;
     state.ui.delete_error = None;
     state.ui.delete_open_next = true;
 }
-
 fn clipboard_set_from_selection(state: &mut FileDialogState, op: ClipboardOp) {
     if !state.core.has_selection() {
         return;
@@ -3370,10 +3411,17 @@ fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSys
 
 #[cfg(test)]
 mod tests {
-    use super::{ListColumnLayout, list_column_layout};
-    use crate::dialog_state::{
-        FileListColumnWeightOverrides, FileListColumnsConfig, FileListDataColumn,
+    use super::{
+        ListColumnLayout, list_column_layout, open_delete_modal_from_selection,
+        open_rename_modal_from_selection,
     };
+    use crate::core::DialogMode;
+    use crate::dialog_core::EntryId;
+    use crate::dialog_state::{
+        FileDialogState, FileListColumnWeightOverrides, FileListColumnsConfig, FileListDataColumn,
+    };
+    use crate::fs::{FileSystem, FsEntry, FsMetadata};
+    use std::path::{Path, PathBuf};
 
     fn columns_config(
         show_size: bool,
@@ -3387,6 +3435,88 @@ mod tests {
         cfg
     }
 
+    #[derive(Clone, Default)]
+    struct UiTestFs {
+        entries: Vec<FsEntry>,
+    }
+
+    impl FileSystem for UiTestFs {
+        fn read_dir(&self, _dir: &Path) -> std::io::Result<Vec<FsEntry>> {
+            Ok(self.entries.clone())
+        }
+
+        fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+            Ok(path.to_path_buf())
+        }
+
+        fn metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
+            self.entries
+                .iter()
+                .find(|entry| entry.path == path)
+                .map(|entry| FsMetadata {
+                    is_dir: entry.is_dir,
+                })
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not found"))
+        }
+
+        fn create_dir(&self, _path: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "create_dir not supported in UiTestFs",
+            ))
+        }
+
+        fn rename(&self, _from: &Path, _to: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "rename not supported in UiTestFs",
+            ))
+        }
+
+        fn remove_file(&self, _path: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "remove_file not supported in UiTestFs",
+            ))
+        }
+
+        fn remove_dir(&self, _path: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "remove_dir not supported in UiTestFs",
+            ))
+        }
+
+        fn remove_dir_all(&self, _path: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "remove_dir_all not supported in UiTestFs",
+            ))
+        }
+
+        fn copy_file(&self, _from: &Path, _to: &Path) -> std::io::Result<u64> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "copy_file not supported in UiTestFs",
+            ))
+        }
+    }
+
+    fn file_entry(path: &str) -> FsEntry {
+        let path = PathBuf::from(path);
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(path.as_os_str().to_string_lossy().as_ref())
+            .to_string();
+        FsEntry {
+            name,
+            path,
+            is_dir: false,
+            size: None,
+            modified: None,
+        }
+    }
     #[test]
     fn list_column_layout_all_columns_visible_without_preview() {
         let cfg = columns_config(
@@ -3714,5 +3844,77 @@ mod tests {
             ]
         );
         assert_eq!(cfg.weight_overrides, expected_weights);
+    }
+
+    #[test]
+    fn open_rename_modal_from_selection_prefills_name_from_id() {
+        let mut state = FileDialogState::new(DialogMode::OpenFiles);
+        state.core.set_cwd(PathBuf::from("/tmp"));
+
+        let fs = UiTestFs {
+            entries: vec![file_entry("/tmp/a.txt")],
+        };
+        state.core.rescan_if_needed(&fs);
+
+        let id = state
+            .core
+            .entries()
+            .iter()
+            .find(|entry| entry.path == Path::new("/tmp/a.txt"))
+            .map(|entry| entry.id)
+            .expect("missing /tmp/a.txt entry id");
+        state.core.focus_and_select_by_id(id);
+
+        open_rename_modal_from_selection(&mut state);
+
+        assert_eq!(state.ui.rename_target_id, Some(id));
+        assert_eq!(state.ui.rename_to, "a.txt");
+        assert!(state.ui.rename_open_next);
+        assert!(state.ui.rename_focus_next);
+    }
+
+    #[test]
+    fn open_rename_modal_from_selection_ignores_unresolved_id() {
+        let mut state = FileDialogState::new(DialogMode::OpenFiles);
+        let id = EntryId::from_path(Path::new("/tmp/missing.txt"));
+        state.core.focus_and_select_by_id(id);
+
+        open_rename_modal_from_selection(&mut state);
+
+        assert_eq!(state.ui.rename_target_id, None);
+        assert!(state.ui.rename_to.is_empty());
+        assert!(!state.ui.rename_open_next);
+    }
+
+    #[test]
+    fn open_delete_modal_from_selection_stores_selected_ids() {
+        let mut state = FileDialogState::new(DialogMode::OpenFiles);
+        state.core.set_cwd(PathBuf::from("/tmp"));
+
+        let fs = UiTestFs {
+            entries: vec![file_entry("/tmp/a.txt"), file_entry("/tmp/b.txt")],
+        };
+        state.core.rescan_if_needed(&fs);
+
+        let a = state
+            .core
+            .entries()
+            .iter()
+            .find(|entry| entry.path == Path::new("/tmp/a.txt"))
+            .map(|entry| entry.id)
+            .expect("missing /tmp/a.txt entry id");
+        let b = state
+            .core
+            .entries()
+            .iter()
+            .find(|entry| entry.path == Path::new("/tmp/b.txt"))
+            .map(|entry| entry.id)
+            .expect("missing /tmp/b.txt entry id");
+        state.core.replace_selection_by_ids([b, a]);
+
+        open_delete_modal_from_selection(&mut state);
+
+        assert_eq!(state.ui.delete_target_ids, vec![b, a]);
+        assert!(state.ui.delete_open_next);
     }
 }

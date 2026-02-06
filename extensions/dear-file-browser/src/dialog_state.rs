@@ -505,16 +505,16 @@ pub struct FileDialogUiState {
     pub rename_open_next: bool,
     /// Focus the rename input on next frame.
     pub rename_focus_next: bool,
-    /// Rename target entry name (relative to cwd).
-    pub rename_target: Option<String>,
+    /// Rename target entry id.
+    pub rename_target_id: Option<EntryId>,
     /// Rename "to" buffer.
     pub rename_to: String,
     /// Error string shown inside the rename modal.
     pub rename_error: Option<String>,
     /// Open the "Delete" confirmation modal on next frame.
     pub delete_open_next: bool,
-    /// Pending delete targets (relative to cwd).
-    pub delete_targets: Vec<String>,
+    /// Pending delete target ids.
+    pub delete_target_ids: Vec<EntryId>,
     /// Whether directory deletion should be recursive (`remove_dir_all`) instead of requiring empty directories.
     pub delete_recursive: bool,
     /// Error string shown inside the delete modal.
@@ -603,11 +603,11 @@ impl Default for FileDialogUiState {
             new_folder_error: None,
             rename_open_next: false,
             rename_focus_next: false,
-            rename_target: None,
+            rename_target_id: None,
             rename_to: String::new(),
             rename_error: None,
             delete_open_next: false,
-            delete_targets: Vec::new(),
+            delete_target_ids: Vec::new(),
             delete_recursive: false,
             delete_error: None,
             clipboard: None,
