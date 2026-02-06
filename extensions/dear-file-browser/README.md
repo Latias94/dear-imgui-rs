@@ -144,6 +144,41 @@ if let Some(res) = mgr.show_browser(ui, open_id) {
 }
 ```
 
+## Custom Pane (IGFD-style)
+
+To render extra widgets below the file list and optionally block confirmation, implement `CustomPane`:
+
+```rust
+use dear_file_browser::{ConfirmGate, CustomPane, CustomPaneCtx};
+
+#[derive(Default)]
+struct MyPane {
+    must_select: bool,
+}
+
+impl CustomPane for MyPane {
+    fn draw(&mut self, ui: &dear_imgui_rs::Ui, ctx: CustomPaneCtx<'_>) -> ConfirmGate {
+        ui.checkbox("Require selection", &mut self.must_select);
+        if self.must_select && ctx.selected_names.is_empty() {
+            ConfirmGate {
+                can_confirm: false,
+                message: Some("Select at least one entry".into()),
+            }
+        } else {
+            ConfirmGate::default()
+        }
+    }
+}
+
+let mut pane = MyPane::default();
+if let Some(res) = ui
+    .file_browser()
+    .draw_contents_with_custom_pane(&mut state, &mut pane)
+{
+    // handle res
+}
+```
+
 ## WASM
 
 - Native: `rfd` uses the browser file picker and is the recommended way to access user files.

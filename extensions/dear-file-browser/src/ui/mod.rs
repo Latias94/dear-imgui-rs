@@ -5,7 +5,8 @@ use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton};
 
 use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy};
-use crate::dialog_core::{DirEntry, Modifiers};
+use crate::custom_pane::{CustomPane, CustomPaneCtx};
+use crate::dialog_core::{ConfirmGate, DirEntry, Modifiers};
 use crate::dialog_state::FileDialogState;
 use crate::fs::{FileSystem, StdFileSystem};
 use crate::places::Places;
@@ -74,7 +75,29 @@ impl<'ui> FileBrowser<'ui> {
         state: &mut FileDialogState,
         fs: &dyn FileSystem,
     ) -> Option<Result<Selection, FileDialogError>> {
-        draw_contents_with_fs(self.ui, state, fs)
+        draw_contents_with_fs_and_custom_pane(self.ui, state, fs, None)
+    }
+
+    /// Draw only the contents of the file browser (no window/modal host) with a custom pane.
+    ///
+    /// The pane can draw additional UI below the file list and can block confirmation.
+    pub fn draw_contents_with_custom_pane(
+        &self,
+        state: &mut FileDialogState,
+        custom_pane: &mut dyn CustomPane,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        self.draw_contents_with_fs_and_custom_pane(state, &StdFileSystem, custom_pane)
+    }
+
+    /// Draw only the contents of the file browser (no window/modal host) using a custom filesystem
+    /// and a custom pane.
+    pub fn draw_contents_with_fs_and_custom_pane(
+        &self,
+        state: &mut FileDialogState,
+        fs: &dyn FileSystem,
+        custom_pane: &mut dyn CustomPane,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        draw_contents_with_fs_and_custom_pane(self.ui, state, fs, Some(custom_pane))
     }
 
     /// Draw the file browser in a standard ImGui window with default host config.
@@ -101,6 +124,17 @@ impl<'ui> FileBrowser<'ui> {
         cfg: &WindowHostConfig,
         fs: &dyn FileSystem,
     ) -> Option<Result<Selection, FileDialogError>> {
+        self.show_windowed_with_fs_and_custom_pane(state, cfg, fs, None)
+    }
+
+    /// Draw the file browser in a standard ImGui window using a custom filesystem and custom pane.
+    pub fn show_windowed_with_fs_and_custom_pane(
+        &self,
+        state: &mut FileDialogState,
+        cfg: &WindowHostConfig,
+        fs: &dyn FileSystem,
+        mut custom_pane: Option<&mut dyn CustomPane>,
+    ) -> Option<Result<Selection, FileDialogError>> {
         if !state.ui.visible {
             return None;
         }
@@ -110,7 +144,7 @@ impl<'ui> FileBrowser<'ui> {
             .window(&cfg.title)
             .size(cfg.initial_size, cfg.size_condition)
             .build(|| {
-                out = draw_contents_with_fs(self.ui, state, fs);
+                out = draw_contents_with_fs_and_custom_pane(self.ui, state, fs, custom_pane.take());
             });
         out
     }
@@ -120,17 +154,21 @@ fn draw_contents(
     ui: &Ui,
     state: &mut FileDialogState,
 ) -> Option<Result<Selection, FileDialogError>> {
-    draw_contents_with_fs(ui, state, &StdFileSystem)
+    draw_contents_with_fs_and_custom_pane(ui, state, &StdFileSystem, None)
 }
 
-fn draw_contents_with_fs(
+fn draw_contents_with_fs_and_custom_pane(
     ui: &Ui,
     state: &mut FileDialogState,
     fs: &dyn FileSystem,
+    mut custom_pane: Option<&mut dyn CustomPane>,
 ) -> Option<Result<Selection, FileDialogError>> {
     if !state.ui.visible {
         return None;
     }
+
+    let mut request_confirm = false;
+    let mut confirm_gate = ConfirmGate::default();
 
     // Top toolbar: Up, Refresh, Hidden toggle, Breadcrumbs, Filter, Search
     if ui.button("Up") {
@@ -196,14 +234,84 @@ fn draw_contents_with_fs(
             ui.child_window("file_list")
                 .size([avail[0] - left_w - 8.0, avail[1] - 80.0])
                 .build(ui, || {
-                    draw_file_table(ui, state, [avail[0] - left_w - 8.0, avail[1] - 110.0], fs);
+                    let inner = ui.content_region_avail();
+                    let mut table_h = inner[1];
+                    let show_pane =
+                        state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
+                    let pane_h = if show_pane {
+                        state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0))
+                    } else {
+                        0.0
+                    };
+                    if pane_h > 0.0 {
+                        table_h = (table_h - pane_h - 8.0).max(0.0);
+                    }
+
+                    draw_file_table(ui, state, [inner[0], table_h], fs, &mut request_confirm);
+
+                    if let Some(pane) = custom_pane.as_deref_mut() {
+                        if state.ui.custom_pane_enabled && pane_h > 0.0 {
+                            ui.separator();
+                            ui.child_window("custom_pane")
+                                .size([inner[0], pane_h])
+                                .border(true)
+                                .build(ui, || {
+                                    let ctx = CustomPaneCtx {
+                                        mode: state.core.mode,
+                                        cwd: &state.core.cwd,
+                                        selected_names: &state.core.selected,
+                                        save_name: &state.core.save_name,
+                                        active_filter: state
+                                            .core
+                                            .active_filter
+                                            .and_then(|i| state.core.filters.get(i)),
+                                    };
+                                    confirm_gate = pane.draw(ui, ctx);
+                                });
+                        }
+                    }
                 });
         }
         LayoutStyle::Minimal => {
             ui.child_window("file_list_min")
                 .size([avail[0], avail[1] - 80.0])
                 .build(ui, || {
-                    draw_file_table(ui, state, [avail[0], avail[1] - 110.0], fs);
+                    let inner = ui.content_region_avail();
+                    let mut table_h = inner[1];
+                    let show_pane =
+                        state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
+                    let pane_h = if show_pane {
+                        state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0))
+                    } else {
+                        0.0
+                    };
+                    if pane_h > 0.0 {
+                        table_h = (table_h - pane_h - 8.0).max(0.0);
+                    }
+
+                    draw_file_table(ui, state, [inner[0], table_h], fs, &mut request_confirm);
+
+                    if let Some(pane) = custom_pane.as_deref_mut() {
+                        if state.ui.custom_pane_enabled && pane_h > 0.0 {
+                            ui.separator();
+                            ui.child_window("custom_pane")
+                                .size([inner[0], pane_h])
+                                .border(true)
+                                .build(ui, || {
+                                    let ctx = CustomPaneCtx {
+                                        mode: state.core.mode,
+                                        cwd: &state.core.cwd,
+                                        selected_names: &state.core.selected,
+                                        save_name: &state.core.save_name,
+                                        active_filter: state
+                                            .core
+                                            .active_filter
+                                            .and_then(|i| state.core.filters.get(i)),
+                                    };
+                                    confirm_gate = pane.draw(ui, ctx);
+                                });
+                        }
+                    }
                 });
         }
     }
@@ -257,7 +365,15 @@ fn draw_contents_with_fs(
         DialogMode::PickFolder => "Select",
         DialogMode::SaveFile => "Save",
     };
+    let _disabled = ui.begin_disabled_with_cond(!confirm_gate.can_confirm);
     let confirm = ui.button(confirm_label);
+    drop(_disabled);
+    if !confirm_gate.can_confirm {
+        if let Some(msg) = confirm_gate.message.as_deref() {
+            ui.same_line();
+            ui.text_disabled(msg);
+        }
+    }
     ui.same_line();
     let cancel = ui.button("Cancel");
     ui.same_line();
@@ -276,20 +392,6 @@ fn draw_contents_with_fs(
         state.core.double_click = dbl;
     }
 
-    if cancel {
-        state.core.cancel();
-    } else if confirm {
-        state.ui.ui_error = None;
-        if let Err(e) = state.core.confirm(fs) {
-            state.ui.ui_error = Some(e.to_string());
-        }
-    }
-
-    if let Some(err) = &state.ui.ui_error {
-        ui.separator();
-        ui.text_colored([1.0, 0.3, 0.3, 1.0], format!("Error: {err}"));
-    }
-
     // Keyboard shortcuts (only when the host window is focused)
     if state.ui.visible && ui.is_window_focused() {
         let ctrl = ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl);
@@ -305,11 +407,23 @@ fn draw_contents_with_fs(
             state.core.navigate_up();
         }
         if !state.ui.path_edit && !ui.io().want_text_input() && ui.is_key_pressed(Key::Enter) {
-            state.ui.ui_error = None;
-            if let Err(e) = state.core.activate_focused(fs) {
-                state.ui.ui_error = Some(e.to_string());
-            }
+            request_confirm |= state.core.activate_focused();
         }
+    }
+
+    request_confirm |= confirm;
+    if cancel {
+        state.core.cancel();
+    } else if request_confirm {
+        state.ui.ui_error = None;
+        if let Err(e) = state.core.confirm(fs, &confirm_gate) {
+            state.ui.ui_error = Some(e.to_string());
+        }
+    }
+
+    if let Some(err) = &state.ui.ui_error {
+        ui.separator();
+        ui.text_colored([1.0, 0.3, 0.3, 1.0], format!("Error: {err}"));
     }
 
     let out = state.core.take_result();
@@ -575,7 +689,13 @@ fn draw_places_io_modal(ui: &Ui, state: &mut FileDialogState) {
     }
 }
 
-fn draw_file_table(ui: &Ui, state: &mut FileDialogState, size: [f32; 2], fs: &dyn FileSystem) {
+fn draw_file_table(
+    ui: &Ui,
+    state: &mut FileDialogState,
+    size: [f32; 2],
+    fs: &dyn FileSystem,
+    request_confirm: &mut bool,
+) {
     state.core.rescan(fs);
 
     // Table
@@ -699,8 +819,8 @@ fn draw_file_table(ui: &Ui, state: &mut FileDialogState, size: [f32; 2], fs: &dy
 
                 if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
                     state.ui.ui_error = None;
-                    if let Err(err) = state.core.double_click_entry(e.name.clone(), e.is_dir, fs) {
-                        state.ui.ui_error = Some(err.to_string());
+                    if state.core.double_click_entry(e.name.clone(), e.is_dir) {
+                        *request_confirm = true;
                     }
                 }
 

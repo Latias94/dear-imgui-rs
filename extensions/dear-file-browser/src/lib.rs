@@ -14,6 +14,8 @@
 
 mod core;
 #[cfg(feature = "imgui")]
+mod custom_pane;
+#[cfg(feature = "imgui")]
 mod dialog_core;
 #[cfg(feature = "imgui")]
 mod dialog_manager;
@@ -33,7 +35,9 @@ pub use core::{
     Selection, SortBy,
 };
 #[cfg(feature = "imgui")]
-pub use dialog_core::{FileDialogCore, Modifiers};
+pub use custom_pane::{CustomPane, CustomPaneCtx};
+#[cfg(feature = "imgui")]
+pub use dialog_core::{ConfirmGate, FileDialogCore, Modifiers};
 #[cfg(feature = "imgui")]
 pub use dialog_manager::{DialogId, DialogManager};
 #[cfg(feature = "imgui")]

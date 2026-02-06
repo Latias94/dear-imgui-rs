@@ -17,12 +17,12 @@ Goal: establish safety nets and constraints before moving code.
 
 ### Epic 0.1 — Snapshot current behaviors
 
-- [ ] Task: Document current features & limitations in `extensions/dear-file-browser/README.md`
+- [x] Task: Document current features & limitations in `extensions/dear-file-browser/README.md`
   - Acceptance: README has a clear "Current capabilities" section and known gaps.
-- [ ] Task: Add core-level regression tests where feasible (no ImGui)
+- [x] Task: Add core-level regression tests where feasible (no ImGui)
   - Candidate: filter matching (case-insensitive), selection finalize rules, save name empty error.
   - Acceptance: `cargo test -p dear-file-browser` passes.
-- [ ] Task: Add a minimal ImGui smoke test for UI drawing
+- [x] Task: Add a minimal ImGui smoke test for UI drawing
   - Acceptance: calling the widget in a headless ImGui context does not panic.
 
 ### Epic 0.2 — Refactor constraints
@@ -46,14 +46,14 @@ Goal: make the file browser renderable in different hosts without changing behav
 
 ### Epic 1.1 — Extract `draw_contents()`
 
-- [ ] Task: Create `ui::draw_contents(ui, state, ...)` that draws the current UI without creating a window.
+- [x] Task: Create `ui::draw_contents(ui, state, ...)` that draws the current UI without creating a window.
   - Acceptance: behavior identical to today when wrapped by a window host.
 
 ### Epic 1.2 — Introduce hosts (minimal)
 
-- [ ] Task: Add a `WindowHost` wrapper that calls `draw_contents()`.
+- [x] Task: Add a `WindowHost` wrapper that calls `draw_contents()`.
   - Acceptance: public API still provides the same `show()` UX.
-- [ ] Task: Add an `EmbedHost` example (in docs or examples) showing embedding in a parent window/child region.
+- [x] Task: Add an `EmbedHost` example (in docs or examples) showing embedding in a parent window/child region.
   - Acceptance: example compiles and renders.
 
 Exit criteria:
@@ -94,7 +94,7 @@ Goal: enable multiple dialogs concurrently and decouple "open" from "display".
 
 ### Epic 3.1 — `DialogManager` + `DialogId`
 
-- [ ] Task: Implement `DialogManager::open(req) -> DialogId`
+- [x] Task: Implement `DialogManager::open(req) -> DialogId`
   - Acceptance: you can open two dialogs with different configuration and drive them independently.
 
 ### Epic 3.2 — OpenRequest / Result typing
@@ -116,12 +116,12 @@ Goal: allow alternative filesystem backends and system devices integration.
 
 ### Epic 4.1 — `FileSystem` trait + default implementation
 
-- [ ] Task: Add `FileSystem` trait (read_dir, drives/devices, canonicalize, exists, is_dir, mkdir if needed)
+- [x] Task: Add `FileSystem` trait (read_dir, drives/devices, canonicalize, exists, is_dir, mkdir if needed)
   - Acceptance: default uses `std::fs`.
 
 ### Epic 4.2 — Replace direct `std::fs` usage in core/UI
 
-- [ ] Task: all filesystem accesses go through `FileSystem`
+- [x] Task: all filesystem accesses go through `FileSystem`
   - Acceptance: no `std::fs::read_dir` inside UI module.
 
 Exit criteria:
@@ -136,19 +136,19 @@ Goal: implement an IGFD-like Places pane with groups and persistence.
 
 ### Epic 5.1 — Data model + serialization
 
-- [ ] Task: `PlacesStore`, `PlacesGroup`, `PlaceItem`
-- [ ] Task: `serialize()/deserialize()` (JSON or RON)
+- [x] Task: `PlacesStore`, `PlacesGroup`, `PlaceItem`
+- [x] Task: `serialize()/deserialize()` (compact string format for now)
   - Acceptance: roundtrip test passes.
 
 ### Epic 5.2 — UI pane
 
-- [ ] Task: left pane renders groups; groups can be expanded/collapsed
+- [x] Task: left pane renders groups; groups can be expanded/collapsed
 - [ ] Task: user-editable groups support add/remove/rename items (minimum viable)
   - Acceptance: interactive editing works without panics; operations are reflected in store.
 
 ### Epic 5.3 — System devices integration
 
-- [ ] Task: default "Devices" group from `FileSystem::drives()/devices()`
+- [x] Task: default "Devices" group from `FileSystem::drives()/devices()`
   - Acceptance: Windows shows drives; other OS provide at least root/home entries.
 
 Exit criteria:
@@ -168,14 +168,14 @@ Goal: bring selection and keyboard navigation close to IGFD.
 
 ### Epic 6.2 — Multi-select gestures
 
-- [ ] Task: Ctrl-click toggles
-- [ ] Task: Shift-click selects ranges
-- [ ] Task: Ctrl+A selects all visible
+- [x] Task: Ctrl-click toggles
+- [x] Task: Shift-click selects ranges
+- [x] Task: Ctrl+A selects all visible
   - Acceptance: works with filtering/search (visible set only).
 
 ### Epic 6.3 — Keyboard navigation
 
-- [ ] Task: up/down moves focus; Enter navigates/confirm; Backspace up-dir
+- [x] Task: up/down moves focus; Enter navigates/confirm; Backspace up-dir
 - [ ] Task: type-to-select buffer (optional)
   - Acceptance: behavior documented and tested where possible.
 
@@ -257,12 +257,12 @@ Goal: implement IGFD’s signature feature.
 
 ### Epic 10.1 — Pane trait & context
 
-- [ ] Task: define `CustomPane` trait and `PaneCtx`
+- [x] Task: define `CustomPane` trait and `PaneCtx`
   - includes: active filter, selection, current dir, user_data
 
 ### Epic 10.2 — Confirm gating
 
-- [ ] Task: pane returns `can_confirm` with optional message
+- [x] Task: pane returns `can_confirm` with optional message
   - Acceptance: confirm button disabled and provides feedback.
 
 Exit criteria:
@@ -352,4 +352,3 @@ Copy/paste for each refactor PR:
 - Risk:
 - Tests:
 - Follow-ups:
-

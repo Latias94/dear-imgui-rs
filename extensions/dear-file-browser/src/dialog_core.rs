@@ -13,6 +13,27 @@ pub struct Modifiers {
     pub shift: bool,
 }
 
+/// Per-frame gate for whether the dialog is allowed to confirm.
+///
+/// This is primarily used by IGFD-style custom panes to disable confirmation
+/// and provide user feedback when extra validation fails.
+#[derive(Clone, Debug)]
+pub struct ConfirmGate {
+    /// Whether confirmation is allowed.
+    pub can_confirm: bool,
+    /// Optional user-facing message shown when confirmation is blocked.
+    pub message: Option<String>,
+}
+
+impl Default for ConfirmGate {
+    fn default() -> Self {
+        Self {
+            can_confirm: true,
+            message: None,
+        }
+    }
+}
+
 /// A single directory entry in the current directory view.
 #[derive(Clone, Debug)]
 pub(crate) struct DirEntry {
@@ -208,16 +229,13 @@ impl FileDialogCore {
     /// Activates the focused entry (Enter).
     ///
     /// If no selection exists, the focused item becomes selected, then confirm is attempted.
-    pub(crate) fn activate_focused(&mut self, fs: &dyn FileSystem) -> Result<(), FileDialogError> {
+    pub(crate) fn activate_focused(&mut self) -> bool {
         if self.selected.is_empty() {
             if let Some(name) = self.focused_name.clone() {
                 self.selected.push(name);
             }
         }
-        if !self.selected.is_empty() {
-            self.confirm(fs)?;
-        }
-        Ok(())
+        !self.selected.is_empty()
     }
 
     /// Handles a click on an entry row.
@@ -261,29 +279,24 @@ impl FileDialogCore {
     }
 
     /// Handles a double-click on an entry row.
-    pub(crate) fn double_click_entry(
-        &mut self,
-        name: String,
-        is_dir: bool,
-        fs: &dyn FileSystem,
-    ) -> Result<(), FileDialogError> {
+    pub(crate) fn double_click_entry(&mut self, name: String, is_dir: bool) -> bool {
         if !self.double_click {
-            return Ok(());
+            return false;
         }
         if is_dir {
             self.cwd.push(&name);
             self.selected.clear();
             self.focused_name = None;
             self.selection_anchor_name = None;
-            return Ok(());
+            return false;
         }
 
         if matches!(self.mode, DialogMode::OpenFile | DialogMode::OpenFiles) {
             self.selected.clear();
             self.selected.push(name);
-            self.confirm(fs)?;
+            return true;
         }
-        Ok(())
+        false
     }
 
     /// Navigates one directory up.
@@ -300,7 +313,11 @@ impl FileDialogCore {
     }
 
     /// Confirms the dialog. On success, stores a result and signals the UI to close.
-    pub(crate) fn confirm(&mut self, fs: &dyn FileSystem) -> Result<(), FileDialogError> {
+    pub(crate) fn confirm(
+        &mut self,
+        fs: &dyn FileSystem,
+        gate: &ConfirmGate,
+    ) -> Result<(), FileDialogError> {
         self.result = None;
 
         // Special-case: if a single directory selected in file-open modes, navigate into it
@@ -318,6 +335,14 @@ impl FileDialogCore {
                 self.selection_anchor_name = None;
                 return Ok(());
             }
+        }
+
+        if !gate.can_confirm {
+            let msg = gate
+                .message
+                .clone()
+                .unwrap_or_else(|| "validation blocked".to_string());
+            return Err(FileDialogError::ValidationBlocked(msg));
         }
 
         let sel = finalize_selection(
@@ -572,7 +597,9 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
         core.view_names = vec!["a.txt".into()];
         core.focused_name = Some("a.txt".into());
-        core.activate_focused(&StdFileSystem).unwrap();
+        let gate = ConfirmGate::default();
+        assert!(core.activate_focused());
+        core.confirm(&StdFileSystem, &gate).unwrap();
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths.len(), 1);
         assert_eq!(

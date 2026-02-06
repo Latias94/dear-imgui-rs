@@ -97,6 +97,9 @@ pub enum FileDialogError {
     /// Platform-specific error or general failure
     #[error("internal error: {0}")]
     Internal(String),
+    /// Confirmation blocked by custom validation logic (e.g. custom pane).
+    #[error("validation blocked: {0}")]
+    ValidationBlocked(String),
 }
 
 /// Click behavior for directory rows

@@ -39,6 +39,10 @@ pub struct FileDialogUiState {
     pub focus_search_next: bool,
     /// Error string to display in UI (non-fatal).
     pub ui_error: Option<String>,
+    /// Whether to render a custom pane region (when a pane is provided by the caller).
+    pub custom_pane_enabled: bool,
+    /// Height of the custom pane region (in pixels).
+    pub custom_pane_height: f32,
 
     /// Places modal mode (export/import).
     pub(crate) places_io_mode: PlacesIoMode,
@@ -66,6 +70,8 @@ impl Default for FileDialogUiState {
             focus_path_edit_next: false,
             focus_search_next: false,
             ui_error: None,
+            custom_pane_enabled: true,
+            custom_pane_height: 120.0,
             places_io_mode: PlacesIoMode::Export,
             places_io_buffer: String::new(),
             places_io_open_next: false,
