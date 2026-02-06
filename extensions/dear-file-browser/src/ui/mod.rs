@@ -10,6 +10,7 @@ use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selecti
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, DirEntry, Modifiers};
 use crate::dialog_state::FileDialogState;
+use crate::dialog_state::FileListViewMode;
 use crate::file_style::EntryKind;
 use crate::fs::{FileSystem, StdFileSystem};
 use crate::places::Places;
@@ -295,6 +296,23 @@ fn draw_contents_with_fs_and_hooks(
         state.ui.new_folder_name.clear();
         state.ui.new_folder_error = None;
         state.ui.new_folder_focus_next = true;
+    }
+    ui.same_line();
+    ui.text("View:");
+    ui.same_line();
+    if ui.radio_button(
+        "List",
+        matches!(state.ui.file_list_view, FileListViewMode::List),
+    ) {
+        state.ui.file_list_view = FileListViewMode::List;
+    }
+    ui.same_line();
+    if ui.radio_button(
+        "Grid",
+        matches!(state.ui.file_list_view, FileListViewMode::Grid),
+    ) {
+        state.ui.file_list_view = FileListViewMode::Grid;
+        state.ui.thumbnails_enabled = true;
     }
     ui.same_line();
     let mut show_hidden = state.core.show_hidden;
@@ -1007,7 +1025,25 @@ fn draw_file_table(
     size: [f32; 2],
     fs: &dyn FileSystem,
     request_confirm: &mut bool,
-    mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
+    thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
+) {
+    match state.ui.file_list_view {
+        FileListViewMode::List => {
+            draw_file_table_view(ui, state, size, fs, request_confirm, thumbnails_backend)
+        }
+        FileListViewMode::Grid => {
+            draw_file_grid_view(ui, state, size, fs, request_confirm, thumbnails_backend)
+        }
+    }
+}
+
+fn draw_file_table_view(
+    ui: &Ui,
+    state: &mut FileDialogState,
+    size: [f32; 2],
+    fs: &dyn FileSystem,
+    request_confirm: &mut bool,
+    thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) {
     state.core.rescan(fs);
     if state.ui.thumbnails_enabled {
@@ -1146,11 +1182,12 @@ fn draw_file_table(
             } else {
                 EntryKind::File
             };
-            let style = state.ui.file_styles.style_for(&e.name, kind);
-            let (text_color, icon, tooltip) = match style {
-                Some(s) => (s.text_color, s.icon.clone(), s.tooltip.clone()),
-                None => (None, None, None),
-            };
+            let (text_color, icon, tooltip) = state
+                .ui
+                .file_styles
+                .style_for(&e.name, kind)
+                .map(|s| (s.text_color, s.icon.clone(), s.tooltip.clone()))
+                .unwrap_or((None, None, None));
 
             let mut label = e.display_name();
             if let Some(icon) = icon.as_deref() {
@@ -1170,6 +1207,9 @@ fn draw_file_table(
                     shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
                 };
                 state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
+                if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
+                    state.core.save_name = e.name.clone();
+                }
             }
 
             if ui.is_item_hovered() {
@@ -1183,10 +1223,6 @@ fn draw_file_table(
                 if state.core.double_click_entry(e.name.clone(), e.is_dir) {
                     *request_confirm = true;
                 }
-            }
-
-            if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
-                state.core.save_name = e.name.clone();
             }
 
             ui.table_next_column();
@@ -1208,6 +1244,210 @@ fn draw_file_table(
         }
     });
 
+    let mut thumbnails_backend = thumbnails_backend;
+    if state.ui.thumbnails_enabled {
+        if let Some(backend) = thumbnails_backend.as_deref_mut() {
+            state.ui.thumbnails.maintain(backend);
+        }
+    }
+}
+
+fn draw_file_grid_view(
+    ui: &Ui,
+    state: &mut FileDialogState,
+    size: [f32; 2],
+    fs: &dyn FileSystem,
+    request_confirm: &mut bool,
+    thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
+) {
+    state.core.rescan(fs);
+    if state.ui.thumbnails_enabled {
+        state.ui.thumbnails.advance_frame();
+    }
+
+    use dear_imgui_rs::{SelectableFlags, TableColumnFlags, TableColumnSetup, TableFlags};
+
+    let entries: Vec<DirEntry> = state.core.entries().to_vec();
+    if entries.is_empty() {
+        if state.ui.empty_hint_enabled {
+            let msg = state
+                .ui
+                .empty_hint_static_message
+                .clone()
+                .unwrap_or_else(|| "No matching entries.".to_string());
+            ui.text_colored(state.ui.empty_hint_color, msg);
+        }
+        return;
+    }
+
+    let thumb = state.ui.thumbnail_size;
+    let pad = 6.0f32;
+    let text_h = ui.text_line_height_with_spacing();
+    let cell_w = (thumb[0] + pad * 2.0).max(64.0);
+    let cell_h = thumb[1] + text_h + pad * 3.0;
+    let cols = ((size[0].max(1.0)) / cell_w).floor() as usize;
+    let cols = cols.clamp(1, 16);
+
+    let flags = TableFlags::SCROLL_Y
+        | TableFlags::SIZING_FIXED_FIT
+        | TableFlags::NO_PAD_OUTER_X
+        | TableFlags::NO_PAD_INNER_X;
+    let mut col_setups = Vec::with_capacity(cols);
+    for i in 0..cols {
+        col_setups.push(
+            TableColumnSetup::new(format!("##grid_col_{i}"))
+                .flags(TableColumnFlags::NO_SORT | TableColumnFlags::NO_RESIZE)
+                .init_width_or_weight(cell_w),
+        );
+    }
+
+    ui.table("file_grid")
+        .flags(flags)
+        .outer_size(size)
+        .columns(col_setups)
+        .headers(false)
+        .build(|ui| {
+            let dl = ui.get_window_draw_list();
+
+            if ui.is_window_focused() && !ui.io().want_text_input() {
+                let modifiers = Modifiers {
+                    ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
+                    shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
+                };
+
+                if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
+                    state.core.select_all();
+                }
+                if ui.is_key_pressed_with_repeat(Key::LeftArrow, true) {
+                    state.core.move_focus(-1, modifiers);
+                }
+                if ui.is_key_pressed_with_repeat(Key::RightArrow, true) {
+                    state.core.move_focus(1, modifiers);
+                }
+                if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
+                    state.core.move_focus(-(cols as i32), modifiers);
+                }
+                if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
+                    state.core.move_focus(cols as i32, modifiers);
+                }
+                if state.ui.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
+                    handle_type_select(ui, state);
+                }
+            }
+
+            let mut idx = 0usize;
+            while idx < entries.len() {
+                ui.table_next_row();
+                for _ in 0..cols {
+                    ui.table_next_column();
+                    if idx >= entries.len() {
+                        break;
+                    }
+                    let item_idx = idx;
+                    let e = &entries[item_idx];
+                    idx += 1;
+
+                    let selected = state.core.selected.iter().any(|s| s == &e.name);
+                    let kind = if e.is_dir {
+                        EntryKind::Dir
+                    } else {
+                        EntryKind::File
+                    };
+                    let (text_color, icon, tooltip) = state
+                        .ui
+                        .file_styles
+                        .style_for(&e.name, kind)
+                        .map(|s| (s.text_color, s.icon.clone(), s.tooltip.clone()))
+                        .unwrap_or((None, None, None));
+
+                    let mut label = e.display_name();
+                    if let Some(icon) = icon.as_deref() {
+                        label = format!("{icon} {label}");
+                    }
+
+                    let _id = ui.push_id(item_idx as i32);
+                    let clicked = ui
+                        .selectable_config("##grid_item")
+                        .selected(selected)
+                        .flags(SelectableFlags::ALLOW_OVERLAP)
+                        .size([cell_w, cell_h])
+                        .build();
+
+                    let item_min = ui.item_rect_min();
+                    let item_max = ui.item_rect_max();
+                    let img_min = [item_min[0] + pad, item_min[1] + pad];
+                    let img_max = [img_min[0] + thumb[0], img_min[1] + thumb[1]];
+
+                    if state.ui.thumbnails_enabled && !e.is_dir {
+                        let max_size_u32 = [thumb[0].max(1.0) as u32, thumb[1].max(1.0) as u32];
+                        if let Some(tex) = state.ui.thumbnails.texture_id(&e.path) {
+                            dl.add_image(
+                                tex,
+                                img_min,
+                                img_max,
+                                [0.0, 0.0],
+                                [1.0, 1.0],
+                                dear_imgui_rs::Color::rgb(1.0, 1.0, 1.0),
+                            );
+                        } else {
+                            dl.add_rect(
+                                img_min,
+                                img_max,
+                                dear_imgui_rs::Color::new(0.2, 0.2, 0.2, 1.0),
+                            )
+                            .filled(true)
+                            .build();
+                            if ui.is_item_visible() {
+                                state.ui.thumbnails.request_visible(&e.path, max_size_u32);
+                            }
+                        }
+                    } else {
+                        dl.add_rect(
+                            img_min,
+                            img_max,
+                            dear_imgui_rs::Color::new(0.2, 0.2, 0.2, 1.0),
+                        )
+                        .filled(true)
+                        .build();
+                    }
+
+                    let text_pos = [item_min[0] + pad, img_max[1] + pad];
+                    let col = text_color
+                        .map(|c| dear_imgui_rs::Color::from_array(c))
+                        .unwrap_or_else(|| dear_imgui_rs::Color::rgb(1.0, 1.0, 1.0));
+                    dl.with_clip_rect(item_min, item_max, || {
+                        dl.add_text(text_pos, col, &label);
+                    });
+
+                    if clicked {
+                        let modifiers = Modifiers {
+                            ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
+                            shift: ui.is_key_down(Key::LeftShift)
+                                || ui.is_key_down(Key::RightShift),
+                        };
+                        state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
+                        if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
+                            state.core.save_name = e.name.clone();
+                        }
+                    }
+
+                    if ui.is_item_hovered() {
+                        if let Some(t) = tooltip.as_deref() {
+                            ui.tooltip_text(t);
+                        }
+                    }
+
+                    if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
+                        state.ui.ui_error = None;
+                        if state.core.double_click_entry(e.name.clone(), e.is_dir) {
+                            *request_confirm = true;
+                        }
+                    }
+                }
+            }
+        });
+
+    let mut thumbnails_backend = thumbnails_backend;
     if state.ui.thumbnails_enabled {
         if let Some(backend) = thumbnails_backend.as_deref_mut() {
             state.ui.thumbnails.maintain(backend);

@@ -77,9 +77,11 @@ let selection = pollster::block_on(
 # let mut ctx = Context::create();
 # let ui = ctx.frame();
 use dear_file_browser::{ExtensionPolicy, FileDialogExt, FileDialogState};
+use dear_file_browser::FileListViewMode;
 let mut state = FileDialogState::new(DialogMode::OpenFile);
 // Optional configuration
 state.ui.layout = LayoutStyle::Standard; // or Minimal
+state.ui.file_list_view = FileListViewMode::List; // or Grid (enables thumbnails)
 state.core.click_action = ClickAction::Select; // or Navigate
 state.core.double_click = true;
 state.core.dirs_first = true;

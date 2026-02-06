@@ -47,6 +47,8 @@ pub use dialog_core::{ConfirmGate, FileDialogCore, Modifiers};
 #[cfg(feature = "imgui")]
 pub use dialog_manager::{DialogId, DialogManager};
 #[cfg(feature = "imgui")]
+pub use dialog_state::FileListViewMode;
+#[cfg(feature = "imgui")]
 pub use dialog_state::{FileDialogState, FileDialogUiState};
 #[cfg(feature = "imgui")]
 pub use file_style::{EntryKind, FileStyle, FileStyleRegistry, StyleMatcher, StyleRule};

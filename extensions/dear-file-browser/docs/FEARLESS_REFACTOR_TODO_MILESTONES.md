@@ -290,6 +290,11 @@ Goal: add thumbnails without binding to a specific renderer backend.
 - [x] Task: define `ThumbnailRenderer` trait (upload/destroy)
 - [x] Task: UI calls `maintain(renderer)` each frame (when a backend is provided)
 
+### Epic 11.4 — Grid view
+
+- [x] Task: add thumbnail grid view + view mode toggle (List ↔ Grid)
+  - Acceptance: selection, double-click, and thumbnail requesting work in grid mode.
+
 ### Epic 11.3 — Optional decoding implementation
 
 - [x] Task: feature `thumbnails-image` uses `image` crate for decode
@@ -343,7 +348,7 @@ Use this as a tracking table for final validation.
 - [ ] Filters: collections + regex (optional) + multi-layer extensions (multi-layer/regex/wildcards done; collections/parser TBD)
 - [ ] File styles: by type/ext/name/regex + callback (callback/font TBD)
 - [x] Custom pane: per filter + blocks confirm
-- [ ] Thumbnails: decode + GPU lifecycle + grid view (list preview done; grid view TBD)
+- [x] Thumbnails: decode + GPU lifecycle + grid view
 
 ---
 

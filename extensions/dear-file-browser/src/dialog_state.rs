@@ -3,6 +3,21 @@ use crate::dialog_core::FileDialogCore;
 use crate::file_style::FileStyleRegistry;
 use crate::thumbnails::{ThumbnailCache, ThumbnailCacheConfig};
 
+/// View mode for the file list region.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileListViewMode {
+    /// Table-style list view (columns: name/size/modified, optional thumbnail preview column).
+    List,
+    /// Thumbnail grid view.
+    Grid,
+}
+
+impl Default for FileListViewMode {
+    fn default() -> Self {
+        Self::List
+    }
+}
+
 /// Places import/export modal mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum PlacesIoMode {
@@ -23,6 +38,8 @@ pub struct FileDialogUiState {
     pub visible: bool,
     /// Layout style for the dialog UI.
     pub layout: LayoutStyle,
+    /// File list view mode (list vs grid).
+    pub file_list_view: FileListViewMode,
     /// Max breadcrumb segments to display (compress with ellipsis when exceeded).
     pub breadcrumbs_max_segments: usize,
     /// Show a hint row when no entries match filters/search.
@@ -86,6 +103,7 @@ impl Default for FileDialogUiState {
         Self {
             visible: true,
             layout: LayoutStyle::Standard,
+            file_list_view: FileListViewMode::default(),
             breadcrumbs_max_segments: 6,
             empty_hint_enabled: true,
             empty_hint_color: [0.7, 0.7, 0.7, 1.0],
