@@ -1176,9 +1176,7 @@ fn try_complete_paste_job(state: &mut FileDialogState) {
     state.core.invalidate_dir_cache();
 
     let first = job.created[0].clone();
-    let _ = state
-        .core
-        .handle_event(CoreEvent::ReplaceSelectionByNames(job.created));
+    state.core.replace_selection_by_names(job.created);
     state.ui.reveal_name_next = Some(first);
 
     if matches!(job.clipboard.op, ClipboardOp::Cut) {

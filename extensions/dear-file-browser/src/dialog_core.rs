@@ -53,10 +53,8 @@ pub enum CoreEvent {
     NavigateTo(PathBuf),
     /// Focus and select one entry by id.
     FocusAndSelectById(EntryId),
-    /// Focus and select one entry by base name.
-    FocusAndSelectByName(String),
-    /// Replace current selection by names.
-    ReplaceSelectionByNames(Vec<String>),
+    /// Replace current selection by entry ids.
+    ReplaceSelectionByIds(Vec<EntryId>),
     /// Clear current selection/focus/anchor.
     ClearSelection,
 }
@@ -305,15 +303,11 @@ impl FileDialogCore {
                 CoreEventOutcome::None
             }
             CoreEvent::FocusAndSelectById(id) => {
-                self.select_single_by_id(id);
+                self.focus_and_select_by_id(id);
                 CoreEventOutcome::None
             }
-            CoreEvent::FocusAndSelectByName(name) => {
-                self.focus_and_select_by_name(name);
-                CoreEventOutcome::None
-            }
-            CoreEvent::ReplaceSelectionByNames(names) => {
-                self.replace_selection_by_names(names);
+            CoreEvent::ReplaceSelectionByIds(ids) => {
+                self.replace_selection_by_ids(ids);
                 CoreEventOutcome::None
             }
             CoreEvent::ClearSelection => {
@@ -340,16 +334,40 @@ impl FileDialogCore {
         self.clear_selection();
     }
 
+    /// Selects and focuses a single entry by id.
+    pub fn focus_and_select_by_id(&mut self, id: EntryId) {
+        self.select_single_by_id(id);
+    }
+
     /// Selects and focuses a single entry by base name.
     ///
-    /// This is useful for UI-driven actions that create a new entry and want to
-    /// immediately reveal it (e.g. "New Folder").
-    pub fn focus_and_select_by_name(&mut self, name: impl Into<String>) {
+    /// This is used by internal UI flows that create/rename entries before id mapping
+    /// can be resolved on the next rescan.
+    pub(crate) fn focus_and_select_by_name(&mut self, name: impl Into<String>) {
         self.select_single_by_name(name.into());
     }
 
-    /// Replace selection by entry names (used by multi-create/paste flows).
-    pub fn replace_selection_by_names(&mut self, names: Vec<String>) {
+    /// Replace selection by entry ids.
+    pub fn replace_selection_by_ids<I>(&mut self, ids: I)
+    where
+        I: IntoIterator<Item = EntryId>,
+    {
+        self.pending_selected_names.clear();
+        self.selected_ids.clear();
+        for id in ids {
+            if self.name_for_id(id).is_some() {
+                self.selected_ids.insert(id);
+            }
+        }
+        self.enforce_selection_cap();
+        let last = self.selected_ids.iter().next_back().copied();
+        self.focused_id = last;
+        self.selection_anchor_id = last;
+        self.sync_name_mirrors_from_ids();
+    }
+
+    /// Replace selection by entry names (used by internal multi-create/paste flows).
+    pub(crate) fn replace_selection_by_names(&mut self, names: Vec<String>) {
         self.pending_selected_names = names;
         self.selected_ids.clear();
         self.focused_id = None;
@@ -366,15 +384,18 @@ impl FileDialogCore {
         self.sync_name_mirrors_from_ids();
     }
 
-    pub(crate) fn selected_len(&self) -> usize {
+    /// Returns the number of currently selected entries.
+    pub fn selected_len(&self) -> usize {
         self.selected_ids.len()
     }
 
-    pub(crate) fn has_selection(&self) -> bool {
+    /// Returns whether there is at least one selected entry.
+    pub fn has_selection(&self) -> bool {
         !self.selected_ids.is_empty()
     }
 
-    pub(crate) fn first_selected_name(&self) -> Option<&str> {
+    /// Returns the first selected entry base name, if any.
+    pub fn first_selected_name(&self) -> Option<&str> {
         self.selected_ids
             .iter()
             .next()
@@ -382,7 +403,8 @@ impl FileDialogCore {
             .or_else(|| self.pending_selected_names.first().map(String::as_str))
     }
 
-    pub(crate) fn selected_names(&self) -> Vec<String> {
+    /// Returns selected entry base names in deterministic selection order.
+    pub fn selected_names(&self) -> Vec<String> {
         if self.selected_ids.is_empty() {
             return self.pending_selected_names.clone();
         }
@@ -391,6 +413,26 @@ impl FileDialogCore {
             .iter()
             .filter_map(|id| self.name_for_id(*id).map(|name| name.to_string()))
             .collect()
+    }
+
+    /// Returns selected entry ids in deterministic selection order.
+    pub fn selected_entry_ids(&self) -> Vec<EntryId> {
+        self.selected_ids.iter().copied().collect()
+    }
+
+    /// Returns the currently focused entry id, if any.
+    pub fn focused_entry_id(&self) -> Option<EntryId> {
+        self.focused_id
+    }
+
+    /// Resolves an entry id from its base name in the current view/snapshot.
+    pub fn entry_id_by_name(&self, name: &str) -> Option<EntryId> {
+        self.id_for_name(name)
+    }
+
+    /// Resolves an entry base name from an entry id in the current view/snapshot.
+    pub fn entry_name_by_id(&self, id: EntryId) -> Option<&str> {
+        self.name_for_id(id)
     }
 
     pub(crate) fn is_selected_id(&self, id: EntryId) -> bool {
@@ -1471,6 +1513,20 @@ mod tests {
     }
 
     #[test]
+    fn focus_and_select_by_id_sets_focus_and_anchor() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.allow_multi = true;
+        set_view_files(&mut core, &["a.txt", "b.txt"]);
+
+        let id = entry_id(&core, "b.txt");
+        core.focus_and_select_by_id(id);
+
+        assert_eq!(core.selected_entry_ids(), vec![id]);
+        assert_eq!(core.focused_entry_id(), Some(id));
+        assert_eq!(core.selected_names(), vec!["b.txt"]);
+    }
+
+    #[test]
     fn shift_click_selects_a_range_in_view_order() {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.allow_multi = true;
@@ -1581,6 +1637,21 @@ mod tests {
 
         assert_eq!(outcome, CoreEventOutcome::None);
         assert_eq!(core.cwd, PathBuf::from("/tmp"));
+    }
+
+    #[test]
+    fn handle_event_replace_selection_by_ids_uses_id_order() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.allow_multi = true;
+        set_view_files(&mut core, &["a.txt", "b.txt", "c.txt"]);
+
+        let c = entry_id(&core, "c.txt");
+        let a = entry_id(&core, "a.txt");
+        let outcome = core.handle_event(CoreEvent::ReplaceSelectionByIds(vec![c, a]));
+
+        assert_eq!(outcome, CoreEventOutcome::None);
+        assert_eq!(core.selected_entry_ids(), vec![c, a]);
+        assert_eq!(core.selected_names(), vec!["c.txt", "a.txt"]);
     }
 
     #[test]
