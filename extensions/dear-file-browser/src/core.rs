@@ -358,6 +358,8 @@ pub enum LayoutStyle {
 pub enum SortBy {
     /// Sort by file or directory name
     Name,
+    /// Sort by full extension (multi-layer aware, e.g. `.tar.gz`)
+    Extension,
     /// Sort by file size (directories first)
     Size,
     /// Sort by last modified time

@@ -856,6 +856,19 @@ fn sort_entries_in_place(
                 let bl = b.name.to_lowercase();
                 natural_cmp_lower(&al, &bl)
             }
+            SortBy::Extension => {
+                use std::cmp::Ordering;
+                let al = a.name.to_lowercase();
+                let bl = b.name.to_lowercase();
+                let ae = full_extension_lower(&al);
+                let be = full_extension_lower(&bl);
+                let ord = natural_cmp_lower(ae, be);
+                if ord == Ordering::Equal {
+                    natural_cmp_lower(&al, &bl)
+                } else {
+                    ord
+                }
+            }
             SortBy::Size => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
             SortBy::Modified => a.modified.cmp(&b.modified),
         };
@@ -1195,6 +1208,47 @@ mod tests {
         sort_entries_in_place(&mut entries, SortBy::Name, true, false);
         let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
         assert_eq!(names, vec!["file1.txt", "file2.txt", "file10.txt"]);
+    }
+
+    #[test]
+    fn sort_by_extension_orders_by_full_extension_then_name() {
+        let mut entries = vec![
+            DirEntry {
+                name: "alpha.tar.gz".into(),
+                path: PathBuf::from("/tmp/alpha.tar.gz"),
+                is_dir: false,
+                size: None,
+                modified: None,
+            },
+            DirEntry {
+                name: "beta.rs".into(),
+                path: PathBuf::from("/tmp/beta.rs"),
+                is_dir: false,
+                size: None,
+                modified: None,
+            },
+            DirEntry {
+                name: "gamma.tar.gz".into(),
+                path: PathBuf::from("/tmp/gamma.tar.gz"),
+                is_dir: false,
+                size: None,
+                modified: None,
+            },
+            DirEntry {
+                name: "noext".into(),
+                path: PathBuf::from("/tmp/noext"),
+                is_dir: false,
+                size: None,
+                modified: None,
+            },
+        ];
+
+        sort_entries_in_place(&mut entries, SortBy::Extension, true, false);
+        let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
+        assert_eq!(
+            names,
+            vec!["noext", "beta.rs", "alpha.tar.gz", "gamma.tar.gz"]
+        );
     }
 
     #[test]

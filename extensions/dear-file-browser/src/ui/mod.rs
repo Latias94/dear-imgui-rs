@@ -1530,16 +1530,21 @@ fn draw_file_table_view(
         .column("Name")
         .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
         .user_id(0)
-        .weight(if show_preview { 0.58 } else { 0.6 })
+        .weight(if show_preview { 0.52 } else { 0.56 })
+        .done()
+        .column("Ext")
+        .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
+        .user_id(1)
+        .weight(0.12)
         .done()
         .column("Size")
         .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
-        .user_id(1)
-        .weight(0.2)
+        .user_id(2)
+        .weight(0.16)
         .done()
         .column("Modified")
         .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
-        .user_id(2)
+        .user_id(3)
         .weight(0.2)
         .done()
         .headers(true);
@@ -1550,11 +1555,16 @@ fn draw_file_table_view(
             if specs.is_dirty() {
                 if let Some(s) = specs.iter().next() {
                     let name_col = if show_preview { 1 } else { 0 };
-                    let size_col = name_col + 1;
-                    let modified_col = name_col + 2;
+                    let ext_col = name_col + 1;
+                    let size_col = name_col + 2;
+                    let modified_col = name_col + 3;
                     let (by, asc) = match (s.column_index, s.sort_direction) {
                         (i, SortDirection::Ascending) if i == name_col => (SortBy::Name, true),
                         (i, SortDirection::Descending) if i == name_col => (SortBy::Name, false),
+                        (i, SortDirection::Ascending) if i == ext_col => (SortBy::Extension, true),
+                        (i, SortDirection::Descending) if i == ext_col => {
+                            (SortBy::Extension, false)
+                        }
                         (i, SortDirection::Ascending) if i == size_col => (SortBy::Size, true),
                         (i, SortDirection::Descending) if i == size_col => (SortBy::Size, false),
                         (i, SortDirection::Ascending) if i == modified_col => {
@@ -1702,6 +1712,15 @@ fn draw_file_table_view(
                 if state.core.double_click_entry(e.name.clone(), e.is_dir) {
                     *request_confirm = true;
                 }
+            }
+
+            ui.table_next_column();
+            if e.is_dir {
+                ui.text("");
+            } else if let Some(i) = e.name.find('.') {
+                ui.text(&e.name[i..]);
+            } else {
+                ui.text("");
             }
 
             ui.table_next_column();
