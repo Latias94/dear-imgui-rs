@@ -39,6 +39,8 @@ pub use dialog_manager::{DialogId, DialogManager};
 #[cfg(feature = "imgui")]
 pub use fs::{FileSystem, FsEntry, FsMetadata, StdFileSystem};
 #[cfg(feature = "imgui")]
-pub use places::{Bookmark, Places};
+pub use places::{
+    Place, PlaceGroup, PlaceOrigin, Places, PlacesDeserializeError, PlacesSerializeOptions,
+};
 #[cfg(feature = "imgui")]
 pub use ui::{FileBrowserState, FileDialogExt, WindowHostConfig};

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use dear_imgui_rs::TreeNodeFlags;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton};
 
@@ -381,58 +382,21 @@ fn draw_breadcrumbs(ui: &Ui, cwd: &Path, max_segments: usize) -> Option<PathBuf>
 fn draw_quick_locations(ui: &Ui, state: &mut FileBrowserState) -> Option<PathBuf> {
     let mut out: Option<PathBuf> = None;
 
-    ui.separator_with_text("System");
-    // Home
-    if ui.button("Home") {
-        if let Some(home) = home_dir() {
-            out = Some(home);
-        }
-    }
-    // Root
-    if ui.button("Root") {
-        out = Some(PathBuf::from(std::path::MAIN_SEPARATOR.to_string()));
-    }
-    // Drives (Windows)
-    #[cfg(target_os = "windows")]
-    {
-        ui.separator();
-        ui.text("Drives");
-        for d in windows_drives() {
-            if ui.button(&d) {
-                out = Some(PathBuf::from(d));
-            }
-        }
-    }
-
-    ui.separator_with_text("Bookmarks");
-    if state.places.bookmarks.is_empty() {
-        ui.text_disabled("No bookmarks");
-    } else {
-        let mut remove_path: Option<PathBuf> = None;
-        for bm in &state.places.bookmarks {
-            if ui.selectable_config(&bm.label).build() {
-                out = Some(bm.path.clone());
-            }
-            if let Some(_popup) = ui.begin_popup_context_item() {
-                ui.text_disabled(&bm.path.display().to_string());
-                ui.separator();
-                if ui.menu_item("Remove bookmark") {
-                    remove_path = Some(bm.path.clone());
-                }
-            }
-        }
-        if let Some(p) = remove_path {
-            state.places.remove_bookmark_path(&p);
-        }
-    }
-
-    if ui.button("+ Add current") {
+    if ui.button("+ Bookmark") {
         state.places.add_bookmark_path(state.cwd.clone());
+    }
+    ui.same_line();
+    if ui.button("Refresh") {
+        state.places.refresh_system_places();
     }
     ui.same_line();
     if ui.button("Export") {
         state.places_io_mode = crate::browser_state::PlacesIoMode::Export;
-        state.places_io_buffer = state.places.serialize_compact();
+        state.places_io_buffer = state
+            .places
+            .serialize_compact(crate::PlacesSerializeOptions {
+                include_code_places: state.places_io_include_code,
+            });
         state.places_io_error = None;
         state.places_io_open_next = true;
     }
@@ -442,6 +406,38 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileBrowserState) -> Option<PathBuf
         state.places_io_buffer.clear();
         state.places_io_error = None;
         state.places_io_open_next = true;
+    }
+
+    ui.separator();
+
+    let mut remove: Option<(String, PathBuf)> = None;
+    for (gi, g) in state.places.groups.iter().enumerate() {
+        let open = ui.collapsing_header(&g.label, TreeNodeFlags::DEFAULT_OPEN);
+        if !open {
+            continue;
+        }
+
+        if g.places.is_empty() {
+            ui.text_disabled("Empty");
+            continue;
+        }
+
+        for (pi, p) in g.places.iter().enumerate() {
+            let _id = ui.push_id((gi * 10_000 + pi) as i32);
+            if ui.selectable_config(&p.label).build() {
+                out = Some(p.path.clone());
+            }
+            if let Some(_popup) = ui.begin_popup_context_item() {
+                ui.text_disabled(&p.path.display().to_string());
+                ui.separator();
+                if ui.menu_item("Remove") {
+                    remove = Some((g.label.clone(), p.path.clone()));
+                }
+            }
+        }
+    }
+    if let Some((g, p)) = remove {
+        state.places.remove_place_path(&g, &p);
     }
     out
 }
@@ -455,12 +451,17 @@ fn draw_places_io_modal(ui: &Ui, state: &mut FileBrowserState) {
     if let Some(_popup) = ui.begin_modal_popup("Places") {
         let is_export = state.places_io_mode == crate::browser_state::PlacesIoMode::Export;
 
-        ui.text("Bookmarks persistence (compact format)");
+        ui.text("Places persistence (compact format)");
         ui.separator();
 
         if ui.button("Export") {
             state.places_io_mode = crate::browser_state::PlacesIoMode::Export;
-            state.places_io_buffer = state.places.serialize_compact();
+            state.places_io_buffer =
+                state
+                    .places
+                    .serialize_compact(crate::PlacesSerializeOptions {
+                        include_code_places: state.places_io_include_code,
+                    });
             state.places_io_error = None;
         }
         ui.same_line();
@@ -476,8 +477,21 @@ fn draw_places_io_modal(ui: &Ui, state: &mut FileBrowserState) {
 
         ui.separator();
 
+        if is_export {
+            let mut include_code = state.places_io_include_code;
+            if ui.checkbox("Include code places", &mut include_code) {
+                state.places_io_include_code = include_code;
+                state.places_io_buffer =
+                    state
+                        .places
+                        .serialize_compact(crate::PlacesSerializeOptions {
+                            include_code_places: state.places_io_include_code,
+                        });
+            }
+        }
+
         let avail = ui.content_region_avail();
-        let size = [avail[0].max(200.0), (avail[1] - 70.0).max(120.0)];
+        let size = [avail[0].max(200.0), (avail[1] - 95.0).max(120.0)];
         if is_export {
             ui.input_text_multiline("##places_export", &mut state.places_io_buffer, size)
                 .read_only(true)
@@ -501,8 +515,10 @@ fn draw_places_io_modal(ui: &Ui, state: &mut FileBrowserState) {
             if ui.button("Merge") {
                 match Places::deserialize_compact(&state.places_io_buffer) {
                     Ok(p) => {
-                        for bm in p.bookmarks {
-                            state.places.add_bookmark(bm.label, bm.path);
+                        for g in p.groups {
+                            for place in g.places {
+                                state.places.add_place(g.label.clone(), place);
+                            }
                         }
                         state.places_io_error = None;
                     }
@@ -777,20 +793,4 @@ fn humanize_duration(d: std::time::Duration) -> String {
     format!("{}d ago", days)
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-}
-
-#[cfg(target_os = "windows")]
-fn windows_drives() -> Vec<String> {
-    let mut v = Vec::new();
-    for c in b'A'..=b'Z' {
-        let s = format!("{}:\\", c as char);
-        if Path::new(&s).exists() {
-            v.push(s);
-        }
-    }
-    v
-}
+// Places helpers live in `places.rs`.

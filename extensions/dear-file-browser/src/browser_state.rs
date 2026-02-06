@@ -77,6 +77,7 @@ pub struct FileBrowserState {
     pub(crate) places_io_mode: PlacesIoMode,
     pub(crate) places_io_buffer: String,
     pub(crate) places_io_open_next: bool,
+    pub(crate) places_io_include_code: bool,
     pub(crate) places_io_error: Option<String>,
 
     pub(crate) focused_name: Option<String>,
@@ -146,6 +147,7 @@ impl FileBrowserState {
             places_io_mode: PlacesIoMode::Export,
             places_io_buffer: String::new(),
             places_io_open_next: false,
+            places_io_include_code: false,
             places_io_error: None,
 
             focused_name: None,

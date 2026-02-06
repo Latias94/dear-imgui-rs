@@ -1,53 +1,167 @@
 use std::path::{Path, PathBuf};
 
-/// A user-defined shortcut location (bookmark) shown in the left "Places" pane.
+/// Place entry origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PlaceOrigin {
+    /// Added by the application/user and intended to be persisted.
+    User,
+    /// Added by the library/application code (e.g. system drives).
+    Code,
+}
+
+impl PlaceOrigin {
+    fn as_compact_char(self) -> char {
+        match self {
+            PlaceOrigin::User => 'u',
+            PlaceOrigin::Code => 'c',
+        }
+    }
+
+    fn from_compact_char(ch: char) -> Option<Self> {
+        match ch {
+            'u' => Some(PlaceOrigin::User),
+            'c' => Some(PlaceOrigin::Code),
+            _ => None,
+        }
+    }
+}
+
+/// A single place entry shown in the left "Places" pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Bookmark {
+pub struct Place {
     /// Display name shown in UI.
     pub label: String,
     /// Target directory path.
     pub path: PathBuf,
+    /// Origin of the entry (user vs code).
+    pub origin: PlaceOrigin,
 }
 
-impl Bookmark {
-    /// Creates a new bookmark.
-    pub fn new(label: impl Into<String>, path: PathBuf) -> Self {
+impl Place {
+    /// Creates a new place entry.
+    pub fn new(label: impl Into<String>, path: PathBuf, origin: PlaceOrigin) -> Self {
         Self {
             label: label.into(),
             path,
+            origin,
+        }
+    }
+
+    /// Convenience constructor for a user-defined place.
+    pub fn user(label: impl Into<String>, path: PathBuf) -> Self {
+        Self::new(label, path, PlaceOrigin::User)
+    }
+
+    /// Convenience constructor for a code-defined place.
+    pub fn code(label: impl Into<String>, path: PathBuf) -> Self {
+        Self::new(label, path, PlaceOrigin::Code)
+    }
+}
+
+/// A group of places (e.g. "System", "Bookmarks").
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PlaceGroup {
+    /// Group title shown in UI.
+    pub label: String,
+    /// Places in this group.
+    pub places: Vec<Place>,
+}
+
+impl PlaceGroup {
+    /// Creates a new group.
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            places: Vec::new(),
         }
     }
 }
 
-/// Storage for user-defined places (bookmarks).
+/// Options for serializing places.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PlacesSerializeOptions {
+    /// Whether to include code-defined places.
+    pub include_code_places: bool,
+}
+
+/// Storage for user-defined and code-defined places.
 ///
-/// This is intentionally filesystem-agnostic. Persistence/serialization will be
-/// layered on top in later milestones.
-#[derive(Clone, Debug, Default)]
+/// This is intentionally dependency-free (no serde). The compact persistence
+/// format is designed to be stable and forward-compatible.
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Places {
-    /// Bookmarked directories.
-    pub bookmarks: Vec<Bookmark>,
+    /// Places groups shown in UI.
+    pub groups: Vec<PlaceGroup>,
 }
 
 impl Places {
-    /// Creates an empty places store.
+    /// Default system group label.
+    pub const SYSTEM_GROUP: &'static str = "System";
+    /// Default bookmarks group label.
+    pub const BOOKMARKS_GROUP: &'static str = "Bookmarks";
+
+    /// Creates a places store with default groups and system entries.
     pub fn new() -> Self {
-        Self::default()
+        let mut p = Self { groups: Vec::new() };
+        p.ensure_default_groups();
+        p.refresh_system_places();
+        p
     }
 
-    /// Returns `true` if there are no bookmarks.
+    /// Returns `true` if there are no places at all.
     pub fn is_empty(&self) -> bool {
-        self.bookmarks.is_empty()
+        self.groups.iter().all(|g| g.places.is_empty())
     }
 
-    /// Adds a bookmark if the path is not already present.
-    pub fn add_bookmark(&mut self, label: impl Into<String>, path: PathBuf) {
-        if self.bookmarks.iter().any(|b| b.path == path) {
+    /// Ensures the default groups exist.
+    pub fn ensure_default_groups(&mut self) {
+        self.ensure_group(Self::SYSTEM_GROUP);
+        self.ensure_group(Self::BOOKMARKS_GROUP);
+    }
+
+    /// Rebuilds the system places group (home/root/drives).
+    ///
+    /// This is a best-effort operation and may produce different results across
+    /// platforms.
+    pub fn refresh_system_places(&mut self) {
+        let group = self.ensure_group_mut(Self::SYSTEM_GROUP);
+        group.places.clear();
+
+        if let Some(home) = home_dir() {
+            group.places.push(Place::code("Home", home));
+        }
+
+        group.places.push(Place::code(
+            "Root",
+            PathBuf::from(std::path::MAIN_SEPARATOR.to_string()),
+        ));
+
+        #[cfg(target_os = "windows")]
+        {
+            for d in windows_drives() {
+                group.places.push(Place::code(d.clone(), PathBuf::from(d)));
+            }
+        }
+    }
+
+    /// Adds a place to a group if its path isn't already present in that group.
+    pub fn add_place(&mut self, group_label: impl Into<String>, place: Place) {
+        let group_label = group_label.into();
+        let group = self.ensure_group_mut(&group_label);
+        if group.places.iter().any(|p| p.path == place.path) {
             return;
         }
-        self.bookmarks.push(Bookmark::new(label, path));
+        group.places.push(place);
+    }
+
+    /// Adds a bookmark (user place) into the default bookmarks group.
+    pub fn add_bookmark(&mut self, label: impl Into<String>, path: PathBuf) {
+        self.add_place(Self::BOOKMARKS_GROUP, Place::user(label, path));
     }
 
     /// Adds a bookmark using a default label derived from the path.
@@ -56,53 +170,92 @@ impl Places {
         self.add_bookmark(label, path);
     }
 
-    /// Removes a bookmark by exact path match. Returns whether a bookmark was removed.
-    pub fn remove_bookmark_path(&mut self, path: &Path) -> bool {
-        let Some(i) = self.bookmarks.iter().position(|b| b.path == path) else {
+    /// Removes a place by exact path match from the given group.
+    pub fn remove_place_path(&mut self, group_label: &str, path: &Path) -> bool {
+        let Some(g) = self.groups.iter_mut().find(|g| g.label == group_label) else {
             return false;
         };
-        self.bookmarks.remove(i);
+        let Some(i) = g.places.iter().position(|p| p.path == path) else {
+            return false;
+        };
+        g.places.remove(i);
         true
     }
 
-    /// Serializes bookmarks into a compact, line-based format.
+    /// Serializes places into a compact, line-based format.
     ///
-    /// Each line is `label<TAB>path` with escaped special characters.
-    /// The resulting string can be persisted by the caller.
-    ///
-    /// This is intentionally dependency-free (no serde). The format is stable
-    /// and forward-compatible: unknown/empty lines should be ignored on parse.
-    pub fn serialize_compact(&self) -> String {
+    /// Each line is `group<TAB>origin<TAB>label<TAB>path` with escaped special characters.
+    pub fn serialize_compact(&self, opts: PlacesSerializeOptions) -> String {
         let mut out = String::new();
-        for bm in &self.bookmarks {
-            let label = escape_field(&bm.label);
-            let path = escape_field(&bm.path.display().to_string());
-            out.push_str(&label);
-            out.push('\t');
-            out.push_str(&path);
-            out.push('\n');
+        for g in &self.groups {
+            // System entries are best-effort derived from the current machine and should
+            // generally not be persisted.
+            if g.label == Self::SYSTEM_GROUP {
+                continue;
+            }
+            for p in &g.places {
+                if !opts.include_code_places && p.origin == PlaceOrigin::Code {
+                    continue;
+                }
+                out.push_str(&escape_field(&g.label));
+                out.push('\t');
+                out.push(p.origin.as_compact_char());
+                out.push('\t');
+                out.push_str(&escape_field(&p.label));
+                out.push('\t');
+                out.push_str(&escape_field(&p.path.display().to_string()));
+                out.push('\n');
+            }
         }
         out
     }
 
-    /// Deserializes bookmarks from the compact format produced by
+    /// Deserializes places from the compact format produced by
     /// [`Places::serialize_compact`].
-    ///
-    /// Invalid lines are ignored; a best-effort `Places` is returned.
     pub fn deserialize_compact(input: &str) -> Result<Self, PlacesDeserializeError> {
-        let mut places = Places::new();
+        let mut places = Places { groups: Vec::new() };
         for (line_idx, raw_line) in input.lines().enumerate() {
             let line = raw_line.trim_end_matches('\r');
             if line.trim().is_empty() {
                 continue;
             }
-            let Some((raw_label, raw_path)) = line.split_once('\t') else {
-                return Err(PlacesDeserializeError {
-                    line: line_idx + 1,
-                    message: "missing TAB separator".into(),
-                });
-            };
 
+            let (raw_group, rest) =
+                line.split_once('\t')
+                    .ok_or_else(|| PlacesDeserializeError {
+                        line: line_idx + 1,
+                        message: "missing group field".into(),
+                    })?;
+            let (raw_origin, rest) =
+                rest.split_once('\t')
+                    .ok_or_else(|| PlacesDeserializeError {
+                        line: line_idx + 1,
+                        message: "missing origin field".into(),
+                    })?;
+            let (raw_label, raw_path) =
+                rest.split_once('\t')
+                    .ok_or_else(|| PlacesDeserializeError {
+                        line: line_idx + 1,
+                        message: "missing label/path fields".into(),
+                    })?;
+
+            let group_label = unescape_field(raw_group).map_err(|msg| PlacesDeserializeError {
+                line: line_idx + 1,
+                message: format!("group: {msg}"),
+            })?;
+            let origin_ch = raw_origin
+                .chars()
+                .next()
+                .ok_or_else(|| PlacesDeserializeError {
+                    line: line_idx + 1,
+                    message: "empty origin field".into(),
+                })?;
+            let origin = PlaceOrigin::from_compact_char(origin_ch).ok_or_else(|| {
+                PlacesDeserializeError {
+                    line: line_idx + 1,
+                    message: "invalid origin field".into(),
+                }
+            })?;
             let label = unescape_field(raw_label).map_err(|msg| PlacesDeserializeError {
                 line: line_idx + 1,
                 message: format!("label: {msg}"),
@@ -111,6 +264,7 @@ impl Places {
                 line: line_idx + 1,
                 message: format!("path: {msg}"),
             })?;
+
             let path = PathBuf::from(path_s);
             if path.as_os_str().is_empty() {
                 continue;
@@ -120,10 +274,56 @@ impl Places {
             } else {
                 label
             };
-            places.add_bookmark(label, path);
+            places.add_place(group_label, Place::new(label, path, origin));
         }
+
+        // Always ensure System + Bookmarks groups exist, and refresh System to match the
+        // current machine (drives, home, etc.).
+        places.ensure_default_groups();
+        places.refresh_system_places();
         Ok(places)
     }
+
+    fn ensure_group(&mut self, label: &str) {
+        if self.groups.iter().any(|g| g.label == label) {
+            return;
+        }
+        self.groups.push(PlaceGroup::new(label));
+    }
+
+    fn ensure_group_mut(&mut self, label: &str) -> &mut PlaceGroup {
+        if !self.groups.iter().any(|g| g.label == label) {
+            self.groups.push(PlaceGroup::new(label));
+        }
+        self.groups
+            .iter_mut()
+            .find(|g| g.label == label)
+            .expect("group exists")
+    }
+}
+
+impl Default for Places {
+    fn default() -> Self {
+        Places::new()
+    }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_drives() -> Vec<String> {
+    let mut v = Vec::new();
+    for c in b'A'..=b'Z' {
+        let s = format!("{}:\\", c as char);
+        if Path::new(&s).exists() {
+            v.push(s);
+        }
+    }
+    v
 }
 
 fn default_label_for_path(path: &Path) -> String {
@@ -197,33 +397,41 @@ mod tests {
 
     #[test]
     fn add_bookmark_dedupes_by_path() {
-        let mut p = Places::default();
+        let mut p = Places::new();
         p.add_bookmark("A", PathBuf::from("x"));
         p.add_bookmark("B", PathBuf::from("x"));
-        assert_eq!(p.bookmarks.len(), 1);
-        assert_eq!(p.bookmarks[0].label, "A");
+        let g = p
+            .groups
+            .iter()
+            .find(|g| g.label == Places::BOOKMARKS_GROUP)
+            .unwrap();
+        assert_eq!(g.places.len(), 1);
+        assert_eq!(g.places[0].label, "A");
     }
 
     #[test]
     fn remove_bookmark_by_path() {
-        let mut p = Places::default();
+        let mut p = Places::new();
         p.add_bookmark("A", PathBuf::from("x"));
-        assert!(p.remove_bookmark_path(Path::new("x")));
-        assert!(!p.remove_bookmark_path(Path::new("x")));
-        assert!(p.bookmarks.is_empty());
+        assert!(p.remove_place_path(Places::BOOKMARKS_GROUP, Path::new("x")));
+        assert!(!p.remove_place_path(Places::BOOKMARKS_GROUP, Path::new("x")));
     }
 
     #[test]
     fn compact_roundtrip_escapes_fields() {
         let mut p = Places::new();
-        p.add_bookmark("a\tb", PathBuf::from("C:\\x\\y"));
-        p.add_bookmark("line\nbreak", PathBuf::from("/tmp/z"));
-        let s = p.serialize_compact();
+        p.groups.clear();
+        p.add_place("G\t1", Place::user("a\tb", PathBuf::from("C:\\x\\y")));
+        p.add_place("G\t2", Place::code("line\nbreak", PathBuf::from("/tmp/z")));
+        let s = p.serialize_compact(PlacesSerializeOptions {
+            include_code_places: true,
+        });
 
         let p2 = Places::deserialize_compact(&s).unwrap();
-        assert_eq!(p2.bookmarks.len(), 2);
-        assert_eq!(p2.bookmarks[0].label, "a\tb");
-        assert_eq!(p2.bookmarks[1].label, "line\nbreak");
+        let g1 = p2.groups.iter().find(|g| g.label == "G\t1").unwrap();
+        assert_eq!(g1.places[0].label, "a\tb");
+        let g2 = p2.groups.iter().find(|g| g.label == "G\t2").unwrap();
+        assert_eq!(g2.places[0].label, "line\nbreak");
     }
 
     #[test]
