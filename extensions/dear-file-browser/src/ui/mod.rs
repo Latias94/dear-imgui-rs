@@ -289,7 +289,9 @@ fn draw_contents_with_fs_and_hooks(
         state.core.navigate_up();
     }
     ui.same_line();
-    if ui.button("Refresh") { /* rescan happens each frame */ }
+    if ui.button("Refresh") {
+        state.core.invalidate_dir_cache();
+    }
     ui.same_line();
     if ui.button("New Folder") {
         state.ui.new_folder_open_next = true;
@@ -666,6 +668,7 @@ fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSyst
                 match fs.create_dir(&path) {
                     Ok(()) => {
                         state.ui.new_folder_name.clear();
+                        state.core.invalidate_dir_cache();
                         ui.close_current_popup();
                     }
                     Err(e) => {
@@ -1045,7 +1048,7 @@ fn draw_file_table_view(
     request_confirm: &mut bool,
     thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) {
-    state.core.rescan(fs);
+    state.core.rescan_if_needed(fs);
     if state.ui.thumbnails_enabled {
         state.ui.thumbnails.advance_frame();
     }
@@ -1109,7 +1112,7 @@ fn draw_file_table_view(
                     };
                     state.core.sort_by = by;
                     state.core.sort_ascending = asc;
-                    state.core.rescan(fs);
+                    state.core.rescan_if_needed(fs);
                 }
                 specs.clear_dirty();
             }
@@ -1260,7 +1263,7 @@ fn draw_file_grid_view(
     request_confirm: &mut bool,
     thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) {
-    state.core.rescan(fs);
+    state.core.rescan_if_needed(fs);
     if state.ui.thumbnails_enabled {
         state.ui.thumbnails.advance_frame();
     }

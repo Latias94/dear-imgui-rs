@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
 use crate::core::{
     ClickAction, DialogMode, ExtensionPolicy, FileDialogError, FileFilter, SavePolicy, Selection,
@@ -110,6 +111,11 @@ pub struct FileDialogCore {
     selection_anchor_name: Option<String>,
     view_names: Vec<String>,
     entries: Vec<DirEntry>,
+
+    dir_snapshot: Vec<DirEntry>,
+    dir_snapshot_cwd: Option<PathBuf>,
+    dir_snapshot_dirty: bool,
+    last_view_key: Option<ViewKey>,
 }
 
 impl FileDialogCore {
@@ -139,12 +145,22 @@ impl FileDialogCore {
             selection_anchor_name: None,
             view_names: Vec::new(),
             entries: Vec::new(),
+            dir_snapshot: Vec::new(),
+            dir_snapshot_cwd: None,
+            dir_snapshot_dirty: true,
+            last_view_key: None,
         }
     }
 
     /// Returns a snapshot of the current entries list.
     pub(crate) fn entries(&self) -> &[DirEntry] {
         &self.entries
+    }
+
+    /// Mark the current directory snapshot as dirty so it will be refreshed on next draw.
+    pub fn invalidate_dir_cache(&mut self) {
+        self.dir_snapshot_dirty = true;
+        self.last_view_key = None;
     }
 
     /// Returns the final result once the user confirms/cancels, and clears it.
@@ -160,12 +176,20 @@ impl FileDialogCore {
         self.selection_anchor_name = None;
     }
 
-    /// Rescans the current directory into an entries cache.
-    pub(crate) fn rescan(&mut self, fs: &dyn FileSystem) {
-        let mut entries = read_entries_with_fs(fs, &self.cwd, self.show_hidden);
+    /// Refreshes the directory snapshot and view cache if needed.
+    pub(crate) fn rescan_if_needed(&mut self, fs: &dyn FileSystem) {
+        self.refresh_dir_snapshot_if_needed(fs);
+
+        let key = ViewKey::new(self);
+        if self.last_view_key.as_ref() == Some(&key) {
+            return;
+        }
+
+        let mut entries = self.dir_snapshot.clone();
         filter_entries_in_place(
             &mut entries,
             self.mode,
+            self.show_hidden,
             &self.filters,
             self.active_filter,
             &self.search,
@@ -179,6 +203,21 @@ impl FileDialogCore {
         self.view_names = entries.iter().map(|e| e.name.clone()).collect();
         self.entries = entries;
         self.retain_selected_visible();
+        self.last_view_key = Some(key);
+    }
+
+    fn refresh_dir_snapshot_if_needed(&mut self, fs: &dyn FileSystem) {
+        let cwd_changed = self.dir_snapshot_cwd.as_ref() != Some(&self.cwd);
+        let should_refresh = self.dir_snapshot_dirty || cwd_changed;
+        if !should_refresh {
+            return;
+        }
+
+        self.dir_snapshot = read_entries_snapshot_with_fs(fs, &self.cwd);
+        self.dir_snapshot_cwd = Some(self.cwd.clone());
+        self.dir_snapshot_dirty = false;
+        // Always rebuild the view after a filesystem refresh even if the view inputs didn't change.
+        self.last_view_key = None;
     }
 
     /// Select the next entry whose base name starts with the given prefix (case-insensitive).
@@ -462,6 +501,50 @@ impl FileDialogCore {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ViewKey {
+    cwd: PathBuf,
+    mode: DialogMode,
+    show_hidden: bool,
+    search: String,
+    sort_by: SortBy,
+    sort_ascending: bool,
+    dirs_first: bool,
+    active_filter_hash: u64,
+}
+
+impl ViewKey {
+    fn new(core: &FileDialogCore) -> Self {
+        Self {
+            cwd: core.cwd.clone(),
+            mode: core.mode,
+            show_hidden: core.show_hidden,
+            search: core.search.clone(),
+            sort_by: core.sort_by,
+            sort_ascending: core.sort_ascending,
+            dirs_first: core.dirs_first,
+            active_filter_hash: active_filter_hash(&core.filters, core.active_filter),
+        }
+    }
+}
+
+fn active_filter_hash(filters: &[FileFilter], active_filter: Option<usize>) -> u64 {
+    let Some(i) = active_filter else {
+        return 0;
+    };
+    let Some(f) = filters.get(i) else {
+        return 0;
+    };
+    let mut hasher = DefaultHasher::new();
+    // Hash both name and tokens so changes trigger a view rebuild.
+    hasher.write(f.name.as_bytes());
+    for t in &f.extensions {
+        hasher.write(t.as_bytes());
+        hasher.write_u8(0);
+    }
+    hasher.finish()
+}
+
 fn effective_filters(filters: &[FileFilter], active_filter: Option<usize>) -> Vec<FileFilter> {
     match active_filter {
         Some(i) => filters.get(i).cloned().into_iter().collect(),
@@ -720,6 +803,7 @@ fn normalize_save_name(save_name: &str, filters: &[FileFilter], policy: Extensio
 fn filter_entries_in_place(
     entries: &mut Vec<DirEntry>,
     mode: DialogMode,
+    show_hidden: bool,
     filters: &[FileFilter],
     active_filter: Option<usize>,
     search: &str,
@@ -732,6 +816,9 @@ fn filter_entries_in_place(
         Some(search.to_lowercase())
     };
     entries.retain(|e| {
+        if !show_hidden && e.name.starts_with('.') {
+            return false;
+        }
         let pass_kind = if matches!(mode, DialogMode::PickFolder) {
             e.is_dir
         } else {
@@ -828,15 +915,12 @@ fn scan_number(bytes: &[u8], start: usize) -> (usize, usize, usize) {
     (end, trim, trim_end)
 }
 
-fn read_entries_with_fs(fs: &dyn FileSystem, dir: &Path, show_hidden: bool) -> Vec<DirEntry> {
+fn read_entries_snapshot_with_fs(fs: &dyn FileSystem, dir: &Path) -> Vec<DirEntry> {
     let mut out = Vec::new();
     let Ok(rd) = fs.read_dir(dir) else {
         return out;
     };
     for e in rd {
-        if !show_hidden && e.name.starts_with('.') {
-            continue;
-        }
         out.push(DirEntry {
             name: e.name,
             path: e.path,
@@ -852,6 +936,7 @@ fn read_entries_with_fs(fs: &dyn FileSystem, dir: &Path, show_hidden: bool) -> V
 mod tests {
     use super::*;
     use crate::fs::StdFileSystem;
+    use std::cell::Cell;
 
     fn mods(ctrl: bool, shift: bool) -> Modifiers {
         Modifiers { ctrl, shift }
@@ -860,11 +945,14 @@ mod tests {
     #[derive(Default)]
     struct TestFs {
         meta: std::collections::HashMap<PathBuf, crate::fs::FsMetadata>,
+        entries: Vec<crate::fs::FsEntry>,
+        read_dir_calls: Cell<usize>,
     }
 
     impl crate::fs::FileSystem for TestFs {
         fn read_dir(&self, _dir: &Path) -> std::io::Result<Vec<crate::fs::FsEntry>> {
-            Ok(Vec::new())
+            self.read_dir_calls.set(self.read_dir_calls.get() + 1);
+            Ok(self.entries.clone())
         }
 
         fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
@@ -1106,5 +1194,69 @@ mod tests {
         assert!(core.pending_overwrite().is_none());
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
+    }
+
+    #[test]
+    fn rescan_if_needed_caches_directory_listing() {
+        let fs = TestFs {
+            entries: vec![
+                crate::fs::FsEntry {
+                    name: "a.txt".into(),
+                    path: PathBuf::from("/tmp/a.txt"),
+                    is_dir: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "b.txt".into(),
+                    path: PathBuf::from("/tmp/b.txt"),
+                    is_dir: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: ".hidden".into(),
+                    path: PathBuf::from("/tmp/.hidden"),
+                    is_dir: false,
+                    size: None,
+                    modified: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(fs.read_dir_calls.get(), 1);
+        assert!(core.entries().iter().all(|e| e.name != ".hidden"));
+
+        // Same key => no rescan, no fs hit.
+        core.rescan_if_needed(&fs);
+        assert_eq!(fs.read_dir_calls.get(), 1);
+
+        // View-only changes should rebuild without hitting fs again.
+        core.search = "b".into();
+        core.rescan_if_needed(&fs);
+        assert_eq!(fs.read_dir_calls.get(), 1);
+        assert_eq!(core.entries().len(), 1);
+        assert_eq!(core.entries()[0].name, "b.txt");
+
+        core.search.clear();
+        core.show_hidden = true;
+        core.rescan_if_needed(&fs);
+        assert_eq!(fs.read_dir_calls.get(), 1);
+        assert!(core.entries().iter().any(|e| e.name == ".hidden"));
+
+        // Explicit refresh should hit fs again even if the view inputs didn't change.
+        core.invalidate_dir_cache();
+        core.rescan_if_needed(&fs);
+        assert_eq!(fs.read_dir_calls.get(), 2);
+
+        // Changing cwd should refresh snapshot.
+        core.set_cwd(PathBuf::from("/other"));
+        core.rescan_if_needed(&fs);
+        assert_eq!(fs.read_dir_calls.get(), 3);
     }
 }
