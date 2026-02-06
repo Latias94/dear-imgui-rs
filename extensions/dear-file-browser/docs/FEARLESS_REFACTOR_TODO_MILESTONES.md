@@ -332,15 +332,15 @@ Exit criteria:
 
 Use this as a tracking table for final validation.
 
-- [ ] Multiple dialogs concurrently (manager + ids)
-- [ ] Host flexibility: window/modal/popup/embed
-- [ ] Places: groups + editable + persistence + devices
+- [x] Multiple dialogs concurrently (manager + ids)
+- [x] Host flexibility: window/modal/popup/embed (modal can be caller-hosted via `draw_contents`)
+- [x] Places: groups + editable + persistence + devices
 - [x] Selection: ctrl/shift, ctrl+a, keyboard navigation, type-to-select
-- [ ] Save: confirm overwrite + extension policy
-- [ ] Filters: collections + regex (optional) + multi-layer extensions
+- [x] Save: confirm overwrite + extension policy
+- [ ] Filters: collections + regex (optional) + multi-layer extensions (multi-layer done; regex TBD)
 - [ ] File styles: by type/ext/name/regex + callback
-- [ ] Custom pane: per filter + blocks confirm
-- [ ] Thumbnails: decode + GPU lifecycle + grid view
+- [x] Custom pane: per filter + blocks confirm
+- [ ] Thumbnails: decode + GPU lifecycle + grid view (list preview done; grid view TBD)
 
 ---
 
