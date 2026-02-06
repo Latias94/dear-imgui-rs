@@ -75,9 +75,9 @@ Goal: move domain logic out of ImGui rendering into a core module.
 
 - [x] Task: Extract `FileDialogCore` (no ImGui types) and drive it from UI
   - Acceptance: selection/navigation/filter/sort/save policies live in core and are unit-testable.
-- [ ] Task: Introduce stable identities (`EntryId`) + richer metadata (`FileMeta`) + `DirSnapshot`
+- [x] Task: Introduce stable identities (`EntryId`) + richer metadata (`FileMeta`) + `DirSnapshot`
   - Acceptance: selection/focus/anchor no longer depend on entry base names (handles duplicates and renames robustly).
-- [ ] Task: Switch selection storage to IDs (`IndexSet<EntryId>`) with `focused` + `anchor`
+- [x] Task: Switch selection storage to IDs (`IndexSet<EntryId>`) with `focused` + `anchor`
   - Acceptance: Ctrl/Shift range semantics are covered by unit tests and remain stable under sorting/filtering.
 
 ### Epic 2.2 — Event model
@@ -189,7 +189,7 @@ Goal: bring selection and keyboard navigation close to IGFD.
 
 ### Epic 6.1 — Selection model
 
-- [ ] Task: switch to `selected: IndexSet<EntryId>` + `focused` + `anchor`
+- [x] Task: switch to `selected: IndexSet<EntryId>` + `focused` + `anchor`
   - Acceptance: unit tests cover selection semantics.
 
 ### Epic 6.2 — Multi-select gestures

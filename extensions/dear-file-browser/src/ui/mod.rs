@@ -2385,7 +2385,7 @@ fn draw_file_table_view(
                 draw_thumbnail_cell(ui, state, e);
             }
 
-            let selected = state.core.is_selected_name(&e.name);
+            let selected = state.core.is_selected_id(e.id);
             let visual = style_visual_for_entry(state, e);
 
             let mut label = e.display_name();
@@ -2416,8 +2416,7 @@ fn draw_file_table_view(
                                         || ui.is_key_down(Key::RightShift),
                                 };
                                 let _ = state.core.handle_event(CoreEvent::ClickEntry {
-                                    name: e.name.clone(),
-                                    is_dir: e.is_dir,
+                                    id: e.id,
                                     modifiers,
                                 });
                                 if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
@@ -2434,7 +2433,8 @@ fn draw_file_table_view(
 
                         if let Some(_popup) = ui.begin_popup_context_item() {
                             if !selected {
-                                state.core.focus_and_select_by_name(e.name.clone());
+                                let _ =
+                                    state.core.handle_event(CoreEvent::FocusAndSelectById(e.id));
                             }
                             let has_selection = state.core.has_selection();
                             let can_paste = state
@@ -2505,10 +2505,9 @@ fn draw_file_table_view(
                         if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
                             state.ui.ui_error = None;
                             *request_confirm |= matches!(
-                                state.core.handle_event(CoreEvent::DoubleClickEntry {
-                                    name: e.name.clone(),
-                                    is_dir: e.is_dir,
-                                }),
+                                state
+                                    .core
+                                    .handle_event(CoreEvent::DoubleClickEntry { id: e.id }),
                                 CoreEventOutcome::RequestConfirm
                             );
                         }
@@ -2704,7 +2703,7 @@ fn draw_file_grid_view(
                     let e = &entries[item_idx];
                     idx += 1;
 
-                    let selected = state.core.is_selected_name(&e.name);
+                    let selected = state.core.is_selected_id(e.id);
                     let visual = style_visual_for_entry(state, e);
 
                     let mut label = e.display_name();
@@ -2782,8 +2781,7 @@ fn draw_file_grid_view(
                                 || ui.is_key_down(Key::RightShift),
                         };
                         let _ = state.core.handle_event(CoreEvent::ClickEntry {
-                            name: e.name.clone(),
-                            is_dir: e.is_dir,
+                            id: e.id,
                             modifiers,
                         });
                         if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
@@ -2799,7 +2797,7 @@ fn draw_file_grid_view(
 
                     if let Some(_popup) = ui.begin_popup_context_item() {
                         if !selected {
-                            state.core.focus_and_select_by_name(e.name.clone());
+                            let _ = state.core.handle_event(CoreEvent::FocusAndSelectById(e.id));
                         }
                         let has_selection = state.core.has_selection();
                         let can_paste = state
@@ -2861,10 +2859,9 @@ fn draw_file_grid_view(
                     if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
                         state.ui.ui_error = None;
                         *request_confirm |= matches!(
-                            state.core.handle_event(CoreEvent::DoubleClickEntry {
-                                name: e.name.clone(),
-                                is_dir: e.is_dir,
-                            }),
+                            state
+                                .core
+                                .handle_event(CoreEvent::DoubleClickEntry { id: e.id }),
                             CoreEventOutcome::RequestConfirm
                         );
                     }

@@ -1,8 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::{
-    collections::{HashSet, hash_map::DefaultHasher},
-    hash::Hasher,
-};
+use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
 use crate::core::{
     ClickAction, DialogMode, ExtensionPolicy, FileDialogError, FileFilter, SavePolicy, Selection,
@@ -10,6 +7,7 @@ use crate::core::{
 };
 use crate::fs::FileSystem;
 use crate::places::Places;
+use indexmap::IndexSet;
 use regex::RegexBuilder;
 
 /// Keyboard/mouse modifier keys used by selection/navigation logic.
@@ -35,19 +33,15 @@ pub enum CoreEvent {
     },
     /// Click an entry row/cell.
     ClickEntry {
-        /// Entry base name.
-        name: String,
-        /// Whether entry is directory.
-        is_dir: bool,
+        /// Entry identity in current view.
+        id: EntryId,
         /// Modifier keys used by selection semantics.
         modifiers: Modifiers,
     },
     /// Double-click an entry row/cell.
     DoubleClickEntry {
-        /// Entry base name.
-        name: String,
-        /// Whether entry is directory.
-        is_dir: bool,
+        /// Entry identity in current view.
+        id: EntryId,
     },
     /// Type-to-select prefix.
     SelectByPrefix(String),
@@ -57,6 +51,8 @@ pub enum CoreEvent {
     NavigateUp,
     /// Navigate to a target directory.
     NavigateTo(PathBuf),
+    /// Focus and select one entry by id.
+    FocusAndSelectById(EntryId),
     /// Focus and select one entry by base name.
     FocusAndSelectByName(String),
     /// Replace current selection by names.
@@ -130,6 +126,8 @@ pub struct DirSnapshot {
 /// A single directory entry in the current directory view.
 #[derive(Clone, Debug)]
 pub(crate) struct DirEntry {
+    /// Stable entry id.
+    pub(crate) id: EntryId,
     /// Base name (no parent path).
     pub(crate) name: String,
     /// Full path.
@@ -153,13 +151,7 @@ impl DirEntry {
     }
 
     fn stable_id(&self) -> EntryId {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(self.path.as_os_str().to_string_lossy().as_bytes());
-        hasher.write_u8(0);
-        hasher.write(self.name.as_bytes());
-        hasher.write_u8(0);
-        hasher.write_u8(u8::from(self.is_dir));
-        EntryId::new(hasher.finish())
+        self.id
     }
 }
 
@@ -176,7 +168,7 @@ pub struct FileDialogCore {
     pub cwd: PathBuf,
     /// Selected entry names (relative to cwd).
     pub selected: Vec<String>,
-    selected_ids: Vec<EntryId>,
+    selected_ids: IndexSet<EntryId>,
     /// Optional filename input for SaveFile.
     pub save_name: String,
     /// Filters (lower-case extensions).
@@ -234,7 +226,7 @@ impl FileDialogCore {
             mode,
             cwd,
             selected: Vec::new(),
-            selected_ids: Vec::new(),
+            selected_ids: IndexSet::new(),
             save_name: String::new(),
             filters: Vec::new(),
             active_filter: None,
@@ -285,16 +277,12 @@ impl FileDialogCore {
                 self.move_focus(delta, modifiers);
                 CoreEventOutcome::None
             }
-            CoreEvent::ClickEntry {
-                name,
-                is_dir,
-                modifiers,
-            } => {
-                self.click_entry(name, is_dir, modifiers);
+            CoreEvent::ClickEntry { id, modifiers } => {
+                self.click_entry(id, modifiers);
                 CoreEventOutcome::None
             }
-            CoreEvent::DoubleClickEntry { name, is_dir } => {
-                if self.double_click_entry(name, is_dir) {
+            CoreEvent::DoubleClickEntry { id } => {
+                if self.double_click_entry(id) {
                     CoreEventOutcome::RequestConfirm
                 } else {
                     CoreEventOutcome::None
@@ -317,6 +305,10 @@ impl FileDialogCore {
             }
             CoreEvent::NavigateTo(path) => {
                 self.navigate_to(path);
+                CoreEventOutcome::None
+            }
+            CoreEvent::FocusAndSelectById(id) => {
+                self.select_single_by_id(id);
                 CoreEventOutcome::None
             }
             CoreEvent::FocusAndSelectByName(name) => {
@@ -361,33 +353,28 @@ impl FileDialogCore {
 
     /// Replace selection by entry names (used by multi-create/paste flows).
     pub fn replace_selection_by_names(&mut self, names: Vec<String>) {
-        self.selected.clear();
-        self.selected.extend(names.iter().cloned());
         self.pending_selected_names = names;
         self.selected_ids.clear();
-        self.focused_name = None;
-        self.selection_anchor_name = None;
         self.focused_id = None;
         self.selection_anchor_id = None;
+        self.sync_name_state_from_ids();
     }
 
     /// Clear current selection, focus and anchor.
     pub fn clear_selection(&mut self) {
-        self.selected.clear();
         self.selected_ids.clear();
-        self.focused_name = None;
-        self.selection_anchor_name = None;
         self.focused_id = None;
         self.selection_anchor_id = None;
         self.pending_selected_names.clear();
+        self.sync_name_state_from_ids();
     }
 
     pub(crate) fn selected_len(&self) -> usize {
-        self.selected.len()
+        self.selected_ids.len()
     }
 
     pub(crate) fn has_selection(&self) -> bool {
-        !self.selected.is_empty()
+        !self.selected_ids.is_empty()
     }
 
     pub(crate) fn first_selected_name(&self) -> Option<&str> {
@@ -398,8 +385,8 @@ impl FileDialogCore {
         &self.selected
     }
 
-    pub(crate) fn is_selected_name(&self, name: &str) -> bool {
-        self.selected.iter().any(|n| n == name)
+    pub(crate) fn is_selected_id(&self, id: EntryId) -> bool {
+        self.selected_ids.contains(&id)
     }
 
     /// Refreshes the directory snapshot and view cache if needed.
@@ -431,7 +418,7 @@ impl FileDialogCore {
         self.entries = entries;
         self.resolve_pending_selected_names();
         self.retain_selected_visible();
-        self.sync_id_state_from_names();
+        self.sync_name_state_from_ids();
         self.last_view_key = Some(key);
     }
 
@@ -453,17 +440,32 @@ impl FileDialogCore {
             return;
         }
         let pending = std::mem::take(&mut self.pending_selected_names);
-        self.selected.clear();
+        self.selected_ids.clear();
         for name in pending {
-            if self.view_names.iter().any(|visible| visible == &name) {
-                self.selected.push(name);
+            if let Some(id) = self.id_for_name(name.as_str()) {
+                self.selected_ids.insert(id);
             }
         }
         self.enforce_selection_cap();
-        if let Some(last) = self.selected.last().cloned() {
-            self.focused_name = Some(last.clone());
-            self.selection_anchor_name = Some(last);
-        }
+        let last = self.selected_ids.iter().next_back().copied();
+        self.focused_id = last;
+        self.selection_anchor_id = last;
+        self.sync_name_state_from_ids();
+    }
+
+    fn entry_by_id(&self, id: EntryId) -> Option<&DirEntry> {
+        self.entries.iter().find(|entry| entry.id == id)
+    }
+
+    fn name_for_id(&self, id: EntryId) -> Option<&str> {
+        self.entry_by_id(id)
+            .map(|entry| entry.name.as_str())
+            .or_else(|| {
+                self.view_ids
+                    .iter()
+                    .position(|candidate| *candidate == id)
+                    .and_then(|index| self.view_names.get(index).map(String::as_str))
+            })
     }
 
     fn id_for_name(&self, name: &str) -> Option<EntryId> {
@@ -471,27 +473,28 @@ impl FileDialogCore {
             .iter()
             .find(|entry| entry.name == name)
             .map(DirEntry::stable_id)
+            .or_else(|| {
+                self.view_names
+                    .iter()
+                    .position(|candidate| candidate == name)
+                    .and_then(|index| self.view_ids.get(index).copied())
+            })
     }
 
-    fn sync_id_state_from_names(&mut self) {
-        let mut seen = HashSet::new();
-        let mut ids = Vec::with_capacity(self.selected.len());
-        for name in &self.selected {
-            if let Some(id) = self.id_for_name(name) {
-                if seen.insert(id) {
-                    ids.push(id);
-                }
+    fn sync_name_state_from_ids(&mut self) {
+        self.selected.clear();
+        self.selected.reserve(self.selected_ids.len());
+        for id in &self.selected_ids {
+            if let Some(name) = self.name_for_id(*id) {
+                self.selected.push(name.to_string());
             }
         }
-        self.selected_ids = ids;
-        self.focused_id = self
-            .focused_name
-            .as_deref()
-            .and_then(|name| self.id_for_name(name));
-        self.selection_anchor_id = self
-            .selection_anchor_name
-            .as_deref()
-            .and_then(|name| self.id_for_name(name));
+        self.focused_name = self
+            .focused_id
+            .and_then(|id| self.name_for_id(id).map(ToOwned::to_owned));
+        self.selection_anchor_name = self
+            .selection_anchor_id
+            .and_then(|id| self.name_for_id(id).map(ToOwned::to_owned));
     }
 
     /// Select the next entry whose base name starts with the given prefix (case-insensitive).
@@ -499,24 +502,27 @@ impl FileDialogCore {
     /// This is used by "type-to-select" navigation (IGFD-style).
     pub(crate) fn select_by_prefix(&mut self, prefix: &str) {
         let prefix = prefix.trim();
-        if prefix.is_empty() || self.view_names.is_empty() {
+        if prefix.is_empty() || self.view_ids.is_empty() {
             return;
         }
         let prefix_lower = prefix.to_lowercase();
 
-        let len = self.view_names.len();
+        let len = self.view_ids.len();
         let start_idx = self
-            .focused_name
-            .as_deref()
-            .and_then(|f| self.view_names.iter().position(|n| n == f))
+            .focused_id
+            .and_then(|focused| self.view_ids.iter().position(|id| *id == focused))
             .map(|i| (i + 1) % len)
             .unwrap_or(0);
 
-        for off in 0..len {
-            let i = (start_idx + off) % len;
-            let name = &self.view_names[i];
-            if name.to_lowercase().starts_with(&prefix_lower) {
-                self.select_single_by_name(name.clone());
+        for offset in 0..len {
+            let index = (start_idx + offset) % len;
+            let id = self.view_ids[index];
+            if self
+                .name_for_id(id)
+                .map(|name| name.to_lowercase().starts_with(&prefix_lower))
+                .unwrap_or(false)
+            {
+                self.select_single_by_id(id);
                 break;
             }
         }
@@ -528,25 +534,30 @@ impl FileDialogCore {
         if cap <= 1 {
             return;
         }
-        let take = self.view_names.len().min(cap);
-        self.selected = self.view_names.iter().take(take).cloned().collect();
-        self.sync_id_state_from_names();
+        self.selected_ids.clear();
+        for id in self.view_ids.iter().take(cap).copied() {
+            self.selected_ids.insert(id);
+        }
+        let last = self.selected_ids.iter().next_back().copied();
+        self.focused_id = last;
+        self.selection_anchor_id = last;
+        self.pending_selected_names.clear();
+        self.sync_name_state_from_ids();
     }
 
     /// Moves keyboard focus up/down within the current view.
     pub(crate) fn move_focus(&mut self, delta: i32, modifiers: Modifiers) {
-        if self.view_names.is_empty() {
+        if self.view_ids.is_empty() {
             return;
         }
 
-        let len = self.view_names.len();
+        let len = self.view_ids.len();
         let current_idx = self
-            .focused_name
-            .as_ref()
-            .and_then(|n| self.view_names.iter().position(|s| s == n));
+            .focused_id
+            .and_then(|id| self.view_ids.iter().position(|candidate| *candidate == id));
         let next_idx = match current_idx {
-            Some(i) => {
-                let next = i as i32 + delta;
+            Some(index) => {
+                let next = index as i32 + delta;
                 next.clamp(0, (len - 1) as i32) as usize
             }
             None => {
@@ -558,31 +569,30 @@ impl FileDialogCore {
             }
         };
 
-        let target = self.view_names[next_idx].clone();
+        let target_id = self.view_ids[next_idx];
         if modifiers.shift {
-            let anchor = self
-                .selection_anchor_name
-                .clone()
-                .or_else(|| self.focused_name.clone())
-                .unwrap_or_else(|| target.clone());
-            if self.selection_anchor_name.is_none() {
-                self.selection_anchor_name = Some(anchor.clone());
+            let anchor_id = self
+                .selection_anchor_id
+                .or(self.focused_id)
+                .unwrap_or(target_id);
+            if self.selection_anchor_id.is_none() {
+                self.selection_anchor_id = Some(anchor_id);
             }
-
-            if let Some(range) = select_range_by_name_capped(
-                &self.view_names,
-                &anchor,
-                &target,
+            if let Some(range) = select_range_by_id_capped(
+                &self.view_ids,
+                anchor_id,
+                target_id,
                 self.selection_cap(),
             ) {
-                self.selected = range;
-                self.focused_name = Some(target);
-                self.sync_id_state_from_names();
+                self.selected_ids = range.into_iter().collect();
+                self.focused_id = Some(target_id);
+                self.pending_selected_names.clear();
+                self.sync_name_state_from_ids();
             } else {
-                self.select_single_by_name(target);
+                self.select_single_by_id(target_id);
             }
         } else {
-            self.select_single_by_name(target);
+            self.select_single_by_id(target_id);
         }
     }
 
@@ -590,24 +600,30 @@ impl FileDialogCore {
     ///
     /// If no selection exists, the focused item becomes selected, then confirm is attempted.
     pub(crate) fn activate_focused(&mut self) -> bool {
-        if self.selected.is_empty() {
-            if let Some(name) = self.focused_name.clone() {
-                self.selected.push(name);
-                self.sync_id_state_from_names();
+        if self.selected_ids.is_empty() {
+            if let Some(id) = self.focused_id {
+                self.selected_ids.insert(id);
+                self.selection_anchor_id = Some(id);
+                self.pending_selected_names.clear();
+                self.sync_name_state_from_ids();
             }
         }
-        !self.selected.is_empty()
+        !self.selected_ids.is_empty()
     }
 
     /// Handles a click on an entry row.
-    pub(crate) fn click_entry(&mut self, name: String, is_dir: bool, modifiers: Modifiers) {
-        if is_dir {
+    pub(crate) fn click_entry(&mut self, id: EntryId, modifiers: Modifiers) {
+        let Some(entry) = self.entry_by_id(id).cloned() else {
+            return;
+        };
+
+        if entry.is_dir {
             match self.click_action {
                 ClickAction::Select => {
-                    self.select_single_by_name(name);
+                    self.select_single_by_id(id);
                 }
                 ClickAction::Navigate => {
-                    self.cwd.push(&name);
+                    self.cwd.push(&entry.name);
                     self.clear_selection();
                 }
             }
@@ -615,51 +631,52 @@ impl FileDialogCore {
         }
 
         if modifiers.shift {
-            if let Some(anchor) = self.selection_anchor_name.clone() {
-                if let Some(range) = select_range_by_name_capped(
-                    &self.view_names,
-                    &anchor,
-                    &name,
-                    self.selection_cap(),
-                ) {
-                    self.selected = range;
-                    self.focused_name = Some(name);
-                    self.sync_id_state_from_names();
+            if let Some(anchor_id) = self.selection_anchor_id {
+                if let Some(range) =
+                    select_range_by_id_capped(&self.view_ids, anchor_id, id, self.selection_cap())
+                {
+                    self.selected_ids = range.into_iter().collect();
+                    self.focused_id = Some(id);
+                    self.pending_selected_names.clear();
+                    self.sync_name_state_from_ids();
                     return;
                 }
             }
-            // Fallback if range selection isn't possible.
-            self.select_single_by_name(name);
+            self.select_single_by_id(id);
             return;
         }
 
         if self.selection_cap() <= 1 || !modifiers.ctrl {
-            self.select_single_by_name(name);
+            self.select_single_by_id(id);
             return;
         }
 
-        toggle_select_name(&mut self.selected, &name);
-        self.focused_name = Some(name.clone());
-        self.selection_anchor_name = Some(name);
+        toggle_select_id(&mut self.selected_ids, id);
+        self.focused_id = Some(id);
+        self.selection_anchor_id = Some(id);
+        self.pending_selected_names.clear();
         self.enforce_selection_cap();
-        self.sync_id_state_from_names();
+        self.sync_name_state_from_ids();
     }
 
     /// Handles a double-click on an entry row.
-    pub(crate) fn double_click_entry(&mut self, name: String, is_dir: bool) -> bool {
+    pub(crate) fn double_click_entry(&mut self, id: EntryId) -> bool {
         if !self.double_click {
             return false;
         }
-        if is_dir {
-            self.cwd.push(&name);
+
+        let Some(entry) = self.entry_by_id(id).cloned() else {
+            return false;
+        };
+
+        if entry.is_dir {
+            self.cwd.push(&entry.name);
             self.clear_selection();
             return false;
         }
 
         if matches!(self.mode, DialogMode::OpenFile | DialogMode::OpenFiles) {
-            self.selected.clear();
-            self.selected.push(name);
-            self.sync_id_state_from_names();
+            self.select_single_by_id(id);
             return true;
         }
         false
@@ -767,11 +784,27 @@ impl FileDialogCore {
     }
 
     fn select_single_by_name(&mut self, name: String) {
-        self.selected.clear();
-        self.selected.push(name.clone());
+        if let Some(id) = self.id_for_name(&name) {
+            self.select_single_by_id(id);
+            return;
+        }
+
+        self.pending_selected_names = vec![name.clone()];
+        self.selected_ids.clear();
+        self.focused_id = None;
+        self.selection_anchor_id = None;
+        self.selected = vec![name.clone()];
         self.focused_name = Some(name.clone());
         self.selection_anchor_name = Some(name);
-        self.sync_id_state_from_names();
+    }
+
+    fn select_single_by_id(&mut self, id: EntryId) {
+        self.selected_ids.clear();
+        self.selected_ids.insert(id);
+        self.focused_id = Some(id);
+        self.selection_anchor_id = Some(id);
+        self.pending_selected_names.clear();
+        self.sync_name_state_from_ids();
     }
 
     fn selection_cap(&self) -> usize {
@@ -783,27 +816,42 @@ impl FileDialogCore {
 
     fn enforce_selection_cap(&mut self) {
         let cap = self.selection_cap();
-        if cap == usize::MAX || self.selected.len() <= cap {
+        if cap == usize::MAX || self.selected_ids.len() <= cap {
             return;
         }
-        while self.selected.len() > cap {
-            self.selected.remove(0);
+        while self.selected_ids.len() > cap {
+            let Some(first) = self.selected_ids.iter().next().copied() else {
+                break;
+            };
+            self.selected_ids.shift_remove(&first);
         }
     }
 
     fn retain_selected_visible(&mut self) {
-        if self.selected.is_empty() || self.view_names.is_empty() {
+        if self.selected_ids.is_empty() || self.view_ids.is_empty() {
             return;
         }
-        let mut keep = Vec::with_capacity(self.selected.len());
-        for n in self.selected.drain(..) {
-            if self.view_names.iter().any(|v| v == &n) {
-                keep.push(n);
-            }
-        }
-        self.selected = keep;
+
+        self.selected_ids
+            .retain(|id| self.view_ids.iter().any(|visible| visible == id));
         self.enforce_selection_cap();
-        self.sync_id_state_from_names();
+
+        if self
+            .focused_id
+            .map(|id| self.view_ids.iter().all(|visible| *visible != id))
+            .unwrap_or(false)
+        {
+            self.focused_id = self.selected_ids.iter().next_back().copied();
+        }
+        if self
+            .selection_anchor_id
+            .map(|id| self.view_ids.iter().all(|visible| *visible != id))
+            .unwrap_or(false)
+        {
+            self.selection_anchor_id = self.focused_id;
+        }
+
+        self.sync_name_state_from_ids();
     }
 }
 
@@ -1015,24 +1063,22 @@ fn has_extension_suffix(name_lower: &str, ext: &str) -> bool {
     name_lower.as_bytes()[prefix_len - 1] == b'.'
 }
 
-fn toggle_select_name(list: &mut Vec<String>, name: &str) {
-    if let Some(i) = list.iter().position(|s| s == name) {
-        list.remove(i);
-    } else {
-        list.push(name.to_string());
+fn toggle_select_id(list: &mut IndexSet<EntryId>, id: EntryId) {
+    if !list.shift_remove(&id) {
+        list.insert(id);
     }
 }
 
-fn select_range_by_name_capped(
-    view_names: &[String],
-    anchor: &str,
-    target: &str,
+fn select_range_by_id_capped(
+    view_ids: &[EntryId],
+    anchor: EntryId,
+    target: EntryId,
     cap: usize,
-) -> Option<Vec<String>> {
-    let ia = view_names.iter().position(|s| s == anchor)?;
-    let it = view_names.iter().position(|s| s == target)?;
+) -> Option<Vec<EntryId>> {
+    let ia = view_ids.iter().position(|id| *id == anchor)?;
+    let it = view_ids.iter().position(|id| *id == target)?;
     let (lo, hi) = if ia <= it { (ia, it) } else { (it, ia) };
-    let mut range = view_names[lo..=hi].to_vec();
+    let mut range = view_ids[lo..=hi].to_vec();
     if cap != usize::MAX && range.len() > cap {
         if it >= ia {
             let start = range.len() - cap;
@@ -1248,6 +1294,13 @@ fn scan_number(bytes: &[u8], start: usize) -> (usize, usize, usize) {
     (end, trim, trim_end)
 }
 
+fn entry_id_from_path(path: &Path, is_dir: bool) -> EntryId {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(path.to_string_lossy().as_bytes());
+    hasher.write_u8(if is_dir { 1 } else { 0 });
+    EntryId::new(hasher.finish())
+}
+
 fn read_entries_snapshot_with_fs(fs: &dyn FileSystem, dir: &Path) -> DirSnapshot {
     let mut out = Vec::new();
     let Ok(rd) = fs.read_dir(dir) else {
@@ -1264,6 +1317,7 @@ fn read_entries_snapshot_with_fs(fs: &dyn FileSystem, dir: &Path) -> DirSnapshot
             modified: e.modified,
         };
         out.push(DirEntry {
+            id: entry_id_from_path(&e.path, meta.is_dir),
             name: e.name,
             path: e.path,
             is_dir: meta.is_dir,
@@ -1286,6 +1340,33 @@ mod tests {
 
     fn mods(ctrl: bool, shift: bool) -> Modifiers {
         Modifiers { ctrl, shift }
+    }
+
+    fn make_file_entry(name: &str) -> DirEntry {
+        let path = PathBuf::from("/tmp").join(name);
+        DirEntry {
+            id: entry_id_from_path(&path, false),
+            name: name.to_string(),
+            path,
+            is_dir: false,
+            size: None,
+            modified: None,
+        }
+    }
+
+    fn set_view_files(core: &mut FileDialogCore, names: &[&str]) {
+        core.entries = names.iter().map(|name| make_file_entry(name)).collect();
+        core.view_names = core
+            .entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect();
+        core.view_ids = core.entries.iter().map(|entry| entry.id).collect();
+    }
+
+    fn entry_id(core: &FileDialogCore, name: &str) -> EntryId {
+        core.id_for_name(name)
+            .unwrap_or_else(|| panic!("missing entry id for {name}"))
     }
 
     #[derive(Default)]
@@ -1369,10 +1450,12 @@ mod tests {
     fn click_file_toggles_in_multi_select() {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.allow_multi = true;
-        core.view_names = vec!["a.txt".into()];
-        core.click_entry("a.txt".into(), false, mods(true, false));
+        set_view_files(&mut core, &["a.txt"]);
+
+        let a = entry_id(&core, "a.txt");
+        core.click_entry(a, mods(true, false));
         assert_eq!(core.selected, vec!["a.txt"]);
-        core.click_entry("a.txt".into(), false, mods(true, false));
+        core.click_entry(a, mods(true, false));
         assert!(core.selected.is_empty());
     }
 
@@ -1390,15 +1473,10 @@ mod tests {
     fn shift_click_selects_a_range_in_view_order() {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.allow_multi = true;
-        core.view_names = vec![
-            "a.txt".into(),
-            "b.txt".into(),
-            "c.txt".into(),
-            "d.txt".into(),
-            "e.txt".into(),
-        ];
-        core.click_entry("b.txt".into(), false, mods(false, false));
-        core.click_entry("e.txt".into(), false, mods(false, true));
+        set_view_files(&mut core, &["a.txt", "b.txt", "c.txt", "d.txt", "e.txt"]);
+
+        core.click_entry(entry_id(&core, "b.txt"), mods(false, false));
+        core.click_entry(entry_id(&core, "e.txt"), mods(false, true));
         assert_eq!(core.selected, vec!["b.txt", "c.txt", "d.txt", "e.txt"]);
     }
 
@@ -1406,7 +1484,8 @@ mod tests {
     fn ctrl_a_selects_all_when_multi_select_enabled() {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.allow_multi = true;
-        core.view_names = vec!["a".into(), "b".into(), "c".into()];
+        set_view_files(&mut core, &["a", "b", "c"]);
+
         core.select_all();
         assert_eq!(core.selected, vec!["a", "b", "c"]);
     }
@@ -1416,7 +1495,8 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.allow_multi = true;
         core.max_selection = Some(2);
-        core.view_names = vec!["a".into(), "b".into(), "c".into()];
+        set_view_files(&mut core, &["a", "b", "c"]);
+
         core.select_all();
         assert_eq!(core.selected, vec!["a", "b"]);
     }
@@ -1426,13 +1506,14 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.allow_multi = true;
         core.max_selection = Some(2);
-        core.view_names = vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()];
-        core.click_entry("b".into(), false, mods(false, false));
-        core.click_entry("e".into(), false, mods(false, true));
+        set_view_files(&mut core, &["a", "b", "c", "d", "e"]);
+
+        core.click_entry(entry_id(&core, "b"), mods(false, false));
+        core.click_entry(entry_id(&core, "e"), mods(false, true));
         assert_eq!(core.selected, vec!["d", "e"]);
 
-        core.click_entry("d".into(), false, mods(false, false));
-        core.click_entry("b".into(), false, mods(false, true));
+        core.click_entry(entry_id(&core, "d"), mods(false, false));
+        core.click_entry(entry_id(&core, "b"), mods(false, true));
         assert_eq!(core.selected, vec!["b", "c"]);
     }
 
@@ -1441,11 +1522,13 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.allow_multi = true;
         core.max_selection = Some(2);
-        core.view_names = vec!["a".into(), "b".into(), "c".into()];
-        core.click_entry("a".into(), false, mods(false, false));
-        core.click_entry("b".into(), false, mods(true, false));
+        set_view_files(&mut core, &["a", "b", "c"]);
+
+        core.click_entry(entry_id(&core, "a"), mods(false, false));
+        core.click_entry(entry_id(&core, "b"), mods(true, false));
         assert_eq!(core.selected, vec!["a", "b"]);
-        core.click_entry("c".into(), false, mods(true, false));
+
+        core.click_entry(entry_id(&core, "c"), mods(true, false));
         assert_eq!(core.selected, vec!["b", "c"]);
     }
 
@@ -1453,8 +1536,9 @@ mod tests {
     fn move_focus_with_shift_extends_range() {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.allow_multi = true;
-        core.view_names = vec!["a".into(), "b".into(), "c".into(), "d".into()];
-        core.click_entry("b".into(), false, mods(false, false));
+        set_view_files(&mut core, &["a", "b", "c", "d"]);
+
+        core.click_entry(entry_id(&core, "b"), mods(false, false));
         core.move_focus(2, mods(false, true));
         assert_eq!(core.selected, vec!["b", "c", "d"]);
         assert_eq!(core.focused_name.as_deref(), Some("d"));
@@ -1463,8 +1547,8 @@ mod tests {
     #[test]
     fn handle_event_activate_focused_requests_confirm() {
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
-        core.view_names = vec!["a.txt".into()];
-        core.focused_name = Some("a.txt".into());
+        set_view_files(&mut core, &["a.txt"]);
+        core.focused_id = Some(entry_id(&core, "a.txt"));
 
         let outcome = core.handle_event(CoreEvent::ActivateFocused);
         assert_eq!(outcome, CoreEventOutcome::RequestConfirm);
@@ -1474,10 +1558,10 @@ mod tests {
     #[test]
     fn handle_event_double_click_file_requests_confirm() {
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        set_view_files(&mut core, &["a.txt"]);
 
         let outcome = core.handle_event(CoreEvent::DoubleClickEntry {
-            name: "a.txt".into(),
-            is_dir: false,
+            id: entry_id(&core, "a.txt"),
         });
 
         assert_eq!(outcome, CoreEventOutcome::RequestConfirm);
@@ -1498,8 +1582,9 @@ mod tests {
     #[test]
     fn activate_focused_confirms_selection() {
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
-        core.view_names = vec!["a.txt".into()];
-        core.focused_name = Some("a.txt".into());
+        set_view_files(&mut core, &["a.txt"]);
+        core.focused_id = Some(entry_id(&core, "a.txt"));
+
         let gate = ConfirmGate::default();
         assert!(core.activate_focused());
         core.confirm(&StdFileSystem, &gate).unwrap();
@@ -1595,27 +1680,9 @@ mod tests {
     #[test]
     fn natural_sort_orders_digit_runs() {
         let mut entries = vec![
-            DirEntry {
-                name: "file10.txt".into(),
-                path: PathBuf::from("/tmp/file10.txt"),
-                is_dir: false,
-                size: None,
-                modified: None,
-            },
-            DirEntry {
-                name: "file2.txt".into(),
-                path: PathBuf::from("/tmp/file2.txt"),
-                is_dir: false,
-                size: None,
-                modified: None,
-            },
-            DirEntry {
-                name: "file1.txt".into(),
-                path: PathBuf::from("/tmp/file1.txt"),
-                is_dir: false,
-                size: None,
-                modified: None,
-            },
+            make_file_entry("file10.txt"),
+            make_file_entry("file2.txt"),
+            make_file_entry("file1.txt"),
         ];
         sort_entries_in_place(&mut entries, SortBy::Name, true, false);
         let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
@@ -1625,34 +1692,10 @@ mod tests {
     #[test]
     fn sort_by_extension_orders_by_full_extension_then_name() {
         let mut entries = vec![
-            DirEntry {
-                name: "alpha.tar.gz".into(),
-                path: PathBuf::from("/tmp/alpha.tar.gz"),
-                is_dir: false,
-                size: None,
-                modified: None,
-            },
-            DirEntry {
-                name: "beta.rs".into(),
-                path: PathBuf::from("/tmp/beta.rs"),
-                is_dir: false,
-                size: None,
-                modified: None,
-            },
-            DirEntry {
-                name: "gamma.tar.gz".into(),
-                path: PathBuf::from("/tmp/gamma.tar.gz"),
-                is_dir: false,
-                size: None,
-                modified: None,
-            },
-            DirEntry {
-                name: "noext".into(),
-                path: PathBuf::from("/tmp/noext"),
-                is_dir: false,
-                size: None,
-                modified: None,
-            },
+            make_file_entry("alpha.tar.gz"),
+            make_file_entry("beta.rs"),
+            make_file_entry("gamma.tar.gz"),
+            make_file_entry("noext"),
         ];
 
         sort_entries_in_place(&mut entries, SortBy::Extension, true, false);
@@ -1666,8 +1709,9 @@ mod tests {
     #[test]
     fn select_by_prefix_cycles_from_current_focus() {
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
-        core.view_names = vec!["alpha".into(), "beta".into(), "alpine".into()];
-        core.focused_name = Some("alpha".into());
+        set_view_files(&mut core, &["alpha", "beta", "alpine"]);
+        core.focused_id = Some(entry_id(&core, "alpha"));
+
         core.select_by_prefix("al");
         assert_eq!(core.selected, vec!["alpine"]);
         assert_eq!(core.focused_name.as_deref(), Some("alpine"));

@@ -32,6 +32,7 @@ rfd = { version = "0.17", optional = true, default-features = false, features = 
 chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 regex = { version = "1.11", optional = true }
+indexmap = "2"
 
 [dev-dependencies]
 pollster = { workspace = true }
