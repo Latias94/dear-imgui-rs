@@ -43,11 +43,12 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - File styles: icons/colors/tooltips via `FileStyleRegistry`
   - Thumbnails: request queue + LRU cache (user-driven decode/upload lifecycle)
   - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all
-  - Keyboard navigation: Up/Down arrows + Enter, Backspace, Ctrl+L (path), Ctrl+F (search)
-  - Empty-state hint with configurable color/message
-  - CJK/emoji supported via user-provided fonts
+- Keyboard navigation: Up/Down arrows + Enter, Backspace, Ctrl+L (path), Ctrl+F (search)
+- Empty-state hint with configurable color/message
+- CJK/emoji supported via user-provided fonts
 - Unified `Selection` + `FileDialogError` across backends
 - Optional `tracing` instrumentation
+- Optional selection cap (IGFD-style `0/1/n`)
 
 ## Features (Cargo)
 
@@ -68,6 +69,7 @@ use dear_file_browser::{Backend, DialogMode, FileDialog};
 let selection = pollster::block_on(
     FileDialog::new(DialogMode::OpenFiles)
         .backend(Backend::Auto)
+        .max_selection(5)
         .filter(("Images", &["png", "jpg"]))
         .open_async()
 );

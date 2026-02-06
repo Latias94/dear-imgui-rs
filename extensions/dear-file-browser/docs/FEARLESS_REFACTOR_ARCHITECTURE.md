@@ -46,7 +46,7 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 | Call/Display split + multi instances | ✅ | `DialogManager` + stable ids. |
 | Custom pane that can block confirm | ✅ | `CustomPane` + `ConfirmGate`. |
 | File styles (type/ext/name/contains/regex/…) | ✅ | Rule-based registry; callback-based provider + font mapping TBD. |
-| Multi-selection (Ctrl/Shift) + Ctrl+A | ✅ | Unlimited multi-select for `OpenFiles`; no “max N” cap yet. |
+| Multi-selection (Ctrl/Shift) + Ctrl+A | ✅ | Supports optional “max N” cap (IGFD-style). |
 | Keyboard navigation + type-to-select | ✅ | Works in list & grid. |
 | Places: devices + bookmarks + custom groups | ✅ | Devices + bookmarks + user groups are editable (add/remove/rename); System group remains read-only. |
 | Directory manual entry (right-click breadcrumb) | ✅ | Supported. |

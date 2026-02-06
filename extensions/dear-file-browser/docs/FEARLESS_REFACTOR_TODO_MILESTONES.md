@@ -195,7 +195,7 @@ Goal: bring selection and keyboard navigation close to IGFD.
 - [x] Task: Shift-click selects ranges
 - [x] Task: Ctrl+A selects all visible
   - Acceptance: works with filtering/search (visible set only).
-- [ ] Task: support a selection cap (`max_selection`)
+- [x] Task: support a selection cap (`max_selection`)
   - Notes:
     - IGFD supports `0 => infinite`, `1 => single`, `n => n files`.
     - We should support this independently from `DialogMode` (i.e. `OpenFiles` + cap = `n`).
