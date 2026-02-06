@@ -30,6 +30,8 @@ mod native;
 #[cfg(feature = "imgui")]
 mod places;
 #[cfg(feature = "imgui")]
+mod thumbnails;
+#[cfg(feature = "imgui")]
 mod ui;
 
 pub use core::{
@@ -52,5 +54,7 @@ pub use fs::{FileSystem, FsEntry, FsMetadata, StdFileSystem};
 pub use places::{
     Place, PlaceGroup, PlaceOrigin, Places, PlacesDeserializeError, PlacesSerializeOptions,
 };
+#[cfg(feature = "imgui")]
+pub use thumbnails::{ThumbnailCache, ThumbnailCacheConfig, ThumbnailRequest};
 #[cfg(feature = "imgui")]
 pub use ui::{FileDialogExt, WindowHostConfig};

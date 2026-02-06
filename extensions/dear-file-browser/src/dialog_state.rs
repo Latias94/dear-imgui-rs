@@ -1,6 +1,7 @@
 use crate::core::{DialogMode, LayoutStyle};
 use crate::dialog_core::FileDialogCore;
 use crate::file_style::FileStyleRegistry;
+use crate::thumbnails::{ThumbnailCache, ThumbnailCacheConfig};
 
 /// Places import/export modal mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -42,6 +43,12 @@ pub struct FileDialogUiState {
     pub ui_error: Option<String>,
     /// Style registry used to decorate the file list (icons/colors/tooltips).
     pub file_styles: FileStyleRegistry,
+    /// Enable thumbnails in the file list (adds a Preview column).
+    pub thumbnails_enabled: bool,
+    /// Thumbnail preview size in pixels.
+    pub thumbnail_size: [f32; 2],
+    /// Thumbnail cache (requests + LRU).
+    pub thumbnails: ThumbnailCache,
     /// Enable "type-to-select" behavior in the file list (IGFD-style).
     pub type_select_enabled: bool,
     /// Timeout (milliseconds) after which the type-to-select buffer resets.
@@ -81,6 +88,9 @@ impl Default for FileDialogUiState {
             focus_search_next: false,
             ui_error: None,
             file_styles: FileStyleRegistry::default(),
+            thumbnails_enabled: false,
+            thumbnail_size: [32.0, 32.0],
+            thumbnails: ThumbnailCache::new(ThumbnailCacheConfig::default()),
             type_select_enabled: true,
             type_select_timeout_ms: 750,
             custom_pane_enabled: true,

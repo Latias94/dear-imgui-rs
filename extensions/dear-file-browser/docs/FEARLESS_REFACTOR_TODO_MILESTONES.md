@@ -279,8 +279,8 @@ Goal: add thumbnails without binding to a specific renderer backend.
 
 ### Epic 11.1 — Thumbnail core pipeline
 
-- [ ] Task: define thumbnail states and LRU cache
-- [ ] Task: visible-driven decode requests (only decode what’s needed)
+- [x] Task: define thumbnail states and LRU cache
+- [x] Task: visible-driven decode requests (only decode what’s needed)
   - Acceptance: large directories do not decode everything eagerly.
 
 ### Epic 11.2 — Renderer interface

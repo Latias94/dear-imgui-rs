@@ -768,6 +768,9 @@ fn draw_file_table(
     request_confirm: &mut bool,
 ) {
     state.core.rescan(fs);
+    if state.ui.thumbnails_enabled {
+        state.ui.thumbnails.advance_frame();
+    }
 
     // Table
     use dear_imgui_rs::{SortDirection, TableColumnFlags, TableFlags};
@@ -778,13 +781,20 @@ fn draw_file_table(
         | TableFlags::SCROLL_Y
         | TableFlags::SIZING_STRETCH_PROP
         | TableFlags::SORTABLE; // enable built-in header sorting
-    ui.table("file_table")
-        .flags(flags)
-        .outer_size(size)
+    let show_preview = state.ui.thumbnails_enabled;
+    let mut table = ui.table("file_table").flags(flags).outer_size(size);
+    if show_preview {
+        table = table
+            .column("Preview")
+            .flags(TableColumnFlags::NO_SORT | TableColumnFlags::NO_RESIZE)
+            .weight(0.12)
+            .done();
+    }
+    table = table
         .column("Name")
         .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
         .user_id(0)
-        .weight(0.6)
+        .weight(if show_preview { 0.58 } else { 0.6 })
         .done()
         .column("Size")
         .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
@@ -796,153 +806,188 @@ fn draw_file_table(
         .user_id(2)
         .weight(0.2)
         .done()
-        .headers(true)
-        .build(|ui| {
-            // Apply ImGui sort specs (single primary sort)
-            if let Some(mut specs) = ui.table_get_sort_specs() {
-                if specs.is_dirty() {
-                    if let Some(s) = specs.iter().next() {
-                        let (by, asc) = match (s.column_index, s.sort_direction) {
-                            (0, SortDirection::Ascending) => (SortBy::Name, true),
-                            (0, SortDirection::Descending) => (SortBy::Name, false),
-                            (1, SortDirection::Ascending) => (SortBy::Size, true),
-                            (1, SortDirection::Descending) => (SortBy::Size, false),
-                            (2, SortDirection::Ascending) => (SortBy::Modified, true),
-                            (2, SortDirection::Descending) => (SortBy::Modified, false),
-                            _ => (state.core.sort_by, state.core.sort_ascending),
-                        };
-                        state.core.sort_by = by;
-                        state.core.sort_ascending = asc;
-                        state.core.rescan(fs);
-                    }
-                    specs.clear_dirty();
-                }
-            }
+        .headers(true);
 
-            if ui.is_window_focused() && !ui.io().want_text_input() {
+    table.build(|ui| {
+        // Apply ImGui sort specs (single primary sort)
+        if let Some(mut specs) = ui.table_get_sort_specs() {
+            if specs.is_dirty() {
+                if let Some(s) = specs.iter().next() {
+                    let name_col = if show_preview { 1 } else { 0 };
+                    let size_col = name_col + 1;
+                    let modified_col = name_col + 2;
+                    let (by, asc) = match (s.column_index, s.sort_direction) {
+                        (i, SortDirection::Ascending) if i == name_col => (SortBy::Name, true),
+                        (i, SortDirection::Descending) if i == name_col => (SortBy::Name, false),
+                        (i, SortDirection::Ascending) if i == size_col => (SortBy::Size, true),
+                        (i, SortDirection::Descending) if i == size_col => (SortBy::Size, false),
+                        (i, SortDirection::Ascending) if i == modified_col => {
+                            (SortBy::Modified, true)
+                        }
+                        (i, SortDirection::Descending) if i == modified_col => {
+                            (SortBy::Modified, false)
+                        }
+                        _ => (state.core.sort_by, state.core.sort_ascending),
+                    };
+                    state.core.sort_by = by;
+                    state.core.sort_ascending = asc;
+                    state.core.rescan(fs);
+                }
+                specs.clear_dirty();
+            }
+        }
+
+        if ui.is_window_focused() && !ui.io().want_text_input() {
+            let modifiers = Modifiers {
+                ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
+                shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
+            };
+
+            if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
+                state.core.select_all();
+            }
+            if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
+                state.core.move_focus(-1, modifiers);
+            }
+            if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
+                state.core.move_focus(1, modifiers);
+            }
+            if state.ui.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
+                handle_type_select(ui, state);
+            }
+        }
+
+        // Clone the entry list so we can mutate `state.core` while iterating (selection, navigation).
+        let entries: Vec<DirEntry> = state.core.entries().to_vec();
+        if entries.is_empty() {
+            if state.ui.empty_hint_enabled {
+                ui.table_next_row();
+                ui.table_next_column();
+                let msg = if let Some(custom) = &state.ui.empty_hint_static_message {
+                    custom.clone()
+                } else {
+                    let filter_label = state
+                        .core
+                        .active_filter
+                        .and_then(|i| state.core.filters.get(i))
+                        .map(|f| f.name.as_str())
+                        .unwrap_or("All files");
+                    let hidden_label = if state.core.show_hidden { "on" } else { "off" };
+                    if state.core.search.is_empty() {
+                        format!(
+                            "No matching entries. Filter: {}, Hidden: {}",
+                            filter_label, hidden_label
+                        )
+                    } else {
+                        format!(
+                            "No matching entries. Filter: {}, Search: '{}', Hidden: {}",
+                            filter_label, state.core.search, hidden_label
+                        )
+                    }
+                };
+                ui.text_colored(state.ui.empty_hint_color, msg);
+            }
+            return;
+        }
+
+        for e in &entries {
+            ui.table_next_row();
+            if show_preview {
+                ui.table_next_column();
+                draw_thumbnail_cell(ui, state, e);
+            }
+            ui.table_next_column();
+
+            let selected = state.core.selected.iter().any(|s| s == &e.name);
+            let kind = if e.is_dir {
+                EntryKind::Dir
+            } else {
+                EntryKind::File
+            };
+            let style = state.ui.file_styles.style_for(&e.name, kind);
+            let (text_color, icon, tooltip) = match style {
+                Some(s) => (s.text_color, s.icon.clone(), s.tooltip.clone()),
+                None => (None, None, None),
+            };
+
+            let mut label = e.display_name();
+            if let Some(icon) = icon.as_deref() {
+                label = format!("{icon} {label}");
+            }
+            let _color = text_color
+                .map(TextColorToken::push)
+                .unwrap_or_else(TextColorToken::none);
+            if ui
+                .selectable_config(label)
+                .selected(selected)
+                .span_all_columns(false)
+                .build()
+            {
                 let modifiers = Modifiers {
                     ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
                     shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
                 };
+                state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
+            }
 
-                if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
-                    state.core.select_all();
-                }
-                if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
-                    state.core.move_focus(-1, modifiers);
-                }
-                if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
-                    state.core.move_focus(1, modifiers);
-                }
-                if state.ui.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
-                    handle_type_select(ui, state);
+            if ui.is_item_hovered() {
+                if let Some(t) = tooltip.as_deref() {
+                    ui.tooltip_text(t);
                 }
             }
 
-            // Clone the entry list so we can mutate `state.core` while iterating (selection, navigation).
-            let entries: Vec<DirEntry> = state.core.entries().to_vec();
-            if entries.is_empty() {
-                if state.ui.empty_hint_enabled {
-                    ui.table_next_row();
-                    ui.table_next_column();
-                    let msg = if let Some(custom) = &state.ui.empty_hint_static_message {
-                        custom.clone()
-                    } else {
-                        let filter_label = state
-                            .core
-                            .active_filter
-                            .and_then(|i| state.core.filters.get(i))
-                            .map(|f| f.name.as_str())
-                            .unwrap_or("All files");
-                        let hidden_label = if state.core.show_hidden { "on" } else { "off" };
-                        if state.core.search.is_empty() {
-                            format!(
-                                "No matching entries. Filter: {}, Hidden: {}",
-                                filter_label, hidden_label
-                            )
-                        } else {
-                            format!(
-                                "No matching entries. Filter: {}, Search: '{}', Hidden: {}",
-                                filter_label, state.core.search, hidden_label
-                            )
-                        }
-                    };
-                    ui.text_colored(state.ui.empty_hint_color, msg);
-                }
-                return;
-            }
-
-            for e in &entries {
-                ui.table_next_row();
-                ui.table_next_column();
-
-                let selected = state.core.selected.iter().any(|s| s == &e.name);
-                let kind = if e.is_dir {
-                    EntryKind::Dir
-                } else {
-                    EntryKind::File
-                };
-                let style = state.ui.file_styles.style_for(&e.name, kind);
-                let (text_color, icon, tooltip) = match style {
-                    Some(s) => (s.text_color, s.icon.clone(), s.tooltip.clone()),
-                    None => (None, None, None),
-                };
-
-                let mut label = e.display_name();
-                if let Some(icon) = icon.as_deref() {
-                    label = format!("{icon} {label}");
-                }
-                let _color = text_color
-                    .map(TextColorToken::push)
-                    .unwrap_or_else(TextColorToken::none);
-                if ui
-                    .selectable_config(label)
-                    .selected(selected)
-                    .span_all_columns(false)
-                    .build()
-                {
-                    let modifiers = Modifiers {
-                        ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
-                        shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
-                    };
-                    state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
-                }
-
-                if ui.is_item_hovered() {
-                    if let Some(t) = tooltip.as_deref() {
-                        ui.tooltip_text(t);
-                    }
-                }
-
-                if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
-                    state.ui.ui_error = None;
-                    if state.core.double_click_entry(e.name.clone(), e.is_dir) {
-                        *request_confirm = true;
-                    }
-                }
-
-                if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
-                    state.core.save_name = e.name.clone();
-                }
-
-                ui.table_next_column();
-                ui.text(match e.size {
-                    Some(s) => format_size(s),
-                    None => String::new(),
-                });
-
-                ui.table_next_column();
-                let modified_str = format_modified_ago(e.modified);
-                ui.text(&modified_str);
-                if ui.is_item_hovered() {
-                    if let Some(m) = e.modified {
-                        use chrono::{DateTime, Local};
-                        let dt: DateTime<Local> = DateTime::<Local>::from(m);
-                        ui.tooltip_text(dt.format("%Y-%m-%d %H:%M:%S").to_string());
-                    }
+            if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
+                state.ui.ui_error = None;
+                if state.core.double_click_entry(e.name.clone(), e.is_dir) {
+                    *request_confirm = true;
                 }
             }
-        });
+
+            if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
+                state.core.save_name = e.name.clone();
+            }
+
+            ui.table_next_column();
+            ui.text(match e.size {
+                Some(s) => format_size(s),
+                None => String::new(),
+            });
+
+            ui.table_next_column();
+            let modified_str = format_modified_ago(e.modified);
+            ui.text(&modified_str);
+            if ui.is_item_hovered() {
+                if let Some(m) = e.modified {
+                    use chrono::{DateTime, Local};
+                    let dt: DateTime<Local> = DateTime::<Local>::from(m);
+                    ui.tooltip_text(dt.format("%Y-%m-%d %H:%M:%S").to_string());
+                }
+            }
+        }
+    });
+}
+
+fn draw_thumbnail_cell(ui: &Ui, state: &mut FileDialogState, e: &DirEntry) {
+    if e.is_dir {
+        ui.text("");
+        return;
+    }
+
+    let max_size_u32 = [
+        state.ui.thumbnail_size[0].max(1.0) as u32,
+        state.ui.thumbnail_size[1].max(1.0) as u32,
+    ];
+    let size = state.ui.thumbnail_size;
+
+    if let Some(tex) = state.ui.thumbnails.texture_id(&e.path) {
+        ui.image(tex, size);
+        return;
+    }
+
+    ui.text_disabled("...");
+    if ui.is_item_visible() {
+        state.ui.thumbnails.request_visible(&e.path, max_size_u32);
+    }
 }
 
 fn handle_type_select(ui: &Ui, state: &mut FileDialogState) {

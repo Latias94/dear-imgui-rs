@@ -41,6 +41,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - Double-click to navigate/confirm (configurable)
   - Places: groups (System + Bookmarks) with export/import via compact string
   - File styles: icons/colors/tooltips via `FileStyleRegistry`
+  - Thumbnails: request queue + LRU cache (user-driven decode/upload lifecycle)
   - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all
   - Keyboard navigation: Up/Down arrows + Enter, Backspace, Ctrl+L (path), Ctrl+F (search)
   - Empty-state hint with configurable color/message
@@ -205,6 +206,34 @@ state.ui.file_styles.push_extension_style(
         tooltip: Some("Image file".into()),
     },
 );
+```
+
+## Thumbnails (ImGui UI)
+
+`dear-file-browser` provides a renderer-agnostic thumbnail request queue and LRU cache. Your application is expected to
+decode images and upload them to the GPU, then feed the resulting `TextureId` back into the cache.
+
+```rust
+use dear_imgui_rs::texture::TextureId;
+use dear_file_browser::ThumbnailRequest;
+
+state.ui.thumbnails_enabled = true;
+state.ui.thumbnail_size = [48.0, 48.0];
+
+// Per-frame, after drawing the dialog:
+let requests: Vec<ThumbnailRequest> = state.ui.thumbnails.take_requests();
+for req in &requests {
+    // 1) decode req.path into pixels (RGBA8), 2) upload to GPU, 3) get a TextureId
+    let tex: TextureId = TextureId::new(0); // placeholder
+    state.ui.thumbnails.fulfill_request(req, Ok(tex));
+}
+
+// Destroy evicted textures in your renderer:
+let to_destroy: Vec<TextureId> = state.ui.thumbnails.take_pending_destroys();
+for tex in to_destroy {
+    // renderer.destroy(tex);
+    let _ = tex;
+}
 ```
 
 ## WASM
