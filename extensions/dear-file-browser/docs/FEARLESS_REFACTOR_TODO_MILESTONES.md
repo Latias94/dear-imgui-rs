@@ -213,7 +213,7 @@ Goal: support richer filter syntax and multi-layer extensions.
 
 ### Epic 8.1 — Multi-layer extension handling
 
-- [ ] Task: update matching to support `.a.b.c` suffixes and non-trivial extensions
+- [x] Task: update matching to support `.a.b.c` suffixes and non-trivial extensions
   - Acceptance: tests cover `.vcxproj.filters` style.
 
 ### Epic 8.2 — IGFD-style filter parser (optional)

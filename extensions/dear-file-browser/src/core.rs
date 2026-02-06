@@ -34,21 +34,24 @@ impl Default for Backend {
 /// File filter (e.g., "Images" -> ["png", "jpg"]).
 ///
 /// Extensions are matched case-insensitively and should be provided without a
-/// leading dot. The variants created from tuples will be normalized to
-/// lowercase automatically.
+/// leading dot. Multi-layer extensions are supported by including dots in the
+/// extension string (e.g. `"vcxproj.filters"`).
+///
+/// The variants created from tuples will be normalized to lowercase
+/// automatically.
 #[derive(Clone, Debug, Default)]
 pub struct FileFilter {
     /// Filter display name
     pub name: String,
-    /// Lower-case extensions without dot (e.g., "png")
+    /// Lower-case extensions without dot (e.g., "png", "vcxproj.filters")
     pub extensions: Vec<String>,
 }
 
 impl FileFilter {
     /// Create a filter from a name and extensions.
     ///
-    /// Extensions should be provided without dots (e.g. "png"). Matching is
-    /// case-insensitive.
+    /// Extensions should be provided without leading dots (e.g. `"png"`,
+    /// `"vcxproj.filters"`). Matching is case-insensitive.
     pub fn new(name: impl Into<String>, exts: impl Into<Vec<String>>) -> Self {
         let mut extensions: Vec<String> = exts.into();
         // Normalize to lowercase so matching is case-insensitive even if callers

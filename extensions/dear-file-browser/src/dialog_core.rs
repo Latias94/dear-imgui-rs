@@ -444,14 +444,27 @@ fn matches_filters(name: &str, filters: &[FileFilter]) -> bool {
     if filters.is_empty() {
         return true;
     }
-    let ext = Path::new(name)
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_lowercase());
-    match ext {
-        Some(e) => filters.iter().any(|f| f.extensions.iter().any(|x| x == &e)),
-        None => false,
+    let name_lower = name.to_lowercase();
+    filters.iter().any(|f| {
+        f.extensions
+            .iter()
+            .any(|ext| has_extension_suffix(&name_lower, ext))
+    })
+}
+
+fn has_extension_suffix(name_lower: &str, ext: &str) -> bool {
+    let ext = ext.trim_start_matches('.');
+    if ext.is_empty() {
+        return false;
     }
+    if !name_lower.ends_with(ext) {
+        return false;
+    }
+    let prefix_len = name_lower.len() - ext.len();
+    if prefix_len == 0 {
+        return false;
+    }
+    name_lower.as_bytes()[prefix_len - 1] == b'.'
 }
 
 fn toggle_select_name(list: &mut Vec<String>, name: &str) {
@@ -763,6 +776,14 @@ mod tests {
         core.confirm(&fs, &gate).unwrap();
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
+    }
+
+    #[test]
+    fn matches_filters_supports_multi_layer_extensions() {
+        let filters = vec![FileFilter::new("VS", vec!["vcxproj.filters".to_string()])];
+        assert!(matches_filters("proj.vcxproj.filters", &filters));
+        assert!(!matches_filters("proj.vcxproj", &filters));
+        assert!(!matches_filters("vcxproj.filters", &filters));
     }
 
     #[test]
