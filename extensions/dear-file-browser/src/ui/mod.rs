@@ -576,10 +576,11 @@ fn draw_contents_with_fs_and_hooks(
                                 .size([inner[0], pane_h])
                                 .border(true)
                                 .build(ui, || {
+                                    let selected_names = state.core.selected_names();
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
-                                        selected_names: state.core.selected_names(),
+                                        selected_names: &selected_names,
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core
@@ -625,10 +626,11 @@ fn draw_contents_with_fs_and_hooks(
                                 .size([inner[0], pane_h])
                                 .border(true)
                                 .build(ui, || {
+                                    let selected_names = state.core.selected_names();
                                     let ctx = CustomPaneCtx {
                                         mode: state.core.mode,
                                         cwd: &state.core.cwd,
-                                        selected_names: state.core.selected_names(),
+                                        selected_names: &selected_names,
                                         save_name: &state.core.save_name,
                                         active_filter: state
                                             .core
@@ -748,7 +750,7 @@ fn draw_contents_with_fs_and_hooks(
         }
         if !ui.io().want_text_input() && ui.is_key_pressed(Key::Delete) {
             if state.core.has_selection() {
-                state.ui.delete_targets = state.core.selected_names().to_vec();
+                state.ui.delete_targets = state.core.selected_names();
                 state.ui.delete_error = None;
                 state.ui.delete_open_next = true;
             }
@@ -1136,9 +1138,8 @@ fn clipboard_set_from_selection(state: &mut FileDialogState, op: ClipboardOp) {
         return;
     }
 
-    let sources = state
-        .core
-        .selected_names()
+    let selected_names = state.core.selected_names();
+    let sources = selected_names
         .iter()
         .map(|name| state.core.cwd.join(name))
         .collect();
@@ -2495,7 +2496,7 @@ fn draw_file_table_view(
                                 ui.close_current_popup();
                             }
                             if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
-                                state.ui.delete_targets = state.core.selected_names().to_vec();
+                                state.ui.delete_targets = state.core.selected_names();
                                 state.ui.delete_error = None;
                                 state.ui.delete_open_next = true;
                                 ui.close_current_popup();
@@ -2849,7 +2850,7 @@ fn draw_file_grid_view(
                             ui.close_current_popup();
                         }
                         if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
-                            state.ui.delete_targets = state.core.selected_names().to_vec();
+                            state.ui.delete_targets = state.core.selected_names();
                             state.ui.delete_error = None;
                             state.ui.delete_open_next = true;
                             ui.close_current_popup();
