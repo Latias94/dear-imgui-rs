@@ -133,13 +133,6 @@ pub enum ScanPolicy {
         /// Max batches to apply in one UI tick.
         max_batches_per_tick: usize,
     },
-    /// Run scan on background worker and consume batches in UI ticks.
-    Background {
-        /// Max number of entries per batch.
-        batch_entries: usize,
-        /// Max batches to apply in one UI tick.
-        max_batches_per_tick: usize,
-    },
 }
 
 impl Default for ScanPolicy {
@@ -149,7 +142,7 @@ impl Default for ScanPolicy {
 }
 
 impl ScanPolicy {
-    /// Recommended batch size for incremental/background scan.
+    /// Recommended batch size for incremental scan.
     pub const TUNED_BATCH_ENTRIES: usize = 512;
     /// Recommended apply budget to balance throughput and frame pacing.
     pub const TUNED_MAX_BATCHES_PER_TICK: usize = 2;
@@ -157,14 +150,6 @@ impl ScanPolicy {
     /// Returns a tuned incremental policy for large directories.
     pub const fn tuned_incremental() -> Self {
         Self::Incremental {
-            batch_entries: Self::TUNED_BATCH_ENTRIES,
-            max_batches_per_tick: Self::TUNED_MAX_BATCHES_PER_TICK,
-        }
-    }
-
-    /// Returns a tuned background policy for large directories.
-    pub const fn tuned_background() -> Self {
-        Self::Background {
             batch_entries: Self::TUNED_BATCH_ENTRIES,
             max_batches_per_tick: Self::TUNED_MAX_BATCHES_PER_TICK,
         }
@@ -180,13 +165,6 @@ impl ScanPolicy {
                 batch_entries: batch_entries.max(1),
                 max_batches_per_tick: max_batches_per_tick.max(1),
             },
-            Self::Background {
-                batch_entries,
-                max_batches_per_tick,
-            } => Self::Background {
-                batch_entries: batch_entries.max(1),
-                max_batches_per_tick: max_batches_per_tick.max(1),
-            },
         }
     }
 
@@ -194,10 +172,6 @@ impl ScanPolicy {
         match self {
             Self::Sync => usize::MAX,
             Self::Incremental {
-                max_batches_per_tick,
-                ..
-            }
-            | Self::Background {
                 max_batches_per_tick,
                 ..
             } => max_batches_per_tick,
@@ -425,8 +399,7 @@ impl ScanRuntime {
     fn from_policy(policy: ScanPolicy) -> Self {
         match policy {
             ScanPolicy::Sync => Self::Sync(SyncScanRuntime::default()),
-            ScanPolicy::Incremental { batch_entries, .. }
-            | ScanPolicy::Background { batch_entries, .. } => {
+            ScanPolicy::Incremental { batch_entries, .. } => {
                 Self::Worker(WorkerScanRuntime::new(batch_entries))
             }
         }
@@ -439,8 +412,7 @@ impl ScanRuntime {
                     *self = Self::Sync(SyncScanRuntime::default());
                 }
             }
-            ScanPolicy::Incremental { batch_entries, .. }
-            | ScanPolicy::Background { batch_entries, .. } => {
+            ScanPolicy::Incremental { batch_entries, .. } => {
                 if let Self::Worker(runtime) = self {
                     runtime.set_batch_entries(batch_entries);
                 } else {
@@ -2817,18 +2789,10 @@ mod tests {
     }
 
     #[test]
-    fn scan_policy_tuned_presets_match_expected_values() {
+    fn scan_policy_tuned_preset_matches_expected_values() {
         assert_eq!(
             ScanPolicy::tuned_incremental(),
             ScanPolicy::Incremental {
-                batch_entries: ScanPolicy::TUNED_BATCH_ENTRIES,
-                max_batches_per_tick: ScanPolicy::TUNED_MAX_BATCHES_PER_TICK,
-            }
-        );
-
-        assert_eq!(
-            ScanPolicy::tuned_background(),
-            ScanPolicy::Background {
                 batch_entries: ScanPolicy::TUNED_BATCH_ENTRIES,
                 max_batches_per_tick: ScanPolicy::TUNED_MAX_BATCHES_PER_TICK,
             }

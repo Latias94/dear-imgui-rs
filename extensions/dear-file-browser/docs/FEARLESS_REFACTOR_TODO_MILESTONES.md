@@ -599,18 +599,18 @@ Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
 
 ### Epic 17.5 - Incremental defaults and budget tuning (Stage E)
 
-- [x] Task: extend `ScanPolicy` incremental/background modes with `max_batches_per_tick`
+- [x] Task: extend `ScanPolicy` incremental mode with `max_batches_per_tick`
   - Acceptance:
     - hosts can tune throughput vs frame pacing explicitly
     - normalization guards keep `batch_entries` and `max_batches_per_tick` >= 1
 - [x] Task: publish tuned presets and baseline sweep (`1/2/4` batches per tick)
   - Acceptance:
-    - `ScanPolicy::tuned_incremental()` / `tuned_background()` available
+    - `ScanPolicy::tuned_incremental()` available
     - benchmark record updated with sweep table and recommendation
 
 Exit criteria:
 
-- Incremental/background scan mode is available and generation-safe.
+- Incremental scan mode is available and generation-safe.
 - Large directory scans no longer block UI interaction.
 - Scan/projection costs are observable via tracing metrics.
 - Incremental policy has documented tuned presets for throughput/frame-pacing tradeoff.

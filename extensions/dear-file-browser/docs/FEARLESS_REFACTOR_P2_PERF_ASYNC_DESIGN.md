@@ -25,7 +25,7 @@ P2 keeps user-visible semantics stable while introducing an architecture that ca
 ### 2.1 Goals
 
 1. Keep UI responsive during expensive scans.
-2. Support incremental/background enumeration with deterministic behavior.
+2. Support incremental enumeration with deterministic behavior.
 3. Preserve selection and confirmation semantics across partial updates.
 4. Add measurable tracing/counters for scan and projection cost.
 5. Keep a Rust-first, testable, backend-agnostic core.
@@ -162,14 +162,10 @@ enum ScanPolicy {
         batch_entries: usize,
         max_batches_per_tick: usize,
     },
-    Background {
-        batch_entries: usize,
-        max_batches_per_tick: usize,
-    },
 }
 ```
 
-Policy is optional and host-configurable with sane defaults (`ScanPolicy::tuned_incremental()` / `ScanPolicy::tuned_background()`).
+Policy is optional and host-configurable with sane defaults (`ScanPolicy::tuned_incremental()`).
 
 ### 6.4 `ScanStatus`
 
@@ -277,7 +273,7 @@ Fearless-mode simplification (breaking allowed):
 
 ### Stage E: policy tuning and apply-budget controls (Epic 17.5)
 
-- Add `max_batches_per_tick` to incremental/background policies.
+- Add `max_batches_per_tick` to incremental policy.
 - Publish tuned presets and benchmark sweep for apply-budget tradeoffs.
 
 ---
@@ -322,7 +318,7 @@ Fearless-mode simplification (breaking allowed):
 
 P2 is considered complete when:
 
-- Incremental/background scanning works without UI stalls for large directories.
+- Incremental scanning works without UI stalls for large directories.
 - Selection and confirmation semantics remain deterministic.
 - Stale scan batches cannot corrupt active snapshot.
 - Tracing clearly exposes scan and projection cost.
