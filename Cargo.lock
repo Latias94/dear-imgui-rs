@@ -791,6 +791,7 @@ version = "0.8.0"
 dependencies = [
  "chrono",
  "dear-imgui-rs",
+ "image",
  "pollster",
  "rfd",
  "thiserror 2.0.17",

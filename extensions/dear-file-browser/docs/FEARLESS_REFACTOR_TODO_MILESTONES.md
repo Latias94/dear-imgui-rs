@@ -290,7 +290,7 @@ Goal: add thumbnails without binding to a specific renderer backend.
 
 ### Epic 11.3 — Optional decoding implementation
 
-- [ ] Task: feature `thumbnails-image` uses `image` crate for decode
+- [x] Task: feature `thumbnails-image` uses `image` crate for decode
   - Acceptance: decoding is feature-gated; crate builds without it.
 
 Exit criteria:

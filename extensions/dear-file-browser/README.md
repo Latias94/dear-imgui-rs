@@ -253,6 +253,18 @@ let mut backend = ThumbnailBackend {
 let _ = ui.file_browser().draw_contents_with_thumbnail_backend(&mut state, &mut backend);
 ```
 
+Optional decoder (`thumbnails-image` feature):
+
+```rust
+// Cargo.toml:
+// dear-file-browser = { version = "...", features = ["thumbnails-image"] }
+
+use dear_file_browser::ImageThumbnailProvider;
+
+let mut provider = ImageThumbnailProvider::default();
+// Still required: a `ThumbnailRenderer` implementation for your graphics backend.
+```
+
 ## WASM
 
 - Native: `rfd` uses the browser file picker and is the recommended way to access user files.

@@ -31,6 +31,8 @@ mod native;
 mod places;
 #[cfg(feature = "imgui")]
 mod thumbnails;
+#[cfg(feature = "thumbnails-image")]
+mod thumbnails_image;
 #[cfg(feature = "imgui")]
 mod ui;
 
@@ -59,5 +61,7 @@ pub use thumbnails::{
     DecodedRgbaImage, ThumbnailBackend, ThumbnailCache, ThumbnailCacheConfig, ThumbnailProvider,
     ThumbnailRenderer, ThumbnailRequest,
 };
+#[cfg(feature = "thumbnails-image")]
+pub use thumbnails_image::ImageThumbnailProvider;
 #[cfg(feature = "imgui")]
 pub use ui::{FileDialogExt, WindowHostConfig};
