@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::core::{
     ClickAction, DialogMode, FileDialogError, FileFilter, LayoutStyle, Selection, SortBy,
 };
+use crate::places::Places;
 
 /// State for the in-UI file browser.
 ///
@@ -62,6 +63,9 @@ pub struct FileBrowserState {
     pub empty_hint_color: [f32; 4],
     /// Custom static hint message when entries list is empty; if None, a default message is built
     pub empty_hint_static_message: Option<String>,
+
+    /// User-defined places shown in the left pane (bookmarks).
+    pub places: Places,
 
     pub(crate) focused_name: Option<String>,
     pub(crate) selection_anchor_name: Option<String>,
@@ -126,6 +130,7 @@ impl FileBrowserState {
             empty_hint_enabled: true,
             empty_hint_color: [0.7, 0.7, 0.7, 1.0],
             empty_hint_static_message: None,
+            places: Places::default(),
 
             focused_name: None,
             selection_anchor_name: None,

@@ -189,7 +189,7 @@ fn draw_contents_with_fs(
             ui.child_window("quick_locations")
                 .size([left_w, avail[1] - 80.0])
                 .build(ui, || {
-                    new_cwd = draw_quick_locations(ui);
+                    new_cwd = draw_quick_locations(ui, state);
                 });
             if let Some(p) = new_cwd {
                 apply_event_with_fs(state, BrowserEvent::NavigateTo(p), fs);
@@ -375,8 +375,10 @@ fn draw_breadcrumbs(ui: &Ui, cwd: &Path, max_segments: usize) -> Option<PathBuf>
     new_cwd
 }
 
-fn draw_quick_locations(ui: &Ui) -> Option<PathBuf> {
+fn draw_quick_locations(ui: &Ui, state: &mut FileBrowserState) -> Option<PathBuf> {
     let mut out: Option<PathBuf> = None;
+
+    ui.separator_with_text("System");
     // Home
     if ui.button("Home") {
         if let Some(home) = home_dir() {
@@ -397,6 +399,32 @@ fn draw_quick_locations(ui: &Ui) -> Option<PathBuf> {
                 out = Some(PathBuf::from(d));
             }
         }
+    }
+
+    ui.separator_with_text("Bookmarks");
+    if state.places.bookmarks.is_empty() {
+        ui.text_disabled("No bookmarks");
+    } else {
+        let mut remove_path: Option<PathBuf> = None;
+        for bm in &state.places.bookmarks {
+            if ui.selectable_config(&bm.label).build() {
+                out = Some(bm.path.clone());
+            }
+            if let Some(_popup) = ui.begin_popup_context_item() {
+                ui.text_disabled(&bm.path.display().to_string());
+                ui.separator();
+                if ui.menu_item("Remove bookmark") {
+                    remove_path = Some(bm.path.clone());
+                }
+            }
+        }
+        if let Some(p) = remove_path {
+            state.places.remove_bookmark_path(&p);
+        }
+    }
+
+    if ui.button("+ Add current") {
+        state.places.add_bookmark_path(state.cwd.clone());
     }
     out
 }

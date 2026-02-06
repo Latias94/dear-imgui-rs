@@ -26,6 +26,8 @@ mod fs;
 #[cfg(feature = "native-rfd")]
 mod native;
 #[cfg(feature = "imgui")]
+mod places;
+#[cfg(feature = "imgui")]
 mod ui;
 
 pub use core::{
@@ -36,5 +38,7 @@ pub use core::{
 pub use dialog_manager::{DialogId, DialogManager};
 #[cfg(feature = "imgui")]
 pub use fs::{FileSystem, FsEntry, FsMetadata, StdFileSystem};
+#[cfg(feature = "imgui")]
+pub use places::{Bookmark, Places};
 #[cfg(feature = "imgui")]
 pub use ui::{FileBrowserState, FileDialogExt, WindowHostConfig};
