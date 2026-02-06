@@ -421,6 +421,8 @@ fn draw_contents_with_fs_and_custom_pane(
         }
     }
 
+    draw_confirm_overwrite_modal(ui, state);
+
     if let Some(err) = &state.ui.ui_error {
         ui.separator();
         ui.text_colored([1.0, 0.3, 0.3, 1.0], format!("Error: {err}"));
@@ -431,6 +433,39 @@ fn draw_contents_with_fs_and_custom_pane(
         state.ui.visible = false;
     }
     out
+}
+
+fn draw_confirm_overwrite_modal(ui: &Ui, state: &mut FileDialogState) {
+    const POPUP_ID: &str = "Confirm overwrite";
+
+    let Some(path_text) = state
+        .core
+        .pending_overwrite()
+        .and_then(|s| s.paths.get(0))
+        .map(|p| p.display().to_string())
+    else {
+        return;
+    };
+
+    if !ui.is_popup_open(POPUP_ID) {
+        ui.open_popup(POPUP_ID);
+    }
+
+    ui.modal_popup(POPUP_ID, || {
+        ui.text("The file already exists:");
+        ui.separator();
+        ui.text(&path_text);
+        ui.separator();
+        if ui.button("Overwrite") {
+            state.core.accept_overwrite();
+            ui.close_current_popup();
+        }
+        ui.same_line();
+        if ui.button("Cancel") {
+            state.core.cancel_overwrite();
+            ui.close_current_popup();
+        }
+    });
 }
 
 fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {

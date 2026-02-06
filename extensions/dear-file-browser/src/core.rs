@@ -102,6 +102,35 @@ pub enum FileDialogError {
     ValidationBlocked(String),
 }
 
+/// Extension handling policy for SaveFile mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExtensionPolicy {
+    /// Keep user-provided extension as-is.
+    KeepUser,
+    /// If the user did not provide an extension, append the active filter's first extension.
+    AddIfMissing,
+    /// Always enforce the active filter's first extension (replace or add).
+    ReplaceByFilter,
+}
+
+/// SaveFile mode policy knobs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SavePolicy {
+    /// Whether to prompt before overwriting an existing file.
+    pub confirm_overwrite: bool,
+    /// How to apply the active filter extension to the save name.
+    pub extension_policy: ExtensionPolicy,
+}
+
+impl Default for SavePolicy {
+    fn default() -> Self {
+        Self {
+            confirm_overwrite: true,
+            extension_policy: ExtensionPolicy::AddIfMissing,
+        }
+    }
+}
+
 /// Click behavior for directory rows
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ClickAction {

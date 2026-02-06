@@ -31,8 +31,8 @@ mod places;
 mod ui;
 
 pub use core::{
-    Backend, ClickAction, DialogMode, FileDialog, FileDialogError, FileFilter, LayoutStyle,
-    Selection, SortBy,
+    Backend, ClickAction, DialogMode, ExtensionPolicy, FileDialog, FileDialogError, FileFilter,
+    LayoutStyle, SavePolicy, Selection, SortBy,
 };
 #[cfg(feature = "imgui")]
 pub use custom_pane::{CustomPane, CustomPaneCtx};

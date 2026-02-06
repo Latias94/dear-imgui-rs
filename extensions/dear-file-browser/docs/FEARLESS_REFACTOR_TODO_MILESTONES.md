@@ -191,14 +191,14 @@ Goal: add IGFD-like save behavior.
 
 ### Epic 7.1 — SavePolicy
 
-- [ ] Task: implement `SavePolicy { confirm_overwrite, extension_policy }`
-- [ ] Task: implement `ExtensionPolicy` modes (KeepUser, AddIfMissing, OverwriteByFilter)
+- [x] Task: implement `SavePolicy { confirm_overwrite, extension_policy }`
+- [x] Task: implement `ExtensionPolicy` modes (KeepUser, AddIfMissing, OverwriteByFilter)
   - Acceptance: unit tests for each policy.
 
 ### Epic 7.2 — Confirm overwrite state
 
-- [ ] Task: core enters `ConfirmOverwrite` state if target exists
-- [ ] Task: UI shows confirmation modal/popup controlled by host
+- [x] Task: core enters `ConfirmOverwrite` state if target exists
+- [x] Task: UI shows confirmation modal/popup controlled by host
   - Acceptance: can cancel overwrite and return to dialog without losing state.
 
 Exit criteria:

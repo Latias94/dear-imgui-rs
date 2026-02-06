@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use crate::core::{ClickAction, DialogMode, FileDialogError, FileFilter, Selection, SortBy};
+use crate::core::{
+    ClickAction, DialogMode, ExtensionPolicy, FileDialogError, FileFilter, SavePolicy, Selection,
+    SortBy,
+};
 use crate::fs::FileSystem;
 use crate::places::Places;
 
@@ -97,8 +100,11 @@ pub struct FileDialogCore {
     pub double_click: bool,
     /// Places shown in the left pane (System + Bookmarks + custom groups).
     pub places: Places,
+    /// Save behavior knobs (SaveFile mode only).
+    pub save_policy: SavePolicy,
 
     result: Option<Result<Selection, FileDialogError>>,
+    pending_overwrite: Option<Selection>,
     focused_name: Option<String>,
     selection_anchor_name: Option<String>,
     view_names: Vec<String>,
@@ -125,7 +131,9 @@ impl FileDialogCore {
             show_hidden: false,
             double_click: true,
             places: Places::default(),
+            save_policy: SavePolicy::default(),
             result: None,
+            pending_overwrite: None,
             focused_name: None,
             selection_anchor_name: None,
             view_names: Vec::new(),
@@ -319,6 +327,7 @@ impl FileDialogCore {
         gate: &ConfirmGate,
     ) -> Result<(), FileDialogError> {
         self.result = None;
+        self.pending_overwrite = None;
 
         // Special-case: if a single directory selected in file-open modes, navigate into it
         // instead of confirming.
@@ -352,7 +361,31 @@ impl FileDialogCore {
             &self.save_name,
             &self.filters,
             self.active_filter,
+            &self.save_policy,
         )?;
+
+        if matches!(self.mode, DialogMode::SaveFile) {
+            let target = sel
+                .paths
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| self.cwd.clone());
+            match fs.metadata(&target) {
+                Ok(md) => {
+                    if md.is_dir {
+                        return Err(FileDialogError::InvalidPath(
+                            "file name points to a directory".into(),
+                        ));
+                    }
+                    if self.save_policy.confirm_overwrite {
+                        self.pending_overwrite = Some(sel);
+                        return Ok(());
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+
         self.result = Some(Ok(sel));
         Ok(())
     }
@@ -360,6 +393,23 @@ impl FileDialogCore {
     /// Cancels the dialog.
     pub(crate) fn cancel(&mut self) {
         self.result = Some(Err(FileDialogError::Cancelled));
+    }
+
+    /// Returns the pending overwrite selection (SaveFile mode) if confirmation is required.
+    pub(crate) fn pending_overwrite(&self) -> Option<&Selection> {
+        self.pending_overwrite.as_ref()
+    }
+
+    /// Accept an overwrite prompt and produce the stored selection.
+    pub(crate) fn accept_overwrite(&mut self) {
+        if let Some(sel) = self.pending_overwrite.take() {
+            self.result = Some(Ok(sel));
+        }
+    }
+
+    /// Cancel an overwrite prompt and return to the dialog.
+    pub(crate) fn cancel_overwrite(&mut self) {
+        self.pending_overwrite = None;
     }
 
     fn select_single_by_name(&mut self, name: String) {
@@ -426,6 +476,7 @@ fn finalize_selection(
     save_name: &str,
     filters: &[FileFilter],
     active_filter: Option<usize>,
+    save_policy: &SavePolicy,
 ) -> Result<Selection, FileDialogError> {
     let mut sel = Selection { paths: Vec::new() };
     let eff_filters = effective_filters(filters, active_filter);
@@ -450,7 +501,7 @@ fn finalize_selection(
             }
         }
         DialogMode::SaveFile => {
-            let name = save_name.trim();
+            let name = normalize_save_name(save_name, &eff_filters, save_policy.extension_policy);
             if name.is_empty() {
                 return Err(FileDialogError::InvalidPath("empty file name".into()));
             }
@@ -458,6 +509,39 @@ fn finalize_selection(
         }
     }
     Ok(sel)
+}
+
+fn normalize_save_name(save_name: &str, filters: &[FileFilter], policy: ExtensionPolicy) -> String {
+    let name = save_name.trim().to_string();
+    if name.is_empty() {
+        return name;
+    }
+
+    let default_ext = filters
+        .first()
+        .and_then(|f| f.extensions.first())
+        .map(|s| s.as_str());
+    let Some(default_ext) = default_ext else {
+        return name;
+    };
+
+    let p = Path::new(&name);
+    let has_ext = p.extension().and_then(|s| s.to_str()).is_some();
+
+    match policy {
+        ExtensionPolicy::KeepUser => name,
+        ExtensionPolicy::AddIfMissing => {
+            if has_ext {
+                name
+            } else {
+                format!("{name}.{default_ext}")
+            }
+        }
+        ExtensionPolicy::ReplaceByFilter => {
+            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or(&name);
+            format!("{stem}.{default_ext}")
+        }
+    }
 }
 
 fn filter_entries_in_place(
@@ -535,6 +619,28 @@ mod tests {
         Modifiers { ctrl, shift }
     }
 
+    #[derive(Default)]
+    struct TestFs {
+        meta: std::collections::HashMap<PathBuf, crate::fs::FsMetadata>,
+    }
+
+    impl crate::fs::FileSystem for TestFs {
+        fn read_dir(&self, _dir: &Path) -> std::io::Result<Vec<crate::fs::FsEntry>> {
+            Ok(Vec::new())
+        }
+
+        fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+            Ok(path.to_path_buf())
+        }
+
+        fn metadata(&self, path: &Path) -> std::io::Result<crate::fs::FsMetadata> {
+            self.meta
+                .get(path)
+                .cloned()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not found"))
+        }
+    }
+
     #[test]
     fn cancel_sets_result() {
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
@@ -606,5 +712,80 @@ mod tests {
             sel.paths[0].file_name().and_then(|s| s.to_str()),
             Some("a.txt")
         );
+    }
+
+    #[test]
+    fn save_adds_extension_from_active_filter_when_missing() {
+        let mut core = FileDialogCore::new(DialogMode::SaveFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.save_name = "asset".into();
+        core.filters = vec![FileFilter::new("Images", vec!["png".to_string()])];
+        core.active_filter = Some(0);
+        core.save_policy.extension_policy = ExtensionPolicy::AddIfMissing;
+        core.save_policy.confirm_overwrite = false;
+
+        let gate = ConfirmGate::default();
+        let fs = TestFs::default();
+        core.confirm(&fs, &gate).unwrap();
+        let sel = core.take_result().unwrap().unwrap();
+        assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
+    }
+
+    #[test]
+    fn save_keep_user_extension_does_not_modify_name() {
+        let mut core = FileDialogCore::new(DialogMode::SaveFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.save_name = "asset.jpg".into();
+        core.filters = vec![FileFilter::new("Images", vec!["png".to_string()])];
+        core.active_filter = Some(0);
+        core.save_policy.extension_policy = ExtensionPolicy::KeepUser;
+        core.save_policy.confirm_overwrite = false;
+
+        let gate = ConfirmGate::default();
+        let fs = TestFs::default();
+        core.confirm(&fs, &gate).unwrap();
+        let sel = core.take_result().unwrap().unwrap();
+        assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.jpg"));
+    }
+
+    #[test]
+    fn save_replace_by_filter_replaces_existing_extension() {
+        let mut core = FileDialogCore::new(DialogMode::SaveFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.save_name = "asset.jpg".into();
+        core.filters = vec![FileFilter::new("Images", vec!["png".to_string()])];
+        core.active_filter = Some(0);
+        core.save_policy.extension_policy = ExtensionPolicy::ReplaceByFilter;
+        core.save_policy.confirm_overwrite = false;
+
+        let gate = ConfirmGate::default();
+        let fs = TestFs::default();
+        core.confirm(&fs, &gate).unwrap();
+        let sel = core.take_result().unwrap().unwrap();
+        assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
+    }
+
+    #[test]
+    fn save_prompts_overwrite_when_target_exists_and_policy_enabled() {
+        let mut core = FileDialogCore::new(DialogMode::SaveFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.save_name = "asset.png".into();
+        core.save_policy.confirm_overwrite = true;
+
+        let mut fs = TestFs::default();
+        fs.meta.insert(
+            PathBuf::from("/tmp/asset.png"),
+            crate::fs::FsMetadata { is_dir: false },
+        );
+
+        let gate = ConfirmGate::default();
+        core.confirm(&fs, &gate).unwrap();
+        assert!(core.take_result().is_none());
+        assert!(core.pending_overwrite().is_some());
+
+        core.accept_overwrite();
+        assert!(core.pending_overwrite().is_none());
+        let sel = core.take_result().unwrap().unwrap();
+        assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
     }
 }
