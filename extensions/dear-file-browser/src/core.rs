@@ -1,6 +1,21 @@
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// Errors returned when parsing IGFD-style filter strings.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[error("invalid IGFD filter spec: {message}")]
+pub struct IgfdFilterParseError {
+    message: String,
+}
+
+impl IgfdFilterParseError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
 /// Dialog mode
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DialogMode {
@@ -76,6 +91,64 @@ impl FileFilter {
             extensions,
         }
     }
+
+    /// Parse an ImGuiFileDialog (IGFD) style filter spec into one or more [`FileFilter`]s.
+    ///
+    /// Supported forms:
+    ///
+    /// - Simple list: `".cpp,.h,.hpp"`
+    /// - Collections: `"C/C++{.c,.cpp,.h},Rust{.rs}"`
+    ///
+    /// Notes:
+    /// - Commas inside parentheses `(...)` do not split (IGFD rule 2).
+    /// - Regex tokens `((...))` are preserved verbatim.
+    /// - Whitespace around commas/tokens is ignored.
+    pub fn parse_igfd(spec: &str) -> Result<Vec<FileFilter>, IgfdFilterParseError> {
+        let spec = spec.trim();
+        if spec.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let parts = split_igfd_commas(spec);
+        let mut out: Vec<FileFilter> = Vec::new();
+        let mut loose_tokens: Vec<String> = Vec::new();
+
+        for part in parts {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+
+            if let Some((label, inner)) = parse_igfd_collection(part)? {
+                if !loose_tokens.is_empty() {
+                    out.push(FileFilter::new(
+                        if out.is_empty() {
+                            spec.to_string()
+                        } else {
+                            "Custom".to_string()
+                        },
+                        std::mem::take(&mut loose_tokens),
+                    ));
+                }
+                out.push(FileFilter::new(label, inner));
+            } else {
+                loose_tokens.push(part.to_string());
+            }
+        }
+
+        if !loose_tokens.is_empty() {
+            out.push(FileFilter::new(
+                if out.is_empty() {
+                    spec.to_string()
+                } else {
+                    "Custom".to_string()
+                },
+                loose_tokens,
+            ));
+        }
+
+        Ok(out)
+    }
 }
 
 impl From<(&str, &[&str])> for FileFilter {
@@ -100,6 +173,107 @@ impl From<(&str, &[&str])> for FileFilter {
 fn is_regex_token(token: &str) -> bool {
     let t = token.trim();
     t.starts_with("((") && t.ends_with("))") && t.len() >= 4
+}
+
+fn split_igfd_commas(input: &str) -> Vec<&str> {
+    let bytes = input.as_bytes();
+    let mut out: Vec<&str> = Vec::new();
+    let mut start = 0usize;
+    let mut brace_depth: i32 = 0;
+    let mut paren_depth: i32 = 0;
+
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => brace_depth += 1,
+            b'}' => brace_depth = (brace_depth - 1).max(0),
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = (paren_depth - 1).max(0),
+            b',' if brace_depth == 0 && paren_depth == 0 => {
+                out.push(&input[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out.push(&input[start..]);
+    out
+}
+
+fn parse_igfd_collection(
+    part: &str,
+) -> Result<Option<(String, Vec<String>)>, IgfdFilterParseError> {
+    let bytes = part.as_bytes();
+    let mut brace_depth: i32 = 0;
+    let mut paren_depth: i32 = 0;
+    let mut open_idx: Option<usize> = None;
+    let mut close_idx: Option<usize> = None;
+
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' if brace_depth == 0 && paren_depth == 0 => {
+                open_idx = Some(i);
+                brace_depth = 1;
+            }
+            b'{' => brace_depth += 1,
+            b'}' => {
+                brace_depth = (brace_depth - 1).max(0);
+                if brace_depth == 0 && open_idx.is_some() {
+                    close_idx = Some(i);
+                    break;
+                }
+            }
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = (paren_depth - 1).max(0),
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let Some(open) = open_idx else {
+        return Ok(None);
+    };
+    let Some(close) = close_idx else {
+        return Err(IgfdFilterParseError::new(
+            "unterminated '{' in filter collection",
+        ));
+    };
+
+    let label = part[..open].trim();
+    if label.is_empty() {
+        return Err(IgfdFilterParseError::new(
+            "collection label is empty (expected 'Name{...}')",
+        ));
+    }
+    let tail = part[close + 1..].trim();
+    if !tail.is_empty() {
+        return Err(IgfdFilterParseError::new(
+            "unexpected trailing characters after '}'",
+        ));
+    }
+
+    let inner = part[open + 1..close].trim();
+    if inner.is_empty() {
+        return Err(IgfdFilterParseError::new(
+            "collection has no filters (empty '{...}')",
+        ));
+    }
+
+    let mut tokens: Vec<String> = Vec::new();
+    for t in split_igfd_commas(inner) {
+        let t = t.trim();
+        if t.is_empty() {
+            continue;
+        }
+        tokens.push(t.to_string());
+    }
+    if tokens.is_empty() {
+        return Err(IgfdFilterParseError::new("collection has no filters"));
+    }
+
+    Ok(Some((label.to_string(), tokens)))
 }
 
 /// Selection result containing one or more paths
@@ -279,6 +453,15 @@ impl FileDialog {
         self
     }
 
+    /// Parse and add one or more IGFD-style filters.
+    ///
+    /// This is a convenience wrapper over [`FileFilter::parse_igfd`].
+    pub fn filters_igfd(mut self, spec: impl AsRef<str>) -> Result<Self, IgfdFilterParseError> {
+        let parsed = FileFilter::parse_igfd(spec.as_ref())?;
+        self.filters.extend(parsed);
+        Ok(self)
+    }
+
     /// Resolve the effective backend
     pub(crate) fn effective_backend(&self) -> Backend {
         match self.backend {
@@ -327,5 +510,37 @@ mod tests {
             ],
         );
         assert_eq!(f.extensions, vec!["png", "jpg", "gif", "((\\p{Lu}+))"]);
+    }
+
+    #[test]
+    fn parse_igfd_simple_list_becomes_single_filter() {
+        let v = FileFilter::parse_igfd(".cpp,.h,.hpp").unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].name, ".cpp,.h,.hpp");
+        assert_eq!(v[0].extensions, vec![".cpp", ".h", ".hpp"]);
+    }
+
+    #[test]
+    fn parse_igfd_collections_build_multiple_filters() {
+        let v = FileFilter::parse_igfd("C/C++{.c,.cpp,.h},Rust{.rs}").unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].name, "C/C++");
+        assert_eq!(v[0].extensions, vec![".c", ".cpp", ".h"]);
+        assert_eq!(v[1].name, "Rust");
+        assert_eq!(v[1].extensions, vec![".rs"]);
+    }
+
+    #[test]
+    fn parse_igfd_does_not_split_commas_inside_parentheses() {
+        let v = FileFilter::parse_igfd("C files(png, jpg){.png,.jpg}").unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].name, "C files(png, jpg)");
+    }
+
+    #[test]
+    fn parse_igfd_regex_token_can_contain_commas() {
+        let v = FileFilter::parse_igfd("Rx{((a,b)),.txt}").unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].extensions, vec!["((a,b))", ".txt"]);
     }
 }
