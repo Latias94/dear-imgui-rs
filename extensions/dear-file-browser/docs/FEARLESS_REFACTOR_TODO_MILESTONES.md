@@ -241,7 +241,7 @@ Goal: implement IGFD-grade file styling rules.
 - [x] Task: `FileStyle { text_color, icon, tooltip }` (font support TBD)
 - [x] Task: matching rules: by type + ext (first-match wins)
   - Acceptance: rule engine tests.
-- [ ] Task: extend matching rules: by name/contains
+- [x] Task: extend matching rules: by name/contains/glob/regex
 - [ ] Task: add optional font mapping (`font_id`)
 
 ### Epic 9.2 — Callback-based style provider
@@ -341,7 +341,7 @@ Use this as a tracking table for final validation.
 - [x] Sorting: natural name ordering (e.g. `file2` < `file10`)
 - [x] Save: confirm overwrite + extension policy
 - [ ] Filters: collections + regex (optional) + multi-layer extensions (multi-layer/regex/wildcards done; collections/parser TBD)
-- [ ] File styles: by type/ext/name/regex + callback
+- [ ] File styles: by type/ext/name/regex + callback (callback/font TBD)
 - [x] Custom pane: per filter + blocks confirm
 - [ ] Thumbnails: decode + GPU lifecycle + grid view (list preview done; grid view TBD)
 

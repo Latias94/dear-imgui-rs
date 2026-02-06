@@ -222,6 +222,24 @@ state.ui.file_styles.push_extension_style(
         tooltip: Some("Image file".into()),
     },
 );
+
+// Name-based matching (case-insensitive):
+state.ui.file_styles.push_name_contains_style(
+    "readme",
+    FileStyle {
+        icon: Some("[DOC]".into()),
+        text_color: Some([0.8, 0.8, 0.8, 1.0]),
+        tooltip: Some("Documentation".into()),
+    },
+);
+state.ui.file_styles.push_name_regex_style(
+    r"((^imgui_.*\.rs$))",
+    FileStyle {
+        icon: Some("[SRC]".into()),
+        text_color: Some([0.2, 0.9, 0.2, 1.0]),
+        tooltip: Some("ImGui source".into()),
+    },
+);
 ```
 
 ## Thumbnails (ImGui UI)
