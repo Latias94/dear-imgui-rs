@@ -423,8 +423,8 @@ Goal: match IGFD’s “natural sorting for filenames and extension on demand”
 
 ### Epic 15.1 — Sort by extension
 
-- [ ] Task: add `SortBy::Extension` (multi-layer aware)
-  - Acceptance: `.tar.gz` and `.vcxproj.filters` sort as expected; natural mode optional.
+- [x] Task: add `SortBy::Extension` (multi-layer aware)
+  - Acceptance: `.tar.gz` and `.vcxproj.filters` sort as expected (natural order used).
 
 ### Epic 15.2 — Optional columns & tuning
 

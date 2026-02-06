@@ -57,7 +57,7 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 | Embedded / custom host | ✅ | `draw_contents*()` + window host config + `show_modal*()` convenience. |
 | Validation buttons tuning (placement/width/invert) | ✅ | `ValidationButtonsConfig` (align/order/width/labels). |
 | Filter groups / collection syntax (`Name{...}`) | ✅ | `FileFilter::parse_igfd()` / `FileDialog::filters_igfd()` support `Name{...}` collections and simple lists. |
-| Natural sort for extensions on demand | 🟡 | Natural sort for names exists; “Sort by extension” is not implemented. |
+| Natural sort for extensions on demand | ✅ | “Ext” column supports sorting by full extension using natural order. |
 | File operations (rename/delete/copy/paste, etc.) | 🟡 | Rename + delete exist (delete dirs must be empty); copy/cut/paste/clipboard still missing. |
 
 ---
