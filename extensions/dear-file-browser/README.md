@@ -39,7 +39,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - Breadcrumbs with automatic compression on long paths
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
-  - Places: groups (System + Bookmarks) with export/import via compact string
+  - Places: editable groups + bookmarks/devices, export/import via compact string
   - File styles: icons/colors/tooltips via `FileStyleRegistry`
   - Thumbnails: request queue + LRU cache (user-driven decode/upload lifecycle)
   - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all

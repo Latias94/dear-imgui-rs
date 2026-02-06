@@ -165,8 +165,9 @@ Goal: implement an IGFD-like Places pane with groups and persistence.
 ### Epic 5.2 — UI pane
 
 - [x] Task: left pane renders groups; groups can be expanded/collapsed
-- [ ] Task: user-editable groups support add/remove/rename items (minimum viable)
+- [x] Task: user-editable groups support add/remove/rename groups/items (minimum viable)
   - Acceptance: interactive editing works without panics; operations are reflected in store.
+  - Notes: System places are read-only; user places are editable.
 
 ### Epic 5.3 — System devices integration
 
