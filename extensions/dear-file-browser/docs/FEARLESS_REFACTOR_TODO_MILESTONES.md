@@ -450,10 +450,12 @@ Goal: match IGFD’s “natural sorting for filenames and extension on demand”
 - [x] Task: add `SortBy::Extension` (multi-layer aware)
   - Acceptance: `.tar.gz` and `.vcxproj.filters` sort as expected (natural order used).
 
-### Epic 15.2 — Optional columns & tuning
+### Epic 15.2 - Optional columns & tuning
 
 - [x] Task: add column visibility knobs (Size/Modified/Preview) and persist per dialog instance
-  - Acceptance: callers can hide “Modified” and run a compact list view.
+  - Acceptance: callers can hide "Modified" and run a compact list view.
+- [x] Task: add one-click list column layouts (`Compact` / `Balanced`)
+  - Acceptance: presets update visibility + order only and preserve runtime `weight_overrides`.
 
 Exit criteria:
 

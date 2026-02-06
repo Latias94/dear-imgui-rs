@@ -452,6 +452,15 @@ fn draw_contents_with_fs_and_hooks(
             ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
 
             ui.separator();
+            if ui.small_button("Compact") {
+                apply_compact_column_layout(&mut state.ui.file_list_columns);
+            }
+            ui.same_line();
+            if ui.small_button("Balanced") {
+                apply_balanced_column_layout(&mut state.ui.file_list_columns);
+            }
+
+            ui.separator();
             ui.text("Order:");
             let mut order = state.ui.file_list_columns.normalized_order();
             let mut changed = false;
@@ -463,11 +472,11 @@ fn draw_contents_with_fs_and_hooks(
                 }
                 ui.text(label);
                 ui.same_line();
-                if ui.small_button(format!("↑##col_order_up_{index}")) {
+                if ui.small_button(format!("Up##col_order_up_{index}")) {
                     changed |= move_column_order_up(&mut order, index);
                 }
                 ui.same_line();
-                if ui.small_button(format!("↓##col_order_down_{index}")) {
+                if ui.small_button(format!("Down##col_order_down_{index}")) {
                     changed |= move_column_order_down(&mut order, index);
                 }
             }
@@ -1839,6 +1848,30 @@ fn is_data_column_visible(config: &FileListColumnsConfig, column: FileListDataCo
         FileListDataColumn::Size => config.show_size,
         FileListDataColumn::Modified => config.show_modified,
     }
+}
+
+fn apply_compact_column_layout(config: &mut FileListColumnsConfig) {
+    config.show_preview = false;
+    config.show_size = true;
+    config.show_modified = false;
+    config.order = [
+        FileListDataColumn::Name,
+        FileListDataColumn::Extension,
+        FileListDataColumn::Size,
+        FileListDataColumn::Modified,
+    ];
+}
+
+fn apply_balanced_column_layout(config: &mut FileListColumnsConfig) {
+    config.show_preview = true;
+    config.show_size = true;
+    config.show_modified = true;
+    config.order = [
+        FileListDataColumn::Name,
+        FileListDataColumn::Extension,
+        FileListDataColumn::Size,
+        FileListDataColumn::Modified,
+    ];
 }
 
 fn move_column_order_up(order: &mut [FileListDataColumn; 4], index: usize) -> bool {
@@ -3236,7 +3269,9 @@ fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSys
 #[cfg(test)]
 mod tests {
     use super::{ListColumnLayout, list_column_layout};
-    use crate::dialog_state::{FileListColumnsConfig, FileListDataColumn};
+    use crate::dialog_state::{
+        FileListColumnWeightOverrides, FileListColumnsConfig, FileListDataColumn,
+    };
 
     fn columns_config(
         show_size: bool,
@@ -3497,5 +3532,85 @@ mod tests {
                 FileListDataColumn::Modified,
             ]
         );
+    }
+
+    #[test]
+    fn apply_compact_column_layout_updates_visibility_and_order_only() {
+        let expected_weights = FileListColumnWeightOverrides {
+            preview: Some(0.11),
+            name: Some(0.57),
+            extension: Some(0.14),
+            size: Some(0.18),
+            modified: Some(0.22),
+        };
+
+        let mut cfg = FileListColumnsConfig {
+            show_preview: true,
+            show_size: false,
+            show_modified: true,
+            order: [
+                FileListDataColumn::Modified,
+                FileListDataColumn::Size,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Name,
+            ],
+            weight_overrides: expected_weights.clone(),
+        };
+
+        super::apply_compact_column_layout(&mut cfg);
+
+        assert!(!cfg.show_preview);
+        assert!(cfg.show_size);
+        assert!(!cfg.show_modified);
+        assert_eq!(
+            cfg.order,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+            ]
+        );
+        assert_eq!(cfg.weight_overrides, expected_weights);
+    }
+
+    #[test]
+    fn apply_balanced_column_layout_updates_visibility_and_order_only() {
+        let expected_weights = FileListColumnWeightOverrides {
+            preview: Some(0.13),
+            name: Some(0.54),
+            extension: Some(0.16),
+            size: Some(0.17),
+            modified: Some(0.21),
+        };
+
+        let mut cfg = FileListColumnsConfig {
+            show_preview: false,
+            show_size: false,
+            show_modified: false,
+            order: [
+                FileListDataColumn::Size,
+                FileListDataColumn::Name,
+                FileListDataColumn::Modified,
+                FileListDataColumn::Extension,
+            ],
+            weight_overrides: expected_weights.clone(),
+        };
+
+        super::apply_balanced_column_layout(&mut cfg);
+
+        assert!(cfg.show_preview);
+        assert!(cfg.show_size);
+        assert!(cfg.show_modified);
+        assert_eq!(
+            cfg.order,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+            ]
+        );
+        assert_eq!(cfg.weight_overrides, expected_weights);
     }
 }

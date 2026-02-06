@@ -113,6 +113,11 @@ ui.window("Open")
 
 List-view columns can be tuned per dialog instance. When users drag-resize or drag-reorder list columns, runtime preferences are written back into `state.ui.file_list_columns` automatically:
 
+- The `Columns` menu also provides one-click layouts:
+  - `Compact`: hides `Preview` + `Modified`, keeps `Size` visible.
+  - `Balanced`: shows `Preview` + `Size` + `Modified`.
+- These presets only change visibility/order and keep `weight_overrides` intact.
+
 ```rust
 use dear_file_browser::{FileListColumnsConfig, FileListDataColumn};
 
