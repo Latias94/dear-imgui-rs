@@ -236,9 +236,11 @@ Goal: implement IGFD-grade file styling rules.
 
 ### Epic 9.1 — Style data model
 
-- [ ] Task: `FileStyle { color, icon, font_id, tooltip }`
-- [ ] Task: matching rules: by type/ext/name/contains
+- [x] Task: `FileStyle { text_color, icon, tooltip }` (font support TBD)
+- [x] Task: matching rules: by type + ext (first-match wins)
   - Acceptance: rule engine tests.
+- [ ] Task: extend matching rules: by name/contains
+- [ ] Task: add optional font mapping (`font_id`)
 
 ### Epic 9.2 — Callback-based style provider
 

@@ -3,11 +3,13 @@ use std::path::{Path, PathBuf};
 use dear_imgui_rs::TreeNodeFlags;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton};
+use dear_imgui_rs::sys;
 
 use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy};
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, DirEntry, Modifiers};
 use crate::dialog_state::FileDialogState;
+use crate::file_style::EntryKind;
 use crate::fs::{FileSystem, StdFileSystem};
 use crate::places::Places;
 
@@ -147,6 +149,39 @@ impl<'ui> FileBrowser<'ui> {
                 out = draw_contents_with_fs_and_custom_pane(self.ui, state, fs, custom_pane.take());
             });
         out
+    }
+}
+
+struct TextColorToken {
+    pushed: bool,
+}
+
+impl TextColorToken {
+    fn push(color: [f32; 4]) -> Self {
+        unsafe {
+            sys::igPushStyleColor_Vec4(
+                sys::ImGuiCol_Text as i32,
+                sys::ImVec4 {
+                    x: color[0],
+                    y: color[1],
+                    z: color[2],
+                    w: color[3],
+                },
+            );
+        }
+        Self { pushed: true }
+    }
+
+    fn none() -> Self {
+        Self { pushed: false }
+    }
+}
+
+impl Drop for TextColorToken {
+    fn drop(&mut self) {
+        if self.pushed {
+            unsafe { sys::igPopStyleColor(1) };
+        }
     }
 }
 
@@ -838,7 +873,24 @@ fn draw_file_table(
                 ui.table_next_column();
 
                 let selected = state.core.selected.iter().any(|s| s == &e.name);
-                let label = e.display_name();
+                let kind = if e.is_dir {
+                    EntryKind::Dir
+                } else {
+                    EntryKind::File
+                };
+                let style = state.ui.file_styles.style_for(&e.name, kind);
+                let (text_color, icon, tooltip) = match style {
+                    Some(s) => (s.text_color, s.icon.clone(), s.tooltip.clone()),
+                    None => (None, None, None),
+                };
+
+                let mut label = e.display_name();
+                if let Some(icon) = icon.as_deref() {
+                    label = format!("{icon} {label}");
+                }
+                let _color = text_color
+                    .map(TextColorToken::push)
+                    .unwrap_or_else(TextColorToken::none);
                 if ui
                     .selectable_config(label)
                     .selected(selected)
@@ -850,6 +902,12 @@ fn draw_file_table(
                         shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
                     };
                     state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
+                }
+
+                if ui.is_item_hovered() {
+                    if let Some(t) = tooltip.as_deref() {
+                        ui.tooltip_text(t);
+                    }
                 }
 
                 if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {

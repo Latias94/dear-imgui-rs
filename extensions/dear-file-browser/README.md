@@ -40,6 +40,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
   - Places: groups (System + Bookmarks) with export/import via compact string
+  - File styles: icons/colors/tooltips via `FileStyleRegistry`
   - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all
   - Keyboard navigation: Up/Down arrows + Enter, Backspace, Ctrl+L (path), Ctrl+F (search)
   - Empty-state hint with configurable color/message
@@ -179,6 +180,31 @@ if let Some(res) = ui
 {
     // handle res
 }
+```
+
+## File Styles (ImGui UI)
+
+To decorate entries (folder icon, per-extension colors, tooltips), configure the `FileStyleRegistry`:
+
+```rust
+use dear_file_browser::{FileStyle, StyleMatcher};
+
+state.ui.file_styles.push_rule(
+    StyleMatcher::AnyDir,
+    FileStyle {
+        icon: Some("[DIR]".into()),
+        text_color: Some([0.9, 0.8, 0.3, 1.0]),
+        tooltip: Some("Directory".into()),
+    },
+);
+state.ui.file_styles.push_extension_style(
+    "png",
+    FileStyle {
+        icon: Some("[IMG]".into()),
+        text_color: Some([0.3, 0.8, 1.0, 1.0]),
+        tooltip: Some("Image file".into()),
+    },
+);
 ```
 
 ## WASM

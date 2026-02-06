@@ -22,6 +22,8 @@ mod dialog_manager;
 #[cfg(feature = "imgui")]
 mod dialog_state;
 #[cfg(feature = "imgui")]
+mod file_style;
+#[cfg(feature = "imgui")]
 mod fs;
 #[cfg(feature = "native-rfd")]
 mod native;
@@ -42,6 +44,8 @@ pub use dialog_core::{ConfirmGate, FileDialogCore, Modifiers};
 pub use dialog_manager::{DialogId, DialogManager};
 #[cfg(feature = "imgui")]
 pub use dialog_state::{FileDialogState, FileDialogUiState};
+#[cfg(feature = "imgui")]
+pub use file_style::{EntryKind, FileStyle, FileStyleRegistry, StyleMatcher, StyleRule};
 #[cfg(feature = "imgui")]
 pub use fs::{FileSystem, FsEntry, FsMetadata, StdFileSystem};
 #[cfg(feature = "imgui")]

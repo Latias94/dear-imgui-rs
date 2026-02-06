@@ -1,5 +1,6 @@
 use crate::core::{DialogMode, LayoutStyle};
 use crate::dialog_core::FileDialogCore;
+use crate::file_style::FileStyleRegistry;
 
 /// Places import/export modal mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,6 +40,8 @@ pub struct FileDialogUiState {
     pub focus_search_next: bool,
     /// Error string to display in UI (non-fatal).
     pub ui_error: Option<String>,
+    /// Style registry used to decorate the file list (icons/colors/tooltips).
+    pub file_styles: FileStyleRegistry,
     /// Whether to render a custom pane region (when a pane is provided by the caller).
     pub custom_pane_enabled: bool,
     /// Height of the custom pane region (in pixels).
@@ -70,6 +73,7 @@ impl Default for FileDialogUiState {
             focus_path_edit_next: false,
             focus_search_next: false,
             ui_error: None,
+            file_styles: FileStyleRegistry::default(),
             custom_pane_enabled: true,
             custom_pane_height: 120.0,
             places_io_mode: PlacesIoMode::Export,
