@@ -750,9 +750,7 @@ fn draw_contents_with_fs_and_hooks(
         }
         if !ui.io().want_text_input() && ui.is_key_pressed(Key::Delete) {
             if state.core.has_selection() {
-                state.ui.delete_targets = state.core.selected_names();
-                state.ui.delete_error = None;
-                state.ui.delete_open_next = true;
+                open_delete_modal_from_selection(state);
             }
         }
     }
@@ -1135,16 +1133,55 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
     }
 }
 
+fn selected_entry_names_from_ids(state: &FileDialogState) -> Vec<String> {
+    let entries = state.core.entries();
+    state
+        .core
+        .selected_entry_ids()
+        .into_iter()
+        .filter_map(|id| {
+            entries
+                .iter()
+                .find(|entry| entry.id == id)
+                .map(|entry| entry.name.clone())
+        })
+        .collect()
+}
+
+fn selected_entry_paths_from_ids(state: &FileDialogState) -> Vec<PathBuf> {
+    let entries = state.core.entries();
+    state
+        .core
+        .selected_entry_ids()
+        .into_iter()
+        .filter_map(|id| {
+            entries
+                .iter()
+                .find(|entry| entry.id == id)
+                .map(|entry| entry.path.clone())
+        })
+        .collect()
+}
+
+fn open_delete_modal_from_selection(state: &mut FileDialogState) {
+    let delete_targets = selected_entry_names_from_ids(state);
+    if delete_targets.is_empty() {
+        return;
+    }
+    state.ui.delete_targets = delete_targets;
+    state.ui.delete_error = None;
+    state.ui.delete_open_next = true;
+}
+
 fn clipboard_set_from_selection(state: &mut FileDialogState, op: ClipboardOp) {
     if !state.core.has_selection() {
         return;
     }
 
-    let selected_names = state.core.selected_names();
-    let sources = selected_names
-        .iter()
-        .map(|name| state.core.cwd.join(name))
-        .collect();
+    let sources = selected_entry_paths_from_ids(state);
+    if sources.is_empty() {
+        return;
+    }
     state.ui.clipboard = Some(FileClipboard { op, sources });
 }
 
@@ -2501,9 +2538,7 @@ fn draw_file_table_view(
                                 ui.close_current_popup();
                             }
                             if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
-                                state.ui.delete_targets = state.core.selected_names();
-                                state.ui.delete_error = None;
-                                state.ui.delete_open_next = true;
+                                open_delete_modal_from_selection(state);
                                 ui.close_current_popup();
                             }
                         }
@@ -2855,9 +2890,7 @@ fn draw_file_grid_view(
                             ui.close_current_popup();
                         }
                         if ui.menu_item_enabled_selected("Delete", Some("Del"), false, true) {
-                            state.ui.delete_targets = state.core.selected_names();
-                            state.ui.delete_error = None;
-                            state.ui.delete_open_next = true;
+                            open_delete_modal_from_selection(state);
                             ui.close_current_popup();
                         }
                     }
