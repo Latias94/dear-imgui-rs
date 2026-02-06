@@ -158,12 +158,19 @@ Fields:
 ```rust
 enum ScanPolicy {
     Sync,
-    Incremental { batch_entries: usize },
-    Background { batch_entries: usize, debounce_ms: u64 },
+    Incremental {
+        batch_entries: usize,
+        max_batches_per_tick: usize,
+    },
+    Background {
+        batch_entries: usize,
+        max_batches_per_tick: usize,
+        debounce_ms: u64,
+    },
 }
 ```
 
-Policy is optional and host-configurable with sane defaults.
+Policy is optional and host-configurable with sane defaults (`ScanPolicy::tuned_incremental()` / `ScanPolicy::tuned_background()`).
 
 ### 6.4 `ScanStatus`
 
@@ -213,6 +220,7 @@ enum ScanStatus {
    - For incremental scan, project appended entries without full rebuild where safe.
 4. **Bounded frame workload**
    - Apply at most `N` batches or `M` entries per frame.
+   - Tuned preset currently uses `batch_entries=512` and `max_batches_per_tick=2`.
 5. **Cheap instrumentation hooks**
    - Measure scan, projection, and confirm path with low overhead.
 
@@ -263,10 +271,15 @@ Fearless-mode simplification (breaking allowed):
 - Add bounded per-frame apply.
 - Improve delta projection and selection reconciliation.
 
-### Stage D: instrumentation and tuning (Epic 17.4)
+### Stage D: instrumentation and baseline capture (Epic 17.4)
 
 - Add tracing events/counters.
-- Profile and tune defaults for large directories.
+- Capture synthetic baseline for 10k/50k directories.
+
+### Stage E: policy tuning and apply-budget controls (Epic 17.5)
+
+- Add `max_batches_per_tick` to incremental/background policies.
+- Publish tuned presets and benchmark sweep for apply-budget tradeoffs.
 
 ---
 
@@ -302,7 +315,7 @@ Fearless-mode simplification (breaking allowed):
 
 - Synthetic 10k and 50k directory datasets.
 - Frame budget stability under incremental append.
-- Baseline record: `docs/P2_PERF_BASELINE_2026-02-06.md`.
+- Baseline + Stage E budget sweep: `docs/P2_PERF_BASELINE_2026-02-06.md`.
 
 ---
 

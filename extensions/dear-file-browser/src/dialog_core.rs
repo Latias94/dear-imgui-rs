@@ -130,11 +130,15 @@ pub enum ScanPolicy {
     Incremental {
         /// Max number of entries per batch.
         batch_entries: usize,
+        /// Max batches to apply in one UI tick.
+        max_batches_per_tick: usize,
     },
     /// Run scan on background worker and consume batches in UI ticks.
     Background {
         /// Max number of entries per batch.
         batch_entries: usize,
+        /// Max batches to apply in one UI tick.
+        max_batches_per_tick: usize,
         /// Debounce interval for rapid rescan requests.
         debounce_ms: u64,
     },
@@ -147,19 +151,63 @@ impl Default for ScanPolicy {
 }
 
 impl ScanPolicy {
+    /// Recommended batch size for incremental/background scan.
+    pub const TUNED_BATCH_ENTRIES: usize = 512;
+    /// Recommended apply budget to balance throughput and frame pacing.
+    pub const TUNED_MAX_BATCHES_PER_TICK: usize = 2;
+    /// Recommended debounce for background scan.
+    pub const TUNED_BACKGROUND_DEBOUNCE_MS: u64 = 50;
+
+    /// Returns a tuned incremental policy for large directories.
+    pub const fn tuned_incremental() -> Self {
+        Self::Incremental {
+            batch_entries: Self::TUNED_BATCH_ENTRIES,
+            max_batches_per_tick: Self::TUNED_MAX_BATCHES_PER_TICK,
+        }
+    }
+
+    /// Returns a tuned background policy for large directories.
+    pub const fn tuned_background() -> Self {
+        Self::Background {
+            batch_entries: Self::TUNED_BATCH_ENTRIES,
+            max_batches_per_tick: Self::TUNED_MAX_BATCHES_PER_TICK,
+            debounce_ms: Self::TUNED_BACKGROUND_DEBOUNCE_MS,
+        }
+    }
+
     fn normalized(self) -> Self {
         match self {
             Self::Sync => Self::Sync,
-            Self::Incremental { batch_entries } => Self::Incremental {
+            Self::Incremental {
+                batch_entries,
+                max_batches_per_tick,
+            } => Self::Incremental {
                 batch_entries: batch_entries.max(1),
+                max_batches_per_tick: max_batches_per_tick.max(1),
             },
             Self::Background {
                 batch_entries,
+                max_batches_per_tick,
                 debounce_ms,
             } => Self::Background {
                 batch_entries: batch_entries.max(1),
+                max_batches_per_tick: max_batches_per_tick.max(1),
                 debounce_ms,
             },
+        }
+    }
+
+    fn max_batches_per_tick(self) -> usize {
+        match self {
+            Self::Sync => usize::MAX,
+            Self::Incremental {
+                max_batches_per_tick,
+                ..
+            }
+            | Self::Background {
+                max_batches_per_tick,
+                ..
+            } => max_batches_per_tick,
         }
     }
 }
@@ -384,10 +432,8 @@ impl ScanRuntime {
     fn from_policy(policy: ScanPolicy) -> Self {
         match policy {
             ScanPolicy::Sync => Self::Sync(SyncScanRuntime::default()),
-            ScanPolicy::Incremental { batch_entries } => {
-                Self::Worker(WorkerScanRuntime::new(batch_entries))
-            }
-            ScanPolicy::Background { batch_entries, .. } => {
+            ScanPolicy::Incremental { batch_entries, .. }
+            | ScanPolicy::Background { batch_entries, .. } => {
                 Self::Worker(WorkerScanRuntime::new(batch_entries))
             }
         }
@@ -400,7 +446,7 @@ impl ScanRuntime {
                     *self = Self::Sync(SyncScanRuntime::default());
                 }
             }
-            ScanPolicy::Incremental { batch_entries }
+            ScanPolicy::Incremental { batch_entries, .. }
             | ScanPolicy::Background { batch_entries, .. } => {
                 if let Self::Worker(runtime) = self {
                     runtime.set_batch_entries(batch_entries);
@@ -991,10 +1037,7 @@ impl FileDialogCore {
     }
 
     fn scan_runtime_batch_budget(&self) -> usize {
-        match self.scan_policy {
-            ScanPolicy::Sync => usize::MAX,
-            ScanPolicy::Incremental { .. } | ScanPolicy::Background { .. } => 1,
-        }
+        self.scan_policy.max_batches_per_tick()
     }
 
     fn begin_scan_request(&mut self) -> ScanRequest {
@@ -2763,15 +2806,119 @@ mod tests {
         assert_eq!(core.scan_generation(), 1);
         assert!(!core.dir_snapshot_dirty);
 
-        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 0 });
+        core.set_scan_policy(ScanPolicy::Incremental {
+            batch_entries: 0,
+            max_batches_per_tick: 0,
+        });
         assert_eq!(
             core.scan_policy(),
-            ScanPolicy::Incremental { batch_entries: 1 }
+            ScanPolicy::Incremental {
+                batch_entries: 1,
+                max_batches_per_tick: 1
+            }
         );
         assert!(core.dir_snapshot_dirty);
 
         core.rescan_if_needed(&fs);
         assert_eq!(core.scan_generation(), 2);
+    }
+
+    #[test]
+    fn scan_policy_tuned_presets_match_expected_values() {
+        assert_eq!(
+            ScanPolicy::tuned_incremental(),
+            ScanPolicy::Incremental {
+                batch_entries: ScanPolicy::TUNED_BATCH_ENTRIES,
+                max_batches_per_tick: ScanPolicy::TUNED_MAX_BATCHES_PER_TICK,
+            }
+        );
+
+        assert_eq!(
+            ScanPolicy::tuned_background(),
+            ScanPolicy::Background {
+                batch_entries: ScanPolicy::TUNED_BATCH_ENTRIES,
+                max_batches_per_tick: ScanPolicy::TUNED_MAX_BATCHES_PER_TICK,
+                debounce_ms: ScanPolicy::TUNED_BACKGROUND_DEBOUNCE_MS,
+            }
+        );
+    }
+
+    #[test]
+    fn incremental_scan_policy_applies_multiple_batches_per_tick() {
+        let fs = TestFs {
+            entries: vec![
+                crate::fs::FsEntry {
+                    name: "a.txt".into(),
+                    path: PathBuf::from("/tmp/a.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "b.txt".into(),
+                    path: PathBuf::from("/tmp/b.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "c.txt".into(),
+                    path: PathBuf::from("/tmp/c.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "d.txt".into(),
+                    path: PathBuf::from("/tmp/d.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_policy(ScanPolicy::Incremental {
+            batch_entries: 1,
+            max_batches_per_tick: 2,
+        });
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Partial {
+                generation: 1,
+                loaded: 1,
+            }
+        );
+        assert_eq!(core.entries().len(), 1);
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Partial {
+                generation: 1,
+                loaded: 3,
+            }
+        );
+        assert_eq!(core.entries().len(), 3);
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Complete {
+                generation: 1,
+                loaded: 4,
+            }
+        );
+        assert_eq!(core.entries().len(), 4);
     }
 
     #[test]
@@ -2846,7 +2993,10 @@ mod tests {
 
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
         core.cwd = PathBuf::from("/tmp");
-        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 2 });
+        core.set_scan_policy(ScanPolicy::Incremental {
+            batch_entries: 2,
+            max_batches_per_tick: 1,
+        });
 
         core.rescan_if_needed(&fs);
         assert_eq!(core.scan_generation(), 1);
@@ -2922,7 +3072,10 @@ mod tests {
 
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
         core.cwd = PathBuf::from("/tmp");
-        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 1 });
+        core.set_scan_policy(ScanPolicy::Incremental {
+            batch_entries: 1,
+            max_batches_per_tick: 1,
+        });
 
         core.rescan_if_needed(&fs_old);
         core.rescan_if_needed(&fs_old);
@@ -2995,7 +3148,10 @@ mod tests {
         let delayed = entry_id_from_path(Path::new("/tmp/c.txt"), false, false);
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.cwd = PathBuf::from("/tmp");
-        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 1 });
+        core.set_scan_policy(ScanPolicy::Incremental {
+            batch_entries: 1,
+            max_batches_per_tick: 1,
+        });
         core.focus_and_select_by_id(delayed);
 
         core.rescan_if_needed(&fs);
@@ -3042,7 +3198,10 @@ mod tests {
         let missing = entry_id_from_path(Path::new("/tmp/missing.txt"), false, false);
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.cwd = PathBuf::from("/tmp");
-        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 1 });
+        core.set_scan_policy(ScanPolicy::Incremental {
+            batch_entries: 1,
+            max_batches_per_tick: 1,
+        });
         core.focus_and_select_by_id(missing);
 
         core.rescan_if_needed(&fs);
@@ -3091,7 +3250,10 @@ mod tests {
             };
             let mut core_incremental = FileDialogCore::new(DialogMode::OpenFile);
             core_incremental.cwd = PathBuf::from("/tmp");
-            core_incremental.set_scan_policy(ScanPolicy::Incremental { batch_entries: 512 });
+            core_incremental.set_scan_policy(ScanPolicy::Incremental {
+                batch_entries: 512,
+                max_batches_per_tick: 1,
+            });
 
             let incremental_started_at = Instant::now();
             let mut ticks = 0usize;
@@ -3125,6 +3287,60 @@ mod tests {
                 sync_elapsed.as_millis(),
                 incremental_elapsed.as_millis(),
                 ticks,
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "perf-baseline"]
+    fn perf_baseline_incremental_budget_sweep() {
+        let entry_count = 50_000usize;
+        let base_entries = make_synthetic_fs_entries(entry_count);
+
+        for &max_batches_per_tick in &[1usize, 2usize, 4usize] {
+            let fs_incremental = TestFs {
+                entries: base_entries.clone(),
+                ..Default::default()
+            };
+            let mut core_incremental = FileDialogCore::new(DialogMode::OpenFile);
+            core_incremental.cwd = PathBuf::from("/tmp");
+            core_incremental.set_scan_policy(ScanPolicy::Incremental {
+                batch_entries: 512,
+                max_batches_per_tick,
+            });
+
+            let incremental_started_at = Instant::now();
+            let mut ticks = 0usize;
+            loop {
+                core_incremental.rescan_if_needed(&fs_incremental);
+                ticks += 1;
+
+                match core_incremental.scan_status() {
+                    ScanStatus::Complete { loaded, .. } => {
+                        assert_eq!(*loaded, entry_count);
+                        break;
+                    }
+                    ScanStatus::Failed { message, .. } => {
+                        panic!("incremental budget sweep failed: {message}");
+                    }
+                    _ => {}
+                }
+
+                assert!(
+                    ticks <= (entry_count / 128) + 128,
+                    "incremental ticks exceeded bound: entry_count={entry_count}, ticks={ticks}"
+                );
+            }
+
+            let incremental_elapsed = incremental_started_at.elapsed();
+            assert_eq!(core_incremental.entries().len(), entry_count);
+
+            eprintln!(
+                "PERF_SWEEP entry_count={} incremental_ms={} incremental_ticks={} batch_entries=512 max_batches_per_tick={}",
+                entry_count,
+                incremental_elapsed.as_millis(),
+                ticks,
+                max_batches_per_tick,
             );
         }
     }

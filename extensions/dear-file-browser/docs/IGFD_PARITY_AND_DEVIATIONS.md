@@ -60,5 +60,6 @@ Last updated: 2026-02-06
 - Completed: Stage C bounded per-frame batch apply + incremental selection reconciliation stability.
 - Completed: Stage D tracing metrics/events (`scan.requested`, `scan.batch_applied`, `scan.completed`, `scan.dropped_stale_batch`, `projector.rebuild`).
 - Completed: Stage D synthetic baseline tests for `10k/50k` entries (`docs/P2_PERF_BASELINE_2026-02-06.md`).
-- Next: tune incremental defaults and extend benchmark matrix (batch size + mixed metadata).
+- Completed: Stage E policy tuning (`max_batches_per_tick` + tuned presets + sweep baseline).
+- Next: publish migration snippets and extend benchmark matrix (batch size + mixed metadata).
 - Continue UX polish and migration snippets without changing parity guarantees.
