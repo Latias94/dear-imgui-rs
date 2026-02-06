@@ -13,6 +13,7 @@ use crate::dialog_state::FileDialogState;
 use crate::file_style::EntryKind;
 use crate::fs::{FileSystem, StdFileSystem};
 use crate::places::Places;
+use crate::thumbnails::ThumbnailBackend;
 
 /// Configuration for hosting the file browser in an ImGui window.
 #[derive(Clone, Debug)]
@@ -78,7 +79,30 @@ impl<'ui> FileBrowser<'ui> {
         state: &mut FileDialogState,
         fs: &dyn FileSystem,
     ) -> Option<Result<Selection, FileDialogError>> {
-        draw_contents_with_fs_and_custom_pane(self.ui, state, fs, None)
+        draw_contents_with_fs_and_hooks(self.ui, state, fs, None, None)
+    }
+
+    /// Draw only the contents of the file browser (no window/modal host) with a thumbnail backend.
+    ///
+    /// When `state.ui.thumbnails_enabled` is true, the UI will request thumbnails for visible
+    /// entries and call `maintain()` each frame to decode/upload and destroy evicted textures.
+    pub fn draw_contents_with_thumbnail_backend(
+        &self,
+        state: &mut FileDialogState,
+        backend: &mut ThumbnailBackend<'_>,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        self.draw_contents_with_fs_and_thumbnail_backend(state, &StdFileSystem, backend)
+    }
+
+    /// Draw only the contents of the file browser (no window/modal host) using a custom filesystem
+    /// and a thumbnail backend.
+    pub fn draw_contents_with_fs_and_thumbnail_backend(
+        &self,
+        state: &mut FileDialogState,
+        fs: &dyn FileSystem,
+        backend: &mut ThumbnailBackend<'_>,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        draw_contents_with_fs_and_hooks(self.ui, state, fs, None, Some(backend))
     }
 
     /// Draw only the contents of the file browser (no window/modal host) with a custom pane.
@@ -100,7 +124,19 @@ impl<'ui> FileBrowser<'ui> {
         fs: &dyn FileSystem,
         custom_pane: &mut dyn CustomPane,
     ) -> Option<Result<Selection, FileDialogError>> {
-        draw_contents_with_fs_and_custom_pane(self.ui, state, fs, Some(custom_pane))
+        draw_contents_with_fs_and_hooks(self.ui, state, fs, Some(custom_pane), None)
+    }
+
+    /// Draw only the contents of the file browser (no window/modal host) using a custom filesystem,
+    /// a custom pane and a thumbnail backend.
+    pub fn draw_contents_with_fs_and_custom_pane_and_thumbnail_backend(
+        &self,
+        state: &mut FileDialogState,
+        fs: &dyn FileSystem,
+        custom_pane: &mut dyn CustomPane,
+        backend: &mut ThumbnailBackend<'_>,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        draw_contents_with_fs_and_hooks(self.ui, state, fs, Some(custom_pane), Some(backend))
     }
 
     /// Draw the file browser in a standard ImGui window with default host config.
@@ -127,16 +163,18 @@ impl<'ui> FileBrowser<'ui> {
         cfg: &WindowHostConfig,
         fs: &dyn FileSystem,
     ) -> Option<Result<Selection, FileDialogError>> {
-        self.show_windowed_with_fs_and_custom_pane(state, cfg, fs, None)
+        self.show_windowed_with_fs_and_hooks(state, cfg, fs, None, None)
     }
 
-    /// Draw the file browser in a standard ImGui window using a custom filesystem and custom pane.
-    pub fn show_windowed_with_fs_and_custom_pane(
+    /// Draw the file browser in a standard ImGui window using a custom filesystem, custom pane,
+    /// and/or thumbnail backend.
+    pub fn show_windowed_with_fs_and_hooks(
         &self,
         state: &mut FileDialogState,
         cfg: &WindowHostConfig,
         fs: &dyn FileSystem,
         mut custom_pane: Option<&mut dyn CustomPane>,
+        mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
     ) -> Option<Result<Selection, FileDialogError>> {
         if !state.ui.visible {
             return None;
@@ -147,9 +185,47 @@ impl<'ui> FileBrowser<'ui> {
             .window(&cfg.title)
             .size(cfg.initial_size, cfg.size_condition)
             .build(|| {
-                out = draw_contents_with_fs_and_custom_pane(self.ui, state, fs, custom_pane.take());
+                out = draw_contents_with_fs_and_hooks(
+                    self.ui,
+                    state,
+                    fs,
+                    custom_pane.take(),
+                    thumbnails_backend.take(),
+                );
             });
         out
+    }
+
+    /// Draw the file browser in a standard ImGui window using a custom filesystem and custom pane.
+    pub fn show_windowed_with_fs_and_custom_pane(
+        &self,
+        state: &mut FileDialogState,
+        cfg: &WindowHostConfig,
+        fs: &dyn FileSystem,
+        custom_pane: Option<&mut dyn CustomPane>,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        self.show_windowed_with_fs_and_hooks(state, cfg, fs, custom_pane, None)
+    }
+
+    /// Draw the file browser in a standard ImGui window using a thumbnail backend.
+    pub fn show_windowed_with_thumbnail_backend(
+        &self,
+        state: &mut FileDialogState,
+        cfg: &WindowHostConfig,
+        backend: &mut ThumbnailBackend<'_>,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        self.show_windowed_with_fs_and_thumbnail_backend(state, cfg, &StdFileSystem, backend)
+    }
+
+    /// Draw the file browser in a standard ImGui window using a custom filesystem and thumbnail backend.
+    pub fn show_windowed_with_fs_and_thumbnail_backend(
+        &self,
+        state: &mut FileDialogState,
+        cfg: &WindowHostConfig,
+        fs: &dyn FileSystem,
+        backend: &mut ThumbnailBackend<'_>,
+    ) -> Option<Result<Selection, FileDialogError>> {
+        self.show_windowed_with_fs_and_hooks(state, cfg, fs, None, Some(backend))
     }
 }
 
@@ -190,14 +266,15 @@ fn draw_contents(
     ui: &Ui,
     state: &mut FileDialogState,
 ) -> Option<Result<Selection, FileDialogError>> {
-    draw_contents_with_fs_and_custom_pane(ui, state, &StdFileSystem, None)
+    draw_contents_with_fs_and_hooks(ui, state, &StdFileSystem, None, None)
 }
 
-fn draw_contents_with_fs_and_custom_pane(
+fn draw_contents_with_fs_and_hooks(
     ui: &Ui,
     state: &mut FileDialogState,
     fs: &dyn FileSystem,
     mut custom_pane: Option<&mut dyn CustomPane>,
+    mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) -> Option<Result<Selection, FileDialogError>> {
     if !state.ui.visible {
         return None;
@@ -283,7 +360,14 @@ fn draw_contents_with_fs_and_custom_pane(
                         table_h = (table_h - pane_h - 8.0).max(0.0);
                     }
 
-                    draw_file_table(ui, state, [inner[0], table_h], fs, &mut request_confirm);
+                    draw_file_table(
+                        ui,
+                        state,
+                        [inner[0], table_h],
+                        fs,
+                        &mut request_confirm,
+                        thumbnails_backend.as_deref_mut(),
+                    );
 
                     if let Some(pane) = custom_pane.as_deref_mut() {
                         if state.ui.custom_pane_enabled && pane_h > 0.0 {
@@ -325,7 +409,14 @@ fn draw_contents_with_fs_and_custom_pane(
                         table_h = (table_h - pane_h - 8.0).max(0.0);
                     }
 
-                    draw_file_table(ui, state, [inner[0], table_h], fs, &mut request_confirm);
+                    draw_file_table(
+                        ui,
+                        state,
+                        [inner[0], table_h],
+                        fs,
+                        &mut request_confirm,
+                        thumbnails_backend.as_deref_mut(),
+                    );
 
                     if let Some(pane) = custom_pane.as_deref_mut() {
                         if state.ui.custom_pane_enabled && pane_h > 0.0 {
@@ -766,6 +857,7 @@ fn draw_file_table(
     size: [f32; 2],
     fs: &dyn FileSystem,
     request_confirm: &mut bool,
+    mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) {
     state.core.rescan(fs);
     if state.ui.thumbnails_enabled {
@@ -965,6 +1057,12 @@ fn draw_file_table(
             }
         }
     });
+
+    if state.ui.thumbnails_enabled {
+        if let Some(backend) = thumbnails_backend.as_deref_mut() {
+            state.ui.thumbnails.maintain(backend);
+        }
+    }
 }
 
 fn draw_thumbnail_cell(ui: &Ui, state: &mut FileDialogState, e: &DirEntry) {

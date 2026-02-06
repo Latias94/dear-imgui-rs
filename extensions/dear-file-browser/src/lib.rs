@@ -55,6 +55,9 @@ pub use places::{
     Place, PlaceGroup, PlaceOrigin, Places, PlacesDeserializeError, PlacesSerializeOptions,
 };
 #[cfg(feature = "imgui")]
-pub use thumbnails::{ThumbnailCache, ThumbnailCacheConfig, ThumbnailRequest};
+pub use thumbnails::{
+    DecodedRgbaImage, ThumbnailBackend, ThumbnailCache, ThumbnailCacheConfig, ThumbnailProvider,
+    ThumbnailRenderer, ThumbnailRequest,
+};
 #[cfg(feature = "imgui")]
 pub use ui::{FileDialogExt, WindowHostConfig};

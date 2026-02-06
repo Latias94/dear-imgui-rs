@@ -3,6 +3,46 @@ use std::path::{Path, PathBuf};
 
 use dear_imgui_rs::texture::TextureId;
 
+/// Decoded thumbnail image in RGBA8 format.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DecodedRgbaImage {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// RGBA8 pixel data (`width * height * 4` bytes).
+    pub rgba: Vec<u8>,
+}
+
+/// Thumbnail decoder/provider.
+///
+/// Implementations are expected to:
+/// - decode files (often images) to RGBA8,
+/// - optionally downscale to `req.max_size`,
+/// - return errors for unsupported formats.
+pub trait ThumbnailProvider {
+    /// Decode a thumbnail request into an RGBA8 image.
+    fn decode(&mut self, req: &ThumbnailRequest) -> Result<DecodedRgbaImage, String>;
+}
+
+/// Thumbnail renderer interface (upload/destroy).
+///
+/// Implementations own the GPU lifecycle of `TextureId`.
+pub trait ThumbnailRenderer {
+    /// Upload an RGBA8 thumbnail image to the GPU and return a `TextureId`.
+    fn upload_rgba8(&mut self, image: &DecodedRgbaImage) -> Result<TextureId, String>;
+    /// Destroy a previously created `TextureId`.
+    fn destroy(&mut self, texture_id: TextureId);
+}
+
+/// Convenience wrapper passed to [`ThumbnailCache::maintain`].
+pub struct ThumbnailBackend<'a> {
+    /// Decoder/provider.
+    pub provider: &'a mut dyn ThumbnailProvider,
+    /// Renderer (upload/destroy).
+    pub renderer: &'a mut dyn ThumbnailRenderer,
+}
+
 /// Configuration for [`ThumbnailCache`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ThumbnailCacheConfig {
@@ -203,6 +243,35 @@ impl ThumbnailCache {
         self.fulfill(&req.path, result, req.max_size);
     }
 
+    /// Process queued requests and perform pending destroys.
+    ///
+    /// This is a convenience helper for applications that want `dear-file-browser` to drive the
+    /// request lifecycle:
+    /// - Decodes queued requests using [`ThumbnailProvider`],
+    /// - Uploads them using [`ThumbnailRenderer`],
+    /// - Fulfills the cache, and
+    /// - Destroys evicted/replaced GPU textures via the renderer.
+    ///
+    /// If you prefer to manage decoding/upload externally, you can instead use
+    /// [`take_requests`](Self::take_requests), [`fulfill_request`](Self::fulfill_request), and
+    /// [`take_pending_destroys`](Self::take_pending_destroys).
+    pub fn maintain(&mut self, backend: &mut ThumbnailBackend<'_>) {
+        let requests = self.take_requests();
+        for req in &requests {
+            let decoded = backend.provider.decode(req);
+            let uploaded = match decoded {
+                Ok(img) => backend.renderer.upload_rgba8(&img),
+                Err(e) => Err(e),
+            };
+            self.fulfill_request(req, uploaded);
+        }
+
+        let destroys = self.take_pending_destroys();
+        for tex in destroys {
+            backend.renderer.destroy(tex);
+        }
+    }
+
     /// Drain GPU textures that should be destroyed after eviction or replacement.
     pub fn take_pending_destroys(&mut self) -> Vec<TextureId> {
         std::mem::take(&mut self.pending_destroys)
@@ -268,6 +337,36 @@ impl ThumbnailCache {
 mod tests {
     use super::*;
 
+    #[derive(Default)]
+    struct DummyProvider;
+
+    impl ThumbnailProvider for DummyProvider {
+        fn decode(&mut self, _req: &ThumbnailRequest) -> Result<DecodedRgbaImage, String> {
+            Ok(DecodedRgbaImage {
+                width: 1,
+                height: 1,
+                rgba: vec![255, 0, 0, 255],
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct DummyRenderer {
+        next: u64,
+        destroyed: Vec<TextureId>,
+    }
+
+    impl ThumbnailRenderer for DummyRenderer {
+        fn upload_rgba8(&mut self, _image: &DecodedRgbaImage) -> Result<TextureId, String> {
+            self.next += 1;
+            Ok(TextureId::new(self.next))
+        }
+
+        fn destroy(&mut self, texture_id: TextureId) {
+            self.destroyed.push(texture_id);
+        }
+    }
+
     #[test]
     fn respects_request_budget_per_frame() {
         let mut c = ThumbnailCache::new(ThumbnailCacheConfig {
@@ -302,5 +401,29 @@ mod tests {
         assert!(destroyed.contains(&TextureId::new(1)));
         assert!(c.texture_id(Path::new("/a.png")).is_none());
         assert_eq!(c.texture_id(Path::new("/b.png")), Some(TextureId::new(2)));
+    }
+
+    #[test]
+    fn maintain_decodes_uploads_and_destroys() {
+        let mut c = ThumbnailCache::new(ThumbnailCacheConfig {
+            max_entries: 1,
+            max_new_requests_per_frame: 10,
+        });
+        let mut provider = DummyProvider::default();
+        let mut renderer = DummyRenderer::default();
+        let mut backend = ThumbnailBackend {
+            provider: &mut provider,
+            renderer: &mut renderer,
+        };
+
+        c.advance_frame();
+        c.request_visible(Path::new("/a.png"), [64, 64]);
+        c.maintain(&mut backend);
+        assert!(c.texture_id(Path::new("/a.png")).is_some());
+
+        c.advance_frame();
+        c.request_visible(Path::new("/b.png"), [64, 64]);
+        c.maintain(&mut backend);
+        assert!(renderer.destroyed.iter().any(|t| t == &TextureId::new(1)));
     }
 }

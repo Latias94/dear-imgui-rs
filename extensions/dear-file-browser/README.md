@@ -210,8 +210,11 @@ state.ui.file_styles.push_extension_style(
 
 ## Thumbnails (ImGui UI)
 
-`dear-file-browser` provides a renderer-agnostic thumbnail request queue and LRU cache. Your application is expected to
-decode images and upload them to the GPU, then feed the resulting `TextureId` back into the cache.
+`dear-file-browser` provides a renderer-agnostic thumbnail request queue and LRU cache. There are two integration styles:
+
+1) Manual: decode/upload in your app, then call `fulfill_request()` and destroy evicted textures.
+2) Backend-driven: implement `ThumbnailProvider` + `ThumbnailRenderer`, pass a `ThumbnailBackend` to the UI, and the UI
+   will call `maintain()` each frame.
 
 ```rust
 use dear_imgui_rs::texture::TextureId;
@@ -220,7 +223,7 @@ use dear_file_browser::ThumbnailRequest;
 state.ui.thumbnails_enabled = true;
 state.ui.thumbnail_size = [48.0, 48.0];
 
-// Per-frame, after drawing the dialog:
+// Manual integration (per-frame, after drawing the dialog):
 let requests: Vec<ThumbnailRequest> = state.ui.thumbnails.take_requests();
 for req in &requests {
     // 1) decode req.path into pixels (RGBA8), 2) upload to GPU, 3) get a TextureId
@@ -234,6 +237,20 @@ for tex in to_destroy {
     // renderer.destroy(tex);
     let _ = tex;
 }
+```
+
+Backend-driven integration:
+
+```rust
+use dear_file_browser::{ThumbnailBackend, ThumbnailProvider, ThumbnailRenderer};
+
+let mut backend = ThumbnailBackend {
+    provider: &mut my_provider,
+    renderer: &mut my_renderer,
+};
+
+// The UI will call `state.ui.thumbnails.maintain(&mut backend)` internally when drawing.
+let _ = ui.file_browser().draw_contents_with_thumbnail_backend(&mut state, &mut backend);
 ```
 
 ## WASM

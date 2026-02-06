@@ -285,8 +285,8 @@ Goal: add thumbnails without binding to a specific renderer backend.
 
 ### Epic 11.2 — Renderer interface
 
-- [ ] Task: define `ThumbnailRenderer` trait (upload/destroy)
-- [ ] Task: UI calls `maintain(renderer)` each frame
+- [x] Task: define `ThumbnailRenderer` trait (upload/destroy)
+- [x] Task: UI calls `maintain(renderer)` each frame (when a backend is provided)
 
 ### Epic 11.3 — Optional decoding implementation
 
