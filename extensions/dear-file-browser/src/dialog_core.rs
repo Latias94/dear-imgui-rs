@@ -2070,7 +2070,7 @@ mod tests {
     use super::*;
     use crate::fs::StdFileSystem;
     use std::cell::Cell;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     fn mods(ctrl: bool, shift: bool) -> Modifiers {
         Modifiers { ctrl, shift }
@@ -2129,6 +2129,22 @@ mod tests {
                     .iter()
                     .find(|entry| entry.id == id)
                     .map(|entry| entry.name.clone())
+            })
+            .collect()
+    }
+
+    fn make_synthetic_fs_entries(count: usize) -> Vec<crate::fs::FsEntry> {
+        (0..count)
+            .map(|idx| {
+                let name = format!("file_{idx:05}.txt");
+                crate::fs::FsEntry {
+                    path: PathBuf::from("/tmp").join(&name),
+                    name,
+                    is_dir: false,
+                    is_symlink: false,
+                    size: Some((idx % 1024) as u64),
+                    modified: None,
+                }
             })
             .collect()
     }
@@ -3043,6 +3059,74 @@ mod tests {
         );
         assert!(core.selected_entry_ids().is_empty());
         assert_eq!(core.focused_entry_id(), None);
+    }
+
+    #[test]
+    #[ignore = "perf-baseline"]
+    fn perf_baseline_large_directory_scan_profiles() {
+        for &entry_count in &[10_000usize, 50_000usize] {
+            let entries = make_synthetic_fs_entries(entry_count);
+
+            let fs_sync = TestFs {
+                entries: entries.clone(),
+                ..Default::default()
+            };
+            let mut core_sync = FileDialogCore::new(DialogMode::OpenFile);
+            core_sync.cwd = PathBuf::from("/tmp");
+            let sync_started_at = Instant::now();
+            core_sync.rescan_if_needed(&fs_sync);
+            let sync_elapsed = sync_started_at.elapsed();
+            assert_eq!(
+                core_sync.scan_status(),
+                &ScanStatus::Complete {
+                    generation: 1,
+                    loaded: entry_count,
+                }
+            );
+            assert_eq!(core_sync.entries().len(), entry_count);
+
+            let fs_incremental = TestFs {
+                entries,
+                ..Default::default()
+            };
+            let mut core_incremental = FileDialogCore::new(DialogMode::OpenFile);
+            core_incremental.cwd = PathBuf::from("/tmp");
+            core_incremental.set_scan_policy(ScanPolicy::Incremental { batch_entries: 512 });
+
+            let incremental_started_at = Instant::now();
+            let mut ticks = 0usize;
+            loop {
+                core_incremental.rescan_if_needed(&fs_incremental);
+                ticks += 1;
+
+                match core_incremental.scan_status() {
+                    ScanStatus::Complete { loaded, .. } => {
+                        assert_eq!(*loaded, entry_count);
+                        break;
+                    }
+                    ScanStatus::Failed { message, .. } => {
+                        panic!("incremental perf baseline failed: {message}");
+                    }
+                    _ => {}
+                }
+
+                assert!(
+                    ticks <= (entry_count / 128) + 128,
+                    "incremental ticks exceeded bound: entry_count={entry_count}, ticks={ticks}"
+                );
+            }
+
+            let incremental_elapsed = incremental_started_at.elapsed();
+            assert_eq!(core_incremental.entries().len(), entry_count);
+
+            eprintln!(
+                "PERF_BASELINE entry_count={} sync_ms={} incremental_ms={} incremental_ticks={} batch_entries=512",
+                entry_count,
+                sync_elapsed.as_millis(),
+                incremental_elapsed.as_millis(),
+                ticks,
+            );
+        }
     }
 
     #[test]

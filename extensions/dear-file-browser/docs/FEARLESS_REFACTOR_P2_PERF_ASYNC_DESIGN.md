@@ -302,6 +302,7 @@ Fearless-mode simplification (breaking allowed):
 
 - Synthetic 10k and 50k directory datasets.
 - Frame budget stability under incremental append.
+- Baseline record: `docs/P2_PERF_BASELINE_2026-02-06.md`.
 
 ---
 
