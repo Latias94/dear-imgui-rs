@@ -1187,34 +1187,11 @@ fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
 }
 
 fn selected_entry_paths_from_ids(state: &FileDialogState) -> Vec<PathBuf> {
-    let entries = state.core.entries();
-    state
-        .core
-        .selected_entry_ids()
-        .into_iter()
-        .filter_map(|id| {
-            entries
-                .iter()
-                .find(|entry| entry.id == id)
-                .map(|entry| entry.path.clone())
-        })
-        .collect()
+    state.core.selected_entry_paths()
 }
 
 fn selected_entry_counts_from_ids(state: &FileDialogState) -> (usize, usize) {
-    let entries = state.core.entries();
-    state
-        .core
-        .selected_entry_ids()
-        .into_iter()
-        .filter_map(|id| entries.iter().find(|entry| entry.id == id))
-        .fold((0usize, 0usize), |(files, dirs), entry| {
-            if entry.is_dir {
-                (files, dirs + 1)
-            } else {
-                (files + 1, dirs)
-            }
-        })
+    state.core.selected_entry_counts()
 }
 
 fn open_rename_modal_from_selection(state: &mut FileDialogState) {

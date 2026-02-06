@@ -376,6 +376,31 @@ impl FileDialogCore {
         self.selected_ids.iter().copied().collect()
     }
 
+    /// Resolves selected entry paths from ids in the current snapshot.
+    ///
+    /// Any ids that are not currently resolvable are skipped.
+    pub fn selected_entry_paths(&self) -> Vec<PathBuf> {
+        self.selected_ids
+            .iter()
+            .filter_map(|id| self.entry_path_by_id(*id).map(Path::to_path_buf))
+            .collect()
+    }
+
+    /// Counts selected files and directories in the current snapshot.
+    ///
+    /// Returns `(files, dirs)`. Any ids that are not currently resolvable are skipped.
+    pub fn selected_entry_counts(&self) -> (usize, usize) {
+        self.selected_ids
+            .iter()
+            .filter_map(|id| self.entry_by_id(*id))
+            .fold((0usize, 0usize), |(files, dirs), entry| {
+                if entry.is_dir {
+                    (files, dirs + 1)
+                } else {
+                    (files + 1, dirs)
+                }
+            })
+    }
     /// Resolves an entry path from an entry id in the current snapshot.
     ///
     /// Returns `None` when the id is not currently resolvable (for example,
@@ -1281,6 +1306,18 @@ mod tests {
         }
     }
 
+    fn make_dir_entry(name: &str) -> DirEntry {
+        let path = PathBuf::from("/tmp").join(name);
+        DirEntry {
+            id: entry_id_from_path(&path, true),
+            name: name.to_string(),
+            path,
+            is_dir: true,
+            size: None,
+            modified: None,
+        }
+    }
+
     fn set_view_files(core: &mut FileDialogCore, names: &[&str]) {
         core.entries = names.iter().map(|name| make_file_entry(name)).collect();
         core.view_names = core
@@ -1395,6 +1432,39 @@ mod tests {
 
         let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
         assert!(core.entry_path_by_id(missing).is_none());
+    }
+    #[test]
+    fn selected_entry_paths_skips_unresolved_ids() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        set_view_files(&mut core, &["a.txt", "b.txt"]);
+
+        let a = entry_id(&core, "a.txt");
+        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
+        core.replace_selection_by_ids([a, missing]);
+
+        assert_eq!(
+            core.selected_entry_paths(),
+            vec![PathBuf::from("/tmp/a.txt")]
+        );
+    }
+
+    #[test]
+    fn selected_entry_counts_tracks_files_and_dirs() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.entries = vec![make_file_entry("a.txt"), make_dir_entry("folder")];
+        core.view_names = core
+            .entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect();
+        core.view_ids = core.entries.iter().map(|entry| entry.id).collect();
+
+        let a = entry_id(&core, "a.txt");
+        let folder = entry_id(&core, "folder");
+        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
+        core.replace_selection_by_ids([a, folder, missing]);
+
+        assert_eq!(core.selected_entry_counts(), (1, 1));
     }
 
     #[test]
