@@ -150,6 +150,37 @@ if let Some(res) = ui.file_browser().show_windowed(&mut state, &cfg) {
 }
 ```
 
+## Modal Host
+
+For an IGFD-style modal workflow without manually wiring popup open/close logic, use `ModalHostConfig`:
+
+```rust
+use dear_file_browser::ModalHostConfig;
+
+let cfg = ModalHostConfig {
+    popup_label: "Open Asset###asset_modal".into(),
+    initial_size: [900.0, 600.0],
+    size_condition: dear_imgui_rs::Condition::FirstUseEver,
+};
+
+let fs = dear_file_browser::StdFileSystem;
+if let Some(res) = ui.file_browser().show_modal_with_fs(&mut state, &cfg, &fs) {
+    // handle res
+}
+```
+
+## Validation Buttons
+
+To tune the bottom action row (placement/order/width/labels), edit `state.ui.validation_buttons`:
+
+```rust
+use dear_file_browser::{ValidationButtonsAlign, ValidationButtonsOrder};
+
+state.ui.validation_buttons.align = ValidationButtonsAlign::Right;
+state.ui.validation_buttons.order = ValidationButtonsOrder::CancelConfirm;
+state.ui.validation_buttons.button_width = Some(120.0);
+```
+
 ## Managing Multiple Dialogs
 
 For an IGFD-style workflow (open now, display later; multiple dialogs concurrently), use `DialogManager`:

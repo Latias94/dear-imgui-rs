@@ -373,14 +373,14 @@ Goal: reach IGFD-grade “dialog feel” by making the bottom action row configu
 
 ### Epic 13.1 — Validation buttons layout/config
 
-- [ ] Task: add a `ValidationButtonsConfig` to UI state:
+- [x] Task: add a `ValidationButtonsConfig` to UI state:
   - placement (left/right), order (Ok/Cancel vs Cancel/Ok), inversion, per-button width
   - label overrides (e.g. "Open", "Save", "Select")
   - Acceptance: a demo shows IGFD-like button tuning without forking UI code.
 
 ### Epic 13.2 — First-class modal host (optional convenience)
 
-- [ ] Task: add `show_modal_windowed()` (or a `ModalHostConfig`) that hosts `draw_contents()` inside a modal popup
+- [x] Task: add `show_modal_*()` (via `ModalHostConfig`) that hosts `draw_contents()` inside a modal popup
   - Acceptance: callers can get IGFD-style modal behavior without manually wiring popup open/close logic.
 
 Exit criteria:

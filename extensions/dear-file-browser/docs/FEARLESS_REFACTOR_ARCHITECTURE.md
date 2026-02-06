@@ -54,8 +54,8 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 | Confirm overwrite (Save) | ✅ | `SavePolicy` + modal prompt. |
 | Result modes (path+name+selection, ext policies) | 🟡 | Returns `Selection { paths }`; extension policy matches IGFD intent; no “GetFileName-only” convenience yet. |
 | Thumbnails + GPU lifecycle hooks | ✅ | Pipeline + LRU + optional `thumbnails-image` decoding + backend upload/destroy. |
-| Embedded / custom host | ✅ | `draw_contents*()` + window host config; “modal host” can be caller-owned (popup/modal). |
-| Validation buttons tuning (placement/width/invert) | ❌ | Needs a “buttons layout” config and UI refactor. |
+| Embedded / custom host | ✅ | `draw_contents*()` + window host config + `show_modal*()` convenience. |
+| Validation buttons tuning (placement/width/invert) | ✅ | `ValidationButtonsConfig` (align/order/width/labels). |
 | Filter groups / collection syntax (`Name{...}`) | 🟡 | Multiple named filters exist; no IGFD-string parser/collection syntax yet. |
 | Natural sort for extensions on demand | 🟡 | Natural sort for names exists; “Sort by extension” is not implemented. |
 | File operations (rename/delete/copy/paste, etc.) | 🟡 | Rename + delete exist (delete dirs must be empty); copy/cut/paste/clipboard still missing. |
