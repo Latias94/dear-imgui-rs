@@ -2015,6 +2015,94 @@ fn table_column_stretch_weight(table: *const sys::ImGuiTable, column_index: i16)
     }
 }
 
+fn table_data_column_for_index(
+    layout: &ListColumnLayout,
+    column_index: i16,
+) -> Option<FileListDataColumn> {
+    if column_index == layout.name {
+        return Some(FileListDataColumn::Name);
+    }
+    if column_index == layout.extension {
+        return Some(FileListDataColumn::Extension);
+    }
+    if layout.size == Some(column_index) {
+        return Some(FileListDataColumn::Size);
+    }
+    if layout.modified == Some(column_index) {
+        return Some(FileListDataColumn::Modified);
+    }
+    None
+}
+
+fn merged_order_with_current(
+    visible_order: &[FileListDataColumn],
+    current_order: [FileListDataColumn; 4],
+) -> [FileListDataColumn; 4] {
+    let mut merged = Vec::with_capacity(4);
+    for &column in visible_order {
+        if !merged.contains(&column) {
+            merged.push(column);
+        }
+    }
+    for column in current_order {
+        if !merged.contains(&column) {
+            merged.push(column);
+        }
+    }
+    for column in [
+        FileListDataColumn::Name,
+        FileListDataColumn::Extension,
+        FileListDataColumn::Size,
+        FileListDataColumn::Modified,
+    ] {
+        if !merged.contains(&column) {
+            merged.push(column);
+        }
+    }
+    [merged[0], merged[1], merged[2], merged[3]]
+}
+
+fn table_data_columns_by_display_order(
+    table: *const sys::ImGuiTable,
+    layout: &ListColumnLayout,
+) -> Vec<FileListDataColumn> {
+    if table.is_null() {
+        return Vec::new();
+    }
+    let columns_count = unsafe { (*table).ColumnsCount.max(0) as usize };
+    let columns_ptr = unsafe { (*table).Columns.Data };
+    if columns_ptr.is_null() {
+        return Vec::new();
+    }
+
+    let mut ordered = Vec::with_capacity(layout.data_columns.len());
+    for index in 0..columns_count {
+        let index_i16 = index as i16;
+        let Some(column) = table_data_column_for_index(layout, index_i16) else {
+            continue;
+        };
+        let display_order = unsafe { (*columns_ptr.add(index)).DisplayOrder };
+        ordered.push((display_order, column));
+    }
+    ordered.sort_by_key(|(display_order, _)| *display_order);
+    ordered.into_iter().map(|(_, column)| column).collect()
+}
+
+fn sync_runtime_column_order_from_table(
+    layout: &ListColumnLayout,
+    config: &mut FileListColumnsConfig,
+) {
+    let table = unsafe { sys::igGetCurrentTable() };
+    if table.is_null() {
+        return;
+    }
+    let visible_order = table_data_columns_by_display_order(table, layout);
+    if visible_order.is_empty() {
+        return;
+    }
+    config.order = merged_order_with_current(&visible_order, config.normalized_order());
+}
+
 fn sync_runtime_column_weights_from_table(
     show_preview: bool,
     layout: &ListColumnLayout,
@@ -2068,6 +2156,7 @@ fn draw_file_table_view(
     // Table
     use dear_imgui_rs::{SortDirection, TableColumnFlags, TableFlags};
     let flags = TableFlags::RESIZABLE
+        | TableFlags::REORDERABLE
         | TableFlags::ROW_BG
         | TableFlags::BORDERS_V
         | TableFlags::BORDERS_OUTER
@@ -2084,7 +2173,11 @@ fn draw_file_table_view(
     if show_preview {
         table = table
             .column("Preview")
-            .flags(TableColumnFlags::NO_SORT | TableColumnFlags::NO_RESIZE)
+            .flags(
+                TableColumnFlags::NO_SORT
+                    | TableColumnFlags::NO_RESIZE
+                    | TableColumnFlags::NO_REORDER,
+            )
             .weight(resolved_preview_column_weight(columns_config))
             .done();
     }
@@ -2428,6 +2521,8 @@ fn draw_file_table_view(
                 ui.close_current_popup();
             }
         }
+
+        sync_runtime_column_order_from_table(&layout, &mut state.ui.file_list_columns);
 
         sync_runtime_column_weights_from_table(
             show_preview,
@@ -3326,6 +3421,28 @@ mod tests {
                 size: Some(1),
                 modified: Some(2),
             }
+        );
+    }
+
+    #[test]
+    fn merged_order_with_current_keeps_hidden_columns() {
+        let merged = super::merged_order_with_current(
+            &[FileListDataColumn::Name, FileListDataColumn::Modified],
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+                FileListDataColumn::Extension,
+            ],
+        );
+        assert_eq!(
+            merged,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Modified,
+                FileListDataColumn::Size,
+                FileListDataColumn::Extension,
+            ]
         );
     }
 }
