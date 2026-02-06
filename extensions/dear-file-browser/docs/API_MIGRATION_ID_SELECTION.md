@@ -42,7 +42,7 @@ Canonical ID-first APIs:
 - `selected_entry_ids() -> Vec<EntryId>`
 - `focused_entry_id() -> Option<EntryId>`
 
-Read-only name view APIs remain:
+Name read helpers were also removed from public API:
 
 - `selected_names() -> Vec<String>`
 
@@ -107,4 +107,4 @@ core.replace_selection_by_ids(ids);
 
 - There is no name-based compatibility layer anymore.
 - For create/rename/paste flows, select by `EntryId::from_path(...)` immediately and let next rescan resolve display names.
-- `selected_names()` is a derived view from current snapshot; if an ID is not visible in the current snapshot, it is omitted from that read view while `selected_entry_ids()` still remains the source of truth.
+- If callers need names/paths before confirm, resolve them from `selected_entry_ids()` against the current entry snapshot owned by the host UI.

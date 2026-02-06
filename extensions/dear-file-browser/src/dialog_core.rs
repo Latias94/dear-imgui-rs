@@ -371,14 +371,6 @@ impl FileDialogCore {
         !self.selected_ids.is_empty()
     }
 
-    /// Returns selected entry base names in deterministic selection order.
-    pub fn selected_names(&self) -> Vec<String> {
-        self.selected_ids
-            .iter()
-            .filter_map(|id| self.name_for_id(*id).map(|name| name.to_string()))
-            .collect()
-    }
-
     /// Returns selected entry ids in deterministic selection order.
     pub fn selected_entry_ids(&self) -> Vec<EntryId> {
         self.selected_ids.iter().copied().collect()
@@ -1299,6 +1291,19 @@ mod tests {
             .unwrap_or_else(|| panic!("missing entry id for {name}"))
     }
 
+    fn selected_entry_names(core: &FileDialogCore) -> Vec<String> {
+        let entries = core.entries();
+        core.selected_entry_ids()
+            .into_iter()
+            .filter_map(|id| {
+                entries
+                    .iter()
+                    .find(|entry| entry.id == id)
+                    .map(|entry| entry.name.clone())
+            })
+            .collect()
+    }
+
     #[derive(Default)]
     struct TestFs {
         meta: std::collections::HashMap<PathBuf, crate::fs::FsMetadata>,
@@ -1384,9 +1389,9 @@ mod tests {
 
         let a = entry_id(&core, "a.txt");
         core.click_entry(a, mods(true, false));
-        assert_eq!(core.selected_names(), vec!["a.txt"]);
+        assert_eq!(selected_entry_names(&core), vec!["a.txt"]);
         core.click_entry(a, mods(true, false));
-        assert!(core.selected_names().is_empty());
+        assert!(selected_entry_names(&core).is_empty());
     }
 
     #[test]
@@ -1399,7 +1404,7 @@ mod tests {
 
         assert_eq!(core.selected_entry_ids(), vec![pending]);
         assert_eq!(core.focused_entry_id(), Some(pending));
-        assert!(core.selected_names().is_empty());
+        assert!(selected_entry_names(&core).is_empty());
     }
 
     #[test]
@@ -1413,7 +1418,7 @@ mod tests {
 
         assert_eq!(core.selected_entry_ids(), vec![id]);
         assert_eq!(core.focused_entry_id(), Some(id));
-        assert_eq!(core.selected_names(), vec!["b.txt"]);
+        assert_eq!(selected_entry_names(&core), vec!["b.txt"]);
     }
 
     #[test]
@@ -1425,7 +1430,7 @@ mod tests {
         core.click_entry(entry_id(&core, "b.txt"), mods(false, false));
         core.click_entry(entry_id(&core, "e.txt"), mods(false, true));
         assert_eq!(
-            core.selected_names(),
+            selected_entry_names(&core),
             vec!["b.txt", "c.txt", "d.txt", "e.txt"]
         );
     }
@@ -1437,7 +1442,7 @@ mod tests {
         set_view_files(&mut core, &["a", "b", "c"]);
 
         core.select_all();
-        assert_eq!(core.selected_names(), vec!["a", "b", "c"]);
+        assert_eq!(selected_entry_names(&core), vec!["a", "b", "c"]);
     }
 
     #[test]
@@ -1448,7 +1453,7 @@ mod tests {
         set_view_files(&mut core, &["a", "b", "c"]);
 
         core.select_all();
-        assert_eq!(core.selected_names(), vec!["a", "b"]);
+        assert_eq!(selected_entry_names(&core), vec!["a", "b"]);
     }
 
     #[test]
@@ -1460,11 +1465,11 @@ mod tests {
 
         core.click_entry(entry_id(&core, "b"), mods(false, false));
         core.click_entry(entry_id(&core, "e"), mods(false, true));
-        assert_eq!(core.selected_names(), vec!["d", "e"]);
+        assert_eq!(selected_entry_names(&core), vec!["d", "e"]);
 
         core.click_entry(entry_id(&core, "d"), mods(false, false));
         core.click_entry(entry_id(&core, "b"), mods(false, true));
-        assert_eq!(core.selected_names(), vec!["b", "c"]);
+        assert_eq!(selected_entry_names(&core), vec!["b", "c"]);
     }
 
     #[test]
@@ -1476,10 +1481,10 @@ mod tests {
 
         core.click_entry(entry_id(&core, "a"), mods(false, false));
         core.click_entry(entry_id(&core, "b"), mods(true, false));
-        assert_eq!(core.selected_names(), vec!["a", "b"]);
+        assert_eq!(selected_entry_names(&core), vec!["a", "b"]);
 
         core.click_entry(entry_id(&core, "c"), mods(true, false));
-        assert_eq!(core.selected_names(), vec!["b", "c"]);
+        assert_eq!(selected_entry_names(&core), vec!["b", "c"]);
     }
 
     #[test]
@@ -1490,7 +1495,7 @@ mod tests {
 
         core.click_entry(entry_id(&core, "b"), mods(false, false));
         core.move_focus(2, mods(false, true));
-        assert_eq!(core.selected_names(), vec!["b", "c", "d"]);
+        assert_eq!(selected_entry_names(&core), vec!["b", "c", "d"]);
         assert_eq!(core.focused_entry_id(), Some(entry_id(&core, "d")));
     }
 
@@ -1502,7 +1507,7 @@ mod tests {
 
         let outcome = core.handle_event(CoreEvent::ActivateFocused);
         assert_eq!(outcome, CoreEventOutcome::RequestConfirm);
-        assert_eq!(core.selected_names(), vec!["a.txt"]);
+        assert_eq!(selected_entry_names(&core), vec!["a.txt"]);
     }
 
     #[test]
@@ -1515,7 +1520,7 @@ mod tests {
         });
 
         assert_eq!(outcome, CoreEventOutcome::RequestConfirm);
-        assert_eq!(core.selected_names(), vec!["a.txt"]);
+        assert_eq!(selected_entry_names(&core), vec!["a.txt"]);
     }
 
     #[test]
@@ -1541,7 +1546,7 @@ mod tests {
 
         assert_eq!(outcome, CoreEventOutcome::None);
         assert_eq!(core.selected_entry_ids(), vec![c, a]);
-        assert_eq!(core.selected_names(), vec!["c.txt", "a.txt"]);
+        assert_eq!(selected_entry_names(&core), vec!["c.txt", "a.txt"]);
     }
 
     #[test]
@@ -1678,11 +1683,11 @@ mod tests {
         core.focused_id = Some(entry_id(&core, "alpha"));
 
         core.select_by_prefix("al");
-        assert_eq!(core.selected_names(), vec!["alpine"]);
+        assert_eq!(selected_entry_names(&core), vec!["alpine"]);
         assert_eq!(core.focused_entry_id(), Some(entry_id(&core, "alpine")));
 
         core.select_by_prefix("al");
-        assert_eq!(core.selected_names(), vec!["alpha"]);
+        assert_eq!(selected_entry_names(&core), vec!["alpha"]);
         assert_eq!(core.focused_entry_id(), Some(entry_id(&core, "alpha")));
     }
 
