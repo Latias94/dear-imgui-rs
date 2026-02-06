@@ -251,10 +251,10 @@ Goal: support richer filter syntax and multi-layer extensions.
 
 - [x] Task: support `*`/`?` wildcard tokens and `((...))` regex tokens in `FileFilter` (ImGui)
   - Acceptance: `".vcx.*"` and `"((^imgui_.*\\.rs$))"` match as expected.
-- [ ] Task: `FilterSpec::parse_igfd(str)` with:
+- [x] Task: `FileFilter::parse_igfd(str)` with:
   - collections: `Name{...}`
   - commas with parentheses rules
-  - regex `((...))` behind `regex-filters`
+  - regex `((...))` tokens preserved verbatim
   - Acceptance: parser unit tests cover examples from IGFD docs.
 
 Exit criteria:
@@ -447,7 +447,7 @@ Use this as a tracking table for final validation.
 - [x] Selection: ctrl/shift, ctrl+a, keyboard navigation, type-to-select
 - [x] Sorting: natural name ordering (e.g. `file2` < `file10`)
 - [x] Save: confirm overwrite + extension policy
-- [ ] Filters: collections + regex (optional) + multi-layer extensions (multi-layer/regex/wildcards done; collections/parser TBD)
+- [x] Filters: collections + regex (optional) + multi-layer extensions
 - [ ] File styles: by type/ext/name/regex + callback (callback/font TBD)
 - [x] Custom pane: per filter + blocks confirm
 - [x] Thumbnails: decode + GPU lifecycle + grid view

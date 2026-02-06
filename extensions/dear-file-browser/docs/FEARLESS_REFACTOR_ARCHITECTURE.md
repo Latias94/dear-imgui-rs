@@ -56,7 +56,7 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 | Thumbnails + GPU lifecycle hooks | ✅ | Pipeline + LRU + optional `thumbnails-image` decoding + backend upload/destroy. |
 | Embedded / custom host | ✅ | `draw_contents*()` + window host config + `show_modal*()` convenience. |
 | Validation buttons tuning (placement/width/invert) | ✅ | `ValidationButtonsConfig` (align/order/width/labels). |
-| Filter groups / collection syntax (`Name{...}`) | 🟡 | Multiple named filters exist; no IGFD-string parser/collection syntax yet. |
+| Filter groups / collection syntax (`Name{...}`) | ✅ | `FileFilter::parse_igfd()` / `FileDialog::filters_igfd()` support `Name{...}` collections and simple lists. |
 | Natural sort for extensions on demand | 🟡 | Natural sort for names exists; “Sort by extension” is not implemented. |
 | File operations (rename/delete/copy/paste, etc.) | 🟡 | Rename + delete exist (delete dirs must be empty); copy/cut/paste/clipboard still missing. |
 

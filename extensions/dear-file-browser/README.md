@@ -120,6 +120,16 @@ ImGui backend advanced tokens (native `rfd` ignores non-plain extensions):
 - Regex tokens wrapped in `((...))` are matched against the full base name (case-insensitive):
   - `"((^imgui_.*\\.rs$))"`
 
+You can also parse IGFD-style filter strings (collections):
+
+```rust
+use dear_file_browser::{DialogMode, FileDialog};
+
+let dlg = FileDialog::new(DialogMode::OpenFile)
+    .filters_igfd("C/C++{.c,.cpp,.h},Rust{.rs}")
+    .unwrap();
+```
+
 ## Embedding (No Host Window)
 
 If you want to embed the browser into an existing window/popup/tab, draw only the contents:
