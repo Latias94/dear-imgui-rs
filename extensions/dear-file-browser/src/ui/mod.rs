@@ -358,13 +358,6 @@ impl Drop for TextColorToken {
     }
 }
 
-fn draw_contents(
-    ui: &Ui,
-    state: &mut FileDialogState,
-) -> Option<Result<Selection, FileDialogError>> {
-    draw_contents_with_fs_and_hooks(ui, state, &StdFileSystem, None, None)
-}
-
 fn draw_contents_with_fs_and_hooks(
     ui: &Ui,
     state: &mut FileDialogState,

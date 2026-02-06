@@ -72,19 +72,10 @@ pub struct ThumbnailRequest {
 
 #[derive(Clone, Debug)]
 enum ThumbnailState {
-    Queued {
-        max_size: [u32; 2],
-    },
-    InFlight {
-        max_size: [u32; 2],
-    },
-    Ready {
-        texture_id: TextureId,
-        max_size: [u32; 2],
-    },
-    Failed {
-        message: String,
-    },
+    Queued,
+    InFlight,
+    Ready { texture_id: TextureId },
+    Failed,
 }
 
 #[derive(Clone, Debug)]
@@ -173,7 +164,7 @@ impl ThumbnailCache {
         self.entries.insert(
             key.clone(),
             ThumbnailEntry {
-                state: ThumbnailState::Queued { max_size },
+                state: ThumbnailState::Queued,
                 lru_stamp: stamp,
             },
         );
@@ -188,7 +179,7 @@ impl ThumbnailCache {
     /// Returns the cached texture id for a path, if available.
     pub fn texture_id(&self, path: &Path) -> Option<TextureId> {
         self.entries.get(path).and_then(|e| match &e.state {
-            ThumbnailState::Ready { texture_id, .. } => Some(*texture_id),
+            ThumbnailState::Ready { texture_id } => Some(*texture_id),
             _ => None,
         })
     }
@@ -200,8 +191,8 @@ impl ThumbnailCache {
         let mut out = Vec::new();
         while let Some(req) = self.requests.pop_front() {
             if let Some(entry) = self.entries.get_mut(&req.path) {
-                if let ThumbnailState::Queued { max_size } = entry.state {
-                    entry.state = ThumbnailState::InFlight { max_size };
+                if let ThumbnailState::Queued = entry.state {
+                    entry.state = ThumbnailState::InFlight;
                 }
             }
             out.push(req);
@@ -212,15 +203,12 @@ impl ThumbnailCache {
     /// Complete a request with either a ready texture id or an error string.
     ///
     /// Returns any evicted texture ids that should be destroyed by the renderer.
-    pub fn fulfill(&mut self, path: &Path, result: Result<TextureId, String>, max_size: [u32; 2]) {
+    pub fn fulfill(&mut self, path: &Path, result: Result<TextureId, String>, _max_size: [u32; 2]) {
         let key = path.to_path_buf();
         let stamp = self.alloc_stamp();
         let state = match result {
-            Ok(texture_id) => ThumbnailState::Ready {
-                texture_id,
-                max_size,
-            },
-            Err(message) => ThumbnailState::Failed { message },
+            Ok(texture_id) => ThumbnailState::Ready { texture_id },
+            Err(_message) => ThumbnailState::Failed,
         };
 
         if let Some(old) = self.entries.insert(
@@ -230,7 +218,7 @@ impl ThumbnailCache {
                 lru_stamp: stamp,
             },
         ) {
-            if let ThumbnailState::Ready { texture_id, .. } = old.state {
+            if let ThumbnailState::Ready { texture_id } = old.state {
                 self.pending_destroys.push(texture_id);
             }
         }
@@ -325,7 +313,7 @@ impl ThumbnailCache {
             }
             let removed = self.entries.remove(&key);
             if let Some(removed) = removed {
-                if let ThumbnailState::Ready { texture_id, .. } = removed.state {
+                if let ThumbnailState::Ready { texture_id } = removed.state {
                     self.pending_destroys.push(texture_id);
                 }
             }

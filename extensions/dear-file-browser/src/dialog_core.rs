@@ -139,8 +139,6 @@ pub enum ScanPolicy {
         batch_entries: usize,
         /// Max batches to apply in one UI tick.
         max_batches_per_tick: usize,
-        /// Debounce interval for rapid rescan requests.
-        debounce_ms: u64,
     },
 }
 
@@ -155,8 +153,6 @@ impl ScanPolicy {
     pub const TUNED_BATCH_ENTRIES: usize = 512;
     /// Recommended apply budget to balance throughput and frame pacing.
     pub const TUNED_MAX_BATCHES_PER_TICK: usize = 2;
-    /// Recommended debounce for background scan.
-    pub const TUNED_BACKGROUND_DEBOUNCE_MS: u64 = 50;
 
     /// Returns a tuned incremental policy for large directories.
     pub const fn tuned_incremental() -> Self {
@@ -171,7 +167,6 @@ impl ScanPolicy {
         Self::Background {
             batch_entries: Self::TUNED_BATCH_ENTRIES,
             max_batches_per_tick: Self::TUNED_MAX_BATCHES_PER_TICK,
-            debounce_ms: Self::TUNED_BACKGROUND_DEBOUNCE_MS,
         }
     }
 
@@ -188,11 +183,9 @@ impl ScanPolicy {
             Self::Background {
                 batch_entries,
                 max_batches_per_tick,
-                debounce_ms,
             } => Self::Background {
                 batch_entries: batch_entries.max(1),
                 max_batches_per_tick: max_batches_per_tick.max(1),
-                debounce_ms,
             },
         }
     }
@@ -2838,7 +2831,6 @@ mod tests {
             ScanPolicy::Background {
                 batch_entries: ScanPolicy::TUNED_BATCH_ENTRIES,
                 max_batches_per_tick: ScanPolicy::TUNED_MAX_BATCHES_PER_TICK,
-                debounce_ms: ScanPolicy::TUNED_BACKGROUND_DEBOUNCE_MS,
             }
         );
     }

@@ -165,7 +165,6 @@ enum ScanPolicy {
     Background {
         batch_entries: usize,
         max_batches_per_tick: usize,
-        debounce_ms: u64,
     },
 }
 ```
