@@ -111,7 +111,7 @@ ui.window("Open")
 
 ## List Column Preferences
 
-List-view columns can be tuned per dialog instance:
+List-view columns can be tuned per dialog instance. When users drag-resize list columns, runtime stretch weights are written back into `state.ui.file_list_columns.weight_overrides` automatically:
 
 ```rust
 use dear_file_browser::{FileListColumnsConfig, FileListDataColumn};

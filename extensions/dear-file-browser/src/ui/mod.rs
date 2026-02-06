@@ -1992,6 +1992,66 @@ fn resolved_data_column_weight(
     )
 }
 
+fn table_column_stretch_weight(table: *const sys::ImGuiTable, column_index: i16) -> Option<f32> {
+    if table.is_null() || column_index < 0 {
+        return None;
+    }
+    let columns_count = unsafe { (*table).ColumnsCount.max(0) as usize };
+    let index = column_index as usize;
+    if index >= columns_count {
+        return None;
+    }
+
+    let columns_ptr = unsafe { (*table).Columns.Data };
+    if columns_ptr.is_null() {
+        return None;
+    }
+
+    let weight = unsafe { (*columns_ptr.add(index)).StretchWeight };
+    if weight.is_finite() && weight > 0.0 {
+        Some(weight)
+    } else {
+        None
+    }
+}
+
+fn sync_runtime_column_weights_from_table(
+    show_preview: bool,
+    layout: &ListColumnLayout,
+    config: &mut FileListColumnsConfig,
+) {
+    let table = unsafe { sys::igGetCurrentTable() };
+    if table.is_null() {
+        return;
+    }
+
+    let resized_column = unsafe { (*table).ResizedColumn };
+    if resized_column < 0 {
+        return;
+    }
+
+    if show_preview {
+        if let Some(weight) = table_column_stretch_weight(table, 0) {
+            config.weight_overrides.preview = Some(weight);
+        }
+    }
+    if let Some(weight) = table_column_stretch_weight(table, layout.name) {
+        config.weight_overrides.name = Some(weight);
+    }
+    if let Some(weight) = table_column_stretch_weight(table, layout.extension) {
+        config.weight_overrides.extension = Some(weight);
+    }
+    if let Some(index) = layout.size {
+        if let Some(weight) = table_column_stretch_weight(table, index) {
+            config.weight_overrides.size = Some(weight);
+        }
+    }
+    if let Some(index) = layout.modified {
+        if let Some(weight) = table_column_stretch_weight(table, index) {
+            config.weight_overrides.modified = Some(weight);
+        }
+    }
+}
 fn draw_file_table_view(
     ui: &Ui,
     state: &mut FileDialogState,
@@ -2368,6 +2428,12 @@ fn draw_file_table_view(
                 ui.close_current_popup();
             }
         }
+
+        sync_runtime_column_weights_from_table(
+            show_preview,
+            &layout,
+            &mut state.ui.file_list_columns,
+        );
     });
 
     let mut thumbnails_backend = thumbnails_backend;
