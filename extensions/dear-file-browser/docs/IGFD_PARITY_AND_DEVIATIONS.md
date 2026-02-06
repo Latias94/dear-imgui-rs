@@ -55,6 +55,7 @@ Last updated: 2026-02-06
 ## Post-Parity Backlog (P2)
 
 - Published: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md` (ScanCoordinator/ScanRuntime + generation-safe incremental scanning model).
-- Next: implement Stage A scaffolding (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`) behind the current synchronous runtime.
-- Next: add optional worker runtime with stale-batch drop guarantees and bounded per-frame processing.
+- Completed: Stage A scaffolding (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`) and generation-owned sync scan flow in `FileDialogCore`.
+- Next: add optional worker runtime with stale-batch drop guarantees.
+- Next: add bounded per-frame processing + tracing/perf baseline.
 - Continue UX polish and migration snippets without changing parity guarantees.

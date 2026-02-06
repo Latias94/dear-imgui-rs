@@ -47,7 +47,7 @@ pub use custom_pane::{CustomPane, CustomPaneCtx};
 #[cfg(feature = "imgui")]
 pub use dialog_core::{
     ConfirmGate, CoreEvent, CoreEventOutcome, DirSnapshot, EntryId, FileDialogCore, FileMeta,
-    Modifiers, ScanHookAction,
+    Modifiers, ScanBatch, ScanBatchKind, ScanHookAction, ScanPolicy, ScanRequest, ScanStatus,
 };
 #[cfg(feature = "imgui")]
 pub use dialog_manager::{DialogId, DialogManager};

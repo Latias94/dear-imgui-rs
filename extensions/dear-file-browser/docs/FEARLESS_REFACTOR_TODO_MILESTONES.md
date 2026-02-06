@@ -32,9 +32,9 @@ Current parity status vs IGFD (excluding C API by product decision):
 
 Execution plan (next implementation wave):
 
-1. P2 Stage A: land scan scaffolding (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`) with sync runtime parity
-2. P2 Stage B: add optional worker runtime + generation-safe stale batch dropping
-3. P2 Stage C: optimize projection path + add tracing/metrics for large directories
+1. P2 Stage B: add optional worker runtime + generation-safe stale batch dropping
+2. P2 Stage C: optimize projection path + bounded per-frame apply path
+3. P2 Stage D: add tracing/metrics and baseline perf data for large directories
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -557,11 +557,11 @@ Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
 
 ### Epic 17.1 - Scan pipeline scaffolding (Stage A)
 
-- [ ] Task: introduce scan contracts in core (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`)
+- [x] Task: introduce scan contracts in core (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`)
   - Acceptance:
     - types are internal-first and unit-testable
     - default behavior remains synchronous and deterministic
-- [ ] Task: add generation-based request ownership in `FileDialogCore`
+- [x] Task: add generation-based request ownership in `FileDialogCore`
   - Acceptance:
     - each rescan increments generation
     - stale generations are ignored in batch apply path

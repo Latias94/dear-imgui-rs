@@ -115,6 +115,168 @@ pub enum ScanHookAction {
     Drop,
 }
 
+/// Directory scan strategy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScanPolicy {
+    /// Run scan synchronously on the caller thread.
+    Sync,
+    /// Consume scan output incrementally in bounded entry batches.
+    Incremental {
+        /// Max number of entries per batch.
+        batch_entries: usize,
+    },
+    /// Run scan on background worker and consume batches in UI ticks.
+    Background {
+        /// Max number of entries per batch.
+        batch_entries: usize,
+        /// Debounce interval for rapid rescan requests.
+        debounce_ms: u64,
+    },
+}
+
+impl Default for ScanPolicy {
+    fn default() -> Self {
+        Self::Sync
+    }
+}
+
+impl ScanPolicy {
+    fn normalized(self) -> Self {
+        match self {
+            Self::Sync => Self::Sync,
+            Self::Incremental { batch_entries } => Self::Incremental {
+                batch_entries: batch_entries.max(1),
+            },
+            Self::Background {
+                batch_entries,
+                debounce_ms,
+            } => Self::Background {
+                batch_entries: batch_entries.max(1),
+                debounce_ms,
+            },
+        }
+    }
+}
+
+/// Immutable scan request descriptor.
+#[derive(Clone, Debug)]
+pub struct ScanRequest {
+    /// Monotonic scan generation.
+    pub generation: u64,
+    /// Directory being scanned.
+    pub cwd: PathBuf,
+    /// Scan policy at submission time.
+    pub scan_policy: ScanPolicy,
+    /// Submission timestamp.
+    pub submitted_at: std::time::Instant,
+}
+
+/// One batch emitted by the scan pipeline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScanBatch {
+    /// Batch generation.
+    pub generation: u64,
+    /// Batch payload kind.
+    pub kind: ScanBatchKind,
+    /// Whether this batch completes the generation.
+    pub is_final: bool,
+}
+
+impl ScanBatch {
+    fn begin(generation: u64) -> Self {
+        Self {
+            generation,
+            kind: ScanBatchKind::Begin,
+            is_final: false,
+        }
+    }
+
+    fn entries(generation: u64, loaded: usize, is_final: bool) -> Self {
+        Self {
+            generation,
+            kind: ScanBatchKind::Entries { loaded },
+            is_final,
+        }
+    }
+
+    fn complete(generation: u64, loaded: usize) -> Self {
+        Self {
+            generation,
+            kind: ScanBatchKind::Complete { loaded },
+            is_final: true,
+        }
+    }
+
+    fn error(generation: u64, message: String) -> Self {
+        Self {
+            generation,
+            kind: ScanBatchKind::Error { message },
+            is_final: true,
+        }
+    }
+}
+
+/// Payload kind for [`ScanBatch`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScanBatchKind {
+    /// Scan generation started.
+    Begin,
+    /// A payload with currently loaded entry count.
+    Entries {
+        /// Number of entries currently loaded.
+        loaded: usize,
+    },
+    /// Scan generation completed.
+    Complete {
+        /// Final loaded entry count.
+        loaded: usize,
+    },
+    /// Scan generation failed.
+    Error {
+        /// Human-readable error message.
+        message: String,
+    },
+}
+
+/// Current scan status for the dialog core.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScanStatus {
+    /// No scan is currently running.
+    Idle,
+    /// A scan generation is running.
+    Scanning {
+        /// Active generation id.
+        generation: u64,
+    },
+    /// A scan generation has partial data.
+    Partial {
+        /// Active generation id.
+        generation: u64,
+        /// Number of currently loaded entries.
+        loaded: usize,
+    },
+    /// A scan generation finished successfully.
+    Complete {
+        /// Completed generation id.
+        generation: u64,
+        /// Final number of loaded entries.
+        loaded: usize,
+    },
+    /// A scan generation failed.
+    Failed {
+        /// Failed generation id.
+        generation: u64,
+        /// Error message captured from filesystem backend.
+        message: String,
+    },
+}
+
+impl Default for ScanStatus {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
 type ScanHookFn = dyn FnMut(&mut FsEntry) -> ScanHookAction + 'static;
 
 struct ScanHook {
@@ -253,6 +415,9 @@ pub struct FileDialogCore {
     entries: Vec<DirEntry>,
 
     scan_hook: Option<ScanHook>,
+    scan_policy: ScanPolicy,
+    scan_status: ScanStatus,
+    scan_generation: u64,
     dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
     last_view_key: Option<ViewKey>,
@@ -288,6 +453,9 @@ impl FileDialogCore {
             view_ids: Vec::new(),
             entries: Vec::new(),
             scan_hook: None,
+            scan_policy: ScanPolicy::default(),
+            scan_status: ScanStatus::default(),
+            scan_generation: 0,
             dir_snapshot: DirSnapshot {
                 cwd: PathBuf::new(),
                 entry_count: 0,
@@ -363,6 +531,39 @@ impl FileDialogCore {
     pub fn invalidate_dir_cache(&mut self) {
         self.dir_snapshot_dirty = true;
         self.last_view_key = None;
+    }
+
+    /// Returns the currently configured scan policy.
+    pub fn scan_policy(&self) -> ScanPolicy {
+        self.scan_policy
+    }
+
+    /// Sets scan policy for future directory refreshes.
+    ///
+    /// Values are normalized to avoid invalid batch sizes.
+    /// Calling this invalidates the directory cache when policy changes.
+    pub fn set_scan_policy(&mut self, policy: ScanPolicy) {
+        let normalized = policy.normalized();
+        if self.scan_policy == normalized {
+            return;
+        }
+        self.scan_policy = normalized;
+        self.invalidate_dir_cache();
+    }
+
+    /// Returns the latest issued scan generation.
+    pub fn scan_generation(&self) -> u64 {
+        self.scan_generation
+    }
+
+    /// Returns the current scan status.
+    pub fn scan_status(&self) -> &ScanStatus {
+        &self.scan_status
+    }
+
+    /// Requests a rescan on the next refresh tick.
+    pub fn request_rescan(&mut self) {
+        self.invalidate_dir_cache();
     }
 
     /// Installs a scan hook that can mutate or drop filesystem entries.
@@ -521,10 +722,69 @@ impl FileDialogCore {
             return;
         }
 
-        self.dir_snapshot = read_entries_snapshot_with_fs(fs, &self.cwd, self.scan_hook.as_mut());
+        let request = self.begin_scan_request();
+        self.apply_scan_batch(ScanBatch::begin(request.generation));
+
+        match read_entries_snapshot_with_fs(fs, &request.cwd, self.scan_hook.as_mut()) {
+            Ok(snapshot) => {
+                let loaded = snapshot.entry_count;
+                self.dir_snapshot = snapshot;
+                self.apply_scan_batch(ScanBatch::entries(request.generation, loaded, false));
+                self.apply_scan_batch(ScanBatch::complete(request.generation, loaded));
+            }
+            Err(err) => {
+                self.dir_snapshot = empty_snapshot_for_cwd(&request.cwd);
+                self.apply_scan_batch(ScanBatch::error(request.generation, err.to_string()));
+            }
+        }
+
         self.dir_snapshot_dirty = false;
         // Always rebuild the view after a filesystem refresh even if the view inputs didn't change.
         self.last_view_key = None;
+    }
+
+    fn begin_scan_request(&mut self) -> ScanRequest {
+        let generation = self.scan_generation.saturating_add(1);
+        self.scan_generation = generation;
+        ScanRequest {
+            generation,
+            cwd: self.cwd.clone(),
+            scan_policy: self.scan_policy,
+            submitted_at: std::time::Instant::now(),
+        }
+    }
+
+    fn apply_scan_batch(&mut self, batch: ScanBatch) {
+        if batch.generation != self.scan_generation {
+            return;
+        }
+
+        self.scan_status = match batch.kind {
+            ScanBatchKind::Begin => ScanStatus::Scanning {
+                generation: batch.generation,
+            },
+            ScanBatchKind::Entries { loaded } => {
+                if batch.is_final {
+                    ScanStatus::Complete {
+                        generation: batch.generation,
+                        loaded,
+                    }
+                } else {
+                    ScanStatus::Partial {
+                        generation: batch.generation,
+                        loaded,
+                    }
+                }
+            }
+            ScanBatchKind::Complete { loaded } => ScanStatus::Complete {
+                generation: batch.generation,
+                loaded,
+            },
+            ScanBatchKind::Error { message } => ScanStatus::Failed {
+                generation: batch.generation,
+                message,
+            },
+        };
     }
 
     fn entry_by_id(&self, id: EntryId) -> Option<&DirEntry> {
@@ -1347,15 +1607,9 @@ fn read_entries_snapshot_with_fs(
     fs: &dyn FileSystem,
     dir: &Path,
     mut scan_hook: Option<&mut ScanHook>,
-) -> DirSnapshot {
+) -> std::io::Result<DirSnapshot> {
     let mut out = Vec::new();
-    let Ok(rd) = fs.read_dir(dir) else {
-        return DirSnapshot {
-            cwd: dir.to_path_buf(),
-            entry_count: out.len(),
-            entries: out,
-        };
-    };
+    let rd = fs.read_dir(dir)?;
     for mut entry in rd {
         if let Some(hook) = scan_hook.as_deref_mut() {
             if matches!(hook.apply(&mut entry), ScanHookAction::Drop) {
@@ -1383,10 +1637,18 @@ fn read_entries_snapshot_with_fs(
             modified: meta.modified,
         });
     }
-    DirSnapshot {
+    Ok(DirSnapshot {
         cwd: dir.to_path_buf(),
         entry_count: out.len(),
         entries: out,
+    })
+}
+
+fn empty_snapshot_for_cwd(cwd: &Path) -> DirSnapshot {
+    DirSnapshot {
+        cwd: cwd.to_path_buf(),
+        entry_count: 0,
+        entries: Vec::new(),
     }
 }
 
@@ -1463,11 +1725,15 @@ mod tests {
         meta: std::collections::HashMap<PathBuf, crate::fs::FsMetadata>,
         entries: Vec<crate::fs::FsEntry>,
         read_dir_calls: Cell<usize>,
+        read_dir_error: Option<std::io::ErrorKind>,
     }
 
     impl crate::fs::FileSystem for TestFs {
         fn read_dir(&self, _dir: &Path) -> std::io::Result<Vec<crate::fs::FsEntry>> {
             self.read_dir_calls.set(self.read_dir_calls.get() + 1);
+            if let Some(kind) = self.read_dir_error {
+                return Err(std::io::Error::new(kind, "read_dir failure"));
+            }
             Ok(self.entries.clone())
         }
 
@@ -2056,6 +2322,103 @@ mod tests {
         core.rescan_if_needed(&fs);
         assert_eq!(core.entries().len(), 1);
         assert_eq!(core.entries()[0].name, "a.txt");
+    }
+
+    #[test]
+    fn scan_policy_normalizes_and_invalidates_cache() {
+        let fs = TestFs::default();
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(core.scan_generation(), 1);
+        assert!(!core.dir_snapshot_dirty);
+
+        core.set_scan_policy(ScanPolicy::Incremental { batch_entries: 0 });
+        assert_eq!(
+            core.scan_policy(),
+            ScanPolicy::Incremental { batch_entries: 1 }
+        );
+        assert!(core.dir_snapshot_dirty);
+
+        core.rescan_if_needed(&fs);
+        assert_eq!(core.scan_generation(), 2);
+    }
+
+    #[test]
+    fn rescan_updates_generation_and_status() {
+        let fs = TestFs {
+            entries: vec![
+                crate::fs::FsEntry {
+                    name: "a.txt".into(),
+                    path: PathBuf::from("/tmp/a.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "b.txt".into(),
+                    path: PathBuf::from("/tmp/b.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.rescan_if_needed(&fs);
+
+        assert_eq!(core.scan_generation(), 1);
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Complete {
+                generation: 1,
+                loaded: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn stale_scan_batch_is_ignored() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.scan_generation = 3;
+        core.scan_status = ScanStatus::Scanning { generation: 3 };
+
+        core.apply_scan_batch(ScanBatch::error(2, "stale".to_string()));
+
+        assert_eq!(core.scan_status, ScanStatus::Scanning { generation: 3 });
+    }
+
+    #[test]
+    fn read_dir_failure_sets_failed_scan_status() {
+        let fs = TestFs {
+            read_dir_error: Some(std::io::ErrorKind::PermissionDenied),
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.rescan_if_needed(&fs);
+
+        assert_eq!(core.scan_generation(), 1);
+        match core.scan_status() {
+            ScanStatus::Failed {
+                generation,
+                message,
+            } => {
+                assert_eq!(*generation, 1);
+                assert!(message.contains("read_dir failure"));
+            }
+            other => panic!("unexpected scan status: {other:?}"),
+        }
+        assert!(core.entries().is_empty());
+        assert_eq!(core.dir_snapshot.cwd, PathBuf::from("/tmp"));
+        assert_eq!(core.dir_snapshot.entry_count, 0);
     }
 
     #[test]

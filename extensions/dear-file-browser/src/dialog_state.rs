@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use dear_imgui_rs::FontId;
 
 use crate::core::{DialogMode, LayoutStyle};
-use crate::dialog_core::{EntryId, FileDialogCore};
+use crate::dialog_core::{EntryId, FileDialogCore, ScanPolicy, ScanStatus};
 use crate::file_style::FileStyleRegistry;
 use crate::thumbnails::{ThumbnailCache, ThumbnailCacheConfig};
 
@@ -685,6 +685,26 @@ impl FileDialogState {
     /// Returns whether the dialog is currently open.
     pub fn is_open(&self) -> bool {
         self.ui.visible
+    }
+
+    /// Returns the active scan policy.
+    pub fn scan_policy(&self) -> ScanPolicy {
+        self.core.scan_policy()
+    }
+
+    /// Sets scan policy for future directory refreshes.
+    pub fn set_scan_policy(&mut self, policy: ScanPolicy) {
+        self.core.set_scan_policy(policy);
+    }
+
+    /// Returns the latest scan status from core.
+    pub fn scan_status(&self) -> &ScanStatus {
+        self.core.scan_status()
+    }
+
+    /// Requests a rescan on the next draw tick.
+    pub fn request_rescan(&mut self) {
+        self.core.request_rescan();
     }
 
     /// Installs a scan hook on the core listing pipeline.
