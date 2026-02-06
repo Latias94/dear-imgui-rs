@@ -646,21 +646,21 @@ impl FileDialogCore {
     ) -> Result<(), FileDialogError> {
         self.result = None;
         self.pending_overwrite = None;
-        let selected_names = self.selected_names();
+        let selected_entries = self
+            .selected_ids
+            .iter()
+            .filter_map(|id| self.entry_by_id(*id).cloned())
+            .collect::<Vec<_>>();
 
         // Special-case: if a single directory selected in file-open modes, navigate into it
         // instead of confirming.
         if matches!(self.mode, DialogMode::OpenFile | DialogMode::OpenFiles)
-            && selected_names.len() == 1
+            && selected_entries.len() == 1
+            && selected_entries[0].is_dir
         {
-            let sel = selected_names[0].clone();
-            let p = self.cwd.join(&sel);
-            let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
-            if is_dir {
-                self.cwd.push(sel);
-                self.clear_selection();
-                return Ok(());
-            }
+            self.cwd.push(&selected_entries[0].name);
+            self.clear_selection();
+            return Ok(());
         }
 
         if !gate.can_confirm {
@@ -674,7 +674,7 @@ impl FileDialogCore {
         let sel = finalize_selection(
             self.mode,
             &self.cwd,
-            selected_names,
+            selected_entries,
             &self.save_name,
             &self.filters,
             self.active_filter,
@@ -1020,7 +1020,7 @@ fn select_range_by_id_capped(
 fn finalize_selection(
     mode: DialogMode,
     cwd: &Path,
-    selected_names: Vec<String>,
+    selected_entries: Vec<DirEntry>,
     save_name: &str,
     filters: &[FileFilter],
     active_filter: Option<usize>,
@@ -1034,14 +1034,14 @@ fn finalize_selection(
             sel.paths.push(cwd.to_path_buf());
         }
         DialogMode::OpenFile | DialogMode::OpenFiles => {
-            if selected_names.is_empty() {
+            if selected_entries.is_empty() {
                 return Err(FileDialogError::InvalidPath("no selection".into()));
             }
-            for n in selected_names {
-                if !matches_filter_matchers(&n, &matchers) {
+            for entry in selected_entries {
+                if !matches_filter_matchers(&entry.name, &matchers) {
                     continue;
                 }
-                sel.paths.push(cwd.join(n));
+                sel.paths.push(entry.path);
             }
             if sel.paths.is_empty() {
                 return Err(FileDialogError::InvalidPath(
