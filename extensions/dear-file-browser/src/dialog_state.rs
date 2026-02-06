@@ -42,6 +42,10 @@ pub struct FileDialogUiState {
     pub ui_error: Option<String>,
     /// Style registry used to decorate the file list (icons/colors/tooltips).
     pub file_styles: FileStyleRegistry,
+    /// Enable "type-to-select" behavior in the file list (IGFD-style).
+    pub type_select_enabled: bool,
+    /// Timeout (milliseconds) after which the type-to-select buffer resets.
+    pub type_select_timeout_ms: u64,
     /// Whether to render a custom pane region (when a pane is provided by the caller).
     pub custom_pane_enabled: bool,
     /// Height of the custom pane region (in pixels).
@@ -57,6 +61,9 @@ pub struct FileDialogUiState {
     pub(crate) places_io_include_code: bool,
     /// Error string shown inside the places modal.
     pub(crate) places_io_error: Option<String>,
+
+    pub(crate) type_select_buffer: String,
+    pub(crate) type_select_last_input: Option<std::time::Instant>,
 }
 
 impl Default for FileDialogUiState {
@@ -74,6 +81,8 @@ impl Default for FileDialogUiState {
             focus_search_next: false,
             ui_error: None,
             file_styles: FileStyleRegistry::default(),
+            type_select_enabled: true,
+            type_select_timeout_ms: 750,
             custom_pane_enabled: true,
             custom_pane_height: 120.0,
             places_io_mode: PlacesIoMode::Export,
@@ -81,6 +90,8 @@ impl Default for FileDialogUiState {
             places_io_open_next: false,
             places_io_include_code: false,
             places_io_error: None,
+            type_select_buffer: String::new(),
+            type_select_last_input: None,
         }
     }
 }

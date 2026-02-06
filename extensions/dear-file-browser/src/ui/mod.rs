@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use dear_imgui_rs::TreeNodeFlags;
 use dear_imgui_rs::Ui;
@@ -833,6 +834,9 @@ fn draw_file_table(
                 if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
                     state.core.move_focus(1, modifiers);
                 }
+                if state.ui.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
+                    handle_type_select(ui, state);
+                }
             }
 
             // Clone the entry list so we can mutate `state.core` while iterating (selection, navigation).
@@ -939,6 +943,92 @@ fn draw_file_table(
                 }
             }
         });
+}
+
+fn handle_type_select(ui: &Ui, state: &mut FileDialogState) {
+    if !state.ui.type_select_enabled {
+        return;
+    }
+    let now = Instant::now();
+    let timeout = Duration::from_millis(state.ui.type_select_timeout_ms);
+    if let Some(last) = state.ui.type_select_last_input {
+        if now.duration_since(last) > timeout {
+            state.ui.type_select_buffer.clear();
+        }
+    }
+
+    let Some(ch) = collect_type_select_char(ui) else {
+        return;
+    };
+    if ch.is_whitespace() {
+        return;
+    }
+    state.ui.type_select_buffer.push(ch.to_ascii_lowercase());
+    state.ui.type_select_last_input = Some(now);
+    state.core.select_by_prefix(&state.ui.type_select_buffer);
+}
+
+fn collect_type_select_char(ui: &Ui) -> Option<char> {
+    let alpha = [
+        (Key::A, 'a'),
+        (Key::B, 'b'),
+        (Key::C, 'c'),
+        (Key::D, 'd'),
+        (Key::E, 'e'),
+        (Key::F, 'f'),
+        (Key::G, 'g'),
+        (Key::H, 'h'),
+        (Key::I, 'i'),
+        (Key::J, 'j'),
+        (Key::K, 'k'),
+        (Key::L, 'l'),
+        (Key::M, 'm'),
+        (Key::N, 'n'),
+        (Key::O, 'o'),
+        (Key::P, 'p'),
+        (Key::Q, 'q'),
+        (Key::R, 'r'),
+        (Key::S, 's'),
+        (Key::T, 't'),
+        (Key::U, 'u'),
+        (Key::V, 'v'),
+        (Key::W, 'w'),
+        (Key::X, 'x'),
+        (Key::Y, 'y'),
+        (Key::Z, 'z'),
+    ];
+    for (k, c) in alpha {
+        if ui.is_key_pressed(k) {
+            return Some(c);
+        }
+    }
+
+    let digits = [
+        (Key::Key0, '0'),
+        (Key::Key1, '1'),
+        (Key::Key2, '2'),
+        (Key::Key3, '3'),
+        (Key::Key4, '4'),
+        (Key::Key5, '5'),
+        (Key::Key6, '6'),
+        (Key::Key7, '7'),
+        (Key::Key8, '8'),
+        (Key::Key9, '9'),
+    ];
+    for (k, c) in digits {
+        if ui.is_key_pressed(k) {
+            return Some(c);
+        }
+    }
+
+    let punct = [(Key::Minus, '-'), (Key::Period, '.'), (Key::Slash, '/')];
+    for (k, c) in punct {
+        if ui.is_key_pressed(k) {
+            return Some(c);
+        }
+    }
+
+    None
 }
 
 fn format_size(size: u64) -> String {

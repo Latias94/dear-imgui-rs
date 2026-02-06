@@ -176,7 +176,7 @@ Goal: bring selection and keyboard navigation close to IGFD.
 ### Epic 6.3 — Keyboard navigation
 
 - [x] Task: up/down moves focus; Enter navigates/confirm; Backspace up-dir
-- [ ] Task: type-to-select buffer (optional)
+- [x] Task: type-to-select buffer (optional)
   - Acceptance: behavior documented and tested where possible.
 
 Exit criteria:
@@ -335,7 +335,7 @@ Use this as a tracking table for final validation.
 - [ ] Multiple dialogs concurrently (manager + ids)
 - [ ] Host flexibility: window/modal/popup/embed
 - [ ] Places: groups + editable + persistence + devices
-- [ ] Selection: ctrl/shift, ctrl+a, keyboard navigation, type-to-select
+- [x] Selection: ctrl/shift, ctrl+a, keyboard navigation, type-to-select
 - [ ] Save: confirm overwrite + extension policy
 - [ ] Filters: collections + regex (optional) + multi-layer extensions
 - [ ] File styles: by type/ext/name/regex + callback

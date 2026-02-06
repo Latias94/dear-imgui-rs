@@ -180,6 +180,34 @@ impl FileDialogCore {
         self.retain_selected_visible();
     }
 
+    /// Select the next entry whose base name starts with the given prefix (case-insensitive).
+    ///
+    /// This is used by "type-to-select" navigation (IGFD-style).
+    pub(crate) fn select_by_prefix(&mut self, prefix: &str) {
+        let prefix = prefix.trim();
+        if prefix.is_empty() || self.view_names.is_empty() {
+            return;
+        }
+        let prefix_lower = prefix.to_lowercase();
+
+        let len = self.view_names.len();
+        let start_idx = self
+            .focused_name
+            .as_deref()
+            .and_then(|f| self.view_names.iter().position(|n| n == f))
+            .map(|i| (i + 1) % len)
+            .unwrap_or(0);
+
+        for off in 0..len {
+            let i = (start_idx + off) % len;
+            let name = &self.view_names[i];
+            if name.to_lowercase().starts_with(&prefix_lower) {
+                self.select_single_by_name(name.clone());
+                break;
+            }
+        }
+    }
+
     /// Applies Ctrl+A style selection to all currently visible entries.
     pub(crate) fn select_all(&mut self) {
         if self.allow_multi {
@@ -784,6 +812,20 @@ mod tests {
         assert!(matches_filters("proj.vcxproj.filters", &filters));
         assert!(!matches_filters("proj.vcxproj", &filters));
         assert!(!matches_filters("vcxproj.filters", &filters));
+    }
+
+    #[test]
+    fn select_by_prefix_cycles_from_current_focus() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.view_names = vec!["alpha".into(), "beta".into(), "alpine".into()];
+        core.focused_name = Some("alpha".into());
+        core.select_by_prefix("al");
+        assert_eq!(core.selected, vec!["alpine"]);
+        assert_eq!(core.focused_name.as_deref(), Some("alpine"));
+
+        core.select_by_prefix("al");
+        assert_eq!(core.selected, vec!["alpha"]);
+        assert_eq!(core.focused_name.as_deref(), Some("alpha"));
     }
 
     #[test]
