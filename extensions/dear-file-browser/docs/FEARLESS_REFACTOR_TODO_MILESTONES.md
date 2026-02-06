@@ -421,6 +421,11 @@ Goal: close the largest feature gap vs IGFD by adding core-supported file operat
     - paste uses `FileSystem` operations only (no direct `std::fs`)
     - copy allocates a unique name in the destination directory (`(copy)`, `(copy 2)`, ...)
     - cut clears the clipboard after a successful paste
+- [x] Task: add paste conflict resolution modal
+  - Acceptance:
+    - when target exists, user can choose `Overwrite` / `Skip` / `Keep Both`
+    - modal supports `Apply to all conflicts` for batch pastes
+    - overwrite path uses recursive delete semantics for directories
 
 Exit criteria:
 

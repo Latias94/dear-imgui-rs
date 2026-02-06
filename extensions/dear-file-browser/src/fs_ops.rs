@@ -1,6 +1,19 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::fs::FileSystem;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExistingTargetPolicy {
+    Overwrite,
+    Skip,
+    KeepBoth,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ExistingTargetDecision {
+    Continue(PathBuf),
+    Skip,
+}
 
 pub(crate) fn copy_tree(fs: &dyn FileSystem, from: &Path, to: &Path) -> std::io::Result<()> {
     let md = fs.metadata(from)?;
@@ -65,6 +78,44 @@ pub(crate) fn unique_child_name(
     ))
 }
 
+pub(crate) fn apply_existing_target_policy(
+    fs: &dyn FileSystem,
+    dest_dir: &Path,
+    desired_name: &str,
+    policy: ExistingTargetPolicy,
+) -> std::io::Result<ExistingTargetDecision> {
+    let dest = dest_dir.join(desired_name);
+    if !child_exists(fs, dest_dir, desired_name)? {
+        return Ok(ExistingTargetDecision::Continue(dest));
+    }
+
+    match policy {
+        ExistingTargetPolicy::Skip => Ok(ExistingTargetDecision::Skip),
+        ExistingTargetPolicy::KeepBoth => {
+            let name = unique_child_name(fs, dest_dir, desired_name)?;
+            Ok(ExistingTargetDecision::Continue(dest_dir.join(name)))
+        }
+        ExistingTargetPolicy::Overwrite => {
+            remove_existing_path(fs, &dest)?;
+            Ok(ExistingTargetDecision::Continue(dest))
+        }
+    }
+}
+
+pub(crate) fn remove_existing_path(fs: &dyn FileSystem, path: &Path) -> std::io::Result<()> {
+    match fs.metadata(path) {
+        Ok(md) => {
+            if md.is_dir {
+                fs.remove_dir_all(path)
+            } else {
+                fs.remove_file(path)
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 fn child_exists(fs: &dyn FileSystem, dir: &Path, name: &str) -> std::io::Result<bool> {
     let p = dir.join(name);
     match fs.metadata(&p) {
@@ -87,7 +138,6 @@ fn split_base_and_full_ext(name: &str) -> (&str, &str) {
 mod tests {
     use super::*;
     use crate::fs::StdFileSystem;
-    use std::path::PathBuf;
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
@@ -153,6 +203,63 @@ mod tests {
         let out = unique_child_name(&fs, &root, desired).unwrap();
         assert!(out.starts_with("a (copy)"));
         assert!(out.ends_with(".tar.gz"));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn apply_existing_target_policy_keep_both_allocates_new_name() {
+        let fs = StdFileSystem;
+        let root = unique_temp_dir("existing_keep_both");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        std::fs::write(root.join("a.txt"), b"x").unwrap();
+
+        let out = apply_existing_target_policy(&fs, &root, "a.txt", ExistingTargetPolicy::KeepBoth)
+            .unwrap();
+
+        let ExistingTargetDecision::Continue(p) = out else {
+            panic!("expected continue")
+        };
+        assert_ne!(p, root.join("a.txt"));
+        assert_eq!(p.file_name().unwrap().to_string_lossy(), "a (copy).txt");
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn apply_existing_target_policy_overwrite_removes_existing() {
+        let fs = StdFileSystem;
+        let root = unique_temp_dir("existing_overwrite");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let d = root.join("d");
+        std::fs::create_dir_all(d.join("nested")).unwrap();
+        std::fs::write(d.join("nested").join("x.txt"), b"x").unwrap();
+
+        let out =
+            apply_existing_target_policy(&fs, &root, "d", ExistingTargetPolicy::Overwrite).unwrap();
+
+        assert!(matches!(out, ExistingTargetDecision::Continue(_)));
+        assert!(!d.exists());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn apply_existing_target_policy_skip_returns_skip() {
+        let fs = StdFileSystem;
+        let root = unique_temp_dir("existing_skip");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        std::fs::write(root.join("a.txt"), b"x").unwrap();
+
+        let out =
+            apply_existing_target_policy(&fs, &root, "a.txt", ExistingTargetPolicy::Skip).unwrap();
+        assert_eq!(out, ExistingTargetDecision::Skip);
 
         std::fs::remove_dir_all(&root).unwrap();
     }

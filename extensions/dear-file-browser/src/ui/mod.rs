@@ -11,11 +11,16 @@ use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, DirEntry, Modifiers};
 use crate::dialog_state::FileDialogState;
 use crate::dialog_state::FileListViewMode;
-use crate::dialog_state::{ClipboardOp, FileClipboard};
+use crate::dialog_state::{
+    ClipboardOp, FileClipboard, PasteConflictAction, PasteConflictPrompt, PendingPasteJob,
+};
 use crate::dialog_state::{ValidationButtonsAlign, ValidationButtonsOrder};
 use crate::file_style::EntryKind;
 use crate::fs::{FileSystem, StdFileSystem};
-use crate::fs_ops::{copy_tree, move_tree, unique_child_name};
+use crate::fs_ops::{
+    ExistingTargetDecision, ExistingTargetPolicy, apply_existing_target_policy, copy_tree,
+    move_tree,
+};
 use crate::places::{Place, PlaceOrigin, Places};
 use crate::thumbnails::ThumbnailBackend;
 
@@ -571,6 +576,7 @@ fn draw_contents_with_fs_and_hooks(
     draw_new_folder_modal(ui, state, fs);
     draw_rename_modal(ui, state, fs);
     draw_delete_confirm_modal(ui, state, fs);
+    draw_paste_conflict_modal(ui, state, fs);
 
     ui.separator();
     // Footer: file name (Save) + buttons
@@ -1064,73 +1070,226 @@ fn clipboard_set_from_selection(state: &mut FileDialogState, op: ClipboardOp) {
     state.ui.clipboard = Some(FileClipboard { op, sources });
 }
 
-fn clipboard_paste_into_cwd(
-    state: &mut FileDialogState,
-    fs: &dyn FileSystem,
-) -> Result<(), String> {
-    let Some(cb) = state.ui.clipboard.clone() else {
-        return Ok(());
+fn start_paste_into_cwd(state: &mut FileDialogState) {
+    let Some(clipboard) = state.ui.clipboard.clone() else {
+        return;
     };
-    if cb.sources.is_empty() {
-        return Ok(());
+    if clipboard.sources.is_empty() {
+        return;
     }
 
-    let dest_dir = state.core.cwd.clone();
-    let mut created: Vec<String> = Vec::new();
+    state.ui.paste_job = Some(PendingPasteJob {
+        clipboard,
+        dest_dir: state.core.cwd.clone(),
+        next_index: 0,
+        created: Vec::new(),
+        apply_all_conflicts: None,
+        pending_conflict_action: None,
+        conflict: None,
+    });
+}
 
-    for src in &cb.sources {
+fn try_complete_paste_job(state: &mut FileDialogState) {
+    let Some(job) = state.ui.paste_job.take() else {
+        return;
+    };
+    if job.created.is_empty() {
+        return;
+    }
+
+    state.core.invalidate_dir_cache();
+
+    let first = job.created[0].clone();
+    state.core.focus_and_select_by_name(first.clone());
+    if job.created.len() > 1 {
+        state.core.selected = job.created;
+    }
+    state.ui.reveal_name_next = Some(first);
+
+    if matches!(job.clipboard.op, ClipboardOp::Cut) {
+        state.ui.clipboard = None;
+    }
+}
+
+fn step_paste_job(state: &mut FileDialogState, fs: &dyn FileSystem) -> Result<bool, String> {
+    let Some(job) = state.ui.paste_job.as_mut() else {
+        return Ok(false);
+    };
+
+    if job.conflict.is_some() {
+        return Ok(false);
+    }
+
+    while job.next_index < job.clipboard.sources.len() {
+        let src = job.clipboard.sources[job.next_index].clone();
         let name = src
             .file_name()
             .ok_or_else(|| format!("Invalid source path: {}", src.display()))?
             .to_string_lossy()
             .to_string();
 
-        let dest_name = match cb.op {
-            ClipboardOp::Copy => unique_child_name(fs, &dest_dir, &name)
-                .map_err(|e| format!("Failed to allocate a unique name for '{name}': {e}"))?,
-            ClipboardOp::Cut => name.clone(),
-        };
-        let dest = dest_dir.join(&dest_name);
-
-        if dest == *src {
+        let mut dest = job.dest_dir.join(&name);
+        if dest == src {
+            job.next_index += 1;
             continue;
         }
-        if dest.starts_with(src) {
+        if dest.starts_with(&src) {
             return Err(format!("Refusing to paste '{name}' into itself"));
         }
-        if matches!(cb.op, ClipboardOp::Cut) && fs.metadata(&dest).is_ok() {
-            return Err(format!("Target already exists: '{dest_name}'"));
+
+        let exists = fs.metadata(&dest).is_ok();
+        if exists {
+            if let Some(action) = job
+                .pending_conflict_action
+                .take()
+                .or(job.apply_all_conflicts)
+            {
+                let policy = match action {
+                    PasteConflictAction::Overwrite => ExistingTargetPolicy::Overwrite,
+                    PasteConflictAction::Skip => ExistingTargetPolicy::Skip,
+                    PasteConflictAction::KeepBoth => ExistingTargetPolicy::KeepBoth,
+                };
+                match apply_existing_target_policy(fs, &job.dest_dir, &name, policy)
+                    .map_err(|e| format!("Failed to resolve target conflict for '{name}': {e}"))?
+                {
+                    ExistingTargetDecision::Skip => {
+                        job.next_index += 1;
+                        continue;
+                    }
+                    ExistingTargetDecision::Continue(p) => dest = p,
+                }
+            } else {
+                job.conflict = Some(PasteConflictPrompt {
+                    source: src,
+                    dest,
+                    apply_to_all: false,
+                });
+                state.ui.paste_conflict_open_next = true;
+                return Ok(false);
+            }
         }
 
-        let r = match cb.op {
-            ClipboardOp::Copy => copy_tree(fs, src, &dest),
-            ClipboardOp::Cut => move_tree(fs, src, &dest),
+        let r = match job.clipboard.op {
+            ClipboardOp::Copy => copy_tree(fs, &src, &dest),
+            ClipboardOp::Cut => move_tree(fs, &src, &dest),
         };
         if let Err(e) = r {
             return Err(format!("Failed to paste '{name}': {e}"));
         }
 
-        created.push(dest_name);
+        let created_name = dest
+            .file_name()
+            .map(|v| v.to_string_lossy().to_string())
+            .unwrap_or(name);
+        job.created.push(created_name);
+        job.next_index += 1;
     }
 
-    if created.is_empty() {
-        return Ok(());
+    Ok(true)
+}
+
+fn run_paste_job_until_wait_or_done(
+    state: &mut FileDialogState,
+    fs: &dyn FileSystem,
+) -> Result<(), String> {
+    loop {
+        match step_paste_job(state, fs)? {
+            true => {
+                try_complete_paste_job(state);
+                return Ok(());
+            }
+            false => {
+                return Ok(());
+            }
+        }
+    }
+}
+
+fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
+    const POPUP_ID: &str = "Paste Conflict";
+
+    if state.ui.paste_conflict_open_next {
+        state.ui.paste_conflict_open_next = false;
+        if !ui.is_popup_open(POPUP_ID) {
+            ui.open_popup(POPUP_ID);
+        }
     }
 
-    state.core.invalidate_dir_cache();
+    if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
+        let prompt = state
+            .ui
+            .paste_job
+            .as_ref()
+            .and_then(|j| j.conflict.as_ref())
+            .cloned();
 
-    let first = created[0].clone();
-    state.core.focus_and_select_by_name(first.clone());
-    if created.len() > 1 {
-        state.core.selected = created;
+        let Some(prompt) = prompt else {
+            ui.text_disabled("No pending paste conflict.");
+            if ui.button("Close") {
+                ui.close_current_popup();
+            }
+            return;
+        };
+
+        let src_name = prompt
+            .source
+            .file_name()
+            .map(|v| v.to_string_lossy().to_string())
+            .unwrap_or_else(|| prompt.source.display().to_string());
+
+        ui.text(format!("Target already exists: {src_name}"));
+        ui.text_disabled(format!("Source: {}", prompt.source.display()));
+        ui.text_disabled(format!("Target: {}", prompt.dest.display()));
+        ui.separator();
+
+        let mut apply_to_all = prompt.apply_to_all;
+        ui.checkbox("Apply to all conflicts", &mut apply_to_all);
+
+        ui.separator();
+        let overwrite = ui.button("Overwrite");
+        ui.same_line();
+        let keep_both = ui.button("Keep Both");
+        ui.same_line();
+        let skip = ui.button("Skip");
+        ui.same_line();
+        let cancel = ui.button("Cancel Paste");
+
+        if cancel {
+            state.ui.paste_job = None;
+            ui.close_current_popup();
+            return;
+        }
+
+        let selected = if overwrite {
+            Some(PasteConflictAction::Overwrite)
+        } else if keep_both {
+            Some(PasteConflictAction::KeepBoth)
+        } else if skip {
+            Some(PasteConflictAction::Skip)
+        } else {
+            None
+        };
+
+        if let Some(action) = selected {
+            if let Some(job) = state.ui.paste_job.as_mut() {
+                if apply_to_all {
+                    job.apply_all_conflicts = Some(action);
+                }
+                job.pending_conflict_action = Some(action);
+                job.conflict = None;
+            }
+            ui.close_current_popup();
+            state.ui.ui_error = None;
+            if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
+                state.ui.ui_error = Some(e);
+                state.ui.paste_job = None;
+            }
+        } else if let Some(job) = state.ui.paste_job.as_mut() {
+            if let Some(conflict) = job.conflict.as_mut() {
+                conflict.apply_to_all = apply_to_all;
+            }
+        }
     }
-    state.ui.reveal_name_next = Some(first);
-
-    if matches!(cb.op, ClipboardOp::Cut) {
-        state.ui.clipboard = None;
-    }
-
-    Ok(())
 }
 
 fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
@@ -1707,8 +1866,10 @@ fn draw_file_table_view(
             }
             if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
                 state.ui.ui_error = None;
-                if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                start_paste_into_cwd(state);
+                if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
                     state.ui.ui_error = Some(e);
+                    state.ui.paste_job = None;
                 }
             }
             if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
@@ -1827,8 +1988,10 @@ fn draw_file_table_view(
                 }
                 if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
                     state.ui.ui_error = None;
-                    if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                    start_paste_into_cwd(state);
+                    if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
                         state.ui.ui_error = Some(e);
+                        state.ui.paste_job = None;
                     }
                     ui.close_current_popup();
                 }
@@ -1899,8 +2062,10 @@ fn draw_file_table_view(
                 .unwrap_or(false);
             if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
                 state.ui.ui_error = None;
-                if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                start_paste_into_cwd(state);
+                if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
                     state.ui.ui_error = Some(e);
+                    state.ui.paste_job = None;
                 }
                 ui.close_current_popup();
             }
@@ -1989,8 +2154,10 @@ fn draw_file_grid_view(
                 }
                 if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
                     state.ui.ui_error = None;
-                    if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                    start_paste_into_cwd(state);
+                    if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
                         state.ui.ui_error = Some(e);
+                        state.ui.paste_job = None;
                     }
                 }
                 if ui.is_key_pressed_with_repeat(Key::LeftArrow, true) {
@@ -2150,8 +2317,10 @@ fn draw_file_grid_view(
                         if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste)
                         {
                             state.ui.ui_error = None;
-                            if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                            start_paste_into_cwd(state);
+                            if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
                                 state.ui.ui_error = Some(e);
+                                state.ui.paste_job = None;
                             }
                             ui.close_current_popup();
                         }
@@ -2191,8 +2360,10 @@ fn draw_file_grid_view(
                     .unwrap_or(false);
                 if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
                     state.ui.ui_error = None;
-                    if let Err(e) = clipboard_paste_into_cwd(state, fs) {
+                    start_paste_into_cwd(state);
+                    if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
                         state.ui.ui_error = Some(e);
+                        state.ui.paste_job = None;
                     }
                     ui.close_current_popup();
                 }

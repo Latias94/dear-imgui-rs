@@ -91,6 +91,47 @@ pub struct FileClipboard {
     pub sources: Vec<PathBuf>,
 }
 
+/// Conflict action used when a paste target already exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PasteConflictAction {
+    /// Replace the existing destination entry.
+    Overwrite,
+    /// Skip this source entry.
+    Skip,
+    /// Keep both entries by allocating a unique destination name.
+    KeepBoth,
+}
+
+/// Pending conflict information shown in the paste conflict modal.
+#[derive(Clone, Debug)]
+pub(crate) struct PasteConflictPrompt {
+    /// Source path currently being pasted.
+    pub source: PathBuf,
+    /// Destination path that already exists.
+    pub dest: PathBuf,
+    /// Whether to reuse the chosen action for all remaining conflicts.
+    pub apply_to_all: bool,
+}
+
+/// In-progress paste job state (supports modal conflict resolution).
+#[derive(Clone, Debug)]
+pub(crate) struct PendingPasteJob {
+    /// Clipboard snapshot captured when paste was triggered.
+    pub clipboard: FileClipboard,
+    /// Destination directory where entries are pasted.
+    pub dest_dir: PathBuf,
+    /// Next source index to process.
+    pub next_index: usize,
+    /// Destination entry names created by this job.
+    pub created: Vec<String>,
+    /// Optional action reused for all remaining conflicts.
+    pub apply_all_conflicts: Option<PasteConflictAction>,
+    /// One-shot action for the next pending conflict only.
+    pub pending_conflict_action: Option<PasteConflictAction>,
+    /// Current conflict waiting for user decision.
+    pub conflict: Option<PasteConflictPrompt>,
+}
+
 /// Places import/export modal mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum PlacesIoMode {
@@ -177,6 +218,10 @@ pub struct FileDialogUiState {
     pub delete_error: Option<String>,
     /// Clipboard state for copy/cut/paste operations.
     pub clipboard: Option<FileClipboard>,
+    /// In-progress paste job state.
+    pub(crate) paste_job: Option<PendingPasteJob>,
+    /// Open the paste conflict modal on next frame.
+    pub(crate) paste_conflict_open_next: bool,
     /// Reveal (scroll to) a specific entry name on the next draw, then clear.
     pub(crate) reveal_name_next: Option<String>,
     /// Style registry used to decorate the file list (icons/colors/tooltips).
@@ -260,6 +305,8 @@ impl Default for FileDialogUiState {
             delete_recursive: false,
             delete_error: None,
             clipboard: None,
+            paste_job: None,
+            paste_conflict_open_next: false,
             reveal_name_next: None,
             file_styles: FileStyleRegistry::default(),
             thumbnails_enabled: false,
