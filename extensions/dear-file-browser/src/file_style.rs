@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Kind of filesystem entry for styling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +21,38 @@ pub struct FileStyle {
     pub icon: Option<String>,
     /// Optional tooltip shown when the entry is hovered.
     pub tooltip: Option<String>,
+    /// Optional font token resolved by UI via `FileDialogUiState::file_style_fonts`.
+    pub font_token: Option<String>,
+}
+
+type FileStyleCallbackFn = dyn Fn(&str, EntryKind) -> Option<FileStyle> + Send + Sync + 'static;
+
+/// Callback handle for dynamic style resolution.
+#[derive(Clone)]
+pub struct FileStyleCallback {
+    inner: Arc<FileStyleCallbackFn>,
+}
+
+impl std::fmt::Debug for FileStyleCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileStyleCallback").finish_non_exhaustive()
+    }
+}
+
+impl FileStyleCallback {
+    /// Create a callback handle from a closure/function.
+    pub fn new<F>(callback: F) -> Self
+    where
+        F: Fn(&str, EntryKind) -> Option<FileStyle> + Send + Sync + 'static,
+    {
+        Self {
+            inner: Arc::new(callback),
+        }
+    }
+
+    fn resolve(&self, name: &str, kind: EntryKind) -> Option<FileStyle> {
+        (self.inner)(name, kind)
+    }
 }
 
 /// Matcher for a style rule.
@@ -100,6 +133,8 @@ pub struct StyleRule {
 pub struct FileStyleRegistry {
     /// Ordered rule list.
     pub rules: Vec<StyleRule>,
+    /// Optional callback provider for dynamic style resolution.
+    pub callback: Option<FileStyleCallback>,
     regex_cache: HashMap<String, regex::Regex>,
 }
 
@@ -159,6 +194,16 @@ impl FileStyleRegistry {
         self.push_rule(StyleMatcher::NameRegex(pattern.as_ref().to_string()), style);
     }
 
+    /// Set a callback provider for dynamic style resolution.
+    pub fn set_callback(&mut self, callback: FileStyleCallback) {
+        self.callback = Some(callback);
+    }
+
+    /// Clear the callback provider.
+    pub fn clear_callback(&mut self) {
+        self.callback = None;
+    }
+
     /// Resolve a style for an entry.
     pub fn style_for(&mut self, name: &str, kind: EntryKind) -> Option<&FileStyle> {
         let name_lower = name.to_lowercase();
@@ -169,12 +214,23 @@ impl FileStyleRegistry {
             .find(|r| r.matcher.matches(name, &name_lower, kind, regex_cache))
             .map(|r| &r.style)
     }
+
+    /// Resolve style as an owned value, checking callback first then static rules.
+    pub fn style_for_owned(&mut self, name: &str, kind: EntryKind) -> Option<FileStyle> {
+        if let Some(cb) = &self.callback {
+            if let Some(style) = cb.resolve(name, kind) {
+                return Some(style);
+            }
+        }
+        self.style_for(name, kind).cloned()
+    }
 }
 
 impl Default for FileStyleRegistry {
     fn default() -> Self {
         Self {
             rules: Vec::new(),
+            callback: None,
             regex_cache: HashMap::new(),
         }
     }
@@ -262,6 +318,7 @@ mod tests {
                 text_color: Some([1.0, 0.0, 0.0, 1.0]),
                 icon: None,
                 tooltip: None,
+                font_token: None,
             },
         );
         assert!(
@@ -284,6 +341,7 @@ mod tests {
             text_color: Some([0.0, 1.0, 0.0, 1.0]),
             icon: None,
             tooltip: None,
+            font_token: None,
         });
         reg.push_extension_style(
             "txt",
@@ -291,6 +349,7 @@ mod tests {
                 text_color: Some([1.0, 0.0, 0.0, 1.0]),
                 icon: None,
                 tooltip: None,
+                font_token: None,
             },
         );
         let s = reg.style_for("a.txt", EntryKind::File).unwrap();
@@ -306,6 +365,7 @@ mod tests {
                 text_color: Some([0.0, 0.0, 1.0, 1.0]),
                 icon: None,
                 tooltip: None,
+                font_token: None,
             },
         );
         assert!(reg.style_for("README.md", EntryKind::File).is_some());
@@ -322,6 +382,7 @@ mod tests {
                 text_color: Some([0.2, 0.8, 0.2, 1.0]),
                 icon: None,
                 tooltip: None,
+                font_token: None,
             },
         );
         assert!(reg.style_for("imgui_demo.rs", EntryKind::File).is_some());
@@ -338,10 +399,57 @@ mod tests {
                 text_color: Some([0.9, 0.6, 0.2, 1.0]),
                 icon: None,
                 tooltip: None,
+                font_token: None,
             },
         );
         assert!(reg.style_for("imgui_demo.rs", EntryKind::File).is_some());
         assert!(reg.style_for("ImGui_demo.RS", EntryKind::File).is_some());
         assert!(reg.style_for("demo_imgui.rs", EntryKind::File).is_none());
+    }
+
+    #[test]
+    fn callback_takes_precedence_over_rules() {
+        let mut reg = FileStyleRegistry::default();
+        reg.push_file_style(FileStyle {
+            text_color: Some([0.0, 1.0, 0.0, 1.0]),
+            icon: Some("[R]".into()),
+            tooltip: None,
+            font_token: None,
+        });
+        reg.set_callback(FileStyleCallback::new(|name, kind| {
+            if matches!(kind, EntryKind::File) && name.eq_ignore_ascii_case("a.txt") {
+                Some(FileStyle {
+                    text_color: Some([1.0, 0.0, 0.0, 1.0]),
+                    icon: Some("[C]".into()),
+                    tooltip: Some("from callback".into()),
+                    font_token: Some("icon".into()),
+                })
+            } else {
+                None
+            }
+        }));
+
+        let s = reg.style_for_owned("a.txt", EntryKind::File).unwrap();
+        assert_eq!(s.icon.as_deref(), Some("[C]"));
+        assert_eq!(s.tooltip.as_deref(), Some("from callback"));
+        assert_eq!(s.font_token.as_deref(), Some("icon"));
+    }
+
+    #[test]
+    fn callback_falls_back_to_rules_when_none() {
+        let mut reg = FileStyleRegistry::default();
+        reg.push_name_style(
+            "readme.md",
+            FileStyle {
+                text_color: Some([0.1, 0.2, 0.3, 1.0]),
+                icon: Some("[DOC]".into()),
+                tooltip: None,
+                font_token: None,
+            },
+        );
+        reg.set_callback(FileStyleCallback::new(|_, _| None));
+
+        let s = reg.style_for_owned("README.md", EntryKind::File).unwrap();
+        assert_eq!(s.icon.as_deref(), Some("[DOC]"));
     }
 }

@@ -257,6 +257,7 @@ state.ui.file_styles.push_rule(
         icon: Some("[DIR]".into()),
         text_color: Some([0.9, 0.8, 0.3, 1.0]),
         tooltip: Some("Directory".into()),
+        font_token: None,
     },
 );
 state.ui.file_styles.push_extension_style(
@@ -265,6 +266,7 @@ state.ui.file_styles.push_extension_style(
         icon: Some("[IMG]".into()),
         text_color: Some([0.3, 0.8, 1.0, 1.0]),
         tooltip: Some("Image file".into()),
+        font_token: None,
     },
 );
 
@@ -275,6 +277,7 @@ state.ui.file_styles.push_name_contains_style(
         icon: Some("[DOC]".into()),
         text_color: Some([0.8, 0.8, 0.8, 1.0]),
         tooltip: Some("Documentation".into()),
+        font_token: None,
     },
 );
 state.ui.file_styles.push_name_regex_style(
@@ -283,8 +286,31 @@ state.ui.file_styles.push_name_regex_style(
         icon: Some("[SRC]".into()),
         text_color: Some([0.2, 0.9, 0.2, 1.0]),
         tooltip: Some("ImGui source".into()),
+        font_token: None,
     },
 );
+
+// Dynamic callback provider (evaluated before static rules):
+state
+    .ui
+    .file_styles
+    .set_callback(dear_file_browser::FileStyleCallback::new(|name, kind| {
+        if matches!(kind, dear_file_browser::EntryKind::File)
+            && name.to_ascii_lowercase().ends_with(".md")
+        {
+            Some(FileStyle {
+                icon: Some("[MD]".into()),
+                text_color: Some([0.9, 0.9, 0.5, 1.0]),
+                tooltip: Some("Markdown".into()),
+                font_token: Some("icons".into()),
+            })
+        } else {
+            None
+        }
+    }));
+
+// Optional font mapping for style font_token:
+// state.ui.file_style_fonts.insert("icons".into(), my_icon_font_id);
 ```
 
 ## Thumbnails (ImGui UI)

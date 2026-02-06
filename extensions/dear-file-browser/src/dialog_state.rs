@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use dear_imgui_rs::FontId;
+
 use crate::core::{DialogMode, LayoutStyle};
 use crate::dialog_core::FileDialogCore;
 use crate::file_style::FileStyleRegistry;
@@ -218,6 +220,8 @@ pub struct FileDialogUiState {
     pub delete_error: Option<String>,
     /// Clipboard state for copy/cut/paste operations.
     pub clipboard: Option<FileClipboard>,
+    /// Optional font mapping used by file style `font_token`.
+    pub file_style_fonts: std::collections::HashMap<String, FontId>,
     /// In-progress paste job state.
     pub(crate) paste_job: Option<PendingPasteJob>,
     /// Open the paste conflict modal on next frame.
@@ -305,6 +309,7 @@ impl Default for FileDialogUiState {
             delete_recursive: false,
             delete_error: None,
             clipboard: None,
+            file_style_fonts: std::collections::HashMap::new(),
             paste_job: None,
             paste_conflict_open_next: false,
             reveal_name_next: None,

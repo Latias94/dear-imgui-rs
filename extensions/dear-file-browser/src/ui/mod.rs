@@ -335,6 +335,33 @@ struct TextColorToken {
     pushed: bool,
 }
 
+struct StyleVisual {
+    text_color: Option<[f32; 4]>,
+    icon: Option<String>,
+    tooltip: Option<String>,
+    font_id: Option<dear_imgui_rs::FontId>,
+}
+
+fn style_visual_for_entry(state: &mut FileDialogState, e: &DirEntry) -> StyleVisual {
+    let kind = if e.is_dir {
+        EntryKind::Dir
+    } else {
+        EntryKind::File
+    };
+    let style = state.ui.file_styles.style_for_owned(&e.name, kind);
+    let font_id = style
+        .as_ref()
+        .and_then(|s| s.font_token.as_deref())
+        .and_then(|token| state.ui.file_style_fonts.get(token).copied());
+
+    StyleVisual {
+        text_color: style.as_ref().and_then(|s| s.text_color),
+        icon: style.as_ref().and_then(|s| s.icon.clone()),
+        tooltip: style.as_ref().and_then(|s| s.tooltip.clone()),
+        font_id,
+    }
+}
+
 impl TextColorToken {
     fn push(color: [f32; 4]) -> Self {
         unsafe {
@@ -1925,43 +1952,37 @@ fn draw_file_table_view(
             ui.table_next_column();
 
             let selected = state.core.selected.iter().any(|s| s == &e.name);
-            let kind = if e.is_dir {
-                EntryKind::Dir
-            } else {
-                EntryKind::File
-            };
-            let (text_color, icon, tooltip) = state
-                .ui
-                .file_styles
-                .style_for(&e.name, kind)
-                .map(|s| (s.text_color, s.icon.clone(), s.tooltip.clone()))
-                .unwrap_or((None, None, None));
+            let visual = style_visual_for_entry(state, e);
 
             let mut label = e.display_name();
-            if let Some(icon) = icon.as_deref() {
+            if let Some(icon) = visual.icon.as_deref() {
                 label = format!("{icon} {label}");
             }
-            let _color = text_color
+            let _font = visual.font_id.map(|id| ui.push_font(id));
+            let _color = visual
+                .text_color
                 .map(TextColorToken::push)
                 .unwrap_or_else(TextColorToken::none);
-            if ui
-                .selectable_config(label)
-                .selected(selected)
-                .span_all_columns(false)
-                .build()
             {
-                let modifiers = Modifiers {
-                    ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
-                    shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
-                };
-                state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
-                if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
-                    state.core.save_name = e.name.clone();
+                if ui
+                    .selectable_config(label)
+                    .selected(selected)
+                    .span_all_columns(false)
+                    .build()
+                {
+                    let modifiers = Modifiers {
+                        ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
+                        shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
+                    };
+                    state.core.click_entry(e.name.clone(), e.is_dir, modifiers);
+                    if matches!(state.core.mode, DialogMode::SaveFile) && !e.is_dir {
+                        state.core.save_name = e.name.clone();
+                    }
                 }
             }
 
             if ui.is_item_hovered() {
-                if let Some(t) = tooltip.as_deref() {
+                if let Some(t) = visual.tooltip.as_deref() {
                     ui.tooltip_text(t);
                 }
             }
@@ -2190,20 +2211,10 @@ fn draw_file_grid_view(
                     idx += 1;
 
                     let selected = state.core.selected.iter().any(|s| s == &e.name);
-                    let kind = if e.is_dir {
-                        EntryKind::Dir
-                    } else {
-                        EntryKind::File
-                    };
-                    let (text_color, icon, tooltip) = state
-                        .ui
-                        .file_styles
-                        .style_for(&e.name, kind)
-                        .map(|s| (s.text_color, s.icon.clone(), s.tooltip.clone()))
-                        .unwrap_or((None, None, None));
+                    let visual = style_visual_for_entry(state, e);
 
                     let mut label = e.display_name();
-                    if let Some(icon) = icon.as_deref() {
+                    if let Some(icon) = visual.icon.as_deref() {
                         label = format!("{icon} {label}");
                     }
 
@@ -2259,12 +2270,16 @@ fn draw_file_grid_view(
                     }
 
                     let text_pos = [item_min[0] + pad, img_max[1] + pad];
-                    let col = text_color
+                    let col = visual
+                        .text_color
                         .map(|c| dear_imgui_rs::Color::from_array(c))
                         .unwrap_or_else(|| dear_imgui_rs::Color::rgb(1.0, 1.0, 1.0));
-                    dl.with_clip_rect(item_min, item_max, || {
-                        dl.add_text(text_pos, col, &label);
-                    });
+                    let _font = visual.font_id.map(|id| ui.push_font(id));
+                    {
+                        dl.with_clip_rect(item_min, item_max, || {
+                            dl.add_text(text_pos, col, &label);
+                        });
+                    }
 
                     if clicked {
                         let modifiers = Modifiers {
@@ -2279,7 +2294,7 @@ fn draw_file_grid_view(
                     }
 
                     if ui.is_item_hovered() {
-                        if let Some(t) = tooltip.as_deref() {
+                        if let Some(t) = visual.tooltip.as_deref() {
                             ui.tooltip_text(t);
                         }
                     }

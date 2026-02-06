@@ -45,7 +45,7 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 |---|---:|---|
 | Call/Display split + multi instances | ✅ | `DialogManager` + stable ids. |
 | Custom pane that can block confirm | ✅ | `CustomPane` + `ConfirmGate`. |
-| File styles (type/ext/name/contains/regex/…) | ✅ | Rule-based registry; callback-based provider + font mapping TBD. |
+| File styles (type/ext/name/contains/regex/…) | ✅ | Rule-based registry + callback-based provider + optional `font_token -> FontId` mapping in UI state. |
 | Multi-selection (Ctrl/Shift) + Ctrl+A | ✅ | Supports optional “max N” cap (IGFD-style). |
 | Keyboard navigation + type-to-select | ✅ | Works in list & grid. |
 | Places: devices + bookmarks + custom groups | ✅ | Devices + bookmarks + user groups are editable (add/remove/rename); System group remains read-only. |

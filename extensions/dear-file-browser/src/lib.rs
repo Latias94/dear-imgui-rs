@@ -56,6 +56,8 @@ pub use dialog_state::{
     ValidationButtonsConfig, ValidationButtonsOrder,
 };
 #[cfg(feature = "imgui")]
+pub use file_style::FileStyleCallback;
+#[cfg(feature = "imgui")]
 pub use file_style::{EntryKind, FileStyle, FileStyleRegistry, StyleMatcher, StyleRule};
 #[cfg(feature = "imgui")]
 pub use fs::{FileSystem, FsEntry, FsMetadata, StdFileSystem};
