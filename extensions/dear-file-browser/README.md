@@ -10,6 +10,9 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 ![ImGui File Browser](https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/file_browser_imgui.png)
 
+> Note: the screenshot may lag behind the latest UI. For the current IGFD-like look/feel, run the demo in
+> `examples/04-integration/file_browser_imgui.rs`.
+
 ## Links
 
 - Native backend: https://github.com/PolyMeilex/rfd
