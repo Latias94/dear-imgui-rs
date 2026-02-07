@@ -45,6 +45,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - Navigation toolbar: back/forward/up/refresh with history
   - Toolbar density + optional icon labels (host-provided glyphs)
   - File-dialog style address bar (typed path + Go + history + Tab completion) + breadcrumbs (auto-compress on long paths)
+  - Bottom action row: status text + filter selector + OK/Cancel
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
   - Places: editable groups + bookmarks/devices, export/import via compact versioned string (v1)

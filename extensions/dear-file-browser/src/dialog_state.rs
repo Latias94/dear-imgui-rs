@@ -426,6 +426,8 @@ pub struct ToolbarIcons {
     pub new_folder: Option<String>,
     /// Icon for "Columns".
     pub columns: Option<String>,
+    /// Icon for "Options".
+    pub options: Option<String>,
 }
 
 /// Configuration for the dialog top toolbar ("chrome").

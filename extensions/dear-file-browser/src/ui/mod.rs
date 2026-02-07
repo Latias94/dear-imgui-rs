@@ -12,10 +12,13 @@ use dear_imgui_rs::{
 };
 
 use crate::core::{
-    ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy, SortMode,
+    ClickAction, DialogMode, ExtensionPolicy, FileDialogError, LayoutStyle, Selection, SortBy,
+    SortMode,
 };
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
-use crate::dialog_core::{ConfirmGate, CoreEvent, CoreEventOutcome, DirEntry, EntryId, Modifiers};
+use crate::dialog_core::{
+    ConfirmGate, CoreEvent, CoreEventOutcome, DirEntry, EntryId, Modifiers, ScanStatus,
+};
 use crate::dialog_state::FileDialogState;
 use crate::dialog_state::{
     ClipboardOp, CustomPaneDock, FileClipboard, FileListColumnsConfig, FileListDataColumn,
@@ -700,6 +703,42 @@ fn draw_contents_with_fs_and_hooks(
         if ui.checkbox("Hidden", &mut show_hidden) {
             state.core.show_hidden = show_hidden;
         }
+
+        ui.same_line();
+        if toolbar_button(
+            ui,
+            "toolbar_options",
+            "Options",
+            state.ui.toolbar.icons.options.as_deref(),
+            icon_mode,
+            show_tooltips,
+            "Options",
+        ) {
+            ui.open_popup("##fb_options");
+        }
+        if let Some(_popup) = ui.begin_popup("##fb_options") {
+            let mut nav_on_click = matches!(state.core.click_action, ClickAction::Navigate);
+            if ui.checkbox("Navigate on click", &mut nav_on_click) {
+                state.core.click_action = if nav_on_click {
+                    ClickAction::Navigate
+                } else {
+                    ClickAction::Select
+                };
+            }
+            let mut dbl = state.core.double_click;
+            if ui.checkbox("DblClick confirm", &mut dbl) {
+                state.core.double_click = dbl;
+            }
+            ui.separator();
+            ui.text_disabled("Shortcuts:");
+            ui.bullet_text("Ctrl+L: focus Path");
+            ui.bullet_text("Ctrl+F: focus Search");
+            ui.bullet_text("Alt+Left/Right: back/forward");
+            ui.bullet_text("Backspace: up");
+            ui.bullet_text("F5: refresh");
+            ui.bullet_text("Tab: path completion");
+            ui.bullet_text("Up/Down: path history");
+        }
         ui.new_line();
 
         // Path bar (file-dialog style address input) + Search.
@@ -1330,24 +1369,37 @@ fn draw_contents_with_fs_and_hooks(
     draw_paste_conflict_modal(ui, state, fs);
 
     ui.separator();
-    // Footer: file name (Save) + buttons
+    // Footer: save name + filter + status + buttons
     if matches!(state.core.mode, DialogMode::SaveFile) {
         ui.text("File name:");
         ui.same_line();
         ui.input_text("##save_name", &mut state.core.save_name)
             .build();
         ui.same_line();
-    }
-    // Filter selector (moved to footer like ImGuiFileDialog)
-    if !state.core.filters().is_empty() && !matches!(state.core.mode, DialogMode::PickFolder) {
+        ui.text_disabled(extension_policy_hint(
+            state.core.save_policy.extension_policy,
+        ));
         ui.same_line();
+        let overwrite = if state.core.save_policy.confirm_overwrite {
+            "Overwrite: ask"
+        } else {
+            "Overwrite: replace"
+        };
+        ui.text_disabled(overwrite);
+        ui.new_line();
+    }
+    // Action row: filter + status + buttons
+    if !state.core.filters().is_empty() && !matches!(state.core.mode, DialogMode::PickFolder) {
+        ui.text("Filter:");
+        ui.same_line();
+        ui.set_next_item_width(220.0);
         let preview = state
             .core
             .active_filter()
             .map(|f| f.name.as_str())
             .unwrap_or("All files");
         let mut next_active_filter = state.core.active_filter_index();
-        if let Some(_c) = ui.begin_combo("Filter", preview) {
+        if let Some(_c) = ui.begin_combo("##filter", preview) {
             if ui
                 .selectable_config("All files")
                 .selected(state.core.active_filter_index().is_none())
@@ -1372,31 +1424,11 @@ fn draw_contents_with_fs_and_hooks(
                 state.core.set_active_filter_all();
             }
         }
+        ui.same_line();
     }
 
-    // Click behavior toggle
-    let mut nav_on_click = matches!(state.core.click_action, ClickAction::Navigate);
-    if ui.checkbox("Navigate on click", &mut nav_on_click) {
-        state.core.click_action = if nav_on_click {
-            ClickAction::Navigate
-        } else {
-            ClickAction::Select
-        };
-    }
+    ui.text_disabled(footer_status_text(state, &confirm_gate));
     ui.same_line();
-    let mut dbl = state.core.double_click;
-    if ui.checkbox("DblClick confirm", &mut dbl) {
-        state.core.double_click = dbl;
-    }
-
-    if !confirm_gate.can_confirm {
-        if let Some(msg) = confirm_gate.message.as_deref() {
-            ui.same_line();
-            ui.text_disabled(msg);
-        }
-    }
-
-    ui.new_line();
     let (confirm, cancel) = draw_validation_buttons_row(ui, state, &confirm_gate);
 
     // Keyboard shortcuts (only when the host window is focused)
@@ -1524,6 +1556,59 @@ fn draw_validation_buttons_row(
             (confirm_clicked, cancel_clicked)
         }
     }
+}
+
+fn extension_policy_hint(p: ExtensionPolicy) -> &'static str {
+    match p {
+        ExtensionPolicy::KeepUser => "Ext: keep user",
+        ExtensionPolicy::AddIfMissing => "Ext: add if missing",
+        ExtensionPolicy::ReplaceByFilter => "Ext: enforce filter",
+    }
+}
+
+fn footer_status_text(state: &FileDialogState, gate: &ConfirmGate) -> String {
+    let visible = state.core.entries().len();
+    let selected = state.core.selected_len();
+
+    let scan = match state.core.scan_status() {
+        ScanStatus::Idle => None,
+        ScanStatus::Scanning { .. } => Some("Scanning".to_string()),
+        ScanStatus::Partial { loaded, .. } => Some(format!("Loading {loaded}")),
+        ScanStatus::Complete { .. } => None,
+        ScanStatus::Failed { .. } => Some("Scan failed".to_string()),
+    };
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(s) = scan {
+        parts.push(s);
+    }
+    parts.push(format!("{visible} items"));
+    if selected > 0 {
+        parts.push(format!("{selected} selected"));
+    }
+
+    if !state.core.filters().is_empty() && !matches!(state.core.mode, DialogMode::PickFolder) {
+        let f = state
+            .core
+            .active_filter()
+            .map(|f| f.name.as_str())
+            .unwrap_or("All files");
+        parts.push(format!("Filter: {f}"));
+    }
+
+    if !state.core.search.trim().is_empty() {
+        parts.push("Search: on".to_string());
+    }
+
+    if !gate.can_confirm {
+        if let Some(msg) = gate.message.as_deref() {
+            parts.push(format!("Blocked: {msg}"));
+        } else {
+            parts.push("Blocked".to_string());
+        }
+    }
+
+    parts.join(" | ")
 }
 
 fn draw_confirm_overwrite_modal(ui: &Ui, state: &mut FileDialogState) {

@@ -741,11 +741,11 @@ This milestone is UI/UX heavy and may change widget layout and transient UI stat
 
 ### Epic 19.4 - Bottom action row parity (Save/Open ergonomics)
 
-- [ ] Task: tune the bottom row to match common file dialog expectations
-  - Candidates:
-    - Save filename field + extension policy hints
-    - filter combo placement (bottom row vs top) as a configurable option
-    - status text ("N items", selection count, current filter)
+- [x] Task: tune the bottom row to match common file dialog expectations
+  - Done:
+    - Save filename field + extension policy hints + overwrite confirmation hint
+    - status text ("N items", selection count, current filter, scan state)
+    - filter selector moved to the action row (file dialog style)
   - Acceptance:
     - a demo can match IGFD’s "save" flow without forking UI code
 
