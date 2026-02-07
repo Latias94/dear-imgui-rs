@@ -12,7 +12,7 @@ imnodes = ["dep:dear-imnodes", "dear-app/imnodes"]
 imguizmo-quat = ["dep:dear-imguizmo-quat"]
 implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
-file-browser = ["dep:dear-file-browser"]
+file-browser = ["dep:dear-file-browser", "dear-file-browser/thumbnails-image"]
 reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
 multi-viewport = [
     "dear-imgui-rs/multi-viewport",

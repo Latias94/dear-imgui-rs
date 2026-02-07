@@ -4,7 +4,10 @@
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use dear_file_browser::{DialogMode, FileDialogExt, FileDialogState};
+use dear_file_browser::{
+    DialogMode, FileDialogExt, FileDialogState, FileListViewMode, ImageThumbnailProvider,
+    ThumbnailBackend, ThumbnailRenderer,
+};
 use dear_imgui_glow::GlowRenderer;
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
@@ -21,7 +24,6 @@ use winit::{
     dpi::LogicalSize,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
 
@@ -39,6 +41,7 @@ struct AppWindow {
     imgui: ImguiState,
     // demo state
     browser: FileDialogState,
+    thumbnails_provider: ImageThumbnailProvider,
     status: String,
 }
 
@@ -97,7 +100,10 @@ impl AppWindow {
             let mut st = FileDialogState::new(DialogMode::OpenFiles);
             let filter =
                 dear_file_browser::FileFilter::from(("Images", &["png", "jpg", "jpeg"][..]));
-            st.core.filters = vec![filter];
+            st.core.set_filters(vec![filter]);
+            st.ui.file_list_view = FileListViewMode::ThumbnailsList;
+            st.ui.thumbnails_enabled = true;
+            st.ui.file_list_columns.show_preview = true;
             st
         };
 
@@ -112,6 +118,7 @@ impl AppWindow {
                 last_frame: Instant::now(),
             },
             browser,
+            thumbnails_provider: ImageThumbnailProvider::default(),
             status: String::new(),
         })
     }
@@ -160,7 +167,26 @@ impl AppWindow {
 
                 ui.separator();
                 if self.browser.is_open() {
-                    if let Some(res) = ui.file_browser().show(&mut self.browser) {
+                    let gl = self
+                        .imgui
+                        .renderer
+                        .gl_context()
+                        .cloned()
+                        .expect("GlowRenderer missing gl_context");
+                    let mut renderer = GlowThumbnailRenderer {
+                        gl: &gl,
+                        texture_map: self.imgui.renderer.texture_map_mut(),
+                    };
+                    let mut backend = ThumbnailBackend {
+                        provider: &mut self.thumbnails_provider,
+                        renderer: &mut renderer,
+                    };
+                    if let Some(res) = ui.file_browser().draw_contents_with(
+                        &mut self.browser,
+                        &dear_file_browser::StdFileSystem,
+                        None,
+                        Some(&mut backend),
+                    ) {
                         match res {
                             Ok(sel) => {
                                 self.status = format!("Selected {} path(s)", sel.paths.len());
@@ -190,6 +216,41 @@ impl AppWindow {
         self.imgui.renderer.render(&draw_data)?;
         self.surface.swap_buffers(&self.context)?;
         Ok(())
+    }
+}
+
+struct GlowThumbnailRenderer<'a> {
+    gl: &'a glow::Context,
+    texture_map: &'a mut dyn dear_imgui_glow::TextureMap,
+}
+
+impl ThumbnailRenderer for GlowThumbnailRenderer<'_> {
+    fn upload_rgba8(
+        &mut self,
+        image: &dear_file_browser::DecodedRgbaImage,
+    ) -> Result<TextureId, String> {
+        let gl_tex = dear_imgui_glow::create_texture_from_rgba(
+            self.gl,
+            image.width,
+            image.height,
+            &image.rgba,
+        )
+        .map_err(|e| format!("{e}"))?;
+        Ok(self.texture_map.register_texture(
+            gl_tex,
+            image.width as i32,
+            image.height as i32,
+            dear_imgui_rs::TextureFormat::RGBA32,
+        ))
+    }
+
+    fn destroy(&mut self, texture_id: TextureId) {
+        let Some(gl_tex) = self.texture_map.remove(texture_id) else {
+            return;
+        };
+        unsafe {
+            self.gl.delete_texture(gl_tex);
+        }
     }
 }
 
@@ -242,7 +303,7 @@ impl ApplicationHandler for App {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut event_loop = EventLoop::new()?;
+    let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App::default();
     event_loop.run_app(&mut app)?;
