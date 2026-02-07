@@ -40,7 +40,7 @@ mod ui;
 
 pub use core::{
     Backend, ClickAction, DialogMode, ExtensionPolicy, FileDialog, FileDialogError, FileFilter,
-    LayoutStyle, SavePolicy, Selection, SortBy,
+    LayoutStyle, SavePolicy, Selection, SortBy, SortMode,
 };
 #[cfg(feature = "imgui")]
 pub use custom_pane::{CustomPane, CustomPaneCtx};
@@ -55,9 +55,9 @@ pub use dialog_manager::{DialogId, DialogManager};
 pub use dialog_state::FileListViewMode;
 #[cfg(feature = "imgui")]
 pub use dialog_state::{
-    ClipboardOp, FileClipboard, FileDialogState, FileDialogUiState, FileListColumnWeightOverrides,
-    FileListColumnsConfig, FileListColumnsDeserializeError, FileListDataColumn,
-    ValidationButtonsAlign, ValidationButtonsConfig, ValidationButtonsOrder,
+    ClipboardOp, CustomPaneDock, FileClipboard, FileDialogState, FileDialogUiState,
+    FileListColumnWeightOverrides, FileListColumnsConfig, FileListColumnsDeserializeError,
+    FileListDataColumn, ValidationButtonsAlign, ValidationButtonsConfig, ValidationButtonsOrder,
 };
 #[cfg(feature = "imgui")]
 pub use file_style::FileStyleCallback;
@@ -67,7 +67,8 @@ pub use file_style::{EntryKind, FileStyle, FileStyleRegistry, StyleMatcher, Styl
 pub use fs::{FileSystem, FsEntry, FsMetadata, StdFileSystem};
 #[cfg(feature = "imgui")]
 pub use places::{
-    Place, PlaceGroup, PlaceOrigin, Places, PlacesDeserializeError, PlacesSerializeOptions,
+    Place, PlaceGroup, PlaceOrigin, Places, PlacesDeserializeError, PlacesMergeOptions,
+    PlacesSerializeOptions,
 };
 #[cfg(feature = "imgui")]
 pub use thumbnails::{

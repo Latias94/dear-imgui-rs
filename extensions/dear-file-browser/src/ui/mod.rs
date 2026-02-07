@@ -3,16 +3,18 @@ use std::time::{Duration, Instant};
 
 use dear_imgui_rs::TreeNodeFlags;
 use dear_imgui_rs::Ui;
-use dear_imgui_rs::input::{Key, MouseButton};
+use dear_imgui_rs::input::{Key, MouseButton, MouseCursor};
 use dear_imgui_rs::sys;
 
-use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy};
+use crate::core::{
+    ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy, SortMode,
+};
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, CoreEvent, CoreEventOutcome, DirEntry, EntryId, Modifiers};
 use crate::dialog_state::FileDialogState;
 use crate::dialog_state::{
-    ClipboardOp, FileClipboard, FileListColumnsConfig, FileListDataColumn, FileListViewMode,
-    PasteConflictAction, PasteConflictPrompt, PendingPasteJob,
+    ClipboardOp, CustomPaneDock, FileClipboard, FileListColumnsConfig, FileListDataColumn,
+    FileListViewMode, PasteConflictAction, PasteConflictPrompt, PendingPasteJob,
 };
 use crate::dialog_state::{ValidationButtonsAlign, ValidationButtonsOrder};
 use crate::file_style::EntryKind;
@@ -369,6 +371,7 @@ fn draw_contents_with_fs_and_hooks(
         return None;
     }
 
+    let has_thumbnail_backend = thumbnails_backend.is_some();
     let mut request_confirm = false;
     let mut confirm_gate = ConfirmGate::default();
 
@@ -381,43 +384,172 @@ fn draw_contents_with_fs_and_hooks(
         state.core.invalidate_dir_cache();
     }
     ui.same_line();
-    if ui.button("New Folder") {
-        state.ui.new_folder_open_next = true;
-        state.ui.new_folder_name.clear();
-        state.ui.new_folder_error = None;
-        state.ui.new_folder_focus_next = true;
+    if state.ui.new_folder_enabled {
+        if ui.button("New Folder") {
+            state.ui.new_folder_open_next = true;
+            state.ui.new_folder_name.clear();
+            state.ui.new_folder_error = None;
+            state.ui.new_folder_focus_next = true;
+        }
+        ui.same_line();
     }
-    ui.same_line();
     ui.text("View:");
     ui.same_line();
-    if ui.radio_button(
-        "List",
-        matches!(state.ui.file_list_view, FileListViewMode::List),
-    ) {
-        state.ui.file_list_view = FileListViewMode::List;
+    let view_preview = match state.ui.file_list_view {
+        FileListViewMode::List => "List",
+        FileListViewMode::ThumbnailsList => "Thumbs",
+        FileListViewMode::Grid => "Grid",
+    };
+    if let Some(_c) = ui.begin_combo("##view_mode", view_preview) {
+        if ui
+            .selectable_config("List")
+            .selected(matches!(state.ui.file_list_view, FileListViewMode::List))
+            .build()
+        {
+            state.ui.file_list_view = FileListViewMode::List;
+        }
+        if ui
+            .selectable_config("Thumbs")
+            .selected(matches!(
+                state.ui.file_list_view,
+                FileListViewMode::ThumbnailsList
+            ))
+            .build()
+        {
+            state.ui.file_list_view = FileListViewMode::ThumbnailsList;
+            state.ui.thumbnails_enabled = true;
+            state.ui.file_list_columns.show_preview = true;
+        }
+        if ui
+            .selectable_config("Grid")
+            .selected(matches!(state.ui.file_list_view, FileListViewMode::Grid))
+            .build()
+        {
+            state.ui.file_list_view = FileListViewMode::Grid;
+            state.ui.thumbnails_enabled = true;
+        }
     }
-    ui.same_line();
-    if ui.radio_button(
-        "Grid",
-        matches!(state.ui.file_list_view, FileListViewMode::Grid),
+
+    if matches!(
+        state.ui.file_list_view,
+        FileListViewMode::ThumbnailsList | FileListViewMode::Grid
     ) {
-        state.ui.file_list_view = FileListViewMode::Grid;
         state.ui.thumbnails_enabled = true;
     }
-    if matches!(state.ui.file_list_view, FileListViewMode::List) {
+
+    if matches!(state.ui.file_list_view, FileListViewMode::Grid) {
+        ui.same_line();
+        ui.text("Sort:");
+        ui.same_line();
+        let preview = format!(
+            "{} {}",
+            match state.core.sort_by {
+                SortBy::Name => "Name",
+                SortBy::Extension => "Ext",
+                SortBy::Size => "Size",
+                SortBy::Modified => "Modified",
+            },
+            if state.core.sort_ascending {
+                "↑"
+            } else {
+                "↓"
+            }
+        );
+        let mut next_by = state.core.sort_by;
+        let mut next_asc = state.core.sort_ascending;
+        if let Some(_c) = ui.begin_combo("##grid_sort", &preview) {
+            let items = [
+                (SortBy::Name, "Name"),
+                (SortBy::Extension, "Ext"),
+                (SortBy::Size, "Size"),
+                (SortBy::Modified, "Modified"),
+            ];
+            for (by, label) in items {
+                if ui.selectable_config(label).selected(next_by == by).build() {
+                    next_by = by;
+                }
+            }
+            ui.separator();
+            if ui.selectable_config("Ascending").selected(next_asc).build() {
+                next_asc = true;
+            }
+            if ui
+                .selectable_config("Descending")
+                .selected(!next_asc)
+                .build()
+            {
+                next_asc = false;
+            }
+        }
+        if next_by != state.core.sort_by || next_asc != state.core.sort_ascending {
+            state.core.sort_by = next_by;
+            state.core.sort_ascending = next_asc;
+        }
+    }
+
+    if state.ui.thumbnails_enabled {
+        ui.same_line();
+        ui.text("Thumb:");
+        ui.same_line();
+        if ui.small_button("S") {
+            state.ui.thumbnail_size = [20.0, 20.0];
+        }
+        ui.same_line();
+        if ui.small_button("M") {
+            state.ui.thumbnail_size = [32.0, 32.0];
+        }
+        ui.same_line();
+        if ui.small_button("L") {
+            state.ui.thumbnail_size = [48.0, 48.0];
+        }
+        if !has_thumbnail_backend {
+            ui.same_line();
+            ui.text_disabled("No thumbnail backend");
+        }
+    }
+
+    if matches!(
+        state.ui.file_list_view,
+        FileListViewMode::List | FileListViewMode::ThumbnailsList
+    ) {
         ui.same_line();
         if let Some(_popup) = ui.begin_combo("Columns", "Configure") {
-            ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
+            match state.ui.file_list_view {
+                FileListViewMode::List => {
+                    let mut enabled = state.ui.thumbnails_enabled;
+                    if ui.checkbox("Enable thumbnails", &mut enabled) {
+                        state.ui.thumbnails_enabled = enabled;
+                    }
+                    if state.ui.thumbnails_enabled {
+                        ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
+                    } else {
+                        ui.text_disabled("Preview (enable thumbnails)");
+                    }
+                }
+                FileListViewMode::ThumbnailsList => {
+                    ui.text_disabled("Preview (forced by Thumbs view)");
+                }
+                FileListViewMode::Grid => {}
+            }
+            ui.checkbox("Ext", &mut state.ui.file_list_columns.show_extension);
             ui.checkbox("Size", &mut state.ui.file_list_columns.show_size);
             ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
 
             ui.separator();
             if ui.small_button("Compact") {
-                apply_compact_column_layout(&mut state.ui.file_list_columns);
+                if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
+                    apply_compact_column_layout_keep_preview(&mut state.ui.file_list_columns);
+                } else {
+                    apply_compact_column_layout(&mut state.ui.file_list_columns);
+                }
             }
             ui.same_line();
             if ui.small_button("Balanced") {
-                apply_balanced_column_layout(&mut state.ui.file_list_columns);
+                if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
+                    apply_balanced_column_layout_keep_preview(&mut state.ui.file_list_columns);
+                } else {
+                    apply_balanced_column_layout(&mut state.ui.file_list_columns);
+                }
             }
 
             ui.separator();
@@ -446,6 +578,16 @@ fn draw_contents_with_fs_and_hooks(
 
             if ui.small_button("Reset columns") {
                 state.ui.file_list_columns = FileListColumnsConfig::default();
+            }
+
+            ui.separator();
+            let mut natural_sort = matches!(state.core.sort_mode, SortMode::Natural);
+            if ui.checkbox("Natural sort", &mut natural_sort) {
+                state.core.sort_mode = if natural_sort {
+                    SortMode::Natural
+                } else {
+                    SortMode::Lexicographic
+                };
             }
         }
     }
@@ -508,52 +650,128 @@ fn draw_contents_with_fs_and_hooks(
                 .size([avail[0] - left_w - 8.0, avail[1] - 80.0])
                 .build(ui, || {
                     let inner = ui.content_region_avail();
-                    let mut table_h = inner[1];
                     let show_pane =
                         state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
-                    let pane_h = if show_pane {
-                        state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0))
-                    } else {
-                        0.0
-                    };
-                    if pane_h > 0.0 {
-                        table_h = (table_h - pane_h - 8.0).max(0.0);
+                    if !show_pane {
+                        draw_file_table(
+                            ui,
+                            state,
+                            [inner[0], inner[1]],
+                            fs,
+                            &mut request_confirm,
+                            thumbnails_backend.as_deref_mut(),
+                        );
+                        return;
                     }
 
-                    draw_file_table(
-                        ui,
-                        state,
-                        [inner[0], table_h],
-                        fs,
-                        &mut request_confirm,
-                        thumbnails_backend.as_deref_mut(),
-                    );
+                    match state.ui.custom_pane_dock {
+                        CustomPaneDock::Bottom => {
+                            let pane_h = state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
+                            let mut table_h = inner[1];
+                            if pane_h > 0.0 {
+                                table_h = (table_h - pane_h - 8.0).max(0.0);
+                            }
 
-                    if let Some(pane) = custom_pane.as_deref_mut() {
-                        if state.ui.custom_pane_enabled && pane_h > 0.0 {
-                            ui.separator();
-                            ui.child_window("custom_pane")
-                                .size([inner[0], pane_h])
+                            draw_file_table(
+                                ui,
+                                state,
+                                [inner[0], table_h],
+                                fs,
+                                &mut request_confirm,
+                                thumbnails_backend.as_deref_mut(),
+                            );
+
+                            if let Some(pane) = custom_pane.as_deref_mut() {
+                                if state.ui.custom_pane_enabled && pane_h > 0.0 {
+                                    ui.separator();
+                                    ui.child_window("custom_pane")
+                                        .size([inner[0], pane_h])
+                                        .border(true)
+                                        .build(ui, || {
+                                            let selected_entry_ids =
+                                                state.core.selected_entry_ids();
+                                            let selected_paths =
+                                                selected_entry_paths_from_ids(state);
+                                            let (selected_files_count, selected_dirs_count) =
+                                                selected_entry_counts_from_ids(state);
+                                            let ctx = CustomPaneCtx {
+                                                mode: state.core.mode,
+                                                cwd: &state.core.cwd,
+                                                selected_entry_ids: &selected_entry_ids,
+                                                selected_paths: &selected_paths,
+                                                selected_files_count,
+                                                selected_dirs_count,
+                                                save_name: &state.core.save_name,
+                                                active_filter: state.core.active_filter(),
+                                            };
+                                            confirm_gate = pane.draw(ui, ctx);
+                                        });
+                                }
+                            }
+                        }
+                        CustomPaneDock::Right => {
+                            const SPLITTER_W: f32 = 6.0;
+                            const MIN_TABLE_W: f32 = 120.0;
+                            const MIN_PANE_W: f32 = 120.0;
+
+                            let max_pane_w = (inner[0] - MIN_TABLE_W - SPLITTER_W).max(0.0);
+                            let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
+                            if max_pane_w >= MIN_PANE_W {
+                                pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
+                            }
+
+                            let table_w = (inner[0] - pane_w - SPLITTER_W).max(0.0);
+
+                            ui.child_window("file_table_rightdock")
+                                .size([table_w, inner[1]])
+                                .build(ui, || {
+                                    draw_file_table(
+                                        ui,
+                                        state,
+                                        [table_w, inner[1]],
+                                        fs,
+                                        &mut request_confirm,
+                                        thumbnails_backend.as_deref_mut(),
+                                    );
+                                });
+
+                            ui.same_line();
+                            ui.invisible_button("custom_pane_splitter", [SPLITTER_W, inner[1]]);
+                            if ui.is_item_hovered() || ui.is_item_active() {
+                                ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
+                            }
+                            if ui.is_item_active() {
+                                let dx = ui.io().mouse_delta()[0];
+                                let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
+                                state.ui.custom_pane_width = if max_pane_w >= MIN_PANE_W {
+                                    new_w.clamp(MIN_PANE_W, max_pane_w)
+                                } else {
+                                    new_w
+                                };
+                            }
+
+                            ui.same_line();
+                            ui.child_window("custom_pane_rightdock")
+                                .size([pane_w, inner[1]])
                                 .border(true)
                                 .build(ui, || {
-                                    let selected_entry_ids = state.core.selected_entry_ids();
-                                    let selected_paths = selected_entry_paths_from_ids(state);
-                                    let (selected_files_count, selected_dirs_count) =
-                                        selected_entry_counts_from_ids(state);
-                                    let ctx = CustomPaneCtx {
-                                        mode: state.core.mode,
-                                        cwd: &state.core.cwd,
-                                        selected_entry_ids: &selected_entry_ids,
-                                        selected_paths: &selected_paths,
-                                        selected_files_count,
-                                        selected_dirs_count,
-                                        save_name: &state.core.save_name,
-                                        active_filter: state
-                                            .core
-                                            .active_filter
-                                            .and_then(|i| state.core.filters.get(i)),
-                                    };
-                                    confirm_gate = pane.draw(ui, ctx);
+                                    if let Some(pane) = custom_pane.as_deref_mut() {
+                                        let selected_entry_ids = state.core.selected_entry_ids();
+                                        let selected_paths = selected_entry_paths_from_ids(state);
+                                        let (selected_files_count, selected_dirs_count) =
+                                            selected_entry_counts_from_ids(state);
+                                        let ctx = CustomPaneCtx {
+                                            mode: state.core.mode,
+                                            cwd: &state.core.cwd,
+                                            selected_entry_ids: &selected_entry_ids,
+                                            selected_paths: &selected_paths,
+                                            selected_files_count,
+                                            selected_dirs_count,
+                                            save_name: &state.core.save_name,
+                                            active_filter: state.core.active_filter(),
+                                        };
+                                        confirm_gate = pane.draw(ui, ctx);
+                                    }
                                 });
                         }
                     }
@@ -564,52 +782,128 @@ fn draw_contents_with_fs_and_hooks(
                 .size([avail[0], avail[1] - 80.0])
                 .build(ui, || {
                     let inner = ui.content_region_avail();
-                    let mut table_h = inner[1];
                     let show_pane =
                         state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
-                    let pane_h = if show_pane {
-                        state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0))
-                    } else {
-                        0.0
-                    };
-                    if pane_h > 0.0 {
-                        table_h = (table_h - pane_h - 8.0).max(0.0);
+                    if !show_pane {
+                        draw_file_table(
+                            ui,
+                            state,
+                            [inner[0], inner[1]],
+                            fs,
+                            &mut request_confirm,
+                            thumbnails_backend.as_deref_mut(),
+                        );
+                        return;
                     }
 
-                    draw_file_table(
-                        ui,
-                        state,
-                        [inner[0], table_h],
-                        fs,
-                        &mut request_confirm,
-                        thumbnails_backend.as_deref_mut(),
-                    );
+                    match state.ui.custom_pane_dock {
+                        CustomPaneDock::Bottom => {
+                            let pane_h = state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
+                            let mut table_h = inner[1];
+                            if pane_h > 0.0 {
+                                table_h = (table_h - pane_h - 8.0).max(0.0);
+                            }
 
-                    if let Some(pane) = custom_pane.as_deref_mut() {
-                        if state.ui.custom_pane_enabled && pane_h > 0.0 {
-                            ui.separator();
-                            ui.child_window("custom_pane")
-                                .size([inner[0], pane_h])
+                            draw_file_table(
+                                ui,
+                                state,
+                                [inner[0], table_h],
+                                fs,
+                                &mut request_confirm,
+                                thumbnails_backend.as_deref_mut(),
+                            );
+
+                            if let Some(pane) = custom_pane.as_deref_mut() {
+                                if state.ui.custom_pane_enabled && pane_h > 0.0 {
+                                    ui.separator();
+                                    ui.child_window("custom_pane")
+                                        .size([inner[0], pane_h])
+                                        .border(true)
+                                        .build(ui, || {
+                                            let selected_entry_ids =
+                                                state.core.selected_entry_ids();
+                                            let selected_paths =
+                                                selected_entry_paths_from_ids(state);
+                                            let (selected_files_count, selected_dirs_count) =
+                                                selected_entry_counts_from_ids(state);
+                                            let ctx = CustomPaneCtx {
+                                                mode: state.core.mode,
+                                                cwd: &state.core.cwd,
+                                                selected_entry_ids: &selected_entry_ids,
+                                                selected_paths: &selected_paths,
+                                                selected_files_count,
+                                                selected_dirs_count,
+                                                save_name: &state.core.save_name,
+                                                active_filter: state.core.active_filter(),
+                                            };
+                                            confirm_gate = pane.draw(ui, ctx);
+                                        });
+                                }
+                            }
+                        }
+                        CustomPaneDock::Right => {
+                            const SPLITTER_W: f32 = 6.0;
+                            const MIN_TABLE_W: f32 = 120.0;
+                            const MIN_PANE_W: f32 = 120.0;
+
+                            let max_pane_w = (inner[0] - MIN_TABLE_W - SPLITTER_W).max(0.0);
+                            let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
+                            if max_pane_w >= MIN_PANE_W {
+                                pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
+                            }
+
+                            let table_w = (inner[0] - pane_w - SPLITTER_W).max(0.0);
+
+                            ui.child_window("file_table_rightdock")
+                                .size([table_w, inner[1]])
+                                .build(ui, || {
+                                    draw_file_table(
+                                        ui,
+                                        state,
+                                        [table_w, inner[1]],
+                                        fs,
+                                        &mut request_confirm,
+                                        thumbnails_backend.as_deref_mut(),
+                                    );
+                                });
+
+                            ui.same_line();
+                            ui.invisible_button("custom_pane_splitter", [SPLITTER_W, inner[1]]);
+                            if ui.is_item_hovered() || ui.is_item_active() {
+                                ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
+                            }
+                            if ui.is_item_active() {
+                                let dx = ui.io().mouse_delta()[0];
+                                let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
+                                state.ui.custom_pane_width = if max_pane_w >= MIN_PANE_W {
+                                    new_w.clamp(MIN_PANE_W, max_pane_w)
+                                } else {
+                                    new_w
+                                };
+                            }
+
+                            ui.same_line();
+                            ui.child_window("custom_pane_rightdock")
+                                .size([pane_w, inner[1]])
                                 .border(true)
                                 .build(ui, || {
-                                    let selected_entry_ids = state.core.selected_entry_ids();
-                                    let selected_paths = selected_entry_paths_from_ids(state);
-                                    let (selected_files_count, selected_dirs_count) =
-                                        selected_entry_counts_from_ids(state);
-                                    let ctx = CustomPaneCtx {
-                                        mode: state.core.mode,
-                                        cwd: &state.core.cwd,
-                                        selected_entry_ids: &selected_entry_ids,
-                                        selected_paths: &selected_paths,
-                                        selected_files_count,
-                                        selected_dirs_count,
-                                        save_name: &state.core.save_name,
-                                        active_filter: state
-                                            .core
-                                            .active_filter
-                                            .and_then(|i| state.core.filters.get(i)),
-                                    };
-                                    confirm_gate = pane.draw(ui, ctx);
+                                    if let Some(pane) = custom_pane.as_deref_mut() {
+                                        let selected_entry_ids = state.core.selected_entry_ids();
+                                        let selected_paths = selected_entry_paths_from_ids(state);
+                                        let (selected_files_count, selected_dirs_count) =
+                                            selected_entry_counts_from_ids(state);
+                                        let ctx = CustomPaneCtx {
+                                            mode: state.core.mode,
+                                            cwd: &state.core.cwd,
+                                            selected_entry_ids: &selected_entry_ids,
+                                            selected_paths: &selected_paths,
+                                            selected_files_count,
+                                            selected_dirs_count,
+                                            save_name: &state.core.save_name,
+                                            active_filter: state.core.active_filter(),
+                                        };
+                                        confirm_gate = pane.draw(ui, ctx);
+                                    }
                                 });
                         }
                     }
@@ -634,35 +928,38 @@ fn draw_contents_with_fs_and_hooks(
         ui.same_line();
     }
     // Filter selector (moved to footer like ImGuiFileDialog)
-    if !state.core.filters.is_empty() && !matches!(state.core.mode, DialogMode::PickFolder) {
+    if !state.core.filters().is_empty() && !matches!(state.core.mode, DialogMode::PickFolder) {
         ui.same_line();
         let preview = state
             .core
-            .active_filter
-            .and_then(|i| state.core.filters.get(i))
+            .active_filter()
             .map(|f| f.name.as_str())
             .unwrap_or("All files");
-        let mut next_active_filter = state.core.active_filter;
+        let mut next_active_filter = state.core.active_filter_index();
         if let Some(_c) = ui.begin_combo("Filter", preview) {
             if ui
                 .selectable_config("All files")
-                .selected(state.core.active_filter.is_none())
+                .selected(state.core.active_filter_index().is_none())
                 .build()
             {
                 next_active_filter = None;
             }
-            for (i, f) in state.core.filters.iter().enumerate() {
+            for (i, f) in state.core.filters().iter().enumerate() {
                 if ui
                     .selectable_config(&f.name)
-                    .selected(state.core.active_filter == Some(i))
+                    .selected(state.core.active_filter_index() == Some(i))
                     .build()
                 {
                     next_active_filter = Some(i);
                 }
             }
         }
-        if next_active_filter != state.core.active_filter {
-            state.core.active_filter = next_active_filter;
+        if next_active_filter != state.core.active_filter_index() {
+            if let Some(i) = next_active_filter {
+                let _ = state.core.set_active_filter_index(i);
+            } else {
+                state.core.set_active_filter_all();
+            }
         }
     }
 
@@ -843,6 +1140,12 @@ fn draw_confirm_overwrite_modal(ui: &Ui, state: &mut FileDialogState) {
 
 fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
     const POPUP_ID: &str = "New Folder";
+
+    if !state.ui.new_folder_enabled {
+        state.ui.new_folder_open_next = false;
+        state.ui.new_folder_error = None;
+        return;
+    }
 
     if state.ui.new_folder_open_next {
         state.ui.new_folder_open_next = false;
@@ -1640,11 +1943,21 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf>
 
     ui.separator();
 
-    let groups = state.core.places.groups.clone();
+    let mut groups = state.core.places.groups.clone();
+    groups.sort_by(|a, b| {
+        a.display_order
+            .cmp(&b.display_order)
+            .then_with(|| a.label.to_lowercase().cmp(&b.label.to_lowercase()))
+    });
     let mut remove_place: Option<(String, PathBuf)> = None;
     let mut edit_req: Option<PlacesEditRequest> = None;
     for (gi, g) in groups.iter().enumerate() {
-        let open = ui.collapsing_header(&g.label, TreeNodeFlags::DEFAULT_OPEN);
+        let flags = if g.default_opened {
+            TreeNodeFlags::DEFAULT_OPEN
+        } else {
+            TreeNodeFlags::NONE
+        };
+        let open = ui.collapsing_header(&g.label, flags);
         if let Some(_popup) = ui.begin_popup_context_item() {
             let is_system = g.label == Places::SYSTEM_GROUP;
             let is_reserved = is_system || g.label == Places::BOOKMARKS_GROUP;
@@ -1673,13 +1986,25 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf>
 
         for (pi, p) in g.places.iter().enumerate() {
             let _id = ui.push_id((gi * 10_000 + pi) as i32);
+            if let Some(thickness) = p.separator_thickness {
+                if thickness > 1 {
+                    ui.dummy([0.0, (thickness - 1) as f32]);
+                }
+                ui.separator();
+                if thickness > 1 {
+                    ui.dummy([0.0, (thickness - 1) as f32]);
+                }
+                continue;
+            }
             if ui.selectable_config(&p.label).build() {
                 out = Some(p.path.clone());
             }
             if let Some(_popup) = ui.begin_popup_context_item() {
                 ui.text_disabled(&p.path.display().to_string());
                 ui.separator();
-                let editable = p.origin == PlaceOrigin::User && g.label != Places::SYSTEM_GROUP;
+                let editable = !p.is_separator()
+                    && p.origin == PlaceOrigin::User
+                    && g.label != Places::SYSTEM_GROUP;
                 if ui.menu_item_enabled_selected("Edit...", None::<&str>, false, editable) {
                     edit_req = Some(PlacesEditRequest::edit_place(&g.label, p));
                     ui.close_current_popup();
@@ -1853,11 +2178,12 @@ fn draw_places_io_modal(ui: &Ui, state: &mut FileDialogState) {
             if ui.button("Merge") {
                 match Places::deserialize_compact(&state.ui.places_io_buffer) {
                     Ok(p) => {
-                        for g in p.groups {
-                            for place in g.places {
-                                state.core.places.add_place(g.label.clone(), place);
-                            }
-                        }
+                        state.core.places.merge_from(
+                            p,
+                            crate::places::PlacesMergeOptions {
+                                overwrite_group_metadata: true,
+                            },
+                        );
                         state.ui.places_io_error = None;
                     }
                     Err(e) => {
@@ -1883,8 +2209,26 @@ fn draw_file_table(
     thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) {
     match state.ui.file_list_view {
-        FileListViewMode::List => {
-            draw_file_table_view(ui, state, size, fs, request_confirm, thumbnails_backend)
+        FileListViewMode::List => draw_file_table_view(
+            ui,
+            state,
+            size,
+            fs,
+            request_confirm,
+            thumbnails_backend,
+            false,
+        ),
+        FileListViewMode::ThumbnailsList => {
+            state.ui.thumbnails_enabled = true;
+            draw_file_table_view(
+                ui,
+                state,
+                size,
+                fs,
+                request_confirm,
+                thumbnails_backend,
+                true,
+            )
         }
         FileListViewMode::Grid => {
             draw_file_grid_view(ui, state, size, fs, request_confirm, thumbnails_backend)
@@ -1903,7 +2247,8 @@ fn data_column_label(column: FileListDataColumn) -> &'static str {
 
 fn is_data_column_visible(config: &FileListColumnsConfig, column: FileListDataColumn) -> bool {
     match column {
-        FileListDataColumn::Name | FileListDataColumn::Extension => true,
+        FileListDataColumn::Name => true,
+        FileListDataColumn::Extension => config.show_extension,
         FileListDataColumn::Size => config.show_size,
         FileListDataColumn::Modified => config.show_modified,
     }
@@ -1911,6 +2256,7 @@ fn is_data_column_visible(config: &FileListColumnsConfig, column: FileListDataCo
 
 fn apply_compact_column_layout(config: &mut FileListColumnsConfig) {
     config.show_preview = false;
+    config.show_extension = true;
     config.show_size = true;
     config.show_modified = false;
     config.order = [
@@ -1921,8 +2267,15 @@ fn apply_compact_column_layout(config: &mut FileListColumnsConfig) {
     ];
 }
 
+fn apply_compact_column_layout_keep_preview(config: &mut FileListColumnsConfig) {
+    let preview = config.show_preview;
+    apply_compact_column_layout(config);
+    config.show_preview = preview;
+}
+
 fn apply_balanced_column_layout(config: &mut FileListColumnsConfig) {
     config.show_preview = true;
+    config.show_extension = true;
     config.show_size = true;
     config.show_modified = true;
     config.order = [
@@ -1931,6 +2284,12 @@ fn apply_balanced_column_layout(config: &mut FileListColumnsConfig) {
         FileListDataColumn::Size,
         FileListDataColumn::Modified,
     ];
+}
+
+fn apply_balanced_column_layout_keep_preview(config: &mut FileListColumnsConfig) {
+    let preview = config.show_preview;
+    apply_balanced_column_layout(config);
+    config.show_preview = preview;
 }
 
 fn move_column_order_up(order: &mut [FileListDataColumn; 4], index: usize) -> bool {
@@ -1953,7 +2312,7 @@ fn move_column_order_down(order: &mut [FileListDataColumn; 4], index: usize) -> 
 struct ListColumnLayout {
     data_columns: Vec<FileListDataColumn>,
     name: i16,
-    extension: i16,
+    extension: Option<i16>,
     size: Option<i16>,
     modified: Option<i16>,
 }
@@ -1962,7 +2321,8 @@ fn list_column_layout(show_preview: bool, config: &FileListColumnsConfig) -> Lis
     let mut data_columns = Vec::with_capacity(4);
     for column in config.normalized_order() {
         match column {
-            FileListDataColumn::Name | FileListDataColumn::Extension => data_columns.push(column),
+            FileListDataColumn::Name => data_columns.push(column),
+            FileListDataColumn::Extension if config.show_extension => data_columns.push(column),
             FileListDataColumn::Size if config.show_size => data_columns.push(column),
             FileListDataColumn::Modified if config.show_modified => data_columns.push(column),
             _ => {}
@@ -1988,7 +2348,7 @@ fn list_column_layout(show_preview: bool, config: &FileListColumnsConfig) -> Lis
     ListColumnLayout {
         data_columns,
         name: name.expect("name column should always be present"),
-        extension: extension.expect("extension column should always be present"),
+        extension,
         size,
         modified,
     }
@@ -2107,7 +2467,7 @@ fn table_data_column_for_index(
     if column_index == layout.name {
         return Some(FileListDataColumn::Name);
     }
-    if column_index == layout.extension {
+    if layout.extension == Some(column_index) {
         return Some(FileListDataColumn::Extension);
     }
     if layout.size == Some(column_index) {
@@ -2211,8 +2571,10 @@ fn sync_runtime_column_weights_from_table(
     if let Some(weight) = table_column_stretch_weight(table, layout.name) {
         config.weight_overrides.name = Some(weight);
     }
-    if let Some(weight) = table_column_stretch_weight(table, layout.extension) {
-        config.weight_overrides.extension = Some(weight);
+    if let Some(index) = layout.extension {
+        if let Some(weight) = table_column_stretch_weight(table, index) {
+            config.weight_overrides.extension = Some(weight);
+        }
     }
     if let Some(index) = layout.size {
         if let Some(weight) = table_column_stretch_weight(table, index) {
@@ -2232,6 +2594,7 @@ fn draw_file_table_view(
     fs: &dyn FileSystem,
     request_confirm: &mut bool,
     thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
+    force_preview: bool,
 ) {
     state.core.rescan_if_needed(fs);
     if state.ui.thumbnails_enabled {
@@ -2249,7 +2612,8 @@ fn draw_file_table_view(
         | TableFlags::SIZING_STRETCH_PROP
         | TableFlags::SORTABLE; // enable built-in header sorting
     let columns_config = &state.ui.file_list_columns;
-    let show_preview = state.ui.thumbnails_enabled && columns_config.show_preview;
+    let show_preview =
+        state.ui.thumbnails_enabled && (columns_config.show_preview || force_preview);
     let show_size = columns_config.show_size;
     let show_modified = columns_config.show_modified;
     let layout = list_column_layout(show_preview, columns_config);
@@ -2330,10 +2694,10 @@ fn draw_file_table_view(
                     let (by, asc) = match (s.column_index, s.sort_direction) {
                         (i, SortDirection::Ascending) if i == layout.name => (SortBy::Name, true),
                         (i, SortDirection::Descending) if i == layout.name => (SortBy::Name, false),
-                        (i, SortDirection::Ascending) if i == layout.extension => {
+                        (i, SortDirection::Ascending) if layout.extension == Some(i) => {
                             (SortBy::Extension, true)
                         }
-                        (i, SortDirection::Descending) if i == layout.extension => {
+                        (i, SortDirection::Descending) if layout.extension == Some(i) => {
                             (SortBy::Extension, false)
                         }
                         (i, SortDirection::Ascending) if layout.size == Some(i) => {
@@ -2413,8 +2777,7 @@ fn draw_file_table_view(
                 } else {
                     let filter_label = state
                         .core
-                        .active_filter
-                        .and_then(|i| state.core.filters.get(i))
+                        .active_filter()
                         .map(|f| f.name.as_str())
                         .unwrap_or("All files");
                     let hidden_label = if state.core.show_hidden { "on" } else { "off" };
@@ -3503,9 +3866,39 @@ mod tests {
                     FileListDataColumn::Modified,
                 ],
                 name: 0,
-                extension: 1,
+                extension: Some(1),
                 size: Some(2),
                 modified: Some(3),
+            }
+        );
+    }
+
+    #[test]
+    fn list_column_layout_hides_extension_column() {
+        let mut cfg = columns_config(
+            true,
+            true,
+            [
+                FileListDataColumn::Name,
+                FileListDataColumn::Extension,
+                FileListDataColumn::Size,
+                FileListDataColumn::Modified,
+            ],
+        );
+        cfg.show_extension = false;
+
+        assert_eq!(
+            list_column_layout(false, &cfg),
+            ListColumnLayout {
+                data_columns: vec![
+                    FileListDataColumn::Name,
+                    FileListDataColumn::Size,
+                    FileListDataColumn::Modified,
+                ],
+                name: 0,
+                extension: None,
+                size: Some(1),
+                modified: Some(2),
             }
         );
     }
@@ -3532,7 +3925,7 @@ mod tests {
                     FileListDataColumn::Modified,
                 ],
                 name: 1,
-                extension: 2,
+                extension: Some(2),
                 size: Some(3),
                 modified: Some(4),
             }
@@ -3560,7 +3953,7 @@ mod tests {
                     FileListDataColumn::Modified,
                 ],
                 name: 0,
-                extension: 1,
+                extension: Some(1),
                 size: None,
                 modified: Some(2),
             }
@@ -3588,7 +3981,7 @@ mod tests {
                     FileListDataColumn::Size,
                 ],
                 name: 0,
-                extension: 1,
+                extension: Some(1),
                 size: Some(2),
                 modified: None,
             }
@@ -3612,7 +4005,7 @@ mod tests {
             ListColumnLayout {
                 data_columns: vec![FileListDataColumn::Name, FileListDataColumn::Extension],
                 name: 0,
-                extension: 1,
+                extension: Some(1),
                 size: None,
                 modified: None,
             }
@@ -3641,7 +4034,7 @@ mod tests {
                     FileListDataColumn::Extension,
                 ],
                 name: 0,
-                extension: 3,
+                extension: Some(3),
                 size: Some(1),
                 modified: Some(2),
             }
@@ -3742,6 +4135,7 @@ mod tests {
 
         let mut cfg = FileListColumnsConfig {
             show_preview: true,
+            show_extension: true,
             show_size: false,
             show_modified: true,
             order: [
@@ -3782,6 +4176,7 @@ mod tests {
 
         let mut cfg = FileListColumnsConfig {
             show_preview: false,
+            show_extension: true,
             show_size: false,
             show_modified: false,
             order: [

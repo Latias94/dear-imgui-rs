@@ -36,6 +36,10 @@ Execution plan (next implementation wave):
 1. P2 Stage F: publish migration snippets and rollout notes
 2. P2 Stage G: extend benchmark matrix (batch size + mixed metadata)
 3. P2 Stage H: evaluate projection delta path under partial scan
+4. P3 UX/config parity wave (Rust-first, capability-first):
+   - dockable custom pane (right/bottom) + resizable splitter
+   - IGFD-classic UI preset (layout/labels/density)
+   - explicit config toggles for “IGFD flags”-like behavior (disable new-folder, hide columns, natural sort toggle, etc.)
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -132,17 +136,26 @@ Goal: enable multiple dialogs concurrently and decouple "open" from "display".
 
 ### Epic 3.1 — `DialogManager` + `DialogId`
 
-- [x] Task: Implement `DialogManager::open(req) -> DialogId`
-  - Acceptance: you can open two dialogs with different configuration and drive them independently.
+- [x] Task: Implement multi-instance open/close with stable ids (`DialogId`)
+  - Acceptance:
+    - you can open two dialogs with different configuration and drive them independently
+    - API supports both `open_browser(mode)` and `open_browser_with_state(state)` styles
+- [x] Task: Provide manager-driven display helpers (`show_browser*` / `draw_browser_contents`)
+  - Acceptance: if a dialog produces a result (confirm/cancel), it is removed from the manager.
 - [x] Task: add explicit state lifecycle helpers (`FileDialogState::open/reopen/close/is_open`)
   - Acceptance: reopening follows IGFD-style `OpenDialog -> Display -> Close` semantics.
 
 ### Epic 3.2 — OpenRequest / Result typing
 
-- [ ] Task: Define `OpenRequest` (mode, start dir, filters, policies, flags)
-  - Acceptance: request is immutable initial config; runtime changes live in core state.
-- [ ] Task: Define `DialogResult` and unify `Selection`
-  - Acceptance: matches both ImGui backend and rfd backend result shapes.
+Note: this started as an early design sketch for a request-driven manager API. The current implementation is state-driven
+(`open_browser_with_state(FileDialogState)`), which already satisfies IGFD-style multi-instance workflows.
+
+If we still want an IGFD-like “open with config” convenience, re-scope this epic to a pure-Rust helper layer:
+
+- [ ] Task (optional): Define `OpenRequest` as a builder-friendly snapshot that can produce a `FileDialogState`
+  - Acceptance: `DialogManager::open_browser_with_request(req)` is a convenience wrapper over `open_browser_with_state`.
+- [ ] Task (optional): Define a minimal `DialogResult` wrapper (or keep `Selection` + `FileDialogError`)
+  - Acceptance: no breaking changes; improves readability for manager-driven call sites.
 
 Exit criteria:
 
@@ -391,6 +404,7 @@ Goal: close remaining UX gaps vs IGFD and document final API.
 - [x] Task: "New Folder" action with validation and error handling
 - [x] Task: after creating, auto-select + reveal the new folder in the list/grid
   - Acceptance: next frame scrolls the list to the created folder and keyboard navigation continues from it.
+  - Follow-up note: add a first-class toggle to disable the “New Folder” UI for read-only browsing hosts.
 
 ### Epic 12.3 — Documentation & migration notes
 
@@ -614,6 +628,65 @@ Exit criteria:
 - Large directory scans no longer block UI interaction.
 - Scan/projection costs are observable via tracing metrics.
 - Incremental policy has documented tuned presets for throughput/frame-pacing tradeoff.
+
+---
+
+## Milestone 18 - P3 UX & Config Parity (IGFD-like “feel”, Rust-first)
+
+Goal: keep capability parity while reducing “migration friction” and achieving an IGFD-like UX without adopting a C/C++ API.
+
+This milestone is intentionally UI/config focused. It should not regress the existing non-C-API parity guarantees.
+
+### Epic 18.1 - Dockable custom pane (right/bottom)
+
+- [x] Task: support `CustomPaneDock::Bottom(height)` (current) and `CustomPaneDock::Right(width)`
+  - Acceptance:
+    - right-docked pane is resizable via splitter
+    - confirm gating works identically for both docks
+    - pane receives the same `CustomPaneCtx` and selection snapshot
+
+### Epic 18.2 - IGFD-classic UI preset (one-liner)
+
+- [x] Task: introduce an “IGFD classic” preset for `FileDialogUiState`
+  - Acceptance:
+    - a single call can apply labels/layout defaults close to IGFD (toolbar density, button labels, column defaults)
+    - preset is opt-in and does not change existing defaults silently
+  - Notes:
+    - implemented as `FileDialogUiState::apply_igfd_classic_preset()` and `FileDialogState::apply_igfd_classic_preset()`
+
+### Epic 18.3 - Explicit config toggles for IGFD-flag-like behavior
+
+- [x] Task: add UI/core toggles for common IGFD flags (typed, Rust-first)
+  - Candidates:
+    - disable “New Folder” action
+    - allow hiding Extension/Size/Modified/Preview columns (full column-hide parity)
+    - natural sort toggle (Natural vs Lexicographic) for perf-sensitive hosts
+  - Acceptance: toggles are discoverable in `FileDialogState` and/or `FileDialog` builder and covered by unit tests.
+
+### Epic 18.4 - Places UX parity improvements (optional)
+
+- [x] Task: support per-group metadata and separators
+  - Candidates:
+    - group display ordering
+    - default-opened flag
+    - place separators (thickness) similar to IGFD
+  - Acceptance:
+    - serialization uses a strict versioned compact format (`v1`) and remains forward-extensible
+    - no backward compatibility requirement for pre-refactor persistence strings
+
+### Epic 18.5 - View modes and density (optional)
+
+- [x] Task: add a “thumbnails list” view + lightweight density presets (Rust-first)
+  - Done:
+    - `FileListViewMode::ThumbnailsList` (list-with-thumbs between List and Grid)
+    - thumb density presets (`S/M/L`) wired to `thumbnail_size`
+    - grid-only sort combo (since table headers are absent)
+  - Acceptance: selection + keyboard/type-to-select remains stable across modes.
+
+Exit criteria:
+
+- Hosts can achieve an IGFD-like UX with opt-in presets/toggles.
+- No regressions in existing parity and P2 performance behavior.
 
 ---
 ## Parity Checklist (IGFD → dear-file-browser)

@@ -423,6 +423,21 @@ pub enum SortBy {
     Modified,
 }
 
+/// String comparison mode used for sorting.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SortMode {
+    /// Natural ordering (e.g. `file2` < `file10`).
+    Natural,
+    /// Simple lexicographic ordering on lowercased strings.
+    Lexicographic,
+}
+
+impl Default for SortMode {
+    fn default() -> Self {
+        Self::Natural
+    }
+}
+
 /// Builder for launching file dialogs
 #[derive(Clone, Debug)]
 pub struct FileDialog {

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use dear_imgui_rs::FontId;
 
-use crate::core::{DialogMode, LayoutStyle};
+use crate::core::{ClickAction, DialogMode, LayoutStyle};
 use crate::dialog_core::{EntryId, FileDialogCore, ScanPolicy, ScanStatus};
 use crate::file_style::FileStyleRegistry;
 use crate::thumbnails::{ThumbnailCache, ThumbnailCacheConfig};
@@ -12,6 +12,10 @@ use crate::thumbnails::{ThumbnailCache, ThumbnailCacheConfig};
 pub enum FileListViewMode {
     /// Table-style list view (columns: name/size/modified, optional thumbnail preview column).
     List,
+    /// Table-style list view with thumbnails enabled and preview column shown.
+    ///
+    /// This is intended to match IGFD’s “thumbnails list” mode (small thumbs on the same row).
+    ThumbnailsList,
     /// Thumbnail grid view.
     Grid,
 }
@@ -85,6 +89,8 @@ impl Default for FileListColumnWeightOverrides {
 pub struct FileListColumnsConfig {
     /// Show preview column in list view when thumbnails are enabled.
     pub show_preview: bool,
+    /// Show extension column in list view.
+    pub show_extension: bool,
     /// Show size column in list view.
     pub show_size: bool,
     /// Show modified time column in list view.
@@ -144,8 +150,9 @@ impl FileListColumnsConfig {
         .join(",");
 
         format!(
-            "v1;preview={};size={};modified={};order={};weights={}",
+            "v1;preview={};ext={};size={};modified={};order={};weights={}",
             u8::from(self.show_preview),
+            u8::from(self.show_extension),
             u8::from(self.show_size),
             u8::from(self.show_modified),
             order,
@@ -157,6 +164,7 @@ impl FileListColumnsConfig {
     pub fn deserialize_compact(input: &str) -> Result<Self, FileListColumnsDeserializeError> {
         let mut version_ok = false;
         let mut preview = None;
+        let mut ext = None;
         let mut size = None;
         let mut modified = None;
         let mut order = None;
@@ -167,11 +175,17 @@ impl FileListColumnsConfig {
                 version_ok = true;
                 continue;
             }
+            if token.starts_with('v') {
+                return Err(FileListColumnsDeserializeError::new(format!(
+                    "unsupported version token `{token}`"
+                )));
+            }
             let (key, value) = token.split_once('=').ok_or_else(|| {
                 FileListColumnsDeserializeError::new(format!("invalid token `{token}`"))
             })?;
             match key {
                 "preview" => preview = Some(parse_compact_bool(value)?),
+                "ext" => ext = Some(parse_compact_bool(value)?),
                 "size" => size = Some(parse_compact_bool(value)?),
                 "modified" => modified = Some(parse_compact_bool(value)?),
                 "order" => order = Some(parse_compact_order(value)?),
@@ -193,6 +207,8 @@ impl FileListColumnsConfig {
         Ok(Self {
             show_preview: preview
                 .ok_or_else(|| FileListColumnsDeserializeError::new("missing key `preview`"))?,
+            show_extension: ext
+                .ok_or_else(|| FileListColumnsDeserializeError::new("missing key `ext`"))?,
             show_size: size
                 .ok_or_else(|| FileListColumnsDeserializeError::new("missing key `size`"))?,
             show_modified: modified
@@ -214,6 +230,7 @@ impl Default for FileListColumnsConfig {
     fn default() -> Self {
         Self {
             show_preview: true,
+            show_extension: true,
             show_size: true,
             show_modified: true,
             order: [
@@ -493,6 +510,8 @@ pub struct FileDialogUiState {
     pub focus_search_next: bool,
     /// Error string to display in UI (non-fatal).
     pub ui_error: Option<String>,
+    /// Whether to show and allow the "New Folder" action.
+    pub new_folder_enabled: bool,
     /// Open the "New Folder" modal on next frame.
     pub new_folder_open_next: bool,
     /// New folder name buffer (used by the "New Folder" modal).
@@ -543,8 +562,12 @@ pub struct FileDialogUiState {
     pub type_select_timeout_ms: u64,
     /// Whether to render a custom pane region (when a pane is provided by the caller).
     pub custom_pane_enabled: bool,
+    /// Dock position for the custom pane.
+    pub custom_pane_dock: CustomPaneDock,
     /// Height of the custom pane region (in pixels).
     pub custom_pane_height: f32,
+    /// Width of the custom pane region when right-docked (in pixels).
+    pub custom_pane_width: f32,
 
     /// Places modal mode (export/import).
     pub(crate) places_io_mode: PlacesIoMode,
@@ -597,6 +620,7 @@ impl Default for FileDialogUiState {
             focus_path_edit_next: false,
             focus_search_next: false,
             ui_error: None,
+            new_folder_enabled: true,
             new_folder_open_next: false,
             new_folder_name: String::new(),
             new_folder_focus_next: false,
@@ -622,7 +646,9 @@ impl Default for FileDialogUiState {
             type_select_enabled: true,
             type_select_timeout_ms: 750,
             custom_pane_enabled: true,
+            custom_pane_dock: CustomPaneDock::default(),
             custom_pane_height: 120.0,
+            custom_pane_width: 250.0,
             places_io_mode: PlacesIoMode::Export,
             places_io_buffer: String::new(),
             places_io_open_next: false,
@@ -641,6 +667,55 @@ impl Default for FileDialogUiState {
             type_select_last_input: None,
         }
     }
+}
+
+impl FileDialogUiState {
+    /// Applies an "IGFD classic" UI preset (opt-in).
+    ///
+    /// This tunes UI defaults to feel closer to ImGuiFileDialog (IGFD) while staying Rust-first:
+    /// - standard layout with places pane,
+    /// - list view as the default,
+    /// - right-docked custom pane (when provided) with a splitter-resizable width,
+    /// - dialog-style button row aligned to the right.
+    pub fn apply_igfd_classic_preset(&mut self) {
+        self.layout = LayoutStyle::Standard;
+        self.file_list_view = FileListViewMode::List;
+        self.thumbnails_enabled = false;
+
+        self.file_list_columns.show_preview = false;
+        self.file_list_columns.show_extension = false;
+        self.file_list_columns.show_size = true;
+        self.file_list_columns.show_modified = true;
+        self.file_list_columns.order = [
+            FileListDataColumn::Name,
+            FileListDataColumn::Extension,
+            FileListDataColumn::Size,
+            FileListDataColumn::Modified,
+        ];
+
+        self.custom_pane_enabled = true;
+        self.custom_pane_dock = CustomPaneDock::Right;
+        self.custom_pane_width = 250.0;
+        self.custom_pane_height = 120.0;
+
+        self.validation_buttons.align = ValidationButtonsAlign::Right;
+        self.validation_buttons.order = ValidationButtonsOrder::CancelConfirm;
+        self.validation_buttons.confirm_label = Some("OK".to_string());
+        self.validation_buttons.cancel_label = Some("Cancel".to_string());
+        self.validation_buttons.button_width = None;
+        self.validation_buttons.confirm_width = None;
+        self.validation_buttons.cancel_width = None;
+    }
+}
+
+/// Dock position for the custom pane.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CustomPaneDock {
+    /// Dock the custom pane below the file list (default).
+    #[default]
+    Bottom,
+    /// Dock the custom pane on the right side, similar to IGFD `sidePane`.
+    Right,
 }
 
 /// Combined state for the in-UI file dialog.
@@ -723,11 +798,45 @@ impl FileDialogState {
     pub fn clear_scan_hook(&mut self) {
         self.core.clear_scan_hook();
     }
+
+    /// Applies an "IGFD classic" preset for both UI and core.
+    ///
+    /// This is a convenience wrapper over [`FileDialogUiState::apply_igfd_classic_preset`] that
+    /// also tunes core defaults to match typical IGFD behavior.
+    pub fn apply_igfd_classic_preset(&mut self) {
+        self.ui.apply_igfd_classic_preset();
+        self.core.click_action = ClickAction::Navigate;
+        self.core.sort_mode = crate::core::SortMode::Natural;
+        self.core.sort_by = crate::core::SortBy::Name;
+        self.core.sort_ascending = true;
+        self.core.dirs_first = true;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn igfd_classic_preset_updates_ui_and_core() {
+        let mut state = FileDialogState::new(DialogMode::OpenFile);
+        state.apply_igfd_classic_preset();
+
+        assert_eq!(state.ui.layout, LayoutStyle::Standard);
+        assert_eq!(state.ui.file_list_view, FileListViewMode::List);
+        assert_eq!(state.ui.custom_pane_dock, CustomPaneDock::Right);
+        assert_eq!(state.ui.file_list_columns.show_extension, false);
+        assert_eq!(
+            state.ui.validation_buttons.align,
+            ValidationButtonsAlign::Right
+        );
+        assert_eq!(
+            state.ui.validation_buttons.order,
+            ValidationButtonsOrder::CancelConfirm
+        );
+        assert_eq!(state.core.click_action, ClickAction::Navigate);
+        assert_eq!(state.core.sort_mode, crate::core::SortMode::Natural);
+    }
 
     #[test]
     fn open_close_roundtrip() {
@@ -757,6 +866,7 @@ mod tests {
     fn file_list_columns_compact_roundtrip() {
         let cfg = FileListColumnsConfig {
             show_preview: false,
+            show_extension: true,
             show_size: true,
             show_modified: false,
             order: [
@@ -782,7 +892,7 @@ mod tests {
     #[test]
     fn file_list_columns_deserialize_rejects_duplicate_order_entries() {
         let err = FileListColumnsConfig::deserialize_compact(
-            "v1;preview=1;size=1;modified=1;order=name,name,size,modified;weights=auto,auto,auto,auto,auto",
+            "v1;preview=1;ext=1;size=1;modified=1;order=name,name,size,modified;weights=auto,auto,auto,auto,auto",
         )
         .unwrap_err();
         assert!(
@@ -794,7 +904,7 @@ mod tests {
     #[test]
     fn file_list_columns_deserialize_rejects_non_positive_weight() {
         let err = FileListColumnsConfig::deserialize_compact(
-            "v1;preview=1;size=1;modified=1;order=name,ext,size,modified;weights=auto,0,auto,auto,auto",
+            "v1;preview=1;ext=1;size=1;modified=1;order=name,ext,size,modified;weights=auto,0,auto,auto,auto",
         )
         .unwrap_err();
         assert!(err.to_string().contains("weight must be finite and > 0"));

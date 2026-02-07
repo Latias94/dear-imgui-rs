@@ -6,7 +6,7 @@ use std::{
 
 use crate::core::{
     ClickAction, DialogMode, ExtensionPolicy, FileDialogError, FileFilter, SavePolicy, Selection,
-    SortBy,
+    SortBy, SortMode,
 };
 use crate::fs::{FileSystem, FsEntry};
 use crate::places::Places;
@@ -621,9 +621,10 @@ pub struct FileDialogCore {
     /// Optional filename input for SaveFile.
     pub save_name: String,
     /// Filters (lower-case extensions).
-    pub filters: Vec<FileFilter>,
+    filters: Vec<FileFilter>,
     /// Active filter index (None = All).
-    pub active_filter: Option<usize>,
+    active_filter: Option<usize>,
+    filter_selection_mode: FilterSelectionMode,
     /// Click behavior for directories: select or navigate.
     pub click_action: ClickAction,
     /// Search query to filter entries by substring (case-insensitive).
@@ -632,6 +633,8 @@ pub struct FileDialogCore {
     pub sort_by: SortBy,
     /// Sort order flag (true = ascending).
     pub sort_ascending: bool,
+    /// String comparison mode used for sorting.
+    pub sort_mode: SortMode,
     /// Put directories before files when sorting.
     pub dirs_first: bool,
     /// Allow selecting multiple files.
@@ -669,6 +672,14 @@ pub struct FileDialogCore {
     last_view_key: Option<ViewKey>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FilterSelectionMode {
+    /// If filters exist, default to the first filter unless the user explicitly selects a filter.
+    AutoFirst,
+    /// Respect the explicitly selected filter (`None` = All files).
+    Manual,
+}
+
 impl FileDialogCore {
     /// Creates a new dialog core for a mode.
     pub fn new(mode: DialogMode) -> Self {
@@ -680,10 +691,12 @@ impl FileDialogCore {
             save_name: String::new(),
             filters: Vec::new(),
             active_filter: None,
+            filter_selection_mode: FilterSelectionMode::AutoFirst,
             click_action: ClickAction::Select,
             search: String::new(),
             sort_by: SortBy::Name,
             sort_ascending: true,
+            sort_mode: SortMode::default(),
             dirs_first: true,
             allow_multi: matches!(mode, DialogMode::OpenFiles),
             max_selection: None,
@@ -712,6 +725,77 @@ impl FileDialogCore {
             dir_snapshot_dirty: true,
             last_view_key: None,
         }
+    }
+
+    /// Returns all configured filters.
+    pub fn filters(&self) -> &[FileFilter] {
+        &self.filters
+    }
+
+    /// Replaces the current filter list and resets selection to "auto first filter".
+    ///
+    /// Use [`Self::set_active_filter_all`] to explicitly select "All files" afterwards.
+    pub fn set_filters(&mut self, filters: Vec<FileFilter>) {
+        self.filters = filters;
+        self.filter_selection_mode = FilterSelectionMode::AutoFirst;
+        self.normalize_active_filter();
+        self.last_view_key = None;
+    }
+
+    /// Adds a filter to the end of the filter list.
+    pub fn add_filter(&mut self, filter: impl Into<FileFilter>) {
+        self.filters.push(filter.into());
+        self.normalize_active_filter();
+        self.last_view_key = None;
+    }
+
+    /// Adds multiple filters to the end of the filter list.
+    pub fn extend_filters<I, F>(&mut self, filters: I)
+    where
+        I: IntoIterator<Item = F>,
+        F: Into<FileFilter>,
+    {
+        self.filters.extend(filters.into_iter().map(Into::into));
+        self.normalize_active_filter();
+        self.last_view_key = None;
+    }
+
+    /// Clears all filters and selects "All files".
+    pub fn clear_filters(&mut self) {
+        self.filters.clear();
+        self.active_filter = None;
+        self.filter_selection_mode = FilterSelectionMode::Manual;
+        self.last_view_key = None;
+    }
+
+    /// Returns the active filter index (into [`Self::filters`]) if any.
+    pub fn active_filter_index(&self) -> Option<usize> {
+        self.active_filter
+    }
+
+    /// Returns the active filter (if any).
+    pub fn active_filter(&self) -> Option<&FileFilter> {
+        self.active_filter.and_then(|i| self.filters.get(i))
+    }
+
+    /// Explicitly select "All files" as the active filter.
+    pub fn set_active_filter_all(&mut self) {
+        self.active_filter = None;
+        self.filter_selection_mode = FilterSelectionMode::Manual;
+        self.last_view_key = None;
+    }
+
+    /// Explicitly select a filter by index.
+    ///
+    /// Returns `false` if the index is out of bounds.
+    pub fn set_active_filter_index(&mut self, index: usize) -> bool {
+        if index >= self.filters.len() {
+            return false;
+        }
+        self.active_filter = Some(index);
+        self.filter_selection_mode = FilterSelectionMode::Manual;
+        self.last_view_key = None;
+        true
     }
 
     /// Returns a snapshot of the current entries list.
@@ -935,6 +1019,7 @@ impl FileDialogCore {
 
     /// Refreshes the directory snapshot and view cache if needed.
     pub(crate) fn rescan_if_needed(&mut self, fs: &dyn FileSystem) {
+        self.normalize_active_filter();
         self.refresh_dir_snapshot_if_needed(fs);
 
         let key = ViewKey::new(self);
@@ -962,6 +1047,7 @@ impl FileDialogCore {
             &mut entries,
             self.sort_by,
             self.sort_ascending,
+            self.sort_mode,
             self.dirs_first,
         );
         self.view_names = entries.iter().map(|e| e.name.clone()).collect();
@@ -975,6 +1061,32 @@ impl FileDialogCore {
             self.entries.len(),
             rebuild_started_at.elapsed().as_micros(),
         );
+    }
+
+    fn normalize_active_filter(&mut self) {
+        if self.filters.is_empty() {
+            self.active_filter = None;
+            return;
+        }
+        // Folder mode always shows only directories; filters are irrelevant there.
+        if matches!(self.mode, DialogMode::PickFolder) {
+            self.active_filter = None;
+            return;
+        }
+
+        match self.filter_selection_mode {
+            FilterSelectionMode::AutoFirst => {
+                let i = self.active_filter.unwrap_or(0);
+                self.active_filter = Some(i.min(self.filters.len().saturating_sub(1)));
+            }
+            FilterSelectionMode::Manual => {
+                if let Some(i) = self.active_filter {
+                    if i >= self.filters.len() {
+                        self.active_filter = Some(0);
+                    }
+                }
+            }
+        }
     }
 
     fn refresh_dir_snapshot_if_needed(&mut self, fs: &dyn FileSystem) {
@@ -1332,6 +1444,7 @@ impl FileDialogCore {
         fs: &dyn FileSystem,
         gate: &ConfirmGate,
     ) -> Result<(), FileDialogError> {
+        self.normalize_active_filter();
         self.result = None;
         self.pending_overwrite = None;
         let selected_entries = self
@@ -1498,6 +1611,7 @@ struct ViewKey {
     search: String,
     sort_by: SortBy,
     sort_ascending: bool,
+    sort_mode: SortMode,
     dirs_first: bool,
     active_filter_hash: u64,
 }
@@ -1511,6 +1625,7 @@ impl ViewKey {
             search: core.search.clone(),
             sort_by: core.sort_by,
             sort_ascending: core.sort_ascending,
+            sort_mode: core.sort_mode,
             dirs_first: core.dirs_first,
             active_filter_hash: active_filter_hash(&core.filters, core.active_filter),
         }
@@ -1837,6 +1952,7 @@ fn sort_entries_in_place(
     entries: &mut Vec<DirEntry>,
     sort_by: SortBy,
     sort_ascending: bool,
+    sort_mode: SortMode,
     dirs_first: bool,
 ) {
     entries.sort_by(|a, b| {
@@ -1847,7 +1963,7 @@ fn sort_entries_in_place(
             SortBy::Name => {
                 let al = a.name.to_lowercase();
                 let bl = b.name.to_lowercase();
-                natural_cmp_lower(&al, &bl)
+                cmp_lower(&al, &bl, sort_mode)
             }
             SortBy::Extension => {
                 use std::cmp::Ordering;
@@ -1855,9 +1971,9 @@ fn sort_entries_in_place(
                 let bl = b.name.to_lowercase();
                 let ae = full_extension_lower(&al);
                 let be = full_extension_lower(&bl);
-                let ord = natural_cmp_lower(ae, be);
+                let ord = cmp_lower(ae, be, sort_mode);
                 if ord == Ordering::Equal {
-                    natural_cmp_lower(&al, &bl)
+                    cmp_lower(&al, &bl, sort_mode)
                 } else {
                     ord
                 }
@@ -1867,6 +1983,13 @@ fn sort_entries_in_place(
         };
         if sort_ascending { ord } else { ord.reverse() }
     });
+}
+
+fn cmp_lower(a: &str, b: &str, mode: SortMode) -> std::cmp::Ordering {
+    match mode {
+        SortMode::Natural => natural_cmp_lower(a, b),
+        SortMode::Lexicographic => a.cmp(b),
+    }
 }
 
 fn natural_cmp_lower(a: &str, b: &str) -> std::cmp::Ordering {
@@ -2479,8 +2602,7 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::SaveFile);
         core.cwd = PathBuf::from("/tmp");
         core.save_name = "asset".into();
-        core.filters = vec![FileFilter::new("Images", vec!["png".to_string()])];
-        core.active_filter = Some(0);
+        core.set_filters(vec![FileFilter::new("Images", vec!["png".to_string()])]);
         core.save_policy.extension_policy = ExtensionPolicy::AddIfMissing;
         core.save_policy.confirm_overwrite = false;
 
@@ -2496,8 +2618,7 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::SaveFile);
         core.cwd = PathBuf::from("/tmp");
         core.save_name = "asset.jpg".into();
-        core.filters = vec![FileFilter::new("Images", vec!["png".to_string()])];
-        core.active_filter = Some(0);
+        core.set_filters(vec![FileFilter::new("Images", vec!["png".to_string()])]);
         core.save_policy.extension_policy = ExtensionPolicy::KeepUser;
         core.save_policy.confirm_overwrite = false;
 
@@ -2513,8 +2634,7 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::SaveFile);
         core.cwd = PathBuf::from("/tmp");
         core.save_name = "asset.jpg".into();
-        core.filters = vec![FileFilter::new("Images", vec!["png".to_string()])];
-        core.active_filter = Some(0);
+        core.set_filters(vec![FileFilter::new("Images", vec!["png".to_string()])]);
         core.save_policy.extension_policy = ExtensionPolicy::ReplaceByFilter;
         core.save_policy.confirm_overwrite = false;
 
@@ -2562,9 +2682,27 @@ mod tests {
             make_file_entry("file2.txt"),
             make_file_entry("file1.txt"),
         ];
-        sort_entries_in_place(&mut entries, SortBy::Name, true, false);
+        sort_entries_in_place(&mut entries, SortBy::Name, true, SortMode::Natural, false);
         let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
         assert_eq!(names, vec!["file1.txt", "file2.txt", "file10.txt"]);
+    }
+
+    #[test]
+    fn lexicographic_sort_orders_digit_runs_as_strings() {
+        let mut entries = vec![
+            make_file_entry("file10.txt"),
+            make_file_entry("file2.txt"),
+            make_file_entry("file1.txt"),
+        ];
+        sort_entries_in_place(
+            &mut entries,
+            SortBy::Name,
+            true,
+            SortMode::Lexicographic,
+            false,
+        );
+        let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
+        assert_eq!(names, vec!["file1.txt", "file10.txt", "file2.txt"]);
     }
 
     #[test]
@@ -2576,7 +2714,13 @@ mod tests {
             make_file_entry("noext"),
         ];
 
-        sort_entries_in_place(&mut entries, SortBy::Extension, true, false);
+        sort_entries_in_place(
+            &mut entries,
+            SortBy::Extension,
+            true,
+            SortMode::Natural,
+            false,
+        );
         let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
         assert_eq!(
             names,

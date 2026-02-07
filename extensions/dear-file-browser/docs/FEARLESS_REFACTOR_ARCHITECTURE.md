@@ -44,11 +44,11 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 | IGFD capability | dear-file-browser | Notes / gaps |
 |---|---:|---|
 | Call/Display split + multi instances | ✅ | `DialogManager` + stable ids. |
-| Custom pane that can block confirm | ✅ | `CustomPane` + `ConfirmGate`. |
+| Custom pane that can block confirm | ✅ | `CustomPane` + `ConfirmGate` (supports bottom or right dock). |
 | File styles (type/ext/name/contains/regex/…) | ✅ | Rule-based registry + callback-based provider + optional `font_token -> FontId` mapping in UI state. |
 | Multi-selection (Ctrl/Shift) + Ctrl+A | ✅ | Supports optional “max N” cap (IGFD-style). |
 | Keyboard navigation + type-to-select | ✅ | Works in list & grid. |
-| Places: devices + bookmarks + custom groups | ✅ | Devices + bookmarks + user groups are editable (add/remove/rename); System group remains read-only. |
+| Places: devices + bookmarks + custom groups | ✅ | Devices + bookmarks + user groups are editable (add/remove/rename) and support per-group metadata (order/default-open) + optional separators; System group remains read-only. |
 | Directory manual entry (right-click breadcrumb) | ✅ | Supported. |
 | “Parallel directory” popup on path separator | ✅ | Supported via breadcrumb separator popup. |
 | Confirm overwrite (Save) | ✅ | `SavePolicy` + modal prompt. |
@@ -62,7 +62,7 @@ Legend: ✅ done, 🟡 partial, ❌ missing / planned.
 
 ---
 
-Parity status note (2026-02-06, non-C-API scope):
+Parity status note (2026-02-07, non-C-API scope):
 
 - Closed recently: explicit lifecycle helpers (`open/reopen/close/is_open`), ID-first rename/delete target model, selected path/count readback in core, scan-time entry hook (`set_scan_hook` / `clear_scan_hook`), link/symlink metadata+style parity (`EntryKind::Link`), host min/max constraints, and parity/deviation baseline docs.
 - Remaining high-priority gaps: none in non-C-API core parity scope; only post-parity API polish remains.

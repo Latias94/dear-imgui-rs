@@ -2,7 +2,7 @@
 
 This document tracks capability parity between `dear-file-browser` (ImGui backend) and ImGuiFileDialog (IGFD), focused on **non-C-API** behavior.
 
-Last updated: 2026-02-06
+Last updated: 2026-02-07
 
 ## Scope
 
@@ -16,7 +16,7 @@ Last updated: 2026-02-06
 | Open/Display split + multi-instance | Done | `DialogManager` + stable ids. |
 | Explicit lifecycle helpers | Done | `open/reopen/close/is_open`. |
 | Host flexibility (window/modal/embed/popup-hosted) | Done | `draw_contents*`, `show_windowed*`, `show_modal*`. |
-| Places and persistence | Done | Devices + bookmarks + editable groups + compact import/export. |
+| Places and persistence | Done | Devices + bookmarks + editable groups + compact import/export (v1), with per-group metadata and optional separators. |
 | Selection UX | Done | Ctrl/Shift, Ctrl+A, keyboard navigation, type-to-select, max-selection cap. |
 | Filters and parsing | Done | Extension/wildcard/regex/collection parsing with IGFD-style semantics. |
 | Save policies | Done | Confirm-overwrite + extension policy. |

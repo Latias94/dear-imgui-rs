@@ -38,12 +38,14 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 - ImGui (pure UI):
   - Layouts: `Standard` (quick locations + list) or `Minimal`
   - Filters by extension, substring Search, directories-first (configurable)
-  - Sorting by Name/Size/Modified via table headers
-  - List columns: configurable visibility for Preview/Size/Modified (per dialog state)
+  - Filter selection defaults to the first configured filter (explicit "All files" option available)
+  - View modes: `List`, `ThumbnailsList`, `Grid`
+  - Sorting by Name/Ext/Size/Modified via table headers (list views) or a sort combo (grid)
+  - List columns: configurable visibility for Preview/Extension/Size/Modified (per dialog state)
   - Breadcrumbs with automatic compression on long paths
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
-  - Places: editable groups + bookmarks/devices, export/import via compact string
+  - Places: editable groups + bookmarks/devices, export/import via compact versioned string (v1)
   - File styles: icons/colors/tooltips via `FileStyleRegistry`
   - Thumbnails: request queue + LRU cache (user-driven decode/upload lifecycle)
   - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all
@@ -83,9 +85,11 @@ let selection = pollster::block_on(
 # use dear_imgui_rs::*;
 # let mut ctx = Context::create();
 # let ui = ctx.frame();
-use dear_file_browser::{ExtensionPolicy, FileDialogExt, FileDialogState};
+use dear_file_browser::{ClickAction, ExtensionPolicy, FileDialogExt, FileDialogState, LayoutStyle};
 use dear_file_browser::FileListViewMode;
 let mut state = FileDialogState::new(DialogMode::OpenFile);
+// Optional: make it feel closer to ImGuiFileDialog (IGFD).
+state.apply_igfd_classic_preset();
 // Optional configuration
 state.ui.layout = LayoutStyle::Standard; // or Minimal
 state.ui.file_list_view = FileListViewMode::List; // or Grid (enables thumbnails)
