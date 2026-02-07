@@ -3010,19 +3010,19 @@ fn draw_breadcrumb_sep_popup(
     }
 
     ui.text_disabled("Quick path selection");
+    ui.text_disabled(parent.display().to_string());
     ui.separator();
-    ui.text("Filter:");
-    ui.same_line();
     if state.ui.breadcrumb_quick_focus_next {
         ui.set_keyboard_focus_here();
         state.ui.breadcrumb_quick_focus_next = false;
     }
-    ui.set_next_item_width(220.0);
+    ui.set_next_item_width(ui.content_region_avail_width().max(80.0));
     let filter_changed = ui
         .input_text(
             "##breadcrumb_quick_filter",
             &mut state.ui.breadcrumb_quick_filter,
         )
+        .hint("Filter...")
         .auto_select_all(true)
         .build();
     if filter_changed {
@@ -3086,6 +3086,7 @@ fn draw_breadcrumb_sep_popup(
     let enter = ui.is_key_pressed(Key::Enter) || ui.is_key_pressed(Key::KeypadEnter);
 
     let flags = dear_imgui_rs::TableFlags::SIZING_FIXED_FIT
+        | dear_imgui_rs::TableFlags::HIDEABLE
         | dear_imgui_rs::TableFlags::ROW_BG
         | dear_imgui_rs::TableFlags::SCROLL_Y
         | dear_imgui_rs::TableFlags::NO_HOST_EXTEND_Y;
@@ -3119,6 +3120,7 @@ fn draw_breadcrumb_sep_popup(
                 .is_some_and(|p| *p == e.path);
             if selected && state.ui.breadcrumb_quick_scroll_to_selected_next {
                 ui.set_scroll_here_y(0.5);
+                ui.set_item_default_focus();
                 state.ui.breadcrumb_quick_scroll_to_selected_next = false;
             }
 
