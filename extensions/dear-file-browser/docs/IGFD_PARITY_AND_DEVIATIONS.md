@@ -24,6 +24,7 @@ Last updated: 2026-02-07
 | File styles | Done | Rule + callback styles with `Dir/File/Link` support. |
 | Scan-time entry callback | Done | Core/state scan hook (`set_scan_hook` / `clear_scan_hook`). |
 | Thumbnails | Done | Decode/upload/destroy lifecycle + grid/list integration. |
+| Address bar path input | Done | Always-visible Path input + Go + submit-on-Enter; Ctrl+L focuses. |
 | Host min/max constraints | Done | `WindowHostConfig` and `ModalHostConfig` support `min_size` / `max_size`. |
 
 ## Intentional Deviations (By Design)

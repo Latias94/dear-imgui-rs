@@ -699,6 +699,87 @@ Exit criteria:
 - No regressions in existing parity and P2 performance behavior.
 
 ---
+
+## Milestone 19 - File Dialog Chrome Polish (IGFD-like feel)
+
+Goal: keep feature parity while making the dialog **feel** like a mature file dialog (navigation chrome, path UX, and layout details).
+
+This milestone is UI/UX heavy and may change widget layout and transient UI state. It should not require any IGFD C/C++ API compatibility.
+
+### Epic 19.1 - Navigation toolbar (Back/Forward/Up/Refresh)
+
+- [ ] Task: add optional navigation history and exposed actions
+  - Candidates:
+    - `CoreEvent::NavigateBack` / `NavigateForward` (or UI-driven history in `FileDialogUiState`)
+    - toolbar buttons (Back/Forward/Up/Refresh) with disabled states
+  - Acceptance:
+    - navigation via breadcrumbs/path typing updates history consistently
+    - selection is cleared or reconciled consistently after navigation (documented)
+
+### Epic 19.2 - Address bar UX (history + completion)
+
+- [ ] Task: make the Path address bar feel like a real address bar
+  - Candidates:
+    - drop-down history (recently visited paths)
+    - inline completion for filesystem segments (Tab/Right-arrow)
+    - "copy path" and "reveal in explorer/finder" context menu items (host-hooked)
+  - Acceptance:
+    - completion does not block the UI during large directory scans
+    - relative path behavior is stable across platforms
+
+### Epic 19.3 - Toolbar density + iconography (optional)
+
+- [ ] Task: provide an IGFD-like compact top toolbar without sacrificing Rust-first defaults
+  - Candidates:
+    - optional icon-only buttons (host-provided icons)
+    - a single "density" knob that maps to spacing/padding in this dialog
+  - Acceptance:
+    - layout remains usable at 600px width and below
+    - no hard-coded pixel widths that break on CJK fonts
+
+### Epic 19.4 - Bottom action row parity (Save/Open ergonomics)
+
+- [ ] Task: tune the bottom row to match common file dialog expectations
+  - Candidates:
+    - Save filename field + extension policy hints
+    - filter combo placement (bottom row vs top) as a configurable option
+    - status text ("N items", selection count, current filter)
+  - Acceptance:
+    - a demo can match IGFD’s "save" flow without forking UI code
+
+Exit criteria:
+
+- The dialog has navigation chrome that users expect from file dialogs.
+- Address bar supports history or completion (at least one).
+- Layout remains robust for narrow windows and CJK fonts.
+
+---
+
+## Milestone 20 - Host Integration & Demos (polish)
+
+Goal: make it easy for hosts to adopt the ImGui backend with "batteries included" examples and clear integration surfaces.
+
+### Epic 20.1 - Thumbnails integration cookbook
+
+- [ ] Task: document and stabilize thumbnail backend integration
+  - Candidates:
+    - minimal CPU decode provider example
+    - minimal GPU renderer example (texture upload/destroy lifecycle)
+  - Acceptance: docs provide a copyable reference without requiring engine-specific glue.
+
+### Epic 20.2 - Demo parity pack (optional)
+
+- [ ] Task: ship one example that looks/feels close to IGFD out of the box
+  - Candidates:
+    - apply IGFD classic preset + tuned columns + view mode + thumbnails backend
+    - curated filters and places defaults
+  - Acceptance: screenshot/video demonstrates IGFD-like look and interactions.
+
+Exit criteria:
+
+- At least one example demonstrates thumbnails properly.
+- Documentation covers the "host responsibilities" (thumbnails backend, icons/fonts, FS abstraction).
+
 ## Parity Checklist (IGFD → dear-file-browser)
 
 Use this as a tracking table for final validation.
