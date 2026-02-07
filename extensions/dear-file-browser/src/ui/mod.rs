@@ -787,6 +787,38 @@ fn draw_contents_with_fs_and_hooks(
         let action_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, action_label)[0];
         let action_w = action_label_w + frame_pad_x * 2.0;
 
+        let has_devices_button = show_breadcrumb_composer
+            && state
+                .core
+                .places
+                .groups
+                .iter()
+                .find(|g| g.label == Places::SYSTEM_GROUP)
+                .is_some_and(|g| g.places.iter().any(|p| !p.is_separator()));
+        let reset_label_w = if show_breadcrumb_composer {
+            font.calc_text_size(font_size, f32::MAX, 0.0, "Reset")[0]
+        } else {
+            0.0
+        };
+        let reset_w = reset_label_w + frame_pad_x * 2.0;
+        let devices_label_w = if has_devices_button {
+            font.calc_text_size(font_size, f32::MAX, 0.0, "Devices")[0]
+        } else {
+            0.0
+        };
+        let devices_w = devices_label_w + frame_pad_x * 2.0;
+        let sep_w = if show_breadcrumb_composer { 1.0 } else { 0.0 };
+        let path_controls_w = if show_breadcrumb_composer {
+            let mut w = reset_w + spacing_x;
+            if has_devices_button {
+                w += devices_w + spacing_x;
+            }
+            w += action_w + spacing_x + sep_w + spacing_x;
+            w
+        } else {
+            action_w
+        };
+
         let search_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Search:")[0];
         let search_total_w = search_label_w + spacing_x + SEARCH_W;
 
@@ -797,7 +829,7 @@ fn draw_contents_with_fs_and_hooks(
             + spacing_x
             + MIN_PATH_W
             + spacing_x
-            + action_w
+            + path_controls_w
             + spacing_x
             + search_total_w;
 
@@ -805,14 +837,14 @@ fn draw_contents_with_fs_and_hooks(
 
         // Path input (+ Go). If we can't fit Search on the same line, Search moves to the next line.
         let path_w = if stacked {
-            (row_w - history_button_w - spacing_x - action_w - spacing_x).max(40.0)
+            (row_w - history_button_w - spacing_x - path_controls_w - spacing_x).max(40.0)
         } else {
             let search_start_x = row_right_x - search_total_w;
             (search_start_x
                 - row_start_x
                 - history_button_w
                 - spacing_x
-                - action_w
+                - path_controls_w
                 - spacing_x * 2.0)
                 .max(MIN_PATH_W)
         };
@@ -848,20 +880,73 @@ fn draw_contents_with_fs_and_hooks(
         ui.same_line();
 
         if show_breadcrumb_composer {
+            let can_reset = state
+                .ui
+                .opened_cwd
+                .as_ref()
+                .is_some_and(|p| *p != state.core.cwd);
             {
-                let can_reset = state
-                    .ui
-                    .opened_cwd
-                    .as_ref()
-                    .is_some_and(|p| *p != state.core.cwd);
                 let _disabled = ui.begin_disabled_with_cond(!can_reset);
                 if ui.button("Reset") {
                     if let Some(p) = state.ui.opened_cwd.clone() {
                         let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
                     }
                 }
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text("Reset to the dialog start directory");
+            }
+            ui.same_line();
+
+            if has_devices_button {
+                let devices = state
+                    .core
+                    .places
+                    .groups
+                    .iter()
+                    .find(|g| g.label == Places::SYSTEM_GROUP)
+                    .map(|g| {
+                        g.places
+                            .iter()
+                            .filter(|p| !p.is_separator())
+                            .map(|p| (p.label.clone(), p.path.clone()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
+                if ui.button("Devices") {
+                    ui.open_popup("##path_devices_popup");
+                }
+                if ui.is_item_hovered() {
+                    ui.tooltip_text("System devices and drives");
+                }
+                if let Some(_popup) = ui.begin_popup("##path_devices_popup") {
+                    ui.text_disabled("Devices:");
+                    ui.separator();
+                    for (i, (label, path)) in devices.iter().enumerate() {
+                        let _id = ui.push_id(i as i32);
+                        if ui.selectable(label) {
+                            let _ = state.core.handle_event(CoreEvent::NavigateTo(path.clone()));
+                            ui.close_current_popup();
+                            break;
+                        }
+                    }
+                }
                 ui.same_line();
             }
+
+            if ui.button("Edit") {
+                state.ui.path_edit = true;
+                state.ui.path_edit_buffer = state.core.cwd.display().to_string();
+                state.ui.focus_path_edit_next = true;
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text("Edit path (Ctrl+L)");
+            }
+            ui.same_line();
+            ui.separator_vertical();
+            ui.same_line();
+
             if let Some(p) = ui
                 .child_window("##path_breadcrumbs")
                 .size([path_w, ui.frame_height()])
@@ -884,13 +969,6 @@ fn draw_contents_with_fs_and_hooks(
                 .flatten()
             {
                 let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
-            }
-
-            ui.same_line();
-            if ui.button("Edit") {
-                state.ui.path_edit = true;
-                state.ui.path_edit_buffer = state.core.cwd.display().to_string();
-                state.ui.focus_path_edit_next = true;
             }
         } else {
             let prev_path_buffer = state.ui.path_edit_buffer.clone();
@@ -2358,6 +2436,12 @@ fn draw_breadcrumbs(
     newline_at_end: bool,
     auto_scroll_end: bool,
 ) -> Option<PathBuf> {
+    let sep_label = if std::path::MAIN_SEPARATOR == '\\' {
+        "\\"
+    } else {
+        "/"
+    };
+
     // Build crumbs first to avoid borrowing cwd while mutating it
     let mut crumbs: Vec<(String, PathBuf)> = Vec::new();
     let mut acc = PathBuf::new();
@@ -2388,31 +2472,36 @@ fn draw_breadcrumbs(
             if ui.button(label) {
                 new_cwd = Some(path.clone());
             }
+            if ui.is_item_clicked_with_button(MouseButton::Right) {
+                new_cwd = Some(path.clone());
+                state.ui.path_edit = true;
+                state.ui.path_edit_buffer = path.display().to_string();
+                state.ui.focus_path_edit_next = true;
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(path.display().to_string());
+            }
             if auto_scroll_end && i + 1 == n && state.ui.breadcrumbs_scroll_to_end_next {
                 ui.set_scroll_here_x(1.0);
                 state.ui.breadcrumbs_scroll_to_end_next = false;
             }
-            if let Some(_popup) = ui.begin_popup_context_item() {
-                ui.text_disabled(path.display().to_string());
-                ui.separator();
-                if ui.menu_item("Edit path...") {
-                    state.ui.path_edit = true;
-                    state.ui.path_edit_buffer = path.display().to_string();
-                    state.ui.focus_path_edit_next = true;
-                    ui.close_current_popup();
-                }
-            }
             ui.same_line();
             if i + 1 < n {
                 if state.ui.breadcrumbs_quick_select {
-                    if ui.small_button(">") {
+                    if ui.small_button(sep_label) {
                         ui.open_popup("##breadcrumb_sep_popup");
                     }
                     if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
                         draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
                     }
+                    if ui.is_item_clicked_with_button(MouseButton::Right) {
+                        new_cwd = Some(path.clone());
+                        state.ui.path_edit = true;
+                        state.ui.path_edit_buffer = path.display().to_string();
+                        state.ui.focus_path_edit_next = true;
+                    }
                 } else {
-                    ui.text(">");
+                    ui.text(sep_label);
                 }
                 ui.same_line();
             }
@@ -2424,26 +2513,31 @@ fn draw_breadcrumbs(
             if ui.button(label) {
                 new_cwd = Some(path.clone());
             }
-            if let Some(_popup) = ui.begin_popup_context_item() {
-                ui.text_disabled(path.display().to_string());
-                ui.separator();
-                if ui.menu_item("Edit path...") {
-                    state.ui.path_edit = true;
-                    state.ui.path_edit_buffer = path.display().to_string();
-                    state.ui.focus_path_edit_next = true;
-                    ui.close_current_popup();
-                }
+            if ui.is_item_clicked_with_button(MouseButton::Right) {
+                new_cwd = Some(path.clone());
+                state.ui.path_edit = true;
+                state.ui.path_edit_buffer = path.display().to_string();
+                state.ui.focus_path_edit_next = true;
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(path.display().to_string());
             }
             ui.same_line();
             if state.ui.breadcrumbs_quick_select {
-                if ui.small_button(">") {
+                if ui.small_button(sep_label) {
                     ui.open_popup("##breadcrumb_sep_popup");
                 }
                 if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
                     draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
                 }
+                if ui.is_item_clicked_with_button(MouseButton::Right) {
+                    new_cwd = Some(path.clone());
+                    state.ui.path_edit = true;
+                    state.ui.path_edit_buffer = path.display().to_string();
+                    state.ui.focus_path_edit_next = true;
+                }
             } else {
-                ui.text(">");
+                ui.text(sep_label);
             }
             ui.same_line();
         }
@@ -2478,18 +2572,24 @@ fn draw_breadcrumbs(
         let start_tail = n.saturating_sub(tail);
         if let Some((_, parent)) = crumbs.get(start_tail.saturating_sub(1)) {
             if state.ui.breadcrumbs_quick_select {
-                if ui.small_button(">") {
+                if ui.small_button(sep_label) {
                     ui.open_popup("##breadcrumb_ellipsis_sep_popup");
                 }
                 if let Some(_popup) = ui.begin_popup("##breadcrumb_ellipsis_sep_popup") {
                     draw_breadcrumb_sep_popup(ui, fs, parent, &mut new_cwd);
                 }
+                if ui.is_item_clicked_with_button(MouseButton::Right) {
+                    new_cwd = Some(parent.clone());
+                    state.ui.path_edit = true;
+                    state.ui.path_edit_buffer = parent.display().to_string();
+                    state.ui.focus_path_edit_next = true;
+                }
             } else {
-                ui.text(">");
+                ui.text(sep_label);
             }
             ui.same_line();
         } else {
-            ui.text(">");
+            ui.text(sep_label);
             ui.same_line();
         }
         // Tail segments
@@ -2499,31 +2599,36 @@ fn draw_breadcrumbs(
             if ui.button(label) {
                 new_cwd = Some(path.clone());
             }
+            if ui.is_item_clicked_with_button(MouseButton::Right) {
+                new_cwd = Some(path.clone());
+                state.ui.path_edit = true;
+                state.ui.path_edit_buffer = path.display().to_string();
+                state.ui.focus_path_edit_next = true;
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(path.display().to_string());
+            }
             if auto_scroll_end && i + 1 == n && state.ui.breadcrumbs_scroll_to_end_next {
                 ui.set_scroll_here_x(1.0);
                 state.ui.breadcrumbs_scroll_to_end_next = false;
             }
-            if let Some(_popup) = ui.begin_popup_context_item() {
-                ui.text_disabled(path.display().to_string());
-                ui.separator();
-                if ui.menu_item("Edit path...") {
-                    state.ui.path_edit = true;
-                    state.ui.path_edit_buffer = path.display().to_string();
-                    state.ui.focus_path_edit_next = true;
-                    ui.close_current_popup();
-                }
-            }
             ui.same_line();
             if i + 1 < n {
                 if state.ui.breadcrumbs_quick_select {
-                    if ui.small_button(">") {
+                    if ui.small_button(sep_label) {
                         ui.open_popup("##breadcrumb_sep_popup");
                     }
                     if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
                         draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
                     }
+                    if ui.is_item_clicked_with_button(MouseButton::Right) {
+                        new_cwd = Some(path.clone());
+                        state.ui.path_edit = true;
+                        state.ui.path_edit_buffer = path.display().to_string();
+                        state.ui.focus_path_edit_next = true;
+                    }
                 } else {
-                    ui.text(">");
+                    ui.text(sep_label);
                 }
                 ui.same_line();
             }
