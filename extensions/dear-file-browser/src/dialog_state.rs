@@ -704,6 +704,10 @@ pub struct FileDialogUiState {
     pub(crate) breadcrumb_quick_filter: String,
     /// Focus the breadcrumb quick-select filter on next open.
     pub(crate) breadcrumb_quick_focus_next: bool,
+    /// Selected child dir path for breadcrumb quick-select popup.
+    pub(crate) breadcrumb_quick_selected: Option<PathBuf>,
+    /// Scroll the quick-select table to selected row on next frame.
+    pub(crate) breadcrumb_quick_scroll_to_selected_next: bool,
 }
 
 impl Default for FileDialogUiState {
@@ -787,6 +791,8 @@ impl Default for FileDialogUiState {
             breadcrumb_quick_parent: None,
             breadcrumb_quick_filter: String::new(),
             breadcrumb_quick_focus_next: false,
+            breadcrumb_quick_selected: None,
+            breadcrumb_quick_scroll_to_selected_next: false,
         }
     }
 }

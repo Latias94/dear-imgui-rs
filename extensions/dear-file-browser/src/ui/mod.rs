@@ -3018,13 +3018,17 @@ fn draw_breadcrumb_sep_popup(
         state.ui.breadcrumb_quick_focus_next = false;
     }
     ui.set_next_item_width(220.0);
-    let _ = ui
+    let filter_changed = ui
         .input_text(
             "##breadcrumb_quick_filter",
             &mut state.ui.breadcrumb_quick_filter,
         )
         .auto_select_all(true)
         .build();
+    if filter_changed {
+        state.ui.breadcrumb_quick_selected = None;
+        state.ui.breadcrumb_quick_scroll_to_selected_next = false;
+    }
     ui.separator();
 
     let Ok(rd) = fs.read_dir(parent) else {
@@ -3051,20 +3055,93 @@ fn draw_breadcrumb_sep_popup(
         return;
     }
 
-    let items_count = i32::try_from(dirs.len()).unwrap_or(i32::MAX);
-    let clipper = dear_imgui_rs::ListClipper::new(items_count)
-        .items_height(ui.text_line_height_with_spacing())
-        .begin(ui);
-    for i in clipper.iter() {
-        let idx = i as usize;
-        if idx >= dirs.len() {
-            continue;
+    if state.ui.breadcrumb_quick_selected.is_none() {
+        state.ui.breadcrumb_quick_selected = Some(dirs[0].path.clone());
+        state.ui.breadcrumb_quick_scroll_to_selected_next = true;
+    } else if let Some(sel) = state.ui.breadcrumb_quick_selected.as_ref() {
+        if !dirs.iter().any(|e| &e.path == sel) {
+            state.ui.breadcrumb_quick_selected = Some(dirs[0].path.clone());
+            state.ui.breadcrumb_quick_scroll_to_selected_next = true;
         }
-        let e = &dirs[idx];
-        if ui.selectable_config(&e.name).build() {
-            *out = Some(e.path.clone());
+    }
+
+    let arrow_up = ui.is_key_pressed(Key::UpArrow);
+    let arrow_down = ui.is_key_pressed(Key::DownArrow);
+    if !ui.io().want_text_input() && (arrow_up || arrow_down) {
+        let cur_idx = state
+            .ui
+            .breadcrumb_quick_selected
+            .as_ref()
+            .and_then(|sel| dirs.iter().position(|e| &e.path == sel))
+            .unwrap_or(0);
+        let next_idx = if arrow_up {
+            cur_idx.saturating_sub(1)
+        } else {
+            (cur_idx + 1).min(dirs.len().saturating_sub(1))
+        };
+        state.ui.breadcrumb_quick_selected = Some(dirs[next_idx].path.clone());
+        state.ui.breadcrumb_quick_scroll_to_selected_next = true;
+    }
+
+    let enter = ui.is_key_pressed(Key::Enter) || ui.is_key_pressed(Key::KeypadEnter);
+
+    let flags = dear_imgui_rs::TableFlags::SIZING_FIXED_FIT
+        | dear_imgui_rs::TableFlags::ROW_BG
+        | dear_imgui_rs::TableFlags::SCROLL_Y
+        | dear_imgui_rs::TableFlags::NO_HOST_EXTEND_Y;
+    let avail = ui.content_region_avail();
+    if let Some(_t) = ui.begin_table_with_sizing("##breadcrumb_quick_table", 1, flags, avail, 0.0) {
+        ui.table_setup_scroll_freeze(0, 1);
+        ui.table_setup_column(
+            "Name",
+            dear_imgui_rs::TableColumnFlags::WIDTH_STRETCH,
+            -1.0,
+            0,
+        );
+        ui.table_headers_row();
+
+        let items_count = i32::try_from(dirs.len()).unwrap_or(i32::MAX);
+        let clipper = dear_imgui_rs::ListClipper::new(items_count)
+            .items_height(ui.text_line_height_with_spacing())
+            .begin(ui);
+        for i in clipper.iter() {
+            let idx = i as usize;
+            if idx >= dirs.len() {
+                continue;
+            }
+            let e = &dirs[idx];
+            ui.table_next_row();
+            ui.table_next_column();
+            let selected = state
+                .ui
+                .breadcrumb_quick_selected
+                .as_ref()
+                .is_some_and(|p| *p == e.path);
+            if selected && state.ui.breadcrumb_quick_scroll_to_selected_next {
+                ui.set_scroll_here_y(0.5);
+                state.ui.breadcrumb_quick_scroll_to_selected_next = false;
+            }
+
+            if ui
+                .selectable_config(&e.name)
+                .selected(selected)
+                .flags(dear_imgui_rs::SelectableFlags::SPAN_ALL_COLUMNS)
+                .build()
+            {
+                state.ui.breadcrumb_quick_selected = Some(e.path.clone());
+                if ui.is_mouse_double_clicked(MouseButton::Left) {
+                    *out = Some(e.path.clone());
+                    ui.close_current_popup();
+                    break;
+                }
+            }
+        }
+    }
+
+    if enter && !ui.io().want_text_input() {
+        if let Some(sel) = state.ui.breadcrumb_quick_selected.clone() {
+            *out = Some(sel);
             ui.close_current_popup();
-            break;
         }
     }
 }
