@@ -500,10 +500,13 @@ pub struct FileDialogUiState {
     pub empty_hint_color: [f32; 4],
     /// Custom static hint message when entries list is empty; if None, a default message is built.
     pub empty_hint_static_message: Option<String>,
-    /// Path edit mode (Ctrl+L).
+    /// Whether the path input is currently being edited (best-effort; updated by UI).
+    ///
+    /// This is UI-only state and should not be treated as a stable API contract.
     pub path_edit: bool,
-    /// Path edit buffer.
+    /// Path input buffer (editable "address bar").
     pub path_edit_buffer: String,
+    pub(crate) path_edit_last_cwd: String,
     /// Focus path edit on next frame.
     pub focus_path_edit_next: bool,
     /// Focus search on next frame (Ctrl+F).
@@ -617,6 +620,7 @@ impl Default for FileDialogUiState {
             empty_hint_static_message: None,
             path_edit: false,
             path_edit_buffer: String::new(),
+            path_edit_last_cwd: String::new(),
             focus_path_edit_next: false,
             focus_search_next: false,
             ui_error: None,

@@ -42,15 +42,15 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - View modes: `List`, `ThumbnailsList`, `Grid`
   - Sorting by Name/Ext/Size/Modified via table headers (list views) or a sort combo (grid)
   - List columns: configurable visibility for Preview/Extension/Size/Modified (per dialog state)
-  - Breadcrumbs with automatic compression on long paths
+  - File-dialog style address bar (typed path + Go) + breadcrumbs (auto-compress on long paths)
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
   - Places: editable groups + bookmarks/devices, export/import via compact versioned string (v1)
   - File styles: icons/colors/tooltips via `FileStyleRegistry`
-  - Thumbnails: request queue + LRU cache (user-driven decode/upload lifecycle)
+  - Thumbnails: request queue + LRU cache (host-provided decode/upload backend)
   - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all
   - Generation-safe incremental scan policy with tuned presets (default; set `ScanPolicy::Sync` to disable)
-- Keyboard navigation: Up/Down arrows + Enter, Backspace, Ctrl+L (path), Ctrl+F (search)
+- Keyboard navigation: Up/Down arrows + Enter, Backspace, Ctrl+L (focus path), Ctrl+F (focus search)
 - Empty-state hint with configurable color/message
 - CJK/emoji supported via user-provided fonts
 - Unified `Selection` + `FileDialogError` across backends

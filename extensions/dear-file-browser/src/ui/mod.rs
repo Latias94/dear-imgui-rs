@@ -596,37 +596,89 @@ fn draw_contents_with_fs_and_hooks(
     if ui.checkbox("Hidden", &mut show_hidden) {
         state.core.show_hidden = show_hidden;
     }
-    ui.same_line();
-    // Breadcrumbs or Path Edit
-    if state.ui.path_edit {
-        if state.ui.focus_path_edit_next {
-            ui.set_keyboard_focus_here();
-            state.ui.focus_path_edit_next = false;
-        }
-        ui.input_text("##path_edit", &mut state.ui.path_edit_buffer)
-            .build();
-        ui.same_line();
-        if ui.button("Go") {
-            submit_path_edit(state, fs);
-        }
-        ui.same_line();
-        if ui.button("Cancel") {
-            state.ui.path_edit = false;
-        }
-    } else {
-        if let Some(p) = draw_breadcrumbs(ui, state, fs, state.ui.breadcrumbs_max_segments) {
-            let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
+    ui.new_line();
+
+    // Path bar (file-dialog style address input) + Search.
+    let cwd_s = state.core.cwd.display().to_string();
+    if state.ui.path_edit_last_cwd != cwd_s && !state.ui.path_edit {
+        state.ui.path_edit_last_cwd = cwd_s.clone();
+        state.ui.path_edit_buffer = cwd_s.clone();
+    } else if state.ui.path_edit_last_cwd.is_empty() {
+        state.ui.path_edit_last_cwd = cwd_s.clone();
+        if state.ui.path_edit_buffer.trim().is_empty() {
+            state.ui.path_edit_buffer = cwd_s.clone();
         }
     }
-    // Search box (aligned to the right)
+
+    ui.text("Path:");
+    ui.same_line();
+    let style = ui.clone_style();
+    let font = ui.current_font();
+    let font_size = ui.current_font_size();
+    let spacing_x = style.item_spacing()[0];
+    let frame_pad_x = style.frame_padding()[0];
+
+    const MIN_PATH_W: f32 = 120.0;
+    const SEARCH_W: f32 = 220.0;
+
+    let go_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Go")[0];
+    let go_w = go_label_w + frame_pad_x * 2.0;
+
+    let search_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Search:")[0];
+    let search_total_w = search_label_w + spacing_x + SEARCH_W;
+
+    let row_start_x = ui.cursor_pos_x();
+    let row_w = ui.content_region_avail_width();
+    let row_right_x = row_start_x + row_w;
+    let min_total_w = MIN_PATH_W + spacing_x + go_w + spacing_x + search_total_w;
+
+    let stacked = row_w < min_total_w;
+
+    // Path input (+ Go). If we can't fit Search on the same line, Search moves to the next line.
+    let path_w = if stacked {
+        (row_w - spacing_x - go_w).max(MIN_PATH_W)
+    } else {
+        let search_start_x = row_right_x - search_total_w;
+        (search_start_x - row_start_x - spacing_x - go_w).max(MIN_PATH_W)
+    };
+    ui.set_next_item_width(path_w);
+    let select_all = state.ui.focus_path_edit_next;
+    if select_all {
+        ui.set_keyboard_focus_here();
+        state.ui.focus_path_edit_next = false;
+    }
+    let submitted = ui
+        .input_text("##path_bar", &mut state.ui.path_edit_buffer)
+        .auto_select_all(select_all)
+        .enter_returns_true(true)
+        .build();
+    let path_active = ui.is_item_active() || ui.is_item_focused();
+    state.ui.path_edit = path_active;
+
+    ui.same_line();
+    let go = ui.button("Go") || (path_active && submitted);
+    if go {
+        submit_path_edit(state, fs);
+    }
+
+    if stacked {
+        ui.new_line();
+    } else {
+        let search_start_x = row_right_x - search_total_w;
+        ui.same_line_with_pos(search_start_x);
+    }
+
+    ui.text("Search:");
     ui.same_line();
     if state.ui.focus_search_next {
         ui.set_keyboard_focus_here();
         state.ui.focus_search_next = false;
     }
-    let search_changed = ui.input_text("Search", &mut state.core.search).build();
-    if search_changed {
-        // `rescan()` will apply search filtering.
+    ui.set_next_item_width(SEARCH_W);
+    let _search_changed = ui.input_text("##search", &mut state.core.search).build();
+
+    if let Some(p) = draw_breadcrumbs(ui, state, fs, state.ui.breadcrumbs_max_segments) {
+        let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
     }
 
     ui.separator();
@@ -1728,13 +1780,25 @@ fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn File
 
 fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
     let input = state.ui.path_edit_buffer.trim();
+    if input.is_empty() {
+        state.ui.ui_error = Some("Path is empty".into());
+        return;
+    }
+
     let raw_p = std::path::PathBuf::from(input);
+    let raw_p = if raw_p.is_absolute() {
+        raw_p
+    } else {
+        state.core.cwd.join(&raw_p)
+    };
     let p = fs.canonicalize(&raw_p).unwrap_or(raw_p.clone());
     match fs.metadata(&p) {
         Ok(md) => {
             if md.is_dir {
                 state.core.set_cwd(p);
                 state.ui.path_edit = false;
+                state.ui.path_edit_last_cwd = state.core.cwd.display().to_string();
+                state.ui.path_edit_buffer = state.ui.path_edit_last_cwd.clone();
                 state.ui.ui_error = None;
             } else {
                 state.ui.ui_error = Some("Path exists but is not a directory".into());

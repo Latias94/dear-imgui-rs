@@ -683,6 +683,16 @@ This milestone is intentionally UI/config focused. It should not regress the exi
     - grid-only sort combo (since table headers are absent)
   - Acceptance: selection + keyboard/type-to-select remains stable across modes.
 
+### Epic 18.6 - Address bar path input (file-dialog feel)
+
+- [x] Task: make path navigation feel like a native file dialog while staying Rust-first
+  - Done:
+    - always-visible path input ("address bar") with `Go` + submit-on-Enter
+    - Ctrl+L focuses the path input (keeps keyboard workflow)
+    - relative paths resolve against the dialog cwd (not process cwd)
+    - breadcrumbs remain available and can be used alongside manual typing
+  - Acceptance: Enter to confirm selection does not trigger while editing the path input.
+
 Exit criteria:
 
 - Hosts can achieve an IGFD-like UX with opt-in presets/toggles.
