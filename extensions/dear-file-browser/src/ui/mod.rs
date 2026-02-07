@@ -3302,26 +3302,13 @@ fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
             }
 
             if is_editing_this_group {
+                let esc = ui.is_key_pressed(Key::Escape);
                 ui.same_line();
-                if ui.small_button("ok##places_edit_ok") {
-                    state.ui.places_inline_edit = None;
-                    state.ui.places_inline_edit_buffer.clear();
-                    state.ui.places_inline_edit_focus_next = false;
-                } else {
-                    ui.same_line();
-                    if state.ui.places_inline_edit_focus_next {
-                        ui.set_keyboard_focus_here();
-                        state.ui.places_inline_edit_focus_next = false;
-                    }
-                    ui.set_next_item_width(ui.content_region_avail_width().max(80.0));
-                    let changed = ui
-                        .input_text(
-                            "##places_inline_edit",
-                            &mut state.ui.places_inline_edit_buffer,
-                        )
-                        .auto_select_all(true)
-                        .build();
-                    if changed {
+                let can_commit =
+                    editing_path.is_some() && !state.ui.places_inline_edit_buffer.trim().is_empty();
+                {
+                    let _disabled = ui.begin_disabled_with_cond(!can_commit);
+                    if ui.small_button("ok##places_edit_ok") {
                         if let Some(from_path) = editing_path.as_ref() {
                             let _ = state.core.places.edit_place_by_path(
                                 &g.label,
@@ -3330,7 +3317,45 @@ fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
                                 from_path.clone(),
                             );
                         }
+                        state.ui.places_inline_edit = None;
+                        state.ui.places_inline_edit_buffer.clear();
+                        state.ui.places_inline_edit_focus_next = false;
                     }
+                }
+                if ui.is_item_hovered() && !can_commit {
+                    ui.tooltip_text("Label cannot be empty");
+                }
+
+                ui.same_line();
+                if state.ui.places_inline_edit_focus_next {
+                    ui.set_keyboard_focus_here();
+                    state.ui.places_inline_edit_focus_next = false;
+                }
+                ui.set_next_item_width(ui.content_region_avail_width().max(80.0));
+                let submitted = ui
+                    .input_text(
+                        "##places_inline_edit",
+                        &mut state.ui.places_inline_edit_buffer,
+                    )
+                    .auto_select_all(true)
+                    .enter_returns_true(true)
+                    .build();
+                if submitted && can_commit {
+                    if let Some(from_path) = editing_path.as_ref() {
+                        let _ = state.core.places.edit_place_by_path(
+                            &g.label,
+                            from_path,
+                            state.ui.places_inline_edit_buffer.clone(),
+                            from_path.clone(),
+                        );
+                    }
+                    state.ui.places_inline_edit = None;
+                    state.ui.places_inline_edit_buffer.clear();
+                    state.ui.places_inline_edit_focus_next = false;
+                } else if esc {
+                    state.ui.places_inline_edit = None;
+                    state.ui.places_inline_edit_buffer.clear();
+                    state.ui.places_inline_edit_focus_next = false;
                 }
             }
 
@@ -3373,6 +3398,7 @@ fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
                 && g.label != Places::SYSTEM_GROUP;
             if editable {
                 if ui.small_button("E") {
+                    state.ui.places_selected = Some((g.label.clone(), p.path.clone()));
                     state.ui.places_inline_edit = Some((g.label.clone(), p.path.clone()));
                     state.ui.places_inline_edit_buffer = p.label.clone();
                     state.ui.places_inline_edit_focus_next = true;
@@ -3402,6 +3428,16 @@ fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
                 .build();
             if clicked {
                 state.ui.places_selected = Some((g.label.clone(), p.path.clone()));
+                if state
+                    .ui
+                    .places_inline_edit
+                    .as_ref()
+                    .is_some_and(|(group, path)| group == &g.label && path != &p.path)
+                {
+                    state.ui.places_inline_edit = None;
+                    state.ui.places_inline_edit_buffer.clear();
+                    state.ui.places_inline_edit_focus_next = false;
+                }
             }
             if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
                 *out = Some(p.path.clone());
