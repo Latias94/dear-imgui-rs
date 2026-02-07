@@ -571,6 +571,7 @@ pub struct FileDialogUiState {
     /// Path input buffer (editable "address bar").
     pub path_edit_buffer: String,
     pub(crate) path_edit_last_cwd: String,
+    pub(crate) breadcrumbs_scroll_to_end_next: bool,
     pub(crate) path_history_index: Option<usize>,
     pub(crate) path_history_saved_buffer: Option<String>,
     pub(crate) path_bar_programmatic_edit: bool,
@@ -690,6 +691,7 @@ impl Default for FileDialogUiState {
             path_edit: false,
             path_edit_buffer: String::new(),
             path_edit_last_cwd: String::new(),
+            breadcrumbs_scroll_to_end_next: false,
             path_history_index: None,
             path_history_saved_buffer: None,
             path_bar_programmatic_edit: false,
@@ -759,6 +761,7 @@ impl FileDialogUiState {
         self.thumbnails_enabled = false;
         self.toolbar.density = ToolbarDensity::Compact;
         self.path_bar_style = PathBarStyle::Breadcrumbs;
+        self.breadcrumbs_scroll_to_end_next = true;
 
         self.file_list_columns.show_preview = false;
         self.file_list_columns.show_extension = false;

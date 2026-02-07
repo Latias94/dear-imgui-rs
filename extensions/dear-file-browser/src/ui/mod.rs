@@ -746,10 +746,16 @@ fn draw_contents_with_fs_and_hooks(
         if state.ui.path_edit_last_cwd != cwd_s && !state.ui.path_edit {
             state.ui.path_edit_last_cwd = cwd_s.clone();
             state.ui.path_edit_buffer = cwd_s.clone();
+            if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                state.ui.breadcrumbs_scroll_to_end_next = true;
+            }
         } else if state.ui.path_edit_last_cwd.is_empty() {
             state.ui.path_edit_last_cwd = cwd_s.clone();
             if state.ui.path_edit_buffer.trim().is_empty() {
                 state.ui.path_edit_buffer = cwd_s.clone();
+            }
+            if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                state.ui.breadcrumbs_scroll_to_end_next = true;
             }
         }
 
@@ -843,12 +849,19 @@ fn draw_contents_with_fs_and_hooks(
                 .size([path_w, ui.frame_height()])
                 .border(true)
                 .flags(
-                    dear_imgui_rs::WindowFlags::NO_SCROLLBAR
+                    dear_imgui_rs::WindowFlags::HORIZONTAL_SCROLLBAR
                         | dear_imgui_rs::WindowFlags::NO_SCROLL_WITH_MOUSE,
                 )
                 .build(ui, || {
                     ui.align_text_to_frame_padding();
-                    draw_breadcrumbs(ui, state, fs, state.ui.breadcrumbs_max_segments, false)
+                    draw_breadcrumbs(
+                        ui,
+                        state,
+                        fs,
+                        state.ui.breadcrumbs_max_segments,
+                        false,
+                        true,
+                    )
                 })
                 .flatten()
             {
@@ -1115,9 +1128,14 @@ fn draw_contents_with_fs_and_hooks(
         let _search_changed = ui.input_text("##search", &mut state.core.search).build();
 
         if !show_breadcrumb_composer {
-            if let Some(p) =
-                draw_breadcrumbs(ui, state, fs, state.ui.breadcrumbs_max_segments, true)
-            {
+            if let Some(p) = draw_breadcrumbs(
+                ui,
+                state,
+                fs,
+                state.ui.breadcrumbs_max_segments,
+                true,
+                false,
+            ) {
                 let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
             }
         }
@@ -2320,6 +2338,7 @@ fn draw_breadcrumbs(
     fs: &dyn FileSystem,
     max_segments: usize,
     newline_at_end: bool,
+    auto_scroll_end: bool,
 ) -> Option<PathBuf> {
     // Build crumbs first to avoid borrowing cwd while mutating it
     let mut crumbs: Vec<(String, PathBuf)> = Vec::new();
@@ -2350,6 +2369,10 @@ fn draw_breadcrumbs(
             let _id = ui.push_id(i as i32);
             if ui.button(label) {
                 new_cwd = Some(path.clone());
+            }
+            if auto_scroll_end && i + 1 == n && state.ui.breadcrumbs_scroll_to_end_next {
+                ui.set_scroll_here_x(1.0);
+                state.ui.breadcrumbs_scroll_to_end_next = false;
             }
             if let Some(_popup) = ui.begin_popup_context_item() {
                 ui.text_disabled(path.display().to_string());
@@ -2399,17 +2422,56 @@ fn draw_breadcrumbs(
             ui.same_line();
         }
         // Ellipsis
-        ui.text("...");
+        if ui.small_button("...") {
+            ui.open_popup("##breadcrumb_ellipsis_popup");
+        }
+        if ui.is_item_hovered() {
+            ui.tooltip_text("Jump to hidden segments");
+        }
+        if let Some(_popup) = ui.begin_popup("##breadcrumb_ellipsis_popup") {
+            let tail = max_segments - 2;
+            let start_tail = n.saturating_sub(tail);
+            let hidden_end = start_tail.saturating_sub(1);
+            ui.text_disabled("Path:");
+            ui.separator();
+            for (i, (label, path)) in crumbs.iter().enumerate().skip(1).take(hidden_end) {
+                let _id = ui.push_id(i as i32);
+                if ui.selectable(label) {
+                    new_cwd = Some(path.clone());
+                    ui.close_current_popup();
+                    break;
+                }
+                if ui.is_item_hovered() {
+                    ui.tooltip_text(path.display().to_string());
+                }
+            }
+        }
         ui.same_line();
-        ui.text(">");
-        ui.same_line();
-        // Tail segments
+
         let tail = max_segments - 2;
+        let start_tail = n.saturating_sub(tail);
+        if let Some((_, parent)) = crumbs.get(start_tail.saturating_sub(1)) {
+            if ui.small_button(">") {
+                ui.open_popup("##breadcrumb_ellipsis_sep_popup");
+            }
+            if let Some(_popup) = ui.begin_popup("##breadcrumb_ellipsis_sep_popup") {
+                draw_breadcrumb_sep_popup(ui, fs, parent, &mut new_cwd);
+            }
+            ui.same_line();
+        } else {
+            ui.text(">");
+            ui.same_line();
+        }
+        // Tail segments
         let start_tail = n.saturating_sub(tail);
         for (i, (label, path)) in crumbs.iter().enumerate().skip(start_tail) {
             let _id = ui.push_id(i as i32);
             if ui.button(label) {
                 new_cwd = Some(path.clone());
+            }
+            if auto_scroll_end && i + 1 == n && state.ui.breadcrumbs_scroll_to_end_next {
+                ui.set_scroll_here_x(1.0);
+                state.ui.breadcrumbs_scroll_to_end_next = false;
             }
             if let Some(_popup) = ui.begin_popup_context_item() {
                 ui.text_disabled(path.display().to_string());
