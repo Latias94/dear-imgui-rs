@@ -47,7 +47,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - File styles: icons/colors/tooltips via `FileStyleRegistry`
   - Thumbnails: request queue + LRU cache (user-driven decode/upload lifecycle)
   - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all
-  - Generation-safe incremental scan policy with tuned presets
+  - Generation-safe incremental scan policy with tuned presets (default; set `ScanPolicy::Sync` to disable)
 - Keyboard navigation: Up/Down arrows + Enter, Backspace, Ctrl+L (path), Ctrl+F (search)
 - Empty-state hint with configurable color/message
 - CJK/emoji supported via user-provided fonts

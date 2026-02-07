@@ -655,8 +655,10 @@ pub struct FileDialogState {
 impl FileDialogState {
     /// Creates a new dialog state for a mode.
     pub fn new(mode: DialogMode) -> Self {
+        let mut core = FileDialogCore::new(mode);
+        core.set_scan_policy(ScanPolicy::tuned_incremental());
         Self {
-            core: FileDialogCore::new(mode),
+            core,
             ui: FileDialogUiState::default(),
         }
     }
@@ -743,6 +745,12 @@ mod tests {
 
         state.reopen();
         assert!(state.is_open());
+    }
+
+    #[test]
+    fn default_scan_policy_is_tuned_incremental() {
+        let state = FileDialogState::new(DialogMode::OpenFile);
+        assert_eq!(state.scan_policy(), ScanPolicy::tuned_incremental());
     }
 
     #[test]

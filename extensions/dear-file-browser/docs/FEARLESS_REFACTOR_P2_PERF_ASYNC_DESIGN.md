@@ -165,7 +165,7 @@ enum ScanPolicy {
 }
 ```
 
-Policy is optional and host-configurable with sane defaults (`ScanPolicy::tuned_incremental()`).
+Policy is optional and host-configurable with sane defaults (`ScanPolicy::tuned_incremental()`). By default, `FileDialogState::new` installs `ScanPolicy::tuned_incremental()`, while `ScanPolicy::default()` remains `Sync`.
 
 ### 6.4 `ScanStatus`
 
