@@ -98,6 +98,7 @@ impl AppWindow {
 
         let browser = {
             let mut st = FileDialogState::new(DialogMode::OpenFiles);
+            st.apply_igfd_classic_preset();
             let filter =
                 dear_file_browser::FileFilter::from(("Images", &["png", "jpg", "jpeg"][..]));
             st.core.set_filters(vec![filter]);
