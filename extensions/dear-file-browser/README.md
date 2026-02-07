@@ -23,6 +23,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 - Roadmap / TODO: `docs/FEARLESS_REFACTOR_TODO_MILESTONES.md`
 - Parity + deviations (non-C-API): `docs/IGFD_PARITY_AND_DEVIATIONS.md`
 - Thumbnails cookbook: `docs/THUMBNAILS_INTEGRATION_COOKBOOK.md`
+- Demo parity pack: `examples/04-integration/file_browser_imgui.rs`
 
 ## Compatibility
 

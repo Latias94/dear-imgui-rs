@@ -6,7 +6,7 @@ use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
 use dear_file_browser::{
     DialogMode, FileDialogExt, FileDialogState, FileListViewMode, ImageThumbnailProvider,
-    ThumbnailBackend, ThumbnailRenderer,
+    ThumbnailBackend, ThumbnailRenderer, ToolbarDensity, ToolbarIconMode,
 };
 use dear_imgui_glow::GlowRenderer;
 use dear_imgui_rs::*;
@@ -105,6 +105,18 @@ impl AppWindow {
             st.ui.file_list_view = FileListViewMode::ThumbnailsList;
             st.ui.thumbnails_enabled = true;
             st.ui.file_list_columns.show_preview = true;
+            st.ui.toolbar.density = ToolbarDensity::Compact;
+            st.ui.toolbar.icons.mode = ToolbarIconMode::IconOnly;
+            st.ui.toolbar.icons.refresh = Some("⟳".to_string());
+            st.ui.toolbar.icons.new_folder = Some("+".to_string());
+            st.ui.toolbar.icons.columns = Some("≡".to_string());
+            st.ui.toolbar.icons.options = Some("⚙".to_string());
+
+            // Curated places: keep System, add a few handy bookmarks.
+            if let Ok(pwd) = std::env::current_dir() {
+                st.core.places.add_bookmark("Repo", pwd);
+            }
+            st.core.places.add_bookmark("Temp", std::env::temp_dir());
             st
         };
 

@@ -771,9 +771,9 @@ Goal: make it easy for hosts to adopt the ImGui backend with "batteries included
 
 ### Epic 20.2 - Demo parity pack (optional)
 
-- [ ] Task: ship one example that looks/feels close to IGFD out of the box
-  - Candidates:
-    - apply IGFD classic preset + tuned columns + view mode + thumbnails backend
+- [x] Task: ship one example that looks/feels close to IGFD out of the box
+  - Done:
+    - `examples/04-integration/file_browser_imgui.rs` applies IGFD classic preset + compact chrome + thumbnails backend
     - curated filters and places defaults
   - Acceptance: screenshot/video demonstrates IGFD-like look and interactions.
 
