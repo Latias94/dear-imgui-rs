@@ -556,6 +556,11 @@ pub struct FileDialogUiState {
     pub file_list_columns: FileListColumnsConfig,
     /// Path bar style (editable text input vs breadcrumb-style composer).
     pub path_bar_style: PathBarStyle,
+    /// When `true` (and `path_bar_style` is [`PathBarStyle::Breadcrumbs`]), show the editable path
+    /// text input instead of the breadcrumb composer.
+    ///
+    /// This mimics IGFD's path composer "Edit" toggle behavior.
+    pub path_input_mode: bool,
     /// Enable quick parallel directory selection popups when clicking breadcrumb separators.
     ///
     /// This mimics IGFD's "quick path selection" feature in the path composer.
@@ -689,6 +694,7 @@ impl Default for FileDialogUiState {
             file_list_view: FileListViewMode::default(),
             file_list_columns: FileListColumnsConfig::default(),
             path_bar_style: PathBarStyle::TextInput,
+            path_input_mode: false,
             breadcrumbs_quick_select: true,
             breadcrumbs_max_segments: 6,
             empty_hint_enabled: true,
@@ -768,6 +774,7 @@ impl FileDialogUiState {
         self.thumbnails_enabled = false;
         self.toolbar.density = ToolbarDensity::Compact;
         self.path_bar_style = PathBarStyle::Breadcrumbs;
+        self.path_input_mode = false;
         self.breadcrumbs_scroll_to_end_next = true;
         self.breadcrumbs_quick_select = true;
 
