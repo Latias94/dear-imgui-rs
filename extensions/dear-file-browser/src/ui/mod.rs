@@ -2804,8 +2804,14 @@ fn draw_breadcrumbs(
                     if ui.small_button(sep_label) {
                         ui.open_popup("##breadcrumb_sep_popup");
                     }
+                    unsafe {
+                        sys::igSetNextWindowSize(
+                            sys::ImVec2 { x: 360.0, y: 280.0 },
+                            dear_imgui_rs::Condition::Appearing as i32,
+                        );
+                    }
                     if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
-                        draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                        draw_breadcrumb_sep_popup(ui, state, fs, path, &mut new_cwd);
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         new_cwd = Some(path.clone());
@@ -2846,8 +2852,14 @@ fn draw_breadcrumbs(
                 if ui.small_button(sep_label) {
                     ui.open_popup("##breadcrumb_sep_popup");
                 }
+                unsafe {
+                    sys::igSetNextWindowSize(
+                        sys::ImVec2 { x: 360.0, y: 280.0 },
+                        dear_imgui_rs::Condition::Appearing as i32,
+                    );
+                }
                 if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
-                    draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                    draw_breadcrumb_sep_popup(ui, state, fs, path, &mut new_cwd);
                 }
                 if ui.is_item_clicked_with_button(MouseButton::Right) {
                     new_cwd = Some(path.clone());
@@ -2897,8 +2909,14 @@ fn draw_breadcrumbs(
                 if ui.small_button(sep_label) {
                     ui.open_popup("##breadcrumb_ellipsis_sep_popup");
                 }
+                unsafe {
+                    sys::igSetNextWindowSize(
+                        sys::ImVec2 { x: 360.0, y: 280.0 },
+                        dear_imgui_rs::Condition::Appearing as i32,
+                    );
+                }
                 if let Some(_popup) = ui.begin_popup("##breadcrumb_ellipsis_sep_popup") {
-                    draw_breadcrumb_sep_popup(ui, fs, parent, &mut new_cwd);
+                    draw_breadcrumb_sep_popup(ui, state, fs, parent, &mut new_cwd);
                 }
                 if ui.is_item_clicked_with_button(MouseButton::Right) {
                     new_cwd = Some(parent.clone());
@@ -2946,8 +2964,14 @@ fn draw_breadcrumbs(
                     if ui.small_button(sep_label) {
                         ui.open_popup("##breadcrumb_sep_popup");
                     }
+                    unsafe {
+                        sys::igSetNextWindowSize(
+                            sys::ImVec2 { x: 360.0, y: 280.0 },
+                            dear_imgui_rs::Condition::Appearing as i32,
+                        );
+                    }
                     if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
-                        draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                        draw_breadcrumb_sep_popup(ui, state, fs, path, &mut new_cwd);
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         new_cwd = Some(path.clone());
@@ -2973,15 +2997,53 @@ fn draw_breadcrumbs(
 
 fn draw_breadcrumb_sep_popup(
     ui: &Ui,
+    state: &mut FileDialogState,
     fs: &dyn FileSystem,
     parent: &Path,
     out: &mut Option<PathBuf>,
 ) {
+    let parent_buf = parent.to_path_buf();
+    if state.ui.breadcrumb_quick_parent.as_ref() != Some(&parent_buf) {
+        state.ui.breadcrumb_quick_parent = Some(parent_buf);
+        state.ui.breadcrumb_quick_filter.clear();
+        state.ui.breadcrumb_quick_focus_next = true;
+    }
+
+    ui.text_disabled("Quick path selection");
+    ui.separator();
+    ui.text("Filter:");
+    ui.same_line();
+    if state.ui.breadcrumb_quick_focus_next {
+        ui.set_keyboard_focus_here();
+        state.ui.breadcrumb_quick_focus_next = false;
+    }
+    ui.set_next_item_width(220.0);
+    let _ = ui
+        .input_text(
+            "##breadcrumb_quick_filter",
+            &mut state.ui.breadcrumb_quick_filter,
+        )
+        .auto_select_all(true)
+        .build();
+    ui.separator();
+
     let Ok(rd) = fs.read_dir(parent) else {
         ui.text_disabled("Failed to read directory");
         return;
     };
-    let mut dirs: Vec<_> = rd.into_iter().filter(|e| e.is_dir).collect();
+    let needle = state.ui.breadcrumb_quick_filter.trim().to_lowercase();
+    let mut dirs: Vec<_> = rd
+        .into_iter()
+        .filter(|e| {
+            if !e.is_dir {
+                return false;
+            }
+            if needle.is_empty() {
+                return true;
+            }
+            e.name.to_lowercase().contains(&needle)
+        })
+        .collect();
     dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
     if dirs.is_empty() {
@@ -2989,9 +3051,18 @@ fn draw_breadcrumb_sep_popup(
         return;
     }
 
-    for e in dirs {
+    let items_count = i32::try_from(dirs.len()).unwrap_or(i32::MAX);
+    let clipper = dear_imgui_rs::ListClipper::new(items_count)
+        .items_height(ui.text_line_height_with_spacing())
+        .begin(ui);
+    for i in clipper.iter() {
+        let idx = i as usize;
+        if idx >= dirs.len() {
+            continue;
+        }
+        let e = &dirs[idx];
         if ui.selectable_config(&e.name).build() {
-            *out = Some(e.path);
+            *out = Some(e.path.clone());
             ui.close_current_popup();
             break;
         }

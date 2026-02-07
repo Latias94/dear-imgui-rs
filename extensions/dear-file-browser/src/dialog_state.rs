@@ -690,6 +690,13 @@ pub struct FileDialogUiState {
     pub(crate) type_select_last_input: Option<std::time::Instant>,
     /// UI-only selection inside the places pane: (group_label, place_path).
     pub(crate) places_selected: Option<(String, PathBuf)>,
+
+    /// Current parent dir for the breadcrumb quick-select popup.
+    pub(crate) breadcrumb_quick_parent: Option<PathBuf>,
+    /// Filter text for the breadcrumb quick-select popup.
+    pub(crate) breadcrumb_quick_filter: String,
+    /// Focus the breadcrumb quick-select filter on next open.
+    pub(crate) breadcrumb_quick_focus_next: bool,
 }
 
 impl Default for FileDialogUiState {
@@ -767,6 +774,9 @@ impl Default for FileDialogUiState {
             type_select_buffer: String::new(),
             type_select_last_input: None,
             places_selected: None,
+            breadcrumb_quick_parent: None,
+            breadcrumb_quick_filter: String::new(),
+            breadcrumb_quick_focus_next: false,
         }
     }
 }
