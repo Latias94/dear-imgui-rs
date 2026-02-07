@@ -17,6 +17,7 @@ Last updated: 2026-02-07
 | Explicit lifecycle helpers | Done | `open/reopen/close/is_open`. |
 | Host flexibility (window/modal/embed/popup-hosted) | Done | `draw_contents*`, `show_windowed*`, `show_modal*`. |
 | Places and persistence | Done | Devices + bookmarks + editable groups + compact import/export (v1), with per-group metadata and optional separators. |
+| Places pane (toggle + splitter) | Done | Toolbar "Places" control + Standard-layout splitter-resizable pane; Minimal layout uses a popup. |
 | Selection UX | Done | Ctrl/Shift, Ctrl+A, keyboard navigation, type-to-select, max-selection cap. |
 | Filters and parsing | Done | Extension/wildcard/regex/collection parsing with IGFD-style semantics. |
 | Save policies | Done | Confirm-overwrite + extension policy. |
@@ -25,6 +26,7 @@ Last updated: 2026-02-07
 | Scan-time entry callback | Done | Core/state scan hook (`set_scan_hook` / `clear_scan_hook`). |
 | Thumbnails | Done | Decode/upload/destroy lifecycle + grid/list integration. |
 | Address bar path input | Done | Always-visible Path input + Go + submit-on-Enter; Ctrl+L focuses; history + Tab completion. |
+| Breadcrumb path composer | Done | Optional breadcrumb composer with ellipsis compression, edit toggle, devices/reset actions, and optional quick path selection popups. |
 | Navigation history | Done | Back/Forward/Up/Refresh with history stacks; Alt+Left/Right + F5 shortcuts. |
 | Host min/max constraints | Done | `WindowHostConfig` and `ModalHostConfig` support `min_size` / `max_size`. |
 

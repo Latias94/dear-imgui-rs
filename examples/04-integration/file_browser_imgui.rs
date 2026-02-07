@@ -106,7 +106,7 @@ impl AppWindow {
             st.ui.thumbnails_enabled = true;
             st.ui.file_list_columns.show_preview = true;
             st.ui.toolbar.density = ToolbarDensity::Compact;
-            st.ui.toolbar.icons.mode = ToolbarIconMode::IconOnly;
+            st.ui.toolbar.icons.mode = ToolbarIconMode::IconAndText;
             st.ui.toolbar.icons.refresh = Some("⟳".to_string());
             st.ui.toolbar.icons.new_folder = Some("+".to_string());
             st.ui.toolbar.icons.columns = Some("≡".to_string());
@@ -117,6 +117,14 @@ impl AppWindow {
                 st.core.places.add_bookmark("Repo", pwd);
             }
             st.core.places.add_bookmark("Temp", std::env::temp_dir());
+
+            // For thumbnails demo: prefer a directory that contains images in this repo.
+            if let Ok(pwd) = std::env::current_dir() {
+                let screenshots = pwd.join("screenshots");
+                if screenshots.is_dir() {
+                    st.core.set_cwd(screenshots);
+                }
+            }
             st
         };
 

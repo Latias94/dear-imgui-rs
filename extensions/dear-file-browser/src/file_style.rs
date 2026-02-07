@@ -144,6 +144,43 @@ pub struct FileStyleRegistry {
 }
 
 impl FileStyleRegistry {
+    /// Returns a small, dependency-free style preset that resembles a classic file dialog.
+    ///
+    /// This preset uses ASCII icons only (e.g. `"[DIR]"`) to avoid relying on icon fonts.
+    /// Hosts can override these rules or provide richer icons via an icon font + `font_token`.
+    pub fn igfd_ascii_preset() -> Self {
+        let mut reg = Self::default();
+
+        reg.push_dir_style(FileStyle {
+            text_color: Some([0.90, 0.80, 0.30, 1.0]),
+            icon: Some("[DIR]".into()),
+            tooltip: Some("Directory".into()),
+            font_token: None,
+        });
+
+        reg.push_link_style(FileStyle {
+            text_color: Some([0.80, 0.60, 1.00, 1.0]),
+            icon: Some("[LNK]".into()),
+            tooltip: Some("Symbolic link".into()),
+            font_token: None,
+        });
+
+        // A small set of common image extensions for thumbnail-heavy demos.
+        for ext in ["png", "jpg", "jpeg", "bmp", "gif", "webp"] {
+            reg.push_extension_style(
+                ext,
+                FileStyle {
+                    text_color: Some([0.30, 0.80, 1.00, 1.0]),
+                    icon: Some("[IMG]".into()),
+                    tooltip: Some("Image file".into()),
+                    font_token: None,
+                },
+            );
+        }
+
+        reg
+    }
+
     /// Invalidate cached compiled regex patterns.
     ///
     /// This is called automatically by `push_*` methods. If you mutate `rules` directly,

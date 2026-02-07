@@ -420,6 +420,8 @@ pub enum ToolbarIconMode {
 pub struct ToolbarIcons {
     /// Icon rendering mode.
     pub mode: ToolbarIconMode,
+    /// Icon for "Places".
+    pub places: Option<String>,
     /// Icon for "Refresh".
     pub refresh: Option<String>,
     /// Icon for "New Folder".
@@ -550,6 +552,10 @@ pub struct FileDialogUiState {
     pub validation_buttons: ValidationButtonsConfig,
     /// Top toolbar ("chrome") configuration.
     pub toolbar: ToolbarConfig,
+    /// Whether to show the left "Places" pane in [`LayoutStyle::Standard`].
+    pub places_pane_shown: bool,
+    /// Width of the left "Places" pane in pixels (Standard layout only).
+    pub places_pane_width: f32,
     /// File list view mode (list vs grid).
     pub file_list_view: FileListViewMode,
     /// List-view column visibility configuration.
@@ -682,6 +688,8 @@ pub struct FileDialogUiState {
 
     pub(crate) type_select_buffer: String,
     pub(crate) type_select_last_input: Option<std::time::Instant>,
+    /// UI-only selection inside the places pane: (group_label, place_path).
+    pub(crate) places_selected: Option<(String, PathBuf)>,
 }
 
 impl Default for FileDialogUiState {
@@ -691,6 +699,8 @@ impl Default for FileDialogUiState {
             layout: LayoutStyle::Standard,
             validation_buttons: ValidationButtonsConfig::default(),
             toolbar: ToolbarConfig::default(),
+            places_pane_shown: true,
+            places_pane_width: 150.0,
             file_list_view: FileListViewMode::default(),
             file_list_columns: FileListColumnsConfig::default(),
             path_bar_style: PathBarStyle::TextInput,
@@ -756,6 +766,7 @@ impl Default for FileDialogUiState {
             places_edit_place_path: String::new(),
             type_select_buffer: String::new(),
             type_select_last_input: None,
+            places_selected: None,
         }
     }
 }
@@ -770,6 +781,8 @@ impl FileDialogUiState {
     /// - dialog-style button row aligned to the right.
     pub fn apply_igfd_classic_preset(&mut self) {
         self.layout = LayoutStyle::Standard;
+        self.places_pane_shown = true;
+        self.places_pane_width = 150.0;
         self.file_list_view = FileListViewMode::List;
         self.thumbnails_enabled = false;
         self.toolbar.density = ToolbarDensity::Compact;
@@ -777,6 +790,10 @@ impl FileDialogUiState {
         self.path_input_mode = false;
         self.breadcrumbs_scroll_to_end_next = true;
         self.breadcrumbs_quick_select = true;
+
+        if self.file_styles.rules.is_empty() && self.file_styles.callback.is_none() {
+            self.file_styles = crate::file_style::FileStyleRegistry::igfd_ascii_preset();
+        }
 
         self.file_list_columns.show_preview = false;
         self.file_list_columns.show_extension = false;

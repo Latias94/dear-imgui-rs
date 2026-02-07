@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use dear_imgui_rs::Direction;
+use dear_imgui_rs::StyleColor;
 use dear_imgui_rs::StyleVar;
 use dear_imgui_rs::TreeNodeFlags;
 use dear_imgui_rs::Ui;
@@ -367,6 +368,33 @@ fn toolbar_button(
     clicked
 }
 
+fn toolbar_toggle_button(
+    ui: &Ui,
+    id: &str,
+    text: &str,
+    icon: Option<&str>,
+    mode: ToolbarIconMode,
+    show_tooltips: bool,
+    tooltip: &str,
+    active: bool,
+) -> bool {
+    if !active {
+        return toolbar_button(ui, id, text, icon, mode, show_tooltips, tooltip);
+    }
+
+    let style = ui.clone_style();
+    let _c0 = ui.push_style_color(StyleColor::Button, style.color(StyleColor::Header));
+    let _c1 = ui.push_style_color(
+        StyleColor::ButtonHovered,
+        style.color(StyleColor::HeaderHovered),
+    );
+    let _c2 = ui.push_style_color(
+        StyleColor::ButtonActive,
+        style.color(StyleColor::HeaderActive),
+    );
+    toolbar_button(ui, id, text, icon, mode, show_tooltips, tooltip)
+}
+
 impl TextColorToken {
     fn push(color: [f32; 4]) -> Self {
         unsafe {
@@ -684,6 +712,30 @@ fn draw_contents_with_fs_and_hooks(
         // Top toolbar: Back/Forward/Up/Refresh, view, sort, etc.
         let can_back = state.core.can_navigate_back();
         let can_forward = state.core.can_navigate_forward();
+
+        let places_active =
+            matches!(state.ui.layout, LayoutStyle::Standard) && state.ui.places_pane_shown;
+        if toolbar_toggle_button(
+            ui,
+            "toolbar_places",
+            "Places",
+            state.ui.toolbar.icons.places.as_deref(),
+            icon_mode,
+            show_tooltips,
+            "Places",
+            places_active,
+        ) {
+            match state.ui.layout {
+                LayoutStyle::Standard => {
+                    state.ui.places_pane_shown = !state.ui.places_pane_shown;
+                }
+                LayoutStyle::Minimal => {
+                    ui.open_popup("##fb_places_popup");
+                }
+            }
+        }
+        ui.same_line();
+
         {
             let _disabled = ui.begin_disabled_with_cond(!can_back);
             if ui.arrow_button("##nav_back", Direction::Left) {
@@ -740,40 +792,90 @@ fn draw_contents_with_fs_and_hooks(
             }
             ui.same_line();
         }
-        ui.text("View:");
+        ui.separator_vertical();
         ui.same_line();
-        let view_preview = match state.ui.file_list_view {
-            FileListViewMode::List => "List",
-            FileListViewMode::ThumbnailsList => "Thumbs",
-            FileListViewMode::Grid => "Grid",
-        };
-        if let Some(_c) = ui.begin_combo("##view_mode", view_preview) {
-            if ui
-                .selectable_config("List")
-                .selected(matches!(state.ui.file_list_view, FileListViewMode::List))
-                .build()
-            {
+        if matches!(state.ui.toolbar.density, ToolbarDensity::Compact) {
+            let list_active = matches!(state.ui.file_list_view, FileListViewMode::List);
+            let thumbs_active = matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList);
+            let grid_active = matches!(state.ui.file_list_view, FileListViewMode::Grid);
+
+            if toolbar_toggle_button(
+                ui,
+                "view_list",
+                "List",
+                None,
+                ToolbarIconMode::Text,
+                show_tooltips,
+                "List view",
+                list_active,
+            ) {
                 state.ui.file_list_view = FileListViewMode::List;
             }
-            if ui
-                .selectable_config("Thumbs")
-                .selected(matches!(
-                    state.ui.file_list_view,
-                    FileListViewMode::ThumbnailsList
-                ))
-                .build()
-            {
+            ui.same_line();
+            if toolbar_toggle_button(
+                ui,
+                "view_thumbs",
+                "Thumbs",
+                None,
+                ToolbarIconMode::Text,
+                show_tooltips,
+                "Thumbnails list view",
+                thumbs_active,
+            ) {
                 state.ui.file_list_view = FileListViewMode::ThumbnailsList;
                 state.ui.thumbnails_enabled = true;
                 state.ui.file_list_columns.show_preview = true;
             }
-            if ui
-                .selectable_config("Grid")
-                .selected(matches!(state.ui.file_list_view, FileListViewMode::Grid))
-                .build()
-            {
+            ui.same_line();
+            if toolbar_toggle_button(
+                ui,
+                "view_grid",
+                "Grid",
+                None,
+                ToolbarIconMode::Text,
+                show_tooltips,
+                "Thumbnails grid view",
+                grid_active,
+            ) {
                 state.ui.file_list_view = FileListViewMode::Grid;
                 state.ui.thumbnails_enabled = true;
+            }
+        } else {
+            ui.text("View:");
+            ui.same_line();
+            let view_preview = match state.ui.file_list_view {
+                FileListViewMode::List => "List",
+                FileListViewMode::ThumbnailsList => "Thumbs",
+                FileListViewMode::Grid => "Grid",
+            };
+            if let Some(_c) = ui.begin_combo("##view_mode", view_preview) {
+                if ui
+                    .selectable_config("List")
+                    .selected(matches!(state.ui.file_list_view, FileListViewMode::List))
+                    .build()
+                {
+                    state.ui.file_list_view = FileListViewMode::List;
+                }
+                if ui
+                    .selectable_config("Thumbs")
+                    .selected(matches!(
+                        state.ui.file_list_view,
+                        FileListViewMode::ThumbnailsList
+                    ))
+                    .build()
+                {
+                    state.ui.file_list_view = FileListViewMode::ThumbnailsList;
+                    state.ui.thumbnails_enabled = true;
+                    state.ui.file_list_columns.show_preview = true;
+                }
+                if ui
+                    .selectable_config("Grid")
+                    .selected(matches!(state.ui.file_list_view, FileListViewMode::Grid))
+                    .build()
+                {
+                    state.ui.file_list_view = FileListViewMode::Grid;
+                    state.ui.thumbnails_enabled = true;
+                }
             }
         }
 
@@ -947,6 +1049,8 @@ fn draw_contents_with_fs_and_hooks(
             }
         }
         ui.same_line();
+        ui.separator_vertical();
+        ui.same_line();
         let mut show_hidden = state.core.show_hidden;
         if ui.checkbox("Hidden", &mut show_hidden) {
             state.core.show_hidden = show_hidden;
@@ -992,6 +1096,24 @@ fn draw_contents_with_fs_and_hooks(
             ui.bullet_text("Up/Down: path history");
         }
         ui.new_line();
+
+        if matches!(state.ui.layout, LayoutStyle::Minimal) {
+            if let Some(_popup) = ui.begin_popup("##fb_places_popup") {
+                ui.text_disabled("Places");
+                ui.separator();
+                let mut new_cwd: Option<PathBuf> = None;
+                ui.child_window("##fb_places_popup_child")
+                    .size([280.0, 380.0])
+                    .border(true)
+                    .build(ui, || {
+                        new_cwd = draw_places_pane(ui, state);
+                    });
+                if let Some(p) = new_cwd {
+                    let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
+                    ui.close_current_popup();
+                }
+            }
+        }
 
         // Path bar (address input / breadcrumb composer) + Search.
         let cwd_s = state.core.cwd.display().to_string();
@@ -1262,59 +1384,159 @@ fn draw_contents_with_fs_and_hooks(
     let avail = ui.content_region_avail();
     match state.ui.layout {
         LayoutStyle::Standard => {
-            let left_w = 180.0f32;
-            let mut new_cwd: Option<PathBuf> = None;
-            ui.child_window("quick_locations")
-                .size([left_w, avail[1] - 80.0])
-                .build(ui, || {
-                    new_cwd = draw_quick_locations(ui, state);
-                });
-            if let Some(p) = new_cwd {
-                let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
-            }
-            ui.same_line();
-            ui.child_window("file_list")
-                .size([avail[0] - left_w - 8.0, avail[1] - 80.0])
-                .build(ui, || {
-                    let inner = ui.content_region_avail();
-                    let show_pane =
-                        state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
-                    if !show_pane {
-                        draw_file_table(
-                            ui,
-                            state,
-                            [inner[0], inner[1]],
-                            fs,
-                            &mut request_confirm,
-                            thumbnails_backend.as_deref_mut(),
-                        );
-                        return;
-                    }
+            let content_h = avail[1] - 80.0;
+            if state.ui.places_pane_shown {
+                const SPLITTER_W: f32 = 6.0;
+                const MIN_PLACES_W: f32 = 120.0;
+                const MIN_FILE_LIST_W: f32 = 180.0;
 
-                    match state.ui.custom_pane_dock {
-                        CustomPaneDock::Bottom => {
-                            let pane_h = state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
-                            let mut table_h = inner[1];
-                            if pane_h > 0.0 {
-                                table_h = (table_h - pane_h - 8.0).max(0.0);
-                            }
+                let spacing_x = ui.clone_style().item_spacing()[0];
+                let max_places_w =
+                    (avail[0] - MIN_FILE_LIST_W - SPLITTER_W - spacing_x * 2.0).max(0.0);
+                let mut places_w = state.ui.places_pane_width.clamp(0.0, max_places_w);
+                if max_places_w >= MIN_PLACES_W {
+                    places_w = places_w.clamp(MIN_PLACES_W, max_places_w);
+                }
+                let file_w = (avail[0] - places_w - SPLITTER_W - spacing_x * 2.0).max(0.0);
 
+                let mut new_cwd: Option<PathBuf> = None;
+                ui.child_window("places_pane")
+                    .size([places_w, content_h])
+                    .border(true)
+                    .build(ui, || {
+                        new_cwd = draw_places_pane(ui, state);
+                    });
+                if let Some(p) = new_cwd {
+                    let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
+                }
+
+                ui.same_line();
+                ui.invisible_button("places_pane_splitter", [SPLITTER_W, content_h]);
+                if ui.is_item_hovered() || ui.is_item_active() {
+                    ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
+                }
+                if ui.is_item_active() {
+                    let dx = ui.io().mouse_delta()[0];
+                    let new_w = (places_w + dx).clamp(0.0, max_places_w);
+                    state.ui.places_pane_width = if max_places_w >= MIN_PLACES_W {
+                        new_w.clamp(MIN_PLACES_W, max_places_w)
+                    } else {
+                        new_w
+                    };
+                }
+
+                ui.same_line();
+                ui.child_window("file_list")
+                    .size([file_w, content_h])
+                    .build(ui, || {
+                        let inner = ui.content_region_avail();
+                        let show_pane =
+                            state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
+                        if !show_pane {
                             draw_file_table(
                                 ui,
                                 state,
-                                [inner[0], table_h],
+                                [inner[0], inner[1]],
                                 fs,
                                 &mut request_confirm,
                                 thumbnails_backend.as_deref_mut(),
                             );
+                            return;
+                        }
 
-                            if let Some(pane) = custom_pane.as_deref_mut() {
-                                if state.ui.custom_pane_enabled && pane_h > 0.0 {
-                                    ui.separator();
-                                    ui.child_window("custom_pane")
-                                        .size([inner[0], pane_h])
-                                        .border(true)
-                                        .build(ui, || {
+                        match state.ui.custom_pane_dock {
+                            CustomPaneDock::Bottom => {
+                                let pane_h =
+                                    state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
+                                let mut table_h = inner[1];
+                                if pane_h > 0.0 {
+                                    table_h = (table_h - pane_h - 8.0).max(0.0);
+                                }
+
+                                draw_file_table(
+                                    ui,
+                                    state,
+                                    [inner[0], table_h],
+                                    fs,
+                                    &mut request_confirm,
+                                    thumbnails_backend.as_deref_mut(),
+                                );
+
+                                if let Some(pane) = custom_pane.as_deref_mut() {
+                                    if state.ui.custom_pane_enabled && pane_h > 0.0 {
+                                        ui.separator();
+                                        ui.child_window("custom_pane")
+                                            .size([inner[0], pane_h])
+                                            .border(true)
+                                            .build(ui, || {
+                                                let selected_entry_ids =
+                                                    state.core.selected_entry_ids();
+                                                let selected_paths =
+                                                    selected_entry_paths_from_ids(state);
+                                                let (selected_files_count, selected_dirs_count) =
+                                                    selected_entry_counts_from_ids(state);
+                                                let ctx = CustomPaneCtx {
+                                                    mode: state.core.mode,
+                                                    cwd: &state.core.cwd,
+                                                    selected_entry_ids: &selected_entry_ids,
+                                                    selected_paths: &selected_paths,
+                                                    selected_files_count,
+                                                    selected_dirs_count,
+                                                    save_name: &state.core.save_name,
+                                                    active_filter: state.core.active_filter(),
+                                                };
+                                                confirm_gate = pane.draw(ui, ctx);
+                                            });
+                                    }
+                                }
+                            }
+                            CustomPaneDock::Right => {
+                                const SPLITTER_W: f32 = 6.0;
+                                const MIN_TABLE_W: f32 = 120.0;
+                                const MIN_PANE_W: f32 = 120.0;
+
+                                let max_pane_w = (inner[0] - MIN_TABLE_W - SPLITTER_W).max(0.0);
+                                let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
+                                if max_pane_w >= MIN_PANE_W {
+                                    pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
+                                }
+
+                                let table_w = (inner[0] - pane_w - SPLITTER_W).max(0.0);
+
+                                ui.child_window("file_table_rightdock")
+                                    .size([table_w, inner[1]])
+                                    .build(ui, || {
+                                        draw_file_table(
+                                            ui,
+                                            state,
+                                            [table_w, inner[1]],
+                                            fs,
+                                            &mut request_confirm,
+                                            thumbnails_backend.as_deref_mut(),
+                                        );
+                                    });
+
+                                ui.same_line();
+                                ui.invisible_button("custom_pane_splitter", [SPLITTER_W, inner[1]]);
+                                if ui.is_item_hovered() || ui.is_item_active() {
+                                    ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
+                                }
+                                if ui.is_item_active() {
+                                    let dx = ui.io().mouse_delta()[0];
+                                    let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
+                                    state.ui.custom_pane_width = if max_pane_w >= MIN_PANE_W {
+                                        new_w.clamp(MIN_PANE_W, max_pane_w)
+                                    } else {
+                                        new_w
+                                    };
+                                }
+
+                                ui.same_line();
+                                ui.child_window("custom_pane_rightdock")
+                                    .size([pane_w, inner[1]])
+                                    .border(true)
+                                    .build(ui, || {
+                                        if let Some(pane) = custom_pane.as_deref_mut() {
                                             let selected_entry_ids =
                                                 state.core.selected_entry_ids();
                                             let selected_paths =
@@ -1332,77 +1554,146 @@ fn draw_contents_with_fs_and_hooks(
                                                 active_filter: state.core.active_filter(),
                                             };
                                             confirm_gate = pane.draw(ui, ctx);
-                                        });
+                                        }
+                                    });
+                            }
+                        }
+                    });
+            } else {
+                ui.child_window("file_list")
+                    .size([avail[0], content_h])
+                    .build(ui, || {
+                        let inner = ui.content_region_avail();
+                        let show_pane =
+                            state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
+                        if !show_pane {
+                            draw_file_table(
+                                ui,
+                                state,
+                                [inner[0], inner[1]],
+                                fs,
+                                &mut request_confirm,
+                                thumbnails_backend.as_deref_mut(),
+                            );
+                            return;
+                        }
+
+                        match state.ui.custom_pane_dock {
+                            CustomPaneDock::Bottom => {
+                                let pane_h =
+                                    state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
+                                let mut table_h = inner[1];
+                                if pane_h > 0.0 {
+                                    table_h = (table_h - pane_h - 8.0).max(0.0);
+                                }
+
+                                draw_file_table(
+                                    ui,
+                                    state,
+                                    [inner[0], table_h],
+                                    fs,
+                                    &mut request_confirm,
+                                    thumbnails_backend.as_deref_mut(),
+                                );
+
+                                if let Some(pane) = custom_pane.as_deref_mut() {
+                                    if state.ui.custom_pane_enabled && pane_h > 0.0 {
+                                        ui.separator();
+                                        ui.child_window("custom_pane")
+                                            .size([inner[0], pane_h])
+                                            .border(true)
+                                            .build(ui, || {
+                                                let selected_entry_ids =
+                                                    state.core.selected_entry_ids();
+                                                let selected_paths =
+                                                    selected_entry_paths_from_ids(state);
+                                                let (selected_files_count, selected_dirs_count) =
+                                                    selected_entry_counts_from_ids(state);
+                                                let ctx = CustomPaneCtx {
+                                                    mode: state.core.mode,
+                                                    cwd: &state.core.cwd,
+                                                    selected_entry_ids: &selected_entry_ids,
+                                                    selected_paths: &selected_paths,
+                                                    selected_files_count,
+                                                    selected_dirs_count,
+                                                    save_name: &state.core.save_name,
+                                                    active_filter: state.core.active_filter(),
+                                                };
+                                                confirm_gate = pane.draw(ui, ctx);
+                                            });
+                                    }
                                 }
                             }
+                            CustomPaneDock::Right => {
+                                const SPLITTER_W: f32 = 6.0;
+                                const MIN_TABLE_W: f32 = 120.0;
+                                const MIN_PANE_W: f32 = 120.0;
+
+                                let max_pane_w = (inner[0] - MIN_TABLE_W - SPLITTER_W).max(0.0);
+                                let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
+                                if max_pane_w >= MIN_PANE_W {
+                                    pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
+                                }
+
+                                let table_w = (inner[0] - pane_w - SPLITTER_W).max(0.0);
+
+                                ui.child_window("file_table_rightdock")
+                                    .size([table_w, inner[1]])
+                                    .build(ui, || {
+                                        draw_file_table(
+                                            ui,
+                                            state,
+                                            [table_w, inner[1]],
+                                            fs,
+                                            &mut request_confirm,
+                                            thumbnails_backend.as_deref_mut(),
+                                        );
+                                    });
+
+                                ui.same_line();
+                                ui.invisible_button("custom_pane_splitter", [SPLITTER_W, inner[1]]);
+                                if ui.is_item_hovered() || ui.is_item_active() {
+                                    ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
+                                }
+                                if ui.is_item_active() {
+                                    let dx = ui.io().mouse_delta()[0];
+                                    let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
+                                    state.ui.custom_pane_width = if max_pane_w >= MIN_PANE_W {
+                                        new_w.clamp(MIN_PANE_W, max_pane_w)
+                                    } else {
+                                        new_w
+                                    };
+                                }
+
+                                ui.same_line();
+                                ui.child_window("custom_pane_rightdock")
+                                    .size([pane_w, inner[1]])
+                                    .border(true)
+                                    .build(ui, || {
+                                        if let Some(pane) = custom_pane.as_deref_mut() {
+                                            let selected_entry_ids =
+                                                state.core.selected_entry_ids();
+                                            let selected_paths =
+                                                selected_entry_paths_from_ids(state);
+                                            let (selected_files_count, selected_dirs_count) =
+                                                selected_entry_counts_from_ids(state);
+                                            let ctx = CustomPaneCtx {
+                                                mode: state.core.mode,
+                                                cwd: &state.core.cwd,
+                                                selected_entry_ids: &selected_entry_ids,
+                                                selected_paths: &selected_paths,
+                                                selected_files_count,
+                                                selected_dirs_count,
+                                                save_name: &state.core.save_name,
+                                                active_filter: state.core.active_filter(),
+                                            };
+                                            confirm_gate = pane.draw(ui, ctx);
+                                        }
+                                    });
+                            }
                         }
-                        CustomPaneDock::Right => {
-                            const SPLITTER_W: f32 = 6.0;
-                            const MIN_TABLE_W: f32 = 120.0;
-                            const MIN_PANE_W: f32 = 120.0;
-
-                            let max_pane_w = (inner[0] - MIN_TABLE_W - SPLITTER_W).max(0.0);
-                            let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
-                            if max_pane_w >= MIN_PANE_W {
-                                pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
-                            }
-
-                            let table_w = (inner[0] - pane_w - SPLITTER_W).max(0.0);
-
-                            ui.child_window("file_table_rightdock")
-                                .size([table_w, inner[1]])
-                                .build(ui, || {
-                                    draw_file_table(
-                                        ui,
-                                        state,
-                                        [table_w, inner[1]],
-                                        fs,
-                                        &mut request_confirm,
-                                        thumbnails_backend.as_deref_mut(),
-                                    );
-                                });
-
-                            ui.same_line();
-                            ui.invisible_button("custom_pane_splitter", [SPLITTER_W, inner[1]]);
-                            if ui.is_item_hovered() || ui.is_item_active() {
-                                ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
-                            }
-                            if ui.is_item_active() {
-                                let dx = ui.io().mouse_delta()[0];
-                                let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
-                                state.ui.custom_pane_width = if max_pane_w >= MIN_PANE_W {
-                                    new_w.clamp(MIN_PANE_W, max_pane_w)
-                                } else {
-                                    new_w
-                                };
-                            }
-
-                            ui.same_line();
-                            ui.child_window("custom_pane_rightdock")
-                                .size([pane_w, inner[1]])
-                                .border(true)
-                                .build(ui, || {
-                                    if let Some(pane) = custom_pane.as_deref_mut() {
-                                        let selected_entry_ids = state.core.selected_entry_ids();
-                                        let selected_paths = selected_entry_paths_from_ids(state);
-                                        let (selected_files_count, selected_dirs_count) =
-                                            selected_entry_counts_from_ids(state);
-                                        let ctx = CustomPaneCtx {
-                                            mode: state.core.mode,
-                                            cwd: &state.core.cwd,
-                                            selected_entry_ids: &selected_entry_ids,
-                                            selected_paths: &selected_paths,
-                                            selected_files_count,
-                                            selected_dirs_count,
-                                            save_name: &state.core.save_name,
-                                            active_filter: state.core.active_filter(),
-                                        };
-                                        confirm_gate = pane.draw(ui, ctx);
-                                    }
-                                });
-                        }
-                    }
-                });
+                    });
+            }
         }
         LayoutStyle::Minimal => {
             ui.child_window("file_list_min")
@@ -2710,47 +3001,52 @@ fn draw_breadcrumb_sep_popup(
     }
 }
 
-fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
+fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
     let mut out: Option<PathBuf> = None;
 
-    if ui.button("+ Bookmark") {
-        state.core.places.add_bookmark_path(state.core.cwd.clone());
+    if let Some(_popup) = ui.begin_popup_context_window() {
+        ui.text_disabled("Places");
+        ui.separator();
+        if ui.menu_item("+ Bookmark") {
+            state.core.places.add_bookmark_path(state.core.cwd.clone());
+            ui.close_current_popup();
+        }
+        if ui.menu_item("+ Group...") {
+            state.ui.places_edit_mode = crate::dialog_state::PlacesEditMode::AddGroup;
+            state.ui.places_edit_group.clear();
+            state.ui.places_edit_group_from = None;
+            state.ui.places_edit_error = None;
+            state.ui.places_edit_open_next = true;
+            state.ui.places_edit_focus_next = true;
+            ui.close_current_popup();
+        }
+        ui.separator();
+        if ui.menu_item("Refresh system") {
+            state.core.places.refresh_system_places();
+            ui.close_current_popup();
+        }
+        ui.separator();
+        if ui.menu_item("Export...") {
+            state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Export;
+            state.ui.places_io_buffer =
+                state
+                    .core
+                    .places
+                    .serialize_compact(crate::PlacesSerializeOptions {
+                        include_code_places: state.ui.places_io_include_code,
+                    });
+            state.ui.places_io_error = None;
+            state.ui.places_io_open_next = true;
+            ui.close_current_popup();
+        }
+        if ui.menu_item("Import...") {
+            state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Import;
+            state.ui.places_io_buffer.clear();
+            state.ui.places_io_error = None;
+            state.ui.places_io_open_next = true;
+            ui.close_current_popup();
+        }
     }
-    ui.same_line();
-    if ui.button("+ Group") {
-        state.ui.places_edit_mode = crate::dialog_state::PlacesEditMode::AddGroup;
-        state.ui.places_edit_group.clear();
-        state.ui.places_edit_group_from = None;
-        state.ui.places_edit_error = None;
-        state.ui.places_edit_open_next = true;
-        state.ui.places_edit_focus_next = true;
-    }
-    ui.same_line();
-    if ui.button("Refresh") {
-        state.core.places.refresh_system_places();
-    }
-    ui.same_line();
-    if ui.button("Export") {
-        state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Export;
-        state.ui.places_io_buffer =
-            state
-                .core
-                .places
-                .serialize_compact(crate::PlacesSerializeOptions {
-                    include_code_places: state.ui.places_io_include_code,
-                });
-        state.ui.places_io_error = None;
-        state.ui.places_io_open_next = true;
-    }
-    ui.same_line();
-    if ui.button("Import") {
-        state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Import;
-        state.ui.places_io_buffer.clear();
-        state.ui.places_io_error = None;
-        state.ui.places_io_open_next = true;
-    }
-
-    ui.separator();
 
     let mut groups = state.core.places.groups.clone();
     groups.sort_by(|a, b| {
@@ -2788,12 +3084,47 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf>
             continue;
         }
 
+        let is_system = g.label == Places::SYSTEM_GROUP;
+        if !is_system {
+            let _id = ui.push_id(&g.label);
+            if ui.small_button("+##places_add") {
+                let label = state
+                    .core
+                    .cwd
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| state.core.cwd.display().to_string());
+                state
+                    .core
+                    .places
+                    .add_place(&g.label, Place::user(label, state.core.cwd.clone()));
+            }
+            ui.same_line();
+            ui.text_disabled("Right-click to edit");
+            ui.separator();
+        }
+
         if g.places.is_empty() {
             ui.text_disabled("Empty");
             continue;
         }
 
-        for (pi, p) in g.places.iter().enumerate() {
+        let can_clip = g
+            .places
+            .iter()
+            .all(|p| p.separator_thickness.unwrap_or(0) <= 1);
+        let use_clipper = can_clip && g.places.len() > 200;
+
+        let draw_place_row = |ui: &Ui,
+                              state: &mut FileDialogState,
+                              edit_req: &mut Option<PlacesEditRequest>,
+                              remove_place: &mut Option<(String, PathBuf)>,
+                              out: &mut Option<PathBuf>,
+                              gi: usize,
+                              pi: usize,
+                              p: &Place| {
             let _id = ui.push_id((gi * 10_000 + pi) as i32);
             if let Some(thickness) = p.separator_thickness {
                 if thickness > 1 {
@@ -2803,24 +3134,86 @@ fn draw_quick_locations(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf>
                 if thickness > 1 {
                     ui.dummy([0.0, (thickness - 1) as f32]);
                 }
-                continue;
+                return;
             }
-            if ui.selectable_config(&p.label).build() {
-                out = Some(p.path.clone());
+
+            let editable = !p.is_separator()
+                && p.origin == PlaceOrigin::User
+                && g.label != Places::SYSTEM_GROUP;
+            if editable {
+                if ui.small_button("E") {
+                    *edit_req = Some(PlacesEditRequest::edit_place(&g.label, p));
+                }
+                ui.same_line();
+            }
+
+            let selected = state.core.cwd == p.path
+                || state
+                    .ui
+                    .places_selected
+                    .as_ref()
+                    .is_some_and(|(group, path)| group == &g.label && path == &p.path);
+            let clicked = ui
+                .selectable_config(&p.label)
+                .selected(selected)
+                .flags(dear_imgui_rs::SelectableFlags::ALLOW_DOUBLE_CLICK)
+                .build();
+            if clicked {
+                state.ui.places_selected = Some((g.label.clone(), p.path.clone()));
+            }
+            if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
+                *out = Some(p.path.clone());
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(p.path.display().to_string());
             }
             if let Some(_popup) = ui.begin_popup_context_item() {
                 ui.text_disabled(&p.path.display().to_string());
                 ui.separator();
-                let editable = !p.is_separator()
-                    && p.origin == PlaceOrigin::User
-                    && g.label != Places::SYSTEM_GROUP;
                 if ui.menu_item_enabled_selected("Edit...", None::<&str>, false, editable) {
-                    edit_req = Some(PlacesEditRequest::edit_place(&g.label, p));
+                    *edit_req = Some(PlacesEditRequest::edit_place(&g.label, p));
                     ui.close_current_popup();
                 }
                 if ui.menu_item_enabled_selected("Remove", None::<&str>, false, editable) {
-                    remove_place = Some((g.label.clone(), p.path.clone()));
+                    *remove_place = Some((g.label.clone(), p.path.clone()));
                 }
+            }
+        };
+
+        if use_clipper {
+            let items_count = i32::try_from(g.places.len()).unwrap_or(i32::MAX);
+            let clipper = dear_imgui_rs::ListClipper::new(items_count)
+                .items_height(ui.text_line_height_with_spacing())
+                .begin(ui);
+            for i in clipper.iter() {
+                let pi = i as usize;
+                if pi >= g.places.len() {
+                    continue;
+                }
+                let p = &g.places[pi];
+                draw_place_row(
+                    ui,
+                    state,
+                    &mut edit_req,
+                    &mut remove_place,
+                    &mut out,
+                    gi,
+                    pi,
+                    p,
+                );
+            }
+        } else {
+            for (pi, p) in g.places.iter().enumerate() {
+                draw_place_row(
+                    ui,
+                    state,
+                    &mut edit_req,
+                    &mut remove_place,
+                    &mut out,
+                    gi,
+                    pi,
+                    p,
+                );
             }
         }
     }

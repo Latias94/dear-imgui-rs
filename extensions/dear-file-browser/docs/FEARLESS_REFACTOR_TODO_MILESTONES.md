@@ -11,7 +11,7 @@ Conventions used here:
 
 ---
 
-## Status Snapshot (2026-02-06)
+## Status Snapshot (2026-02-07)
 
 Current parity status vs IGFD (excluding C API by product decision):
 
@@ -26,6 +26,10 @@ Current parity status vs IGFD (excluding C API by product decision):
   - unified host/content entrypoints (`*_with` API) to remove redundant method matrix (commit: `60b4a12`)
   - P2 performance/async architecture design doc (scan coordinator/runtime + generation model) (docs-only)
   - Stage E scan-policy tuning (`max_batches_per_tick` + tuned presets + budget sweep baseline)
+  - IGFD-like path composer: breadcrumb style + edit toggle + devices/reset + quick path selection popups
+  - IGFD-like places: toolbar "Places" control + show/hide + splitter-resizable pane (Standard layout), popup access in Minimal layout
+  - Places pane UX polish: per-group quick add (`+`), per-place edit button (`E`), double-click-to-navigate, right-click context actions
+  - Demo: default to a repo image directory for visible thumbnails; use icon+text toolbar labels to avoid missing glyph confusion
 - Remaining high-priority gaps (non-C API):
   - none in core feature parity scope
 - P2 design baseline:
@@ -40,6 +44,7 @@ Execution plan (next implementation wave):
    - dockable custom pane (right/bottom) + resizable splitter
    - IGFD-classic UI preset (layout/labels/density)
    - explicit config toggles for “IGFD flags”-like behavior (disable new-folder, hide columns, natural sort toggle, etc.)
+   - 1:1 chrome polish pass: places toggle/splitter, breadcrumb composer, header spacing, icon/font guidance
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -748,6 +753,34 @@ This milestone is UI/UX heavy and may change widget layout and transient UI stat
     - filter selector moved to the action row (file dialog style)
   - Acceptance:
     - a demo can match IGFD’s "save" flow without forking UI code
+
+### Epic 19.5 - Breadcrumb path composer (IGFD-style)
+
+- [x] Task: support an IGFD-like breadcrumb composer in the Path bar
+  - Done:
+    - `PathBarStyle::Breadcrumbs` with auto-compression and ellipsis popup navigation
+    - IGFD-like "Edit" toggle semantics (`path_input_mode`) + Ctrl+L to enter edit mode
+    - optional quick parallel path selection popups (breadcrumb separators)
+    - devices popup + reset-to-open-directory shortcut in breadcrumb mode
+  - Acceptance:
+    - composer remains usable on long paths (scroll-to-end + compression)
+    - Ctrl+L consistently activates text edit mode for both path bar styles
+
+### Epic 19.6 - Places pane (toggle + splitter)
+
+- [x] Task: make Places look/behave closer to IGFD while staying Rust-first
+  - Done:
+    - toolbar "Places" control:
+      - Standard layout: show/hide the places pane
+      - Minimal layout: open a popup places view
+    - Standard layout: splitter-resizable places pane width
+    - Places pane UX polish:
+      - per-group quick add (`+`) and per-place edit button (`E`)
+      - double-click-to-navigate, hover tooltip shows full path
+      - right-click context actions and modal-driven edit/import/export flows
+  - Acceptance:
+    - places pane can be hidden without losing navigation access
+    - pane width is stable across resizes and does not break narrow layouts
 
 Exit criteria:
 

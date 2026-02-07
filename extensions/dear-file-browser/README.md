@@ -49,11 +49,13 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - List columns: configurable visibility for Preview/Extension/Size/Modified (per dialog state)
   - Navigation toolbar: back/forward/up/refresh with history
   - Toolbar density + optional icon labels (host-provided glyphs)
+    - If you use `ToolbarIconMode::IconOnly`, ensure your font contains the glyphs; otherwise prefer `IconAndText` for a safe text fallback.
   - File-dialog style address bar (typed path + Go + history + Tab completion) + breadcrumbs (auto-compress on long paths)
   - Bottom action row: status text + filter selector + OK/Cancel
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
   - Places: editable groups + bookmarks/devices, export/import via compact versioned string (v1)
+  - Places pane: show/hide + splitter-resizable width (Standard layout); popup access in Minimal layout
   - File styles: icons/colors/tooltips via `FileStyleRegistry`
   - Thumbnails: request queue + LRU cache (host-provided decode/upload backend)
   - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all
