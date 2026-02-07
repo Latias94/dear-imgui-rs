@@ -554,6 +554,8 @@ pub struct FileDialogUiState {
     pub file_list_view: FileListViewMode,
     /// List-view column visibility configuration.
     pub file_list_columns: FileListColumnsConfig,
+    /// Path bar style (editable text input vs breadcrumb-style composer).
+    pub path_bar_style: PathBarStyle,
     /// Max breadcrumb segments to display (compress with ellipsis when exceeded).
     pub breadcrumbs_max_segments: usize,
     /// Show a hint row when no entries match filters/search.
@@ -680,6 +682,7 @@ impl Default for FileDialogUiState {
             toolbar: ToolbarConfig::default(),
             file_list_view: FileListViewMode::default(),
             file_list_columns: FileListColumnsConfig::default(),
+            path_bar_style: PathBarStyle::TextInput,
             breadcrumbs_max_segments: 6,
             empty_hint_enabled: true,
             empty_hint_color: [0.7, 0.7, 0.7, 1.0],
@@ -755,6 +758,7 @@ impl FileDialogUiState {
         self.file_list_view = FileListViewMode::List;
         self.thumbnails_enabled = false;
         self.toolbar.density = ToolbarDensity::Compact;
+        self.path_bar_style = PathBarStyle::Breadcrumbs;
 
         self.file_list_columns.show_preview = false;
         self.file_list_columns.show_extension = false;
@@ -780,6 +784,16 @@ impl FileDialogUiState {
         self.validation_buttons.confirm_width = None;
         self.validation_buttons.cancel_width = None;
     }
+}
+
+/// Path bar style (text input vs breadcrumb composer).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PathBarStyle {
+    /// Always show an editable path text input ("address bar").
+    #[default]
+    TextInput,
+    /// Show a breadcrumb-style path composer; edit mode can still be entered via Ctrl+L or context menu.
+    Breadcrumbs,
 }
 
 /// Dock position for the custom pane.
