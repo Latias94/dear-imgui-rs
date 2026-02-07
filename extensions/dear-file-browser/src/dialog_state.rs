@@ -391,6 +391,64 @@ impl Default for ValidationButtonsConfig {
     }
 }
 
+/// Density preset for the dialog top toolbar ("chrome").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolbarDensity {
+    /// Use the host's default Dear ImGui style values.
+    #[default]
+    Normal,
+    /// Reduce padding and spacing to fit more controls (IGFD-like).
+    Compact,
+    /// Increase padding and spacing for touch-friendly UIs.
+    Spacious,
+}
+
+/// How to render toolbar buttons when optional icons are provided.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolbarIconMode {
+    /// Render text-only labels.
+    #[default]
+    Text,
+    /// Render icon-only labels (falls back to text if an icon is not provided).
+    IconOnly,
+    /// Render icon + text (falls back to text if an icon is not provided).
+    IconAndText,
+}
+
+/// Optional toolbar icons (host-provided glyphs, typically from an icon font).
+#[derive(Clone, Debug, Default)]
+pub struct ToolbarIcons {
+    /// Icon rendering mode.
+    pub mode: ToolbarIconMode,
+    /// Icon for "Refresh".
+    pub refresh: Option<String>,
+    /// Icon for "New Folder".
+    pub new_folder: Option<String>,
+    /// Icon for "Columns".
+    pub columns: Option<String>,
+}
+
+/// Configuration for the dialog top toolbar ("chrome").
+#[derive(Clone, Debug)]
+pub struct ToolbarConfig {
+    /// Density preset affecting padding/spacing.
+    pub density: ToolbarDensity,
+    /// Optional icon glyphs for toolbar buttons.
+    pub icons: ToolbarIcons,
+    /// Whether to show tooltips for toolbar controls.
+    pub show_tooltips: bool,
+}
+
+impl Default for ToolbarConfig {
+    fn default() -> Self {
+        Self {
+            density: ToolbarDensity::Normal,
+            icons: ToolbarIcons::default(),
+            show_tooltips: true,
+        }
+    }
+}
+
 /// Clipboard operation kind used by the in-UI file browser.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardOp {
@@ -488,6 +546,8 @@ pub struct FileDialogUiState {
     pub layout: LayoutStyle,
     /// Validation button row configuration (Ok/Cancel).
     pub validation_buttons: ValidationButtonsConfig,
+    /// Top toolbar ("chrome") configuration.
+    pub toolbar: ToolbarConfig,
     /// File list view mode (list vs grid).
     pub file_list_view: FileListViewMode,
     /// List-view column visibility configuration.
@@ -615,6 +675,7 @@ impl Default for FileDialogUiState {
             visible: true,
             layout: LayoutStyle::Standard,
             validation_buttons: ValidationButtonsConfig::default(),
+            toolbar: ToolbarConfig::default(),
             file_list_view: FileListViewMode::default(),
             file_list_columns: FileListColumnsConfig::default(),
             breadcrumbs_max_segments: 6,
@@ -691,6 +752,7 @@ impl FileDialogUiState {
         self.layout = LayoutStyle::Standard;
         self.file_list_view = FileListViewMode::List;
         self.thumbnails_enabled = false;
+        self.toolbar.density = ToolbarDensity::Compact;
 
         self.file_list_columns.show_preview = false;
         self.file_list_columns.show_extension = false;

@@ -730,13 +730,14 @@ This milestone is UI/UX heavy and may change widget layout and transient UI stat
 
 ### Epic 19.3 - Toolbar density + iconography (optional)
 
-- [ ] Task: provide an IGFD-like compact top toolbar without sacrificing Rust-first defaults
-  - Candidates:
-    - optional icon-only buttons (host-provided icons)
-    - a single "density" knob that maps to spacing/padding in this dialog
+- [x] Task: provide an IGFD-like compact top toolbar without sacrificing Rust-first defaults
+  - Done:
+    - `ToolbarConfig { density, icons, show_tooltips }` on `FileDialogUiState`
+    - optional icon labels for common chrome actions (host-provided glyphs)
+    - a single density knob that maps to FramePadding/ItemSpacing/ItemInnerSpacing in the chrome
   - Acceptance:
-    - layout remains usable at 600px width and below
-    - no hard-coded pixel widths that break on CJK fonts
+    - layout remains usable at 600px width and below (density helps)
+    - chrome avoids hard-coded widths that break on CJK fonts
 
 ### Epic 19.4 - Bottom action row parity (Save/Open ergonomics)
 

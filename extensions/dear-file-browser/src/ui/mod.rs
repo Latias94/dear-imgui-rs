@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use dear_imgui_rs::Direction;
+use dear_imgui_rs::StyleVar;
 use dear_imgui_rs::TreeNodeFlags;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton, MouseCursor};
@@ -18,7 +19,8 @@ use crate::dialog_core::{ConfirmGate, CoreEvent, CoreEventOutcome, DirEntry, Ent
 use crate::dialog_state::FileDialogState;
 use crate::dialog_state::{
     ClipboardOp, CustomPaneDock, FileClipboard, FileListColumnsConfig, FileListDataColumn,
-    FileListViewMode, PasteConflictAction, PasteConflictPrompt, PendingPasteJob,
+    FileListViewMode, PasteConflictAction, PasteConflictPrompt, PendingPasteJob, ToolbarDensity,
+    ToolbarIconMode,
 };
 use crate::dialog_state::{ValidationButtonsAlign, ValidationButtonsOrder};
 use crate::file_style::EntryKind;
@@ -335,6 +337,33 @@ fn style_visual_for_entry(state: &mut FileDialogState, e: &DirEntry) -> StyleVis
     }
 }
 
+fn toolbar_label(id: &str, text: &str, icon: Option<&str>, mode: ToolbarIconMode) -> String {
+    let display = match mode {
+        ToolbarIconMode::Text => text.to_string(),
+        ToolbarIconMode::IconOnly => icon.unwrap_or(text).to_string(),
+        ToolbarIconMode::IconAndText => {
+            icon.map_or_else(|| text.to_string(), |icon| format!("{icon} {text}"))
+        }
+    };
+    format!("{display}###{id}")
+}
+
+fn toolbar_button(
+    ui: &Ui,
+    id: &str,
+    text: &str,
+    icon: Option<&str>,
+    mode: ToolbarIconMode,
+    show_tooltips: bool,
+    tooltip: &str,
+) -> bool {
+    let clicked = ui.button(toolbar_label(id, text, icon, mode));
+    if show_tooltips && !tooltip.is_empty() && ui.is_item_hovered() {
+        ui.tooltip_text(tooltip);
+    }
+    clicked
+}
+
 impl TextColorToken {
     fn push(color: [f32; 4]) -> Self {
         unsafe {
@@ -379,587 +408,639 @@ fn draw_contents_with_fs_and_hooks(
     let mut request_confirm = false;
     let mut confirm_gate = ConfirmGate::default();
 
-    // Top toolbar: Back/Forward/Up/Refresh, view, sort, etc.
-    let can_back = state.core.can_navigate_back();
-    let can_forward = state.core.can_navigate_forward();
+    // Chrome density scope (toolbar + address bar).
     {
-        let _disabled = ui.begin_disabled_with_cond(!can_back);
-        if ui.arrow_button("##nav_back", Direction::Left) {
-            let _ = state.core.handle_event(CoreEvent::NavigateBack);
-        }
-    }
-    if ui.is_item_hovered() {
-        ui.tooltip_text("Back (Alt+Left)");
-    }
-    ui.same_line();
-    {
-        let _disabled = ui.begin_disabled_with_cond(!can_forward);
-        if ui.arrow_button("##nav_forward", Direction::Right) {
-            let _ = state.core.handle_event(CoreEvent::NavigateForward);
-        }
-    }
-    if ui.is_item_hovered() {
-        ui.tooltip_text("Forward (Alt+Right)");
-    }
-    ui.same_line();
-    if ui.arrow_button("##nav_up", Direction::Up) {
-        let _ = state.core.handle_event(CoreEvent::NavigateUp);
-    }
-    if ui.is_item_hovered() {
-        ui.tooltip_text("Up (Backspace)");
-    }
-    ui.same_line();
-    if ui.button("Refresh") {
-        let _ = state.core.handle_event(CoreEvent::Refresh);
-    }
-    ui.same_line();
-    if state.ui.new_folder_enabled {
-        if ui.button("New Folder") {
-            state.ui.new_folder_open_next = true;
-            state.ui.new_folder_name.clear();
-            state.ui.new_folder_error = None;
-            state.ui.new_folder_focus_next = true;
-        }
-        ui.same_line();
-    }
-    ui.text("View:");
-    ui.same_line();
-    let view_preview = match state.ui.file_list_view {
-        FileListViewMode::List => "List",
-        FileListViewMode::ThumbnailsList => "Thumbs",
-        FileListViewMode::Grid => "Grid",
-    };
-    if let Some(_c) = ui.begin_combo("##view_mode", view_preview) {
-        if ui
-            .selectable_config("List")
-            .selected(matches!(state.ui.file_list_view, FileListViewMode::List))
-            .build()
-        {
-            state.ui.file_list_view = FileListViewMode::List;
-        }
-        if ui
-            .selectable_config("Thumbs")
-            .selected(matches!(
-                state.ui.file_list_view,
-                FileListViewMode::ThumbnailsList
-            ))
-            .build()
-        {
-            state.ui.file_list_view = FileListViewMode::ThumbnailsList;
-            state.ui.thumbnails_enabled = true;
-            state.ui.file_list_columns.show_preview = true;
-        }
-        if ui
-            .selectable_config("Grid")
-            .selected(matches!(state.ui.file_list_view, FileListViewMode::Grid))
-            .build()
-        {
-            state.ui.file_list_view = FileListViewMode::Grid;
-            state.ui.thumbnails_enabled = true;
-        }
-    }
+        let show_tooltips = state.ui.toolbar.show_tooltips;
+        let icon_mode = state.ui.toolbar.icons.mode;
+        let chrome_style = ui.clone_style();
+        let (scale, min) = match state.ui.toolbar.density {
+            ToolbarDensity::Normal => (1.0, 0.0),
+            ToolbarDensity::Compact => (0.82, 1.0),
+            ToolbarDensity::Spacious => (1.18, 0.0),
+        };
+        let scale_vec2 =
+            |v: [f32; 2]| -> [f32; 2] { [(v[0] * scale).max(min), (v[1] * scale).max(min)] };
+        let _frame_padding = ui.push_style_var(StyleVar::FramePadding(scale_vec2(
+            chrome_style.frame_padding(),
+        )));
+        let _item_spacing = ui.push_style_var(StyleVar::ItemSpacing(scale_vec2(
+            chrome_style.item_spacing(),
+        )));
+        let _item_inner_spacing = ui.push_style_var(StyleVar::ItemInnerSpacing(scale_vec2(
+            chrome_style.item_inner_spacing(),
+        )));
 
-    if matches!(
-        state.ui.file_list_view,
-        FileListViewMode::ThumbnailsList | FileListViewMode::Grid
-    ) {
-        state.ui.thumbnails_enabled = true;
-    }
-
-    if matches!(state.ui.file_list_view, FileListViewMode::Grid) {
+        // Top toolbar: Back/Forward/Up/Refresh, view, sort, etc.
+        let can_back = state.core.can_navigate_back();
+        let can_forward = state.core.can_navigate_forward();
+        {
+            let _disabled = ui.begin_disabled_with_cond(!can_back);
+            if ui.arrow_button("##nav_back", Direction::Left) {
+                let _ = state.core.handle_event(CoreEvent::NavigateBack);
+            }
+        }
+        if show_tooltips && ui.is_item_hovered() {
+            ui.tooltip_text("Back (Alt+Left)");
+        }
         ui.same_line();
-        ui.text("Sort:");
+        {
+            let _disabled = ui.begin_disabled_with_cond(!can_forward);
+            if ui.arrow_button("##nav_forward", Direction::Right) {
+                let _ = state.core.handle_event(CoreEvent::NavigateForward);
+            }
+        }
+        if show_tooltips && ui.is_item_hovered() {
+            ui.tooltip_text("Forward (Alt+Right)");
+        }
         ui.same_line();
-        let preview = format!(
-            "{} {}",
-            match state.core.sort_by {
-                SortBy::Name => "Name",
-                SortBy::Extension => "Ext",
-                SortBy::Size => "Size",
-                SortBy::Modified => "Modified",
-            },
-            if state.core.sort_ascending {
-                "↑"
-            } else {
-                "↓"
+        if ui.arrow_button("##nav_up", Direction::Up) {
+            let _ = state.core.handle_event(CoreEvent::NavigateUp);
+        }
+        if show_tooltips && ui.is_item_hovered() {
+            ui.tooltip_text("Up (Backspace)");
+        }
+        ui.same_line();
+        if toolbar_button(
+            ui,
+            "toolbar_refresh",
+            "Refresh",
+            state.ui.toolbar.icons.refresh.as_deref(),
+            icon_mode,
+            show_tooltips,
+            "Refresh (F5)",
+        ) {
+            let _ = state.core.handle_event(CoreEvent::Refresh);
+        }
+        ui.same_line();
+        if state.ui.new_folder_enabled {
+            if toolbar_button(
+                ui,
+                "toolbar_new_folder",
+                "New Folder",
+                state.ui.toolbar.icons.new_folder.as_deref(),
+                icon_mode,
+                show_tooltips,
+                "New folder",
+            ) {
+                state.ui.new_folder_open_next = true;
+                state.ui.new_folder_name.clear();
+                state.ui.new_folder_error = None;
+                state.ui.new_folder_focus_next = true;
             }
-        );
-        let mut next_by = state.core.sort_by;
-        let mut next_asc = state.core.sort_ascending;
-        if let Some(_c) = ui.begin_combo("##grid_sort", &preview) {
-            let items = [
-                (SortBy::Name, "Name"),
-                (SortBy::Extension, "Ext"),
-                (SortBy::Size, "Size"),
-                (SortBy::Modified, "Modified"),
-            ];
-            for (by, label) in items {
-                if ui.selectable_config(label).selected(next_by == by).build() {
-                    next_by = by;
-                }
-            }
-            ui.separator();
-            if ui.selectable_config("Ascending").selected(next_asc).build() {
-                next_asc = true;
-            }
+            ui.same_line();
+        }
+        ui.text("View:");
+        ui.same_line();
+        let view_preview = match state.ui.file_list_view {
+            FileListViewMode::List => "List",
+            FileListViewMode::ThumbnailsList => "Thumbs",
+            FileListViewMode::Grid => "Grid",
+        };
+        if let Some(_c) = ui.begin_combo("##view_mode", view_preview) {
             if ui
-                .selectable_config("Descending")
-                .selected(!next_asc)
+                .selectable_config("List")
+                .selected(matches!(state.ui.file_list_view, FileListViewMode::List))
                 .build()
             {
-                next_asc = false;
+                state.ui.file_list_view = FileListViewMode::List;
+            }
+            if ui
+                .selectable_config("Thumbs")
+                .selected(matches!(
+                    state.ui.file_list_view,
+                    FileListViewMode::ThumbnailsList
+                ))
+                .build()
+            {
+                state.ui.file_list_view = FileListViewMode::ThumbnailsList;
+                state.ui.thumbnails_enabled = true;
+                state.ui.file_list_columns.show_preview = true;
+            }
+            if ui
+                .selectable_config("Grid")
+                .selected(matches!(state.ui.file_list_view, FileListViewMode::Grid))
+                .build()
+            {
+                state.ui.file_list_view = FileListViewMode::Grid;
+                state.ui.thumbnails_enabled = true;
             }
         }
-        if next_by != state.core.sort_by || next_asc != state.core.sort_ascending {
-            state.core.sort_by = next_by;
-            state.core.sort_ascending = next_asc;
-        }
-    }
 
-    if state.ui.thumbnails_enabled {
-        ui.same_line();
-        ui.text("Thumb:");
-        ui.same_line();
-        if ui.small_button("S") {
-            state.ui.thumbnail_size = [20.0, 20.0];
+        if matches!(
+            state.ui.file_list_view,
+            FileListViewMode::ThumbnailsList | FileListViewMode::Grid
+        ) {
+            state.ui.thumbnails_enabled = true;
         }
-        ui.same_line();
-        if ui.small_button("M") {
-            state.ui.thumbnail_size = [32.0, 32.0];
-        }
-        ui.same_line();
-        if ui.small_button("L") {
-            state.ui.thumbnail_size = [48.0, 48.0];
-        }
-        if !has_thumbnail_backend {
+
+        if matches!(state.ui.file_list_view, FileListViewMode::Grid) {
             ui.same_line();
-            ui.text_disabled("No thumbnail backend");
-        }
-    }
-
-    if matches!(
-        state.ui.file_list_view,
-        FileListViewMode::List | FileListViewMode::ThumbnailsList
-    ) {
-        ui.same_line();
-        if let Some(_popup) = ui.begin_combo("Columns", "Configure") {
-            match state.ui.file_list_view {
-                FileListViewMode::List => {
-                    let mut enabled = state.ui.thumbnails_enabled;
-                    if ui.checkbox("Enable thumbnails", &mut enabled) {
-                        state.ui.thumbnails_enabled = enabled;
-                    }
-                    if state.ui.thumbnails_enabled {
-                        ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
-                    } else {
-                        ui.text_disabled("Preview (enable thumbnails)");
-                    }
-                }
-                FileListViewMode::ThumbnailsList => {
-                    ui.text_disabled("Preview (forced by Thumbs view)");
-                }
-                FileListViewMode::Grid => {}
-            }
-            ui.checkbox("Ext", &mut state.ui.file_list_columns.show_extension);
-            ui.checkbox("Size", &mut state.ui.file_list_columns.show_size);
-            ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
-
-            ui.separator();
-            if ui.small_button("Compact") {
-                if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
-                    apply_compact_column_layout_keep_preview(&mut state.ui.file_list_columns);
+            ui.text("Sort:");
+            ui.same_line();
+            let preview = format!(
+                "{} {}",
+                match state.core.sort_by {
+                    SortBy::Name => "Name",
+                    SortBy::Extension => "Ext",
+                    SortBy::Size => "Size",
+                    SortBy::Modified => "Modified",
+                },
+                if state.core.sort_ascending {
+                    "↑"
                 } else {
-                    apply_compact_column_layout(&mut state.ui.file_list_columns);
+                    "↓"
                 }
+            );
+            let mut next_by = state.core.sort_by;
+            let mut next_asc = state.core.sort_ascending;
+            if let Some(_c) = ui.begin_combo("##grid_sort", &preview) {
+                let items = [
+                    (SortBy::Name, "Name"),
+                    (SortBy::Extension, "Ext"),
+                    (SortBy::Size, "Size"),
+                    (SortBy::Modified, "Modified"),
+                ];
+                for (by, label) in items {
+                    if ui.selectable_config(label).selected(next_by == by).build() {
+                        next_by = by;
+                    }
+                }
+                ui.separator();
+                if ui.selectable_config("Ascending").selected(next_asc).build() {
+                    next_asc = true;
+                }
+                if ui
+                    .selectable_config("Descending")
+                    .selected(!next_asc)
+                    .build()
+                {
+                    next_asc = false;
+                }
+            }
+            if next_by != state.core.sort_by || next_asc != state.core.sort_ascending {
+                state.core.sort_by = next_by;
+                state.core.sort_ascending = next_asc;
+            }
+        }
+
+        if state.ui.thumbnails_enabled {
+            ui.same_line();
+            ui.text("Thumb:");
+            ui.same_line();
+            if ui.small_button("S") {
+                state.ui.thumbnail_size = [20.0, 20.0];
             }
             ui.same_line();
-            if ui.small_button("Balanced") {
-                if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
-                    apply_balanced_column_layout_keep_preview(&mut state.ui.file_list_columns);
-                } else {
-                    apply_balanced_column_layout(&mut state.ui.file_list_columns);
-                }
+            if ui.small_button("M") {
+                state.ui.thumbnail_size = [32.0, 32.0];
             }
-
-            ui.separator();
-            ui.text("Order:");
-            let mut order = state.ui.file_list_columns.normalized_order();
-            let mut changed = false;
-            for index in 0..order.len() {
-                let column = order[index];
-                let mut label = data_column_label(column).to_string();
-                if !is_data_column_visible(&state.ui.file_list_columns, column) {
-                    label.push_str(" (hidden)");
-                }
-                ui.text(label);
+            ui.same_line();
+            if ui.small_button("L") {
+                state.ui.thumbnail_size = [48.0, 48.0];
+            }
+            if !has_thumbnail_backend {
                 ui.same_line();
-                if ui.small_button(format!("Up##col_order_up_{index}")) {
-                    changed |= move_column_order_up(&mut order, index);
-                }
-                ui.same_line();
-                if ui.small_button(format!("Down##col_order_down_{index}")) {
-                    changed |= move_column_order_down(&mut order, index);
-                }
-            }
-            if changed {
-                state.ui.file_list_columns.order = order;
-            }
-
-            if ui.small_button("Reset columns") {
-                state.ui.file_list_columns = FileListColumnsConfig::default();
-            }
-
-            ui.separator();
-            let mut natural_sort = matches!(state.core.sort_mode, SortMode::Natural);
-            if ui.checkbox("Natural sort", &mut natural_sort) {
-                state.core.sort_mode = if natural_sort {
-                    SortMode::Natural
-                } else {
-                    SortMode::Lexicographic
-                };
+                ui.text_disabled("No thumbnail backend");
             }
         }
-    }
-    ui.same_line();
-    let mut show_hidden = state.core.show_hidden;
-    if ui.checkbox("Hidden", &mut show_hidden) {
-        state.core.show_hidden = show_hidden;
-    }
-    ui.new_line();
 
-    // Path bar (file-dialog style address input) + Search.
-    let cwd_s = state.core.cwd.display().to_string();
-    if state.ui.path_edit_last_cwd != cwd_s && !state.ui.path_edit {
-        state.ui.path_edit_last_cwd = cwd_s.clone();
-        state.ui.path_edit_buffer = cwd_s.clone();
-    } else if state.ui.path_edit_last_cwd.is_empty() {
-        state.ui.path_edit_last_cwd = cwd_s.clone();
-        if state.ui.path_edit_buffer.trim().is_empty() {
-            state.ui.path_edit_buffer = cwd_s.clone();
-        }
-    }
-
-    ui.text("Path:");
-    ui.same_line();
-    let style = ui.clone_style();
-    let font = ui.current_font();
-    let font_size = ui.current_font_size();
-    let spacing_x = style.item_spacing()[0];
-    let frame_pad_x = style.frame_padding()[0];
-    let history_button_w = ui.frame_height();
-
-    const MIN_PATH_W: f32 = 120.0;
-    const SEARCH_W: f32 = 220.0;
-
-    let go_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Go")[0];
-    let go_w = go_label_w + frame_pad_x * 2.0;
-
-    let search_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Search:")[0];
-    let search_total_w = search_label_w + spacing_x + SEARCH_W;
-
-    let row_start_x = ui.cursor_pos_x();
-    let row_w = ui.content_region_avail_width();
-    let row_right_x = row_start_x + row_w;
-    let min_total_w =
-        history_button_w + spacing_x + MIN_PATH_W + spacing_x + go_w + spacing_x + search_total_w;
-
-    let stacked = row_w < min_total_w;
-
-    // Path input (+ Go). If we can't fit Search on the same line, Search moves to the next line.
-    let path_w = if stacked {
-        (row_w - history_button_w - spacing_x - go_w - spacing_x).max(40.0)
-    } else {
-        let search_start_x = row_right_x - search_total_w;
-        (search_start_x - row_start_x - history_button_w - spacing_x - go_w - spacing_x * 2.0)
-            .max(MIN_PATH_W)
-    };
-
-    let recent_paths = state.core.recent_paths().cloned().collect::<Vec<_>>();
-    {
-        let _disabled = ui.begin_disabled_with_cond(recent_paths.is_empty());
-        if ui.arrow_button("##path_history_dropdown", Direction::Down) {
-            ui.open_popup("##path_history_dropdown_popup");
-        }
-    }
-    if ui.is_item_hovered() {
-        ui.tooltip_text("Path history");
-    }
-    if let Some(_popup) = ui.begin_popup("##path_history_dropdown_popup") {
-        ui.text_disabled("Recent:");
-        ui.separator();
-        for (i, p) in recent_paths.iter().enumerate() {
-            let _id = ui.push_id(i as i32);
-            let label = p.display().to_string();
-            if ui.selectable(&label) {
-                let _ = state.core.handle_event(CoreEvent::NavigateTo(p.clone()));
-                state.ui.path_edit = false;
-                state.ui.path_edit_last_cwd = state.core.cwd.display().to_string();
-                state.ui.path_edit_buffer = state.ui.path_edit_last_cwd.clone();
-                state.ui.path_history_index = None;
-                state.ui.path_history_saved_buffer = None;
-                state.ui.ui_error = None;
-                ui.close_current_popup();
-            }
-        }
-    }
-    ui.same_line();
-
-    let prev_path_buffer = state.ui.path_edit_buffer.clone();
-    ui.set_next_item_width(path_w);
-    let select_all = state.ui.focus_path_edit_next;
-    if select_all {
-        ui.set_keyboard_focus_here();
-        state.ui.focus_path_edit_next = false;
-    }
-
-    struct PathBarCallback<'a> {
-        cwd: PathBuf,
-        fs: &'a dyn FileSystem,
-        recent_paths: Vec<String>,
-        history_index: *mut Option<usize>,
-        history_saved_buffer: *mut Option<String>,
-        programmatic_edit: *mut bool,
-    }
-
-    impl PathBarCallback<'_> {
-        fn set_text(&mut self, mut data: TextCallbackData, text: &str) {
-            let old = data.str();
-            if old == text {
-                return;
-            }
-            data.remove_chars(0, old.len());
-            data.insert_chars(0, text);
-            data.set_cursor_pos(text.len());
-            unsafe { *self.programmatic_edit = true };
-        }
-
-        fn common_prefix_len(a: &str, b: &str) -> usize {
-            let mut n = 0usize;
-            for (ca, cb) in a.chars().zip(b.chars()) {
-                let same = if ca.is_ascii() && cb.is_ascii() {
-                    ca.to_ascii_lowercase() == cb.to_ascii_lowercase()
-                } else {
-                    ca == cb
-                };
-                if !same {
-                    break;
-                }
-                n += ca.len_utf8();
-            }
-            n
-        }
-
-        fn starts_with_case_insensitive(name: &str, prefix: &str) -> bool {
-            let mut it_name = name.chars();
-            let mut it_prefix = prefix.chars();
-            loop {
-                match it_prefix.next() {
-                    None => return true,
-                    Some(pc) => {
-                        let Some(nc) = it_name.next() else {
-                            return false;
-                        };
-                        let same = if nc.is_ascii() && pc.is_ascii() {
-                            nc.to_ascii_lowercase() == pc.to_ascii_lowercase()
+        if matches!(
+            state.ui.file_list_view,
+            FileListViewMode::List | FileListViewMode::ThumbnailsList
+        ) {
+            ui.same_line();
+            let columns_label = match (icon_mode, state.ui.toolbar.icons.columns.as_deref()) {
+                (ToolbarIconMode::IconOnly, Some(icon)) => format!("{icon}###columns"),
+                (ToolbarIconMode::IconAndText, Some(icon)) => format!("{icon} Columns###columns"),
+                _ => "Columns###columns".to_string(),
+            };
+            if let Some(_popup) = ui.begin_combo(&columns_label, "Configure") {
+                match state.ui.file_list_view {
+                    FileListViewMode::List => {
+                        let mut enabled = state.ui.thumbnails_enabled;
+                        if ui.checkbox("Enable thumbnails", &mut enabled) {
+                            state.ui.thumbnails_enabled = enabled;
+                        }
+                        if state.ui.thumbnails_enabled {
+                            ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
                         } else {
-                            nc == pc
-                        };
-                        if !same {
-                            return false;
+                            ui.text_disabled("Preview (enable thumbnails)");
+                        }
+                    }
+                    FileListViewMode::ThumbnailsList => {
+                        ui.text_disabled("Preview (forced by Thumbs view)");
+                    }
+                    FileListViewMode::Grid => {}
+                }
+                ui.checkbox("Ext", &mut state.ui.file_list_columns.show_extension);
+                ui.checkbox("Size", &mut state.ui.file_list_columns.show_size);
+                ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
+
+                ui.separator();
+                if ui.small_button("Compact") {
+                    if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
+                        apply_compact_column_layout_keep_preview(&mut state.ui.file_list_columns);
+                    } else {
+                        apply_compact_column_layout(&mut state.ui.file_list_columns);
+                    }
+                }
+                ui.same_line();
+                if ui.small_button("Balanced") {
+                    if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
+                        apply_balanced_column_layout_keep_preview(&mut state.ui.file_list_columns);
+                    } else {
+                        apply_balanced_column_layout(&mut state.ui.file_list_columns);
+                    }
+                }
+
+                ui.separator();
+                ui.text("Order:");
+                let mut order = state.ui.file_list_columns.normalized_order();
+                let mut changed = false;
+                for index in 0..order.len() {
+                    let column = order[index];
+                    let mut label = data_column_label(column).to_string();
+                    if !is_data_column_visible(&state.ui.file_list_columns, column) {
+                        label.push_str(" (hidden)");
+                    }
+                    ui.text(label);
+                    ui.same_line();
+                    if ui.small_button(format!("Up##col_order_up_{index}")) {
+                        changed |= move_column_order_up(&mut order, index);
+                    }
+                    ui.same_line();
+                    if ui.small_button(format!("Down##col_order_down_{index}")) {
+                        changed |= move_column_order_down(&mut order, index);
+                    }
+                }
+                if changed {
+                    state.ui.file_list_columns.order = order;
+                }
+
+                if ui.small_button("Reset columns") {
+                    state.ui.file_list_columns = FileListColumnsConfig::default();
+                }
+
+                ui.separator();
+                let mut natural_sort = matches!(state.core.sort_mode, SortMode::Natural);
+                if ui.checkbox("Natural sort", &mut natural_sort) {
+                    state.core.sort_mode = if natural_sort {
+                        SortMode::Natural
+                    } else {
+                        SortMode::Lexicographic
+                    };
+                }
+            }
+            if show_tooltips && ui.is_item_hovered() {
+                ui.tooltip_text("Columns");
+            }
+        }
+        ui.same_line();
+        let mut show_hidden = state.core.show_hidden;
+        if ui.checkbox("Hidden", &mut show_hidden) {
+            state.core.show_hidden = show_hidden;
+        }
+        ui.new_line();
+
+        // Path bar (file-dialog style address input) + Search.
+        let cwd_s = state.core.cwd.display().to_string();
+        if state.ui.path_edit_last_cwd != cwd_s && !state.ui.path_edit {
+            state.ui.path_edit_last_cwd = cwd_s.clone();
+            state.ui.path_edit_buffer = cwd_s.clone();
+        } else if state.ui.path_edit_last_cwd.is_empty() {
+            state.ui.path_edit_last_cwd = cwd_s.clone();
+            if state.ui.path_edit_buffer.trim().is_empty() {
+                state.ui.path_edit_buffer = cwd_s.clone();
+            }
+        }
+
+        ui.text("Path:");
+        ui.same_line();
+        let style = ui.clone_style();
+        let font = ui.current_font();
+        let font_size = ui.current_font_size();
+        let spacing_x = style.item_spacing()[0];
+        let frame_pad_x = style.frame_padding()[0];
+        let history_button_w = ui.frame_height();
+
+        const MIN_PATH_W: f32 = 120.0;
+        const SEARCH_W: f32 = 220.0;
+
+        let go_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Go")[0];
+        let go_w = go_label_w + frame_pad_x * 2.0;
+
+        let search_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Search:")[0];
+        let search_total_w = search_label_w + spacing_x + SEARCH_W;
+
+        let row_start_x = ui.cursor_pos_x();
+        let row_w = ui.content_region_avail_width();
+        let row_right_x = row_start_x + row_w;
+        let min_total_w = history_button_w
+            + spacing_x
+            + MIN_PATH_W
+            + spacing_x
+            + go_w
+            + spacing_x
+            + search_total_w;
+
+        let stacked = row_w < min_total_w;
+
+        // Path input (+ Go). If we can't fit Search on the same line, Search moves to the next line.
+        let path_w = if stacked {
+            (row_w - history_button_w - spacing_x - go_w - spacing_x).max(40.0)
+        } else {
+            let search_start_x = row_right_x - search_total_w;
+            (search_start_x - row_start_x - history_button_w - spacing_x - go_w - spacing_x * 2.0)
+                .max(MIN_PATH_W)
+        };
+
+        let recent_paths = state.core.recent_paths().cloned().collect::<Vec<_>>();
+        {
+            let _disabled = ui.begin_disabled_with_cond(recent_paths.is_empty());
+            if ui.arrow_button("##path_history_dropdown", Direction::Down) {
+                ui.open_popup("##path_history_dropdown_popup");
+            }
+        }
+        if ui.is_item_hovered() {
+            ui.tooltip_text("Path history");
+        }
+        if let Some(_popup) = ui.begin_popup("##path_history_dropdown_popup") {
+            ui.text_disabled("Recent:");
+            ui.separator();
+            for (i, p) in recent_paths.iter().enumerate() {
+                let _id = ui.push_id(i as i32);
+                let label = p.display().to_string();
+                if ui.selectable(&label) {
+                    let _ = state.core.handle_event(CoreEvent::NavigateTo(p.clone()));
+                    state.ui.path_edit = false;
+                    state.ui.path_edit_last_cwd = state.core.cwd.display().to_string();
+                    state.ui.path_edit_buffer = state.ui.path_edit_last_cwd.clone();
+                    state.ui.path_history_index = None;
+                    state.ui.path_history_saved_buffer = None;
+                    state.ui.ui_error = None;
+                    ui.close_current_popup();
+                }
+            }
+        }
+        ui.same_line();
+
+        let prev_path_buffer = state.ui.path_edit_buffer.clone();
+        ui.set_next_item_width(path_w);
+        let select_all = state.ui.focus_path_edit_next;
+        if select_all {
+            ui.set_keyboard_focus_here();
+            state.ui.focus_path_edit_next = false;
+        }
+
+        struct PathBarCallback<'a> {
+            cwd: PathBuf,
+            fs: &'a dyn FileSystem,
+            recent_paths: Vec<String>,
+            history_index: *mut Option<usize>,
+            history_saved_buffer: *mut Option<String>,
+            programmatic_edit: *mut bool,
+        }
+
+        impl PathBarCallback<'_> {
+            fn set_text(&mut self, mut data: TextCallbackData, text: &str) {
+                let old = data.str();
+                if old == text {
+                    return;
+                }
+                data.remove_chars(0, old.len());
+                data.insert_chars(0, text);
+                data.set_cursor_pos(text.len());
+                unsafe { *self.programmatic_edit = true };
+            }
+
+            fn common_prefix_len(a: &str, b: &str) -> usize {
+                let mut n = 0usize;
+                for (ca, cb) in a.chars().zip(b.chars()) {
+                    let same = if ca.is_ascii() && cb.is_ascii() {
+                        ca.to_ascii_lowercase() == cb.to_ascii_lowercase()
+                    } else {
+                        ca == cb
+                    };
+                    if !same {
+                        break;
+                    }
+                    n += ca.len_utf8();
+                }
+                n
+            }
+
+            fn starts_with_case_insensitive(name: &str, prefix: &str) -> bool {
+                let mut it_name = name.chars();
+                let mut it_prefix = prefix.chars();
+                loop {
+                    match it_prefix.next() {
+                        None => return true,
+                        Some(pc) => {
+                            let Some(nc) = it_name.next() else {
+                                return false;
+                            };
+                            let same = if nc.is_ascii() && pc.is_ascii() {
+                                nc.to_ascii_lowercase() == pc.to_ascii_lowercase()
+                            } else {
+                                nc == pc
+                            };
+                            if !same {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+
+            fn last_sep_pos(s: &str) -> Option<(usize, char)> {
+                s.char_indices()
+                    .filter(|(_, c)| *c == '/' || *c == '\\')
+                    .last()
+            }
+
+            fn try_complete_path(&mut self, data: TextCallbackData) {
+                let input = data.str().trim();
+                if input.is_empty() {
+                    return;
+                }
+
+                let (dir_prefix, frag, sep) = match Self::last_sep_pos(input) {
+                    Some((i, c)) => (&input[..=i], &input[i + 1..], c),
+                    None => ("", input, std::path::MAIN_SEPARATOR),
+                };
+
+                if frag.is_empty() {
+                    return;
+                }
+
+                let base_dir = if dir_prefix.is_empty() {
+                    self.cwd.clone()
+                } else {
+                    let raw = PathBuf::from(dir_prefix);
+                    if raw.is_absolute() {
+                        raw
+                    } else {
+                        self.cwd.join(raw)
+                    }
+                };
+
+                let Ok(entries) = self.fs.read_dir(&base_dir) else {
+                    return;
+                };
+
+                let mut matches = entries
+                    .into_iter()
+                    .filter(|e| e.is_dir)
+                    .filter(|e| Self::starts_with_case_insensitive(&e.name, frag))
+                    .map(|e| e.name)
+                    .collect::<Vec<_>>();
+                if matches.is_empty() {
+                    return;
+                }
+                matches.sort();
+
+                let completed = if matches.len() == 1 {
+                    let mut s = matches[0].clone();
+                    s.push(sep);
+                    s
+                } else {
+                    let first = matches[0].as_str();
+                    let mut prefix_len = first.len();
+                    for other in matches.iter().skip(1) {
+                        prefix_len = prefix_len.min(Self::common_prefix_len(first, other));
+                    }
+                    first[..prefix_len].to_string()
+                };
+
+                let new_text = if dir_prefix.is_empty() {
+                    completed
+                } else {
+                    format!("{dir_prefix}{completed}")
+                };
+
+                unsafe { *self.history_index = None };
+                unsafe { *self.history_saved_buffer = None };
+                self.set_text(data, &new_text);
+            }
+
+            fn apply_history(&mut self, direction: HistoryDirection, data: TextCallbackData) {
+                if self.recent_paths.is_empty() {
+                    return;
+                }
+
+                let idx = unsafe { &mut *self.history_index };
+                let saved = unsafe { &mut *self.history_saved_buffer };
+
+                match (direction, *idx) {
+                    (HistoryDirection::Up, None) => {
+                        *saved = Some(data.str().to_string());
+                        *idx = Some(0);
+                        let p = self.recent_paths[0].clone();
+                        self.set_text(data, &p);
+                        return;
+                    }
+                    (HistoryDirection::Down, None) => return,
+                    (_, Some(_)) => {}
+                }
+
+                let Some(mut i) = *idx else { return };
+                match direction {
+                    HistoryDirection::Up => {
+                        if i + 1 < self.recent_paths.len() {
+                            i += 1;
+                            *idx = Some(i);
+                            let p = self.recent_paths[i].clone();
+                            self.set_text(data, &p);
+                        }
+                    }
+                    HistoryDirection::Down => {
+                        if i == 0 {
+                            let restore = saved.clone().unwrap_or_else(String::new);
+                            *idx = None;
+                            *saved = None;
+                            self.set_text(data, &restore);
+                        } else {
+                            i -= 1;
+                            *idx = Some(i);
+                            let p = self.recent_paths[i].clone();
+                            self.set_text(data, &p);
                         }
                     }
                 }
             }
         }
 
-        fn last_sep_pos(s: &str) -> Option<(usize, char)> {
-            s.char_indices()
-                .filter(|(_, c)| *c == '/' || *c == '\\')
-                .last()
-        }
-
-        fn try_complete_path(&mut self, data: TextCallbackData) {
-            let input = data.str().trim();
-            if input.is_empty() {
-                return;
+        impl InputTextCallbackHandler for PathBarCallback<'_> {
+            fn on_completion(&mut self, data: TextCallbackData) {
+                self.try_complete_path(data);
             }
 
-            let (dir_prefix, frag, sep) = match Self::last_sep_pos(input) {
-                Some((i, c)) => (&input[..=i], &input[i + 1..], c),
-                None => ("", input, std::path::MAIN_SEPARATOR),
-            };
-
-            if frag.is_empty() {
-                return;
-            }
-
-            let base_dir = if dir_prefix.is_empty() {
-                self.cwd.clone()
-            } else {
-                let raw = PathBuf::from(dir_prefix);
-                if raw.is_absolute() {
-                    raw
-                } else {
-                    self.cwd.join(raw)
-                }
-            };
-
-            let Ok(entries) = self.fs.read_dir(&base_dir) else {
-                return;
-            };
-
-            let mut matches = entries
-                .into_iter()
-                .filter(|e| e.is_dir)
-                .filter(|e| Self::starts_with_case_insensitive(&e.name, frag))
-                .map(|e| e.name)
-                .collect::<Vec<_>>();
-            if matches.is_empty() {
-                return;
-            }
-            matches.sort();
-
-            let completed = if matches.len() == 1 {
-                let mut s = matches[0].clone();
-                s.push(sep);
-                s
-            } else {
-                let first = matches[0].as_str();
-                let mut prefix_len = first.len();
-                for other in matches.iter().skip(1) {
-                    prefix_len = prefix_len.min(Self::common_prefix_len(first, other));
-                }
-                first[..prefix_len].to_string()
-            };
-
-            let new_text = if dir_prefix.is_empty() {
-                completed
-            } else {
-                format!("{dir_prefix}{completed}")
-            };
-
-            unsafe { *self.history_index = None };
-            unsafe { *self.history_saved_buffer = None };
-            self.set_text(data, &new_text);
-        }
-
-        fn apply_history(&mut self, direction: HistoryDirection, data: TextCallbackData) {
-            if self.recent_paths.is_empty() {
-                return;
-            }
-
-            let idx = unsafe { &mut *self.history_index };
-            let saved = unsafe { &mut *self.history_saved_buffer };
-
-            match (direction, *idx) {
-                (HistoryDirection::Up, None) => {
-                    *saved = Some(data.str().to_string());
-                    *idx = Some(0);
-                    let p = self.recent_paths[0].clone();
-                    self.set_text(data, &p);
-                    return;
-                }
-                (HistoryDirection::Down, None) => return,
-                (_, Some(_)) => {}
-            }
-
-            let Some(mut i) = *idx else { return };
-            match direction {
-                HistoryDirection::Up => {
-                    if i + 1 < self.recent_paths.len() {
-                        i += 1;
-                        *idx = Some(i);
-                        let p = self.recent_paths[i].clone();
-                        self.set_text(data, &p);
-                    }
-                }
-                HistoryDirection::Down => {
-                    if i == 0 {
-                        let restore = saved.clone().unwrap_or_else(String::new);
-                        *idx = None;
-                        *saved = None;
-                        self.set_text(data, &restore);
-                    } else {
-                        i -= 1;
-                        *idx = Some(i);
-                        let p = self.recent_paths[i].clone();
-                        self.set_text(data, &p);
-                    }
-                }
+            fn on_history(&mut self, direction: HistoryDirection, data: TextCallbackData) {
+                self.apply_history(direction, data);
             }
         }
-    }
 
-    impl InputTextCallbackHandler for PathBarCallback<'_> {
-        fn on_completion(&mut self, data: TextCallbackData) {
-            self.try_complete_path(data);
+        let callback_recent_paths = recent_paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>();
+        let history_index_ptr: *mut Option<usize> = &mut state.ui.path_history_index;
+        let history_saved_ptr: *mut Option<String> = &mut state.ui.path_history_saved_buffer;
+        let programmatic_edit_ptr: *mut bool = &mut state.ui.path_bar_programmatic_edit;
+        let callback = PathBarCallback {
+            cwd: state.core.cwd.clone(),
+            fs,
+            recent_paths: callback_recent_paths,
+            history_index: history_index_ptr,
+            history_saved_buffer: history_saved_ptr,
+            programmatic_edit: programmatic_edit_ptr,
+        };
+        let submitted = ui
+            .input_text("##path_bar", &mut state.ui.path_edit_buffer)
+            .callback(callback)
+            .callback_flags(InputTextCallback::COMPLETION | InputTextCallback::HISTORY)
+            .auto_select_all(select_all)
+            .enter_returns_true(true)
+            .build();
+        let path_active = ui.is_item_active() || ui.is_item_focused();
+        state.ui.path_edit = path_active;
+        if path_active
+            && !state.ui.path_bar_programmatic_edit
+            && state.ui.path_edit_buffer != prev_path_buffer
+        {
+            state.ui.path_history_index = None;
+            state.ui.path_history_saved_buffer = None;
+        }
+        state.ui.path_bar_programmatic_edit = false;
+
+        ui.same_line();
+        let go = ui.button("Go") || (path_active && submitted);
+        if go {
+            submit_path_edit(state, fs);
         }
 
-        fn on_history(&mut self, direction: HistoryDirection, data: TextCallbackData) {
-            self.apply_history(direction, data);
+        if stacked {
+            ui.new_line();
+        } else {
+            let search_start_x = row_right_x - search_total_w;
+            ui.same_line_with_pos(search_start_x);
         }
-    }
 
-    let callback_recent_paths = recent_paths
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect::<Vec<_>>();
-    let history_index_ptr: *mut Option<usize> = &mut state.ui.path_history_index;
-    let history_saved_ptr: *mut Option<String> = &mut state.ui.path_history_saved_buffer;
-    let programmatic_edit_ptr: *mut bool = &mut state.ui.path_bar_programmatic_edit;
-    let callback = PathBarCallback {
-        cwd: state.core.cwd.clone(),
-        fs,
-        recent_paths: callback_recent_paths,
-        history_index: history_index_ptr,
-        history_saved_buffer: history_saved_ptr,
-        programmatic_edit: programmatic_edit_ptr,
-    };
-    let submitted = ui
-        .input_text("##path_bar", &mut state.ui.path_edit_buffer)
-        .callback(callback)
-        .callback_flags(InputTextCallback::COMPLETION | InputTextCallback::HISTORY)
-        .auto_select_all(select_all)
-        .enter_returns_true(true)
-        .build();
-    let path_active = ui.is_item_active() || ui.is_item_focused();
-    state.ui.path_edit = path_active;
-    if path_active
-        && !state.ui.path_bar_programmatic_edit
-        && state.ui.path_edit_buffer != prev_path_buffer
-    {
-        state.ui.path_history_index = None;
-        state.ui.path_history_saved_buffer = None;
-    }
-    state.ui.path_bar_programmatic_edit = false;
+        ui.text("Search:");
+        ui.same_line();
+        if state.ui.focus_search_next {
+            ui.set_keyboard_focus_here();
+            state.ui.focus_search_next = false;
+        }
+        ui.set_next_item_width(SEARCH_W);
+        let _search_changed = ui.input_text("##search", &mut state.core.search).build();
 
-    ui.same_line();
-    let go = ui.button("Go") || (path_active && submitted);
-    if go {
-        submit_path_edit(state, fs);
-    }
+        if let Some(p) = draw_breadcrumbs(ui, state, fs, state.ui.breadcrumbs_max_segments) {
+            let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
+        }
 
-    if stacked {
-        ui.new_line();
-    } else {
-        let search_start_x = row_right_x - search_total_w;
-        ui.same_line_with_pos(search_start_x);
+        ui.separator();
     }
-
-    ui.text("Search:");
-    ui.same_line();
-    if state.ui.focus_search_next {
-        ui.set_keyboard_focus_here();
-        state.ui.focus_search_next = false;
-    }
-    ui.set_next_item_width(SEARCH_W);
-    let _search_changed = ui.input_text("##search", &mut state.core.search).build();
-
-    if let Some(p) = draw_breadcrumbs(ui, state, fs, state.ui.breadcrumbs_max_segments) {
-        let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
-    }
-
-    ui.separator();
 
     // Content region
     let avail = ui.content_region_avail();
