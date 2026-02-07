@@ -962,12 +962,18 @@ fn draw_contents_with_fs_and_hooks(
             FileListViewMode::List | FileListViewMode::ThumbnailsList
         ) {
             ui.same_line();
-            let columns_label = match (icon_mode, state.ui.toolbar.icons.columns.as_deref()) {
-                (ToolbarIconMode::IconOnly, Some(icon)) => format!("{icon}###columns"),
-                (ToolbarIconMode::IconAndText, Some(icon)) => format!("{icon} Columns###columns"),
-                _ => "Columns###columns".to_string(),
-            };
-            if let Some(_popup) = ui.begin_combo(&columns_label, "Configure") {
+            if toolbar_button(
+                ui,
+                "toolbar_columns",
+                "Columns",
+                state.ui.toolbar.icons.columns.as_deref(),
+                icon_mode,
+                show_tooltips,
+                "Columns",
+            ) {
+                ui.open_popup("##fb_columns_popup");
+            }
+            if let Some(_popup) = ui.begin_popup("##fb_columns_popup") {
                 match state.ui.file_list_view {
                     FileListViewMode::List => {
                         let mut enabled = state.ui.thumbnails_enabled;
@@ -1044,18 +1050,7 @@ fn draw_contents_with_fs_and_hooks(
                     };
                 }
             }
-            if show_tooltips && ui.is_item_hovered() {
-                ui.tooltip_text("Columns");
-            }
         }
-        ui.same_line();
-        ui.separator_vertical();
-        ui.same_line();
-        let mut show_hidden = state.core.show_hidden;
-        if ui.checkbox("Hidden", &mut show_hidden) {
-            state.core.show_hidden = show_hidden;
-        }
-
         ui.same_line();
         if toolbar_button(
             ui,
@@ -1085,6 +1080,10 @@ fn draw_contents_with_fs_and_hooks(
             if ui.checkbox("Quick path select", &mut quick) {
                 state.ui.breadcrumbs_quick_select = quick;
             }
+            let mut show_hidden = state.core.show_hidden;
+            if ui.checkbox("Show hidden", &mut show_hidden) {
+                state.core.show_hidden = show_hidden;
+            }
             ui.separator();
             ui.text_disabled("Shortcuts:");
             ui.bullet_text("Ctrl+L: focus Path");
@@ -1095,7 +1094,8 @@ fn draw_contents_with_fs_and_hooks(
             ui.bullet_text("Tab: path completion");
             ui.bullet_text("Up/Down: path history");
         }
-        ui.new_line();
+        ui.separator_vertical();
+        ui.same_line();
 
         if matches!(state.ui.layout, LayoutStyle::Minimal) {
             if let Some(_popup) = ui.begin_popup("##fb_places_popup") {
@@ -1135,9 +1135,6 @@ fn draw_contents_with_fs_and_hooks(
 
         let breadcrumbs_mode = state.ui.path_bar_style == PathBarStyle::Breadcrumbs;
         let show_breadcrumb_composer = breadcrumbs_mode && !state.ui.path_input_mode;
-
-        ui.text("Path:");
-        ui.same_line();
         let style = ui.clone_style();
         let font = ui.current_font();
         let font_size = ui.current_font_size();
