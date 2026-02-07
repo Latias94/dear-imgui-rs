@@ -691,6 +691,13 @@ pub struct FileDialogUiState {
     /// UI-only selection inside the places pane: (group_label, place_path).
     pub(crate) places_selected: Option<(String, PathBuf)>,
 
+    /// Inline edit (IGFD-like) state for place labels: (group_label, place_path).
+    pub(crate) places_inline_edit: Option<(String, PathBuf)>,
+    /// Inline edit buffer for the selected place label.
+    pub(crate) places_inline_edit_buffer: String,
+    /// Focus the inline edit input on next frame.
+    pub(crate) places_inline_edit_focus_next: bool,
+
     /// Current parent dir for the breadcrumb quick-select popup.
     pub(crate) breadcrumb_quick_parent: Option<PathBuf>,
     /// Filter text for the breadcrumb quick-select popup.
@@ -774,6 +781,9 @@ impl Default for FileDialogUiState {
             type_select_buffer: String::new(),
             type_select_last_input: None,
             places_selected: None,
+            places_inline_edit: None,
+            places_inline_edit_buffer: String::new(),
+            places_inline_edit_focus_next: false,
             breadcrumb_quick_parent: None,
             breadcrumb_quick_filter: String::new(),
             breadcrumb_quick_focus_next: false,

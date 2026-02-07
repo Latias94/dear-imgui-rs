@@ -3154,6 +3154,38 @@ fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
 
         let is_system = g.label == Places::SYSTEM_GROUP;
         if !is_system {
+            let selected_path = state.ui.places_selected.as_ref().and_then(|(group, path)| {
+                if group == &g.label {
+                    Some(path.clone())
+                } else {
+                    None
+                }
+            });
+
+            let is_editing_this_group = state
+                .ui
+                .places_inline_edit
+                .as_ref()
+                .is_some_and(|(group, _)| group == &g.label);
+            let editing_path = state
+                .ui
+                .places_inline_edit
+                .as_ref()
+                .and_then(|(group, path)| {
+                    if group == &g.label {
+                        Some(path.clone())
+                    } else {
+                        None
+                    }
+                });
+
+            let can_remove = selected_path.as_ref().is_some_and(|sel| {
+                g.places
+                    .iter()
+                    .find(|p| !p.is_separator() && &p.path == sel)
+                    .is_some_and(|p| p.origin == PlaceOrigin::User)
+            });
+
             let _id = ui.push_id(&g.label);
             if ui.small_button("+##places_add") {
                 let label = state
@@ -3170,7 +3202,59 @@ fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
                     .add_place(&g.label, Place::user(label, state.core.cwd.clone()));
             }
             ui.same_line();
-            ui.text_disabled("Right-click to edit");
+            {
+                let _disabled = ui.begin_disabled_with_cond(!can_remove);
+                if ui.small_button("-##places_remove") {
+                    if let Some(sel) = selected_path.clone() {
+                        remove_place = Some((g.label.clone(), sel.clone()));
+                        if state
+                            .ui
+                            .places_inline_edit
+                            .as_ref()
+                            .is_some_and(|(group, path)| group == &g.label && *path == sel)
+                        {
+                            state.ui.places_inline_edit = None;
+                            state.ui.places_inline_edit_buffer.clear();
+                            state.ui.places_inline_edit_focus_next = false;
+                        }
+                        state.ui.places_selected = None;
+                    }
+                }
+            }
+
+            if is_editing_this_group {
+                ui.same_line();
+                if ui.small_button("ok##places_edit_ok") {
+                    state.ui.places_inline_edit = None;
+                    state.ui.places_inline_edit_buffer.clear();
+                    state.ui.places_inline_edit_focus_next = false;
+                } else {
+                    ui.same_line();
+                    if state.ui.places_inline_edit_focus_next {
+                        ui.set_keyboard_focus_here();
+                        state.ui.places_inline_edit_focus_next = false;
+                    }
+                    ui.set_next_item_width(ui.content_region_avail_width().max(80.0));
+                    let changed = ui
+                        .input_text(
+                            "##places_inline_edit",
+                            &mut state.ui.places_inline_edit_buffer,
+                        )
+                        .auto_select_all(true)
+                        .build();
+                    if changed {
+                        if let Some(from_path) = editing_path.as_ref() {
+                            let _ = state.core.places.edit_place_by_path(
+                                &g.label,
+                                from_path,
+                                state.ui.places_inline_edit_buffer.clone(),
+                                from_path.clone(),
+                            );
+                        }
+                    }
+                }
+            }
+
             ui.separator();
         }
 
@@ -3210,7 +3294,9 @@ fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
                 && g.label != Places::SYSTEM_GROUP;
             if editable {
                 if ui.small_button("E") {
-                    *edit_req = Some(PlacesEditRequest::edit_place(&g.label, p));
+                    state.ui.places_inline_edit = Some((g.label.clone(), p.path.clone()));
+                    state.ui.places_inline_edit_buffer = p.label.clone();
+                    state.ui.places_inline_edit_focus_next = true;
                 }
                 ui.same_line();
             }
@@ -3221,8 +3307,17 @@ fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<PathBuf> {
                     .places_selected
                     .as_ref()
                     .is_some_and(|(group, path)| group == &g.label && path == &p.path);
+
+            let display_label = state
+                .ui
+                .places_inline_edit
+                .as_ref()
+                .is_some_and(|(group, path)| group == &g.label && path == &p.path)
+                .then(|| state.ui.places_inline_edit_buffer.as_str())
+                .unwrap_or(p.label.as_str());
+
             let clicked = ui
-                .selectable_config(&p.label)
+                .selectable_config(display_label)
                 .selected(selected)
                 .flags(dear_imgui_rs::SelectableFlags::ALLOW_DOUBLE_CLICK)
                 .build();
