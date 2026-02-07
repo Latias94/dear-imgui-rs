@@ -763,10 +763,10 @@ Goal: make it easy for hosts to adopt the ImGui backend with "batteries included
 
 ### Epic 20.1 - Thumbnails integration cookbook
 
-- [ ] Task: document and stabilize thumbnail backend integration
-  - Candidates:
-    - minimal CPU decode provider example
-    - minimal GPU renderer example (texture upload/destroy lifecycle)
+- [x] Task: document and stabilize thumbnail backend integration
+  - Done:
+    - `docs/THUMBNAILS_INTEGRATION_COOKBOOK.md`
+    - reference implementation in `examples/04-integration/file_browser_imgui.rs` (Glow)
   - Acceptance: docs provide a copyable reference without requiring engine-specific glue.
 
 ### Epic 20.2 - Demo parity pack (optional)

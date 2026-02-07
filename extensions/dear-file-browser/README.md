@@ -22,6 +22,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 - P2 synthetic perf baseline: `docs/P2_PERF_BASELINE_2026-02-06.md`
 - Roadmap / TODO: `docs/FEARLESS_REFACTOR_TODO_MILESTONES.md`
 - Parity + deviations (non-C-API): `docs/IGFD_PARITY_AND_DEVIATIONS.md`
+- Thumbnails cookbook: `docs/THUMBNAILS_INTEGRATION_COOKBOOK.md`
 
 ## Compatibility
 
