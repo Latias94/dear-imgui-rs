@@ -43,7 +43,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - Sorting by Name/Ext/Size/Modified via table headers (list views) or a sort combo (grid)
   - List columns: configurable visibility for Preview/Extension/Size/Modified (per dialog state)
   - Navigation toolbar: back/forward/up/refresh with history
-  - File-dialog style address bar (typed path + Go) + breadcrumbs (auto-compress on long paths)
+  - File-dialog style address bar (typed path + Go + history + Tab completion) + breadcrumbs (auto-compress on long paths)
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
   - Places: editable groups + bookmarks/devices, export/import via compact versioned string (v1)

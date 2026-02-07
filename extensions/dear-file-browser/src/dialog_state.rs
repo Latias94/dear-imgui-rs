@@ -507,6 +507,9 @@ pub struct FileDialogUiState {
     /// Path input buffer (editable "address bar").
     pub path_edit_buffer: String,
     pub(crate) path_edit_last_cwd: String,
+    pub(crate) path_history_index: Option<usize>,
+    pub(crate) path_history_saved_buffer: Option<String>,
+    pub(crate) path_bar_programmatic_edit: bool,
     /// Focus path edit on next frame.
     pub focus_path_edit_next: bool,
     /// Focus search on next frame (Ctrl+F).
@@ -621,6 +624,9 @@ impl Default for FileDialogUiState {
             path_edit: false,
             path_edit_buffer: String::new(),
             path_edit_last_cwd: String::new(),
+            path_history_index: None,
+            path_history_saved_buffer: None,
+            path_bar_programmatic_edit: false,
             focus_path_edit_next: false,
             focus_search_next: false,
             ui_error: None,

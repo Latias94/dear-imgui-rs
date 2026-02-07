@@ -679,6 +679,7 @@ pub struct FileDialogCore {
 
     nav_back: VecDeque<PathBuf>,
     nav_forward: VecDeque<PathBuf>,
+    nav_recent: VecDeque<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -693,6 +694,7 @@ impl FileDialogCore {
     /// Creates a new dialog core for a mode.
     pub fn new(mode: DialogMode) -> Self {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let nav_recent = VecDeque::from([cwd.clone()]);
         Self {
             mode,
             cwd,
@@ -735,6 +737,7 @@ impl FileDialogCore {
             last_view_key: None,
             nav_back: VecDeque::new(),
             nav_forward: VecDeque::new(),
+            nav_recent,
         }
     }
 
@@ -746,6 +749,11 @@ impl FileDialogCore {
     /// Returns whether a "forward" navigation is currently possible.
     pub fn can_navigate_forward(&self) -> bool {
         !self.nav_forward.is_empty()
+    }
+
+    /// Returns recently visited directories (most recent first).
+    pub fn recent_paths(&self) -> impl Iterator<Item = &PathBuf> {
+        self.nav_recent.iter()
     }
 
     fn push_nav_back(&mut self, cwd: PathBuf) {
@@ -783,6 +791,7 @@ impl FileDialogCore {
         self.push_nav_back(old);
         self.nav_forward.clear();
         self.set_cwd(target);
+        self.record_recent_cwd();
     }
 
     fn navigate_back(&mut self) {
@@ -795,6 +804,7 @@ impl FileDialogCore {
         let old = self.cwd.clone();
         self.push_nav_forward(old);
         self.set_cwd(prev);
+        self.record_recent_cwd();
     }
 
     fn navigate_forward(&mut self) {
@@ -807,6 +817,22 @@ impl FileDialogCore {
         let old = self.cwd.clone();
         self.push_nav_back(old);
         self.set_cwd(next);
+        self.record_recent_cwd();
+    }
+
+    fn record_recent_cwd(&mut self) {
+        const NAV_RECENT_MAX: usize = 24;
+
+        let cwd = self.cwd.clone();
+        if self.nav_recent.front() == Some(&cwd) {
+            return;
+        }
+
+        self.nav_recent.retain(|p| p != &cwd);
+        self.nav_recent.push_front(cwd);
+        while self.nav_recent.len() > NAV_RECENT_MAX {
+            let _ = self.nav_recent.pop_back();
+        }
     }
 
     /// Returns all configured filters.

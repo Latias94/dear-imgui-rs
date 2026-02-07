@@ -6,6 +6,9 @@ use dear_imgui_rs::TreeNodeFlags;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton, MouseCursor};
 use dear_imgui_rs::sys;
+use dear_imgui_rs::{
+    HistoryDirection, InputTextCallback, InputTextCallbackHandler, TextCallbackData,
+};
 
 use crate::core::{
     ClickAction, DialogMode, FileDialogError, LayoutStyle, Selection, SortBy, SortMode,
@@ -643,6 +646,7 @@ fn draw_contents_with_fs_and_hooks(
     let font_size = ui.current_font_size();
     let spacing_x = style.item_spacing()[0];
     let frame_pad_x = style.frame_padding()[0];
+    let history_button_w = ui.frame_height();
 
     const MIN_PATH_W: f32 = 120.0;
     const SEARCH_W: f32 = 220.0;
@@ -656,30 +660,278 @@ fn draw_contents_with_fs_and_hooks(
     let row_start_x = ui.cursor_pos_x();
     let row_w = ui.content_region_avail_width();
     let row_right_x = row_start_x + row_w;
-    let min_total_w = MIN_PATH_W + spacing_x + go_w + spacing_x + search_total_w;
+    let min_total_w =
+        history_button_w + spacing_x + MIN_PATH_W + spacing_x + go_w + spacing_x + search_total_w;
 
     let stacked = row_w < min_total_w;
 
     // Path input (+ Go). If we can't fit Search on the same line, Search moves to the next line.
     let path_w = if stacked {
-        (row_w - spacing_x - go_w).max(MIN_PATH_W)
+        (row_w - history_button_w - spacing_x - go_w - spacing_x).max(40.0)
     } else {
         let search_start_x = row_right_x - search_total_w;
-        (search_start_x - row_start_x - spacing_x - go_w).max(MIN_PATH_W)
+        (search_start_x - row_start_x - history_button_w - spacing_x - go_w - spacing_x * 2.0)
+            .max(MIN_PATH_W)
     };
+
+    let recent_paths = state.core.recent_paths().cloned().collect::<Vec<_>>();
+    {
+        let _disabled = ui.begin_disabled_with_cond(recent_paths.is_empty());
+        if ui.arrow_button("##path_history_dropdown", Direction::Down) {
+            ui.open_popup("##path_history_dropdown_popup");
+        }
+    }
+    if ui.is_item_hovered() {
+        ui.tooltip_text("Path history");
+    }
+    if let Some(_popup) = ui.begin_popup("##path_history_dropdown_popup") {
+        ui.text_disabled("Recent:");
+        ui.separator();
+        for (i, p) in recent_paths.iter().enumerate() {
+            let _id = ui.push_id(i as i32);
+            let label = p.display().to_string();
+            if ui.selectable(&label) {
+                let _ = state.core.handle_event(CoreEvent::NavigateTo(p.clone()));
+                state.ui.path_edit = false;
+                state.ui.path_edit_last_cwd = state.core.cwd.display().to_string();
+                state.ui.path_edit_buffer = state.ui.path_edit_last_cwd.clone();
+                state.ui.path_history_index = None;
+                state.ui.path_history_saved_buffer = None;
+                state.ui.ui_error = None;
+                ui.close_current_popup();
+            }
+        }
+    }
+    ui.same_line();
+
+    let prev_path_buffer = state.ui.path_edit_buffer.clone();
     ui.set_next_item_width(path_w);
     let select_all = state.ui.focus_path_edit_next;
     if select_all {
         ui.set_keyboard_focus_here();
         state.ui.focus_path_edit_next = false;
     }
+
+    struct PathBarCallback<'a> {
+        cwd: PathBuf,
+        fs: &'a dyn FileSystem,
+        recent_paths: Vec<String>,
+        history_index: *mut Option<usize>,
+        history_saved_buffer: *mut Option<String>,
+        programmatic_edit: *mut bool,
+    }
+
+    impl PathBarCallback<'_> {
+        fn set_text(&mut self, mut data: TextCallbackData, text: &str) {
+            let old = data.str();
+            if old == text {
+                return;
+            }
+            data.remove_chars(0, old.len());
+            data.insert_chars(0, text);
+            data.set_cursor_pos(text.len());
+            unsafe { *self.programmatic_edit = true };
+        }
+
+        fn common_prefix_len(a: &str, b: &str) -> usize {
+            let mut n = 0usize;
+            for (ca, cb) in a.chars().zip(b.chars()) {
+                let same = if ca.is_ascii() && cb.is_ascii() {
+                    ca.to_ascii_lowercase() == cb.to_ascii_lowercase()
+                } else {
+                    ca == cb
+                };
+                if !same {
+                    break;
+                }
+                n += ca.len_utf8();
+            }
+            n
+        }
+
+        fn starts_with_case_insensitive(name: &str, prefix: &str) -> bool {
+            let mut it_name = name.chars();
+            let mut it_prefix = prefix.chars();
+            loop {
+                match it_prefix.next() {
+                    None => return true,
+                    Some(pc) => {
+                        let Some(nc) = it_name.next() else {
+                            return false;
+                        };
+                        let same = if nc.is_ascii() && pc.is_ascii() {
+                            nc.to_ascii_lowercase() == pc.to_ascii_lowercase()
+                        } else {
+                            nc == pc
+                        };
+                        if !same {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        fn last_sep_pos(s: &str) -> Option<(usize, char)> {
+            s.char_indices()
+                .filter(|(_, c)| *c == '/' || *c == '\\')
+                .last()
+        }
+
+        fn try_complete_path(&mut self, data: TextCallbackData) {
+            let input = data.str().trim();
+            if input.is_empty() {
+                return;
+            }
+
+            let (dir_prefix, frag, sep) = match Self::last_sep_pos(input) {
+                Some((i, c)) => (&input[..=i], &input[i + 1..], c),
+                None => ("", input, std::path::MAIN_SEPARATOR),
+            };
+
+            if frag.is_empty() {
+                return;
+            }
+
+            let base_dir = if dir_prefix.is_empty() {
+                self.cwd.clone()
+            } else {
+                let raw = PathBuf::from(dir_prefix);
+                if raw.is_absolute() {
+                    raw
+                } else {
+                    self.cwd.join(raw)
+                }
+            };
+
+            let Ok(entries) = self.fs.read_dir(&base_dir) else {
+                return;
+            };
+
+            let mut matches = entries
+                .into_iter()
+                .filter(|e| e.is_dir)
+                .filter(|e| Self::starts_with_case_insensitive(&e.name, frag))
+                .map(|e| e.name)
+                .collect::<Vec<_>>();
+            if matches.is_empty() {
+                return;
+            }
+            matches.sort();
+
+            let completed = if matches.len() == 1 {
+                let mut s = matches[0].clone();
+                s.push(sep);
+                s
+            } else {
+                let first = matches[0].as_str();
+                let mut prefix_len = first.len();
+                for other in matches.iter().skip(1) {
+                    prefix_len = prefix_len.min(Self::common_prefix_len(first, other));
+                }
+                first[..prefix_len].to_string()
+            };
+
+            let new_text = if dir_prefix.is_empty() {
+                completed
+            } else {
+                format!("{dir_prefix}{completed}")
+            };
+
+            unsafe { *self.history_index = None };
+            unsafe { *self.history_saved_buffer = None };
+            self.set_text(data, &new_text);
+        }
+
+        fn apply_history(&mut self, direction: HistoryDirection, data: TextCallbackData) {
+            if self.recent_paths.is_empty() {
+                return;
+            }
+
+            let idx = unsafe { &mut *self.history_index };
+            let saved = unsafe { &mut *self.history_saved_buffer };
+
+            match (direction, *idx) {
+                (HistoryDirection::Up, None) => {
+                    *saved = Some(data.str().to_string());
+                    *idx = Some(0);
+                    let p = self.recent_paths[0].clone();
+                    self.set_text(data, &p);
+                    return;
+                }
+                (HistoryDirection::Down, None) => return,
+                (_, Some(_)) => {}
+            }
+
+            let Some(mut i) = *idx else { return };
+            match direction {
+                HistoryDirection::Up => {
+                    if i + 1 < self.recent_paths.len() {
+                        i += 1;
+                        *idx = Some(i);
+                        let p = self.recent_paths[i].clone();
+                        self.set_text(data, &p);
+                    }
+                }
+                HistoryDirection::Down => {
+                    if i == 0 {
+                        let restore = saved.clone().unwrap_or_else(String::new);
+                        *idx = None;
+                        *saved = None;
+                        self.set_text(data, &restore);
+                    } else {
+                        i -= 1;
+                        *idx = Some(i);
+                        let p = self.recent_paths[i].clone();
+                        self.set_text(data, &p);
+                    }
+                }
+            }
+        }
+    }
+
+    impl InputTextCallbackHandler for PathBarCallback<'_> {
+        fn on_completion(&mut self, data: TextCallbackData) {
+            self.try_complete_path(data);
+        }
+
+        fn on_history(&mut self, direction: HistoryDirection, data: TextCallbackData) {
+            self.apply_history(direction, data);
+        }
+    }
+
+    let callback_recent_paths = recent_paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>();
+    let history_index_ptr: *mut Option<usize> = &mut state.ui.path_history_index;
+    let history_saved_ptr: *mut Option<String> = &mut state.ui.path_history_saved_buffer;
+    let programmatic_edit_ptr: *mut bool = &mut state.ui.path_bar_programmatic_edit;
+    let callback = PathBarCallback {
+        cwd: state.core.cwd.clone(),
+        fs,
+        recent_paths: callback_recent_paths,
+        history_index: history_index_ptr,
+        history_saved_buffer: history_saved_ptr,
+        programmatic_edit: programmatic_edit_ptr,
+    };
     let submitted = ui
         .input_text("##path_bar", &mut state.ui.path_edit_buffer)
+        .callback(callback)
+        .callback_flags(InputTextCallback::COMPLETION | InputTextCallback::HISTORY)
         .auto_select_all(select_all)
         .enter_returns_true(true)
         .build();
     let path_active = ui.is_item_active() || ui.is_item_focused();
     state.ui.path_edit = path_active;
+    if path_active
+        && !state.ui.path_bar_programmatic_edit
+        && state.ui.path_edit_buffer != prev_path_buffer
+    {
+        state.ui.path_history_index = None;
+        state.ui.path_history_saved_buffer = None;
+    }
+    state.ui.path_bar_programmatic_edit = false;
 
     ui.same_line();
     let go = ui.button("Go") || (path_active && submitted);

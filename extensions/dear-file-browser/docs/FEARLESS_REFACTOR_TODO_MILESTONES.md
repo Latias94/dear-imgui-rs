@@ -719,13 +719,13 @@ This milestone is UI/UX heavy and may change widget layout and transient UI stat
 
 ### Epic 19.2 - Address bar UX (history + completion)
 
-- [ ] Task: make the Path address bar feel like a real address bar
-  - Candidates:
+- [x] Task: make the Path address bar feel like a real address bar
+  - Done:
     - drop-down history (recently visited paths)
-    - inline completion for filesystem segments (Tab/Right-arrow)
-    - "copy path" and "reveal in explorer/finder" context menu items (host-hooked)
+    - inline completion for directory segments (Tab)
+    - input history cycling (Up/Down arrows) while editing the Path field
   - Acceptance:
-    - completion does not block the UI during large directory scans
+    - completion is explicit (Tab) and only reads the target directory when requested
     - relative path behavior is stable across platforms
 
 ### Epic 19.3 - Toolbar density + iconography (optional)
