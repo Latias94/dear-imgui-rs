@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use dear_imgui_rs::Direction;
 use dear_imgui_rs::TreeNodeFlags;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton, MouseCursor};
@@ -375,13 +376,38 @@ fn draw_contents_with_fs_and_hooks(
     let mut request_confirm = false;
     let mut confirm_gate = ConfirmGate::default();
 
-    // Top toolbar: Up, Refresh, Hidden toggle, Breadcrumbs, Filter, Search
-    if ui.button("Up") {
+    // Top toolbar: Back/Forward/Up/Refresh, view, sort, etc.
+    let can_back = state.core.can_navigate_back();
+    let can_forward = state.core.can_navigate_forward();
+    {
+        let _disabled = ui.begin_disabled_with_cond(!can_back);
+        if ui.arrow_button("##nav_back", Direction::Left) {
+            let _ = state.core.handle_event(CoreEvent::NavigateBack);
+        }
+    }
+    if ui.is_item_hovered() {
+        ui.tooltip_text("Back (Alt+Left)");
+    }
+    ui.same_line();
+    {
+        let _disabled = ui.begin_disabled_with_cond(!can_forward);
+        if ui.arrow_button("##nav_forward", Direction::Right) {
+            let _ = state.core.handle_event(CoreEvent::NavigateForward);
+        }
+    }
+    if ui.is_item_hovered() {
+        ui.tooltip_text("Forward (Alt+Right)");
+    }
+    ui.same_line();
+    if ui.arrow_button("##nav_up", Direction::Up) {
         let _ = state.core.handle_event(CoreEvent::NavigateUp);
+    }
+    if ui.is_item_hovered() {
+        ui.tooltip_text("Up (Backspace)");
     }
     ui.same_line();
     if ui.button("Refresh") {
-        state.core.invalidate_dir_cache();
+        let _ = state.core.handle_event(CoreEvent::Refresh);
     }
     ui.same_line();
     if state.ui.new_folder_enabled {
@@ -1043,6 +1069,7 @@ fn draw_contents_with_fs_and_hooks(
     // Keyboard shortcuts (only when the host window is focused)
     if state.ui.visible && ui.is_window_focused() {
         let ctrl = ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl);
+        let alt = ui.is_key_down(Key::LeftAlt) || ui.is_key_down(Key::RightAlt);
         if ctrl && ui.is_key_pressed(Key::L) {
             state.ui.path_edit = true;
             state.ui.path_edit_buffer = state.core.cwd.display().to_string();
@@ -1053,6 +1080,15 @@ fn draw_contents_with_fs_and_hooks(
         }
         if !ui.io().want_capture_keyboard() && ui.is_key_pressed(Key::Backspace) {
             let _ = state.core.handle_event(CoreEvent::NavigateUp);
+        }
+        if !ui.io().want_text_input() && alt && ui.is_key_pressed(Key::LeftArrow) {
+            let _ = state.core.handle_event(CoreEvent::NavigateBack);
+        }
+        if !ui.io().want_text_input() && alt && ui.is_key_pressed(Key::RightArrow) {
+            let _ = state.core.handle_event(CoreEvent::NavigateForward);
+        }
+        if !ui.io().want_text_input() && ui.is_key_pressed(Key::F5) {
+            let _ = state.core.handle_event(CoreEvent::Refresh);
         }
         if !state.ui.path_edit && !ui.io().want_text_input() && ui.is_key_pressed(Key::Enter) {
             request_confirm |= matches!(
@@ -1795,7 +1831,7 @@ fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
     match fs.metadata(&p) {
         Ok(md) => {
             if md.is_dir {
-                state.core.set_cwd(p);
+                let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
                 state.ui.path_edit = false;
                 state.ui.path_edit_last_cwd = state.core.cwd.display().to_string();
                 state.ui.path_edit_buffer = state.ui.path_edit_last_cwd.clone();

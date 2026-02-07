@@ -57,6 +57,12 @@ pub enum CoreEvent {
     NavigateUp,
     /// Navigate to a target directory.
     NavigateTo(PathBuf),
+    /// Navigate backward in directory history.
+    NavigateBack,
+    /// Navigate forward in directory history.
+    NavigateForward,
+    /// Refresh the current directory view (forces a rescan on next tick).
+    Refresh,
     /// Focus and select one entry by id.
     FocusAndSelectById(EntryId),
     /// Replace current selection by entry ids.
@@ -670,6 +676,9 @@ pub struct FileDialogCore {
     dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
     last_view_key: Option<ViewKey>,
+
+    nav_back: VecDeque<PathBuf>,
+    nav_forward: VecDeque<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -724,7 +733,80 @@ impl FileDialogCore {
             },
             dir_snapshot_dirty: true,
             last_view_key: None,
+            nav_back: VecDeque::new(),
+            nav_forward: VecDeque::new(),
         }
+    }
+
+    /// Returns whether a "back" navigation is currently possible.
+    pub fn can_navigate_back(&self) -> bool {
+        !self.nav_back.is_empty()
+    }
+
+    /// Returns whether a "forward" navigation is currently possible.
+    pub fn can_navigate_forward(&self) -> bool {
+        !self.nav_forward.is_empty()
+    }
+
+    fn push_nav_back(&mut self, cwd: PathBuf) {
+        const NAV_HISTORY_MAX: usize = 64;
+
+        if self.nav_back.back() == Some(&cwd) {
+            return;
+        }
+
+        self.nav_back.push_back(cwd);
+        while self.nav_back.len() > NAV_HISTORY_MAX {
+            let _ = self.nav_back.pop_front();
+        }
+    }
+
+    fn push_nav_forward(&mut self, cwd: PathBuf) {
+        const NAV_HISTORY_MAX: usize = 64;
+
+        if self.nav_forward.back() == Some(&cwd) {
+            return;
+        }
+
+        self.nav_forward.push_back(cwd);
+        while self.nav_forward.len() > NAV_HISTORY_MAX {
+            let _ = self.nav_forward.pop_front();
+        }
+    }
+
+    fn navigate_to_with_history(&mut self, target: PathBuf) {
+        if target == self.cwd {
+            return;
+        }
+
+        let old = self.cwd.clone();
+        self.push_nav_back(old);
+        self.nav_forward.clear();
+        self.set_cwd(target);
+    }
+
+    fn navigate_back(&mut self) {
+        let Some(prev) = self.nav_back.pop_back() else {
+            return;
+        };
+        if prev == self.cwd {
+            return;
+        }
+        let old = self.cwd.clone();
+        self.push_nav_forward(old);
+        self.set_cwd(prev);
+    }
+
+    fn navigate_forward(&mut self) {
+        let Some(next) = self.nav_forward.pop_back() else {
+            return;
+        };
+        if next == self.cwd {
+            return;
+        }
+        let old = self.cwd.clone();
+        self.push_nav_back(old);
+        self.set_cwd(next);
     }
 
     /// Returns all configured filters.
@@ -842,6 +924,18 @@ impl FileDialogCore {
             }
             CoreEvent::NavigateTo(path) => {
                 self.navigate_to(path);
+                CoreEventOutcome::None
+            }
+            CoreEvent::NavigateBack => {
+                self.navigate_back();
+                CoreEventOutcome::None
+            }
+            CoreEvent::NavigateForward => {
+                self.navigate_forward();
+                CoreEventOutcome::None
+            }
+            CoreEvent::Refresh => {
+                self.invalidate_dir_cache();
                 CoreEventOutcome::None
             }
             CoreEvent::FocusAndSelectById(id) => {
@@ -1372,8 +1466,8 @@ impl FileDialogCore {
                     self.select_single_by_id(id);
                 }
                 ClickAction::Navigate => {
-                    self.cwd.push(&entry.name);
-                    self.clear_selection();
+                    let target = self.cwd.join(&entry.name);
+                    self.navigate_to_with_history(target);
                 }
             }
             return;
@@ -1415,8 +1509,8 @@ impl FileDialogCore {
         };
 
         if entry.is_dir {
-            self.cwd.push(&entry.name);
-            self.clear_selection();
+            let target = self.cwd.join(&entry.name);
+            self.navigate_to_with_history(target);
             return false;
         }
 
@@ -1429,13 +1523,16 @@ impl FileDialogCore {
 
     /// Navigates one directory up.
     pub(crate) fn navigate_up(&mut self) {
-        let _ = self.cwd.pop();
-        self.clear_selection();
+        let mut target = self.cwd.clone();
+        if !target.pop() {
+            return;
+        }
+        self.navigate_to_with_history(target);
     }
 
     /// Navigates to a directory.
     pub(crate) fn navigate_to(&mut self, p: PathBuf) {
-        self.set_cwd(p);
+        self.navigate_to_with_history(p);
     }
 
     /// Confirms the dialog. On success, stores a result and signals the UI to close.
@@ -1459,8 +1556,8 @@ impl FileDialogCore {
             && selected_entries.len() == 1
             && selected_entries[0].is_dir
         {
-            self.cwd.push(&selected_entries[0].name);
-            self.clear_selection();
+            let target = self.cwd.join(&selected_entries[0].name);
+            self.navigate_to_with_history(target);
             return Ok(());
         }
 
@@ -2278,6 +2375,47 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn navigation_history_back_forward_tracks_and_clears_forward() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        let start = PathBuf::from("/tmp").join("start");
+        let one = PathBuf::from("/tmp").join("one");
+        let two = PathBuf::from("/tmp").join("two");
+        core.set_cwd(start.clone());
+
+        assert!(!core.can_navigate_back());
+        assert!(!core.can_navigate_forward());
+
+        let _ = core.handle_event(CoreEvent::NavigateTo(one.clone()));
+        assert_eq!(core.cwd, one);
+        assert!(core.can_navigate_back());
+        assert!(!core.can_navigate_forward());
+
+        let _ = core.handle_event(CoreEvent::NavigateBack);
+        assert_eq!(core.cwd, start);
+        assert!(!core.can_navigate_back());
+        assert!(core.can_navigate_forward());
+
+        let _ = core.handle_event(CoreEvent::NavigateForward);
+        assert_eq!(core.cwd, one);
+        assert!(core.can_navigate_back());
+        assert!(!core.can_navigate_forward());
+
+        let _ = core.handle_event(CoreEvent::NavigateBack);
+        assert_eq!(core.cwd, start);
+        assert!(core.can_navigate_forward());
+
+        let _ = core.handle_event(CoreEvent::NavigateTo(two.clone()));
+        assert_eq!(core.cwd, two);
+        assert!(core.can_navigate_back());
+        assert!(!core.can_navigate_forward());
+
+        let _ = core.handle_event(CoreEvent::Refresh);
+        assert_eq!(core.cwd, two);
+        assert!(core.can_navigate_back());
+        assert!(!core.can_navigate_forward());
     }
 
     #[derive(Default)]

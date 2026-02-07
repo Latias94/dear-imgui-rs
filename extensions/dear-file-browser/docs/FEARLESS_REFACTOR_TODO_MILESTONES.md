@@ -708,13 +708,14 @@ This milestone is UI/UX heavy and may change widget layout and transient UI stat
 
 ### Epic 19.1 - Navigation toolbar (Back/Forward/Up/Refresh)
 
-- [ ] Task: add optional navigation history and exposed actions
-  - Candidates:
-    - `CoreEvent::NavigateBack` / `NavigateForward` (or UI-driven history in `FileDialogUiState`)
+- [x] Task: add optional navigation history and exposed actions
+  - Done:
+    - `CoreEvent::NavigateBack` / `NavigateForward` / `NavigateUp` / `Refresh`
     - toolbar buttons (Back/Forward/Up/Refresh) with disabled states
+    - keyboard shortcuts: Alt+Left/Right (back/forward), Backspace (up), F5 (refresh)
   - Acceptance:
     - navigation via breadcrumbs/path typing updates history consistently
-    - selection is cleared or reconciled consistently after navigation (documented)
+    - selection is cleared consistently after navigation (current behavior)
 
 ### Epic 19.2 - Address bar UX (history + completion)
 
