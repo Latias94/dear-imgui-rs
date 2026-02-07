@@ -729,6 +729,10 @@ fn draw_contents_with_fs_and_hooks(
             if ui.checkbox("DblClick confirm", &mut dbl) {
                 state.core.double_click = dbl;
             }
+            let mut quick = state.ui.breadcrumbs_quick_select;
+            if ui.checkbox("Quick path select", &mut quick) {
+                state.ui.breadcrumbs_quick_select = quick;
+            }
             ui.separator();
             ui.text_disabled("Shortcuts:");
             ui.bullet_text("Ctrl+L: focus Path");
@@ -844,6 +848,20 @@ fn draw_contents_with_fs_and_hooks(
         ui.same_line();
 
         if show_breadcrumb_composer {
+            {
+                let can_reset = state
+                    .ui
+                    .opened_cwd
+                    .as_ref()
+                    .is_some_and(|p| *p != state.core.cwd);
+                let _disabled = ui.begin_disabled_with_cond(!can_reset);
+                if ui.button("Reset") {
+                    if let Some(p) = state.ui.opened_cwd.clone() {
+                        let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
+                    }
+                }
+                ui.same_line();
+            }
             if let Some(p) = ui
                 .child_window("##path_breadcrumbs")
                 .size([path_w, ui.frame_height()])
@@ -2386,11 +2404,15 @@ fn draw_breadcrumbs(
             }
             ui.same_line();
             if i + 1 < n {
-                if ui.small_button(">") {
-                    ui.open_popup("##breadcrumb_sep_popup");
-                }
-                if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
-                    draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                if state.ui.breadcrumbs_quick_select {
+                    if ui.small_button(">") {
+                        ui.open_popup("##breadcrumb_sep_popup");
+                    }
+                    if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
+                        draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                    }
+                } else {
+                    ui.text(">");
                 }
                 ui.same_line();
             }
@@ -2413,11 +2435,15 @@ fn draw_breadcrumbs(
                 }
             }
             ui.same_line();
-            if ui.small_button(">") {
-                ui.open_popup("##breadcrumb_sep_popup");
-            }
-            if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
-                draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+            if state.ui.breadcrumbs_quick_select {
+                if ui.small_button(">") {
+                    ui.open_popup("##breadcrumb_sep_popup");
+                }
+                if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
+                    draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                }
+            } else {
+                ui.text(">");
             }
             ui.same_line();
         }
@@ -2451,11 +2477,15 @@ fn draw_breadcrumbs(
         let tail = max_segments - 2;
         let start_tail = n.saturating_sub(tail);
         if let Some((_, parent)) = crumbs.get(start_tail.saturating_sub(1)) {
-            if ui.small_button(">") {
-                ui.open_popup("##breadcrumb_ellipsis_sep_popup");
-            }
-            if let Some(_popup) = ui.begin_popup("##breadcrumb_ellipsis_sep_popup") {
-                draw_breadcrumb_sep_popup(ui, fs, parent, &mut new_cwd);
+            if state.ui.breadcrumbs_quick_select {
+                if ui.small_button(">") {
+                    ui.open_popup("##breadcrumb_ellipsis_sep_popup");
+                }
+                if let Some(_popup) = ui.begin_popup("##breadcrumb_ellipsis_sep_popup") {
+                    draw_breadcrumb_sep_popup(ui, fs, parent, &mut new_cwd);
+                }
+            } else {
+                ui.text(">");
             }
             ui.same_line();
         } else {
@@ -2485,11 +2515,15 @@ fn draw_breadcrumbs(
             }
             ui.same_line();
             if i + 1 < n {
-                if ui.small_button(">") {
-                    ui.open_popup("##breadcrumb_sep_popup");
-                }
-                if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
-                    draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                if state.ui.breadcrumbs_quick_select {
+                    if ui.small_button(">") {
+                        ui.open_popup("##breadcrumb_sep_popup");
+                    }
+                    if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
+                        draw_breadcrumb_sep_popup(ui, fs, path, &mut new_cwd);
+                    }
+                } else {
+                    ui.text(">");
                 }
                 ui.same_line();
             }

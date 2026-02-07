@@ -556,6 +556,10 @@ pub struct FileDialogUiState {
     pub file_list_columns: FileListColumnsConfig,
     /// Path bar style (editable text input vs breadcrumb-style composer).
     pub path_bar_style: PathBarStyle,
+    /// Enable quick parallel directory selection popups when clicking breadcrumb separators.
+    ///
+    /// This mimics IGFD's "quick path selection" feature in the path composer.
+    pub breadcrumbs_quick_select: bool,
     /// Max breadcrumb segments to display (compress with ellipsis when exceeded).
     pub breadcrumbs_max_segments: usize,
     /// Show a hint row when no entries match filters/search.
@@ -572,6 +576,7 @@ pub struct FileDialogUiState {
     pub path_edit_buffer: String,
     pub(crate) path_edit_last_cwd: String,
     pub(crate) breadcrumbs_scroll_to_end_next: bool,
+    pub(crate) opened_cwd: Option<PathBuf>,
     pub(crate) path_history_index: Option<usize>,
     pub(crate) path_history_saved_buffer: Option<String>,
     pub(crate) path_bar_programmatic_edit: bool,
@@ -684,6 +689,7 @@ impl Default for FileDialogUiState {
             file_list_view: FileListViewMode::default(),
             file_list_columns: FileListColumnsConfig::default(),
             path_bar_style: PathBarStyle::TextInput,
+            breadcrumbs_quick_select: true,
             breadcrumbs_max_segments: 6,
             empty_hint_enabled: true,
             empty_hint_color: [0.7, 0.7, 0.7, 1.0],
@@ -692,6 +698,7 @@ impl Default for FileDialogUiState {
             path_edit_buffer: String::new(),
             path_edit_last_cwd: String::new(),
             breadcrumbs_scroll_to_end_next: false,
+            opened_cwd: None,
             path_history_index: None,
             path_history_saved_buffer: None,
             path_bar_programmatic_edit: false,
@@ -762,6 +769,7 @@ impl FileDialogUiState {
         self.toolbar.density = ToolbarDensity::Compact;
         self.path_bar_style = PathBarStyle::Breadcrumbs;
         self.breadcrumbs_scroll_to_end_next = true;
+        self.breadcrumbs_quick_select = true;
 
         self.file_list_columns.show_preview = false;
         self.file_list_columns.show_extension = false;
@@ -834,6 +842,7 @@ impl FileDialogState {
     /// This mirrors IGFD's `OpenDialog` step before `Display`.
     pub fn open(&mut self) {
         self.ui.visible = true;
+        self.ui.opened_cwd = Some(self.core.cwd.clone());
     }
 
     /// Reopens the dialog.
