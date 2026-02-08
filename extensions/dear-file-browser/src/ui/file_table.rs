@@ -13,7 +13,7 @@ use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton};
 use dear_imgui_rs::sys;
 
-use super::{
+use super::ops::{
     clipboard_set_from_selection, open_delete_modal_from_selection,
     open_rename_modal_from_selection, run_paste_job_until_wait_or_done, start_paste_into_cwd,
 };

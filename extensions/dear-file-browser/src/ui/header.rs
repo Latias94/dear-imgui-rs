@@ -210,7 +210,7 @@ pub(super) fn draw_chrome(
                 }
 
                 if ok || submitted {
-                    if super::try_create_new_folder_in_cwd(state, fs) {
+                    if super::popups::try_create_new_folder_in_cwd(state, fs) {
                         state.ui.new_folder_inline_active = false;
                     }
                 }
@@ -479,7 +479,7 @@ pub(super) fn draw_chrome(
                 }
 
                 if ok || submitted {
-                    if super::try_create_new_folder_in_cwd(state, fs) {
+                    if super::popups::try_create_new_folder_in_cwd(state, fs) {
                         state.ui.new_folder_inline_active = false;
                     }
                 }
