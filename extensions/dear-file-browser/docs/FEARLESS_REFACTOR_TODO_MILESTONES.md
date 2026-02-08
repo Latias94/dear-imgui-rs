@@ -835,6 +835,55 @@ Exit criteria:
 - At least one example demonstrates thumbnails properly.
 - Documentation covers the "host responsibilities" (thumbnails backend, icons/fonts, FS abstraction).
 
+---
+
+## Milestone 21 - IGFD UI Fidelity (source-diff driven)
+
+Goal: keep the already-achieved **capability parity** while aligning the ImGui backend’s **visual language and micro-interactions** with IGFD as closely as practical.
+
+Policy:
+
+- IGFD source (`repo-ref/ImGuiFileDialog/ImGuiFileDialog.cpp`) is the reference for UI flow and widget semantics.
+- We do **not** chase 1:1 flags or API shape; we chase user-visible behavior and layout robustness.
+- Prefer derived sizing from content region; avoid hard-coded pixels unless IGFD does so intentionally.
+
+### Epic 21.1 - IgfdClassic header compactness (no overlap under narrow widths)
+
+- [ ] Task: match IGFD classic labels and tooltips
+  - `resetButtonString` → `R`
+  - `editPathButtonString` → `E`
+  - `DisplayMode_*` → `FL/TL/TG`
+  - Acceptance: narrow window never overlaps view buttons with path controls; tooltips remain discoverable.
+- [ ] Task: align classic header separators and ordering with `m_DrawHeader()`
+  - Acceptance: order is consistent with IGFD: Places / New Folder / Path composer / Display mode / Search.
+
+### Epic 21.2 - Breadcrumb micro-interaction parity
+
+- [ ] Task: breadcrumb right-click matches IGFD
+  - Acceptance: right-click activates path edit buffer at that segment (or parent for separators) without navigating until Enter.
+- [ ] Task: separator quick-select parity
+  - Acceptance: click opens path popup; right-click selects parent segment for edit (IGFD `m_SetCurrentPath` behavior).
+
+### Epic 21.3 - Places pane visual fidelity
+
+- [ ] Task: tighten spacing + align edit affordances (IGFD-like)
+  - Acceptance: group rows and per-place edit buttons remain readable at compact density; no overlap in minimal widths.
+- [ ] Task: match separator thickness and group ordering defaults
+  - Acceptance: separators are visually distinct and consistent; ordering mirrors IGFD’s “Bookmarks/Devices” mental model.
+
+### Epic 21.4 - File list / thumbnails look & feel
+
+- [ ] Task: thumbnails list row height + padding parity
+  - Acceptance: TL rows align with IGFD-like image height; selection highlight and hover feel consistent.
+- [ ] Task: grid selection + sort affordances parity
+  - Acceptance: grid view communicates sort state clearly and remains keyboard-friendly.
+
+Exit criteria:
+
+- IgfdClassic header stays usable at small widths (no overlap, predictable stacking).
+- Breadcrumb interactions match IGFD (right-click edit semantics, separator behavior).
+- Places + file list visuals are “close enough” that users recognize the IGFD mental model immediately.
+
 ## Parity Checklist (IGFD → dear-file-browser)
 
 Use this as a tracking table for final validation.

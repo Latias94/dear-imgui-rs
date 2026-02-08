@@ -327,11 +327,21 @@ pub(super) fn estimate_breadcrumbs_total_width(
     };
 
     let mut crumbs: Vec<String> = Vec::new();
+    let mut saw_prefix = false;
     for comp in cwd.components() {
         use std::path::Component;
         match comp {
-            Component::Prefix(p) => crumbs.push(p.as_os_str().to_string_lossy().to_string()),
-            Component::RootDir => crumbs.push(String::from(std::path::MAIN_SEPARATOR)),
+            Component::Prefix(p) => {
+                saw_prefix = true;
+                crumbs.push(p.as_os_str().to_string_lossy().to_string());
+            }
+            Component::RootDir => {
+                // Match IGFD: on Windows, the root separator after a drive/UNC prefix is not a
+                // separate breadcrumb element (e.g. `F:` + `\` is rendered as `F:\`).
+                if !saw_prefix {
+                    crumbs.push(String::from(std::path::MAIN_SEPARATOR));
+                }
+            }
             Component::Normal(seg) => crumbs.push(seg.to_string_lossy().to_string()),
             _ => {}
         }
@@ -349,7 +359,12 @@ pub(super) fn estimate_breadcrumbs_total_width(
         for (i, label) in crumbs.iter().enumerate() {
             widths.push(button_w(label));
             if i + 1 < n {
-                widths.push(sep_w(sep_label));
+                // Avoid a duplicated root separator: "/" + "home" should render as "/home",
+                // not "//home". Same for Windows root paths like "\\Windows".
+                let is_root_crumb = i == 0 && label == sep_label;
+                if !is_root_crumb {
+                    widths.push(sep_w(sep_label));
+                }
             }
         }
     } else {
@@ -357,7 +372,9 @@ pub(super) fn estimate_breadcrumbs_total_width(
         let start_tail = n.saturating_sub(tail);
 
         widths.push(button_w(&crumbs[0]));
-        widths.push(sep_w(sep_label));
+        if crumbs[0] != sep_label {
+            widths.push(sep_w(sep_label));
+        }
         widths.push(button_w("..."));
         widths.push(sep_w(sep_label));
 
@@ -390,20 +407,33 @@ pub(super) fn draw_breadcrumbs(
     // Build crumbs first to avoid borrowing cwd while mutating it
     let mut crumbs: Vec<(String, PathBuf)> = Vec::new();
     let mut acc = PathBuf::new();
+    let mut last_is_prefix = false;
     for comp in state.core.cwd.components() {
         use std::path::Component;
         match comp {
             Component::Prefix(p) => {
                 acc.push(p.as_os_str());
                 crumbs.push((p.as_os_str().to_string_lossy().to_string(), acc.clone()));
+                last_is_prefix = true;
             }
             Component::RootDir => {
                 acc.push(std::path::MAIN_SEPARATOR.to_string());
-                crumbs.push((String::from(std::path::MAIN_SEPARATOR), acc.clone()));
+                // Match IGFD: on Windows, the root separator after a drive/UNC prefix is not a
+                // separate breadcrumb element, but clicking the prefix crumb should navigate to
+                // the root (e.g. `F:` navigates to `F:\`).
+                if last_is_prefix {
+                    if let Some((_, p)) = crumbs.last_mut() {
+                        *p = acc.clone();
+                    }
+                } else {
+                    crumbs.push((String::from(std::path::MAIN_SEPARATOR), acc.clone()));
+                }
+                last_is_prefix = false;
             }
             Component::Normal(seg) => {
                 acc.push(seg);
                 crumbs.push((seg.to_string_lossy().to_string(), acc.clone()));
+                last_is_prefix = false;
             }
             _ => {}
         }
@@ -418,7 +448,6 @@ pub(super) fn draw_breadcrumbs(
                 new_cwd = Some(path.clone());
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
-                new_cwd = Some(path.clone());
                 state.ui.path_edit = true;
                 state.ui.path_edit_buffer = path.display().to_string();
                 state.ui.focus_path_edit_next = true;
@@ -435,13 +464,16 @@ pub(super) fn draw_breadcrumbs(
             }
             ui.same_line();
             if i + 1 < n {
+                let is_root_crumb = i == 0 && label == sep_label;
+                if is_root_crumb {
+                    continue;
+                }
                 if state.ui.breadcrumbs_quick_select {
                     if ui.small_button(sep_label) {
                         state.ui.breadcrumb_quick_parent = Some(path.clone());
                         ui.open_popup("##igfd_path_popup");
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
-                        new_cwd = Some(path.clone());
                         state.ui.path_edit = true;
                         state.ui.path_edit_buffer = path.display().to_string();
                         state.ui.focus_path_edit_next = true;
@@ -463,7 +495,6 @@ pub(super) fn draw_breadcrumbs(
                 new_cwd = Some(path.clone());
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
-                new_cwd = Some(path.clone());
                 state.ui.path_edit = true;
                 state.ui.path_edit_buffer = path.display().to_string();
                 state.ui.focus_path_edit_next = true;
@@ -475,22 +506,23 @@ pub(super) fn draw_breadcrumbs(
                 ui.tooltip_text(path.display().to_string());
             }
             ui.same_line();
-            if state.ui.breadcrumbs_quick_select {
-                if ui.small_button(sep_label) {
-                    state.ui.breadcrumb_quick_parent = Some(path.clone());
-                    ui.open_popup("##igfd_path_popup");
-                }
-                if ui.is_item_clicked_with_button(MouseButton::Right) {
-                    new_cwd = Some(path.clone());
-                    state.ui.path_edit = true;
-                    state.ui.path_edit_buffer = path.display().to_string();
-                    state.ui.focus_path_edit_next = true;
-                    if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
-                        state.ui.path_input_mode = true;
+            if label != sep_label {
+                if state.ui.breadcrumbs_quick_select {
+                    if ui.small_button(sep_label) {
+                        state.ui.breadcrumb_quick_parent = Some(path.clone());
+                        ui.open_popup("##igfd_path_popup");
                     }
+                    if ui.is_item_clicked_with_button(MouseButton::Right) {
+                        state.ui.path_edit = true;
+                        state.ui.path_edit_buffer = path.display().to_string();
+                        state.ui.focus_path_edit_next = true;
+                        if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                            state.ui.path_input_mode = true;
+                        }
+                    }
+                } else {
+                    ui.text(sep_label);
                 }
-            } else {
-                ui.text(sep_label);
             }
             ui.same_line();
         }
@@ -531,7 +563,6 @@ pub(super) fn draw_breadcrumbs(
                     ui.open_popup("##igfd_path_popup");
                 }
                 if ui.is_item_clicked_with_button(MouseButton::Right) {
-                    new_cwd = Some(parent.clone());
                     state.ui.path_edit = true;
                     state.ui.path_edit_buffer = parent.display().to_string();
                     state.ui.focus_path_edit_next = true;
@@ -556,7 +587,6 @@ pub(super) fn draw_breadcrumbs(
                 new_cwd = Some(path.clone());
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
-                new_cwd = Some(path.clone());
                 state.ui.path_edit = true;
                 state.ui.path_edit_buffer = path.display().to_string();
                 state.ui.focus_path_edit_next = true;
@@ -579,7 +609,6 @@ pub(super) fn draw_breadcrumbs(
                         ui.open_popup("##igfd_path_popup");
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
-                        new_cwd = Some(path.clone());
                         state.ui.path_edit = true;
                         state.ui.path_edit_buffer = path.display().to_string();
                         state.ui.focus_path_edit_next = true;

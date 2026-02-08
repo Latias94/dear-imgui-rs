@@ -31,7 +31,7 @@ IGFD runs a fixed frame layout:
 
 `dear-file-browser` equivalent entrypoint:
 
-- `extensions/dear-file-browser/src/ui/mod.rs` (single file; UI host + contents)
+- `extensions/dear-file-browser/src/ui/mod.rs` (UI orchestrator: sizing + pane composition + popup dispatch)
 
 ## Feature → IGFD → dear-file-browser mapping
 
@@ -44,9 +44,9 @@ IGFD runs a fixed frame layout:
   - Display mode toolbar (thumbnails/list)
   - Search bar
 - dear-file-browser: `extensions/dear-file-browser/src/ui/mod.rs`
-  - `HeaderStyle::IgfdClassic` header layout
-  - Path bar: breadcrumbs + edit toggle + reset/devices
-  - Search bar (shared with path popup filtering)
+  - Header orchestration: `extensions/dear-file-browser/src/ui/header.rs`
+  - Path composer + breadcrumbs: `extensions/dear-file-browser/src/ui/path_bar.rs`
+  - IGFD path popup: `extensions/dear-file-browser/src/ui/igfd_path_popup.rs`
 
 ### Path composer (breadcrumbs)
 
@@ -55,8 +55,9 @@ IGFD runs a fixed frame layout:
   - Long paths: keep tail visible
   - Separator quick-select opens IGFD path popup
 - dear-file-browser:
-  - Breadcrumb drawing: `draw_breadcrumbs(...)`
-  - Tail visibility: end-aligned composer with clip-rect
+  - Composer layout: `extensions/dear-file-browser/src/ui/header.rs`
+  - Breadcrumb drawing: `extensions/dear-file-browser/src/ui/path_bar.rs` (`draw_breadcrumbs`)
+  - Tail visibility: end-aligned + clip-rect in classic header
 
 ### Separator quick-select popup (IGFD path popup)
 
@@ -68,7 +69,7 @@ IGFD runs a fixed frame layout:
   - Filtering: uses the *global search tag* (`SearchManager::searchTag`)
 - dear-file-browser:
   - Popup opener: breadcrumb separator click opens `"##igfd_path_popup"`
-  - Popup render: `draw_igfd_path_popup(...)` → `draw_igfd_path_table_popup(...)`
+  - Popup render: `extensions/dear-file-browser/src/ui/igfd_path_popup.rs`
   - Filtering: uses `core.search` (shared search)
 
 ### Main content sizing (footer reservation)
@@ -77,6 +78,7 @@ IGFD runs a fixed frame layout:
   - `size = GetContentRegionAvail() - (0, footerHeight)`
 - dear-file-browser:
   - Content region height uses last-frame measured footer height (no magic constants)
+  - Orchestrated in `extensions/dear-file-browser/src/ui/mod.rs`
 
 ### File list view (table)
 
@@ -84,8 +86,8 @@ IGFD runs a fixed frame layout:
   - Columns: Name / Type / Size / Date
   - Sorting: table sort specs → `sortingField` and `SortFields(...)`
 - dear-file-browser:
-  - `draw_file_table_view(...)` (table builder + table sort specs → `core.sort_by/sort_ascending`)
-  - Columns are configurable; `HeaderStyle::IgfdClassic` aligns labels and behaviors
+  - Table + thumbnails views: `extensions/dear-file-browser/src/ui/file_table.rs`
+  - Sort wiring: table sort specs → `core.sort_by/sort_ascending`
 
 ### "Type" column semantics (filter-aware)
 
@@ -101,6 +103,7 @@ IGFD runs a fixed frame layout:
   - Open modes: filename input is editable; Enter triggers OK
   - Measures `footerHeight`
 - dear-file-browser:
+  - Footer renderer: `extensions/dear-file-browser/src/ui/footer.rs`
   - Footer is IGFD-like: editable file field in Open modes + measured height
 
 ## Known "IGFD-only" concepts (still useful to emulate)

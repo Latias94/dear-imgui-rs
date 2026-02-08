@@ -9,7 +9,7 @@ Last updated: 2026-02-08
 - Included: ImGui-hosted dialog behavior, core state machine, styling, filtering, places, file operations, thumbnails, host constraints.
 - Excluded: C API shape and API-level compatibility with IGFD C/C++ interfaces.
 
-## Parity Matrix
+## Capability Parity Matrix (Non-C-API)
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -35,6 +35,21 @@ Last updated: 2026-02-08
 | IGFD-like header layout | Done | `HeaderStyle::IgfdClassic` + `apply_igfd_classic_preset()` provide a closer header order (Places + New Folder + Path + View + Search). |
 | Navigation history | Done | Back/Forward/Up/Refresh with history stacks; Alt+Left/Right + F5 shortcuts. |
 | Host min/max constraints | Done | `WindowHostConfig` and `ModalHostConfig` support `min_size` / `max_size`. |
+
+## UI Fidelity Parity (IGFD-look & micro-interactions)
+
+Capability parity does **not** imply pixel-identical UI. This section tracks the remaining work to make the ImGui backend **feel** like IGFD when using `HeaderStyle::IgfdClassic`.
+
+| UI detail | Status | Notes |
+|---|---|---|
+| Classic header compact labels (`R`, `E`, `FL/TL/TG`) | Done | IGFD uses single-letter/short labels to stay usable under narrow widths. |
+| Breadcrumb right-click semantics (enter edit, do not navigate) | Done | IGFD right-click on crumb/separator activates path edit buffer without changing cwd until Enter. |
+| Breadcrumb separator behavior parity | Done | Click: open path popup; right-click: activate edit at parent segment (IGFD). |
+| Root separator duplication (`F:\\\\...`, `//home`) | Done | RootDir is not rendered as a separate crumb after a drive/UNC prefix; separator between root and first segment is skipped. |
+| Header narrow-width no-overlap | Planned | Prefer single-row; fall back to stacked without cursor backtracking overlap. |
+| Places visuals (spacing, right-aligned edit buttons) | Partial | Behavior parity is mostly there; visual fidelity still evolving. |
+| Thumbnails views (row height, padding, selection highlight) | Partial | Functionality parity exists; pixel-level alignment still evolving. |
+| Context menus parity (path / file list items) | Partial | Major actions exist; IGFD-style menu grouping and labels TBD. |
 
 ## Intentional Deviations (By Design)
 

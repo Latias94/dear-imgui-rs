@@ -516,7 +516,26 @@ pub(super) fn draw_chrome(
     }
 
     let breadcrumbs_mode = state.ui.path_bar_style == PathBarStyle::Breadcrumbs;
+    let is_igfd_classic = matches!(header_style, HeaderStyle::IgfdClassic);
     let show_breadcrumb_composer = breadcrumbs_mode && !state.ui.path_input_mode;
+
+    // IGFD uses compact labels for classic chrome. Keep them scoped to IgfdClassic to avoid
+    // surprising other header styles.
+    let reset_label = if breadcrumbs_mode && is_igfd_classic {
+        "R"
+    } else {
+        "Reset"
+    };
+    let action_label = if breadcrumbs_mode {
+        if is_igfd_classic { "E" } else { "Edit" }
+    } else {
+        "Go"
+    };
+    let (view_list_label, view_thumbs_label, view_grid_label) = if is_igfd_classic {
+        ("FL", "TL", "TG")
+    } else {
+        ("List", "Thumbs", "Grid")
+    };
     let style = ui.clone_style();
     let font = ui.current_font();
     let font_size = ui.current_font_size();
@@ -537,7 +556,6 @@ pub(super) fn draw_chrome(
         220.0
     };
 
-    let action_label = if breadcrumbs_mode { "Edit" } else { "Go" };
     let action_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, action_label)[0];
     let action_w = action_label_w + frame_pad_x * 2.0;
 
@@ -550,7 +568,7 @@ pub(super) fn draw_chrome(
             .find(|g| g.label == Places::SYSTEM_GROUP)
             .is_some_and(|g| g.places.iter().any(|p| !p.is_separator()));
     let reset_label_w = if breadcrumbs_mode {
-        font.calc_text_size(font_size, f32::MAX, 0.0, "Reset")[0]
+        font.calc_text_size(font_size, f32::MAX, 0.0, reset_label)[0]
     } else {
         0.0
     };
@@ -578,10 +596,12 @@ pub(super) fn draw_chrome(
     let search_total_w =
         search_reset_w + spacing_x + search_label_w + spacing_x + min_search_input_w;
     let view_controls_w = if matches!(header_style, HeaderStyle::IgfdClassic) {
-        let list_w = font.calc_text_size(font_size, f32::MAX, 0.0, "List")[0] + frame_pad_x * 2.0;
+        let list_w =
+            font.calc_text_size(font_size, f32::MAX, 0.0, view_list_label)[0] + frame_pad_x * 2.0;
         let thumbs_w =
-            font.calc_text_size(font_size, f32::MAX, 0.0, "Thumbs")[0] + frame_pad_x * 2.0;
-        let grid_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Grid")[0] + frame_pad_x * 2.0;
+            font.calc_text_size(font_size, f32::MAX, 0.0, view_thumbs_label)[0] + frame_pad_x * 2.0;
+        let grid_w =
+            font.calc_text_size(font_size, f32::MAX, 0.0, view_grid_label)[0] + frame_pad_x * 2.0;
         let buttons_w = list_w + spacing_x + thumbs_w + spacing_x + grid_w;
         let sep_w = 1.0;
         // Buttons + spacing + vertical separator + spacing.
@@ -659,14 +679,14 @@ pub(super) fn draw_chrome(
             .is_some_and(|p| *p != state.core.cwd);
         {
             let _disabled = ui.begin_disabled_with_cond(!can_reset);
-            if ui.button("Reset") {
+            if ui.button(reset_label) {
                 if let Some(p) = state.ui.opened_cwd.clone() {
                     let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
                 }
             }
         }
         if ui.is_item_hovered() {
-            ui.tooltip_text("Reset to the dialog start directory");
+            ui.tooltip_text("Reset to current directory");
         }
         ui.same_line();
 
@@ -707,7 +727,7 @@ pub(super) fn draw_chrome(
             ui.same_line();
         }
 
-        if ui.button("Edit") {
+        if ui.button(action_label) {
             state.ui.path_input_mode = !state.ui.path_input_mode;
             if state.ui.path_input_mode {
                 state.ui.path_edit_buffer = state.core.cwd.display().to_string();
@@ -718,7 +738,7 @@ pub(super) fn draw_chrome(
             }
         }
         if ui.is_item_hovered() {
-            ui.tooltip_text("Edit path (Ctrl+L)");
+            ui.tooltip_text("Edit path (Ctrl+L)\nYou can also right click on path buttons");
         }
         ui.same_line();
         ui.separator_vertical();
@@ -811,11 +831,11 @@ pub(super) fn draw_chrome(
         if toolbar_toggle_button(
             ui,
             "view_list",
-            "List",
+            view_list_label,
             None,
             ToolbarIconMode::Text,
             show_tooltips,
-            "List view",
+            "File List",
             list_active,
         ) {
             state.ui.file_list_view = FileListViewMode::List;
@@ -826,11 +846,11 @@ pub(super) fn draw_chrome(
             if toolbar_toggle_button(
                 ui,
                 "view_thumbs",
-                "Thumbs",
+                view_thumbs_label,
                 None,
                 ToolbarIconMode::Text,
                 show_tooltips,
-                "Thumbnails list view",
+                "Thumbnails List",
                 thumbs_active,
             ) {
                 state.ui.file_list_view = FileListViewMode::ThumbnailsList;
@@ -844,11 +864,11 @@ pub(super) fn draw_chrome(
             if toolbar_toggle_button(
                 ui,
                 "view_grid",
-                "Grid",
+                view_grid_label,
                 None,
                 ToolbarIconMode::Text,
                 show_tooltips,
-                "Thumbnails grid view",
+                "Thumbnails Grid",
                 grid_active,
             ) {
                 state.ui.file_list_view = FileListViewMode::Grid;
