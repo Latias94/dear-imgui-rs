@@ -21,6 +21,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 ## Fearless Refactor (IGFD-Grade)
 
 - Architecture: `docs/FEARLESS_REFACTOR_ARCHITECTURE.md`
+- IGFD source reference map: `docs/IGFD_SOURCE_REFERENCE_MAP.md` (1:1 UI/behavior alignment guide)
 - P2 performance/async design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
 - P2 synthetic perf baseline: `docs/P2_PERF_BASELINE_2026-02-06.md`
 - Roadmap / TODO: `docs/FEARLESS_REFACTOR_TODO_MILESTONES.md`
@@ -96,12 +97,15 @@ let selection = pollster::block_on(
 # let mut ctx = Context::create();
 # let ui = ctx.frame();
 use dear_file_browser::{ClickAction, ExtensionPolicy, FileDialogExt, FileDialogState, LayoutStyle};
+use dear_file_browser::HeaderStyle;
 use dear_file_browser::FileListViewMode;
 let mut state = FileDialogState::new(DialogMode::OpenFile);
 // Optional: make it feel closer to ImGuiFileDialog (IGFD).
+// (This also sets `ui.header_style = HeaderStyle::IgfdClassic`.)
 state.apply_igfd_classic_preset();
 // Optional configuration
 state.ui.layout = LayoutStyle::Standard; // or Minimal
+state.ui.header_style = HeaderStyle::IgfdClassic; // or ToolbarAndAddress
 state.ui.file_list_view = FileListViewMode::List; // or Grid (enables thumbnails)
 state.ui.file_list_columns.show_preview = false; // compact list without preview column
 state.ui.file_list_columns.show_modified = false; // optional

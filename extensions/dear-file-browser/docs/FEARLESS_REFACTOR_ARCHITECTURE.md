@@ -1,6 +1,13 @@
-# Fearless Refactor: File Browser Architecture (IGFD-Grade)
+# Fearless Refactor: File Browser Architecture (IGFD Reference-Driven)
 
-This document proposes a "fearless refactor" of `dear-file-browser` to reach feature parity (or near-parity) with ImGuiFileDialog (IGFD) while staying idiomatic to Rust and compatible with `dear-imgui-rs`.
+This document proposes and documents a "fearless refactor" of `dear-file-browser` to reach feature parity (or near-parity) with ImGuiFileDialog (IGFD) while staying idiomatic to Rust and compatible with `dear-imgui-rs`.
+
+Key policy: **IGFD is the reference implementation for UI/behavior** in the ImGui backend. We keep a copy of IGFD source under `repo-ref/ImGuiFileDialog` and prefer source-diff driven parity work.
+
+See also:
+
+- `docs/IGFD_PARITY_AND_DEVIATIONS.md` (capability parity tracking)
+- `docs/IGFD_SOURCE_REFERENCE_MAP.md` (IGFD function → our code map for 1:1 UI/behavior alignment)
 
 Scope: **the ImGui-embedded browser/dialog** (not OS-native dialogs via `rfd`, which remain a separate backend).
 

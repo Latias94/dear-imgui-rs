@@ -11,7 +11,7 @@ Conventions used here:
 
 ---
 
-## Status Snapshot (2026-02-07)
+## Status Snapshot (2026-02-08)
 
 Current parity status vs IGFD (excluding C API by product decision):
 
@@ -27,6 +27,7 @@ Current parity status vs IGFD (excluding C API by product decision):
   - P2 performance/async architecture design doc (scan coordinator/runtime + generation model) (docs-only)
   - Stage E scan-policy tuning (`max_batches_per_tick` + tuned presets + budget sweep baseline)
   - IGFD-like path composer: breadcrumb style + edit toggle + devices/reset + quick path selection popups
+  - IGFD-like path popup: separator quick-select popup is a path table (IGFD `m_DisplayPathPopup` semantics)
   - IGFD-like places: toolbar "Places" control + show/hide + splitter-resizable pane (Standard layout), popup access in Minimal layout
   - Places pane UX polish: per-group quick add (`+`), per-place edit button (`E`), double-click-to-navigate, right-click context actions
   - Demo: default to a repo image directory for visible thumbnails; use icon+text toolbar labels to avoid missing glyph confusion
@@ -45,6 +46,11 @@ Execution plan (next implementation wave):
    - IGFD-classic UI preset (layout/labels/density)
    - explicit config toggles for “IGFD flags”-like behavior (disable new-folder, hide columns, natural sort toggle, etc.)
    - 1:1 chrome polish pass: places toggle/splitter, breadcrumb composer, header spacing, icon/font guidance
+
+Implementation note:
+
+- For UI/behavior parity tasks, prefer a source-diff workflow against `repo-ref/ImGuiFileDialog/ImGuiFileDialog.cpp`.
+  Use `docs/IGFD_SOURCE_REFERENCE_MAP.md` to quickly locate the relevant IGFD function and our corresponding implementation.
 
 ---
 ## Milestone 0 — Baseline & Refactor Safety Net
@@ -505,6 +511,16 @@ Goal: match IGFD’s “natural sorting for filenames and extension on demand”
 - [x] Task: add one-click list column layouts (`Compact` / `Balanced`)
   - Acceptance: presets update visibility + order only and preserve runtime `weight_overrides`.
 
+### Epic 15.3 — IGFD "Type" column semantics (filter-aware)
+
+- [x] Task: add `SortBy::Type` (IGFD-style, filter-aware dot depth)
+  - Acceptance:
+    - With active filter `gz`, `archive.tar.gz` displays `.gz` in the "Type" column.
+    - With active filter `tar.gz`, `archive.tar.gz` displays `.tar.gz` in the "Type" column.
+    - Sorting by the "Type" column matches what is displayed.
+  - Notes:
+    - `SortBy::Extension` remains available for "full extension" sorting (always `.tar.gz`).
+
 Exit criteria:
 
 - Sorting and list columns can be tuned to closely resemble IGFD setups.
@@ -749,8 +765,11 @@ This milestone is UI/UX heavy and may change widget layout and transient UI stat
 - [x] Task: tune the bottom row to match common file dialog expectations
   - Done:
     - Save filename field + extension policy hints + overwrite confirmation hint
+    - Open footer file field is editable (IGFD-like) and supports typed file name/path confirm when no selection exists
     - status text ("N items", selection count, current filter, scan state)
     - filter selector moved to the action row (file dialog style)
+    - content region height derives from measured footer height (no hard-coded pixel constants)
+    - confirm button is disabled until the dialog is confirmable (selection or typed path; non-empty save name)
   - Acceptance:
     - a demo can match IGFD’s "save" flow without forking UI code
 
@@ -762,6 +781,7 @@ This milestone is UI/UX heavy and may change widget layout and transient UI stat
     - IGFD-like "Edit" toggle semantics (`path_input_mode`) + Ctrl+L to enter edit mode
     - optional quick parallel path selection popups (breadcrumb separators)
     - devices popup + reset-to-open-directory shortcut in breadcrumb mode
+    - framed inline path composer (no child window) + end-aligned breadcrumbs for long path visibility
   - Acceptance:
     - composer remains usable on long paths (scroll-to-end + compression)
     - Ctrl+L consistently activates text edit mode for both path bar styles

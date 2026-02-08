@@ -2,7 +2,7 @@
 
 This document tracks capability parity between `dear-file-browser` (ImGui backend) and ImGuiFileDialog (IGFD), focused on **non-C-API** behavior.
 
-Last updated: 2026-02-07
+Last updated: 2026-02-08
 
 ## Scope
 
@@ -20,13 +20,19 @@ Last updated: 2026-02-07
 | Places pane (toggle + splitter) | Done | Toolbar "Places" control + Standard-layout splitter-resizable pane; Minimal layout uses a popup. |
 | Selection UX | Done | Ctrl/Shift, Ctrl+A, keyboard navigation, type-to-select, max-selection cap. |
 | Filters and parsing | Done | Extension/wildcard/regex/collection parsing with IGFD-style semantics. |
+| Type column semantics | Done | IGFD-style filter-aware "Type" (dot depth derived from active filter) via `SortBy::Type`; full extension sorting remains available via `SortBy::Extension`. |
 | Save policies | Done | Confirm-overwrite + extension policy. |
 | File operations | Done | Rename/delete/copy/cut/paste with conflict resolution. |
 | File styles | Done | Rule + callback styles with `Dir/File/Link` support. |
 | Scan-time entry callback | Done | Core/state scan hook (`set_scan_hook` / `clear_scan_hook`). |
 | Thumbnails | Done | Decode/upload/destroy lifecycle + grid/list integration. |
 | Address bar path input | Done | Always-visible Path input + Go + submit-on-Enter; Ctrl+L focuses; history + Tab completion. |
-| Breadcrumb path composer | Done | Optional breadcrumb composer with ellipsis compression, edit toggle, devices/reset actions, and optional quick path selection popups. |
+| Breadcrumb path composer | Done | Optional breadcrumb composer with ellipsis compression, edit toggle, devices/reset actions, and optional quick path selection popups (IGFD-like path table popup sized from content). |
+| Path composer tail visibility | Done | Breadcrumbs in the framed composer are end-aligned so the rightmost segments stay visible for long paths. |
+| Footer file field (Open) | Done | IGFD-like editable footer field; typing a file name/path can confirm Open when no selection exists. |
+| Pick folder selection | Done | PickFolder confirms the selected directory when present; otherwise defaults to current directory. |
+| Confirm button enablement | Done | Confirm button is disabled until the core has something confirmable (selection or typed footer path; non-empty save name). |
+| IGFD-like header layout | Done | `HeaderStyle::IgfdClassic` + `apply_igfd_classic_preset()` provide a closer header order (Places + New Folder + Path + View + Search). |
 | Navigation history | Done | Back/Forward/Up/Refresh with history stacks; Alt+Left/Right + F5 shortcuts. |
 | Host min/max constraints | Done | `WindowHostConfig` and `ModalHostConfig` support `min_size` / `max_size`. |
 
@@ -55,6 +61,11 @@ Last updated: 2026-02-07
 
 - Formatting: `cargo fmt`
 - Tests: `cargo nextest run -p dear-file-browser`
+
+## Reference implementation
+
+We keep a copy of ImGuiFileDialog source under `repo-ref/ImGuiFileDialog` and treat it as the reference for ImGui-backend UI/behavior parity work.
+See `docs/IGFD_SOURCE_REFERENCE_MAP.md` for a practical function map.
 
 ## Post-Parity Backlog (P2)
 
