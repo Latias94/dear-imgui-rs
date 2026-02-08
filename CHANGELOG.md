@@ -83,6 +83,10 @@ This release focuses on `dear-app` usability improvements for real applications 
   - Per-frame OS cursor/IME state updates via `prepare_render_with_ui` (more correct cursor shape + IME toggling).
   - More reliable recovery when recreating the window/GPU stack after fatal surface errors; if recreation fails, `on_exit` is called with the old context for cleanup.
   - `WaitUntil { fps }` control flow now uses `fps` to schedule the next wake consistently.
+- Extensions
+  - `dear-file-browser`
+    - `DialogManager::open_browser*` now opens dialogs by default (visible immediately), matching the IGFD-style `OpenDialog -> Display` flow.
+    - Filters now default to the first configured filter unless the user explicitly selects "All files".
 
 ## [0.8.0] - 2026-01-03
 

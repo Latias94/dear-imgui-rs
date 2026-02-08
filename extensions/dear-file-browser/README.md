@@ -221,6 +221,8 @@ let dlg = FileDialog::new(DialogMode::OpenFile)
     .unwrap();
 ```
 
+ImGui backend default selection mirrors IGFD: when filters are configured, the active filter defaults to the first filter unless the user explicitly selects "All files" (no active filter). Filters are displayed in the insertion order.
+
 ## Embedding (No Host Window)
 
 If you want to embed the browser into an existing window/popup/tab, draw only the contents:

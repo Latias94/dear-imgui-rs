@@ -55,6 +55,10 @@ impl DialogManager {
 
     /// Open a new in-UI file browser dialog with a fully configured state.
     pub fn open_browser_with_state(&mut self, state: FileDialogState) -> DialogId {
+        let mut state = state;
+        // `open_browser*` mirrors IGFD's `OpenDialog` step: the returned dialog is immediately
+        // visible and ready to be displayed via `show_*` / `draw_*`.
+        state.open();
         self.next_id = self.next_id.wrapping_add(1);
         let id = DialogId(self.next_id);
         self.browsers.insert(id, state);
@@ -170,6 +174,9 @@ mod tests {
 
         assert!(mgr.contains(id1));
         assert!(mgr.contains(id2));
+
+        assert!(mgr.dialog_state(id1).unwrap().is_open());
+        assert!(mgr.dialog_state(id2).unwrap().is_open());
 
         let s1 = mgr.close(id1).unwrap();
         assert_eq!(s1.core.mode, DialogMode::OpenFile);
