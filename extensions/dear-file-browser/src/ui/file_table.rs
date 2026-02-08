@@ -1,84 +1,42 @@
 use std::time::{Duration, Instant};
 
-use crate::core::{DialogMode, FileFilter, LayoutStyle, SortBy};
+use crate::core::{DialogMode, LayoutStyle, SortBy};
 use crate::dialog_core::{CoreEvent, CoreEventOutcome, DirEntry, Modifiers};
 use crate::dialog_state::{
-    ClipboardOp, FileDialogState, FileListColumnsConfig, FileListDataColumn, FileListViewMode,
-    HeaderStyle,
+    ClipboardOp, FileDialogState, FileListDataColumn, FileListViewMode, HeaderStyle,
 };
-use crate::file_style::EntryKind;
 use crate::fs::FileSystem;
 use crate::thumbnails::ThumbnailBackend;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton};
-use dear_imgui_rs::sys;
 
 use super::ops::{
     clipboard_set_from_selection, open_delete_modal_from_selection,
     open_rename_modal_from_selection, run_paste_job_until_wait_or_done, start_paste_into_cwd,
 };
 
-struct TextColorToken {
-    pushed: bool,
-}
+mod columns;
+mod format;
+mod style;
 
-struct StyleVisual {
-    text_color: Option<[f32; 4]>,
-    icon: Option<String>,
-    tooltip: Option<String>,
-    font_id: Option<dear_imgui_rs::FontId>,
-}
+pub(in crate::ui) use columns::{
+    apply_balanced_column_layout, apply_balanced_column_layout_keep_preview,
+    apply_compact_column_layout, apply_compact_column_layout_keep_preview,
+    data_column_label_for_state, extension_ui_label, is_data_column_visible,
+    move_column_order_down, move_column_order_up,
+};
 
-fn style_visual_for_entry(state: &mut FileDialogState, e: &DirEntry) -> StyleVisual {
-    let kind = if e.is_symlink {
-        EntryKind::Link
-    } else if e.is_dir {
-        EntryKind::Dir
-    } else {
-        EntryKind::File
-    };
-    let style = state.ui.file_styles.style_for_owned(&e.name, kind);
-    let font_id = style
-        .as_ref()
-        .and_then(|s| s.font_token.as_deref())
-        .and_then(|token| state.ui.file_style_fonts.get(token).copied());
+use columns::list_column_layout as list_column_layout_impl;
+use columns::{
+    igfd_type_dots_to_extract, resolved_data_column_weight, resolved_preview_column_weight,
+    sync_runtime_column_order_from_table, sync_runtime_column_weights_from_table,
+    type_extension_by_dot_count,
+};
+use format::{format_modified_ago, format_size};
+use style::{TextColorToken, style_visual_for_entry};
 
-    StyleVisual {
-        text_color: style.as_ref().and_then(|s| s.text_color),
-        icon: style.as_ref().and_then(|s| s.icon.clone()),
-        tooltip: style.as_ref().and_then(|s| s.tooltip.clone()),
-        font_id,
-    }
-}
-
-impl TextColorToken {
-    fn push(color: [f32; 4]) -> Self {
-        unsafe {
-            sys::igPushStyleColor_Vec4(
-                sys::ImGuiCol_Text as i32,
-                sys::ImVec4 {
-                    x: color[0],
-                    y: color[1],
-                    z: color[2],
-                    w: color[3],
-                },
-            );
-        }
-        Self { pushed: true }
-    }
-
-    fn none() -> Self {
-        Self { pushed: false }
-    }
-}
-
-impl Drop for TextColorToken {
-    fn drop(&mut self) {
-        if self.pushed {
-            unsafe { sys::igPopStyleColor(1) };
-        }
-    }
-}
+#[cfg(test)]
+pub(in crate::ui) use columns::{ListColumnLayout, list_column_layout, merged_order_with_current};
 
 pub(super) fn draw_file_table(
     ui: &Ui,
@@ -116,434 +74,6 @@ pub(super) fn draw_file_table(
     }
 }
 
-fn data_column_label(column: FileListDataColumn) -> &'static str {
-    match column {
-        FileListDataColumn::Name => "Name",
-        FileListDataColumn::Extension => "Ext",
-        FileListDataColumn::Size => "Size",
-        FileListDataColumn::Modified => "Modified",
-    }
-}
-
-pub(super) fn extension_ui_label(state: &FileDialogState) -> &'static str {
-    if matches!(state.ui.header_style, HeaderStyle::IgfdClassic) {
-        "Type"
-    } else {
-        "Ext"
-    }
-}
-
-fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
-    let Some(filter) = active_filter else {
-        return 1;
-    };
-    let mut max_dots = 1usize;
-    for token in &filter.extensions {
-        let t = token.trim();
-        if t.is_empty() {
-            continue;
-        }
-        if is_regex_token(t) {
-            continue;
-        }
-        let dot_count = t.as_bytes().iter().filter(|&&b| b == b'.').count();
-        let token_dots = if t.contains('*') || t.contains('?') {
-            dot_count
-        } else if t.starts_with('.') {
-            dot_count
-        } else {
-            dot_count.saturating_add(1)
-        };
-        max_dots = max_dots.max(token_dots);
-    }
-    max_dots.max(1)
-}
-
-fn is_regex_token(token: &str) -> bool {
-    let t = token.trim();
-    t.starts_with("((") && t.ends_with("))") && t.len() >= 4
-}
-
-fn type_extension_by_dot_count<'a>(name: &'a str, dots_to_extract: usize) -> &'a str {
-    if dots_to_extract == 0 {
-        return name.find('.').map(|i| &name[i..]).unwrap_or("");
-    }
-    let bytes = name.as_bytes();
-    let total_dots = bytes.iter().filter(|&&b| b == b'.').count();
-    if total_dots == 0 {
-        return "";
-    }
-    let dots = dots_to_extract.min(total_dots);
-    let mut seen = 0usize;
-    for i in (0..bytes.len()).rev() {
-        if bytes[i] == b'.' {
-            seen += 1;
-            if seen == dots {
-                return &name[i..];
-            }
-        }
-    }
-    ""
-}
-
-pub(super) fn data_column_label_for_state(
-    state: &FileDialogState,
-    column: FileListDataColumn,
-) -> &'static str {
-    match column {
-        FileListDataColumn::Extension => extension_ui_label(state),
-        _ => data_column_label(column),
-    }
-}
-
-pub(super) fn is_data_column_visible(
-    config: &FileListColumnsConfig,
-    column: FileListDataColumn,
-) -> bool {
-    match column {
-        FileListDataColumn::Name => true,
-        FileListDataColumn::Extension => config.show_extension,
-        FileListDataColumn::Size => config.show_size,
-        FileListDataColumn::Modified => config.show_modified,
-    }
-}
-
-pub(super) fn apply_compact_column_layout(config: &mut FileListColumnsConfig) {
-    config.show_preview = false;
-    config.show_extension = true;
-    config.show_size = true;
-    config.show_modified = false;
-    config.order = [
-        FileListDataColumn::Name,
-        FileListDataColumn::Extension,
-        FileListDataColumn::Size,
-        FileListDataColumn::Modified,
-    ];
-}
-
-pub(super) fn apply_compact_column_layout_keep_preview(config: &mut FileListColumnsConfig) {
-    let preview = config.show_preview;
-    apply_compact_column_layout(config);
-    config.show_preview = preview;
-}
-
-pub(super) fn apply_balanced_column_layout(config: &mut FileListColumnsConfig) {
-    config.show_preview = true;
-    config.show_extension = true;
-    config.show_size = true;
-    config.show_modified = true;
-    config.order = [
-        FileListDataColumn::Name,
-        FileListDataColumn::Extension,
-        FileListDataColumn::Size,
-        FileListDataColumn::Modified,
-    ];
-}
-
-pub(super) fn apply_balanced_column_layout_keep_preview(config: &mut FileListColumnsConfig) {
-    let preview = config.show_preview;
-    apply_balanced_column_layout(config);
-    config.show_preview = preview;
-}
-
-pub(super) fn move_column_order_up(order: &mut [FileListDataColumn; 4], index: usize) -> bool {
-    if index == 0 || index >= order.len() {
-        return false;
-    }
-    order.swap(index, index - 1);
-    true
-}
-
-pub(super) fn move_column_order_down(order: &mut [FileListDataColumn; 4], index: usize) -> bool {
-    if index + 1 >= order.len() {
-        return false;
-    }
-    order.swap(index, index + 1);
-    true
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct ListColumnLayout {
-    pub(super) data_columns: Vec<FileListDataColumn>,
-    pub(super) name: i16,
-    pub(super) extension: Option<i16>,
-    pub(super) size: Option<i16>,
-    pub(super) modified: Option<i16>,
-}
-
-pub(super) fn list_column_layout(
-    show_preview: bool,
-    config: &FileListColumnsConfig,
-) -> ListColumnLayout {
-    let mut data_columns = Vec::with_capacity(4);
-    for column in config.normalized_order() {
-        match column {
-            FileListDataColumn::Name => data_columns.push(column),
-            FileListDataColumn::Extension if config.show_extension => data_columns.push(column),
-            FileListDataColumn::Size if config.show_size => data_columns.push(column),
-            FileListDataColumn::Modified if config.show_modified => data_columns.push(column),
-            _ => {}
-        }
-    }
-
-    let mut index: i16 = if show_preview { 1 } else { 0 };
-    let mut name = None;
-    let mut extension = None;
-    let mut size = None;
-    let mut modified = None;
-
-    for column in &data_columns {
-        match column {
-            FileListDataColumn::Name => name = Some(index),
-            FileListDataColumn::Extension => extension = Some(index),
-            FileListDataColumn::Size => size = Some(index),
-            FileListDataColumn::Modified => modified = Some(index),
-        }
-        index += 1;
-    }
-
-    ListColumnLayout {
-        data_columns,
-        name: name.expect("name column should always be present"),
-        extension,
-        size,
-        modified,
-    }
-}
-
-fn validated_column_weight(override_weight: Option<f32>, default_weight: f32) -> f32 {
-    match override_weight {
-        Some(weight) if weight.is_finite() && weight > 0.0 => weight,
-        _ => default_weight,
-    }
-}
-
-fn default_preview_column_weight() -> f32 {
-    0.12
-}
-
-fn default_data_column_weight(
-    column: FileListDataColumn,
-    show_preview: bool,
-    show_size: bool,
-    show_modified: bool,
-) -> f32 {
-    match column {
-        FileListDataColumn::Name => {
-            if show_size || show_modified {
-                if show_preview { 0.52 } else { 0.56 }
-            } else if show_preview {
-                0.88
-            } else {
-                0.92
-            }
-        }
-        FileListDataColumn::Extension => {
-            if show_size || show_modified {
-                0.12
-            } else {
-                0.08
-            }
-        }
-        FileListDataColumn::Size => {
-            if show_modified {
-                0.16
-            } else {
-                0.2
-            }
-        }
-        FileListDataColumn::Modified => {
-            if show_size {
-                0.2
-            } else {
-                0.24
-            }
-        }
-    }
-}
-
-fn column_weight_override(
-    config: &FileListColumnsConfig,
-    column: FileListDataColumn,
-) -> Option<f32> {
-    match column {
-        FileListDataColumn::Name => config.weight_overrides.name,
-        FileListDataColumn::Extension => config.weight_overrides.extension,
-        FileListDataColumn::Size => config.weight_overrides.size,
-        FileListDataColumn::Modified => config.weight_overrides.modified,
-    }
-}
-
-fn resolved_preview_column_weight(config: &FileListColumnsConfig) -> f32 {
-    validated_column_weight(
-        config.weight_overrides.preview,
-        default_preview_column_weight(),
-    )
-}
-
-fn resolved_data_column_weight(
-    config: &FileListColumnsConfig,
-    column: FileListDataColumn,
-    show_preview: bool,
-    show_size: bool,
-    show_modified: bool,
-) -> f32 {
-    validated_column_weight(
-        column_weight_override(config, column),
-        default_data_column_weight(column, show_preview, show_size, show_modified),
-    )
-}
-
-fn table_column_stretch_weight(table: *const sys::ImGuiTable, column_index: i16) -> Option<f32> {
-    if table.is_null() || column_index < 0 {
-        return None;
-    }
-    let columns_count = unsafe { (*table).ColumnsCount.max(0) as usize };
-    let index = column_index as usize;
-    if index >= columns_count {
-        return None;
-    }
-
-    let columns_ptr = unsafe { (*table).Columns.Data };
-    if columns_ptr.is_null() {
-        return None;
-    }
-
-    let weight = unsafe { (*columns_ptr.add(index)).StretchWeight };
-    if weight.is_finite() && weight > 0.0 {
-        Some(weight)
-    } else {
-        None
-    }
-}
-
-fn table_data_column_for_index(
-    layout: &ListColumnLayout,
-    column_index: i16,
-) -> Option<FileListDataColumn> {
-    if column_index == layout.name {
-        return Some(FileListDataColumn::Name);
-    }
-    if layout.extension == Some(column_index) {
-        return Some(FileListDataColumn::Extension);
-    }
-    if layout.size == Some(column_index) {
-        return Some(FileListDataColumn::Size);
-    }
-    if layout.modified == Some(column_index) {
-        return Some(FileListDataColumn::Modified);
-    }
-    None
-}
-
-pub(super) fn merged_order_with_current(
-    visible_order: &[FileListDataColumn],
-    current_order: [FileListDataColumn; 4],
-) -> [FileListDataColumn; 4] {
-    let mut merged = Vec::with_capacity(4);
-    for &column in visible_order {
-        if !merged.contains(&column) {
-            merged.push(column);
-        }
-    }
-    for column in current_order {
-        if !merged.contains(&column) {
-            merged.push(column);
-        }
-    }
-    for column in [
-        FileListDataColumn::Name,
-        FileListDataColumn::Extension,
-        FileListDataColumn::Size,
-        FileListDataColumn::Modified,
-    ] {
-        if !merged.contains(&column) {
-            merged.push(column);
-        }
-    }
-    [merged[0], merged[1], merged[2], merged[3]]
-}
-
-fn table_data_columns_by_display_order(
-    table: *const sys::ImGuiTable,
-    layout: &ListColumnLayout,
-) -> Vec<FileListDataColumn> {
-    if table.is_null() {
-        return Vec::new();
-    }
-    let columns_count = unsafe { (*table).ColumnsCount.max(0) as usize };
-    let columns_ptr = unsafe { (*table).Columns.Data };
-    if columns_ptr.is_null() {
-        return Vec::new();
-    }
-
-    let mut ordered = Vec::with_capacity(layout.data_columns.len());
-    for index in 0..columns_count {
-        let index_i16 = index as i16;
-        let Some(column) = table_data_column_for_index(layout, index_i16) else {
-            continue;
-        };
-        let display_order = unsafe { (*columns_ptr.add(index)).DisplayOrder };
-        ordered.push((display_order, column));
-    }
-    ordered.sort_by_key(|(display_order, _)| *display_order);
-    ordered.into_iter().map(|(_, column)| column).collect()
-}
-
-fn sync_runtime_column_order_from_table(
-    layout: &ListColumnLayout,
-    config: &mut FileListColumnsConfig,
-) {
-    let table = unsafe { sys::igGetCurrentTable() };
-    if table.is_null() {
-        return;
-    }
-    let visible_order = table_data_columns_by_display_order(table, layout);
-    if visible_order.is_empty() {
-        return;
-    }
-    config.order = merged_order_with_current(&visible_order, config.normalized_order());
-}
-
-fn sync_runtime_column_weights_from_table(
-    show_preview: bool,
-    layout: &ListColumnLayout,
-    config: &mut FileListColumnsConfig,
-) {
-    let table = unsafe { sys::igGetCurrentTable() };
-    if table.is_null() {
-        return;
-    }
-
-    let resized_column = unsafe { (*table).ResizedColumn };
-    if resized_column < 0 {
-        return;
-    }
-
-    if show_preview {
-        if let Some(weight) = table_column_stretch_weight(table, 0) {
-            config.weight_overrides.preview = Some(weight);
-        }
-    }
-    if let Some(weight) = table_column_stretch_weight(table, layout.name) {
-        config.weight_overrides.name = Some(weight);
-    }
-    if let Some(index) = layout.extension {
-        if let Some(weight) = table_column_stretch_weight(table, index) {
-            config.weight_overrides.extension = Some(weight);
-        }
-    }
-    if let Some(index) = layout.size {
-        if let Some(weight) = table_column_stretch_weight(table, index) {
-            config.weight_overrides.size = Some(weight);
-        }
-    }
-    if let Some(index) = layout.modified {
-        if let Some(weight) = table_column_stretch_weight(table, index) {
-            config.weight_overrides.modified = Some(weight);
-        }
-    }
-}
 fn draw_file_table_view(
     ui: &Ui,
     state: &mut FileDialogState,
@@ -573,7 +103,7 @@ fn draw_file_table_view(
         state.ui.thumbnails_enabled && (columns_config.show_preview || force_preview);
     let show_size = columns_config.show_size;
     let show_modified = columns_config.show_modified;
-    let layout = list_column_layout(show_preview, columns_config);
+    let layout = list_column_layout_impl(show_preview, columns_config);
     let type_dots_to_extract = if matches!(state.ui.header_style, HeaderStyle::IgfdClassic) {
         igfd_type_dots_to_extract(state.core.active_filter())
     } else {
@@ -1423,67 +953,4 @@ fn collect_type_select_char(ui: &Ui) -> Option<char> {
     }
 
     None
-}
-
-fn format_size(size: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    let s = size as f64;
-    if s >= GB {
-        format!("{:.2} GB", s / GB)
-    } else if s >= MB {
-        format!("{:.2} MB", s / MB)
-    } else if s >= KB {
-        format!("{:.0} KB", s / KB)
-    } else {
-        format!("{} B", size)
-    }
-}
-
-fn format_modified_ago(modified: Option<std::time::SystemTime>) -> String {
-    use std::time::SystemTime;
-    let m = match modified {
-        Some(t) => t,
-        None => return String::new(),
-    };
-    let now = SystemTime::now();
-    let delta = match now.duration_since(m) {
-        Ok(d) => d,
-        Err(e) => e.duration(),
-    };
-    // For older than a week, show short absolute date inline; full datetime remains in tooltip
-    const DAY: u64 = 24 * 60 * 60;
-    const WEEK: u64 = 7 * DAY;
-    if delta.as_secs() >= WEEK {
-        use chrono::{DateTime, Local};
-        let dt: DateTime<Local> = DateTime::<Local>::from(m);
-        return dt.format("%Y-%m-%d").to_string();
-    }
-    humanize_duration(delta)
-}
-
-fn humanize_duration(d: std::time::Duration) -> String {
-    let secs = d.as_secs();
-    const MIN: u64 = 60;
-    const HOUR: u64 = 60 * MIN;
-    const DAY: u64 = 24 * HOUR;
-    const WEEK: u64 = 7 * DAY;
-    if secs < 10 {
-        return "just now".into();
-    }
-    if secs < MIN {
-        return format!("{}s ago", secs);
-    }
-    if secs < HOUR {
-        return format!("{}m ago", secs / MIN);
-    }
-    if secs < DAY {
-        return format!("{}h ago", secs / HOUR);
-    }
-    if secs < WEEK {
-        return format!("{}d ago", secs / DAY);
-    }
-    let days = secs / DAY;
-    format!("{}d ago", days)
 }
