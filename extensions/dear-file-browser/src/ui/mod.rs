@@ -1229,11 +1229,10 @@ fn draw_contents_with_fs_and_hooks(
             + spacing_x
             + right_block_w;
 
-        let stacked = if matches!(header_style, HeaderStyle::IgfdClassic) {
-            false
-        } else {
-            row_w < min_total_w
-        };
+        // In IGFD-classic mode we *prefer* a single-row header, but on very small widths we must
+        // fall back to a stacked layout. Otherwise, `same_line_with_pos(right_block_start_x)`
+        // can move the cursor backwards and cause items to overlap.
+        let stacked = row_w < min_total_w;
         let right_block_start_x = row_right_x - right_block_w;
 
         // Path input (+ Go). If we can't fit Search on the same line, Search moves to the next line.
@@ -1423,7 +1422,12 @@ fn draw_contents_with_fs_and_hooks(
         if stacked {
             ui.new_line();
         } else {
-            ui.same_line_with_pos(right_block_start_x);
+            // Guard against any cursor-backtracking overlap if our width estimates are off.
+            if right_block_start_x < ui.cursor_pos_x() + spacing_x {
+                ui.new_line();
+            } else {
+                ui.same_line_with_pos(right_block_start_x);
+            }
         }
 
         if matches!(header_style, HeaderStyle::IgfdClassic) {
