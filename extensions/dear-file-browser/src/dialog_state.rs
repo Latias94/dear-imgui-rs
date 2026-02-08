@@ -546,6 +546,8 @@ pub(crate) enum PlacesEditMode {
 pub struct FileDialogUiState {
     /// Whether to draw the dialog (show/hide). Prefer [`FileDialogState::open`]/[`FileDialogState::close`].
     pub visible: bool,
+    /// Header layout style.
+    pub header_style: HeaderStyle,
     /// Layout style for the dialog UI.
     pub layout: LayoutStyle,
     /// Validation button row configuration (Ok/Cancel).
@@ -599,6 +601,8 @@ pub struct FileDialogUiState {
     pub ui_error: Option<String>,
     /// Whether to show and allow the "New Folder" action.
     pub new_folder_enabled: bool,
+    /// Whether the "New Folder" inline editor is active (toolbar-local, IGFD-like).
+    pub new_folder_inline_active: bool,
     /// Open the "New Folder" modal on next frame.
     pub new_folder_open_next: bool,
     /// New folder name buffer (used by the "New Folder" modal).
@@ -700,20 +704,27 @@ pub struct FileDialogUiState {
 
     /// Current parent dir for the breadcrumb quick-select popup.
     pub(crate) breadcrumb_quick_parent: Option<PathBuf>,
-    /// Filter text for the breadcrumb quick-select popup.
-    pub(crate) breadcrumb_quick_filter: String,
-    /// Focus the breadcrumb quick-select filter on next open.
-    pub(crate) breadcrumb_quick_focus_next: bool,
-    /// Selected child dir path for breadcrumb quick-select popup.
-    pub(crate) breadcrumb_quick_selected: Option<PathBuf>,
-    /// Scroll the quick-select table to selected row on next frame.
-    pub(crate) breadcrumb_quick_scroll_to_selected_next: bool,
+
+    /// Last measured footer height (in window coordinates), used to size the content region
+    /// without hard-coded constants. Updated each frame after drawing the footer.
+    pub(crate) footer_height_last: f32,
+
+    /// UI buffer for the footer "File/Folder" input.
+    ///
+    /// - SaveFile uses `core.save_name` instead.
+    /// - OpenFile/OpenFiles can be typed to open a file by name/path (IGFD-style).
+    /// - PickFolder currently uses this for display only.
+    pub(crate) footer_file_name_buffer: String,
+    /// The last auto-generated display string for the footer input, used to keep the field
+    /// synced to selection unless the user edits it.
+    pub(crate) footer_file_name_last_display: String,
 }
 
 impl Default for FileDialogUiState {
     fn default() -> Self {
         Self {
             visible: true,
+            header_style: HeaderStyle::ToolbarAndAddress,
             layout: LayoutStyle::Standard,
             validation_buttons: ValidationButtonsConfig::default(),
             toolbar: ToolbarConfig::default(),
@@ -740,6 +751,7 @@ impl Default for FileDialogUiState {
             focus_search_next: false,
             ui_error: None,
             new_folder_enabled: true,
+            new_folder_inline_active: false,
             new_folder_open_next: false,
             new_folder_name: String::new(),
             new_folder_focus_next: false,
@@ -789,10 +801,9 @@ impl Default for FileDialogUiState {
             places_inline_edit_buffer: String::new(),
             places_inline_edit_focus_next: false,
             breadcrumb_quick_parent: None,
-            breadcrumb_quick_filter: String::new(),
-            breadcrumb_quick_focus_next: false,
-            breadcrumb_quick_selected: None,
-            breadcrumb_quick_scroll_to_selected_next: false,
+            footer_height_last: 0.0,
+            footer_file_name_buffer: String::new(),
+            footer_file_name_last_display: String::new(),
         }
     }
 }
@@ -802,10 +813,12 @@ impl FileDialogUiState {
     ///
     /// This tunes UI defaults to feel closer to ImGuiFileDialog (IGFD) while staying Rust-first:
     /// - standard layout with places pane,
+    /// - IGFD-like single-row header layout,
     /// - list view as the default,
     /// - right-docked custom pane (when provided) with a splitter-resizable width,
     /// - dialog-style button row aligned to the right.
     pub fn apply_igfd_classic_preset(&mut self) {
+        self.header_style = HeaderStyle::IgfdClassic;
         self.layout = LayoutStyle::Standard;
         self.places_pane_shown = true;
         self.places_pane_width = 150.0;
@@ -845,6 +858,16 @@ impl FileDialogUiState {
         self.validation_buttons.confirm_width = None;
         self.validation_buttons.cancel_width = None;
     }
+}
+
+/// Header layout style.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HeaderStyle {
+    /// Two-row layout: a top toolbar row plus a separate address/search row.
+    #[default]
+    ToolbarAndAddress,
+    /// A single-row header that mimics ImGuiFileDialog's classic header layout.
+    IgfdClassic,
 }
 
 /// Path bar style (text input vs breadcrumb composer).

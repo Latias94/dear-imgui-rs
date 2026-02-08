@@ -108,6 +108,27 @@ pub struct ThumbnailCache {
     pending_destroys: Vec<TextureId>,
 }
 
+/// Snapshot of thumbnail cache state, useful for UI indicators (e.g. "generation progress").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ThumbnailStats {
+    /// Total number of tracked thumbnail entries (including ready/failed/in-flight).
+    pub total: usize,
+    /// Number of entries queued (requested but not yet decoded/uploaded).
+    pub queued: usize,
+    /// Number of entries currently marked as in-flight.
+    pub in_flight: usize,
+    /// Number of ready-to-display thumbnails.
+    pub ready: usize,
+    /// Number of failed thumbnails (decode/upload failure).
+    pub failed: usize,
+    /// Number of requests waiting in the decode/upload queue.
+    pub pending_requests: usize,
+    /// New requests issued in the current frame (budgeted by `max_new_requests_per_frame`).
+    pub issued_this_frame: usize,
+    /// Per-frame request budget.
+    pub max_new_requests_per_frame: usize,
+}
+
 impl Default for ThumbnailCache {
     fn default() -> Self {
         Self::new(ThumbnailCacheConfig::default())
@@ -263,6 +284,28 @@ impl ThumbnailCache {
     /// Drain GPU textures that should be destroyed after eviction or replacement.
     pub fn take_pending_destroys(&mut self) -> Vec<TextureId> {
         std::mem::take(&mut self.pending_destroys)
+    }
+
+    /// Returns a snapshot of the cache state for UI display.
+    pub fn stats(&self) -> ThumbnailStats {
+        let mut stats = ThumbnailStats {
+            total: self.entries.len(),
+            pending_requests: self.requests.len(),
+            issued_this_frame: self.issued_this_frame,
+            max_new_requests_per_frame: self.config.max_new_requests_per_frame,
+            ..ThumbnailStats::default()
+        };
+
+        for entry in self.entries.values() {
+            match entry.state {
+                ThumbnailState::Queued => stats.queued += 1,
+                ThumbnailState::InFlight => stats.in_flight += 1,
+                ThumbnailState::Ready { .. } => stats.ready += 1,
+                ThumbnailState::Failed => stats.failed += 1,
+            }
+        }
+
+        stats
     }
 
     fn alloc_stamp(&mut self) -> u64 {

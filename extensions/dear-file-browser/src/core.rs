@@ -415,6 +415,17 @@ pub enum LayoutStyle {
 pub enum SortBy {
     /// Sort by file or directory name
     Name,
+    /// Sort by IGFD-style "Type" (filter-aware extension).
+    ///
+    /// This mimics ImGuiFileDialog's "Type" column semantics: for multi-dot
+    /// filenames like `archive.tar.gz`, the visible/sortable "Type" depends on
+    /// the currently active filter (e.g. `.gz` vs `.tar.gz`).
+    ///
+    /// Notes:
+    /// - Directory entries have an empty type string.
+    /// - When "All files" is selected (no active filter), the dot depth
+    ///   defaults to 1 (e.g. `.gz`).
+    Type,
     /// Sort by full extension (multi-layer aware, e.g. `.tar.gz`)
     Extension,
     /// Sort by file size (directories first)

@@ -1163,12 +1163,14 @@ impl FileDialogCore {
             self.active_filter,
             &self.search,
         );
+        let type_dots_to_extract = igfd_type_dots_to_extract(self.active_filter());
         sort_entries_in_place(
             &mut entries,
             self.sort_by,
             self.sort_ascending,
             self.sort_mode,
             self.dirs_first,
+            type_dots_to_extract,
         );
         self.view_names = entries.iter().map(|e| e.name.clone()).collect();
         self.view_ids = entries.iter().map(DirEntry::stable_id).collect();
@@ -1566,6 +1568,7 @@ impl FileDialogCore {
         &mut self,
         fs: &dyn FileSystem,
         gate: &ConfirmGate,
+        typed_footer_name: Option<&str>,
     ) -> Result<(), FileDialogError> {
         self.normalize_active_filter();
         self.result = None;
@@ -1593,6 +1596,42 @@ impl FileDialogCore {
                 .clone()
                 .unwrap_or_else(|| "validation blocked".to_string());
             return Err(FileDialogError::ValidationBlocked(msg));
+        }
+
+        // IGFD-like footer entry: allow opening a file by typing a name/path when no selection exists.
+        if matches!(self.mode, DialogMode::OpenFile | DialogMode::OpenFiles)
+            && selected_entries.is_empty()
+        {
+            if let Some(typed) = typed_footer_name.map(str::trim) {
+                if !typed.is_empty() {
+                    let raw = PathBuf::from(typed);
+                    let raw = if raw.is_absolute() {
+                        raw
+                    } else {
+                        self.cwd.join(&raw)
+                    };
+                    let p = fs.canonicalize(&raw).unwrap_or(raw.clone());
+                    match fs.metadata(&p) {
+                        Ok(md) => {
+                            if md.is_dir {
+                                self.navigate_to_with_history(p);
+                                return Ok(());
+                            }
+                            self.result = Some(Ok(Selection { paths: vec![p] }));
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            use std::io::ErrorKind::*;
+                            let msg = match e.kind() {
+                                NotFound => format!("No such file: {}", typed),
+                                PermissionDenied => format!("Permission denied: {}", typed),
+                                _ => format!("Invalid file '{}': {}", typed, e),
+                            };
+                            return Err(FileDialogError::InvalidPath(msg));
+                        }
+                    }
+                }
+            }
         }
 
         let sel = finalize_selection(
@@ -1977,13 +2016,21 @@ fn finalize_selection(
     let matchers = compile_filter_matchers(&eff_filters);
     match mode {
         DialogMode::PickFolder => {
-            sel.paths.push(cwd.to_path_buf());
+            if let Some(dir) = selected_entries.into_iter().find(|e| e.is_dir) {
+                sel.paths.push(dir.path);
+            } else {
+                // No explicit selection => pick current directory.
+                sel.paths.push(cwd.to_path_buf());
+            }
         }
         DialogMode::OpenFile | DialogMode::OpenFiles => {
             if selected_entries.is_empty() {
                 return Err(FileDialogError::InvalidPath("no selection".into()));
             }
             for entry in selected_entries {
+                if entry.is_dir {
+                    continue;
+                }
                 if !matches_filter_matchers(&entry.name, &matchers) {
                     continue;
                 }
@@ -2077,6 +2124,7 @@ fn sort_entries_in_place(
     sort_ascending: bool,
     sort_mode: SortMode,
     dirs_first: bool,
+    type_dots_to_extract: usize,
 ) {
     entries.sort_by(|a, b| {
         if dirs_first && a.is_dir != b.is_dir {
@@ -2087,6 +2135,19 @@ fn sort_entries_in_place(
                 let al = a.name.to_lowercase();
                 let bl = b.name.to_lowercase();
                 cmp_lower(&al, &bl, sort_mode)
+            }
+            SortBy::Type => {
+                use std::cmp::Ordering;
+                let al = a.name.to_lowercase();
+                let bl = b.name.to_lowercase();
+                let ae = type_extension_lower(&al, type_dots_to_extract);
+                let be = type_extension_lower(&bl, type_dots_to_extract);
+                let ord = cmp_lower(ae, be, sort_mode);
+                if ord == Ordering::Equal {
+                    cmp_lower(&al, &bl, sort_mode)
+                } else {
+                    ord
+                }
             }
             SortBy::Extension => {
                 use std::cmp::Ordering;
@@ -2108,6 +2169,54 @@ fn sort_entries_in_place(
     });
 }
 
+fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
+    let Some(filter) = active_filter else {
+        return 1;
+    };
+    let mut max_dots = 1usize;
+    for token in &filter.extensions {
+        let t = token.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if parse_regex_token(t).is_some() {
+            continue;
+        }
+        let dot_count = t.as_bytes().iter().filter(|&&b| b == b'.').count();
+        let token_dots = if t.contains('*') || t.contains('?') {
+            dot_count
+        } else if t.starts_with('.') {
+            dot_count
+        } else {
+            dot_count.saturating_add(1)
+        };
+        max_dots = max_dots.max(token_dots);
+    }
+    max_dots.max(1)
+}
+
+fn type_extension_lower<'a>(name_lower: &'a str, dots_to_extract: usize) -> &'a str {
+    if dots_to_extract == 0 {
+        return full_extension_lower(name_lower);
+    }
+    let bytes = name_lower.as_bytes();
+    let total_dots = bytes.iter().filter(|&&b| b == b'.').count();
+    if total_dots == 0 {
+        return "";
+    }
+    let dots = dots_to_extract.min(total_dots);
+    let mut seen = 0usize;
+    for i in (0..bytes.len()).rev() {
+        if bytes[i] == b'.' {
+            seen += 1;
+            if seen == dots {
+                return &name_lower[i..];
+            }
+        }
+    }
+    ""
+}
+
 fn cmp_lower(a: &str, b: &str, mode: SortMode) -> std::cmp::Ordering {
     match mode {
         SortMode::Natural => natural_cmp_lower(a, b),
@@ -2115,7 +2224,7 @@ fn cmp_lower(a: &str, b: &str, mode: SortMode) -> std::cmp::Ordering {
     }
 }
 
-fn natural_cmp_lower(a: &str, b: &str) -> std::cmp::Ordering {
+pub(crate) fn natural_cmp_lower(a: &str, b: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let ab = a.as_bytes();
     let bb = b.as_bytes();
@@ -2752,13 +2861,78 @@ mod tests {
 
         let gate = ConfirmGate::default();
         assert!(core.activate_focused());
-        core.confirm(&StdFileSystem, &gate).unwrap();
+        core.confirm(&StdFileSystem, &gate, None).unwrap();
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths.len(), 1);
         assert_eq!(
             sel.paths[0].file_name().and_then(|s| s.to_str()),
             Some("a.txt")
         );
+    }
+
+    #[test]
+    fn open_footer_typed_file_confirms_when_no_selection() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+
+        let mut fs = TestFs::default();
+        fs.meta.insert(
+            PathBuf::from("/tmp/a.txt"),
+            crate::fs::FsMetadata {
+                is_dir: false,
+                is_symlink: false,
+            },
+        );
+
+        let gate = ConfirmGate::default();
+        core.confirm(&fs, &gate, Some("a.txt")).unwrap();
+        let sel = core.take_result().unwrap().unwrap();
+        assert_eq!(sel.paths, vec![PathBuf::from("/tmp/a.txt")]);
+    }
+
+    #[test]
+    fn open_footer_typed_directory_navigates_instead_of_confirming() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+
+        let mut fs = TestFs::default();
+        fs.meta.insert(
+            PathBuf::from("/tmp/folder"),
+            crate::fs::FsMetadata {
+                is_dir: true,
+                is_symlink: false,
+            },
+        );
+
+        let gate = ConfirmGate::default();
+        core.confirm(&fs, &gate, Some("folder")).unwrap();
+        assert_eq!(core.cwd, PathBuf::from("/tmp/folder"));
+        assert!(core.take_result().is_none());
+    }
+
+    #[test]
+    fn pick_folder_confirms_selected_directory_when_present() {
+        let mut core = FileDialogCore::new(DialogMode::PickFolder);
+        core.cwd = PathBuf::from("/tmp");
+        core.entries = vec![make_dir_entry("a"), make_dir_entry("b")];
+        core.view_names = core
+            .entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect();
+        core.view_ids = core.entries.iter().map(|entry| entry.id).collect();
+
+        let b = entry_id(&core, "b");
+        let _ = core.handle_event(CoreEvent::ClickEntry {
+            id: b,
+            modifiers: Modifiers::default(),
+        });
+
+        let gate = ConfirmGate::default();
+        let fs = TestFs::default();
+        core.confirm(&fs, &gate, None).unwrap();
+        let sel = core.take_result().unwrap().unwrap();
+        assert_eq!(sel.paths, vec![PathBuf::from("/tmp/b")]);
     }
 
     #[test]
@@ -2772,7 +2946,7 @@ mod tests {
 
         let gate = ConfirmGate::default();
         let fs = TestFs::default();
-        core.confirm(&fs, &gate).unwrap();
+        core.confirm(&fs, &gate, None).unwrap();
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
     }
@@ -2788,7 +2962,7 @@ mod tests {
 
         let gate = ConfirmGate::default();
         let fs = TestFs::default();
-        core.confirm(&fs, &gate).unwrap();
+        core.confirm(&fs, &gate, None).unwrap();
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.jpg"));
     }
@@ -2804,7 +2978,7 @@ mod tests {
 
         let gate = ConfirmGate::default();
         let fs = TestFs::default();
-        core.confirm(&fs, &gate).unwrap();
+        core.confirm(&fs, &gate, None).unwrap();
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
     }
@@ -2846,7 +3020,14 @@ mod tests {
             make_file_entry("file2.txt"),
             make_file_entry("file1.txt"),
         ];
-        sort_entries_in_place(&mut entries, SortBy::Name, true, SortMode::Natural, false);
+        sort_entries_in_place(
+            &mut entries,
+            SortBy::Name,
+            true,
+            SortMode::Natural,
+            false,
+            1,
+        );
         let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
         assert_eq!(names, vec!["file1.txt", "file2.txt", "file10.txt"]);
     }
@@ -2864,6 +3045,7 @@ mod tests {
             true,
             SortMode::Lexicographic,
             false,
+            1,
         );
         let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
         assert_eq!(names, vec!["file1.txt", "file10.txt", "file2.txt"]);
@@ -2884,6 +3066,7 @@ mod tests {
             true,
             SortMode::Natural,
             false,
+            1,
         );
         let names: Vec<_> = entries.into_iter().map(|e| e.name).collect();
         assert_eq!(
@@ -2924,7 +3107,7 @@ mod tests {
         );
 
         let gate = ConfirmGate::default();
-        core.confirm(&fs, &gate).unwrap();
+        core.confirm(&fs, &gate, None).unwrap();
         assert!(core.take_result().is_none());
         assert!(core.pending_overwrite().is_some());
 

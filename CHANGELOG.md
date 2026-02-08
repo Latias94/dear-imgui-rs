@@ -22,6 +22,8 @@ This release focuses on `dear-app` usability improvements for real applications 
 - Backends
   - `dear-imgui-winit`: `multi_viewport::ViewportData` is no longer a public API (internal backend detail).
   - `dear-imgui-wgpu`: `multi_viewport::{ViewportWgpuData}` and `multi_viewport_sdl3::{ViewportWgpuData}` are no longer public APIs (internal renderer details).
+- Extensions
+  - `dear-file-browser`: `SortBy` gains a new variant `Type` (IGFD-style filter-aware "Type" sorting). Downstream exhaustive `match` statements must be updated.
 - `*-sys` crates (prebuilt downloads)
   - Prebuilt downloads/extraction are now gated behind the Cargo feature `prebuilt`. If you set `*_SYS_PREBUILT_URL` to an `http(s)://...` URL or to a `.tar.gz` archive, or set `*_SYS_USE_PREBUILT=1`, you must also enable `--features prebuilt`.
   - Default builds do not enable `prebuilt` (and therefore do not pull in HTTP client dependencies like `ureq`). (Fixes #12)
@@ -59,6 +61,11 @@ This release focuses on `dear-app` usability improvements for real applications 
 - Backends
   - `dear-imgui-ash`: external texture helpers mirroring WGPU (`register_external_texture_with_sampler`, `update_external_texture_view`, `update_external_texture_sampler`, `unregister_texture`).
   - `dear-imgui-ash`: `multi-viewport-sdl3` feature to render secondary viewports when using the SDL3 platform backend (creates surfaces via `Platform_CreateVkSurface`).
+- Extensions
+  - `dear-file-browser` (ImGui backend parity with ImGuiFileDialog)
+    - Breadcrumb path composer: end-aligned tail visibility + separator quick-select popup rendered as an IGFD-style path table.
+    - Footer: IGFD-like editable file field in Open modes (type a file name/path and confirm), plus improved PickFolder confirm semantics.
+    - Columns/sorting: add `SortBy::Type` and make the "Type" column filter-aware (multi-dot extraction matches IGFD behavior).
 
 ### Changed
 

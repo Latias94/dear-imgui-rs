@@ -13,8 +13,7 @@ use dear_imgui_rs::{
 };
 
 use crate::core::{
-    ClickAction, DialogMode, ExtensionPolicy, FileDialogError, LayoutStyle, Selection, SortBy,
-    SortMode,
+    ClickAction, DialogMode, FileDialogError, FileFilter, LayoutStyle, Selection, SortBy, SortMode,
 };
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{
@@ -23,8 +22,8 @@ use crate::dialog_core::{
 use crate::dialog_state::FileDialogState;
 use crate::dialog_state::{
     ClipboardOp, CustomPaneDock, FileClipboard, FileListColumnsConfig, FileListDataColumn,
-    FileListViewMode, PasteConflictAction, PasteConflictPrompt, PathBarStyle, PendingPasteJob,
-    ToolbarDensity, ToolbarIconMode,
+    FileListViewMode, HeaderStyle, PasteConflictAction, PasteConflictPrompt, PathBarStyle,
+    PendingPasteJob, ToolbarDensity, ToolbarIconMode,
 };
 use crate::dialog_state::{ValidationButtonsAlign, ValidationButtonsOrder};
 use crate::file_style::EntryKind;
@@ -683,6 +682,11 @@ fn draw_contents_with_fs_and_hooks(
         return None;
     }
 
+    // Make all widget IDs inside this browser instance unique, even when embedding
+    // multiple dialogs in the same host window. This avoids ImGui "conflicting ID"
+    // warnings for internal child windows/popups/tooltips.
+    let _dialog_id_scope = ui.push_id(state as *mut FileDialogState);
+
     let has_thumbnail_backend = thumbnails_backend.is_some();
     let mut request_confirm = false;
     let mut confirm_gate = ConfirmGate::default();
@@ -709,410 +713,413 @@ fn draw_contents_with_fs_and_hooks(
             chrome_style.item_inner_spacing(),
         )));
 
-        // Top toolbar: Back/Forward/Up/Refresh, view, sort, etc.
-        let can_back = state.core.can_navigate_back();
-        let can_forward = state.core.can_navigate_forward();
+        let header_style = state.ui.header_style;
+        if matches!(header_style, HeaderStyle::ToolbarAndAddress) {
+            // Top toolbar: Back/Forward/Up/Refresh, view, sort, etc.
+            let can_back = state.core.can_navigate_back();
+            let can_forward = state.core.can_navigate_forward();
 
-        let places_active =
-            matches!(state.ui.layout, LayoutStyle::Standard) && state.ui.places_pane_shown;
-        if toolbar_toggle_button(
-            ui,
-            "toolbar_places",
-            "Places",
-            state.ui.toolbar.icons.places.as_deref(),
-            icon_mode,
-            show_tooltips,
-            "Places",
-            places_active,
-        ) {
-            match state.ui.layout {
-                LayoutStyle::Standard => {
-                    state.ui.places_pane_shown = !state.ui.places_pane_shown;
-                }
-                LayoutStyle::Minimal => {
-                    ui.open_popup("##fb_places_popup");
-                }
-            }
-        }
-        ui.same_line();
-
-        {
-            let _disabled = ui.begin_disabled_with_cond(!can_back);
-            if ui.arrow_button("##nav_back", Direction::Left) {
-                let _ = state.core.handle_event(CoreEvent::NavigateBack);
-            }
-        }
-        if show_tooltips && ui.is_item_hovered() {
-            ui.tooltip_text("Back (Alt+Left)");
-        }
-        ui.same_line();
-        {
-            let _disabled = ui.begin_disabled_with_cond(!can_forward);
-            if ui.arrow_button("##nav_forward", Direction::Right) {
-                let _ = state.core.handle_event(CoreEvent::NavigateForward);
-            }
-        }
-        if show_tooltips && ui.is_item_hovered() {
-            ui.tooltip_text("Forward (Alt+Right)");
-        }
-        ui.same_line();
-        if ui.arrow_button("##nav_up", Direction::Up) {
-            let _ = state.core.handle_event(CoreEvent::NavigateUp);
-        }
-        if show_tooltips && ui.is_item_hovered() {
-            ui.tooltip_text("Up (Backspace)");
-        }
-        ui.same_line();
-        if toolbar_button(
-            ui,
-            "toolbar_refresh",
-            "Refresh",
-            state.ui.toolbar.icons.refresh.as_deref(),
-            icon_mode,
-            show_tooltips,
-            "Refresh (F5)",
-        ) {
-            let _ = state.core.handle_event(CoreEvent::Refresh);
-        }
-        ui.same_line();
-        if state.ui.new_folder_enabled {
-            if toolbar_button(
+            let places_active =
+                matches!(state.ui.layout, LayoutStyle::Standard) && state.ui.places_pane_shown;
+            if toolbar_toggle_button(
                 ui,
-                "toolbar_new_folder",
-                "New Folder",
-                state.ui.toolbar.icons.new_folder.as_deref(),
+                "toolbar_places",
+                "Places",
+                state.ui.toolbar.icons.places.as_deref(),
                 icon_mode,
                 show_tooltips,
-                "New folder",
+                "Places",
+                places_active,
             ) {
-                state.ui.new_folder_open_next = true;
-                state.ui.new_folder_name.clear();
-                state.ui.new_folder_error = None;
-                state.ui.new_folder_focus_next = true;
+                match state.ui.layout {
+                    LayoutStyle::Standard => {
+                        state.ui.places_pane_shown = !state.ui.places_pane_shown;
+                    }
+                    LayoutStyle::Minimal => {
+                        ui.open_popup("##fb_places_popup");
+                    }
+                }
             }
             ui.same_line();
-        }
-        ui.separator_vertical();
-        ui.same_line();
-        if matches!(state.ui.toolbar.density, ToolbarDensity::Compact) {
-            let list_active = matches!(state.ui.file_list_view, FileListViewMode::List);
-            let thumbs_active = matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList);
-            let grid_active = matches!(state.ui.file_list_view, FileListViewMode::Grid);
 
-            if toolbar_toggle_button(
-                ui,
-                "view_list",
-                "List",
-                None,
-                ToolbarIconMode::Text,
-                show_tooltips,
-                "List view",
-                list_active,
-            ) {
-                state.ui.file_list_view = FileListViewMode::List;
+            {
+                let _disabled = ui.begin_disabled_with_cond(!can_back);
+                if ui.arrow_button("##nav_back", Direction::Left) {
+                    let _ = state.core.handle_event(CoreEvent::NavigateBack);
+                }
+            }
+            if show_tooltips && ui.is_item_hovered() {
+                ui.tooltip_text("Back (Alt+Left)");
             }
             ui.same_line();
-            if toolbar_toggle_button(
-                ui,
-                "view_thumbs",
-                "Thumbs",
-                None,
-                ToolbarIconMode::Text,
-                show_tooltips,
-                "Thumbnails list view",
-                thumbs_active,
-            ) {
-                state.ui.file_list_view = FileListViewMode::ThumbnailsList;
-                state.ui.thumbnails_enabled = true;
-                state.ui.file_list_columns.show_preview = true;
+            {
+                let _disabled = ui.begin_disabled_with_cond(!can_forward);
+                if ui.arrow_button("##nav_forward", Direction::Right) {
+                    let _ = state.core.handle_event(CoreEvent::NavigateForward);
+                }
+            }
+            if show_tooltips && ui.is_item_hovered() {
+                ui.tooltip_text("Forward (Alt+Right)");
             }
             ui.same_line();
-            if toolbar_toggle_button(
-                ui,
-                "view_grid",
-                "Grid",
-                None,
-                ToolbarIconMode::Text,
-                show_tooltips,
-                "Thumbnails grid view",
-                grid_active,
-            ) {
-                state.ui.file_list_view = FileListViewMode::Grid;
-                state.ui.thumbnails_enabled = true;
+            if ui.arrow_button("##nav_up", Direction::Up) {
+                let _ = state.core.handle_event(CoreEvent::NavigateUp);
             }
-        } else {
-            ui.text("View:");
+            if show_tooltips && ui.is_item_hovered() {
+                ui.tooltip_text("Up (Backspace)");
+            }
             ui.same_line();
-            let view_preview = match state.ui.file_list_view {
-                FileListViewMode::List => "List",
-                FileListViewMode::ThumbnailsList => "Thumbs",
-                FileListViewMode::Grid => "Grid",
-            };
-            if let Some(_c) = ui.begin_combo("##view_mode", view_preview) {
-                if ui
-                    .selectable_config("List")
-                    .selected(matches!(state.ui.file_list_view, FileListViewMode::List))
-                    .build()
+            if toolbar_button(
+                ui,
+                "toolbar_refresh",
+                "Refresh",
+                state.ui.toolbar.icons.refresh.as_deref(),
+                icon_mode,
+                show_tooltips,
+                "Refresh (F5)",
+            ) {
+                let _ = state.core.handle_event(CoreEvent::Refresh);
+            }
+            ui.same_line();
+            if state.ui.new_folder_enabled {
+                if toolbar_button(
+                    ui,
+                    "toolbar_new_folder",
+                    "New Folder",
+                    state.ui.toolbar.icons.new_folder.as_deref(),
+                    icon_mode,
+                    show_tooltips,
+                    "New folder",
+                ) {
+                    match state.ui.layout {
+                        LayoutStyle::Standard => {
+                            state.ui.new_folder_inline_active = true;
+                        }
+                        LayoutStyle::Minimal => {
+                            state.ui.new_folder_open_next = true;
+                        }
+                    }
+                    state.ui.new_folder_name.clear();
+                    state.ui.new_folder_error = None;
+                    state.ui.new_folder_focus_next = true;
+                }
+                ui.same_line();
+
+                if matches!(state.ui.layout, LayoutStyle::Standard)
+                    && state.ui.new_folder_inline_active
                 {
+                    ui.set_next_item_width(160.0);
+                    if state.ui.new_folder_focus_next {
+                        ui.set_keyboard_focus_here();
+                        state.ui.new_folder_focus_next = false;
+                    }
+                    let submitted = ui
+                        .input_text("##new_folder_inline", &mut state.ui.new_folder_name)
+                        .hint("New folder...")
+                        .enter_returns_true(true)
+                        .build();
+                    let input_active = ui.is_item_active();
+
+                    ui.same_line();
+                    let ok = ui.small_button("OK##new_folder_inline");
+                    ui.same_line();
+                    let cancel = ui.small_button("Cancel##new_folder_inline")
+                        || (input_active && ui.is_key_pressed(Key::Escape));
+
+                    if cancel {
+                        state.ui.new_folder_inline_active = false;
+                        state.ui.new_folder_error = None;
+                        state.ui.new_folder_name.clear();
+                    }
+
+                    if ok || submitted {
+                        if try_create_new_folder_in_cwd(state, fs) {
+                            state.ui.new_folder_inline_active = false;
+                        }
+                    }
+
+                    if let Some(err) = &state.ui.new_folder_error {
+                        ui.same_line();
+                        ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
+                    }
+
+                    ui.same_line();
+                }
+            }
+            ui.separator_vertical();
+            ui.same_line();
+            if matches!(state.ui.toolbar.density, ToolbarDensity::Compact) {
+                let list_active = matches!(state.ui.file_list_view, FileListViewMode::List);
+                let thumbs_active =
+                    matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList);
+                let grid_active = matches!(state.ui.file_list_view, FileListViewMode::Grid);
+
+                if toolbar_toggle_button(
+                    ui,
+                    "view_list",
+                    "List",
+                    None,
+                    ToolbarIconMode::Text,
+                    show_tooltips,
+                    "List view",
+                    list_active,
+                ) {
                     state.ui.file_list_view = FileListViewMode::List;
                 }
-                if ui
-                    .selectable_config("Thumbs")
-                    .selected(matches!(
-                        state.ui.file_list_view,
-                        FileListViewMode::ThumbnailsList
-                    ))
-                    .build()
-                {
+                ui.same_line();
+                if toolbar_toggle_button(
+                    ui,
+                    "view_thumbs",
+                    "Thumbs",
+                    None,
+                    ToolbarIconMode::Text,
+                    show_tooltips,
+                    "Thumbnails list view",
+                    thumbs_active,
+                ) {
                     state.ui.file_list_view = FileListViewMode::ThumbnailsList;
                     state.ui.thumbnails_enabled = true;
                     state.ui.file_list_columns.show_preview = true;
                 }
-                if ui
-                    .selectable_config("Grid")
-                    .selected(matches!(state.ui.file_list_view, FileListViewMode::Grid))
-                    .build()
-                {
+                ui.same_line();
+                if toolbar_toggle_button(
+                    ui,
+                    "view_grid",
+                    "Grid",
+                    None,
+                    ToolbarIconMode::Text,
+                    show_tooltips,
+                    "Thumbnails grid view",
+                    grid_active,
+                ) {
                     state.ui.file_list_view = FileListViewMode::Grid;
                     state.ui.thumbnails_enabled = true;
                 }
-            }
-        }
-
-        if matches!(
-            state.ui.file_list_view,
-            FileListViewMode::ThumbnailsList | FileListViewMode::Grid
-        ) {
-            state.ui.thumbnails_enabled = true;
-        }
-
-        if matches!(state.ui.file_list_view, FileListViewMode::Grid) {
-            ui.same_line();
-            ui.text("Sort:");
-            ui.same_line();
-            let preview = format!(
-                "{} {}",
-                match state.core.sort_by {
-                    SortBy::Name => "Name",
-                    SortBy::Extension => "Ext",
-                    SortBy::Size => "Size",
-                    SortBy::Modified => "Modified",
-                },
-                if state.core.sort_ascending {
-                    "↑"
-                } else {
-                    "↓"
-                }
-            );
-            let mut next_by = state.core.sort_by;
-            let mut next_asc = state.core.sort_ascending;
-            if let Some(_c) = ui.begin_combo("##grid_sort", &preview) {
-                let items = [
-                    (SortBy::Name, "Name"),
-                    (SortBy::Extension, "Ext"),
-                    (SortBy::Size, "Size"),
-                    (SortBy::Modified, "Modified"),
-                ];
-                for (by, label) in items {
-                    if ui.selectable_config(label).selected(next_by == by).build() {
-                        next_by = by;
+            } else {
+                ui.text("View:");
+                ui.same_line();
+                let view_preview = match state.ui.file_list_view {
+                    FileListViewMode::List => "List",
+                    FileListViewMode::ThumbnailsList => "Thumbs",
+                    FileListViewMode::Grid => "Grid",
+                };
+                if let Some(_c) = ui.begin_combo("##view_mode", view_preview) {
+                    if ui
+                        .selectable_config("List")
+                        .selected(matches!(state.ui.file_list_view, FileListViewMode::List))
+                        .build()
+                    {
+                        state.ui.file_list_view = FileListViewMode::List;
+                    }
+                    if ui
+                        .selectable_config("Thumbs")
+                        .selected(matches!(
+                            state.ui.file_list_view,
+                            FileListViewMode::ThumbnailsList
+                        ))
+                        .build()
+                    {
+                        state.ui.file_list_view = FileListViewMode::ThumbnailsList;
+                        state.ui.thumbnails_enabled = true;
+                        state.ui.file_list_columns.show_preview = true;
+                    }
+                    if ui
+                        .selectable_config("Grid")
+                        .selected(matches!(state.ui.file_list_view, FileListViewMode::Grid))
+                        .build()
+                    {
+                        state.ui.file_list_view = FileListViewMode::Grid;
+                        state.ui.thumbnails_enabled = true;
                     }
                 }
-                ui.separator();
-                if ui.selectable_config("Ascending").selected(next_asc).build() {
-                    next_asc = true;
-                }
-                if ui
-                    .selectable_config("Descending")
-                    .selected(!next_asc)
-                    .build()
-                {
-                    next_asc = false;
-                }
             }
-            if next_by != state.core.sort_by || next_asc != state.core.sort_ascending {
-                state.core.sort_by = next_by;
-                state.core.sort_ascending = next_asc;
-            }
-        }
 
-        if state.ui.thumbnails_enabled {
-            ui.same_line();
-            ui.text("Thumb:");
-            ui.same_line();
-            if ui.small_button("S") {
-                state.ui.thumbnail_size = [20.0, 20.0];
+            if matches!(
+                state.ui.file_list_view,
+                FileListViewMode::ThumbnailsList | FileListViewMode::Grid
+            ) {
+                state.ui.thumbnails_enabled = true;
             }
-            ui.same_line();
-            if ui.small_button("M") {
-                state.ui.thumbnail_size = [32.0, 32.0];
-            }
-            ui.same_line();
-            if ui.small_button("L") {
-                state.ui.thumbnail_size = [48.0, 48.0];
-            }
-            if !has_thumbnail_backend {
+
+            if matches!(state.ui.file_list_view, FileListViewMode::Grid) {
                 ui.same_line();
-                ui.text_disabled("No thumbnail backend");
+                ui.text("Sort:");
+                ui.same_line();
+                let type_label = "Type";
+                let ext_label = "Ext";
+                let preview = format!(
+                    "{} {}",
+                    match state.core.sort_by {
+                        SortBy::Name => "Name",
+                        SortBy::Type => type_label,
+                        SortBy::Extension => ext_label,
+                        SortBy::Size => "Size",
+                        SortBy::Modified => "Modified",
+                    },
+                    if state.core.sort_ascending {
+                        "↑"
+                    } else {
+                        "↓"
+                    }
+                );
+                let mut next_by = state.core.sort_by;
+                let mut next_asc = state.core.sort_ascending;
+                if let Some(_c) = ui.begin_combo("##grid_sort", &preview) {
+                    let items = [
+                        (SortBy::Name, "Name"),
+                        (SortBy::Type, type_label),
+                        (SortBy::Extension, ext_label),
+                        (SortBy::Size, "Size"),
+                        (SortBy::Modified, "Modified"),
+                    ];
+                    for (by, label) in items {
+                        if ui.selectable_config(label).selected(next_by == by).build() {
+                            next_by = by;
+                        }
+                    }
+                    ui.separator();
+                    if ui.selectable_config("Ascending").selected(next_asc).build() {
+                        next_asc = true;
+                    }
+                    if ui
+                        .selectable_config("Descending")
+                        .selected(!next_asc)
+                        .build()
+                    {
+                        next_asc = false;
+                    }
+                }
+                if next_by != state.core.sort_by || next_asc != state.core.sort_ascending {
+                    state.core.sort_by = next_by;
+                    state.core.sort_ascending = next_asc;
+                }
             }
-        }
 
-        if matches!(
-            state.ui.file_list_view,
-            FileListViewMode::List | FileListViewMode::ThumbnailsList
-        ) {
+            if matches!(
+                state.ui.file_list_view,
+                FileListViewMode::List | FileListViewMode::ThumbnailsList
+            ) {
+                ui.same_line();
+                if toolbar_button(
+                    ui,
+                    "toolbar_columns",
+                    "Columns",
+                    state.ui.toolbar.icons.columns.as_deref(),
+                    icon_mode,
+                    show_tooltips,
+                    "Columns",
+                ) {
+                    ui.open_popup("##fb_columns_popup");
+                }
+            }
             ui.same_line();
             if toolbar_button(
                 ui,
-                "toolbar_columns",
-                "Columns",
-                state.ui.toolbar.icons.columns.as_deref(),
+                "toolbar_options",
+                "Options",
+                state.ui.toolbar.icons.options.as_deref(),
                 icon_mode,
                 show_tooltips,
-                "Columns",
+                "Options",
             ) {
-                ui.open_popup("##fb_columns_popup");
+                ui.open_popup("##fb_options");
             }
-            if let Some(_popup) = ui.begin_popup("##fb_columns_popup") {
-                match state.ui.file_list_view {
-                    FileListViewMode::List => {
-                        let mut enabled = state.ui.thumbnails_enabled;
-                        if ui.checkbox("Enable thumbnails", &mut enabled) {
-                            state.ui.thumbnails_enabled = enabled;
-                        }
-                        if state.ui.thumbnails_enabled {
-                            ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
-                        } else {
-                            ui.text_disabled("Preview (enable thumbnails)");
-                        }
-                    }
-                    FileListViewMode::ThumbnailsList => {
-                        ui.text_disabled("Preview (forced by Thumbs view)");
-                    }
-                    FileListViewMode::Grid => {}
-                }
-                ui.checkbox("Ext", &mut state.ui.file_list_columns.show_extension);
-                ui.checkbox("Size", &mut state.ui.file_list_columns.show_size);
-                ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
+            ui.separator_vertical();
+            ui.same_line();
+        }
 
-                ui.separator();
-                if ui.small_button("Compact") {
-                    if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
-                        apply_compact_column_layout_keep_preview(&mut state.ui.file_list_columns);
-                    } else {
-                        apply_compact_column_layout(&mut state.ui.file_list_columns);
+        if matches!(header_style, HeaderStyle::IgfdClassic) {
+            let places_active =
+                matches!(state.ui.layout, LayoutStyle::Standard) && state.ui.places_pane_shown;
+            if toolbar_toggle_button(
+                ui,
+                "toolbar_places",
+                "Places",
+                state.ui.toolbar.icons.places.as_deref(),
+                icon_mode,
+                show_tooltips,
+                "Places",
+                places_active,
+            ) {
+                match state.ui.layout {
+                    LayoutStyle::Standard => {
+                        state.ui.places_pane_shown = !state.ui.places_pane_shown;
                     }
+                    LayoutStyle::Minimal => {
+                        ui.open_popup("##fb_places_popup");
+                    }
+                }
+            }
+            ui.same_line();
+
+            if state.ui.new_folder_enabled {
+                if toolbar_button(
+                    ui,
+                    "toolbar_new_folder",
+                    "New Folder",
+                    state.ui.toolbar.icons.new_folder.as_deref(),
+                    icon_mode,
+                    show_tooltips,
+                    "New folder",
+                ) {
+                    match state.ui.layout {
+                        LayoutStyle::Standard => {
+                            state.ui.new_folder_inline_active = true;
+                        }
+                        LayoutStyle::Minimal => {
+                            state.ui.new_folder_open_next = true;
+                        }
+                    }
+                    state.ui.new_folder_name.clear();
+                    state.ui.new_folder_error = None;
+                    state.ui.new_folder_focus_next = true;
                 }
                 ui.same_line();
-                if ui.small_button("Balanced") {
-                    if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
-                        apply_balanced_column_layout_keep_preview(&mut state.ui.file_list_columns);
-                    } else {
-                        apply_balanced_column_layout(&mut state.ui.file_list_columns);
-                    }
-                }
 
-                ui.separator();
-                ui.text("Order:");
-                let mut order = state.ui.file_list_columns.normalized_order();
-                let mut changed = false;
-                for index in 0..order.len() {
-                    let column = order[index];
-                    let mut label = data_column_label(column).to_string();
-                    if !is_data_column_visible(&state.ui.file_list_columns, column) {
-                        label.push_str(" (hidden)");
+                if matches!(state.ui.layout, LayoutStyle::Standard)
+                    && state.ui.new_folder_inline_active
+                {
+                    ui.set_next_item_width(160.0);
+                    if state.ui.new_folder_focus_next {
+                        ui.set_keyboard_focus_here();
+                        state.ui.new_folder_focus_next = false;
                     }
-                    ui.text(label);
+                    let submitted = ui
+                        .input_text("##new_folder_inline", &mut state.ui.new_folder_name)
+                        .hint("New folder...")
+                        .enter_returns_true(true)
+                        .build();
+                    let input_active = ui.is_item_active();
+
                     ui.same_line();
-                    if ui.small_button(format!("Up##col_order_up_{index}")) {
-                        changed |= move_column_order_up(&mut order, index);
-                    }
+                    let ok = ui.small_button("OK##new_folder_inline");
                     ui.same_line();
-                    if ui.small_button(format!("Down##col_order_down_{index}")) {
-                        changed |= move_column_order_down(&mut order, index);
+                    let cancel = ui.small_button("Cancel##new_folder_inline")
+                        || (input_active && ui.is_key_pressed(Key::Escape));
+
+                    if cancel {
+                        state.ui.new_folder_inline_active = false;
+                        state.ui.new_folder_error = None;
+                        state.ui.new_folder_name.clear();
                     }
-                }
-                if changed {
-                    state.ui.file_list_columns.order = order;
-                }
 
-                if ui.small_button("Reset columns") {
-                    state.ui.file_list_columns = FileListColumnsConfig::default();
-                }
+                    if ok || submitted {
+                        if try_create_new_folder_in_cwd(state, fs) {
+                            state.ui.new_folder_inline_active = false;
+                        }
+                    }
 
-                ui.separator();
-                let mut natural_sort = matches!(state.core.sort_mode, SortMode::Natural);
-                if ui.checkbox("Natural sort", &mut natural_sort) {
-                    state.core.sort_mode = if natural_sort {
-                        SortMode::Natural
-                    } else {
-                        SortMode::Lexicographic
-                    };
-                }
-            }
-        }
-        ui.same_line();
-        if toolbar_button(
-            ui,
-            "toolbar_options",
-            "Options",
-            state.ui.toolbar.icons.options.as_deref(),
-            icon_mode,
-            show_tooltips,
-            "Options",
-        ) {
-            ui.open_popup("##fb_options");
-        }
-        if let Some(_popup) = ui.begin_popup("##fb_options") {
-            let mut nav_on_click = matches!(state.core.click_action, ClickAction::Navigate);
-            if ui.checkbox("Navigate on click", &mut nav_on_click) {
-                state.core.click_action = if nav_on_click {
-                    ClickAction::Navigate
-                } else {
-                    ClickAction::Select
-                };
-            }
-            let mut dbl = state.core.double_click;
-            if ui.checkbox("DblClick confirm", &mut dbl) {
-                state.core.double_click = dbl;
-            }
-            let mut quick = state.ui.breadcrumbs_quick_select;
-            if ui.checkbox("Quick path select", &mut quick) {
-                state.ui.breadcrumbs_quick_select = quick;
-            }
-            let mut show_hidden = state.core.show_hidden;
-            if ui.checkbox("Show hidden", &mut show_hidden) {
-                state.core.show_hidden = show_hidden;
-            }
-            ui.separator();
-            ui.text_disabled("Shortcuts:");
-            ui.bullet_text("Ctrl+L: focus Path");
-            ui.bullet_text("Ctrl+F: focus Search");
-            ui.bullet_text("Alt+Left/Right: back/forward");
-            ui.bullet_text("Backspace: up");
-            ui.bullet_text("F5: refresh");
-            ui.bullet_text("Tab: path completion");
-            ui.bullet_text("Up/Down: path history");
-        }
-        ui.separator_vertical();
-        ui.same_line();
+                    if let Some(err) = &state.ui.new_folder_error {
+                        ui.same_line();
+                        ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
+                    }
 
-        if matches!(state.ui.layout, LayoutStyle::Minimal) {
-            if let Some(_popup) = ui.begin_popup("##fb_places_popup") {
-                ui.text_disabled("Places");
-                ui.separator();
-                let mut new_cwd: Option<PathBuf> = None;
-                ui.child_window("##fb_places_popup_child")
-                    .size([280.0, 380.0])
-                    .border(true)
-                    .build(ui, || {
-                        new_cwd = draw_places_pane(ui, state);
-                    });
-                if let Some(p) = new_cwd {
-                    let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
-                    ui.close_current_popup();
+                    ui.same_line();
                 }
             }
+
+            ui.separator_vertical();
+            ui.same_line();
         }
 
         // Path bar (address input / breadcrumb composer) + Search.
@@ -1142,8 +1149,18 @@ fn draw_contents_with_fs_and_hooks(
         let frame_pad_x = style.frame_padding()[0];
         let history_button_w = ui.frame_height();
 
-        const MIN_PATH_W: f32 = 120.0;
-        const SEARCH_W: f32 = 220.0;
+        let min_path_w = if matches!(header_style, HeaderStyle::IgfdClassic) {
+            // Keep a minimal but usable composer width in "classic" mode.
+            (ui.frame_height() * 4.0).max(60.0)
+        } else {
+            120.0
+        };
+        let min_search_input_w = if matches!(header_style, HeaderStyle::IgfdClassic) {
+            // Allow the search bar to shrink to keep the header on a single row.
+            (ui.frame_height() * 6.0).max(90.0)
+        } else {
+            220.0
+        };
 
         let action_label = if breadcrumbs_mode { "Edit" } else { "Go" };
         let action_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, action_label)[0];
@@ -1182,33 +1199,54 @@ fn draw_contents_with_fs_and_hooks(
         };
 
         let search_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Search:")[0];
-        let search_total_w = search_label_w + spacing_x + SEARCH_W;
+        let search_reset_w = ui.frame_height();
+        let search_total_w =
+            search_reset_w + spacing_x + search_label_w + spacing_x + min_search_input_w;
+        let view_controls_w = if matches!(header_style, HeaderStyle::IgfdClassic) {
+            let list_w =
+                font.calc_text_size(font_size, f32::MAX, 0.0, "List")[0] + frame_pad_x * 2.0;
+            let thumbs_w =
+                font.calc_text_size(font_size, f32::MAX, 0.0, "Thumbs")[0] + frame_pad_x * 2.0;
+            let grid_w =
+                font.calc_text_size(font_size, f32::MAX, 0.0, "Grid")[0] + frame_pad_x * 2.0;
+            let buttons_w = list_w + spacing_x + thumbs_w + spacing_x + grid_w;
+            let sep_w = 1.0;
+            // Buttons + spacing + vertical separator + spacing.
+            buttons_w + spacing_x + sep_w + spacing_x
+        } else {
+            0.0
+        };
+        let right_block_w = view_controls_w + search_total_w;
 
         let row_start_x = ui.cursor_pos_x();
         let row_w = ui.content_region_avail_width();
         let row_right_x = row_start_x + row_w;
         let min_total_w = history_button_w
             + spacing_x
-            + MIN_PATH_W
+            + min_path_w
             + spacing_x
             + path_controls_w
             + spacing_x
-            + search_total_w;
+            + right_block_w;
 
-        let stacked = row_w < min_total_w;
+        let stacked = if matches!(header_style, HeaderStyle::IgfdClassic) {
+            false
+        } else {
+            row_w < min_total_w
+        };
+        let right_block_start_x = row_right_x - right_block_w;
 
         // Path input (+ Go). If we can't fit Search on the same line, Search moves to the next line.
         let path_w = if stacked {
             (row_w - history_button_w - spacing_x - path_controls_w - spacing_x).max(40.0)
         } else {
-            let search_start_x = row_right_x - search_total_w;
-            (search_start_x
+            (right_block_start_x
                 - row_start_x
                 - history_button_w
                 - spacing_x
                 - path_controls_w
                 - spacing_x * 2.0)
-                .max(MIN_PATH_W)
+                .max(min_path_w)
         };
 
         let recent_paths = state.core.recent_paths().cloned().collect::<Vec<_>>();
@@ -1315,29 +1353,66 @@ fn draw_contents_with_fs_and_hooks(
             ui.same_line();
 
             if show_breadcrumb_composer {
-                if let Some(p) = ui
-                    .child_window("##path_breadcrumbs")
-                    .size([path_w, ui.frame_height()])
-                    .border(true)
-                    .flags(
-                        dear_imgui_rs::WindowFlags::HORIZONTAL_SCROLLBAR
-                            | dear_imgui_rs::WindowFlags::NO_SCROLL_WITH_MOUSE,
-                    )
-                    .build(ui, || {
-                        ui.align_text_to_frame_padding();
-                        draw_breadcrumbs(
-                            ui,
-                            state,
-                            fs,
-                            state.ui.breadcrumbs_max_segments,
-                            false,
-                            true,
-                        )
-                    })
-                    .flatten()
-                {
-                    let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
+                // IGFD draws the path composer inline (no child window). We reserve a framed
+                // region and draw breadcrumbs clipped to its content area.
+                let frame_h = ui.frame_height();
+                ui.dummy([path_w, frame_h]);
+                let rect_min = ui.item_rect_min();
+                let rect_max = ui.item_rect_max();
+                let after = ui.cursor_pos();
+
+                let dl = ui.get_window_draw_list();
+                let rounding = style.frame_rounding();
+                dl.add_rect(rect_min, rect_max, ui.get_color_u32(StyleColor::FrameBg))
+                    .filled(true)
+                    .rounding(rounding)
+                    .build();
+                dl.add_rect(rect_min, rect_max, ui.get_color_u32(StyleColor::Border))
+                    .rounding(rounding)
+                    .build();
+
+                // Match InputText's horizontal padding, but keep full vertical space so
+                // breadcrumb buttons (which are frame-height) don't get clipped away.
+                let pad = style.frame_padding();
+                let content_min = [rect_min[0] + pad[0], rect_min[1]];
+                let mut content_max = [rect_max[0] - pad[0], rect_max[1]];
+                if content_max[0] < content_min[0] {
+                    content_max[0] = content_min[0];
                 }
+                if content_max[1] < content_min[1] {
+                    content_max[1] = content_min[1];
+                }
+
+                let crumbs_total_w = estimate_breadcrumbs_total_width(
+                    ui,
+                    &state.core.cwd,
+                    state.ui.breadcrumbs_max_segments,
+                    state.ui.breadcrumbs_quick_select,
+                );
+                let visible_w = (content_max[0] - content_min[0]).max(0.0);
+                let start_x = if crumbs_total_w > visible_w {
+                    // Keep the tail visible for long paths.
+                    content_max[0] - crumbs_total_w
+                } else {
+                    content_min[0]
+                };
+
+                ui.with_clip_rect(content_min, content_max, true, || {
+                    ui.set_cursor_screen_pos([start_x, rect_min[1]]);
+                    if let Some(p) = draw_breadcrumbs(
+                        ui,
+                        state,
+                        fs,
+                        state.ui.breadcrumbs_max_segments,
+                        false,
+                        false,
+                    ) {
+                        let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
+                    }
+                });
+
+                // Restore layout cursor to after the reserved region.
+                ui.set_cursor_pos(after);
             } else {
                 draw_path_input_text(ui, state, fs, &recent_paths, path_w, false);
             }
@@ -1348,17 +1423,98 @@ fn draw_contents_with_fs_and_hooks(
         if stacked {
             ui.new_line();
         } else {
-            let search_start_x = row_right_x - search_total_w;
-            ui.same_line_with_pos(search_start_x);
+            ui.same_line_with_pos(right_block_start_x);
         }
 
+        if matches!(header_style, HeaderStyle::IgfdClassic) {
+            let list_active = matches!(state.ui.file_list_view, FileListViewMode::List);
+            let thumbs_active = matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList);
+            let grid_active = matches!(state.ui.file_list_view, FileListViewMode::Grid);
+
+            if toolbar_toggle_button(
+                ui,
+                "view_list",
+                "List",
+                None,
+                ToolbarIconMode::Text,
+                show_tooltips,
+                "List view",
+                list_active,
+            ) {
+                state.ui.file_list_view = FileListViewMode::List;
+            }
+            ui.same_line();
+            {
+                let _disabled = ui.begin_disabled_with_cond(!has_thumbnail_backend);
+                if toolbar_toggle_button(
+                    ui,
+                    "view_thumbs",
+                    "Thumbs",
+                    None,
+                    ToolbarIconMode::Text,
+                    show_tooltips,
+                    "Thumbnails list view",
+                    thumbs_active,
+                ) {
+                    state.ui.file_list_view = FileListViewMode::ThumbnailsList;
+                    state.ui.thumbnails_enabled = true;
+                    state.ui.file_list_columns.show_preview = true;
+                }
+            }
+            ui.same_line();
+            {
+                let _disabled = ui.begin_disabled_with_cond(!has_thumbnail_backend);
+                if toolbar_toggle_button(
+                    ui,
+                    "view_grid",
+                    "Grid",
+                    None,
+                    ToolbarIconMode::Text,
+                    show_tooltips,
+                    "Thumbnails grid view",
+                    grid_active,
+                ) {
+                    state.ui.file_list_view = FileListViewMode::Grid;
+                    state.ui.thumbnails_enabled = true;
+                }
+            }
+            if has_thumbnail_backend
+                && state.ui.thumbnails_enabled
+                && matches!(
+                    state.ui.file_list_view,
+                    FileListViewMode::ThumbnailsList | FileListViewMode::Grid
+                )
+            {
+                let stats = state.ui.thumbnails.stats();
+                if stats.total > 0 && stats.ready < stats.total {
+                    ui.same_line();
+                    let frac = stats.ready as f32 / stats.total as f32;
+                    let w = (ui.frame_height() * 4.0).max(80.0);
+                    let h = (ui.frame_height() * 0.55).max(6.0);
+                    ui.progress_bar_with_overlay(frac, format!("{}/{}", stats.ready, stats.total))
+                        .size([w, h])
+                        .build();
+                }
+            }
+            ui.same_line();
+            ui.separator_vertical();
+            ui.same_line();
+        }
+
+        if ui.button("X##search_reset") {
+            state.core.search.clear();
+        }
+        if ui.is_item_hovered() {
+            ui.tooltip_text("Reset search");
+        }
+        ui.same_line();
         ui.text("Search:");
         ui.same_line();
         if state.ui.focus_search_next {
             ui.set_keyboard_focus_here();
             state.ui.focus_search_next = false;
         }
-        ui.set_next_item_width(SEARCH_W);
+        ui.set_next_item_width(ui.content_region_avail_width().max(80.0));
         let _search_changed = ui.input_text("##search", &mut state.core.search).build();
 
         if !breadcrumbs_mode {
@@ -1379,22 +1535,26 @@ fn draw_contents_with_fs_and_hooks(
 
     // Content region
     let avail = ui.content_region_avail();
+    let footer_h = state
+        .ui
+        .footer_height_last
+        .max(estimate_footer_height(ui, state));
+    let content_h = (avail[1] - footer_h).max(0.0);
     match state.ui.layout {
         LayoutStyle::Standard => {
-            let content_h = avail[1] - 80.0;
             if state.ui.places_pane_shown {
-                const SPLITTER_W: f32 = 6.0;
                 const MIN_PLACES_W: f32 = 120.0;
                 const MIN_FILE_LIST_W: f32 = 180.0;
 
+                let splitter_w = splitter_width(ui);
                 let spacing_x = ui.clone_style().item_spacing()[0];
                 let max_places_w =
-                    (avail[0] - MIN_FILE_LIST_W - SPLITTER_W - spacing_x * 2.0).max(0.0);
+                    (avail[0] - MIN_FILE_LIST_W - splitter_w - spacing_x * 2.0).max(0.0);
                 let mut places_w = state.ui.places_pane_width.clamp(0.0, max_places_w);
                 if max_places_w >= MIN_PLACES_W {
                     places_w = places_w.clamp(MIN_PLACES_W, max_places_w);
                 }
-                let file_w = (avail[0] - places_w - SPLITTER_W - spacing_x * 2.0).max(0.0);
+                let file_w = (avail[0] - places_w - splitter_w - spacing_x * 2.0).max(0.0);
 
                 let mut new_cwd: Option<PathBuf> = None;
                 ui.child_window("places_pane")
@@ -1408,7 +1568,7 @@ fn draw_contents_with_fs_and_hooks(
                 }
 
                 ui.same_line();
-                ui.invisible_button("places_pane_splitter", [SPLITTER_W, content_h]);
+                ui.invisible_button("places_pane_splitter", [splitter_w, content_h]);
                 if ui.is_item_hovered() || ui.is_item_active() {
                     ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
                 }
@@ -1443,11 +1603,13 @@ fn draw_contents_with_fs_and_hooks(
 
                         match state.ui.custom_pane_dock {
                             CustomPaneDock::Bottom => {
+                                let style = ui.clone_style();
+                                let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
                                 let pane_h =
                                     state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
                                 let mut table_h = inner[1];
                                 if pane_h > 0.0 {
-                                    table_h = (table_h - pane_h - 8.0).max(0.0);
+                                    table_h = (table_h - pane_h - sep_h).max(0.0);
                                 }
 
                                 draw_file_table(
@@ -1488,17 +1650,17 @@ fn draw_contents_with_fs_and_hooks(
                                 }
                             }
                             CustomPaneDock::Right => {
-                                const SPLITTER_W: f32 = 6.0;
                                 const MIN_TABLE_W: f32 = 120.0;
                                 const MIN_PANE_W: f32 = 120.0;
 
-                                let max_pane_w = (inner[0] - MIN_TABLE_W - SPLITTER_W).max(0.0);
+                                let splitter_w = splitter_width(ui);
+                                let max_pane_w = (inner[0] - MIN_TABLE_W - splitter_w).max(0.0);
                                 let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
                                 if max_pane_w >= MIN_PANE_W {
                                     pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
                                 }
 
-                                let table_w = (inner[0] - pane_w - SPLITTER_W).max(0.0);
+                                let table_w = (inner[0] - pane_w - splitter_w).max(0.0);
 
                                 ui.child_window("file_table_rightdock")
                                     .size([table_w, inner[1]])
@@ -1514,7 +1676,7 @@ fn draw_contents_with_fs_and_hooks(
                                     });
 
                                 ui.same_line();
-                                ui.invisible_button("custom_pane_splitter", [SPLITTER_W, inner[1]]);
+                                ui.invisible_button("custom_pane_splitter", [splitter_w, inner[1]]);
                                 if ui.is_item_hovered() || ui.is_item_active() {
                                     ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
                                 }
@@ -1577,11 +1739,13 @@ fn draw_contents_with_fs_and_hooks(
 
                         match state.ui.custom_pane_dock {
                             CustomPaneDock::Bottom => {
+                                let style = ui.clone_style();
+                                let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
                                 let pane_h =
                                     state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
                                 let mut table_h = inner[1];
                                 if pane_h > 0.0 {
-                                    table_h = (table_h - pane_h - 8.0).max(0.0);
+                                    table_h = (table_h - pane_h - sep_h).max(0.0);
                                 }
 
                                 draw_file_table(
@@ -1622,17 +1786,17 @@ fn draw_contents_with_fs_and_hooks(
                                 }
                             }
                             CustomPaneDock::Right => {
-                                const SPLITTER_W: f32 = 6.0;
                                 const MIN_TABLE_W: f32 = 120.0;
                                 const MIN_PANE_W: f32 = 120.0;
 
-                                let max_pane_w = (inner[0] - MIN_TABLE_W - SPLITTER_W).max(0.0);
+                                let splitter_w = splitter_width(ui);
+                                let max_pane_w = (inner[0] - MIN_TABLE_W - splitter_w).max(0.0);
                                 let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
                                 if max_pane_w >= MIN_PANE_W {
                                     pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
                                 }
 
-                                let table_w = (inner[0] - pane_w - SPLITTER_W).max(0.0);
+                                let table_w = (inner[0] - pane_w - splitter_w).max(0.0);
 
                                 ui.child_window("file_table_rightdock")
                                     .size([table_w, inner[1]])
@@ -1648,7 +1812,7 @@ fn draw_contents_with_fs_and_hooks(
                                     });
 
                                 ui.same_line();
-                                ui.invisible_button("custom_pane_splitter", [SPLITTER_W, inner[1]]);
+                                ui.invisible_button("custom_pane_splitter", [splitter_w, inner[1]]);
                                 if ui.is_item_hovered() || ui.is_item_active() {
                                     ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
                                 }
@@ -1694,7 +1858,7 @@ fn draw_contents_with_fs_and_hooks(
         }
         LayoutStyle::Minimal => {
             ui.child_window("file_list_min")
-                .size([avail[0], avail[1] - 80.0])
+                .size([avail[0], content_h])
                 .build(ui, || {
                     let inner = ui.content_region_avail();
                     let show_pane =
@@ -1713,10 +1877,12 @@ fn draw_contents_with_fs_and_hooks(
 
                     match state.ui.custom_pane_dock {
                         CustomPaneDock::Bottom => {
+                            let style = ui.clone_style();
+                            let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
                             let pane_h = state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
                             let mut table_h = inner[1];
                             if pane_h > 0.0 {
-                                table_h = (table_h - pane_h - 8.0).max(0.0);
+                                table_h = (table_h - pane_h - sep_h).max(0.0);
                             }
 
                             draw_file_table(
@@ -1757,17 +1923,17 @@ fn draw_contents_with_fs_and_hooks(
                             }
                         }
                         CustomPaneDock::Right => {
-                            const SPLITTER_W: f32 = 6.0;
                             const MIN_TABLE_W: f32 = 120.0;
                             const MIN_PANE_W: f32 = 120.0;
 
-                            let max_pane_w = (inner[0] - MIN_TABLE_W - SPLITTER_W).max(0.0);
+                            let splitter_w = splitter_width(ui);
+                            let max_pane_w = (inner[0] - MIN_TABLE_W - splitter_w).max(0.0);
                             let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
                             if max_pane_w >= MIN_PANE_W {
                                 pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
                             }
 
-                            let table_w = (inner[0] - pane_w - SPLITTER_W).max(0.0);
+                            let table_w = (inner[0] - pane_w - splitter_w).max(0.0);
 
                             ui.child_window("file_table_rightdock")
                                 .size([table_w, inner[1]])
@@ -1783,7 +1949,7 @@ fn draw_contents_with_fs_and_hooks(
                                 });
 
                             ui.same_line();
-                            ui.invisible_button("custom_pane_splitter", [SPLITTER_W, inner[1]]);
+                            ui.invisible_button("custom_pane_splitter", [splitter_w, inner[1]]);
                             if ui.is_item_hovered() || ui.is_item_active() {
                                 ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
                             }
@@ -1826,6 +1992,15 @@ fn draw_contents_with_fs_and_hooks(
         }
     }
 
+    // IGFD-style quick path selection popup (opened from breadcrumb separators).
+    if let Some(p) = draw_igfd_path_popup(ui, state, fs, [avail[0], content_h]) {
+        let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
+    }
+
+    draw_minimal_places_popup(ui, state);
+    draw_columns_popup(ui, state);
+    draw_options_popup(ui, state, has_thumbnail_backend);
+
     draw_places_io_modal(ui, state);
     draw_places_edit_modal(ui, state, fs);
     draw_new_folder_modal(ui, state, fs);
@@ -1833,38 +2008,92 @@ fn draw_contents_with_fs_and_hooks(
     draw_delete_confirm_modal(ui, state, fs);
     draw_paste_conflict_modal(ui, state, fs);
 
+    // Footer (IGFD-style): file field + filters + buttons, then a compact status line.
+    let footer_start_y = ui.cursor_pos_y();
     ui.separator();
-    // Footer: save name + filter + status + buttons
-    if matches!(state.core.mode, DialogMode::SaveFile) {
-        ui.text("File name:");
-        ui.same_line();
-        ui.input_text("##save_name", &mut state.core.save_name)
-            .build();
-        ui.same_line();
-        ui.text_disabled(extension_policy_hint(
-            state.core.save_policy.extension_policy,
-        ));
-        ui.same_line();
-        let overwrite = if state.core.save_policy.confirm_overwrite {
-            "Overwrite: ask"
-        } else {
-            "Overwrite: replace"
-        };
-        ui.text_disabled(overwrite);
-        ui.new_line();
+
+    let style = ui.clone_style();
+    let spacing_x = style.item_spacing()[0];
+
+    let show_filter =
+        !state.core.filters().is_empty() && !matches!(state.core.mode, DialogMode::PickFolder);
+    let filter_preview = state
+        .core
+        .active_filter()
+        .map(|f| f.name.clone())
+        .unwrap_or_else(|| "All files".to_string());
+    let filter_combo_w = if show_filter {
+        calc_filter_combo_width(ui, filter_preview.as_str())
+    } else {
+        0.0
+    };
+
+    // Compute an expected buttons width so we can size the file input without hard-coded constants.
+    let (_confirm_label, _cancel_label, _confirm_w, _cancel_w, buttons_group_w) =
+        validation_buttons_layout(ui, state);
+
+    ui.align_text_to_frame_padding();
+    let file_label = match state.core.mode {
+        DialogMode::PickFolder => "Folder:",
+        _ => "File:",
+    };
+    ui.text(file_label);
+    ui.same_line();
+
+    let footer_display = footer_file_name_display(state);
+    if matches!(
+        state.core.mode,
+        DialogMode::OpenFile | DialogMode::OpenFiles | DialogMode::PickFolder
+    ) {
+        if state.ui.footer_file_name_buffer.trim().is_empty()
+            || state.ui.footer_file_name_buffer == state.ui.footer_file_name_last_display
+        {
+            state.ui.footer_file_name_buffer = footer_display.clone();
+        }
+        state.ui.footer_file_name_last_display = footer_display.clone();
     }
-    // Action row: filter + status + buttons
-    if !state.core.filters().is_empty() && !matches!(state.core.mode, DialogMode::PickFolder) {
-        ui.text("Filter:");
+
+    let reserved_w = buttons_group_w
+        + if show_filter {
+            spacing_x + filter_combo_w
+        } else {
+            0.0
+        };
+    let input_w = (ui.content_region_avail_width() - reserved_w - spacing_x).max(60.0);
+    ui.set_next_item_width(input_w);
+
+    let file_entered = match state.core.mode {
+        DialogMode::SaveFile => ui
+            .input_text("##footer_file_name", &mut state.core.save_name)
+            .enter_returns_true(true)
+            .build(),
+        DialogMode::OpenFile | DialogMode::OpenFiles => ui
+            .input_text("##footer_file_name", &mut state.ui.footer_file_name_buffer)
+            .enter_returns_true(true)
+            .build(),
+        DialogMode::PickFolder => ui
+            .input_text("##footer_file_name", &mut state.ui.footer_file_name_buffer)
+            .read_only(true)
+            .enter_returns_true(true)
+            .build(),
+    };
+
+    if file_entered {
+        request_confirm = match state.core.mode {
+            DialogMode::SaveFile => !state.core.save_name.trim().is_empty(),
+            DialogMode::OpenFile | DialogMode::OpenFiles => {
+                !state.ui.footer_file_name_buffer.trim().is_empty()
+            }
+            DialogMode::PickFolder => false,
+        };
+    }
+
+    // Filter combobox (auto width like IGFD).
+    if show_filter && !matches!(state.core.mode, DialogMode::PickFolder) {
         ui.same_line();
-        ui.set_next_item_width(220.0);
-        let preview = state
-            .core
-            .active_filter()
-            .map(|f| f.name.as_str())
-            .unwrap_or("All files");
+        ui.set_next_item_width(filter_combo_w);
         let mut next_active_filter = state.core.active_filter_index();
-        if let Some(_c) = ui.begin_combo("##filter", preview) {
+        if let Some(_c) = ui.begin_combo("##filter", filter_preview.as_str()) {
             if ui
                 .selectable_config("All files")
                 .selected(state.core.active_filter_index().is_none())
@@ -1889,12 +2118,14 @@ fn draw_contents_with_fs_and_hooks(
                 state.core.set_active_filter_all();
             }
         }
-        ui.same_line();
     }
 
-    ui.text_disabled(footer_status_text(state, &confirm_gate));
+    // Buttons (right-aligned).
     ui.same_line();
     let (confirm, cancel) = draw_validation_buttons_row(ui, state, &confirm_gate);
+
+    // Compact status line (non-interactive).
+    ui.text_disabled(footer_status_text(state, &confirm_gate));
 
     // Keyboard shortcuts (only when the host window is focused)
     if state.ui.visible && ui.is_window_focused() {
@@ -1944,8 +2175,17 @@ fn draw_contents_with_fs_and_hooks(
         state.core.cancel();
     } else if request_confirm {
         state.ui.ui_error = None;
-        if let Err(e) = state.core.confirm(fs, &confirm_gate) {
-            state.ui.ui_error = Some(e.to_string());
+        let typed_footer_name = match state.core.mode {
+            DialogMode::OpenFile | DialogMode::OpenFiles => {
+                Some(state.ui.footer_file_name_buffer.as_str())
+            }
+            _ => None,
+        };
+        let can_confirm = confirm_gate.can_confirm && core_can_confirm(state);
+        if can_confirm {
+            if let Err(e) = state.core.confirm(fs, &confirm_gate, typed_footer_name) {
+                state.ui.ui_error = Some(e.to_string());
+            }
         }
     }
 
@@ -1956,11 +2196,138 @@ fn draw_contents_with_fs_and_hooks(
         ui.text_colored([1.0, 0.3, 0.3, 1.0], format!("Error: {err}"));
     }
 
+    // Update measured footer height for the next frame's content sizing.
+    state.ui.footer_height_last = (ui.cursor_pos_y() - footer_start_y).max(0.0);
+
     let out = state.core.take_result();
     if out.is_some() {
         state.close();
     }
     out
+}
+
+fn estimate_footer_height(ui: &Ui, _state: &FileDialogState) -> f32 {
+    // We keep this derived from current style metrics to avoid hard-coded pixel constants.
+    // The actual value is measured each frame and stored in `state.ui.footer_height_last`.
+    let style = ui.clone_style();
+    let row_h = ui
+        .frame_height_with_spacing()
+        .max(ui.text_line_height_with_spacing());
+    let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
+    // Footer row + compact status line.
+    sep_h + row_h + ui.text_line_height_with_spacing()
+}
+
+fn splitter_width(ui: &Ui) -> f32 {
+    // Match IGFD's typical splitter thickness (~4px) but keep it relative to current style.
+    let w = ui.frame_height() * 0.25;
+    w.clamp(4.0, 10.0)
+}
+
+fn calc_filter_combo_width(ui: &Ui, preview: &str) -> f32 {
+    const MIN_W: f32 = 150.0;
+    let style = ui.clone_style();
+    let font = ui.current_font();
+    let font_size = ui.current_font_size();
+    let text_w = font.calc_text_size(font_size, f32::MAX, 0.0, preview)[0];
+    // Match IGFD: text width + arrow area (frame height) + inner spacing.
+    (text_w + ui.frame_height() + style.item_inner_spacing()[0]).max(MIN_W)
+}
+
+fn validation_buttons_layout(ui: &Ui, state: &FileDialogState) -> (String, String, f32, f32, f32) {
+    let default_confirm = match state.core.mode {
+        DialogMode::OpenFile | DialogMode::OpenFiles => "Open",
+        DialogMode::PickFolder => "Select",
+        DialogMode::SaveFile => "Save",
+    };
+    let cfg = &state.ui.validation_buttons;
+    let confirm_label = cfg
+        .confirm_label
+        .as_deref()
+        .unwrap_or(default_confirm)
+        .to_string();
+    let cancel_label = cfg.cancel_label.as_deref().unwrap_or("Cancel").to_string();
+
+    let style = ui.clone_style();
+    let spacing_x = style.item_spacing()[0];
+    let pad_x = style.frame_padding()[0];
+    let font = ui.current_font();
+    let font_size = ui.current_font_size();
+
+    let calc_button_width = |label: &str| -> f32 {
+        let text_w = font.calc_text_size(font_size, f32::MAX, 0.0, label)[0];
+        text_w + pad_x * 2.0
+    };
+
+    let base_w = cfg.button_width;
+    let confirm_w = cfg
+        .confirm_width
+        .or(base_w)
+        .unwrap_or_else(|| calc_button_width(&confirm_label));
+    let cancel_w = cfg
+        .cancel_width
+        .or(base_w)
+        .unwrap_or_else(|| calc_button_width(&cancel_label));
+    let group_w = confirm_w + cancel_w + spacing_x;
+
+    (confirm_label, cancel_label, confirm_w, cancel_w, group_w)
+}
+
+fn footer_file_name_display(state: &FileDialogState) -> String {
+    let selected_len = state.core.selected_len();
+    if selected_len == 0 {
+        return String::new();
+    }
+
+    let (files, dirs) = state.core.selected_entry_counts();
+    match state.core.mode {
+        DialogMode::OpenFile => {
+            if files == 1 && dirs == 0 {
+                state
+                    .core
+                    .selected_entry_paths()
+                    .into_iter()
+                    .next()
+                    .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
+                    .unwrap_or_default()
+            } else if selected_len > 1 {
+                format!("{selected_len} files selected")
+            } else {
+                String::new()
+            }
+        }
+        DialogMode::OpenFiles => {
+            if selected_len == 1 && files == 1 && dirs == 0 {
+                state
+                    .core
+                    .selected_entry_paths()
+                    .into_iter()
+                    .next()
+                    .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
+                    .unwrap_or_default()
+            } else {
+                format!("{selected_len} files selected")
+            }
+        }
+        DialogMode::PickFolder => {
+            if selected_len == 0 {
+                ".".to_string()
+            } else if selected_len == 1 && dirs == 1 && files == 0 {
+                state
+                    .core
+                    .selected_entry_paths()
+                    .into_iter()
+                    .next()
+                    .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
+                    .unwrap_or_default()
+            } else if selected_len > 1 {
+                format!("{selected_len} items selected")
+            } else {
+                String::new()
+            }
+        }
+        DialogMode::SaveFile => String::new(),
+    }
 }
 
 fn draw_validation_buttons_row(
@@ -2006,11 +2373,16 @@ fn draw_validation_buttons_row(
         ui.set_cursor_pos_x(x);
     }
 
+    let can_confirm = gate.can_confirm && core_can_confirm(state);
+
     match cfg.order {
         ValidationButtonsOrder::ConfirmCancel => {
-            let _disabled = ui.begin_disabled_with_cond(!gate.can_confirm);
+            let _disabled = ui.begin_disabled_with_cond(!can_confirm);
             let confirm_clicked = ui.button_with_size(confirm_label, [confirm_w, 0.0]);
             drop(_disabled);
+            if !can_confirm && ui.is_item_hovered() {
+                ui.tooltip_text(confirm_disabled_reason(state, gate));
+            }
             ui.same_line();
             let cancel_clicked = ui.button_with_size(cancel_label, [cancel_w, 0.0]);
             (confirm_clicked, cancel_clicked)
@@ -2018,19 +2390,40 @@ fn draw_validation_buttons_row(
         ValidationButtonsOrder::CancelConfirm => {
             let cancel_clicked = ui.button_with_size(cancel_label, [cancel_w, 0.0]);
             ui.same_line();
-            let _disabled = ui.begin_disabled_with_cond(!gate.can_confirm);
+            let _disabled = ui.begin_disabled_with_cond(!can_confirm);
             let confirm_clicked = ui.button_with_size(confirm_label, [confirm_w, 0.0]);
             drop(_disabled);
+            if !can_confirm && ui.is_item_hovered() {
+                ui.tooltip_text(confirm_disabled_reason(state, gate));
+            }
             (confirm_clicked, cancel_clicked)
         }
     }
 }
 
-fn extension_policy_hint(p: ExtensionPolicy) -> &'static str {
-    match p {
-        ExtensionPolicy::KeepUser => "Ext: keep user",
-        ExtensionPolicy::AddIfMissing => "Ext: add if missing",
-        ExtensionPolicy::ReplaceByFilter => "Ext: enforce filter",
+fn core_can_confirm(state: &FileDialogState) -> bool {
+    match state.core.mode {
+        DialogMode::SaveFile => !state.core.save_name.trim().is_empty(),
+        DialogMode::OpenFile | DialogMode::OpenFiles => {
+            state.core.has_selection() || !state.ui.footer_file_name_buffer.trim().is_empty()
+        }
+        DialogMode::PickFolder => true,
+    }
+}
+
+fn confirm_disabled_reason(state: &FileDialogState, gate: &ConfirmGate) -> String {
+    if !gate.can_confirm {
+        if let Some(msg) = gate.message.as_deref() {
+            return msg.to_string();
+        }
+        return "Blocked".to_string();
+    }
+    match state.core.mode {
+        DialogMode::SaveFile => "Type a file name to save.".to_string(),
+        DialogMode::OpenFile | DialogMode::OpenFiles => {
+            "Select a file, or type a file name/path in the footer field.".to_string()
+        }
+        DialogMode::PickFolder => "Select a folder, or confirm the current directory.".to_string(),
     }
 }
 
@@ -2148,39 +2541,203 @@ fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSyst
         }
 
         if create {
-            state.ui.new_folder_error = None;
-            let name = state.ui.new_folder_name.trim();
-            let invalid = name.is_empty()
-                || name == "."
-                || name == ".."
-                || name.contains('/')
-                || name.contains('\\')
-                || name.contains('\0');
-            if invalid {
-                state.ui.new_folder_error = Some("Invalid folder name".into());
-            } else {
-                let name = name.to_string();
-                let path = state.core.cwd.join(&name);
-                match fs.create_dir(&path) {
-                    Ok(()) => {
-                        state.ui.new_folder_name.clear();
-                        let id = EntryId::from_path(&path);
-                        state.core.focus_and_select_by_id(id);
-                        state.ui.reveal_id_next = Some(id);
-                        state.core.invalidate_dir_cache();
-                        ui.close_current_popup();
-                    }
-                    Err(e) => {
-                        state.ui.new_folder_error =
-                            Some(format!("Failed to create '{}': {}", name, e));
-                    }
-                }
+            if try_create_new_folder_in_cwd(state, fs) {
+                ui.close_current_popup();
             }
         }
 
         if let Some(err) = &state.ui.new_folder_error {
             ui.separator();
             ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
+        }
+    }
+}
+
+fn try_create_new_folder_in_cwd(state: &mut FileDialogState, fs: &dyn FileSystem) -> bool {
+    state.ui.new_folder_error = None;
+    let name = state.ui.new_folder_name.trim();
+    let invalid = name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0');
+    if invalid {
+        state.ui.new_folder_error = Some("Invalid folder name".into());
+        return false;
+    }
+
+    let name = name.to_string();
+    let path = state.core.cwd.join(&name);
+    match fs.create_dir(&path) {
+        Ok(()) => {
+            state.ui.new_folder_name.clear();
+            let id = EntryId::from_path(&path);
+            state.core.focus_and_select_by_id(id);
+            state.ui.reveal_id_next = Some(id);
+            state.core.invalidate_dir_cache();
+            true
+        }
+        Err(e) => {
+            state.ui.new_folder_error = Some(format!("Failed to create '{}': {}", name, e));
+            false
+        }
+    }
+}
+
+fn draw_columns_popup(ui: &Ui, state: &mut FileDialogState) {
+    if let Some(_popup) = ui.begin_popup("##fb_columns_popup") {
+        match state.ui.file_list_view {
+            FileListViewMode::List => {
+                let mut enabled = state.ui.thumbnails_enabled;
+                if ui.checkbox("Enable thumbnails", &mut enabled) {
+                    state.ui.thumbnails_enabled = enabled;
+                }
+                if state.ui.thumbnails_enabled {
+                    ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
+                } else {
+                    ui.text_disabled("Preview (enable thumbnails)");
+                }
+            }
+            FileListViewMode::ThumbnailsList => {
+                ui.text_disabled("Preview (forced by Thumbs view)");
+            }
+            FileListViewMode::Grid => {}
+        }
+        ui.checkbox(
+            extension_ui_label(state),
+            &mut state.ui.file_list_columns.show_extension,
+        );
+        ui.checkbox("Size", &mut state.ui.file_list_columns.show_size);
+        ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
+
+        ui.separator();
+        if ui.small_button("Compact") {
+            if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
+                apply_compact_column_layout_keep_preview(&mut state.ui.file_list_columns);
+            } else {
+                apply_compact_column_layout(&mut state.ui.file_list_columns);
+            }
+        }
+        ui.same_line();
+        if ui.small_button("Balanced") {
+            if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
+                apply_balanced_column_layout_keep_preview(&mut state.ui.file_list_columns);
+            } else {
+                apply_balanced_column_layout(&mut state.ui.file_list_columns);
+            }
+        }
+
+        ui.separator();
+        ui.text("Order:");
+        let mut order = state.ui.file_list_columns.normalized_order();
+        let mut changed = false;
+        for index in 0..order.len() {
+            let column = order[index];
+            let mut label = data_column_label_for_state(state, column).to_string();
+            if !is_data_column_visible(&state.ui.file_list_columns, column) {
+                label.push_str(" (hidden)");
+            }
+            ui.text(label);
+            ui.same_line();
+            if ui.small_button(format!("Up##col_order_up_{index}")) {
+                changed |= move_column_order_up(&mut order, index);
+            }
+            ui.same_line();
+            if ui.small_button(format!("Down##col_order_down_{index}")) {
+                changed |= move_column_order_down(&mut order, index);
+            }
+        }
+        if changed {
+            state.ui.file_list_columns.order = order;
+        }
+
+        if ui.small_button("Reset columns") {
+            state.ui.file_list_columns = FileListColumnsConfig::default();
+        }
+
+        ui.separator();
+        let mut natural_sort = matches!(state.core.sort_mode, SortMode::Natural);
+        if ui.checkbox("Natural sort", &mut natural_sort) {
+            state.core.sort_mode = if natural_sort {
+                SortMode::Natural
+            } else {
+                SortMode::Lexicographic
+            };
+        }
+    }
+}
+
+fn draw_options_popup(ui: &Ui, state: &mut FileDialogState, has_thumbnail_backend: bool) {
+    if let Some(_popup) = ui.begin_popup("##fb_options") {
+        let mut nav_on_click = matches!(state.core.click_action, ClickAction::Navigate);
+        if ui.checkbox("Navigate on click", &mut nav_on_click) {
+            state.core.click_action = if nav_on_click {
+                ClickAction::Navigate
+            } else {
+                ClickAction::Select
+            };
+        }
+        let mut dbl = state.core.double_click;
+        if ui.checkbox("DblClick confirm", &mut dbl) {
+            state.core.double_click = dbl;
+        }
+        let mut quick = state.ui.breadcrumbs_quick_select;
+        if ui.checkbox("Quick path select", &mut quick) {
+            state.ui.breadcrumbs_quick_select = quick;
+        }
+        let mut show_hidden = state.core.show_hidden;
+        if ui.checkbox("Show hidden", &mut show_hidden) {
+            state.core.show_hidden = show_hidden;
+        }
+        ui.separator();
+        ui.text_disabled("Thumbnails:");
+        ui.text("Size:");
+        ui.same_line();
+        if ui.small_button("S##thumb_size") {
+            state.ui.thumbnail_size = [20.0, 20.0];
+        }
+        ui.same_line();
+        if ui.small_button("M##thumb_size") {
+            state.ui.thumbnail_size = [32.0, 32.0];
+        }
+        ui.same_line();
+        if ui.small_button("L##thumb_size") {
+            state.ui.thumbnail_size = [48.0, 48.0];
+        }
+        if !has_thumbnail_backend {
+            ui.same_line();
+            ui.text_disabled("No thumbnail backend");
+        }
+        ui.separator();
+        ui.text_disabled("Shortcuts:");
+        ui.bullet_text("Ctrl+L: focus Path");
+        ui.bullet_text("Ctrl+F: focus Search");
+        ui.bullet_text("Alt+Left/Right: back/forward");
+        ui.bullet_text("Backspace: up");
+        ui.bullet_text("F5: refresh");
+        ui.bullet_text("Tab: path completion");
+        ui.bullet_text("Up/Down: path history");
+    }
+}
+
+fn draw_minimal_places_popup(ui: &Ui, state: &mut FileDialogState) {
+    if !matches!(state.ui.layout, LayoutStyle::Minimal) {
+        return;
+    }
+    if let Some(_popup) = ui.begin_popup("##fb_places_popup") {
+        ui.text_disabled("Places");
+        ui.separator();
+        let mut new_cwd: Option<PathBuf> = None;
+        ui.child_window("##fb_places_popup_child")
+            .size([280.0, 380.0])
+            .border(true)
+            .build(ui, || {
+                new_cwd = draw_places_pane(ui, state);
+            });
+        if let Some(p) = new_cwd {
+            let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
+            ui.close_current_popup();
         }
     }
 }
@@ -2738,10 +3295,83 @@ fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
     }
 }
 
+fn estimate_breadcrumbs_total_width(
+    ui: &Ui,
+    cwd: &Path,
+    max_segments: usize,
+    quick_select: bool,
+) -> f32 {
+    let sep_label = if std::path::MAIN_SEPARATOR == '\\' {
+        "\\"
+    } else {
+        "/"
+    };
+
+    let style = ui.clone_style();
+    let spacing_x = style.item_spacing()[0];
+    let pad_x = style.frame_padding()[0];
+    let font = ui.current_font();
+    let font_size = ui.current_font_size();
+    let text_w = |s: &str| -> f32 { font.calc_text_size(font_size, f32::MAX, 0.0, s)[0] };
+    let button_w = |s: &str| -> f32 { text_w(s) + pad_x * 2.0 };
+    let sep_w = |s: &str| -> f32 { if quick_select { button_w(s) } else { text_w(s) } };
+
+    let mut crumbs: Vec<String> = Vec::new();
+    for comp in cwd.components() {
+        use std::path::Component;
+        match comp {
+            Component::Prefix(p) => {
+                crumbs.push(p.as_os_str().to_string_lossy().to_string());
+            }
+            Component::RootDir => {
+                crumbs.push(String::from(std::path::MAIN_SEPARATOR));
+            }
+            Component::Normal(seg) => {
+                crumbs.push(seg.to_string_lossy().to_string());
+            }
+            _ => {}
+        }
+    }
+
+    let n = crumbs.len();
+    if n == 0 {
+        return 0.0;
+    }
+
+    let compress = max_segments > 0 && n > max_segments && max_segments >= 3;
+    let mut widths: Vec<f32> = Vec::new();
+    if !compress {
+        for (i, label) in crumbs.iter().enumerate() {
+            widths.push(button_w(label));
+            if i + 1 < n {
+                widths.push(sep_w(sep_label));
+            }
+        }
+    } else {
+        let tail = max_segments - 2;
+        let start_tail = n.saturating_sub(tail);
+
+        widths.push(button_w(&crumbs[0]));
+        widths.push(sep_w(sep_label));
+        widths.push(button_w("..."));
+        widths.push(sep_w(sep_label));
+
+        for (i, label) in crumbs.iter().enumerate().skip(start_tail) {
+            widths.push(button_w(label));
+            if i + 1 < n {
+                widths.push(sep_w(sep_label));
+            }
+        }
+    }
+
+    let gaps = widths.len().saturating_sub(1) as f32;
+    widths.iter().sum::<f32>() + spacing_x * gaps
+}
+
 fn draw_breadcrumbs(
     ui: &Ui,
     state: &mut FileDialogState,
-    fs: &dyn FileSystem,
+    _fs: &dyn FileSystem,
     max_segments: usize,
     newline_at_end: bool,
     auto_scroll_end: bool,
@@ -2802,16 +3432,8 @@ fn draw_breadcrumbs(
             if i + 1 < n {
                 if state.ui.breadcrumbs_quick_select {
                     if ui.small_button(sep_label) {
-                        ui.open_popup("##breadcrumb_sep_popup");
-                    }
-                    unsafe {
-                        sys::igSetNextWindowSize(
-                            sys::ImVec2 { x: 360.0, y: 280.0 },
-                            dear_imgui_rs::Condition::Appearing as i32,
-                        );
-                    }
-                    if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
-                        draw_breadcrumb_sep_popup(ui, state, fs, path, &mut new_cwd);
+                        state.ui.breadcrumb_quick_parent = Some(path.clone());
+                        ui.open_popup("##igfd_path_popup");
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         new_cwd = Some(path.clone());
@@ -2850,16 +3472,8 @@ fn draw_breadcrumbs(
             ui.same_line();
             if state.ui.breadcrumbs_quick_select {
                 if ui.small_button(sep_label) {
-                    ui.open_popup("##breadcrumb_sep_popup");
-                }
-                unsafe {
-                    sys::igSetNextWindowSize(
-                        sys::ImVec2 { x: 360.0, y: 280.0 },
-                        dear_imgui_rs::Condition::Appearing as i32,
-                    );
-                }
-                if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
-                    draw_breadcrumb_sep_popup(ui, state, fs, path, &mut new_cwd);
+                    state.ui.breadcrumb_quick_parent = Some(path.clone());
+                    ui.open_popup("##igfd_path_popup");
                 }
                 if ui.is_item_clicked_with_button(MouseButton::Right) {
                     new_cwd = Some(path.clone());
@@ -2907,16 +3521,8 @@ fn draw_breadcrumbs(
         if let Some((_, parent)) = crumbs.get(start_tail.saturating_sub(1)) {
             if state.ui.breadcrumbs_quick_select {
                 if ui.small_button(sep_label) {
-                    ui.open_popup("##breadcrumb_ellipsis_sep_popup");
-                }
-                unsafe {
-                    sys::igSetNextWindowSize(
-                        sys::ImVec2 { x: 360.0, y: 280.0 },
-                        dear_imgui_rs::Condition::Appearing as i32,
-                    );
-                }
-                if let Some(_popup) = ui.begin_popup("##breadcrumb_ellipsis_sep_popup") {
-                    draw_breadcrumb_sep_popup(ui, state, fs, parent, &mut new_cwd);
+                    state.ui.breadcrumb_quick_parent = Some(parent.clone());
+                    ui.open_popup("##igfd_path_popup");
                 }
                 if ui.is_item_clicked_with_button(MouseButton::Right) {
                     new_cwd = Some(parent.clone());
@@ -2962,16 +3568,8 @@ fn draw_breadcrumbs(
             if i + 1 < n {
                 if state.ui.breadcrumbs_quick_select {
                     if ui.small_button(sep_label) {
-                        ui.open_popup("##breadcrumb_sep_popup");
-                    }
-                    unsafe {
-                        sys::igSetNextWindowSize(
-                            sys::ImVec2 { x: 360.0, y: 280.0 },
-                            dear_imgui_rs::Condition::Appearing as i32,
-                        );
-                    }
-                    if let Some(_popup) = ui.begin_popup("##breadcrumb_sep_popup") {
-                        draw_breadcrumb_sep_popup(ui, state, fs, path, &mut new_cwd);
+                        state.ui.breadcrumb_quick_parent = Some(path.clone());
+                        ui.open_popup("##igfd_path_popup");
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         new_cwd = Some(path.clone());
@@ -2995,47 +3593,54 @@ fn draw_breadcrumbs(
     new_cwd
 }
 
-fn draw_breadcrumb_sep_popup(
+fn draw_igfd_path_popup(
+    ui: &Ui,
+    state: &mut FileDialogState,
+    fs: &dyn FileSystem,
+    ref_size: [f32; 2],
+) -> Option<PathBuf> {
+    let mut out: Option<PathBuf> = None;
+
+    let mut ref_size = ref_size;
+    if ref_size[0] <= 0.0 || ref_size[1] <= 0.0 {
+        ref_size = ui.window_size();
+    }
+    let min_w = ui.frame_height() * 18.0;
+    let min_h = ui.frame_height() * 12.0;
+    let w = (ref_size[0] * 0.5).clamp(min_w, ref_size[0].max(min_w));
+    let h = (ref_size[1] * 0.5).clamp(min_h, ref_size[1].max(min_h));
+    unsafe {
+        sys::igSetNextWindowSize(
+            sys::ImVec2 { x: w, y: h },
+            dear_imgui_rs::Condition::Appearing as i32,
+        );
+    }
+
+    if let Some(_popup) = ui.begin_popup("##igfd_path_popup") {
+        let Some(parent) = state.ui.breadcrumb_quick_parent.clone() else {
+            ui.text_disabled("No path");
+            return None;
+        };
+        draw_igfd_path_table_popup(ui, state, fs, parent.as_path(), &mut out, [w, h]);
+    }
+    out
+}
+
+fn draw_igfd_path_table_popup(
     ui: &Ui,
     state: &mut FileDialogState,
     fs: &dyn FileSystem,
     parent: &Path,
     out: &mut Option<PathBuf>,
+    _size: [f32; 2],
 ) {
-    let parent_buf = parent.to_path_buf();
-    if state.ui.breadcrumb_quick_parent.as_ref() != Some(&parent_buf) {
-        state.ui.breadcrumb_quick_parent = Some(parent_buf);
-        state.ui.breadcrumb_quick_filter.clear();
-        state.ui.breadcrumb_quick_focus_next = true;
-    }
-
-    ui.text_disabled("Quick path selection");
-    ui.text_disabled(parent.display().to_string());
-    ui.separator();
-    if state.ui.breadcrumb_quick_focus_next {
-        ui.set_keyboard_focus_here();
-        state.ui.breadcrumb_quick_focus_next = false;
-    }
-    ui.set_next_item_width(ui.content_region_avail_width().max(80.0));
-    let filter_changed = ui
-        .input_text(
-            "##breadcrumb_quick_filter",
-            &mut state.ui.breadcrumb_quick_filter,
-        )
-        .hint("Filter...")
-        .auto_select_all(true)
-        .build();
-    if filter_changed {
-        state.ui.breadcrumb_quick_selected = None;
-        state.ui.breadcrumb_quick_scroll_to_selected_next = false;
-    }
-    ui.separator();
-
     let Ok(rd) = fs.read_dir(parent) else {
         ui.text_disabled("Failed to read directory");
         return;
     };
-    let needle = state.ui.breadcrumb_quick_filter.trim().to_lowercase();
+
+    // IGFD uses the global search tag for path popup filtering.
+    let needle = state.core.search.trim().to_lowercase();
     let mut dirs: Vec<_> = rd
         .into_iter()
         .filter(|e| {
@@ -3048,53 +3653,25 @@ fn draw_breadcrumb_sep_popup(
             e.name.to_lowercase().contains(&needle)
         })
         .collect();
-    dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-    if dirs.is_empty() {
-        ui.text_disabled("No subdirectories");
-        return;
-    }
-
-    if state.ui.breadcrumb_quick_selected.is_none() {
-        state.ui.breadcrumb_quick_selected = Some(dirs[0].path.clone());
-        state.ui.breadcrumb_quick_scroll_to_selected_next = true;
-    } else if let Some(sel) = state.ui.breadcrumb_quick_selected.as_ref() {
-        if !dirs.iter().any(|e| &e.path == sel) {
-            state.ui.breadcrumb_quick_selected = Some(dirs[0].path.clone());
-            state.ui.breadcrumb_quick_scroll_to_selected_next = true;
+    dirs.sort_by(|a, b| match state.core.sort_mode {
+        SortMode::Natural => {
+            crate::dialog_core::natural_cmp_lower(&a.name.to_lowercase(), &b.name.to_lowercase())
         }
-    }
-
-    let arrow_up = ui.is_key_pressed(Key::UpArrow);
-    let arrow_down = ui.is_key_pressed(Key::DownArrow);
-    if !ui.io().want_text_input() && (arrow_up || arrow_down) {
-        let cur_idx = state
-            .ui
-            .breadcrumb_quick_selected
-            .as_ref()
-            .and_then(|sel| dirs.iter().position(|e| &e.path == sel))
-            .unwrap_or(0);
-        let next_idx = if arrow_up {
-            cur_idx.saturating_sub(1)
-        } else {
-            (cur_idx + 1).min(dirs.len().saturating_sub(1))
-        };
-        state.ui.breadcrumb_quick_selected = Some(dirs[next_idx].path.clone());
-        state.ui.breadcrumb_quick_scroll_to_selected_next = true;
-    }
-
-    let enter = ui.is_key_pressed(Key::Enter) || ui.is_key_pressed(Key::KeypadEnter);
+        SortMode::Lexicographic => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    });
 
     let flags = dear_imgui_rs::TableFlags::SIZING_FIXED_FIT
         | dear_imgui_rs::TableFlags::HIDEABLE
         | dear_imgui_rs::TableFlags::ROW_BG
         | dear_imgui_rs::TableFlags::SCROLL_Y
         | dear_imgui_rs::TableFlags::NO_HOST_EXTEND_Y;
-    let avail = ui.content_region_avail();
-    if let Some(_t) = ui.begin_table_with_sizing("##breadcrumb_quick_table", 1, flags, avail, 0.0) {
+    let table_size = ui.content_region_avail();
+    if let Some(_t) =
+        ui.begin_table_with_sizing("##FileDialog_pathTable", 1, flags, table_size, 0.0)
+    {
         ui.table_setup_scroll_freeze(0, 1);
         ui.table_setup_column(
-            "Name",
+            "File name",
             dear_imgui_rs::TableColumnFlags::WIDTH_STRETCH,
             -1.0,
             0,
@@ -3111,39 +3688,28 @@ fn draw_breadcrumb_sep_popup(
                 continue;
             }
             let e = &dirs[idx];
+            let style = state
+                .ui
+                .file_styles
+                .style_for_owned(&e.name, EntryKind::Dir);
+            let mut label = e.name.as_str().to_string();
+            if let Some(icon) = style.as_ref().and_then(|s| s.icon.as_deref()) {
+                label = format!("{icon} {label}");
+            }
             ui.table_next_row();
             ui.table_next_column();
-            let selected = state
-                .ui
-                .breadcrumb_quick_selected
-                .as_ref()
-                .is_some_and(|p| *p == e.path);
-            if selected && state.ui.breadcrumb_quick_scroll_to_selected_next {
-                ui.set_scroll_here_y(0.5);
-                ui.set_item_default_focus();
-                state.ui.breadcrumb_quick_scroll_to_selected_next = false;
-            }
-
             if ui
-                .selectable_config(&e.name)
-                .selected(selected)
+                .selectable_config(label.as_str())
                 .flags(dear_imgui_rs::SelectableFlags::SPAN_ALL_COLUMNS)
                 .build()
             {
-                state.ui.breadcrumb_quick_selected = Some(e.path.clone());
-                if ui.is_mouse_double_clicked(MouseButton::Left) {
-                    *out = Some(e.path.clone());
-                    ui.close_current_popup();
-                    break;
-                }
+                *out = Some(e.path.clone());
+                ui.close_current_popup();
+                break;
             }
-        }
-    }
-
-    if enter && !ui.io().want_text_input() {
-        if let Some(sel) = state.ui.breadcrumb_quick_selected.clone() {
-            *out = Some(sel);
-            ui.close_current_popup();
+            if ui.is_item_hovered() {
+                ui.tooltip_text(e.path.display().to_string());
+            }
         }
     }
 }
@@ -3725,6 +4291,77 @@ fn data_column_label(column: FileListDataColumn) -> &'static str {
     }
 }
 
+fn extension_ui_label(state: &FileDialogState) -> &'static str {
+    if matches!(state.ui.header_style, HeaderStyle::IgfdClassic) {
+        "Type"
+    } else {
+        "Ext"
+    }
+}
+
+fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
+    let Some(filter) = active_filter else {
+        return 1;
+    };
+    let mut max_dots = 1usize;
+    for token in &filter.extensions {
+        let t = token.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if is_regex_token(t) {
+            continue;
+        }
+        let dot_count = t.as_bytes().iter().filter(|&&b| b == b'.').count();
+        let token_dots = if t.contains('*') || t.contains('?') {
+            dot_count
+        } else if t.starts_with('.') {
+            dot_count
+        } else {
+            dot_count.saturating_add(1)
+        };
+        max_dots = max_dots.max(token_dots);
+    }
+    max_dots.max(1)
+}
+
+fn is_regex_token(token: &str) -> bool {
+    let t = token.trim();
+    t.starts_with("((") && t.ends_with("))") && t.len() >= 4
+}
+
+fn type_extension_by_dot_count<'a>(name: &'a str, dots_to_extract: usize) -> &'a str {
+    if dots_to_extract == 0 {
+        return name.find('.').map(|i| &name[i..]).unwrap_or("");
+    }
+    let bytes = name.as_bytes();
+    let total_dots = bytes.iter().filter(|&&b| b == b'.').count();
+    if total_dots == 0 {
+        return "";
+    }
+    let dots = dots_to_extract.min(total_dots);
+    let mut seen = 0usize;
+    for i in (0..bytes.len()).rev() {
+        if bytes[i] == b'.' {
+            seen += 1;
+            if seen == dots {
+                return &name[i..];
+            }
+        }
+    }
+    ""
+}
+
+fn data_column_label_for_state(
+    state: &FileDialogState,
+    column: FileListDataColumn,
+) -> &'static str {
+    match column {
+        FileListDataColumn::Extension => extension_ui_label(state),
+        _ => data_column_label(column),
+    }
+}
+
 fn is_data_column_visible(config: &FileListColumnsConfig, column: FileListDataColumn) -> bool {
     match column {
         FileListDataColumn::Name => true,
@@ -4097,6 +4734,11 @@ fn draw_file_table_view(
     let show_size = columns_config.show_size;
     let show_modified = columns_config.show_modified;
     let layout = list_column_layout(show_preview, columns_config);
+    let type_dots_to_extract = if matches!(state.ui.header_style, HeaderStyle::IgfdClassic) {
+        igfd_type_dots_to_extract(state.core.active_filter())
+    } else {
+        1
+    };
 
     let mut table = ui.table("file_table").flags(flags).outer_size(size);
     if show_preview {
@@ -4112,6 +4754,7 @@ fn draw_file_table_view(
     }
 
     for column in &layout.data_columns {
+        let ext_label = extension_ui_label(state);
         table = match column {
             FileListDataColumn::Name => table
                 .column("Name")
@@ -4126,7 +4769,7 @@ fn draw_file_table_view(
                 ))
                 .done(),
             FileListDataColumn::Extension => table
-                .column("Ext")
+                .column(ext_label)
                 .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
                 .user_id(1)
                 .weight(resolved_data_column_weight(
@@ -4170,15 +4813,21 @@ fn draw_file_table_view(
         // Apply ImGui sort specs (single primary sort)
         if let Some(mut specs) = ui.table_get_sort_specs() {
             if specs.is_dirty() {
+                let extension_sort_by = if matches!(state.ui.header_style, HeaderStyle::IgfdClassic)
+                {
+                    SortBy::Type
+                } else {
+                    SortBy::Extension
+                };
                 if let Some(s) = specs.iter().next() {
                     let (by, asc) = match (s.column_index, s.sort_direction) {
                         (i, SortDirection::Ascending) if i == layout.name => (SortBy::Name, true),
                         (i, SortDirection::Descending) if i == layout.name => (SortBy::Name, false),
                         (i, SortDirection::Ascending) if layout.extension == Some(i) => {
-                            (SortBy::Extension, true)
+                            (extension_sort_by, true)
                         }
                         (i, SortDirection::Descending) if layout.extension == Some(i) => {
-                            (SortBy::Extension, false)
+                            (extension_sort_by, false)
                         }
                         (i, SortDirection::Ascending) if layout.size == Some(i) => {
                             (SortBy::Size, true)
@@ -4344,6 +4993,17 @@ fn draw_file_table_view(
                                 .map(|c| !c.sources.is_empty())
                                 .unwrap_or(false);
 
+                            if ui.menu_item_enabled_selected("Open", Some("Enter"), false, true) {
+                                state.ui.ui_error = None;
+                                *request_confirm |= matches!(
+                                    state
+                                        .core
+                                        .handle_event(CoreEvent::DoubleClickEntry { id: e.id }),
+                                    CoreEventOutcome::RequestConfirm
+                                );
+                                ui.close_current_popup();
+                            }
+                            ui.separator();
                             if ui.menu_item_enabled_selected(
                                 "Copy",
                                 Some("Ctrl+C"),
@@ -4407,6 +5067,8 @@ fn draw_file_table_view(
                     FileListDataColumn::Extension => {
                         if e.is_dir {
                             ui.text("");
+                        } else if matches!(state.ui.header_style, HeaderStyle::IgfdClassic) {
+                            ui.text(type_extension_by_dot_count(&e.name, type_dots_to_extract));
                         } else if let Some(i) = e.name.find('.') {
                             ui.text(&e.name[i..]);
                         } else {
@@ -4446,6 +5108,40 @@ fn draw_file_table_view(
                 .as_ref()
                 .map(|c| !c.sources.is_empty())
                 .unwrap_or(false);
+            if ui.menu_item("Refresh") {
+                let _ = state.core.handle_event(CoreEvent::Refresh);
+                ui.close_current_popup();
+            }
+            if state.ui.new_folder_enabled {
+                if ui.menu_item("New Folder") {
+                    match state.ui.layout {
+                        LayoutStyle::Standard => {
+                            state.ui.new_folder_inline_active = true;
+                        }
+                        LayoutStyle::Minimal => {
+                            state.ui.new_folder_open_next = true;
+                        }
+                    }
+                    state.ui.new_folder_name.clear();
+                    state.ui.new_folder_error = None;
+                    state.ui.new_folder_focus_next = true;
+                    ui.close_current_popup();
+                }
+            }
+            if ui.menu_item("Options...") {
+                ui.open_popup("##fb_options");
+                ui.close_current_popup();
+            }
+            if matches!(
+                state.ui.file_list_view,
+                FileListViewMode::List | FileListViewMode::ThumbnailsList
+            ) {
+                if ui.menu_item("Columns...") {
+                    ui.open_popup("##fb_columns_popup");
+                    ui.close_current_popup();
+                }
+            }
+            ui.separator();
             if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
                 state.ui.ui_error = None;
                 start_paste_into_cwd(state);
