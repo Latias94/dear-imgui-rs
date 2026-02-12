@@ -170,6 +170,7 @@ impl Ui {
     ///
     /// The platform handle type depends on the backend (e.g. `HWND` on Windows).
     #[doc(alias = "FindViewportByPlatformHandle")]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn find_viewport_by_platform_handle(
         &self,
         platform_handle: *mut std::ffi::c_void,

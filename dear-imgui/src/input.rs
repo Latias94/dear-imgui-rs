@@ -9,7 +9,8 @@
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::as_conversions
+    clippy::as_conversions,
+    clippy::unnecessary_cast
 )]
 use crate::sys;
 use bitflags::bitflags;
@@ -22,11 +23,11 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum MouseButton {
     /// Left mouse button
-    Left = sys::ImGuiMouseButton_Left as i32,
+    Left = sys::ImGuiMouseButton_Left,
     /// Right mouse button
-    Right = sys::ImGuiMouseButton_Right as i32,
+    Right = sys::ImGuiMouseButton_Right,
     /// Middle mouse button
-    Middle = sys::ImGuiMouseButton_Middle as i32,
+    Middle = sys::ImGuiMouseButton_Middle,
     /// Extra mouse button 1 (typically Back)
     Extra1 = 3,
     /// Extra mouse button 2 (typically Forward)
@@ -341,13 +342,13 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct KeyMods: i32 {
         /// Ctrl modifier
-        const CTRL = sys::ImGuiMod_Ctrl as i32;
+        const CTRL = sys::ImGuiMod_Ctrl;
         /// Shift modifier
-        const SHIFT = sys::ImGuiMod_Shift as i32;
+        const SHIFT = sys::ImGuiMod_Shift;
         /// Alt modifier
-        const ALT = sys::ImGuiMod_Alt as i32;
+        const ALT = sys::ImGuiMod_Alt;
         /// Super/Cmd modifier
-        const SUPER = sys::ImGuiMod_Super as i32;
+        const SUPER = sys::ImGuiMod_Super;
     }
 }
 
@@ -394,20 +395,20 @@ bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct InputFlags: i32 {
-        const NONE = sys::ImGuiInputFlags_None as i32;
-        const REPEAT = sys::ImGuiInputFlags_Repeat as i32;
+        const NONE = sys::ImGuiInputFlags_None;
+        const REPEAT = sys::ImGuiInputFlags_Repeat;
 
-        const ROUTE_ACTIVE = sys::ImGuiInputFlags_RouteActive as i32;
-        const ROUTE_FOCUSED = sys::ImGuiInputFlags_RouteFocused as i32;
-        const ROUTE_GLOBAL = sys::ImGuiInputFlags_RouteGlobal as i32;
-        const ROUTE_ALWAYS = sys::ImGuiInputFlags_RouteAlways as i32;
+        const ROUTE_ACTIVE = sys::ImGuiInputFlags_RouteActive;
+        const ROUTE_FOCUSED = sys::ImGuiInputFlags_RouteFocused;
+        const ROUTE_GLOBAL = sys::ImGuiInputFlags_RouteGlobal;
+        const ROUTE_ALWAYS = sys::ImGuiInputFlags_RouteAlways;
 
-        const ROUTE_OVER_FOCUSED = sys::ImGuiInputFlags_RouteOverFocused as i32;
-        const ROUTE_OVER_ACTIVE = sys::ImGuiInputFlags_RouteOverActive as i32;
-        const ROUTE_UNLESS_BG_FOCUSED = sys::ImGuiInputFlags_RouteUnlessBgFocused as i32;
-        const ROUTE_FROM_ROOT_WINDOW = sys::ImGuiInputFlags_RouteFromRootWindow as i32;
+        const ROUTE_OVER_FOCUSED = sys::ImGuiInputFlags_RouteOverFocused;
+        const ROUTE_OVER_ACTIVE = sys::ImGuiInputFlags_RouteOverActive;
+        const ROUTE_UNLESS_BG_FOCUSED = sys::ImGuiInputFlags_RouteUnlessBgFocused;
+        const ROUTE_FROM_ROOT_WINDOW = sys::ImGuiInputFlags_RouteFromRootWindow;
 
-        const TOOLTIP = sys::ImGuiInputFlags_Tooltip as i32;
+        const TOOLTIP = sys::ImGuiInputFlags_Tooltip;
     }
 }
 
@@ -423,47 +424,47 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct InputTextFlags: i32 {
         /// No flags
-        const NONE = sys::ImGuiInputTextFlags_None as i32;
+        const NONE = sys::ImGuiInputTextFlags_None;
         /// Allow 0123456789.+-*/
-        const CHARS_DECIMAL = sys::ImGuiInputTextFlags_CharsDecimal as i32;
+        const CHARS_DECIMAL = sys::ImGuiInputTextFlags_CharsDecimal;
         /// Allow 0123456789ABCDEFabcdef
-        const CHARS_HEXADECIMAL = sys::ImGuiInputTextFlags_CharsHexadecimal as i32;
+        const CHARS_HEXADECIMAL = sys::ImGuiInputTextFlags_CharsHexadecimal;
         /// Turn a..z into A..Z
-        const CHARS_UPPERCASE = sys::ImGuiInputTextFlags_CharsUppercase as i32;
+        const CHARS_UPPERCASE = sys::ImGuiInputTextFlags_CharsUppercase;
         /// Filter out spaces, tabs
-        const CHARS_NO_BLANK = sys::ImGuiInputTextFlags_CharsNoBlank as i32;
+        const CHARS_NO_BLANK = sys::ImGuiInputTextFlags_CharsNoBlank;
         /// Select entire text when first taking mouse focus
-        const AUTO_SELECT_ALL = sys::ImGuiInputTextFlags_AutoSelectAll as i32;
+        const AUTO_SELECT_ALL = sys::ImGuiInputTextFlags_AutoSelectAll;
         /// Return 'true' when Enter is pressed (as opposed to every time the value was modified)
-        const ENTER_RETURNS_TRUE = sys::ImGuiInputTextFlags_EnterReturnsTrue as i32;
+        const ENTER_RETURNS_TRUE = sys::ImGuiInputTextFlags_EnterReturnsTrue;
         /// Callback on pressing TAB (for completion handling)
-        const CALLBACK_COMPLETION = sys::ImGuiInputTextFlags_CallbackCompletion as i32;
+        const CALLBACK_COMPLETION = sys::ImGuiInputTextFlags_CallbackCompletion;
         /// Callback on pressing Up/Down arrows (for history handling)
-        const CALLBACK_HISTORY = sys::ImGuiInputTextFlags_CallbackHistory as i32;
+        const CALLBACK_HISTORY = sys::ImGuiInputTextFlags_CallbackHistory;
         /// Callback on each iteration (user can query cursor and modify text)
-        const CALLBACK_ALWAYS = sys::ImGuiInputTextFlags_CallbackAlways as i32;
+        const CALLBACK_ALWAYS = sys::ImGuiInputTextFlags_CallbackAlways;
         /// Callback on character inputs to replace or discard them
-        const CALLBACK_CHAR_FILTER = sys::ImGuiInputTextFlags_CallbackCharFilter as i32;
+        const CALLBACK_CHAR_FILTER = sys::ImGuiInputTextFlags_CallbackCharFilter;
         /// Pressing TAB input a '\t' character into the text field
-        const ALLOW_TAB_INPUT = sys::ImGuiInputTextFlags_AllowTabInput as i32;
+        const ALLOW_TAB_INPUT = sys::ImGuiInputTextFlags_AllowTabInput;
         /// In multi-line mode, unfocus with Enter, add new line with Ctrl+Enter
-        const CTRL_ENTER_FOR_NEW_LINE = sys::ImGuiInputTextFlags_CtrlEnterForNewLine as i32;
+        const CTRL_ENTER_FOR_NEW_LINE = sys::ImGuiInputTextFlags_CtrlEnterForNewLine;
         /// Disable following the cursor horizontally
-        const NO_HORIZONTAL_SCROLL = sys::ImGuiInputTextFlags_NoHorizontalScroll as i32;
+        const NO_HORIZONTAL_SCROLL = sys::ImGuiInputTextFlags_NoHorizontalScroll;
         /// Overwrite mode
-        const ALWAYS_OVERWRITE = sys::ImGuiInputTextFlags_AlwaysOverwrite as i32;
+        const ALWAYS_OVERWRITE = sys::ImGuiInputTextFlags_AlwaysOverwrite;
         /// Read-only mode
-        const READ_ONLY = sys::ImGuiInputTextFlags_ReadOnly as i32;
+        const READ_ONLY = sys::ImGuiInputTextFlags_ReadOnly;
         /// Password mode, display all characters as '*'
-        const PASSWORD = sys::ImGuiInputTextFlags_Password as i32;
+        const PASSWORD = sys::ImGuiInputTextFlags_Password;
         /// Disable undo/redo
-        const NO_UNDO_REDO = sys::ImGuiInputTextFlags_NoUndoRedo as i32;
+        const NO_UNDO_REDO = sys::ImGuiInputTextFlags_NoUndoRedo;
         /// Allow 0123456789.+-*/eE (Scientific notation input)
-        const CHARS_SCIENTIFIC = sys::ImGuiInputTextFlags_CharsScientific as i32;
+        const CHARS_SCIENTIFIC = sys::ImGuiInputTextFlags_CharsScientific;
         /// Callback on buffer capacity changes request
-        const CALLBACK_RESIZE = sys::ImGuiInputTextFlags_CallbackResize as i32;
+        const CALLBACK_RESIZE = sys::ImGuiInputTextFlags_CallbackResize;
         /// Callback on any edit (note that InputText() already returns true on edit)
-        const CALLBACK_EDIT = sys::ImGuiInputTextFlags_CallbackEdit as i32;
+        const CALLBACK_EDIT = sys::ImGuiInputTextFlags_CallbackEdit;
     }
 }
 

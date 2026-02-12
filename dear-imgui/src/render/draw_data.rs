@@ -714,9 +714,11 @@ mod tests {
         assert_eq!(draw_data.textures_count(), 0);
 
         let mut textures_vec: crate::internal::ImVector<*mut sys::ImTextureData> =
-            crate::internal::ImVector::default();
-        textures_vec.size = 1;
-        textures_vec.data = std::ptr::null_mut();
+            crate::internal::ImVector {
+                size: 1,
+                data: std::ptr::null_mut(),
+                ..crate::internal::ImVector::default()
+            };
         let draw_data = DrawData {
             valid: false,
             cmd_lists_count: 0,

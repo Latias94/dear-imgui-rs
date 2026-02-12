@@ -260,6 +260,7 @@ impl From<Id> for sys::ImGuiID {
 /// Condition for setting window/widget properties
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(i32)]
+#[allow(clippy::unnecessary_cast)]
 pub enum Condition {
     /// Never apply the setting
     Never = -1,

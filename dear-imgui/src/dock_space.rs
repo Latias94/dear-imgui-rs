@@ -1,7 +1,8 @@
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::as_conversions
+    clippy::as_conversions,
+    clippy::unnecessary_cast
 )]
 //! Docking space functionality for Dear ImGui
 //!

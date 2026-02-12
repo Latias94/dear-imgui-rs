@@ -44,7 +44,7 @@ fn input_text_multiline_growable_buffer_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
-    let mut text = String::from_iter(std::iter::repeat('b').take(8192));
+    let mut text = String::from_iter(std::iter::repeat_n('b', 8192));
 
     let ui = ctx.frame();
     let _ = ui

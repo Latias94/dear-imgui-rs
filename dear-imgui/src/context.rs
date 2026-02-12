@@ -664,8 +664,7 @@ impl Context {
                 return;
             }
 
-            let mut bytes =
-                std::slice::from_raw_parts(data_ptr as *const u8, out_ini_size as usize);
+            let mut bytes = std::slice::from_raw_parts(data_ptr as *const u8, out_ini_size);
             if bytes.last() == Some(&0) {
                 bytes = &bytes[..bytes.len().saturating_sub(1)];
             }
