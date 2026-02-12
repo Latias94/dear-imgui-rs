@@ -18,6 +18,17 @@ renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
 renderer.render_draw_data(&imgui.render(), &mut render_pass)?;
 ```
 
+## Selecting wgpu version
+
+By default this crate uses `wgpu` v28.
+
+If your ecosystem is pinned to `wgpu` v27 (e.g. a release train), select it explicitly:
+
+```toml
+[dependencies]
+dear-imgui-wgpu = { version = "0.8", default-features = false, features = ["wgpu-27"] }
+```
+
 ## What You Get
 
 - ImGui v1.92 texture system integration (create/update/destroy)
@@ -36,7 +47,7 @@ renderer.render_draw_data(&imgui.render(), &mut render_pass)?;
 |-----------------|---------|
 | Crate           | 0.8.x   |
 | dear-imgui-rs   | 0.8.x   |
-| wgpu            | 28 (0.8.x), 27 (0.7.x) |
+| wgpu            | 28 (default), 27 (feature `wgpu-27`) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -48,7 +59,11 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 ## Features
 
 - Default: no extra features required for native builds
-- `webgl`: forwards to `wgpu/webgl` (WASM + WebGL)
-- `webgpu`: forwards to `wgpu/webgpu` (WASM + WebGPU)
+- WGPU version selection (mutually exclusive)
+  - `wgpu-28` (default)
+  - `wgpu-27`
+- WASM targets
+  - `webgl` / `webgpu` select the WASM route for the default `wgpu-28` build
+  - With `wgpu-27`, use `webgl-wgpu27` / `webgpu-wgpu27` instead
 
 Pick exactly one of `webgl` or `webgpu` for browser targets; for native leave both off.

@@ -133,6 +133,15 @@ dear-imgui-wgpu = "0.8"   # or dear-imgui-glow
 dear-imgui-winit = "0.8"
 ```
 
+If you need `wgpu = 27` compatibility for the WGPU renderer backend:
+
+```toml
+[dependencies]
+dear-imgui-rs = "0.8"
+dear-imgui-wgpu = { version = "0.8", default-features = false, features = ["wgpu-27"] }
+dear-imgui-winit = "0.8"
+```
+
 ### Application Runner (Recommended for Quick Start)
 
 ```toml
@@ -225,7 +234,7 @@ Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.8.x   | wgpu = 28         | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
+| dear-imgui-wgpu  | 0.8.x   | wgpu = 28/27      | WebGPU renderer (default wgpu 28; optional wgpu 27 via features). Experimental multi-viewport on native via winit/SDL3; disabled on wasm |
 | dear-imgui-glow  | 0.8.x   | glow = 0.16       | OpenGL renderer (winit/glutin) |
 | dear-imgui-winit | 0.8.x   | winit = 0.30.12   | Winit platform backend         |
 | dear-imgui-sdl3  | 0.8.x   | sdl3 = 0.17       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
@@ -248,8 +257,9 @@ Extensions
 | dear-imguizmo-quat  | 0.8.x   | 0.8.x                  | dear-imguizmo-quat-sys 0.8.x| Quaternion gizmo                       |
 | dear-imgui-reflect  | 0.8.x   | 0.8.x                  | —                           | Reflection-based UI helpers (pure Rust)|
 
-Note: if you need `wgpu = 27` (or an older toolchain), use the 0.7.x train. The latest core patch is
-`dear-imgui-rs 0.7.1` (core-only); the rest of the workspace crates remain at 0.7.0.
+Note: if your ecosystem is pinned to `wgpu = 27` (e.g. a release train), you can use
+`dear-imgui-wgpu 0.8.x` with `default-features = false, features = ["wgpu-27"]`. `dear-app` stays
+on the default `wgpu = 28` path.
 
 Maintenance rules
 

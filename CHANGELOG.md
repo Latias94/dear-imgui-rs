@@ -65,6 +65,7 @@ This release focuses on `dear-app` usability improvements for real applications 
 - Backends
   - `dear-imgui-ash`: external texture helpers mirroring WGPU (`register_external_texture_with_sampler`, `update_external_texture_view`, `update_external_texture_sampler`, `unregister_texture`).
   - `dear-imgui-ash`: `multi-viewport-sdl3` feature to render secondary viewports when using the SDL3 platform backend (creates surfaces via `Platform_CreateVkSurface`).
+  - `dear-imgui-wgpu`: add feature-gated support for both `wgpu` v28 (default) and v27 (`wgpu-27`), to better match ecosystems pinned to a specific major.
 - Examples
   - `threaded_snapshot_minimal`: headless multi-thread example demonstrating `FrameSnapshot` + `TextureFeedback` (no real GPU renderer).
 - Extensions

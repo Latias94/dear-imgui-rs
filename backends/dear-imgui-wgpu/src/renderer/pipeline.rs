@@ -35,7 +35,10 @@ impl WgpuRenderer {
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Dear ImGui Pipeline Layout"),
             bind_group_layouts: &[uniform_layout, image_layout],
+            #[cfg(feature = "wgpu-28")]
             immediate_size: 0,
+            #[cfg(feature = "wgpu-27")]
+            push_constant_ranges: &[],
         });
 
         // Get shader module
@@ -129,7 +132,10 @@ impl WgpuRenderer {
             depth_stencil,
             multisample: backend_data.init_info.pipeline_multisample_state,
             fragment: Some(fragment_state),
+            #[cfg(feature = "wgpu-28")]
             multiview_mask: None,
+            #[cfg(feature = "wgpu-27")]
+            multiview: None,
             cache: None,
         });
 

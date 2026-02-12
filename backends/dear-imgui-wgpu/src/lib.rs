@@ -5,6 +5,9 @@
 //!
 //! # Features
 //!
+//! - **WGPU version selection**: choose exactly one of:
+//!   - `wgpu-28` (default)
+//!   - `wgpu-27` (for ecosystems pinned to wgpu 27.x, e.g. some Bevy version trains)
 //! - **Modern texture management**: Full integration with Dear ImGui's ImTextureData system
 //! - **External textures**: Register existing `wgpu::Texture` resources for UI display,
 //!   with optional per-texture custom samplers.
@@ -41,6 +44,45 @@
 //! # Ok(())
 //! # }
 //! ```
+
+// Select a single wgpu version via features (default: wgpu-28).
+//
+// We keep the public API surface using `wgpu::*` types, but allow downstream crates to opt into a
+// specific major version to better match their ecosystem (e.g. Bevy).
+#[cfg(all(feature = "wgpu-27", feature = "wgpu-28"))]
+compile_error!("Features `wgpu-27` and `wgpu-28` are mutually exclusive; enable only one.");
+#[cfg(not(any(feature = "wgpu-27", feature = "wgpu-28")))]
+compile_error!("Either feature `wgpu-27` or `wgpu-28` must be enabled for dear-imgui-wgpu.");
+
+#[cfg(all(feature = "wgpu-27", feature = "webgl"))]
+compile_error!(
+    "Feature `webgl` selects the wgpu-28 WebGL route; use `webgl-wgpu27` with `wgpu-27`."
+);
+#[cfg(all(feature = "wgpu-27", feature = "webgpu"))]
+compile_error!(
+    "Feature `webgpu` selects the wgpu-28 WebGPU route; use `webgpu-wgpu27` with `wgpu-27`."
+);
+#[cfg(all(feature = "wgpu-28", feature = "webgl-wgpu27"))]
+compile_error!(
+    "Feature `webgl-wgpu27` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-28", feature = "webgpu-wgpu27"))]
+compile_error!(
+    "Feature `webgpu-wgpu27` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-27", feature = "webgl-wgpu28"))]
+compile_error!(
+    "Feature `webgl-wgpu28` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-27", feature = "webgpu-wgpu28"))]
+compile_error!(
+    "Feature `webgpu-wgpu28` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
+);
+
+#[cfg(feature = "wgpu-27")]
+extern crate wgpu27 as wgpu;
+#[cfg(feature = "wgpu-28")]
+extern crate wgpu28 as wgpu;
 
 // Module declarations
 mod data;

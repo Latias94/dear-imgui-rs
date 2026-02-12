@@ -12,7 +12,8 @@ keywords.workspace = true
 
 [dependencies]
 dear-imgui-rs = { path = "../../dear-imgui", version = "0.8" }
-wgpu.workspace = true
+wgpu27 = { package = "wgpu", version = "27.0", optional = true }
+wgpu28 = { package = "wgpu", version = "28.0", optional = true }
 bytemuck = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
@@ -21,7 +22,10 @@ sdl3-sys = { version = "0.6", optional = true }
 raw-window-handle = { workspace = true, optional = true }
 
 [features]
-default = []
+default = ["wgpu-28"]
+# Select wgpu major version. These are mutually exclusive.
+wgpu-27 = ["dep:wgpu27"]
+wgpu-28 = ["dep:wgpu28"]
 # Enable multi-viewport support with the winit platform backend.
 multi-viewport-winit = ["dear-imgui-rs/multi-viewport", "dep:winit"]
 # Enable multi-viewport support with SDL3 platform backend (native only)
@@ -29,8 +33,12 @@ multi-viewport-sdl3 = ["dear-imgui-rs/multi-viewport", "dep:sdl3-sys", "dep:raw-
 # Debug logging for multi-viewport paths (see mvlog! macro)
 mv-log = []
 # Enable WebGL support for WASM
-webgl = ["wgpu/webgl"]
-webgpu = ["wgpu/webgpu"]
+webgl = ["webgl-wgpu28"]
+webgpu = ["webgpu-wgpu28"]
+webgl-wgpu27 = ["wgpu27/webgl"]
+webgl-wgpu28 = ["wgpu28/webgl"]
+webgpu-wgpu27 = ["wgpu27/webgpu"]
+webgpu-wgpu28 = ["wgpu28/webgpu"]
 # Experimental: enable wasm font-atlas access for testing
 wasm-font-atlas-experimental = ["dear-imgui-rs/wasm-font-atlas-experimental"]
 
