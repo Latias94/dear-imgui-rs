@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-glow"
-version = "0.8.0"
+version = "0.9.0"
 edition.workspace = true
 description = "Glow (OpenGL) renderer backend for dear-imgui-rs"
 license.workspace = true
@@ -11,7 +11,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.8" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.9" }
 glow.workspace = true
 memoffset.workspace = true
 thiserror.workspace = true

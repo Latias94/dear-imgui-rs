@@ -1,6 +1,6 @@
 [package]
 name = "dear-imnodes-sys"
-version = "0.8.0"
+version = "0.9.0"
 edition.workspace = true
 description = "Low-level FFI bindings for ImNodes via cimnodes (C API)"
 license.workspace = true
@@ -32,7 +32,7 @@ features = []
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.8" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.9" }
 cfg-if.workspace = true
 flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }

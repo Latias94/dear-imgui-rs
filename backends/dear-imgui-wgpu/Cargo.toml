@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-wgpu"
-version = "0.8.0"
+version = "0.9.0"
 edition.workspace = true
 description = "WGPU renderer backend for dear-imgui-rs (native + WebAssembly)"
 license.workspace = true
@@ -11,7 +11,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.8" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.9" }
 wgpu27 = { package = "wgpu", version = "27.0", optional = true }
 wgpu28 = { package = "wgpu", version = "28.0", optional = true }
 bytemuck = { workspace = true, features = ["derive"] }
