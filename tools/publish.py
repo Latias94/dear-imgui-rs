@@ -7,7 +7,7 @@ dependencies are published before their dependents.
 
 Publishing Order:
 1. Core: dear-imgui-sys -> dear-imgui-rs
-2. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-sdl3
+2. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-ash, dear-imgui-sdl3
 3. Extensions (sys): dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys,
                      dear-implot3d-sys, dear-imguizmo-quat-sys
 4. Extensions (high-level): dear-implot, dear-imnodes, dear-imguizmo,
@@ -57,6 +57,7 @@ PUBLISH_ORDER = [
     ("dear-imgui-winit", "backends/dear-imgui-winit"),
     ("dear-imgui-wgpu", "backends/dear-imgui-wgpu"),
     ("dear-imgui-glow", "backends/dear-imgui-glow"),
+    ("dear-imgui-ash", "backends/dear-imgui-ash"),
     ("dear-imgui-sdl3", "backends/dear-imgui-sdl3"),
     
     # Extension sys crates (depend on dear-imgui-sys)

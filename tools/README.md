@@ -86,7 +86,7 @@ python3 tools/publish.py --wait 60
 
 **Publishing Order:**
 1. Core: `dear-imgui-sys` → `dear-imgui-rs`
-2. Backends: `dear-imgui-winit`, `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-sdl3`
+2. Backends: `dear-imgui-winit`, `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-sdl3`
 3. Extension sys: `dear-implot-sys`, `dear-imnodes-sys`, etc.
 4. Extension high-level: `dear-implot`, `dear-imnodes`, etc.
 5. Application: `dear-app`
