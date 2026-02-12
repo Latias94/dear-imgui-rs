@@ -5,7 +5,9 @@
 
 pub mod draw_data;
 pub mod renderer;
+pub mod snapshot;
 
 // Re-export commonly used types
 pub use draw_data::*;
 pub use renderer::*;
+pub use snapshot::*;

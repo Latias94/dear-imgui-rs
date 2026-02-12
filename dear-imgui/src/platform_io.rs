@@ -1074,6 +1074,54 @@ impl PlatformIo {
         usize::try_from(vector.Size).unwrap_or(0)
     }
 
+    /// Apply managed texture feedback produced by a renderer thread.
+    ///
+    /// In ImGui 1.92+, `DrawData::textures()` is built from `PlatformIO.Textures[]`. Renderer backends
+    /// are expected to update each `TextureData`'s `Status` (and `TexID` on creation) after handling
+    /// `WantCreate`/`WantUpdates`/`WantDestroy` requests.
+    ///
+    /// In a threaded engine, the renderer thread cannot safely mutate ImGui state directly. The
+    /// intended flow is:
+    /// - UI thread: snapshot texture requests and send to renderer
+    /// - Render thread: create/update/destroy GPU resources and produce `TextureFeedback`
+    /// - UI thread: call this function before the next frame to apply the feedback
+    ///
+    /// Returns the number of textures updated.
+    pub fn apply_texture_feedback(
+        &mut self,
+        feedback: &[crate::render::snapshot::TextureFeedback],
+    ) -> usize {
+        if feedback.is_empty() {
+            return 0;
+        }
+
+        let mut by_id: std::collections::HashMap<i32, crate::render::snapshot::TextureFeedback> =
+            std::collections::HashMap::with_capacity(feedback.len());
+        for &fb in feedback {
+            by_id.insert(fb.id.0, fb);
+        }
+
+        let mut applied = 0usize;
+        for mut tex in self.textures() {
+            let uid = tex.unique_id();
+            let Some(fb) = by_id.get(&uid) else { continue };
+
+            // Destroyed clears backend bindings (TexID/BackendUserData) as expected by ImGui.
+            if fb.status == crate::texture::TextureStatus::Destroyed {
+                tex.set_status(fb.status);
+            } else {
+                if let Some(tex_id) = fb.tex_id {
+                    tex.set_tex_id(tex_id);
+                }
+                tex.set_status(fb.status);
+            }
+
+            applied += 1;
+        }
+
+        applied
+    }
+
     /// Get a specific texture by index
     ///
     /// Returns None if the index is out of bounds.

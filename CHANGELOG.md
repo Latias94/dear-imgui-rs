@@ -39,6 +39,10 @@ This release focuses on `dear-app` usability improvements for real applications 
   - `Ui::set_window_focus`: focus a window by name, or clear focus via `None` (`SetWindowFocus(NULL)`).
   - `Context::{register_user_texture,unregister_user_texture}`: safe wrappers for ImGui's experimental `RegisterUserTexture()` API to include user-created `ImTextureData` in `DrawData::textures()`.
   - `Context::register_user_texture_token`: RAII helper returning `RegisteredUserTexture` which unregisters on drop.
+  - Threaded renderer support: `render::snapshot` module with `FrameSnapshot` (`Send + Sync`) for Extract → Render architectures (e.g. Bevy). Snapshots include Rust-owned draw lists/commands and managed texture requests extracted from `DrawData::textures()`.
+  - `render::snapshot::TextureFeedback` and `PlatformIo::apply_texture_feedback`: apply renderer-thread results (TexID/status) back to ImGui-managed textures on the UI thread.
+  - `Context::platform_io_mut` is now available without the `multi-viewport` feature (enables applying texture feedback even when viewports are disabled).
+  - `dear_imgui_rs::fonts` module path is now public (e.g. `dear_imgui_rs::fonts::FontConfig`).
   - `PlatformIo::{platform_create_vk_surface_raw,set_platform_create_vk_surface_raw}`: access to ImGui's optional `Platform_CreateVkSurface` callback (used by Vulkan renderers with SDL2/SDL3/GLFW/Win32 multi-viewport).
   - Input capture hints: `Ui::set_next_frame_want_capture_keyboard` / `Ui::set_next_frame_want_capture_mouse`.
   - Navigation: `Ui::set_nav_cursor_visible`.
@@ -61,6 +65,8 @@ This release focuses on `dear-app` usability improvements for real applications 
 - Backends
   - `dear-imgui-ash`: external texture helpers mirroring WGPU (`register_external_texture_with_sampler`, `update_external_texture_view`, `update_external_texture_sampler`, `unregister_texture`).
   - `dear-imgui-ash`: `multi-viewport-sdl3` feature to render secondary viewports when using the SDL3 platform backend (creates surfaces via `Platform_CreateVkSurface`).
+- Examples
+  - `threaded_snapshot_minimal`: headless multi-thread example demonstrating `FrameSnapshot` + `TextureFeedback` (no real GPU renderer).
 - Extensions
   - `dear-file-browser` (ImGui backend parity with ImGuiFileDialog)
     - Breadcrumb path composer: end-aligned tail visibility + separator quick-select popup rendered as an IGFD-style path table.

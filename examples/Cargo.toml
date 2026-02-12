@@ -215,6 +215,10 @@ name = "ime_debug"
 path = "04-integration/ime_debug.rs"
 
 [[bin]]
+name = "threaded_snapshot_minimal"
+path = "04-integration/threaded_snapshot_minimal.rs"
+
+[[bin]]
 name = "dear_app_docking"
 path = "02-docking/dear_app_docking.rs"
 

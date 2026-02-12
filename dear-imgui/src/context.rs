@@ -428,8 +428,10 @@ impl Context {
 
     // removed legacy set_renderer_name_or_panic (use set_renderer_name())
 
-    /// Get mutable access to the platform IO
-    #[cfg(feature = "multi-viewport")]
+    /// Get mutable access to the platform IO.
+    ///
+    /// Note: `ImGuiPlatformIO` exists even when multi-viewport is disabled. We expose it
+    /// unconditionally so callers can use ImGui 1.92+ texture management via `PlatformIO.Textures[]`.
     pub fn platform_io_mut(&mut self) -> &mut crate::platform_io::PlatformIo {
         let _guard = CTX_MUTEX.lock();
         unsafe {

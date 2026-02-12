@@ -322,7 +322,7 @@ mod dock_builder;
 mod dock_space;
 mod draw;
 mod error;
-mod fonts;
+pub mod fonts;
 pub mod input;
 pub mod internal;
 mod io;
