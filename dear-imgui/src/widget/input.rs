@@ -341,7 +341,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                 return 0;
             }
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
+                if ((*data).EventFlag as i32) == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
                     let user_data = (*data).UserData as *mut ImString;
                     if user_data.is_null() {
                         return;
@@ -372,7 +372,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     label_ptr,
                     buf_ptr,
                     buf_size,
-                    flags.bits(),
+                    flags.raw(),
                     Some(resize_cb_imstr),
                     user_ptr,
                 )
@@ -382,7 +382,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     hint_ptr,
                     buf_ptr,
                     buf_size,
-                    flags.bits(),
+                    flags.raw(),
                     Some(resize_cb_imstr),
                     user_ptr,
                 )
@@ -560,7 +560,8 @@ where
                     return 0;
                 }
 
-                let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
+                let event_flag =
+                    unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag as i32) };
                 match event_flag {
                     InputTextFlags::CALLBACK_RESIZE => unsafe {
                         let requested_i32 = (*data).BufSize;
@@ -643,7 +644,7 @@ where
                     label_ptr,
                     buf_ptr,
                     capacity,
-                    flags.bits(),
+                    flags.raw(),
                     Some(callback_router::<T>),
                     user_ptr,
                 )
@@ -653,7 +654,7 @@ where
                     hint_ptr,
                     buf_ptr,
                     capacity,
-                    flags.bits(),
+                    flags.raw(),
                     Some(callback_router::<T>),
                     user_ptr,
                 )
@@ -729,7 +730,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
                 return 0;
             }
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                if (*data).EventFlag == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
+                if ((*data).EventFlag as i32) == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
                     let user_data = (*data).UserData as *mut ImString;
                     if user_data.is_null() {
                         return;
@@ -760,7 +761,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
                 buf_ptr,
                 buf_size,
                 size_vec,
-                flags.bits(),
+                flags.raw(),
                 Some(resize_cb_imstr),
                 user_ptr,
             )
@@ -836,7 +837,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
             }
 
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                let event_flag = InputTextFlags::from_bits_truncate((*data).EventFlag);
+                let event_flag = InputTextFlags::from_bits_truncate((*data).EventFlag as i32);
                 match event_flag {
                     InputTextFlags::CALLBACK_RESIZE => {
                         let user_ptr = (*data).UserData as *mut UserData;
@@ -891,7 +892,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
                 buf_ptr,
                 capacity,
                 size_vec,
-                flags.bits(),
+                flags.raw(),
                 Some(callback_router),
                 user_ptr,
             )
@@ -988,7 +989,8 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                     return 0;
                 }
 
-                let event_flag = unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag) };
+                let event_flag =
+                    unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag as i32) };
                 match event_flag {
                     InputTextFlags::CALLBACK_RESIZE => unsafe {
                         let requested_i32 = (*data).BufSize;
@@ -1072,7 +1074,7 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                 buf_ptr,
                 capacity,
                 size_vec,
-                flags.bits(),
+                flags.raw(),
                 Some(callback_router::<T>),
                 user_ptr,
             )
@@ -1138,7 +1140,7 @@ impl<'ui> InputInt<'ui> {
                 value as *mut i32,
                 self.step,
                 self.step_fast,
-                self.flags.bits(),
+                self.flags.raw(),
             )
         }
     }
@@ -1205,7 +1207,7 @@ impl<'ui> InputFloat<'ui> {
                 self.step,
                 self.step_fast,
                 format_ptr,
-                self.flags.bits(),
+                self.flags.raw(),
             )
         }
     }
@@ -1272,7 +1274,7 @@ impl<'ui> InputDouble<'ui> {
                 self.step,
                 self.step_fast,
                 format_ptr,
-                self.flags.bits(),
+                self.flags.raw(),
             )
         }
     }
@@ -1538,7 +1540,7 @@ extern "C" fn callback(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
     }
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-        let event_flag = InputTextFlags::from_bits_truncate((*data).EventFlag);
+        let event_flag = InputTextFlags::from_bits_truncate((*data).EventFlag as i32);
         let buffer_ptr = (*data).UserData as *mut String;
 
         if buffer_ptr.is_null() {
@@ -1663,7 +1665,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p
                     .map(|step| step as *const T)
                     .unwrap_or(ptr::null()) as *const c_void,
                 two,
-                self.flags.bits() as i32,
+                self.flags.raw(),
             )
         }
     }
@@ -1762,7 +1764,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
                     .map(|step| step as *const T)
                     .unwrap_or(ptr::null()) as *const c_void,
                 two,
-                self.flags.bits() as i32,
+                self.flags.raw(),
             )
         }
     }
@@ -1820,7 +1822,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat2<'ui, 'p, L, F> {
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igInputFloat2(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
+            sys::igInputFloat2(one, self.value.as_mut_ptr(), two, self.flags.raw())
         }
     }
 }
@@ -1877,7 +1879,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat3<'ui, 'p, L, F> {
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igInputFloat3(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
+            sys::igInputFloat3(one, self.value.as_mut_ptr(), two, self.flags.raw())
         }
     }
 }
@@ -1934,7 +1936,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat4<'ui, 'p, L, F> {
                 .ui
                 .scratch_txt_with_opt(self.label, self.display_format);
 
-            sys::igInputFloat4(one, self.value.as_mut_ptr(), two, self.flags.bits() as i32)
+            sys::igInputFloat4(one, self.value.as_mut_ptr(), two, self.flags.raw())
         }
     }
 }
@@ -1974,11 +1976,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt2<'ui, 'p, L> {
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
-            sys::igInputInt2(
-                label_cstr,
-                self.value.as_mut_ptr(),
-                self.flags.bits() as i32,
-            )
+            sys::igInputInt2(label_cstr, self.value.as_mut_ptr(), self.flags.raw())
         }
     }
 }
@@ -2018,11 +2016,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt3<'ui, 'p, L> {
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
-            sys::igInputInt3(
-                label_cstr,
-                self.value.as_mut_ptr(),
-                self.flags.bits() as i32,
-            )
+            sys::igInputInt3(label_cstr, self.value.as_mut_ptr(), self.flags.raw())
         }
     }
 }
@@ -2062,11 +2056,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt4<'ui, 'p, L> {
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
-            sys::igInputInt4(
-                label_cstr,
-                self.value.as_mut_ptr(),
-                self.flags.bits() as i32,
-            )
+            sys::igInputInt4(label_cstr, self.value.as_mut_ptr(), self.flags.raw())
         }
     }
 }
