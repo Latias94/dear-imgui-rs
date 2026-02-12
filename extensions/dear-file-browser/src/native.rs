@@ -42,6 +42,27 @@ impl FileDialog {
         d
     }
 
+    fn to_rfd_async(&self) -> rfd::AsyncFileDialog {
+        let mut a = rfd::AsyncFileDialog::new();
+        if let Some(dir) = self.start_dir.as_deref() {
+            a = a.set_directory(dir);
+        }
+        if let Some(name) = self.default_name.as_deref() {
+            a = a.set_file_name(name);
+        }
+        for f in &self.filters {
+            let exts_owned: Vec<String> = f
+                .extensions
+                .iter()
+                .filter_map(|s| plain_extension_for_native(s))
+                .collect();
+            if !exts_owned.is_empty() {
+                a = a.add_filter(&f.name, &exts_owned);
+            }
+        }
+        a
+    }
+
     /// Open a dialog synchronously (blocking).
     pub fn open_blocking(self) -> Result<Selection, FileDialogError> {
         match self.effective_backend() {
@@ -99,26 +120,14 @@ impl FileDialog {
         let mut sel = Selection::default();
         match self.mode {
             DialogMode::OpenFile => {
-                let mut a = A::new();
-                if let Some(dir) = self.start_dir.as_deref() {
-                    a = a.set_directory(dir);
-                }
-                if let Some(name) = self.default_name.as_deref() {
-                    a = a.set_file_name(name);
-                }
+                let a = self.to_rfd_async();
                 let f = a.pick_file().await;
                 if let Some(h) = f {
                     sel.paths.push(h.path().to_path_buf());
                 }
             }
             DialogMode::OpenFiles => {
-                let mut a = A::new();
-                if let Some(dir) = self.start_dir.as_deref() {
-                    a = a.set_directory(dir);
-                }
-                if let Some(name) = self.default_name.as_deref() {
-                    a = a.set_file_name(name);
-                }
+                let a = self.to_rfd_async();
                 if !self.allow_multi {
                     let f = a.pick_file().await;
                     if let Some(h) = f {
@@ -143,13 +152,7 @@ impl FileDialog {
                 }
             }
             DialogMode::SaveFile => {
-                let mut a = A::new();
-                if let Some(dir) = self.start_dir.as_deref() {
-                    a = a.set_directory(dir);
-                }
-                if let Some(name) = self.default_name.as_deref() {
-                    a = a.set_file_name(name);
-                }
+                let a = self.to_rfd_async();
                 let f = a.save_file().await;
                 if let Some(h) = f {
                     sel.paths.push(h.path().to_path_buf());

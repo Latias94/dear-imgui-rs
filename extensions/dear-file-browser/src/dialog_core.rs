@@ -2119,7 +2119,7 @@ fn filter_entries_in_place(
 }
 
 fn sort_entries_in_place(
-    entries: &mut Vec<DirEntry>,
+    entries: &mut [DirEntry],
     sort_by: SortBy,
     sort_ascending: bool,
     sort_mode: SortMode,
@@ -2195,7 +2195,7 @@ fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
     max_dots.max(1)
 }
 
-fn type_extension_lower<'a>(name_lower: &'a str, dots_to_extract: usize) -> &'a str {
+fn type_extension_lower(name_lower: &str, dots_to_extract: usize) -> &str {
     if dots_to_extract == 0 {
         return full_extension_lower(name_lower);
     }
@@ -2280,8 +2280,7 @@ fn scan_number(bytes: &[u8], start: usize) -> (usize, usize, usize) {
     while trim < end && bytes[trim] == b'0' {
         trim += 1;
     }
-    let trim_end = if trim == end { end } else { end };
-    (end, trim, trim_end)
+    (end, trim, end)
 }
 
 fn entry_id_from_path(path: &Path, is_dir: bool, is_symlink: bool) -> EntryId {

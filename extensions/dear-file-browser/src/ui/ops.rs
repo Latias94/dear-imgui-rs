@@ -188,15 +188,9 @@ pub(super) fn run_paste_job_until_wait_or_done(
     state: &mut FileDialogState,
     fs: &dyn FileSystem,
 ) -> Result<(), String> {
-    loop {
-        match step_paste_job(state, fs)? {
-            true => {
-                try_complete_paste_job(state);
-                return Ok(());
-            }
-            false => {
-                return Ok(());
-            }
-        }
+    if step_paste_job(state, fs)? {
+        try_complete_paste_job(state);
     }
+
+    Ok(())
 }

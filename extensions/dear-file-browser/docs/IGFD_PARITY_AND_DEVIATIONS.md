@@ -2,7 +2,7 @@
 
 This document tracks capability parity between `dear-file-browser` (ImGui backend) and ImGuiFileDialog (IGFD), focused on **non-C-API** behavior.
 
-Last updated: 2026-02-08
+Last updated: 2026-02-12
 
 ## Scope
 
@@ -46,10 +46,38 @@ Capability parity does **not** imply pixel-identical UI. This section tracks the
 | Breadcrumb right-click semantics (enter edit, do not navigate) | Done | IGFD right-click on crumb/separator activates path edit buffer without changing cwd until Enter. |
 | Breadcrumb separator behavior parity | Done | Click: open path popup; right-click: activate edit at parent segment (IGFD). |
 | Root separator duplication (`F:\\\\...`, `//home`) | Done | RootDir is not rendered as a separate crumb after a drive/UNC prefix; separator between root and first segment is skipped. |
-| Header narrow-width no-overlap | Planned | Prefer single-row; fall back to stacked without cursor backtracking overlap. |
-| Places visuals (spacing, right-aligned edit buttons) | Partial | Behavior parity is mostly there; visual fidelity still evolving. |
-| Thumbnails views (row height, padding, selection highlight) | Partial | Functionality parity exists; pixel-level alignment still evolving. |
-| Context menus parity (path / file list items) | Partial | Major actions exist; IGFD-style menu grouping and labels TBD. |
+| Header narrow-width no-overlap | Done | `ToolbarAndAddress` is now truly two-row; `IgfdClassic` guards against cursor backtracking by stacking when space is insufficient. |
+| Places visuals (spacing, right-aligned edit buttons) | Done | Per-row edit button is right-aligned (IGFD-like); group action buttons are right-aligned in the header row; row hover/selection now spans full width with IGFD-like separators. |
+| Thumbnails views (row height, padding, selection highlight) | Done | Grid cells use style-derived metrics; not-ready thumbnails show a consistent placeholder; grid hover/selected overlay + label clip/alignment tuned for IGFD-like feel. |
+| Context menus parity (path / file list items) | Partial | File list item/window menus are unified across list/grid; further IGFD-style grouping/labels can still be refined. |
+
+### Acceptance Checklists (UI Fidelity)
+
+The items below act as a **concrete acceptance checklist** for flipping the above "Partial" items to "Done".
+
+#### Places visuals
+
+- [x] Per-place edit button is right-aligned overlay; only shown on hover/selected/editing.
+- [x] Group header action buttons (`+/-`) are right-aligned on the header row (no extra action row).
+- [x] Places row overlay widgets restore cursor position (no layout drift).
+- [x] Group header spacing/padding matches IGFD under narrow widths (no clipping or overlap).
+- [x] Inline label edit row visuals match IGFD (button sizing, input height, spacing).
+- [x] Visual polish: hover/active colors and separators match IGFD grouping.
+
+#### Thumbnails views (Thumbs list / Grid)
+
+- [x] Grid cell padding/spacing derives from ImGui style (`frame_padding`, `item_spacing`).
+- [x] Grid label is ellipsized (`…`) to fit within the cell width.
+- [x] Not-ready thumbnail shows a consistent placeholder block (instead of `"..."` text).
+- [x] Table selection highlight spans the full row (including the preview column).
+- [x] Grid selection/hover highlight colors match IGFD more closely.
+- [x] Pixel-level alignment: image + label baseline and clip rect feel IGFD-like across fonts.
+
+#### Context menus (file list / window)
+
+- [x] Entry context menu is unified across list and grid (Open/Rename/Delete/Copy/Cut/Paste).
+- [x] Window context menu is unified across list and grid (Refresh/New Folder/View/Options/Columns/Show hidden/Paste).
+- [x] Menu labels + separator grouping tuned to IGFD naming conventions.
 
 ## Intentional Deviations (By Design)
 

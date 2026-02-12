@@ -400,8 +400,11 @@ pub(super) fn draw_chrome(
         ) {
             ui.open_popup("##fb_options");
         }
-        ui.separator_vertical();
-        ui.same_line();
+
+        // HeaderStyle::ToolbarAndAddress is a two-row layout by design: keep the toolbar
+        // on its own row, then render the address/search row below. This avoids cursor
+        // backtracking and overlap on narrow widths.
+        ui.new_line();
     }
 
     if matches!(header_style, HeaderStyle::IgfdClassic) {
@@ -498,6 +501,13 @@ pub(super) fn draw_chrome(
     }
 
     // Path bar (address input / breadcrumb composer) + Search.
+    //
+    // If the previous chrome row overflowed on very narrow widths, we can end up with
+    // no horizontal space left on the current line. Start a new row in that case to
+    // keep the path bar usable and avoid any cursor backtracking overlap.
+    if ui.content_region_avail_width() <= 1.0 {
+        ui.new_line();
+    }
     let cwd_s = state.core.cwd.display().to_string();
     if state.ui.path_edit_last_cwd != cwd_s && !state.ui.path_input_mode {
         state.ui.path_edit_last_cwd = cwd_s.clone();

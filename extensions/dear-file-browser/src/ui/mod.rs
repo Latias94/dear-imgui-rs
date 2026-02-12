@@ -823,11 +823,12 @@ mod tests {
         show_modified: bool,
         order: [FileListDataColumn; 4],
     ) -> FileListColumnsConfig {
-        let mut cfg = FileListColumnsConfig::default();
-        cfg.show_size = show_size;
-        cfg.show_modified = show_modified;
-        cfg.order = order;
-        cfg
+        FileListColumnsConfig {
+            show_size,
+            show_modified,
+            order,
+            ..FileListColumnsConfig::default()
+        }
     }
 
     #[test]

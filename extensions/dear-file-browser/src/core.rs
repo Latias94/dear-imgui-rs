@@ -572,11 +572,11 @@ impl FileDialog {
             Backend::Auto => {
                 #[cfg(feature = "native-rfd")]
                 {
-                    return Backend::Native;
+                    Backend::Native
                 }
                 #[cfg(not(feature = "native-rfd"))]
                 {
-                    return Backend::ImGui;
+                    Backend::ImGui
                 }
             }
         }

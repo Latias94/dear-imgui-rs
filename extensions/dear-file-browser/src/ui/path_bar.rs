@@ -35,7 +35,7 @@ impl PathBarCallback<'_> {
         let mut n = 0usize;
         for (ca, cb) in a.chars().zip(b.chars()) {
             let same = if ca.is_ascii() && cb.is_ascii() {
-                ca.to_ascii_lowercase() == cb.to_ascii_lowercase()
+                ca.eq_ignore_ascii_case(&cb)
             } else {
                 ca == cb
             };
@@ -58,7 +58,7 @@ impl PathBarCallback<'_> {
                         return false;
                     };
                     let same = if nc.is_ascii() && pc.is_ascii() {
-                        nc.to_ascii_lowercase() == pc.to_ascii_lowercase()
+                        nc.eq_ignore_ascii_case(&pc)
                     } else {
                         nc == pc
                     };

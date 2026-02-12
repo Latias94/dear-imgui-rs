@@ -998,7 +998,7 @@ mod tests {
         assert_eq!(state.ui.layout, LayoutStyle::Standard);
         assert_eq!(state.ui.file_list_view, FileListViewMode::List);
         assert_eq!(state.ui.custom_pane_dock, CustomPaneDock::Right);
-        assert_eq!(state.ui.file_list_columns.show_extension, false);
+        assert!(!state.ui.file_list_columns.show_extension);
         assert_eq!(
             state.ui.validation_buttons.align,
             ValidationButtonsAlign::Right

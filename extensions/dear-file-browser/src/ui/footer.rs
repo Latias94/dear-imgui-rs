@@ -100,13 +100,6 @@ pub(super) fn draw_footer(
         ui.set_next_item_width(filter_combo_w);
         let mut next_active_filter = state.core.active_filter_index();
         if let Some(_c) = ui.begin_combo("##filter", filter_preview.as_str()) {
-            if ui
-                .selectable_config("All files")
-                .selected(state.core.active_filter_index().is_none())
-                .build()
-            {
-                next_active_filter = None;
-            }
             for (i, f) in state.core.filters().iter().enumerate() {
                 if ui
                     .selectable_config(&f.name)
@@ -115,6 +108,16 @@ pub(super) fn draw_footer(
                 {
                     next_active_filter = Some(i);
                 }
+            }
+            if !state.core.filters().is_empty() {
+                ui.separator();
+            }
+            if ui
+                .selectable_config("All files")
+                .selected(state.core.active_filter_index().is_none())
+                .build()
+            {
+                next_active_filter = None;
             }
         }
         if next_active_filter != state.core.active_filter_index() {
