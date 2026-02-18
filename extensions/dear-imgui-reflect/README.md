@@ -46,7 +46,7 @@ Optional math interop:
 [dependencies]
 dear-imgui-rs = "0.10"
 dear-imgui-reflect = { version = "0.10", features = ["glam", "mint"] }
-glam = "0.29" # or workspace version
+glam = "0.32" # or workspace version
 mint = "0.5"
 ```
 
@@ -441,7 +441,7 @@ Enable the `glam` and/or `mint` features to get out-of-the-box `ImGuiValue` impl
 ```toml
 [dependencies]
 dear-imgui-reflect = { version = "0.10", features = ["glam", "mint"] }
-glam = "0.29"
+glam = "0.32"
 mint = "0.5"
 ```
 

@@ -37,9 +37,7 @@ pub enum RendererError {
     #[cfg(all(not(target_arch = "wasm32"), feature = "gpu-allocator"))]
     #[error("gpu-allocator error: {0}")]
     GpuAllocator(#[from] gpu_allocator::AllocationError),
-
-    /// vk-mem error (when `vk-mem` feature is enabled).
-    #[cfg(all(not(target_arch = "wasm32"), feature = "vk-mem"))]
-    #[error("vk-mem error: {0}")]
-    VkMem(#[from] vk_mem::Error),
+    // NOTE: vk-mem (VMA) APIs return `ash::vk::Result` on failure, which is already covered by
+    // the `Vulkan` variant above. We intentionally don't carry a separate vk-mem error variant
+    // to avoid duplicate `From<ash::vk::Result>` implementations.
 }

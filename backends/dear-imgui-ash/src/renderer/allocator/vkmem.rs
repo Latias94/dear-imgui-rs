@@ -4,6 +4,7 @@ use super::Allocate;
 use crate::{RendererError, RendererResult};
 use ash::{Device, vk};
 use std::sync::{Arc, Mutex, MutexGuard};
+use vk_mem::Alloc as _;
 use vk_mem::{
     Allocation, AllocationCreateFlags, AllocationCreateInfo, Allocator as VkMemAllocator,
     MemoryUsage,
