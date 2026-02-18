@@ -23,8 +23,8 @@ It is designed to integrate directly with `dear-imgui-rs` and the rest of this w
 
 | Item                | Version |
 |---------------------|---------|
-| Crate               | 0.9.x   |
-| dear-imgui-rs       | 0.9.x   |
+| Crate               | 0.10.x   |
+| dear-imgui-rs       | 0.10.x   |
 
 The optional `glam` and `mint` features track the same workspace versions as other crates in this repository.
 
@@ -36,16 +36,16 @@ Add the crate alongside `dear-imgui-rs`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.9"
-dear-imgui-reflect = "0.9"
+dear-imgui-rs = "0.10"
+dear-imgui-reflect = "0.10"
 ```
 
 Optional math interop:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.9"
-dear-imgui-reflect = { version = "0.9", features = ["glam", "mint"] }
+dear-imgui-rs = "0.10"
+dear-imgui-reflect = { version = "0.10", features = ["glam", "mint"] }
 glam = "0.29" # or workspace version
 mint = "0.5"
 ```
@@ -440,7 +440,7 @@ Enable the `glam` and/or `mint` features to get out-of-the-box `ImGuiValue` impl
 
 ```toml
 [dependencies]
-dear-imgui-reflect = { version = "0.9", features = ["glam", "mint"] }
+dear-imgui-reflect = { version = "0.10", features = ["glam", "mint"] }
 glam = "0.29"
 mint = "0.5"
 ```

@@ -1,6 +1,6 @@
 [package]
 name = "dear-imguizmo"
-version = "0.9.0"
+version = "0.10.0"
 edition.workspace = true
 description = "High-level Rust bindings for ImGuizmo (C API) with Dear ImGui integration"
 license.workspace = true
@@ -12,9 +12,9 @@ keywords.workspace = true
 readme = "README.md"
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.9" }
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.9" }
-dear-imguizmo-sys = { path = "../dear-imguizmo-sys", version = "0.9" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.10" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.10" }
+dear-imguizmo-sys = { path = "../dear-imguizmo-sys", version = "0.10" }
 thiserror.workspace = true
 bitflags = { workspace = true }
 glam = { workspace = true, optional = true }

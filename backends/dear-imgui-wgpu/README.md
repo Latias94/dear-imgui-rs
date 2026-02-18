@@ -26,7 +26,7 @@ If your ecosystem is pinned to `wgpu` v27 (e.g. a release train), select it expl
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.9", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "0.10", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
@@ -45,8 +45,8 @@ dear-imgui-wgpu = { version = "0.9", default-features = false, features = ["wgpu
 
 | Item            | Version |
 |-----------------|---------|
-| Crate           | 0.9.x   |
-| dear-imgui-rs   | 0.9.x   |
+| Crate           | 0.10.x   |
+| dear-imgui-rs   | 0.10.x   |
 | wgpu            | 28 (default), 27 (feature `wgpu-27`) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.

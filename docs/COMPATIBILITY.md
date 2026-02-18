@@ -5,9 +5,9 @@ This document tracks compatibility across the workspace crates, upstream Dear Im
 ## Versioning Policy
 
 - Unified release train: all `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current train: unified `v0.9.0` (use `version = "0.9"`).
+- Current train: unified `v0.10.0` (use `version = "0.10"`).
+- Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Previous train: unified `v0.7.0` (use `version = "0.7"`).
 - Internal dependency constraints in this repo also pin to the unified minor (e.g., `0.5`). Mixing different minors across our crates is unsupported.
 - Exception: helper tooling like `tools/build-support` may follow an independent version and is not part of the unified train.
 
@@ -17,46 +17,53 @@ Core
 
 | Crate           | Version | Upstream        | Notes                                     |
 |-----------------|---------|-----------------|-------------------------------------------|
-| dear-imgui-rs   | 0.9.x   | —               | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.9.x   | ImGui v1.92.5   | Docking branch via cimgui                 |
+| dear-imgui-rs   | 0.10.x  | —               | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.10.x  | ImGui v1.92.6   | Docking branch via cimgui                 |
 
 Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.9.x   | wgpu = 28              | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
-| dear-imgui-glow   | 0.9.x   | glow = 0.16            | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash    | 0.9.x   | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
-| dear-imgui-winit  | 0.9.x   | winit = 0.30.12        | Winit platform backend |
-| dear-imgui-sdl3   | 0.9.x   | sdl3 = 0.17, sdl3-sys  | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
+| dear-imgui-wgpu   | 0.10.x  | wgpu = 28              | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
+| dear-imgui-glow   | 0.10.x  | glow = 0.16            | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash    | 0.10.x  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
+| dear-imgui-winit  | 0.10.x  | winit = 0.30.12        | Winit platform backend |
+| dear-imgui-sdl3   | 0.10.x  | sdl3 = 0.17, sdl3-sys  | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
 
 Utilities
 
 | Crate     | Version | External deps | Notes |
 |-----------|---------|---------------|-------|
-| dear-app  | 0.9.x   | winit, wgpu   | App runner (docking, themes, add-ons) |
+| dear-app  | 0.10.x  | winit, wgpu   | App runner (docking, themes, add-ons) |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
 |---------------------|---------|------------------------|------------------------------|----------------------------------------|
-| dear-implot         | 0.9.x   | 0.9.x                  | dear-implot-sys 0.9.x        | 2D plotting                            |
-| dear-imnodes        | 0.9.x   | 0.9.x                  | dear-imnodes-sys 0.9.x       | Node editor                            |
-| dear-imguizmo       | 0.9.x   | 0.9.x                  | dear-imguizmo-sys 0.9.x      | 3D gizmo                               |
-| dear-file-browser   | 0.9.x   | 0.9.x                  | —                            | ImGui UI + native (rfd) backends       |
-| dear-implot3d       | 0.9.x   | 0.9.x                  | dear-implot3d-sys 0.9.x      | 3D plotting                            |
-| dear-imguizmo-quat  | 0.9.x   | 0.9.x                  | dear-imguizmo-quat-sys 0.9.x | Quaternion gizmo                       |
-| dear-imgui-reflect  | 0.9.x   | 0.9.x                  | —                            | Reflection-based UI helpers (pure Rust)|
+| dear-implot         | 0.10.x  | 0.10.x                 | dear-implot-sys 0.10.x       | 2D plotting                            |
+| dear-imnodes        | 0.10.x  | 0.10.x                 | dear-imnodes-sys 0.10.x      | Node editor                            |
+| dear-imguizmo       | 0.10.x  | 0.10.x                 | dear-imguizmo-sys 0.10.x     | 3D gizmo                               |
+| dear-file-browser   | 0.10.x  | 0.10.x                 | —                            | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.10.x  | 0.10.x                 | dear-implot3d-sys 0.10.x     | 3D plotting                            |
+| dear-imguizmo-quat  | 0.10.x  | 0.10.x                 | dear-imguizmo-quat-sys 0.10.x | Quaternion gizmo                      |
+| dear-imgui-reflect  | 0.10.x  | 0.10.x                 | —                            | Reflection-based UI helpers (pure Rust)|
 
 ## Trunk (Unreleased)
 
-- Target release train: `0.10.0` (unreleased).
+- Target release train: `0.11.0` (unreleased).
 - Minimum supported Rust: 1.92 (required by `wgpu` 28).
 - External dependencies baseline: wgpu 28, winit 0.30.12, glow 0.16, sdl3 0.17.
 
 ## History
 
-Release Train 0.9 (current)
+Release Train 0.10 (current)
+
+- All crates unified to 0.10.0 across the workspace (use `version = "0.10"`).
+- Core + backends aligned with Dear ImGui v1.92.6 (docking) via cimgui.
+- External dependencies baseline: wgpu 28, winit 0.30.12, glow 0.16, sdl3 0.17.
+- Minimum supported Rust: 1.92 (required by `wgpu` 28).
+
+Release Train 0.9 (previous)
 
 - All crates unified to 0.9.0 across the workspace (use `version = "0.9"`).
 - External dependencies baseline: wgpu 28, winit 0.30.12, glow 0.16, sdl3 0.17.

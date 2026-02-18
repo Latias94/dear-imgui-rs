@@ -1,6 +1,6 @@
 [package]
 name = "dear-implot"
-version = "0.9.0"
+version = "0.10.0"
 edition.workspace = true
 description = "High-level Rust bindings to ImPlot with dear-imgui-rs integration"
 license.workspace = true
@@ -16,9 +16,9 @@ features = ["freetype"]
 
 [dependencies]
 bitflags.workspace = true
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.9" }
-dear-implot-sys = { path = "../dear-implot-sys", version = "0.9" }
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.9" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.10" }
+dear-implot-sys = { path = "../dear-implot-sys", version = "0.10" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.10" }
 #mint.workspace = true
 #parking_lot.workspace = true
 #cfg-if.workspace = true

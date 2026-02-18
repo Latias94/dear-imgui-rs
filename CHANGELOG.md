@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-02-19
+
+Upgrade to Dear ImGui v1.92.6 (docking branch) via cimgui `1.92.6dock`, refresh all C API submodules (ImPlot/ImPlot3D, ImNodes, ImGuizmo, ImGuIZMO.quat), and regenerate bindings for native + import-style WASM builds.
+
+### Highlights
+
+- Dear ImGui v1.92.6 (docking) upgrade.
+- Regenerated pregenerated bindings for core + all extension `*-sys` crates (native + wasm).
+- Updated ImPlot/ImPlot3D safe wrappers for upstream spec-based item APIs.
+
+### Breaking Changes
+
+- Core (`dear-imgui-rs`)
+  - Fonts: removed `FontConfig::pixel_snap_v` (upstream removed `ImFontConfig::PixelSnapV`).
+  - Popups: `begin_popup_context_*` helpers now default to `PopupFlags::NONE` to follow ImGui v1.92.6 semantics (default is still Right mouse; passing a literal `0` no longer requests Left).
+
+### Added
+
+- Core (`dear-imgui-rs`)
+  - Style: `StyleVar::ImageRounding` and `Style::{image_rounding,set_image_rounding}`.
+  - Popups: `begin_popup_context_*_with_flags` helpers for explicit popup button/flags selection.
+
+### Changed
+
+- `*-sys` crates
+  - Updated `cimgui`/`cimplot`/`cimplot3d`/`cimnodes`/`cimguizmo`/`cimguizmo_quat` submodules.
+  - Regenerated pregenerated bindings (`bindings_pregenerated.rs`, `wasm_bindings_pregenerated.rs`).
+  - Build scripts now `rerun-if-changed` on pregenerated bindings to avoid stale OUT_DIR reuse when `*_SYS_SKIP_CC=1`.
+- Tooling
+  - `tools/update_submodule_and_bindings.py`: select the newest generated `bindings.rs` (mtime) to avoid picking stale outputs.
+
+### Fixed
+
+- Extensions
+  - `dear-implot`: updated plot item calls to pass the new `ImPlotSpec_c` parameter (keeps high-level Rust API stable).
+  - `dear-implot3d`: updated plot item calls to pass the new `ImPlot3DSpec_c` parameter; re-implemented `set_next_*_style()` helpers on top of the new spec mechanism.
+  - `dear-imguizmo-quat`: fixed Vec4 type mismatches after sys bindings refresh.
+
 ## [0.9.0] - 2026-02-12
 
 This release focuses on `dear-app` usability improvements for real applications (GPU configuration presets, smoother startup, and clearer redraw semantics).

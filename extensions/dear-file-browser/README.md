@@ -33,8 +33,8 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.9.x   |
-| dear-imgui-rs | 0.9.x   |
+| Crate         | 0.10.x   |
+| dear-imgui-rs | 0.10.x   |
 
 ## Features
 
