@@ -346,6 +346,7 @@ pub const ImGuiItemFlags_NoNavDefaultFocus: ImGuiItemFlags_ = 4;
 pub const ImGuiItemFlags_ButtonRepeat: ImGuiItemFlags_ = 8;
 pub const ImGuiItemFlags_AutoClosePopups: ImGuiItemFlags_ = 16;
 pub const ImGuiItemFlags_AllowDuplicateId: ImGuiItemFlags_ = 32;
+pub const ImGuiItemFlags_Disabled: ImGuiItemFlags_ = 64;
 pub type ImGuiItemFlags_ = ::std::os::raw::c_int;
 pub const ImGuiInputTextFlags_None: ImGuiInputTextFlags_ = 0;
 pub const ImGuiInputTextFlags_CharsDecimal: ImGuiInputTextFlags_ = 1;
@@ -398,17 +399,18 @@ pub const ImGuiTreeNodeFlags_DrawLinesFull: ImGuiTreeNodeFlags_ = 524288;
 pub const ImGuiTreeNodeFlags_DrawLinesToNodes: ImGuiTreeNodeFlags_ = 1048576;
 pub type ImGuiTreeNodeFlags_ = ::std::os::raw::c_int;
 pub const ImGuiPopupFlags_None: ImGuiPopupFlags_ = 0;
-pub const ImGuiPopupFlags_MouseButtonLeft: ImGuiPopupFlags_ = 0;
-pub const ImGuiPopupFlags_MouseButtonRight: ImGuiPopupFlags_ = 1;
-pub const ImGuiPopupFlags_MouseButtonMiddle: ImGuiPopupFlags_ = 2;
-pub const ImGuiPopupFlags_MouseButtonMask_: ImGuiPopupFlags_ = 31;
-pub const ImGuiPopupFlags_MouseButtonDefault_: ImGuiPopupFlags_ = 1;
+pub const ImGuiPopupFlags_MouseButtonLeft: ImGuiPopupFlags_ = 4;
+pub const ImGuiPopupFlags_MouseButtonRight: ImGuiPopupFlags_ = 8;
+pub const ImGuiPopupFlags_MouseButtonMiddle: ImGuiPopupFlags_ = 12;
 pub const ImGuiPopupFlags_NoReopen: ImGuiPopupFlags_ = 32;
 pub const ImGuiPopupFlags_NoOpenOverExistingPopup: ImGuiPopupFlags_ = 128;
 pub const ImGuiPopupFlags_NoOpenOverItems: ImGuiPopupFlags_ = 256;
 pub const ImGuiPopupFlags_AnyPopupId: ImGuiPopupFlags_ = 1024;
 pub const ImGuiPopupFlags_AnyPopupLevel: ImGuiPopupFlags_ = 2048;
 pub const ImGuiPopupFlags_AnyPopup: ImGuiPopupFlags_ = 3072;
+pub const ImGuiPopupFlags_MouseButtonShift_: ImGuiPopupFlags_ = 2;
+pub const ImGuiPopupFlags_MouseButtonMask_: ImGuiPopupFlags_ = 12;
+pub const ImGuiPopupFlags_InvalidMask_: ImGuiPopupFlags_ = 3;
 pub type ImGuiPopupFlags_ = ::std::os::raw::c_int;
 pub const ImGuiSelectableFlags_None: ImGuiSelectableFlags_ = 0;
 pub const ImGuiSelectableFlags_NoAutoClosePopups: ImGuiSelectableFlags_ = 1;
@@ -821,24 +823,25 @@ pub const ImGuiStyleVar_ScrollbarRounding: ImGuiStyleVar_ = 19;
 pub const ImGuiStyleVar_ScrollbarPadding: ImGuiStyleVar_ = 20;
 pub const ImGuiStyleVar_GrabMinSize: ImGuiStyleVar_ = 21;
 pub const ImGuiStyleVar_GrabRounding: ImGuiStyleVar_ = 22;
-pub const ImGuiStyleVar_ImageBorderSize: ImGuiStyleVar_ = 23;
-pub const ImGuiStyleVar_TabRounding: ImGuiStyleVar_ = 24;
-pub const ImGuiStyleVar_TabBorderSize: ImGuiStyleVar_ = 25;
-pub const ImGuiStyleVar_TabMinWidthBase: ImGuiStyleVar_ = 26;
-pub const ImGuiStyleVar_TabMinWidthShrink: ImGuiStyleVar_ = 27;
-pub const ImGuiStyleVar_TabBarBorderSize: ImGuiStyleVar_ = 28;
-pub const ImGuiStyleVar_TabBarOverlineSize: ImGuiStyleVar_ = 29;
-pub const ImGuiStyleVar_TableAngledHeadersAngle: ImGuiStyleVar_ = 30;
-pub const ImGuiStyleVar_TableAngledHeadersTextAlign: ImGuiStyleVar_ = 31;
-pub const ImGuiStyleVar_TreeLinesSize: ImGuiStyleVar_ = 32;
-pub const ImGuiStyleVar_TreeLinesRounding: ImGuiStyleVar_ = 33;
-pub const ImGuiStyleVar_ButtonTextAlign: ImGuiStyleVar_ = 34;
-pub const ImGuiStyleVar_SelectableTextAlign: ImGuiStyleVar_ = 35;
-pub const ImGuiStyleVar_SeparatorTextBorderSize: ImGuiStyleVar_ = 36;
-pub const ImGuiStyleVar_SeparatorTextAlign: ImGuiStyleVar_ = 37;
-pub const ImGuiStyleVar_SeparatorTextPadding: ImGuiStyleVar_ = 38;
-pub const ImGuiStyleVar_DockingSeparatorSize: ImGuiStyleVar_ = 39;
-pub const ImGuiStyleVar_COUNT: ImGuiStyleVar_ = 40;
+pub const ImGuiStyleVar_ImageRounding: ImGuiStyleVar_ = 23;
+pub const ImGuiStyleVar_ImageBorderSize: ImGuiStyleVar_ = 24;
+pub const ImGuiStyleVar_TabRounding: ImGuiStyleVar_ = 25;
+pub const ImGuiStyleVar_TabBorderSize: ImGuiStyleVar_ = 26;
+pub const ImGuiStyleVar_TabMinWidthBase: ImGuiStyleVar_ = 27;
+pub const ImGuiStyleVar_TabMinWidthShrink: ImGuiStyleVar_ = 28;
+pub const ImGuiStyleVar_TabBarBorderSize: ImGuiStyleVar_ = 29;
+pub const ImGuiStyleVar_TabBarOverlineSize: ImGuiStyleVar_ = 30;
+pub const ImGuiStyleVar_TableAngledHeadersAngle: ImGuiStyleVar_ = 31;
+pub const ImGuiStyleVar_TableAngledHeadersTextAlign: ImGuiStyleVar_ = 32;
+pub const ImGuiStyleVar_TreeLinesSize: ImGuiStyleVar_ = 33;
+pub const ImGuiStyleVar_TreeLinesRounding: ImGuiStyleVar_ = 34;
+pub const ImGuiStyleVar_ButtonTextAlign: ImGuiStyleVar_ = 35;
+pub const ImGuiStyleVar_SelectableTextAlign: ImGuiStyleVar_ = 36;
+pub const ImGuiStyleVar_SeparatorTextBorderSize: ImGuiStyleVar_ = 37;
+pub const ImGuiStyleVar_SeparatorTextAlign: ImGuiStyleVar_ = 38;
+pub const ImGuiStyleVar_SeparatorTextPadding: ImGuiStyleVar_ = 39;
+pub const ImGuiStyleVar_DockingSeparatorSize: ImGuiStyleVar_ = 40;
+pub const ImGuiStyleVar_COUNT: ImGuiStyleVar_ = 41;
 pub type ImGuiStyleVar_ = ::std::os::raw::c_int;
 pub const ImGuiButtonFlags_None: ImGuiButtonFlags_ = 0;
 pub const ImGuiButtonFlags_MouseButtonLeft: ImGuiButtonFlags_ = 1;
@@ -858,10 +861,11 @@ pub const ImGuiColorEditFlags_NoLabel: ImGuiColorEditFlags_ = 128;
 pub const ImGuiColorEditFlags_NoSidePreview: ImGuiColorEditFlags_ = 256;
 pub const ImGuiColorEditFlags_NoDragDrop: ImGuiColorEditFlags_ = 512;
 pub const ImGuiColorEditFlags_NoBorder: ImGuiColorEditFlags_ = 1024;
-pub const ImGuiColorEditFlags_AlphaOpaque: ImGuiColorEditFlags_ = 2048;
-pub const ImGuiColorEditFlags_AlphaNoBg: ImGuiColorEditFlags_ = 4096;
-pub const ImGuiColorEditFlags_AlphaPreviewHalf: ImGuiColorEditFlags_ = 8192;
-pub const ImGuiColorEditFlags_AlphaBar: ImGuiColorEditFlags_ = 65536;
+pub const ImGuiColorEditFlags_NoColorMarkers: ImGuiColorEditFlags_ = 2048;
+pub const ImGuiColorEditFlags_AlphaOpaque: ImGuiColorEditFlags_ = 4096;
+pub const ImGuiColorEditFlags_AlphaNoBg: ImGuiColorEditFlags_ = 8192;
+pub const ImGuiColorEditFlags_AlphaPreviewHalf: ImGuiColorEditFlags_ = 16384;
+pub const ImGuiColorEditFlags_AlphaBar: ImGuiColorEditFlags_ = 262144;
 pub const ImGuiColorEditFlags_HDR: ImGuiColorEditFlags_ = 524288;
 pub const ImGuiColorEditFlags_DisplayRGB: ImGuiColorEditFlags_ = 1048576;
 pub const ImGuiColorEditFlags_DisplayHSV: ImGuiColorEditFlags_ = 2097152;
@@ -873,7 +877,7 @@ pub const ImGuiColorEditFlags_PickerHueWheel: ImGuiColorEditFlags_ = 67108864;
 pub const ImGuiColorEditFlags_InputRGB: ImGuiColorEditFlags_ = 134217728;
 pub const ImGuiColorEditFlags_InputHSV: ImGuiColorEditFlags_ = 268435456;
 pub const ImGuiColorEditFlags_DefaultOptions_: ImGuiColorEditFlags_ = 177209344;
-pub const ImGuiColorEditFlags_AlphaMask_: ImGuiColorEditFlags_ = 14338;
+pub const ImGuiColorEditFlags_AlphaMask_: ImGuiColorEditFlags_ = 28674;
 pub const ImGuiColorEditFlags_DisplayMask_: ImGuiColorEditFlags_ = 7340032;
 pub const ImGuiColorEditFlags_DataTypeMask_: ImGuiColorEditFlags_ = 25165824;
 pub const ImGuiColorEditFlags_PickerMask_: ImGuiColorEditFlags_ = 100663296;
@@ -887,6 +891,7 @@ pub const ImGuiSliderFlags_WrapAround: ImGuiSliderFlags_ = 256;
 pub const ImGuiSliderFlags_ClampOnInput: ImGuiSliderFlags_ = 512;
 pub const ImGuiSliderFlags_ClampZeroRange: ImGuiSliderFlags_ = 1024;
 pub const ImGuiSliderFlags_NoSpeedTweaks: ImGuiSliderFlags_ = 2048;
+pub const ImGuiSliderFlags_ColorMarkers: ImGuiSliderFlags_ = 4096;
 pub const ImGuiSliderFlags_AlwaysClamp: ImGuiSliderFlags_ = 1536;
 pub const ImGuiSliderFlags_InvalidMask_: ImGuiSliderFlags_ = 1879048207;
 pub type ImGuiSliderFlags_ = ::std::os::raw::c_int;
@@ -1062,6 +1067,7 @@ pub struct ImGuiStyle {
     pub GrabMinSize: f32,
     pub GrabRounding: f32,
     pub LogSliderDeadzone: f32,
+    pub ImageRounding: f32,
     pub ImageBorderSize: f32,
     pub TabRounding: f32,
     pub TabBorderSize: f32,
@@ -1079,6 +1085,7 @@ pub struct ImGuiStyle {
     pub DragDropTargetRounding: f32,
     pub DragDropTargetBorderSize: f32,
     pub DragDropTargetPadding: f32,
+    pub ColorMarkerSize: f32,
     pub ColorButtonPosition: ImGuiDir,
     pub ButtonTextAlign: ImVec2_c,
     pub SelectableTextAlign: ImVec2_c,
@@ -1269,12 +1276,14 @@ pub struct ImGuiInputTextCallbackData {
     pub EventFlag: ImGuiInputTextFlags,
     pub Flags: ImGuiInputTextFlags,
     pub UserData: *mut ::std::os::raw::c_void,
-    pub EventChar: ImWchar,
+    pub ID: ImGuiID,
     pub EventKey: ImGuiKey,
+    pub EventChar: ImWchar,
+    pub EventActivated: bool,
+    pub BufDirty: bool,
     pub Buf: *mut ::std::os::raw::c_char,
     pub BufTextLen: ::std::os::raw::c_int,
     pub BufSize: ::std::os::raw::c_int,
-    pub BufDirty: bool,
     pub CursorPos: ::std::os::raw::c_int,
     pub SelectionStart: ::std::os::raw::c_int,
     pub SelectionEnd: ::std::os::raw::c_int,
@@ -2017,7 +2026,6 @@ pub struct ImFontConfig {
     pub FontDataOwnedByAtlas: bool,
     pub MergeMode: bool,
     pub PixelSnapH: bool,
-    pub PixelSnapV: bool,
     pub OversampleH: ImS8,
     pub OversampleV: ImS8,
     pub EllipsisChar: ImWchar,
@@ -2032,6 +2040,7 @@ pub struct ImFontConfig {
     pub FontLoaderFlags: ::std::os::raw::c_uint,
     pub RasterizerMultiply: f32,
     pub RasterizerDensity: f32,
+    pub ExtraSizeScale: f32,
     pub Flags: ImFontFlags,
     pub DstFont: *mut ImFont,
     pub FontLoader: *const ImFontLoader,
@@ -2869,6 +2878,10 @@ pub const ImDrawTextFlags_CpuFineClip: ImDrawTextFlags_ = 1;
 pub const ImDrawTextFlags_WrapKeepBlanks: ImDrawTextFlags_ = 2;
 pub const ImDrawTextFlags_StopOnNewLine: ImDrawTextFlags_ = 4;
 pub type ImDrawTextFlags_ = ::std::os::raw::c_int;
+pub const ImWcharClass_Blank: ImWcharClass = 0;
+pub const ImWcharClass_Punct: ImWcharClass = 1;
+pub const ImWcharClass_Other: ImWcharClass = 2;
+pub type ImWcharClass = ::std::os::raw::c_int;
 pub type ImFileHandle = *mut FILE;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -3191,7 +3204,6 @@ impl Default for ImGuiDataTypeInfo {
 pub const ImGuiDataType_Pointer: ImGuiDataTypePrivate_ = 12;
 pub const ImGuiDataType_ID: ImGuiDataTypePrivate_ = 13;
 pub type ImGuiDataTypePrivate_ = ::std::os::raw::c_int;
-pub const ImGuiItemFlags_Disabled: ImGuiItemFlagsPrivate_ = 1024;
 pub const ImGuiItemFlags_ReadOnly: ImGuiItemFlagsPrivate_ = 2048;
 pub const ImGuiItemFlags_MixedValue: ImGuiItemFlagsPrivate_ = 4096;
 pub const ImGuiItemFlags_NoWindowHoverableCheck: ImGuiItemFlagsPrivate_ = 8192;
@@ -3452,6 +3464,7 @@ pub const ImGuiNextItemDataFlags_HasOpen: ImGuiNextItemDataFlags_ = 2;
 pub const ImGuiNextItemDataFlags_HasShortcut: ImGuiNextItemDataFlags_ = 4;
 pub const ImGuiNextItemDataFlags_HasRefVal: ImGuiNextItemDataFlags_ = 8;
 pub const ImGuiNextItemDataFlags_HasStorageID: ImGuiNextItemDataFlags_ = 16;
+pub const ImGuiNextItemDataFlags_HasColorMarker: ImGuiNextItemDataFlags_ = 32;
 pub type ImGuiNextItemDataFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -3467,6 +3480,7 @@ pub struct ImGuiNextItemData {
     pub OpenCond: ImU8,
     pub RefVal: ImGuiDataTypeStorage,
     pub StorageId: ImGuiID,
+    pub ColorMarker: ImU32,
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -3582,7 +3596,7 @@ impl Default for ImGuiPopupData {
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImBitArray_ImGuiKey_NamedKey_COUNT__lessImGuiKey_NamedKey_BEGIN {
-    pub Storage: [ImU32; 5usize],
+    pub Data: [ImU32; 5usize],
 }
 pub type ImBitArrayForNamedKeys = ImBitArray_ImGuiKey_NamedKey_COUNT__lessImGuiKey_NamedKey_BEGIN;
 pub const ImGuiInputEventType_None: ImGuiInputEventType = 0;
@@ -4985,7 +4999,8 @@ pub const ImGuiDebugLogFlags_EventDocking: ImGuiDebugLogFlags_ = 1024;
 pub const ImGuiDebugLogFlags_EventViewport: ImGuiDebugLogFlags_ = 2048;
 pub const ImGuiDebugLogFlags_EventMask_: ImGuiDebugLogFlags_ = 4095;
 pub const ImGuiDebugLogFlags_OutputToTTY: ImGuiDebugLogFlags_ = 1048576;
-pub const ImGuiDebugLogFlags_OutputToTestEngine: ImGuiDebugLogFlags_ = 2097152;
+pub const ImGuiDebugLogFlags_OutputToDebugger: ImGuiDebugLogFlags_ = 2097152;
+pub const ImGuiDebugLogFlags_OutputToTestEngine: ImGuiDebugLogFlags_ = 4194304;
 pub type ImGuiDebugLogFlags_ = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
@@ -5735,6 +5750,7 @@ pub struct ImGuiContext {
     pub NavJustMovedToKeyMods: ImGuiKeyChord,
     pub NavJustMovedToIsTabbing: bool,
     pub NavJustMovedToHasSelectionData: bool,
+    pub ConfigNavEnableTabbing: bool,
     pub ConfigNavWindowingWithGamepad: bool,
     pub ConfigNavWindowingKeyNext: ImGuiKeyChord,
     pub ConfigNavWindowingKeyPrev: ImGuiKeyChord,
@@ -5951,6 +5967,7 @@ pub struct ImGuiWindowTempData {
     pub DockTabItemStatusFlags: ImGuiItemStatusFlags,
     pub DockTabItemRect: ImRect_c,
     pub ItemWidth: f32,
+    pub ItemWidthDefault: f32,
     pub TextWrapPos: f32,
     pub ItemWidthStack: ImVector_float,
     pub TextWrapPosStack: ImVector_float,
@@ -6073,7 +6090,6 @@ pub struct ImGuiWindow {
     pub LastFrameActive: ::std::os::raw::c_int,
     pub LastFrameJustFocused: ::std::os::raw::c_int,
     pub LastTimeActive: f32,
-    pub ItemWidthDefault: f32,
     pub StateStorage: ImGuiStorage,
     pub ColumnsStorage: ImVector_ImGuiOldColumns,
     pub FontWindowScale: f32,
@@ -6536,6 +6552,7 @@ pub struct ImGuiTabBar {
     pub ID: ImGuiID,
     pub SelectedTabId: ImGuiID,
     pub NextSelectedTabId: ImGuiID,
+    pub NextScrollToTabId: ImGuiID,
     pub VisibleTabId: ImGuiID,
     pub CurrFrameVisible: ::std::os::raw::c_int,
     pub PrevFrameVisible: ::std::os::raw::c_int,
@@ -9273,6 +9290,9 @@ unsafe extern "C" {
     pub fn igGetItemRectSize() -> ImVec2_c;
 }
 unsafe extern "C" {
+    pub fn igGetItemFlags() -> ImGuiItemFlags;
+}
+unsafe extern "C" {
     pub fn igGetMainViewport() -> *mut ImGuiViewport;
 }
 unsafe extern "C" {
@@ -9616,6 +9636,13 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn ImGuiInputTextCallbackData_SelectAll(self_: *mut ImGuiInputTextCallbackData);
+}
+unsafe extern "C" {
+    pub fn ImGuiInputTextCallbackData_SetSelection(
+        self_: *mut ImGuiInputTextCallbackData,
+        s: ::std::os::raw::c_int,
+        e: ::std::os::raw::c_int,
+    );
 }
 unsafe extern "C" {
     pub fn ImGuiInputTextCallbackData_ClearSelection(self_: *mut ImGuiInputTextCallbackData);
@@ -10638,6 +10665,18 @@ unsafe extern "C" {
     ) -> *mut ImFont;
 }
 unsafe extern "C" {
+    pub fn ImFontAtlas_AddFontDefaultVector(
+        self_: *mut ImFontAtlas,
+        font_cfg: *const ImFontConfig,
+    ) -> *mut ImFont;
+}
+unsafe extern "C" {
+    pub fn ImFontAtlas_AddFontDefaultBitmap(
+        self_: *mut ImFontAtlas,
+        font_cfg: *const ImFontConfig,
+    ) -> *mut ImFont;
+}
+unsafe extern "C" {
     pub fn ImFontAtlas_AddFontFromFileTTF(
         self_: *mut ImFontAtlas,
         filename: *const ::std::os::raw::c_char,
@@ -11154,6 +11193,35 @@ unsafe extern "C" {
     ) -> *const ::std::os::raw::c_char;
 }
 unsafe extern "C" {
+    pub fn igImTextInitClassifiers();
+}
+unsafe extern "C" {
+    pub fn igImTextClassifierClear(
+        bits: *mut ImU32,
+        codepoint_min: ::std::os::raw::c_uint,
+        codepoint_end: ::std::os::raw::c_uint,
+        char_class: ImWcharClass,
+    );
+}
+unsafe extern "C" {
+    pub fn igImTextClassifierSetCharClass(
+        bits: *mut ImU32,
+        codepoint_min: ::std::os::raw::c_uint,
+        codepoint_end: ::std::os::raw::c_uint,
+        char_class: ImWcharClass,
+        c: ::std::os::raw::c_uint,
+    );
+}
+unsafe extern "C" {
+    pub fn igImTextClassifierSetCharClassFromStr(
+        bits: *mut ImU32,
+        codepoint_min: ::std::os::raw::c_uint,
+        codepoint_end: ::std::os::raw::c_uint,
+        char_class: ImWcharClass,
+        s: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
     pub fn igImFileOpen(
         filename: *const ::std::os::raw::c_char,
         mode: *const ::std::os::raw::c_char,
@@ -11474,9 +11542,6 @@ unsafe extern "C" {
     pub fn ImRect_ClipWithFull(self_: *mut ImRect, r: ImRect_c);
 }
 unsafe extern "C" {
-    pub fn ImRect_Floor(self_: *mut ImRect);
-}
-unsafe extern "C" {
     pub fn ImRect_IsInverted(self_: *mut ImRect) -> bool;
 }
 unsafe extern "C" {
@@ -11692,6 +11757,13 @@ unsafe extern "C" {
     pub fn ImGuiInputTextState_GetSelectionEnd(
         self_: *mut ImGuiInputTextState,
     ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn ImGuiInputTextState_SetSelection(
+        self_: *mut ImGuiInputTextState,
+        start: ::std::os::raw::c_int,
+        end: ::std::os::raw::c_int,
+    );
 }
 unsafe extern "C" {
     pub fn ImGuiInputTextState_SelectAll(self_: *mut ImGuiInputTextState);
@@ -12096,6 +12168,9 @@ unsafe extern "C" {
     pub fn igGetPlatformIO_ContextPtr(ctx: *mut ImGuiContext) -> *mut ImGuiPlatformIO;
 }
 unsafe extern "C" {
+    pub fn igGetScale() -> f32;
+}
+unsafe extern "C" {
     pub fn igGetCurrentWindowRead() -> *mut ImGuiWindow;
 }
 unsafe extern "C" {
@@ -12274,6 +12349,18 @@ unsafe extern "C" {
     pub fn igShutdown();
 }
 unsafe extern "C" {
+    pub fn igSetContextName(ctx: *mut ImGuiContext, name: *const ::std::os::raw::c_char);
+}
+unsafe extern "C" {
+    pub fn igAddContextHook(ctx: *mut ImGuiContext, hook: *const ImGuiContextHook) -> ImGuiID;
+}
+unsafe extern "C" {
+    pub fn igRemoveContextHook(ctx: *mut ImGuiContext, hook_to_remove: ImGuiID);
+}
+unsafe extern "C" {
+    pub fn igCallContextHooks(ctx: *mut ImGuiContext, type_: ImGuiContextHookType);
+}
+unsafe extern "C" {
     pub fn igUpdateInputEvents(trickle_fast_inputs: bool);
 }
 unsafe extern "C" {
@@ -12305,15 +12392,6 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn igUpdateMouseMovingWindowEndFrame();
-}
-unsafe extern "C" {
-    pub fn igAddContextHook(context: *mut ImGuiContext, hook: *const ImGuiContextHook) -> ImGuiID;
-}
-unsafe extern "C" {
-    pub fn igRemoveContextHook(context: *mut ImGuiContext, hook_to_remove: ImGuiID);
-}
-unsafe extern "C" {
-    pub fn igCallContextHooks(context: *mut ImGuiContext, type_: ImGuiContextHookType);
 }
 unsafe extern "C" {
     pub fn igTranslateWindowsInViewport(
@@ -12424,9 +12502,6 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn igGetItemStatusFlags() -> ImGuiItemStatusFlags;
-}
-unsafe extern "C" {
-    pub fn igGetItemFlags() -> ImGuiItemFlags;
 }
 unsafe extern "C" {
     pub fn igGetActiveID() -> ImGuiID;
@@ -12617,6 +12692,9 @@ unsafe extern "C" {
         r_avoid: ImRect_c,
         policy: ImGuiPopupPositionPolicy,
     ) -> ImVec2_c;
+}
+unsafe extern "C" {
+    pub fn igGetMouseButtonFromPopupFlags(flags: ImGuiPopupFlags) -> ImGuiMouseButton;
 }
 unsafe extern "C" {
     pub fn igBeginTooltipEx(
@@ -13318,6 +13396,9 @@ unsafe extern "C" {
     ) -> ImGuiID;
 }
 unsafe extern "C" {
+    pub fn igTableFixDisplayOrder(table: *mut ImGuiTable);
+}
+unsafe extern "C" {
     pub fn igTableSortSpecsSanitize(table: *mut ImGuiTable);
 }
 unsafe extern "C" {
@@ -13374,6 +13455,13 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn igTableSetColumnWidthAutoAll(table: *mut ImGuiTable);
+}
+unsafe extern "C" {
+    pub fn igTableSetColumnDisplayOrder(
+        table: *mut ImGuiTable,
+        column_n: ::std::os::raw::c_int,
+        dst_order: ::std::os::raw::c_int,
+    );
 }
 unsafe extern "C" {
     pub fn igTableRemove(table: *mut ImGuiTable);
@@ -13605,6 +13693,9 @@ unsafe extern "C" {
     pub fn igRenderFrameBorder(p_min: ImVec2_c, p_max: ImVec2_c, rounding: f32);
 }
 unsafe extern "C" {
+    pub fn igRenderColorComponentMarker(bb: ImRect_c, col: ImU32, rounding: f32);
+}
+unsafe extern "C" {
     pub fn igRenderColorRectWithAlphaCheckerboard(
         draw_list: *mut ImDrawList,
         p_min: ImVec2_c,
@@ -13663,12 +13754,12 @@ unsafe extern "C" {
     pub fn igRenderArrowDockMenu(draw_list: *mut ImDrawList, p_min: ImVec2_c, sz: f32, col: ImU32);
 }
 unsafe extern "C" {
-    pub fn igRenderRectFilledRangeH(
+    pub fn igRenderRectFilledInRangeH(
         draw_list: *mut ImDrawList,
         rect: ImRect_c,
         col: ImU32,
-        x_start_norm: f32,
-        x_end_norm: f32,
+        fill_x0: f32,
+        fill_x1: f32,
         rounding: f32,
     );
 }
@@ -13979,6 +14070,9 @@ unsafe extern "C" {
     pub fn igColorPickerOptionsPopup(ref_col: *const f32, flags: ImGuiColorEditFlags);
 }
 unsafe extern "C" {
+    pub fn igSetNextItemColorMarker(col: ImU32);
+}
+unsafe extern "C" {
     pub fn igPlotEx(
         plot_type: ImGuiPlotType,
         label: *const ::std::os::raw::c_char,
@@ -14113,6 +14207,9 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn igShowFontAtlas(atlas: *mut ImFontAtlas);
+}
+unsafe extern "C" {
+    pub fn igDebugTextureIDToU64(tex_id: ImTextureID) -> ImU64;
 }
 unsafe extern "C" {
     pub fn igDebugHookIdInfo(
@@ -14363,6 +14460,9 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn igImFontAtlasFontDestroyOutput(atlas: *mut ImFontAtlas, font: *mut ImFont);
+}
+unsafe extern "C" {
+    pub fn igImFontAtlasFontRebuildOutput(atlas: *mut ImFontAtlas, font: *mut ImFont);
 }
 unsafe extern "C" {
     pub fn igImFontAtlasFontDiscardBakes(

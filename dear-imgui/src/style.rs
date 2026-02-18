@@ -220,6 +220,13 @@ impl Style {
         self.inner_mut().FrameRounding = v;
     }
 
+    pub fn image_rounding(&self) -> f32 {
+        self.inner().ImageRounding
+    }
+    pub fn set_image_rounding(&mut self, v: f32) {
+        self.inner_mut().ImageRounding = v;
+    }
+
     pub fn frame_border_size(&self) -> f32 {
         self.inner().FrameBorderSize
     }
@@ -758,6 +765,8 @@ pub enum StyleVar {
     FramePadding([f32; 2]),
     /// Rounding radius of frame corners (used by most widgets)
     FrameRounding(f32),
+    /// Rounding radius of image corners (used by Image() and ImageButton() widgets)
+    ImageRounding(f32),
     /// Thickness of border around frames
     FrameBorderSize(f32),
     /// Horizontal and vertical spacing between widgets/lines

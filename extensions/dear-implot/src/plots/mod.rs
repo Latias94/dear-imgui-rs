@@ -20,6 +20,7 @@ pub mod stairs;
 pub mod stems;
 pub mod text;
 
+use crate::sys;
 use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_slice_with_opt};
 use std::os::raw::c_char;
 
@@ -159,6 +160,38 @@ pub(crate) fn with_plot_str_slice_with_opt<R>(
         .collect();
     let txt_opt = txt_opt.filter(|s| !s.contains('\0'));
     with_scratch_txt_slice_with_opt(&cleaned, txt_opt, f)
+}
+
+pub(crate) fn default_plot_spec() -> sys::ImPlotSpec_c {
+    let auto_col = sys::ImVec4_c {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        w: -1.0,
+    };
+
+    sys::ImPlotSpec_c {
+        LineColor: auto_col,
+        LineWeight: 1.0,
+        FillColor: auto_col,
+        FillAlpha: 1.0,
+        Marker: sys::ImPlotMarker_None,
+        MarkerSize: 4.0,
+        MarkerLineColor: auto_col,
+        MarkerFillColor: auto_col,
+        Size: 4.0,
+        Offset: 0,
+        Stride: crate::IMPLOT_AUTO,
+        Flags: sys::ImPlotItemFlags_None,
+    }
+}
+
+pub(crate) fn plot_spec_from(flags: u32, offset: i32, stride: i32) -> sys::ImPlotSpec_c {
+    let mut spec = default_plot_spec();
+    spec.Flags = flags as sys::ImPlotItemFlags;
+    spec.Offset = offset;
+    spec.Stride = stride;
+    spec
 }
 
 /// Universal plot builder that can create any plot type

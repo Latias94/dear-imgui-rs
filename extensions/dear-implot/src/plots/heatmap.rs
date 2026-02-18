@@ -1,6 +1,6 @@
 //! Heatmap plot implementation
 
-use super::{Plot, PlotError, with_plot_str_or_empty};
+use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
 use crate::{HeatmapFlags, sys};
 use dear_imgui_rs::with_scratch_txt_two;
 
@@ -120,6 +120,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
                     self.label
                 };
                 with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
+                    let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
                     sys::ImPlot_PlotHeatmap_doublePtr(
                         label_ptr,
                         self.values.as_ptr(),
@@ -130,11 +131,12 @@ impl<'a> Plot for HeatmapPlot<'a> {
                         label_fmt_ptr,
                         self.bounds_min,
                         self.bounds_max,
-                        self.flags.bits() as i32,
+                        spec,
                     );
                 })
             }
             None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
                 sys::ImPlot_PlotHeatmap_doublePtr(
                     label_ptr,
                     self.values.as_ptr(),
@@ -145,7 +147,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
                     std::ptr::null(),
                     self.bounds_min,
                     self.bounds_max,
-                    self.flags.bits() as i32,
+                    spec,
                 );
             }),
         }
@@ -257,6 +259,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                     self.label
                 };
                 with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
+                    let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
                     sys::ImPlot_PlotHeatmap_FloatPtr(
                         label_ptr,
                         self.values.as_ptr(),
@@ -267,11 +270,12 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                         label_fmt_ptr,
                         self.bounds_min,
                         self.bounds_max,
-                        self.flags.bits() as i32,
+                        spec,
                     );
                 })
             }
             None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
                 sys::ImPlot_PlotHeatmap_FloatPtr(
                     label_ptr,
                     self.values.as_ptr(),
@@ -282,7 +286,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                     std::ptr::null(),
                     self.bounds_min,
                     self.bounds_max,
-                    self.flags.bits() as i32,
+                    spec,
                 );
             }),
         }

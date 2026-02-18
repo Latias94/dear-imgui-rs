@@ -1,6 +1,6 @@
 //! Dummy plot implementation
 
-use super::{PlotData, PlotError, with_plot_str_or_empty};
+use super::{PlotData, PlotError, plot_spec_from, with_plot_str_or_empty};
 use crate::DummyFlags;
 use crate::sys;
 
@@ -39,7 +39,8 @@ impl<'a> DummyPlot<'a> {
     /// Plot the dummy entry
     pub fn plot(self) {
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            sys::ImPlot_PlotDummy(label_ptr, self.flags.bits() as i32);
+            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            sys::ImPlot_PlotDummy(label_ptr, spec);
         })
     }
 }

@@ -479,6 +479,9 @@ fn docsrs_build(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cimg
 fn main() {
     let cfg = BuildConfig::new();
     println!("cargo:rerun-if-changed=build.rs");
+    // Pregenerated bindings are copied into OUT_DIR when native toolchains are disabled.
+    println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
+    println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/cimplot3d.h");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/cimplot3d.cpp");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/implot3d/implot3d.h");

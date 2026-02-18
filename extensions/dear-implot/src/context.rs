@@ -161,14 +161,13 @@ impl<'ui> PlotUi<'ui> {
 
         let label = if label.contains('\0') { "" } else { label };
         with_scratch_txt(label, |ptr| unsafe {
+            let spec = crate::plots::plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotLine_doublePtrdoublePtr(
                 ptr,
                 x_data.as_ptr(),
                 y_data.as_ptr(),
                 count,
-                0,
-                0,
-                0,
+                spec,
             );
         })
     }
@@ -185,14 +184,13 @@ impl<'ui> PlotUi<'ui> {
 
         let label = if label.contains('\0') { "" } else { label };
         with_scratch_txt(label, |ptr| unsafe {
+            let spec = crate::plots::plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotScatter_doublePtrdoublePtr(
                 ptr,
                 x_data.as_ptr(),
                 y_data.as_ptr(),
                 count,
-                0,
-                0,
-                0,
+                spec,
             );
         })
     }

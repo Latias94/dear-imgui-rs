@@ -70,6 +70,10 @@ fn main() {
 
     // Re-run triggers
     println!("cargo:rerun-if-changed=build.rs");
+    // Pregenerated bindings are copied into OUT_DIR when native toolchains are disabled.
+    // Track them so `cargo check` picks up refreshed bindings immediately.
+    println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
+    println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_FORCE_BUILD");

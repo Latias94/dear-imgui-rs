@@ -1,6 +1,6 @@
 //! Histogram plot implementation
 
-use super::{Plot, PlotError, with_plot_str_or_empty};
+use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
 use crate::sys;
 use crate::{BinMethod, HistogramFlags};
 
@@ -112,6 +112,7 @@ impl<'a> Plot for HistogramPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
             sys::ImPlot_PlotHistogram_doublePtr(
                 label_ptr,
                 self.values.as_ptr(),
@@ -119,7 +120,7 @@ impl<'a> Plot for HistogramPlot<'a> {
                 self.bins,
                 self.bar_scale,
                 range,
-                self.flags.bits() as i32,
+                spec,
             );
         })
     }
@@ -231,6 +232,7 @@ impl<'a> Plot for Histogram2DPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
             sys::ImPlot_PlotHistogram2D_doublePtr(
                 label_ptr,
                 self.x_values.as_ptr(),
@@ -239,7 +241,7 @@ impl<'a> Plot for Histogram2DPlot<'a> {
                 self.x_bins,
                 self.y_bins,
                 range,
-                self.flags.bits() as i32,
+                spec,
             );
         })
     }

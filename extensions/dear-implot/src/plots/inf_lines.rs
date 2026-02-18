@@ -1,6 +1,6 @@
 //! Infinite lines plot implementation
 
-use super::{Plot, PlotError, with_plot_str_or_empty};
+use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
 use crate::{InfLinesFlags, sys};
 
 /// Builder for infinite lines plots
@@ -60,14 +60,8 @@ impl<'a> Plot for InfLinesPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            sys::ImPlot_PlotInfLines_doublePtr(
-                label_ptr,
-                self.positions.as_ptr(),
-                count,
-                self.flags.bits() as i32,
-                self.offset,
-                self.stride,
-            );
+            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
+            sys::ImPlot_PlotInfLines_doublePtr(label_ptr, self.positions.as_ptr(), count, spec);
         })
     }
 

@@ -339,6 +339,8 @@ fn main() {
 
     // Rerun hints
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
+    println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=third-party/cimguizmo/cimguizmo.h");
     println!("cargo:rerun-if-changed=third-party/cimguizmo/cimguizmo.cpp");
     println!("cargo:rerun-if-changed=third-party/cimguizmo/ImGuizmo/ImGuizmo.cpp");

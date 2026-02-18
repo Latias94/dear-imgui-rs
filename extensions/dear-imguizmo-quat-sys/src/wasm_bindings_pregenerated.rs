@@ -145,7 +145,7 @@ unsafe extern "C" {
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
-    pub fn imguiGizmo_setDirectionColor_Vec4Vec4(dColor: ImVec4, pColor: ImVec4);
+    pub fn imguiGizmo_setDirectionColor_Vec4Vec4(dColor: ImVec4_c, pColor: ImVec4_c);
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
@@ -153,7 +153,7 @@ unsafe extern "C" {
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
-    pub fn imguiGizmo_setDirectionColor_Vec4(color: ImVec4);
+    pub fn imguiGizmo_setDirectionColor_Vec4(color: ImVec4_c);
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
@@ -161,7 +161,7 @@ unsafe extern "C" {
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
-    pub fn imguiGizmo_setSphereColors_Vec4(a: ImVec4, b: ImVec4);
+    pub fn imguiGizmo_setSphereColors_Vec4(a: ImVec4_c, b: ImVec4_c);
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {

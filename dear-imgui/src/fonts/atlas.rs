@@ -1003,12 +1003,6 @@ impl FontConfig {
         self
     }
 
-    /// Set pixel snap vertically
-    pub fn pixel_snap_v(mut self, snap: bool) -> Self {
-        self.raw.PixelSnapV = snap;
-        self
-    }
-
     /// Set horizontal oversampling
     pub fn oversample_h(mut self, oversample: i8) -> Self {
         self.raw.OversampleH = oversample;

@@ -199,10 +199,9 @@ impl Ui {
     }
 
     /// Begin a popup context menu for the last item.
-    /// This is typically used with right-click context menus.
     #[doc(alias = "BeginPopupContextItem")]
     pub fn begin_popup_context_item(&self) -> Option<PopupToken<'_>> {
-        self.begin_popup_context_item_with_label(None)
+        self.begin_popup_context_item_with_flags(None, PopupFlags::NONE)
     }
 
     /// Begin a popup context menu for the last item with a custom label.
@@ -211,25 +210,29 @@ impl Ui {
         &self,
         str_id: Option<&str>,
     ) -> Option<PopupToken<'_>> {
+        self.begin_popup_context_item_with_flags(str_id, PopupFlags::NONE)
+    }
+
+    /// Begin a popup context menu for the last item with explicit popup flags.
+    #[doc(alias = "BeginPopupContextItem")]
+    pub fn begin_popup_context_item_with_flags(
+        &self,
+        str_id: Option<&str>,
+        flags: PopupFlags,
+    ) -> Option<PopupToken<'_>> {
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe {
-            sys::igBeginPopupContextItem(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
-        };
+        let render = unsafe { sys::igBeginPopupContextItem(str_id_ptr, flags.bits()) };
 
-        if render {
-            Some(PopupToken::new(self))
-        } else {
-            None
-        }
+        render.then(|| PopupToken::new(self))
     }
 
     /// Begin a popup context menu for the current window.
     #[doc(alias = "BeginPopupContextWindow")]
     pub fn begin_popup_context_window(&self) -> Option<PopupToken<'_>> {
-        self.begin_popup_context_window_with_label(None)
+        self.begin_popup_context_window_with_flags(None, PopupFlags::NONE)
     }
 
     /// Begin a popup context menu for the current window with a custom label.
@@ -238,25 +241,29 @@ impl Ui {
         &self,
         str_id: Option<&str>,
     ) -> Option<PopupToken<'_>> {
+        self.begin_popup_context_window_with_flags(str_id, PopupFlags::NONE)
+    }
+
+    /// Begin a popup context menu for the current window with explicit popup flags.
+    #[doc(alias = "BeginPopupContextWindow")]
+    pub fn begin_popup_context_window_with_flags(
+        &self,
+        str_id: Option<&str>,
+        flags: PopupFlags,
+    ) -> Option<PopupToken<'_>> {
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe {
-            sys::igBeginPopupContextWindow(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
-        };
+        let render = unsafe { sys::igBeginPopupContextWindow(str_id_ptr, flags.bits()) };
 
-        if render {
-            Some(PopupToken::new(self))
-        } else {
-            None
-        }
+        render.then(|| PopupToken::new(self))
     }
 
     /// Begin a popup context menu for empty space (void).
     #[doc(alias = "BeginPopupContextVoid")]
     pub fn begin_popup_context_void(&self) -> Option<PopupToken<'_>> {
-        self.begin_popup_context_void_with_label(None)
+        self.begin_popup_context_void_with_flags(None, PopupFlags::NONE)
     }
 
     /// Begin a popup context menu for empty space with a custom label.
@@ -265,19 +272,23 @@ impl Ui {
         &self,
         str_id: Option<&str>,
     ) -> Option<PopupToken<'_>> {
+        self.begin_popup_context_void_with_flags(str_id, PopupFlags::NONE)
+    }
+
+    /// Begin a popup context menu for empty space (void) with explicit popup flags.
+    #[doc(alias = "BeginPopupContextVoid")]
+    pub fn begin_popup_context_void_with_flags(
+        &self,
+        str_id: Option<&str>,
+        flags: PopupFlags,
+    ) -> Option<PopupToken<'_>> {
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe {
-            sys::igBeginPopupContextVoid(str_id_ptr, PopupFlags::MOUSE_BUTTON_RIGHT.bits())
-        };
+        let render = unsafe { sys::igBeginPopupContextVoid(str_id_ptr, flags.bits()) };
 
-        if render {
-            Some(PopupToken::new(self))
-        } else {
-            None
-        }
+        render.then(|| PopupToken::new(self))
     }
 }
 

@@ -202,6 +202,9 @@ unsafe fn push_style_var(style_var: StyleVar) {
         FrameRounding(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameRounding as i32, v)
         },
+        ImageRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ImageRounding as i32, v)
+        },
         FrameBorderSize(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameBorderSize as i32, v)
         },

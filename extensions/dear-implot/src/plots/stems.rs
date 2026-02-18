@@ -1,6 +1,6 @@
 //! Stem plot implementation
 
-use super::{Plot, PlotError, validate_data_lengths, with_plot_str_or_empty};
+use super::{Plot, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
 use crate::{StemsFlags, sys};
 
 /// Builder for stem plots (lollipop charts)
@@ -69,15 +69,14 @@ impl<'a> Plot for StemPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
             sys::ImPlot_PlotStems_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 count,
                 self.y_ref,
-                self.flags.bits() as i32,
-                self.offset,
-                self.stride,
+                spec,
             );
         })
     }
@@ -142,15 +141,14 @@ impl<'a> Plot for SimpleStemPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotStems_doublePtrdoublePtr(
                 label_ptr,
                 x_data.as_ptr(),
                 self.values.as_ptr(),
                 count,
                 self.y_ref,
-                0, // flags
-                0,
-                std::mem::size_of::<f64>() as i32,
+                spec,
             );
         })
     }

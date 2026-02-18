@@ -457,13 +457,13 @@ impl<'ui> GizmoQuatUi<'ui> {
     pub fn set_direction_colors_vec4(&self, dir: [f32; 4], plane: [f32; 4]) {
         unsafe {
             sys::imguiGizmo_setDirectionColor_Vec4Vec4(
-                sys::ImVec4 {
+                sys::ImVec4_c {
                     x: dir[0],
                     y: dir[1],
                     z: dir[2],
                     w: dir[3],
                 },
-                sys::ImVec4 {
+                sys::ImVec4_c {
                     x: plane[0],
                     y: plane[1],
                     z: plane[2],
@@ -474,7 +474,7 @@ impl<'ui> GizmoQuatUi<'ui> {
     }
     pub fn set_direction_color_vec4(&self, color: [f32; 4]) {
         unsafe {
-            sys::imguiGizmo_setDirectionColor_Vec4(sys::ImVec4 {
+            sys::imguiGizmo_setDirectionColor_Vec4(sys::ImVec4_c {
                 x: color[0],
                 y: color[1],
                 z: color[2],
@@ -485,13 +485,13 @@ impl<'ui> GizmoQuatUi<'ui> {
     pub fn set_sphere_colors_vec4(&self, a: [f32; 4], b: [f32; 4]) {
         unsafe {
             sys::imguiGizmo_setSphereColors_Vec4(
-                sys::ImVec4 {
+                sys::ImVec4_c {
                     x: a[0],
                     y: a[1],
                     z: a[2],
                     w: a[3],
                 },
-                sys::ImVec4 {
+                sys::ImVec4_c {
                     x: b[0],
                     y: b[1],
                     z: b[2],

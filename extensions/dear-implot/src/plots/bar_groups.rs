@@ -1,6 +1,6 @@
 //! Bar groups plot implementation
 
-use super::{PlotData, PlotError, with_plot_str_slice};
+use super::{PlotData, PlotError, plot_spec_from, with_plot_str_slice};
 use crate::BarGroupsFlags;
 use crate::sys;
 
@@ -99,6 +99,7 @@ impl<'a> BarGroupsPlot<'a> {
     /// Plot the bar groups
     pub fn plot(self) {
         with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
             sys::ImPlot_PlotBarGroups_doublePtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
@@ -106,7 +107,7 @@ impl<'a> BarGroupsPlot<'a> {
                 self.group_count as i32,
                 self.group_size,
                 self.shift,
-                self.flags.bits() as i32,
+                spec,
             );
         })
     }
@@ -211,6 +212,7 @@ impl<'a> BarGroupsPlotF32<'a> {
     /// Plot the bar groups
     pub fn plot(self) {
         with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
             sys::ImPlot_PlotBarGroups_FloatPtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
@@ -218,7 +220,7 @@ impl<'a> BarGroupsPlotF32<'a> {
                 self.group_count as i32,
                 self.group_size,
                 self.shift,
-                self.flags.bits() as i32,
+                spec,
             );
         })
     }

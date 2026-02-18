@@ -55,14 +55,18 @@ pub fn pop_style_var(count: i32) {
 
 #[inline]
 pub fn set_next_line_style(col: [f32; 4], weight: f32) {
-    unsafe { sys::ImPlot3D_SetNextLineStyle(crate::imvec4(col[0], col[1], col[2], col[3]), weight) }
+    crate::update_next_plot3d_spec(|spec| {
+        spec.LineColor = crate::imvec4(col[0], col[1], col[2], col[3]);
+        spec.LineWeight = weight;
+    })
 }
 
 #[inline]
 pub fn set_next_fill_style(col: [f32; 4], alpha_mod: f32) {
-    unsafe {
-        sys::ImPlot3D_SetNextFillStyle(crate::imvec4(col[0], col[1], col[2], col[3]), alpha_mod)
-    }
+    crate::update_next_plot3d_spec(|spec| {
+        spec.FillColor = crate::imvec4(col[0], col[1], col[2], col[3]);
+        spec.FillAlpha = alpha_mod;
+    })
 }
 
 #[inline]
@@ -73,15 +77,13 @@ pub fn set_next_marker_style(
     weight: f32,
     outline: [f32; 4],
 ) {
-    unsafe {
-        sys::ImPlot3D_SetNextMarkerStyle(
-            marker as i32,
-            size,
-            crate::imvec4(fill[0], fill[1], fill[2], fill[3]),
-            weight,
-            crate::imvec4(outline[0], outline[1], outline[2], outline[3]),
-        )
-    }
+    crate::update_next_plot3d_spec(|spec| {
+        spec.Marker = marker as sys::ImPlot3DMarker;
+        spec.MarkerSize = size;
+        spec.MarkerFillColor = crate::imvec4(fill[0], fill[1], fill[2], fill[3]);
+        spec.MarkerLineColor = crate::imvec4(outline[0], outline[1], outline[2], outline[3]);
+        spec.LineWeight = weight;
+    })
 }
 
 #[inline]

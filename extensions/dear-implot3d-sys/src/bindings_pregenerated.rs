@@ -535,6 +535,7 @@ pub struct ImGuiStyle {
     pub GrabMinSize: f32,
     pub GrabRounding: f32,
     pub LogSliderDeadzone: f32,
+    pub ImageRounding: f32,
     pub ImageBorderSize: f32,
     pub TabRounding: f32,
     pub TabBorderSize: f32,
@@ -552,6 +553,7 @@ pub struct ImGuiStyle {
     pub DragDropTargetRounding: f32,
     pub DragDropTargetBorderSize: f32,
     pub DragDropTargetPadding: f32,
+    pub ColorMarkerSize: f32,
     pub ColorButtonPosition: ImGuiDir,
     pub ButtonTextAlign: ImVec2_c,
     pub SelectableTextAlign: ImVec2_c,
@@ -1292,7 +1294,6 @@ pub struct ImFontConfig {
     pub FontDataOwnedByAtlas: bool,
     pub MergeMode: bool,
     pub PixelSnapH: bool,
-    pub PixelSnapV: bool,
     pub OversampleH: ImS8,
     pub OversampleV: ImS8,
     pub EllipsisChar: ImWchar,
@@ -1307,6 +1308,7 @@ pub struct ImFontConfig {
     pub FontLoaderFlags: ::std::os::raw::c_uint,
     pub RasterizerMultiply: f32,
     pub RasterizerDensity: f32,
+    pub ExtraSizeScale: f32,
     pub Flags: ImFontFlags,
     pub DstFont: *mut ImFont,
     pub FontLoader: *const ImFontLoader,
@@ -2380,6 +2382,7 @@ pub struct ImGuiNextItemData {
     pub OpenCond: ImU8,
     pub RefVal: ImGuiDataTypeStorage,
     pub StorageId: ImGuiID,
+    pub ColorMarker: ImU32,
 }
 impl Default for ImGuiNextItemData {
     fn default() -> Self {
@@ -2522,7 +2525,7 @@ impl Default for ImGuiPopupData {
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImBitArray_ImGuiKey_NamedKey_COUNT__lessImGuiKey_NamedKey_BEGIN {
-    pub Storage: [ImU32; 5usize],
+    pub Data: [ImU32; 5usize],
 }
 pub type ImBitArrayForNamedKeys = ImBitArray_ImGuiKey_NamedKey_COUNT__lessImGuiKey_NamedKey_BEGIN;
 pub const ImGuiInputEventType_None: ImGuiInputEventType = 0;
@@ -4409,6 +4412,7 @@ pub struct ImGuiWindowTempData {
     pub DockTabItemStatusFlags: ImGuiItemStatusFlags,
     pub DockTabItemRect: ImRect_c,
     pub ItemWidth: f32,
+    pub ItemWidthDefault: f32,
     pub TextWrapPos: f32,
     pub ItemWidthStack: ImVector_float,
     pub TextWrapPosStack: ImVector_float,
@@ -4530,7 +4534,6 @@ pub struct ImGuiWindow {
     pub LastFrameActive: ::std::os::raw::c_int,
     pub LastFrameJustFocused: ::std::os::raw::c_int,
     pub LastTimeActive: f32,
-    pub ItemWidthDefault: f32,
     pub StateStorage: ImGuiStorage,
     pub ColumnsStorage: ImVector_ImGuiOldColumns,
     pub FontWindowScale: f32,
@@ -4981,6 +4984,7 @@ pub struct ImGuiTabBar {
     pub ID: ImGuiID,
     pub SelectedTabId: ImGuiID,
     pub NextSelectedTabId: ImGuiID,
+    pub NextScrollToTabId: ImGuiID,
     pub VisibleTabId: ImGuiID,
     pub CurrFrameVisible: ::std::os::raw::c_int,
     pub PrevFrameVisible: ::std::os::raw::c_int,
@@ -5870,6 +5874,7 @@ pub type ImAxis3D = ::std::os::raw::c_int;
 pub type ImPlane3D = ::std::os::raw::c_int;
 pub type ImPlot3DScale = ::std::os::raw::c_int;
 pub type ImPlot3DColormap = ::std::os::raw::c_int;
+pub type ImPlot3DProp = ::std::os::raw::c_int;
 pub type ImPlot3DFlags = ::std::os::raw::c_int;
 pub type ImPlot3DItemFlags = ::std::os::raw::c_int;
 pub type ImPlot3DScatterFlags = ::std::os::raw::c_int;
@@ -5882,6 +5887,18 @@ pub type ImPlot3DImageFlags = ::std::os::raw::c_int;
 pub type ImPlot3DDummyFlags = ::std::os::raw::c_int;
 pub type ImPlot3DLegendFlags = ::std::os::raw::c_int;
 pub type ImPlot3DAxisFlags = ::std::os::raw::c_int;
+pub const ImPlot3DProp_LineColor: ImPlot3DProp_ = 0;
+pub const ImPlot3DProp_LineWeight: ImPlot3DProp_ = 1;
+pub const ImPlot3DProp_FillColor: ImPlot3DProp_ = 2;
+pub const ImPlot3DProp_FillAlpha: ImPlot3DProp_ = 3;
+pub const ImPlot3DProp_Marker: ImPlot3DProp_ = 4;
+pub const ImPlot3DProp_MarkerSize: ImPlot3DProp_ = 5;
+pub const ImPlot3DProp_MarkerLineColor: ImPlot3DProp_ = 6;
+pub const ImPlot3DProp_MarkerFillColor: ImPlot3DProp_ = 7;
+pub const ImPlot3DProp_Offset: ImPlot3DProp_ = 8;
+pub const ImPlot3DProp_Stride: ImPlot3DProp_ = 9;
+pub const ImPlot3DProp_Flags: ImPlot3DProp_ = 10;
+pub type ImPlot3DProp_ = ::std::os::raw::c_int;
 pub const ImPlot3DFlags_None: ImPlot3DFlags_ = 0;
 pub const ImPlot3DFlags_NoTitle: ImPlot3DFlags_ = 1;
 pub const ImPlot3DFlags_NoLegend: ImPlot3DFlags_ = 2;
@@ -5899,39 +5916,35 @@ pub const ImPlot3DCond_None: ImPlot3DCond_ = 0;
 pub const ImPlot3DCond_Always: ImPlot3DCond_ = 1;
 pub const ImPlot3DCond_Once: ImPlot3DCond_ = 2;
 pub type ImPlot3DCond_ = ::std::os::raw::c_int;
-pub const ImPlot3DCol_Line: ImPlot3DCol_ = 0;
-pub const ImPlot3DCol_Fill: ImPlot3DCol_ = 1;
-pub const ImPlot3DCol_MarkerOutline: ImPlot3DCol_ = 2;
-pub const ImPlot3DCol_MarkerFill: ImPlot3DCol_ = 3;
-pub const ImPlot3DCol_TitleText: ImPlot3DCol_ = 4;
-pub const ImPlot3DCol_InlayText: ImPlot3DCol_ = 5;
-pub const ImPlot3DCol_FrameBg: ImPlot3DCol_ = 6;
-pub const ImPlot3DCol_PlotBg: ImPlot3DCol_ = 7;
-pub const ImPlot3DCol_PlotBorder: ImPlot3DCol_ = 8;
-pub const ImPlot3DCol_LegendBg: ImPlot3DCol_ = 9;
-pub const ImPlot3DCol_LegendBorder: ImPlot3DCol_ = 10;
-pub const ImPlot3DCol_LegendText: ImPlot3DCol_ = 11;
-pub const ImPlot3DCol_AxisText: ImPlot3DCol_ = 12;
-pub const ImPlot3DCol_AxisGrid: ImPlot3DCol_ = 13;
-pub const ImPlot3DCol_AxisTick: ImPlot3DCol_ = 14;
-pub const ImPlot3DCol_COUNT: ImPlot3DCol_ = 15;
+pub const ImPlot3DCol_TitleText: ImPlot3DCol_ = 0;
+pub const ImPlot3DCol_InlayText: ImPlot3DCol_ = 1;
+pub const ImPlot3DCol_FrameBg: ImPlot3DCol_ = 2;
+pub const ImPlot3DCol_PlotBg: ImPlot3DCol_ = 3;
+pub const ImPlot3DCol_PlotBorder: ImPlot3DCol_ = 4;
+pub const ImPlot3DCol_LegendBg: ImPlot3DCol_ = 5;
+pub const ImPlot3DCol_LegendBorder: ImPlot3DCol_ = 6;
+pub const ImPlot3DCol_LegendText: ImPlot3DCol_ = 7;
+pub const ImPlot3DCol_AxisText: ImPlot3DCol_ = 8;
+pub const ImPlot3DCol_AxisGrid: ImPlot3DCol_ = 9;
+pub const ImPlot3DCol_AxisTick: ImPlot3DCol_ = 10;
+pub const ImPlot3DCol_COUNT: ImPlot3DCol_ = 11;
 pub type ImPlot3DCol_ = ::std::os::raw::c_int;
 pub const ImPlot3DStyleVar_LineWeight: ImPlot3DStyleVar_ = 0;
 pub const ImPlot3DStyleVar_Marker: ImPlot3DStyleVar_ = 1;
 pub const ImPlot3DStyleVar_MarkerSize: ImPlot3DStyleVar_ = 2;
-pub const ImPlot3DStyleVar_MarkerWeight: ImPlot3DStyleVar_ = 3;
-pub const ImPlot3DStyleVar_FillAlpha: ImPlot3DStyleVar_ = 4;
-pub const ImPlot3DStyleVar_PlotDefaultSize: ImPlot3DStyleVar_ = 5;
-pub const ImPlot3DStyleVar_PlotMinSize: ImPlot3DStyleVar_ = 6;
-pub const ImPlot3DStyleVar_PlotPadding: ImPlot3DStyleVar_ = 7;
-pub const ImPlot3DStyleVar_LabelPadding: ImPlot3DStyleVar_ = 8;
-pub const ImPlot3DStyleVar_ViewScaleFactor: ImPlot3DStyleVar_ = 9;
-pub const ImPlot3DStyleVar_LegendPadding: ImPlot3DStyleVar_ = 10;
-pub const ImPlot3DStyleVar_LegendInnerPadding: ImPlot3DStyleVar_ = 11;
-pub const ImPlot3DStyleVar_LegendSpacing: ImPlot3DStyleVar_ = 12;
-pub const ImPlot3DStyleVar_COUNT: ImPlot3DStyleVar_ = 13;
+pub const ImPlot3DStyleVar_FillAlpha: ImPlot3DStyleVar_ = 3;
+pub const ImPlot3DStyleVar_PlotDefaultSize: ImPlot3DStyleVar_ = 4;
+pub const ImPlot3DStyleVar_PlotMinSize: ImPlot3DStyleVar_ = 5;
+pub const ImPlot3DStyleVar_PlotPadding: ImPlot3DStyleVar_ = 6;
+pub const ImPlot3DStyleVar_LabelPadding: ImPlot3DStyleVar_ = 7;
+pub const ImPlot3DStyleVar_ViewScaleFactor: ImPlot3DStyleVar_ = 8;
+pub const ImPlot3DStyleVar_LegendPadding: ImPlot3DStyleVar_ = 9;
+pub const ImPlot3DStyleVar_LegendInnerPadding: ImPlot3DStyleVar_ = 10;
+pub const ImPlot3DStyleVar_LegendSpacing: ImPlot3DStyleVar_ = 11;
+pub const ImPlot3DStyleVar_COUNT: ImPlot3DStyleVar_ = 12;
 pub type ImPlot3DStyleVar_ = ::std::os::raw::c_int;
-pub const ImPlot3DMarker_None: ImPlot3DMarker_ = -1;
+pub const ImPlot3DMarker_None: ImPlot3DMarker_ = -2;
+pub const ImPlot3DMarker_Auto: ImPlot3DMarker_ = -1;
 pub const ImPlot3DMarker_Circle: ImPlot3DMarker_ = 0;
 pub const ImPlot3DMarker_Square: ImPlot3DMarker_ = 1;
 pub const ImPlot3DMarker_Diamond: ImPlot3DMarker_ = 2;
@@ -6042,6 +6055,21 @@ pub const ImPlot3DColormap_PiYG: ImPlot3DColormap_ = 13;
 pub const ImPlot3DColormap_Spectral: ImPlot3DColormap_ = 14;
 pub const ImPlot3DColormap_Greys: ImPlot3DColormap_ = 15;
 pub type ImPlot3DColormap_ = ::std::os::raw::c_int;
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct ImPlot3DSpec_c {
+    pub LineColor: ImVec4_c,
+    pub LineWeight: f32,
+    pub FillColor: ImVec4_c,
+    pub FillAlpha: f32,
+    pub Marker: ImPlot3DMarker,
+    pub MarkerSize: f32,
+    pub MarkerLineColor: ImVec4_c,
+    pub MarkerFillColor: ImVec4_c,
+    pub Offset: ::std::os::raw::c_int,
+    pub Stride: ::std::os::raw::c_int,
+    pub Flags: ImPlot3DItemFlags,
+}
 pub type ImPlot3DFormatter = ::std::option::Option<
     unsafe extern "C" fn(
         value: f64,
@@ -6098,7 +6126,6 @@ pub struct ImPlot3DStyle_c {
     pub LineWeight: f32,
     pub Marker: ::std::os::raw::c_int,
     pub MarkerSize: f32,
-    pub MarkerWeight: f32,
     pub FillAlpha: f32,
     pub PlotDefaultSize: ImVec2_c,
     pub PlotMinSize: ImVec2_c,
@@ -6108,11 +6135,12 @@ pub struct ImPlot3DStyle_c {
     pub LegendPadding: ImVec2_c,
     pub LegendInnerPadding: ImVec2_c,
     pub LegendSpacing: ImVec2_c,
-    pub Colors: [ImVec4_c; 15usize],
+    pub Colors: [ImVec4_c; 11usize],
     pub Colormap: ImPlot3DColormap,
 }
 pub type ImPlot3DPoint = ImPlot3DPoint_c;
 pub type ImPlot3DQuat = ImPlot3DQuat_c;
+pub type ImPlot3DSpec = ImPlot3DSpec_c;
 pub type ImPlot3DStyle = ImPlot3DStyle_c;
 unsafe extern "C" {
     pub fn ImPlot3D_CreateContext() -> *mut ImPlot3DContext;
@@ -6244,9 +6272,7 @@ unsafe extern "C" {
         ys: *const f32,
         zs: *const f32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6256,9 +6282,7 @@ unsafe extern "C" {
         ys: *const f64,
         zs: *const f64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6268,9 +6292,7 @@ unsafe extern "C" {
         ys: *const ImS8,
         zs: *const ImS8,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6280,9 +6302,7 @@ unsafe extern "C" {
         ys: *const ImU8,
         zs: *const ImU8,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6292,9 +6312,7 @@ unsafe extern "C" {
         ys: *const ImS16,
         zs: *const ImS16,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6304,9 +6322,7 @@ unsafe extern "C" {
         ys: *const ImU16,
         zs: *const ImU16,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6316,9 +6332,7 @@ unsafe extern "C" {
         ys: *const ImS32,
         zs: *const ImS32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6328,9 +6342,7 @@ unsafe extern "C" {
         ys: *const ImU32,
         zs: *const ImU32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6340,9 +6352,7 @@ unsafe extern "C" {
         ys: *const ImS64,
         zs: *const ImS64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6352,9 +6362,7 @@ unsafe extern "C" {
         ys: *const ImU64,
         zs: *const ImU64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DScatterFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6364,9 +6372,7 @@ unsafe extern "C" {
         ys: *const f32,
         zs: *const f32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6376,9 +6382,7 @@ unsafe extern "C" {
         ys: *const f64,
         zs: *const f64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6388,9 +6392,7 @@ unsafe extern "C" {
         ys: *const ImS8,
         zs: *const ImS8,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6400,9 +6402,7 @@ unsafe extern "C" {
         ys: *const ImU8,
         zs: *const ImU8,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6412,9 +6412,7 @@ unsafe extern "C" {
         ys: *const ImS16,
         zs: *const ImS16,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6424,9 +6422,7 @@ unsafe extern "C" {
         ys: *const ImU16,
         zs: *const ImU16,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6436,9 +6432,7 @@ unsafe extern "C" {
         ys: *const ImS32,
         zs: *const ImS32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6448,9 +6442,7 @@ unsafe extern "C" {
         ys: *const ImU32,
         zs: *const ImU32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6460,9 +6452,7 @@ unsafe extern "C" {
         ys: *const ImS64,
         zs: *const ImS64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6472,9 +6462,7 @@ unsafe extern "C" {
         ys: *const ImU64,
         zs: *const ImU64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DLineFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6484,9 +6472,7 @@ unsafe extern "C" {
         ys: *const f32,
         zs: *const f32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6496,9 +6482,7 @@ unsafe extern "C" {
         ys: *const f64,
         zs: *const f64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6508,9 +6492,7 @@ unsafe extern "C" {
         ys: *const ImS8,
         zs: *const ImS8,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6520,9 +6502,7 @@ unsafe extern "C" {
         ys: *const ImU8,
         zs: *const ImU8,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6532,9 +6512,7 @@ unsafe extern "C" {
         ys: *const ImS16,
         zs: *const ImS16,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6544,9 +6522,7 @@ unsafe extern "C" {
         ys: *const ImU16,
         zs: *const ImU16,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6556,9 +6532,7 @@ unsafe extern "C" {
         ys: *const ImS32,
         zs: *const ImS32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6568,9 +6542,7 @@ unsafe extern "C" {
         ys: *const ImU32,
         zs: *const ImU32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6580,9 +6552,7 @@ unsafe extern "C" {
         ys: *const ImS64,
         zs: *const ImS64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6592,9 +6562,7 @@ unsafe extern "C" {
         ys: *const ImU64,
         zs: *const ImU64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DTriangleFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6604,9 +6572,7 @@ unsafe extern "C" {
         ys: *const f32,
         zs: *const f32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6616,9 +6582,7 @@ unsafe extern "C" {
         ys: *const f64,
         zs: *const f64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6628,9 +6592,7 @@ unsafe extern "C" {
         ys: *const ImS8,
         zs: *const ImS8,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6640,9 +6602,7 @@ unsafe extern "C" {
         ys: *const ImU8,
         zs: *const ImU8,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6652,9 +6612,7 @@ unsafe extern "C" {
         ys: *const ImS16,
         zs: *const ImS16,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6664,9 +6622,7 @@ unsafe extern "C" {
         ys: *const ImU16,
         zs: *const ImU16,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6676,9 +6632,7 @@ unsafe extern "C" {
         ys: *const ImS32,
         zs: *const ImS32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6688,9 +6642,7 @@ unsafe extern "C" {
         ys: *const ImU32,
         zs: *const ImU32,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6700,9 +6652,7 @@ unsafe extern "C" {
         ys: *const ImS64,
         zs: *const ImS64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6712,9 +6662,7 @@ unsafe extern "C" {
         ys: *const ImU64,
         zs: *const ImU64,
         count: ::std::os::raw::c_int,
-        flags: ImPlot3DQuadFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6727,9 +6675,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6742,9 +6688,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6757,9 +6701,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6772,9 +6714,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6787,9 +6727,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6802,9 +6740,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6817,9 +6753,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6832,9 +6766,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6847,9 +6779,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6862,9 +6792,7 @@ unsafe extern "C" {
         y_count: ::std::os::raw::c_int,
         scale_min: f64,
         scale_max: f64,
-        flags: ImPlot3DSurfaceFlags,
-        offset: ::std::os::raw::c_int,
-        stride: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6874,7 +6802,7 @@ unsafe extern "C" {
         idx: *const ::std::os::raw::c_uint,
         vtx_count: ::std::os::raw::c_int,
         idx_count: ::std::os::raw::c_int,
-        flags: ImPlot3DMeshFlags,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6887,11 +6815,11 @@ unsafe extern "C" {
         uv0: ImVec2_c,
         uv1: ImVec2_c,
         tint_col: ImVec4_c,
-        flags: ImPlot3DImageFlags,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_PlotImage_Plot3DPoInt(
+    pub fn ImPlot3D_PlotImage_Plot3DPoint(
         label_id: *const ::std::os::raw::c_char,
         tex_ref: ImTextureRef_c,
         p0: ImPlot3DPoint_c,
@@ -6903,7 +6831,7 @@ unsafe extern "C" {
         uv2: ImVec2_c,
         uv3: ImVec2_c,
         tint_col: ImVec4_c,
-        flags: ImPlot3DImageFlags,
+        spec: ImPlot3DSpec_c,
     );
 }
 unsafe extern "C" {
@@ -6917,10 +6845,10 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_PlotDummy(label_id: *const ::std::os::raw::c_char, flags: ImPlot3DDummyFlags);
+    pub fn ImPlot3D_PlotDummy(label_id: *const ::std::os::raw::c_char, spec: ImPlot3DSpec_c);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_PlotToPixels_Plot3DPoInt(point: ImPlot3DPoint_c) -> ImVec2_c;
+    pub fn ImPlot3D_PlotToPixels_Plot3DPoint(point: ImPlot3DPoint_c) -> ImVec2_c;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_PlotToPixels_double(x: f64, y: f64, z: f64) -> ImVec2_c;
@@ -6995,25 +6923,13 @@ unsafe extern "C" {
     pub fn ImPlot3D_PopStyleVar(count: ::std::os::raw::c_int);
 }
 unsafe extern "C" {
-    pub fn ImPlot3D_SetNextLineStyle(col: ImVec4_c, weight: f32);
-}
-unsafe extern "C" {
-    pub fn ImPlot3D_SetNextFillStyle(col: ImVec4_c, alpha_mod: f32);
-}
-unsafe extern "C" {
-    pub fn ImPlot3D_SetNextMarkerStyle(
-        marker: ImPlot3DMarker,
-        size: f32,
-        fill: ImVec4_c,
-        weight: f32,
-        outline: ImVec4_c,
-    );
-}
-unsafe extern "C" {
     pub fn ImPlot3D_GetStyleColorVec4(idx: ImPlot3DCol) -> ImVec4_c;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_GetStyleColorU32(idx: ImPlot3DCol) -> ImU32;
+}
+unsafe extern "C" {
+    pub fn ImPlot3D_NextMarker() -> ImPlot3DMarker;
 }
 unsafe extern "C" {
     pub fn ImPlot3D_AddColormap_Vec4Ptr(

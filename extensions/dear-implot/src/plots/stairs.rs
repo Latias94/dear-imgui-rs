@@ -1,6 +1,6 @@
 //! Stairs plot implementation
 
-use super::{PlotData, PlotError, validate_data_lengths, with_plot_str_or_empty};
+use super::{PlotData, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
 use crate::StairsFlags;
 use crate::sys;
 
@@ -68,14 +68,13 @@ impl<'a> StairsPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
             sys::ImPlot_PlotStairs_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 count,
-                self.flags.bits() as i32,
-                self.offset,
-                self.stride,
+                spec,
             );
         })
     }
@@ -148,14 +147,13 @@ impl<'a> StairsPlotF32<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), 0, std::mem::size_of::<f32>() as i32);
             sys::ImPlot_PlotStairs_FloatPtrFloatPtr(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 count,
-                self.flags.bits() as i32,
-                0,
-                std::mem::size_of::<f32>() as i32,
+                spec,
             );
         })
     }
@@ -241,14 +239,13 @@ impl<'a> SimpleStairsPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotStairs_doublePtrdoublePtr(
                 label_ptr,
                 x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 count,
-                self.flags.bits() as i32,
-                0,
-                std::mem::size_of::<f64>() as i32,
+                spec,
             );
         })
     }

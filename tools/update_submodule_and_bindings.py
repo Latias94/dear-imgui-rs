@@ -72,9 +72,13 @@ def find_bindings(target_dir: Path, profile: str, crate: str) -> Path:
         return None
     # build dir prefix is crate name with a hash suffix
     pattern = f"{crate}-*/out/bindings.rs"
-    for p in build_dir.glob(pattern):
-        return p
-    return None
+    matches = list(build_dir.glob(pattern))
+    if not matches:
+        return None
+    # When multiple build outputs exist (incremental builds, feature changes),
+    # prefer the most recently modified bindings.
+    matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return matches[0]
 
 
 def main() -> int:

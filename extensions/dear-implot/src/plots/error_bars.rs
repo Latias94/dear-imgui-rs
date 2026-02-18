@@ -1,6 +1,6 @@
 //! Error bars plot implementation
 
-use super::{Plot, PlotError, validate_data_lengths, with_plot_str_or_empty};
+use super::{Plot, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
 use crate::{ErrorBarsFlags, sys};
 
 /// Builder for error bars plots
@@ -84,15 +84,14 @@ impl<'a> Plot for ErrorBarsPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
             sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrInt(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 self.err_data.as_ptr(),
                 count,
-                self.flags.bits() as i32,
-                self.offset,
-                self.stride,
+                spec,
             );
         })
     }
@@ -170,6 +169,7 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),
@@ -177,9 +177,7 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
                 self.err_neg.as_ptr(),
                 self.err_pos.as_ptr(),
                 count,
-                self.flags.bits() as i32,
-                0,
-                std::mem::size_of::<f64>() as i32,
+                spec,
             );
         })
     }
@@ -251,15 +249,14 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrInt(
                 label_ptr,
                 x_data.as_ptr(),
                 self.values.as_ptr(),
                 self.errors.as_ptr(),
                 count,
-                0, // flags
-                0,
-                std::mem::size_of::<f64>() as i32,
+                spec,
             );
         })
     }

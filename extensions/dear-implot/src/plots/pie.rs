@@ -1,6 +1,6 @@
 //! Pie chart plot implementation
 
-use super::{Plot, PlotError, with_plot_str_slice_with_opt};
+use super::{Plot, PlotError, plot_spec_from, with_plot_str_slice_with_opt};
 use crate::PieChartFlags;
 use crate::sys;
 
@@ -123,6 +123,7 @@ impl<'a> Plot for PieChartPlot<'a> {
             &self.label_ids,
             self.label_fmt,
             |label_ptrs, label_fmt_ptr| unsafe {
+                let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
                 sys::ImPlot_PlotPieChart_doublePtrStr(
                     label_ptrs.as_ptr(),
                     self.values.as_ptr(),
@@ -132,7 +133,7 @@ impl<'a> Plot for PieChartPlot<'a> {
                     self.radius,
                     label_fmt_ptr,
                     self.angle0,
-                    self.flags.bits() as i32,
+                    spec,
                 );
             },
         )
@@ -253,6 +254,7 @@ impl<'a> Plot for PieChartPlotF32<'a> {
             &self.label_ids,
             self.label_fmt,
             |label_ptrs, label_fmt_ptr| unsafe {
+                let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
                 sys::ImPlot_PlotPieChart_FloatPtrStr(
                     label_ptrs.as_ptr(),
                     self.values.as_ptr(),
@@ -262,7 +264,7 @@ impl<'a> Plot for PieChartPlotF32<'a> {
                     self.radius,
                     label_fmt_ptr,
                     self.angle0,
-                    self.flags.bits() as i32,
+                    spec,
                 );
             },
         )

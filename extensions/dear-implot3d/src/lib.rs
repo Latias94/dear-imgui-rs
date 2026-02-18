@@ -54,9 +54,60 @@ pub mod meshes;
 pub mod plots;
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 
 fn len_i32(len: usize) -> Option<i32> {
     i32::try_from(len).ok()
+}
+
+const IMPLOT3D_AUTO: i32 = -1;
+
+thread_local! {
+    static NEXT_PLOT3D_SPEC: RefCell<Option<sys::ImPlot3DSpec_c>> = RefCell::new(None);
+}
+
+pub(crate) fn update_next_plot3d_spec(f: impl FnOnce(&mut sys::ImPlot3DSpec_c)) {
+    NEXT_PLOT3D_SPEC.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let mut spec = guard.take().unwrap_or_else(default_plot3d_spec);
+        f(&mut spec);
+        *guard = Some(spec);
+    })
+}
+
+fn take_next_plot3d_spec() -> Option<sys::ImPlot3DSpec_c> {
+    NEXT_PLOT3D_SPEC.with(|cell| cell.borrow_mut().take())
+}
+
+fn default_plot3d_spec() -> sys::ImPlot3DSpec_c {
+    let auto_col = sys::ImVec4_c {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        w: -1.0,
+    };
+
+    sys::ImPlot3DSpec_c {
+        LineColor: auto_col,
+        LineWeight: 1.0,
+        FillColor: auto_col,
+        FillAlpha: -1.0,
+        Marker: sys::ImPlot3DMarker_Auto,
+        MarkerSize: -1.0,
+        MarkerLineColor: auto_col,
+        MarkerFillColor: auto_col,
+        Offset: 0,
+        Stride: IMPLOT3D_AUTO,
+        Flags: sys::ImPlot3DItemFlags_None,
+    }
+}
+
+fn plot3d_spec_from(flags: u32, offset: i32, stride: i32) -> sys::ImPlot3DSpec_c {
+    let mut spec = take_next_plot3d_spec().unwrap_or_else(default_plot3d_spec);
+    spec.Flags = flags as sys::ImPlot3DItemFlags;
+    spec.Offset = offset;
+    spec.Stride = stride;
+    spec
 }
 
 trait ImVec2Ctor {
@@ -422,15 +473,14 @@ impl<'ui> Plot3DUi<'ui> {
         }
         let stride_bytes = std::mem::size_of::<f32>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
             sys::ImPlot3D_PlotLine_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                0,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -462,15 +512,14 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotLine_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -496,15 +545,14 @@ impl<'ui> Plot3DUi<'ui> {
         }
         let stride_bytes = std::mem::size_of::<f64>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
             sys::ImPlot3D_PlotLine_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                0,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -536,15 +584,14 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotLine_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -570,15 +617,14 @@ impl<'ui> Plot3DUi<'ui> {
         }
         let stride_bytes = std::mem::size_of::<f32>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
             sys::ImPlot3D_PlotScatter_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                0,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -610,15 +656,14 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotScatter_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -644,15 +689,14 @@ impl<'ui> Plot3DUi<'ui> {
         }
         let stride_bytes = std::mem::size_of::<f64>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
             sys::ImPlot3D_PlotScatter_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                0,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -684,15 +728,14 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotScatter_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -718,15 +761,14 @@ impl<'ui> Plot3DUi<'ui> {
         }
         let stride_bytes = std::mem::size_of::<f32>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
             sys::ImPlot3D_PlotTriangle_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                0,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -757,15 +799,14 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotTriangle_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -791,15 +832,14 @@ impl<'ui> Plot3DUi<'ui> {
         }
         let stride_bytes = std::mem::size_of::<f32>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
             sys::ImPlot3D_PlotQuad_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                0,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -830,15 +870,14 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotQuad_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -864,15 +903,14 @@ impl<'ui> Plot3DUi<'ui> {
         }
         let stride_bytes = std::mem::size_of::<f64>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
             sys::ImPlot3D_PlotTriangle_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                0,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -903,15 +941,14 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotTriangle_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -937,15 +974,14 @@ impl<'ui> Plot3DUi<'ui> {
         }
         let stride_bytes = std::mem::size_of::<f64>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
             sys::ImPlot3D_PlotQuad_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                0,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -976,15 +1012,14 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotQuad_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
                 ys.as_ptr(),
                 zs.as_ptr(),
                 count,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -1173,6 +1208,7 @@ impl<'ui> Surface3DBuilder<'ui> {
             label
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(self.flags.bits(), 0, std::mem::size_of::<f32>() as i32);
             sys::ImPlot3D_PlotSurface_FloatPtr(
                 label_ptr,
                 self.xs.as_ptr(),
@@ -1182,9 +1218,7 @@ impl<'ui> Surface3DBuilder<'ui> {
                 y_count,
                 self.scale_min,
                 self.scale_max,
-                self.flags.bits() as i32,
-                0,
-                0,
+                spec,
             );
         })
     }
@@ -1256,6 +1290,7 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotSurface_FloatPtr(
                 label_ptr,
                 xs_flat.as_ptr(),
@@ -1265,9 +1300,7 @@ impl<'ui> Plot3DUi<'ui> {
                 y_count as i32,
                 scale_min,
                 scale_max,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -1308,6 +1341,7 @@ impl<'ui> Plot3DUi<'ui> {
             stride
         };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
             sys::ImPlot3D_PlotSurface_FloatPtr(
                 label_ptr,
                 xs_flat.as_ptr(),
@@ -1317,9 +1351,7 @@ impl<'ui> Plot3DUi<'ui> {
                 y_count,
                 scale_min,
                 scale_max,
-                flags.bits() as i32,
-                offset,
-                stride_bytes,
+                spec,
             );
         })
     }
@@ -1358,6 +1390,7 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
         let label = if label.contains('\0') { "image" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
+            let spec = plot3d_spec_from(self.flags.bits(), 0, IMPLOT3D_AUTO);
             sys::ImPlot3D_PlotImage_Vec2(
                 label_ptr,
                 self.tex_ref,
@@ -1379,7 +1412,7 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
                 imvec2(self.uv0[0], self.uv0[1]),
                 imvec2(self.uv1[0], self.uv1[1]),
                 imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
-                self.flags.bits() as i32,
+                spec,
             );
         })
     }
@@ -1423,7 +1456,8 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
         let label = if label.contains('\0') { "image" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
-            sys::ImPlot3D_PlotImage_Plot3DPoInt(
+            let spec = plot3d_spec_from(self.flags.bits(), 0, IMPLOT3D_AUTO);
+            sys::ImPlot3D_PlotImage_Plot3DPoint(
                 label_ptr,
                 self.tex_ref,
                 sys::ImPlot3DPoint_c {
@@ -1451,7 +1485,7 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
                 imvec2(self.uv2[0], self.uv2[1]),
                 imvec2(self.uv3[0], self.uv3[1]),
                 imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
-                self.flags.bits() as i32,
+                spec,
             );
         })
     }
@@ -1792,13 +1826,14 @@ impl<'ui> Mesh3DBuilder<'ui> {
         let label = if label.contains('\0') { "mesh" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
+            let spec = plot3d_spec_from(self.flags.bits(), 0, IMPLOT3D_AUTO);
             sys::ImPlot3D_PlotMesh(
                 label_ptr,
                 vertices.as_ptr(),
                 self.indices.as_ptr(),
                 vtx_count,
                 idx_count,
-                self.flags.bits() as i32,
+                spec,
             );
         })
     }

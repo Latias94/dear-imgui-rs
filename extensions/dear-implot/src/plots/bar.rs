@@ -1,6 +1,6 @@
 //! Bar plot implementation
 
-use super::{Plot, PlotError, with_plot_str_or_empty};
+use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
 use crate::{BarsFlags, sys};
 
 /// Builder for bar plots with customization options
@@ -78,15 +78,14 @@ impl<'a> Plot for BarPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
             sys::ImPlot_PlotBars_doublePtrInt(
                 label_ptr,
                 self.values.as_ptr(),
                 count,
                 self.bar_size,
                 self.shift,
-                self.flags.bits() as i32,
-                self.offset,
-                self.stride,
+                spec,
             );
         })
     }
@@ -145,15 +144,14 @@ impl<'a> Plot for PositionalBarPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotBars_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 count,
                 self.bar_size,
-                self.flags.bits() as i32,
-                0,
-                std::mem::size_of::<f64>() as i32,
+                spec,
             );
         })
     }

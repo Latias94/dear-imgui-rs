@@ -306,6 +306,9 @@ fn main() {
 
     // Rerun hints
     println!("cargo:rerun-if-changed=build.rs");
+    // Pregenerated bindings are copied into OUT_DIR when native toolchains are disabled.
+    println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
+    println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=third-party/cimplot/cimplot.h");
     println!("cargo:rerun-if-changed=third-party/cimplot/cimplot.cpp");
     println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot.h");

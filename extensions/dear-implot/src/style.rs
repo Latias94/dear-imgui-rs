@@ -8,15 +8,8 @@ use std::os::raw::c_char;
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum StyleVar {
-    LineWeight = sys::ImPlotStyleVar_LineWeight as i32,
-    Marker = sys::ImPlotStyleVar_Marker as i32,
-    MarkerSize = sys::ImPlotStyleVar_MarkerSize as i32,
-    MarkerWeight = sys::ImPlotStyleVar_MarkerWeight as i32,
-    FillAlpha = sys::ImPlotStyleVar_FillAlpha as i32,
-    ErrorBarSize = sys::ImPlotStyleVar_ErrorBarSize as i32,
-    ErrorBarWeight = sys::ImPlotStyleVar_ErrorBarWeight as i32,
-    DigitalBitHeight = sys::ImPlotStyleVar_DigitalBitHeight as i32,
-    DigitalBitGap = sys::ImPlotStyleVar_DigitalBitGap as i32,
+    PlotDefaultSize = sys::ImPlotStyleVar_PlotDefaultSize as i32,
+    PlotMinSize = sys::ImPlotStyleVar_PlotMinSize as i32,
     PlotBorderSize = sys::ImPlotStyleVar_PlotBorderSize as i32,
     MinorAlpha = sys::ImPlotStyleVar_MinorAlpha as i32,
     MajorTickLen = sys::ImPlotStyleVar_MajorTickLen as i32,
@@ -33,8 +26,8 @@ pub enum StyleVar {
     MousePosPadding = sys::ImPlotStyleVar_MousePosPadding as i32,
     AnnotationPadding = sys::ImPlotStyleVar_AnnotationPadding as i32,
     FitPadding = sys::ImPlotStyleVar_FitPadding as i32,
-    PlotDefaultSize = sys::ImPlotStyleVar_PlotDefaultSize as i32,
-    PlotMinSize = sys::ImPlotStyleVar_PlotMinSize as i32,
+    DigitalPadding = sys::ImPlotStyleVar_DigitalPadding as i32,
+    DigitalSpacing = sys::ImPlotStyleVar_DigitalSpacing as i32,
 }
 
 /// Token for managing style variable changes

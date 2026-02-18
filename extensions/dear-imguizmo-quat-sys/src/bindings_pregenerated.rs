@@ -136,19 +136,19 @@ unsafe extern "C" {
     pub fn imguiGizmo_setDirectionColor_U32U32(dColor: ImU32, pColor: ImU32);
 }
 unsafe extern "C" {
-    pub fn imguiGizmo_setDirectionColor_Vec4Vec4(dColor: ImVec4, pColor: ImVec4);
+    pub fn imguiGizmo_setDirectionColor_Vec4Vec4(dColor: ImVec4_c, pColor: ImVec4_c);
 }
 unsafe extern "C" {
     pub fn imguiGizmo_setDirectionColor_U32(color: ImU32);
 }
 unsafe extern "C" {
-    pub fn imguiGizmo_setDirectionColor_Vec4(color: ImVec4);
+    pub fn imguiGizmo_setDirectionColor_Vec4(color: ImVec4_c);
 }
 unsafe extern "C" {
     pub fn imguiGizmo_restoreDirectionColor();
 }
 unsafe extern "C" {
-    pub fn imguiGizmo_setSphereColors_Vec4(a: ImVec4, b: ImVec4);
+    pub fn imguiGizmo_setSphereColors_Vec4(a: ImVec4_c, b: ImVec4_c);
 }
 unsafe extern "C" {
     pub fn imguiGizmo_setSphereColors_U32(a: ImU32, b: ImU32);

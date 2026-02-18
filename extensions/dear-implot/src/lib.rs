@@ -198,11 +198,6 @@ pub enum Marker {
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PlotColorElement {
-    Line = sys::ImPlotCol_Line as u32,
-    Fill = sys::ImPlotCol_Fill as u32,
-    MarkerOutline = sys::ImPlotCol_MarkerOutline as u32,
-    MarkerFill = sys::ImPlotCol_MarkerFill as u32,
-    ErrorBar = sys::ImPlotCol_ErrorBar as u32,
     FrameBg = sys::ImPlotCol_FrameBg as u32,
     PlotBg = sys::ImPlotCol_PlotBg as u32,
     PlotBorder = sys::ImPlotCol_PlotBorder as u32,

@@ -537,6 +537,7 @@ pub struct ImGuiStyle {
     pub GrabMinSize: f32,
     pub GrabRounding: f32,
     pub LogSliderDeadzone: f32,
+    pub ImageRounding: f32,
     pub ImageBorderSize: f32,
     pub TabRounding: f32,
     pub TabBorderSize: f32,
@@ -554,6 +555,7 @@ pub struct ImGuiStyle {
     pub DragDropTargetRounding: f32,
     pub DragDropTargetBorderSize: f32,
     pub DragDropTargetPadding: f32,
+    pub ColorMarkerSize: f32,
     pub ColorButtonPosition: ImGuiDir,
     pub ButtonTextAlign: ImVec2_c,
     pub SelectableTextAlign: ImVec2_c,
@@ -1297,7 +1299,6 @@ pub struct ImFontConfig {
     pub FontDataOwnedByAtlas: bool,
     pub MergeMode: bool,
     pub PixelSnapH: bool,
-    pub PixelSnapV: bool,
     pub OversampleH: ImS8,
     pub OversampleV: ImS8,
     pub EllipsisChar: ImWchar,
@@ -1312,6 +1313,7 @@ pub struct ImFontConfig {
     pub FontLoaderFlags: ::std::os::raw::c_uint,
     pub RasterizerMultiply: f32,
     pub RasterizerDensity: f32,
+    pub ExtraSizeScale: f32,
     pub Flags: ImFontFlags,
     pub DstFont: *mut ImFont,
     pub FontLoader: *const ImFontLoader,
@@ -2386,6 +2388,7 @@ pub struct ImGuiNextItemData {
     pub OpenCond: ImU8,
     pub RefVal: ImGuiDataTypeStorage,
     pub StorageId: ImGuiID,
+    pub ColorMarker: ImU32,
 }
 impl Default for ImGuiNextItemData {
     fn default() -> Self {
@@ -2528,7 +2531,7 @@ impl Default for ImGuiPopupData {
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImBitArray_ImGuiKey_NamedKey_COUNT__lessImGuiKey_NamedKey_BEGIN {
-    pub Storage: [ImU32; 5usize],
+    pub Data: [ImU32; 5usize],
 }
 pub type ImBitArrayForNamedKeys = ImBitArray_ImGuiKey_NamedKey_COUNT__lessImGuiKey_NamedKey_BEGIN;
 pub const ImGuiInputEventType_None: ImGuiInputEventType = 0;
@@ -4415,6 +4418,7 @@ pub struct ImGuiWindowTempData {
     pub DockTabItemStatusFlags: ImGuiItemStatusFlags,
     pub DockTabItemRect: ImRect_c,
     pub ItemWidth: f32,
+    pub ItemWidthDefault: f32,
     pub TextWrapPos: f32,
     pub ItemWidthStack: ImVector_float,
     pub TextWrapPosStack: ImVector_float,
@@ -4536,7 +4540,6 @@ pub struct ImGuiWindow {
     pub LastFrameActive: ::std::os::raw::c_int,
     pub LastFrameJustFocused: ::std::os::raw::c_int,
     pub LastTimeActive: f32,
-    pub ItemWidthDefault: f32,
     pub StateStorage: ImGuiStorage,
     pub ColumnsStorage: ImVector_ImGuiOldColumns,
     pub FontWindowScale: f32,
@@ -4987,6 +4990,7 @@ pub struct ImGuiTabBar {
     pub ID: ImGuiID,
     pub SelectedTabId: ImGuiID,
     pub NextSelectedTabId: ImGuiID,
+    pub NextScrollToTabId: ImGuiID,
     pub VisibleTabId: ImGuiID,
     pub CurrFrameVisible: ::std::os::raw::c_int,
     pub PrevFrameVisible: ::std::os::raw::c_int,

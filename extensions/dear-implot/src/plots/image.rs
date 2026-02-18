@@ -1,6 +1,6 @@
 //! Image plot implementation
 
-use super::{Plot, PlotError, with_plot_str_or_empty};
+use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
 use crate::{ImageFlags, sys};
 
 /// Plot an image in plot coordinates using an ImTextureID
@@ -78,6 +78,7 @@ impl<'a> Plot for ImagePlot<'a> {
             _TexID: self.tex_id,
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
             sys::ImPlot_PlotImage(
                 label_ptr,
                 tex_ref,
@@ -86,7 +87,7 @@ impl<'a> Plot for ImagePlot<'a> {
                 uv0,
                 uv1,
                 tint,
-                self.flags.bits() as i32,
+                spec,
             )
         })
     }

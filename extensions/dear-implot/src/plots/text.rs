@@ -1,6 +1,6 @@
 //! Text plot implementation
 
-use super::{PlotData, PlotError, with_plot_str};
+use super::{PlotData, PlotError, plot_spec_from, with_plot_str};
 use crate::TextFlags;
 use crate::sys;
 
@@ -68,13 +68,8 @@ impl<'a> TextPlot<'a> {
             y: self.pix_offset_y as f32,
         };
         let _ = with_plot_str(self.text, |text_ptr| unsafe {
-            sys::ImPlot_PlotText(
-                text_ptr,
-                self.x,
-                self.y,
-                pix_offset,
-                self.flags.bits() as i32,
-            );
+            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
         });
     }
 }
@@ -253,13 +248,8 @@ impl FormattedTextPlot {
             y: self.pix_offset_y as f32,
         };
         let _ = with_plot_str(&self.text, |text_ptr| unsafe {
-            sys::ImPlot_PlotText(
-                text_ptr,
-                self.x,
-                self.y,
-                pix_offset,
-                self.flags.bits() as i32,
-            );
+            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
         });
     }
 }
