@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, file browser, reflection-based UI).
+`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL/Vulkan backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, file browser, reflection-based UI).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
@@ -87,6 +87,14 @@ cargo run --bin reflect_demo --features reflect
 # implot3d example (uses dear-app)
 cargo run --bin implot3d_basic --features implot3d
 
+# Vulkan (Ash) renderer examples (native)
+cargo run --bin ash_basic
+cargo run --bin ash_textures
+# Multi-viewport (winit + Vulkan/Ash, native only)
+cargo run -p dear-imgui-examples --bin multi_viewport_ash --features multi-viewport
+# SDL3 + Vulkan/Ash multi-viewport (native only)
+cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport
+
 # WebAssembly (WASM) web demo (import-style, ImGui + optional ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
 # Note: this import-style WASM path is developed on `main` and shipped in the 0.7.x+ release trains.
 # For the full setup (bindings generation, web demo build, provider build, and troubleshooting),
@@ -129,8 +137,8 @@ cargo run --bin file_browser_imgui --features file-browser
 [dependencies]
 dear-imgui-rs = "0.10"
 # Choose a backend + platform integration
-dear-imgui-wgpu = "0.10"   # or dear-imgui-glow
-dear-imgui-winit = "0.10"
+dear-imgui-wgpu = "0.10"   # or dear-imgui-glow / dear-imgui-ash
+dear-imgui-winit = "0.10"  # or dear-imgui-sdl3
 ```
 
 If you need `wgpu = 27` compatibility for the WGPU renderer backend:
@@ -236,6 +244,7 @@ Backends
 |------------------|---------|-------------------|--------------------------------|
 | dear-imgui-wgpu  | 0.10.x   | wgpu = 28/27      | WebGPU renderer (default wgpu 28; optional wgpu 27 via features). Experimental multi-viewport on native via winit/SDL3; disabled on wasm |
 | dear-imgui-glow  | 0.10.x   | glow = 0.16       | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash   | 0.10.x   | ash = 0.38        | Vulkan renderer (optional multi-viewport helpers via winit/SDL3; native only) |
 | dear-imgui-winit | 0.10.x   | winit = 0.30.12   | Winit platform backend         |
 | dear-imgui-sdl3  | 0.10.x   | sdl3 = 0.17       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
 
@@ -243,22 +252,22 @@ Application Runner
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.10.x   | 0.9.x                  | App runner (docking, themes, add-ons)            |
+| dear-app  | 0.10.x   | 0.10.x                 | App runner (docking, themes, add-ons)            |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.10.x   | 0.9.x                  | dear-implot-sys 0.9.x       | 2D plotting                            |
-| dear-imnodes        | 0.10.x   | 0.9.x                  | dear-imnodes-sys 0.9.x      | Node editor                            |
-| dear-imguizmo       | 0.10.x   | 0.9.x                  | dear-imguizmo-sys 0.9.x     | 3D gizmo + GraphEditor                 |
-| dear-file-browser   | 0.10.x   | 0.9.x                  | —                           | ImGui UI + native (rfd) backends       |
-| dear-implot3d       | 0.10.x   | 0.9.x                  | dear-implot3d-sys 0.9.x     | 3D plotting                            |
-| dear-imguizmo-quat  | 0.10.x   | 0.9.x                  | dear-imguizmo-quat-sys 0.9.x| Quaternion gizmo                       |
-| dear-imgui-reflect  | 0.10.x   | 0.9.x                  | —                           | Reflection-based UI helpers (pure Rust)|
+| dear-implot         | 0.10.x   | 0.10.x                 | dear-implot-sys 0.10.x      | 2D plotting                            |
+| dear-imnodes        | 0.10.x   | 0.10.x                 | dear-imnodes-sys 0.10.x     | Node editor                            |
+| dear-imguizmo       | 0.10.x   | 0.10.x                 | dear-imguizmo-sys 0.10.x    | 3D gizmo + GraphEditor                 |
+| dear-file-browser   | 0.10.x   | 0.10.x                 | —                           | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.10.x   | 0.10.x                 | dear-implot3d-sys 0.10.x    | 3D plotting                            |
+| dear-imguizmo-quat  | 0.10.x   | 0.10.x                 | dear-imguizmo-quat-sys 0.10.x | Quaternion gizmo                       |
+| dear-imgui-reflect  | 0.10.x   | 0.10.x                 | —                           | Reflection-based UI helpers (pure Rust)|
 
 Note: if your ecosystem is pinned to `wgpu = 27` (e.g. a release train), you can use
-`dear-imgui-wgpu 0.9.x` with `default-features = false, features = ["wgpu-27"]`. `dear-app` stays
+`dear-imgui-wgpu 0.10.x` with `default-features = false, features = ["wgpu-27"]`. `dear-app` stays
 on the default `wgpu = 28` path.
 
 Maintenance rules
