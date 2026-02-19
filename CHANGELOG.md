@@ -14,6 +14,7 @@ Upgrade to Dear ImGui v1.92.6 (docking branch) via cimgui `1.92.6dock`, refresh 
 ### Highlights
 
 - Dear ImGui v1.92.6 (docking) upgrade.
+- Dear ImGui v1.92.6 release notes: https://github.com/ocornut/imgui/releases/tag/v1.92.6
 - Regenerated pregenerated bindings for core + all extension `*-sys` crates (native + wasm).
 - Updated ImPlot/ImPlot3D safe wrappers for upstream spec-based item APIs.
 
