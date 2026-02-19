@@ -92,7 +92,7 @@ fn default_plot3d_spec() -> sys::ImPlot3DSpec_c {
         LineWeight: 1.0,
         FillColor: auto_col,
         FillAlpha: -1.0,
-        Marker: sys::ImPlot3DMarker_Auto,
+        Marker: sys::ImPlot3DMarker_Auto as _,
         MarkerSize: -1.0,
         MarkerLineColor: auto_col,
         MarkerFillColor: auto_col,

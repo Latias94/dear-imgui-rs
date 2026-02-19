@@ -175,7 +175,7 @@ pub(crate) fn default_plot_spec() -> sys::ImPlotSpec_c {
         LineWeight: 1.0,
         FillColor: auto_col,
         FillAlpha: 1.0,
-        Marker: sys::ImPlotMarker_None,
+        Marker: sys::ImPlotMarker_None as _,
         MarkerSize: 4.0,
         MarkerLineColor: auto_col,
         MarkerFillColor: auto_col,
