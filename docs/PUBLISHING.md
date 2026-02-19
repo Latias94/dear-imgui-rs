@@ -46,6 +46,10 @@ Before publishing, ensure:
 
 - [ ] Pregenerated bindings are up-to-date for `-sys` crates
   ```bash
+  # Windows PowerShell
+  python tools/update_submodule_and_bindings.py --crates all --profile release
+
+  # Linux/macOS
   python3 tools/update_submodule_and_bindings.py --crates all --profile release
   ```
 
@@ -150,6 +154,8 @@ If you prefer to publish manually or need to publish individual crates:
    cargo publish -p dear-imgui-winit
    cargo publish -p dear-imgui-wgpu
    cargo publish -p dear-imgui-glow
+   cargo publish -p dear-imgui-ash
+   cargo publish -p dear-imgui-sdl3
    ```
 
 3. **Extension Sys Crates**
