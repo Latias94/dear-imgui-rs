@@ -2,7 +2,7 @@
 
 use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
 use crate::sys;
-use crate::{BinMethod, HistogramFlags};
+use crate::{BinMethod, HistogramFlags, ItemFlags};
 
 /// Builder for 1D histogram plots
 pub struct HistogramPlot<'a> {
@@ -12,6 +12,7 @@ pub struct HistogramPlot<'a> {
     bar_scale: f64,
     range: Option<sys::ImPlotRange>,
     flags: HistogramFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> HistogramPlot<'a> {
@@ -24,6 +25,7 @@ impl<'a> HistogramPlot<'a> {
             bar_scale: 1.0,
             range: None, // Auto-range
             flags: HistogramFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -60,6 +62,12 @@ impl<'a> HistogramPlot<'a> {
     /// Set histogram flags for customization
     pub fn with_flags(mut self, flags: HistogramFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -112,7 +120,11 @@ impl<'a> Plot for HistogramPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                crate::IMPLOT_AUTO,
+            );
             sys::ImPlot_PlotHistogram_doublePtr(
                 label_ptr,
                 self.values.as_ptr(),
@@ -139,6 +151,7 @@ pub struct Histogram2DPlot<'a> {
     y_bins: i32,
     range: Option<sys::ImPlotRect>,
     flags: HistogramFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> Histogram2DPlot<'a> {
@@ -152,6 +165,7 @@ impl<'a> Histogram2DPlot<'a> {
             y_bins: BinMethod::Sturges as i32,
             range: None, // Auto-range
             flags: HistogramFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -186,6 +200,12 @@ impl<'a> Histogram2DPlot<'a> {
     /// Set histogram flags for customization
     pub fn with_flags(mut self, flags: HistogramFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -232,7 +252,11 @@ impl<'a> Plot for Histogram2DPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                crate::IMPLOT_AUTO,
+            );
             sys::ImPlot_PlotHistogram2D_doublePtr(
                 label_ptr,
                 self.x_values.as_ptr(),

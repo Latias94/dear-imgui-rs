@@ -1,7 +1,7 @@
 //! Bar plot implementation
 
 use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
-use crate::{BarsFlags, sys};
+use crate::{BarsFlags, ItemFlags, sys};
 
 /// Builder for bar plots with customization options
 pub struct BarPlot<'a> {
@@ -10,6 +10,7 @@ pub struct BarPlot<'a> {
     bar_size: f64,
     shift: f64,
     flags: BarsFlags,
+    item_flags: ItemFlags,
     offset: i32,
     stride: i32,
 }
@@ -23,6 +24,7 @@ impl<'a> BarPlot<'a> {
             bar_size: 0.67, // Default bar width
             shift: 0.0,
             flags: BarsFlags::NONE,
+            item_flags: ItemFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -43,6 +45,12 @@ impl<'a> BarPlot<'a> {
     /// Set bar flags for customization
     pub fn with_flags(mut self, flags: BarsFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -78,7 +86,11 @@ impl<'a> Plot for BarPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                self.offset,
+                self.stride,
+            );
             sys::ImPlot_PlotBars_doublePtrInt(
                 label_ptr,
                 self.values.as_ptr(),
@@ -102,6 +114,7 @@ pub struct PositionalBarPlot<'a> {
     y_data: &'a [f64],
     bar_size: f64,
     flags: BarsFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> PositionalBarPlot<'a> {
@@ -113,6 +126,7 @@ impl<'a> PositionalBarPlot<'a> {
             y_data,
             bar_size: 0.67,
             flags: BarsFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -125,6 +139,12 @@ impl<'a> PositionalBarPlot<'a> {
     /// Set bar flags for customization
     pub fn with_flags(mut self, flags: BarsFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -144,7 +164,11 @@ impl<'a> Plot for PositionalBarPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                std::mem::size_of::<f64>() as i32,
+            );
             sys::ImPlot_PlotBars_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),

@@ -1,8 +1,7 @@
 //! Dummy plot implementation
 
 use super::{PlotData, PlotError, plot_spec_from, with_plot_str_or_empty};
-use crate::DummyFlags;
-use crate::sys;
+use crate::{DummyFlags, ItemFlags, sys};
 
 /// Builder for dummy plots
 ///
@@ -11,6 +10,7 @@ use crate::sys;
 pub struct DummyPlot<'a> {
     label: &'a str,
     flags: DummyFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> DummyPlot<'a> {
@@ -19,12 +19,19 @@ impl<'a> DummyPlot<'a> {
         Self {
             label,
             flags: DummyFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
     /// Set dummy flags for customization
     pub fn with_flags(mut self, flags: DummyFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -39,7 +46,11 @@ impl<'a> DummyPlot<'a> {
     /// Plot the dummy entry
     pub fn plot(self) {
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                crate::IMPLOT_AUTO,
+            );
             sys::ImPlot_PlotDummy(label_ptr, spec);
         })
     }
@@ -59,6 +70,7 @@ impl<'a> PlotData for DummyPlot<'a> {
 pub struct MultiDummyPlot<'a> {
     labels: Vec<&'a str>,
     flags: DummyFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> MultiDummyPlot<'a> {
@@ -67,12 +79,19 @@ impl<'a> MultiDummyPlot<'a> {
         Self {
             labels,
             flags: DummyFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
     /// Set dummy flags for all entries
     pub fn with_flags(mut self, flags: DummyFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for all dummy entries
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -97,7 +116,9 @@ impl<'a> MultiDummyPlot<'a> {
     /// Plot all dummy entries
     pub fn plot(self) {
         for &label in &self.labels {
-            let dummy_plot = DummyPlot::new(label).with_flags(self.flags);
+            let dummy_plot = DummyPlot::new(label)
+                .with_flags(self.flags)
+                .with_item_flags(self.item_flags);
             dummy_plot.plot();
         }
     }
@@ -158,6 +179,7 @@ impl<'a> LegendHeader<'a> {
 pub struct CustomLegendEntry<'a> {
     label: &'a str,
     flags: DummyFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> CustomLegendEntry<'a> {
@@ -166,6 +188,7 @@ impl<'a> CustomLegendEntry<'a> {
         Self {
             label,
             flags: DummyFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -175,9 +198,17 @@ impl<'a> CustomLegendEntry<'a> {
         self
     }
 
+    /// Set common item flags for the entry
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
+        self
+    }
+
     /// Plot the custom entry
     pub fn plot(self) {
-        let dummy_plot = DummyPlot::new(self.label).with_flags(self.flags);
+        let dummy_plot = DummyPlot::new(self.label)
+            .with_flags(self.flags)
+            .with_item_flags(self.item_flags);
         dummy_plot.plot();
     }
 }

@@ -1,13 +1,14 @@
 //! Infinite lines plot implementation
 
 use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
-use crate::{InfLinesFlags, sys};
+use crate::{InfLinesFlags, ItemFlags, sys};
 
 /// Builder for infinite lines plots
 pub struct InfLinesPlot<'a> {
     label: &'a str,
     positions: &'a [f64],
     flags: InfLinesFlags,
+    item_flags: ItemFlags,
     offset: i32,
     stride: i32,
 }
@@ -19,6 +20,7 @@ impl<'a> InfLinesPlot<'a> {
             label,
             positions,
             flags: InfLinesFlags::NONE,
+            item_flags: ItemFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -27,6 +29,12 @@ impl<'a> InfLinesPlot<'a> {
     /// Make lines horizontal instead of vertical
     pub fn horizontal(mut self) -> Self {
         self.flags |= InfLinesFlags::HORIZONTAL;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -60,7 +68,11 @@ impl<'a> Plot for InfLinesPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                self.offset,
+                self.stride,
+            );
             sys::ImPlot_PlotInfLines_doublePtr(label_ptr, self.positions.as_ptr(), count, spec);
         })
     }

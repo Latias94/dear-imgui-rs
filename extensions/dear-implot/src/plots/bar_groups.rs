@@ -1,8 +1,7 @@
 //! Bar groups plot implementation
 
 use super::{PlotData, PlotError, plot_spec_from, with_plot_str_slice};
-use crate::BarGroupsFlags;
-use crate::sys;
+use crate::{BarGroupsFlags, ItemFlags, sys};
 
 /// Builder for bar groups plots with extensive customization options
 pub struct BarGroupsPlot<'a> {
@@ -13,6 +12,7 @@ pub struct BarGroupsPlot<'a> {
     group_size: f64,
     shift: f64,
     flags: BarGroupsFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> BarGroupsPlot<'a> {
@@ -37,6 +37,7 @@ impl<'a> BarGroupsPlot<'a> {
             group_size: 0.67,
             shift: 0.0,
             flags: BarGroupsFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -55,6 +56,12 @@ impl<'a> BarGroupsPlot<'a> {
     /// Set bar groups flags for customization
     pub fn with_flags(mut self, flags: BarGroupsFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -99,7 +106,11 @@ impl<'a> BarGroupsPlot<'a> {
     /// Plot the bar groups
     pub fn plot(self) {
         with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                crate::IMPLOT_AUTO,
+            );
             sys::ImPlot_PlotBarGroups_doublePtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
@@ -132,6 +143,7 @@ pub struct BarGroupsPlotF32<'a> {
     group_size: f64,
     shift: f64,
     flags: BarGroupsFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> BarGroupsPlotF32<'a> {
@@ -150,6 +162,7 @@ impl<'a> BarGroupsPlotF32<'a> {
             group_size: 0.67,
             shift: 0.0,
             flags: BarGroupsFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -168,6 +181,12 @@ impl<'a> BarGroupsPlotF32<'a> {
     /// Set flags
     pub fn with_flags(mut self, flags: BarGroupsFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -212,7 +231,11 @@ impl<'a> BarGroupsPlotF32<'a> {
     /// Plot the bar groups
     pub fn plot(self) {
         with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                crate::IMPLOT_AUTO,
+            );
             sys::ImPlot_PlotBarGroups_FloatPtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),

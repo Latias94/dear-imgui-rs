@@ -1,7 +1,7 @@
 //! Scatter plot implementation
 
 use super::{Plot, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
-use crate::{ScatterFlags, sys};
+use crate::{ItemFlags, ScatterFlags, sys};
 
 /// Builder for scatter plots with customization options
 pub struct ScatterPlot<'a> {
@@ -9,6 +9,7 @@ pub struct ScatterPlot<'a> {
     x_data: &'a [f64],
     y_data: &'a [f64],
     flags: ScatterFlags,
+    item_flags: ItemFlags,
     offset: i32,
     stride: i32,
 }
@@ -21,6 +22,7 @@ impl<'a> ScatterPlot<'a> {
             x_data,
             y_data,
             flags: ScatterFlags::NONE,
+            item_flags: ItemFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -29,6 +31,12 @@ impl<'a> ScatterPlot<'a> {
     /// Set scatter flags for customization
     pub fn with_flags(mut self, flags: ScatterFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -60,7 +68,11 @@ impl<'a> Plot for ScatterPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                self.offset,
+                self.stride,
+            );
             sys::ImPlot_PlotScatter_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),

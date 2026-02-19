@@ -1,7 +1,7 @@
 //! Line plot implementation
 
 use super::{Plot, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
-use crate::{LineFlags, sys};
+use crate::{ItemFlags, LineFlags, sys};
 
 /// Builder for line plots with extensive customization options
 pub struct LinePlot<'a> {
@@ -9,6 +9,7 @@ pub struct LinePlot<'a> {
     x_data: &'a [f64],
     y_data: &'a [f64],
     flags: LineFlags,
+    item_flags: ItemFlags,
     offset: i32,
     stride: i32,
 }
@@ -21,6 +22,7 @@ impl<'a> LinePlot<'a> {
             x_data,
             y_data,
             flags: LineFlags::NONE,
+            item_flags: ItemFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -29,6 +31,12 @@ impl<'a> LinePlot<'a> {
     /// Set line flags for customization
     pub fn with_flags(mut self, flags: LineFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -60,7 +68,11 @@ impl<'a> Plot for LinePlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                self.offset,
+                self.stride,
+            );
             sys::ImPlot_PlotLine_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),

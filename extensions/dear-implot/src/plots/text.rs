@@ -1,8 +1,7 @@
 //! Text plot implementation
 
 use super::{PlotData, PlotError, plot_spec_from, with_plot_str};
-use crate::TextFlags;
-use crate::sys;
+use crate::{ItemFlags, TextFlags, sys};
 
 /// Builder for text plots with extensive customization options
 ///
@@ -14,6 +13,7 @@ pub struct TextPlot<'a> {
     pix_offset_x: f64,
     pix_offset_y: f64,
     flags: TextFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> TextPlot<'a> {
@@ -26,6 +26,7 @@ impl<'a> TextPlot<'a> {
             pix_offset_x: 0.0,
             pix_offset_y: 0.0,
             flags: TextFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -39,6 +40,12 @@ impl<'a> TextPlot<'a> {
     /// Set text flags for customization
     pub fn with_flags(mut self, flags: TextFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -68,7 +75,11 @@ impl<'a> TextPlot<'a> {
             y: self.pix_offset_y as f32,
         };
         let _ = with_plot_str(self.text, |text_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                crate::IMPLOT_AUTO,
+            );
             sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
         });
     }
@@ -90,6 +101,7 @@ pub struct MultiTextPlot<'a> {
     positions: Vec<(f64, f64)>,
     pixel_offsets: Vec<(f64, f64)>,
     flags: TextFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> MultiTextPlot<'a> {
@@ -101,6 +113,7 @@ impl<'a> MultiTextPlot<'a> {
             positions,
             pixel_offsets,
             flags: TextFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -113,6 +126,12 @@ impl<'a> MultiTextPlot<'a> {
     /// Set text flags for all texts
     pub fn with_flags(mut self, flags: TextFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for all text items (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -164,7 +183,8 @@ impl<'a> MultiTextPlot<'a> {
 
             let text_plot = TextPlot::new(text, position.0, position.1)
                 .with_pixel_offset(offset.0, offset.1)
-                .with_flags(self.flags);
+                .with_flags(self.flags)
+                .with_item_flags(self.item_flags);
 
             text_plot.plot();
         }
@@ -189,6 +209,7 @@ pub struct FormattedTextPlot {
     pix_offset_x: f64,
     pix_offset_y: f64,
     flags: TextFlags,
+    item_flags: ItemFlags,
 }
 
 impl FormattedTextPlot {
@@ -201,6 +222,7 @@ impl FormattedTextPlot {
             pix_offset_x: 0.0,
             pix_offset_y: 0.0,
             flags: TextFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -219,6 +241,12 @@ impl FormattedTextPlot {
     /// Set text flags for customization
     pub fn with_flags(mut self, flags: TextFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -248,7 +276,11 @@ impl FormattedTextPlot {
             y: self.pix_offset_y as f32,
         };
         let _ = with_plot_str(&self.text, |text_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                crate::IMPLOT_AUTO,
+            );
             sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
         });
     }
@@ -279,6 +311,7 @@ pub struct TextAnnotation<'a> {
     y: f64,
     auto_offset: bool,
     flags: TextFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> TextAnnotation<'a> {
@@ -290,6 +323,7 @@ impl<'a> TextAnnotation<'a> {
             y,
             auto_offset: true,
             flags: TextFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -302,6 +336,12 @@ impl<'a> TextAnnotation<'a> {
     /// Set text flags
     pub fn with_flags(mut self, flags: TextFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for the annotation text
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -322,7 +362,8 @@ impl<'a> TextAnnotation<'a> {
 
         let text_plot = TextPlot::new(self.text, self.x, self.y)
             .with_pixel_offset(offset.0, offset.1)
-            .with_flags(self.flags);
+            .with_flags(self.flags)
+            .with_item_flags(self.item_flags);
 
         text_plot.plot();
     }

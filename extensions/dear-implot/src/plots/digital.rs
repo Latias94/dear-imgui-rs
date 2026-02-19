@@ -1,8 +1,7 @@
 //! Digital plot implementation
 
 use super::{PlotData, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
-use crate::DigitalFlags;
-use crate::sys;
+use crate::{DigitalFlags, ItemFlags, sys};
 
 /// Builder for digital plots with extensive customization options
 ///
@@ -13,6 +12,7 @@ pub struct DigitalPlot<'a> {
     x_data: &'a [f64],
     y_data: &'a [f64],
     flags: DigitalFlags,
+    item_flags: ItemFlags,
     offset: i32,
     stride: i32,
 }
@@ -25,6 +25,7 @@ impl<'a> DigitalPlot<'a> {
             x_data,
             y_data,
             flags: DigitalFlags::NONE,
+            item_flags: ItemFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -33,6 +34,12 @@ impl<'a> DigitalPlot<'a> {
     /// Set digital flags for customization
     pub fn with_flags(mut self, flags: DigitalFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -63,7 +70,11 @@ impl<'a> DigitalPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                self.offset,
+                self.stride,
+            );
             sys::ImPlot_PlotDigital_doublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),
@@ -91,6 +102,7 @@ pub struct DigitalPlotF32<'a> {
     x_data: &'a [f32],
     y_data: &'a [f32],
     flags: DigitalFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> DigitalPlotF32<'a> {
@@ -101,12 +113,19 @@ impl<'a> DigitalPlotF32<'a> {
             x_data,
             y_data,
             flags: DigitalFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
     /// Set digital flags for customization
     pub fn with_flags(mut self, flags: DigitalFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -130,7 +149,11 @@ impl<'a> DigitalPlotF32<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, std::mem::size_of::<f32>() as i32);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                std::mem::size_of::<f32>() as i32,
+            );
             sys::ImPlot_PlotDigital_FloatPtr(
                 label_ptr,
                 self.x_data.as_ptr(),
@@ -157,6 +180,7 @@ pub struct SimpleDigitalPlot<'a> {
     label: &'a str,
     y_data: &'a [f64],
     flags: DigitalFlags,
+    item_flags: ItemFlags,
     x_scale: f64,
     x_start: f64,
 }
@@ -168,6 +192,7 @@ impl<'a> SimpleDigitalPlot<'a> {
             label,
             y_data,
             flags: DigitalFlags::NONE,
+            item_flags: ItemFlags::NONE,
             x_scale: 1.0,
             x_start: 0.0,
         }
@@ -191,6 +216,12 @@ impl<'a> SimpleDigitalPlot<'a> {
         self
     }
 
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
+        self
+    }
+
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
         if self.y_data.is_empty() {
@@ -210,7 +241,11 @@ impl<'a> SimpleDigitalPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                std::mem::size_of::<f64>() as i32,
+            );
             sys::ImPlot_PlotDigital_doublePtr(
                 label_ptr,
                 x_data.as_ptr(),
@@ -238,6 +273,7 @@ pub struct BooleanDigitalPlot<'a> {
     x_data: &'a [f64],
     y_data: &'a [bool],
     flags: DigitalFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> BooleanDigitalPlot<'a> {
@@ -248,12 +284,19 @@ impl<'a> BooleanDigitalPlot<'a> {
             x_data,
             y_data,
             flags: DigitalFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
     /// Set digital flags for customization
     pub fn with_flags(mut self, flags: DigitalFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -284,7 +327,11 @@ impl<'a> BooleanDigitalPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                std::mem::size_of::<f64>() as i32,
+            );
             sys::ImPlot_PlotDigital_doublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),

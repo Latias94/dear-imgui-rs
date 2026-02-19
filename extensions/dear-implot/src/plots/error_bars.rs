@@ -1,7 +1,7 @@
 //! Error bars plot implementation
 
 use super::{Plot, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
-use crate::{ErrorBarsFlags, sys};
+use crate::{ErrorBarsFlags, ItemFlags, sys};
 
 /// Builder for error bars plots
 pub struct ErrorBarsPlot<'a> {
@@ -10,6 +10,7 @@ pub struct ErrorBarsPlot<'a> {
     y_data: &'a [f64],
     err_data: &'a [f64],
     flags: ErrorBarsFlags,
+    item_flags: ItemFlags,
     offset: i32,
     stride: i32,
 }
@@ -29,6 +30,7 @@ impl<'a> ErrorBarsPlot<'a> {
             y_data,
             err_data,
             flags: ErrorBarsFlags::NONE,
+            item_flags: ItemFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -37,6 +39,12 @@ impl<'a> ErrorBarsPlot<'a> {
     /// Set error bar flags for customization
     pub fn with_flags(mut self, flags: ErrorBarsFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -84,7 +92,11 @@ impl<'a> Plot for ErrorBarsPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                self.offset,
+                self.stride,
+            );
             sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrInt(
                 label_ptr,
                 self.x_data.as_ptr(),
@@ -109,6 +121,7 @@ pub struct AsymmetricErrorBarsPlot<'a> {
     err_neg: &'a [f64],
     err_pos: &'a [f64],
     flags: ErrorBarsFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> AsymmetricErrorBarsPlot<'a> {
@@ -134,12 +147,19 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
             err_neg,
             err_pos,
             flags: ErrorBarsFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
     /// Set error bar flags for customization
     pub fn with_flags(mut self, flags: ErrorBarsFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -169,7 +189,11 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                std::mem::size_of::<f64>() as i32,
+            );
             sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),

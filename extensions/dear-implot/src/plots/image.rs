@@ -1,7 +1,7 @@
 //! Image plot implementation
 
 use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
-use crate::{ImageFlags, sys};
+use crate::{ImageFlags, ItemFlags, sys};
 
 /// Plot an image in plot coordinates using an ImTextureID
 pub struct ImagePlot<'a> {
@@ -13,6 +13,7 @@ pub struct ImagePlot<'a> {
     uv1: [f32; 2],
     tint: [f32; 4],
     flags: ImageFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> ImagePlot<'a> {
@@ -31,6 +32,7 @@ impl<'a> ImagePlot<'a> {
             uv1: [1.0, 1.0],
             tint: [1.0, 1.0, 1.0, 1.0],
             flags: ImageFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -45,6 +47,12 @@ impl<'a> ImagePlot<'a> {
     }
     pub fn with_flags(mut self, flags: ImageFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -78,7 +86,11 @@ impl<'a> Plot for ImagePlot<'a> {
             _TexID: self.tex_id,
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                crate::IMPLOT_AUTO,
+            );
             sys::ImPlot_PlotImage(
                 label_ptr,
                 tex_ref,

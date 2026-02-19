@@ -265,6 +265,18 @@ pub enum BinMethod {
     Scott = -4,
 }
 
+bitflags::bitflags! {
+    /// Flags for ANY `PlotX` function. Used by setting `ImPlotSpec::Flags`.
+    ///
+    /// These flags can be composed with the plot-type-specific flags (e.g. `LineFlags`).
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+    pub struct ItemFlags: u32 {
+        const NONE = sys::ImPlotItemFlags_None as u32;
+        const NO_LEGEND = sys::ImPlotItemFlags_NoLegend as u32;
+        const NO_FIT = sys::ImPlotItemFlags_NoFit as u32;
+    }
+}
+
 // Plot flags for different plot types
 bitflags::bitflags! {
     /// Flags for heatmap plots

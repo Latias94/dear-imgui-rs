@@ -1,8 +1,7 @@
 //! Pie chart plot implementation
 
 use super::{Plot, PlotError, plot_spec_from, with_plot_str_slice_with_opt};
-use crate::PieChartFlags;
-use crate::sys;
+use crate::{ItemFlags, PieChartFlags, sys};
 
 /// Builder for pie chart plots
 pub struct PieChartPlot<'a> {
@@ -14,6 +13,7 @@ pub struct PieChartPlot<'a> {
     label_fmt: Option<&'a str>,
     angle0: f64,
     flags: PieChartFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> PieChartPlot<'a> {
@@ -41,6 +41,7 @@ impl<'a> PieChartPlot<'a> {
             label_fmt: Some("%.1f"),
             angle0: 90.0, // Start angle in degrees
             flags: PieChartFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -60,6 +61,12 @@ impl<'a> PieChartPlot<'a> {
     /// Set pie chart flags for customization
     pub fn with_flags(mut self, flags: PieChartFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -123,7 +130,11 @@ impl<'a> Plot for PieChartPlot<'a> {
             &self.label_ids,
             self.label_fmt,
             |label_ptrs, label_fmt_ptr| unsafe {
-                let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+                let spec = plot_spec_from(
+                    self.flags.bits() | self.item_flags.bits(),
+                    0,
+                    crate::IMPLOT_AUTO,
+                );
                 sys::ImPlot_PlotPieChart_doublePtrStr(
                     label_ptrs.as_ptr(),
                     self.values.as_ptr(),
@@ -154,6 +165,7 @@ pub struct PieChartPlotF32<'a> {
     label_fmt: Option<&'a str>,
     angle0: f64,
     flags: PieChartFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> PieChartPlotF32<'a> {
@@ -174,6 +186,7 @@ impl<'a> PieChartPlotF32<'a> {
             label_fmt: Some("%.1f"),
             angle0: 90.0,
             flags: PieChartFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -192,6 +205,12 @@ impl<'a> PieChartPlotF32<'a> {
     /// Set pie chart flags for customization
     pub fn with_flags(mut self, flags: PieChartFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -254,7 +273,11 @@ impl<'a> Plot for PieChartPlotF32<'a> {
             &self.label_ids,
             self.label_fmt,
             |label_ptrs, label_fmt_ptr| unsafe {
-                let spec = plot_spec_from(self.flags.bits(), 0, crate::IMPLOT_AUTO);
+                let spec = plot_spec_from(
+                    self.flags.bits() | self.item_flags.bits(),
+                    0,
+                    crate::IMPLOT_AUTO,
+                );
                 sys::ImPlot_PlotPieChart_FloatPtrStr(
                     label_ptrs.as_ptr(),
                     self.values.as_ptr(),

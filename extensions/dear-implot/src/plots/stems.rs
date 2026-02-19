@@ -1,7 +1,7 @@
 //! Stem plot implementation
 
 use super::{Plot, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
-use crate::{StemsFlags, sys};
+use crate::{ItemFlags, StemsFlags, sys};
 
 /// Builder for stem plots (lollipop charts)
 pub struct StemPlot<'a> {
@@ -10,6 +10,7 @@ pub struct StemPlot<'a> {
     y_data: &'a [f64],
     y_ref: f64,
     flags: StemsFlags,
+    item_flags: ItemFlags,
     offset: i32,
     stride: i32,
 }
@@ -23,6 +24,7 @@ impl<'a> StemPlot<'a> {
             y_data,
             y_ref: 0.0, // Default reference line at Y=0
             flags: StemsFlags::NONE,
+            item_flags: ItemFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
@@ -38,6 +40,12 @@ impl<'a> StemPlot<'a> {
     /// Set stem flags for customization
     pub fn with_flags(mut self, flags: StemsFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -69,7 +77,11 @@ impl<'a> Plot for StemPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(self.flags.bits(), self.offset, self.stride);
+            let spec = plot_spec_from(
+                self.flags.bits() | self.item_flags.bits(),
+                self.offset,
+                self.stride,
+            );
             sys::ImPlot_PlotStems_doublePtrdoublePtr(
                 label_ptr,
                 self.x_data.as_ptr(),
