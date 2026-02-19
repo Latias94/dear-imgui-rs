@@ -44,6 +44,7 @@ ALL_CRATES = [
     ("dear-imgui-winit", "backends/dear-imgui-winit"),
     ("dear-imgui-wgpu", "backends/dear-imgui-wgpu"),
     ("dear-imgui-glow", "backends/dear-imgui-glow"),
+    ("dear-imgui-ash", "backends/dear-imgui-ash"),
     ("dear-imgui-sdl3", "backends/dear-imgui-sdl3"),
     ("dear-app", "dear-app"),
     ("dear-implot-sys", "extensions/dear-implot-sys"),
