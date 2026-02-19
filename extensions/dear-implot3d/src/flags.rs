@@ -131,17 +131,17 @@ bitflags::bitflags! {
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Marker3D {
-    None = sys::ImPlot3DMarker_None,
-    Circle = sys::ImPlot3DMarker_Circle,
-    Square = sys::ImPlot3DMarker_Square,
-    Diamond = sys::ImPlot3DMarker_Diamond,
-    Up = sys::ImPlot3DMarker_Up,
-    Down = sys::ImPlot3DMarker_Down,
-    Left = sys::ImPlot3DMarker_Left,
-    Right = sys::ImPlot3DMarker_Right,
-    Cross = sys::ImPlot3DMarker_Cross,
-    Plus = sys::ImPlot3DMarker_Plus,
-    Asterisk = sys::ImPlot3DMarker_Asterisk,
+    None = sys::ImPlot3DMarker_None as i32,
+    Circle = sys::ImPlot3DMarker_Circle as i32,
+    Square = sys::ImPlot3DMarker_Square as i32,
+    Diamond = sys::ImPlot3DMarker_Diamond as i32,
+    Up = sys::ImPlot3DMarker_Up as i32,
+    Down = sys::ImPlot3DMarker_Down as i32,
+    Left = sys::ImPlot3DMarker_Left as i32,
+    Right = sys::ImPlot3DMarker_Right as i32,
+    Cross = sys::ImPlot3DMarker_Cross as i32,
+    Plus = sys::ImPlot3DMarker_Plus as i32,
+    Asterisk = sys::ImPlot3DMarker_Asterisk as i32,
 }
 /// 3D axis selector (X/Y/Z)
 #[repr(i32)]
