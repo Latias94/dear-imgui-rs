@@ -29,6 +29,8 @@ Upgrade to Dear ImGui v1.92.6 (docking branch) via cimgui `1.92.6dock`, refresh 
 - Core (`dear-imgui-rs`)
   - Style: `StyleVar::ImageRounding` and `Style::{image_rounding,set_image_rounding}`.
   - Popups: `begin_popup_context_*_with_flags` helpers for explicit popup button/flags selection.
+- Extensions
+  - `dear-implot`: `ItemFlags` and `with_item_flags(...)` helpers to compose common `ImPlotItemFlags` with plot-type-specific flags.
 
 ### Changed
 
@@ -44,6 +46,7 @@ Upgrade to Dear ImGui v1.92.6 (docking branch) via cimgui `1.92.6dock`, refresh 
 - Extensions
   - `dear-implot`: updated plot item calls to pass the new `ImPlotSpec_c` parameter (keeps high-level Rust API stable).
   - `dear-implot3d`: updated plot item calls to pass the new `ImPlot3DSpec_c` parameter; re-implemented `set_next_*_style()` helpers on top of the new spec mechanism.
+  - `dear-implot`/`dear-implot3d`: stabilized default spec construction against platform-dependent bindgen enum constant types.
   - `dear-imguizmo-quat`: fixed Vec4 type mismatches after sys bindings refresh.
 
 ## [0.9.0] - 2026-02-12
