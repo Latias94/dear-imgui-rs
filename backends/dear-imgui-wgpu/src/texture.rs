@@ -910,6 +910,7 @@ mod tests {
         unsafe {
             (*tex.as_raw_mut()).WantDestroyNextFrame = false;
         }
+        tex.create(ImFormat::RGBA32, 1, 1);
         TextureUpdateResult::Failed.apply_to(&mut tex);
         assert_eq!(tex.status(), TextureStatus::WantCreate);
 
