@@ -182,7 +182,7 @@ pub(crate) fn default_plot_spec() -> sys::ImPlotSpec_c {
         Size: 4.0,
         Offset: 0,
         Stride: crate::IMPLOT_AUTO,
-        Flags: sys::ImPlotItemFlags_None,
+        Flags: sys::ImPlotItemFlags_None as _,
     }
 }
 

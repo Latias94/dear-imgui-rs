@@ -98,7 +98,7 @@ fn default_plot3d_spec() -> sys::ImPlot3DSpec_c {
         MarkerFillColor: auto_col,
         Offset: 0,
         Stride: IMPLOT3D_AUTO,
-        Flags: sys::ImPlot3DItemFlags_None,
+        Flags: sys::ImPlot3DItemFlags_None as _,
     }
 }
 
