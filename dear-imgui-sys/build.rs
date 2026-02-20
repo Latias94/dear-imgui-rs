@@ -111,8 +111,9 @@ fn main() {
     // Build strategy selection via features + env var override
     // Force native build when explicitly requested or when sandboxed
     // (we still prefer prebuilt if compatible, including freetype variants).
-    let force_build =
-        cfg!(feature = "build-from-source") || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
+    let force_build = cfg!(feature = "build-from-source")
+        || cfg!(feature = "test-engine")
+        || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
 
     // Try prebuilt dear_imgui first (static lib) unless force_build
     let linked_prebuilt = if force_build {
@@ -190,6 +191,9 @@ fn docsrs_build(cfg: &BuildConfig) {
     // Keep bindgen in sync with the compiled C++ library: we always enable `IMGUI_USE_WCHAR32`
     // so `ImWchar` is a 32-bit codepoint type.
     bindings = bindings.clang_arg("-DIMGUI_USE_WCHAR32");
+    if cfg!(feature = "test-engine") {
+        bindings = bindings.clang_arg("-DIMGUI_ENABLE_TEST_ENGINE");
+    }
     let bindings = bindings
         .generate()
         .expect("Unable to generate bindings from cimgui.h (docs.rs)");
@@ -234,6 +238,9 @@ fn generate_bindings_native(cfg: &BuildConfig) {
     // Keep bindgen in sync with the compiled C++ library: we always enable `IMGUI_USE_WCHAR32`
     // so `ImWchar` is a 32-bit codepoint type.
     bindings = bindings.clang_arg("-DIMGUI_USE_WCHAR32");
+    if cfg!(feature = "test-engine") {
+        bindings = bindings.clang_arg("-DIMGUI_ENABLE_TEST_ENGINE");
+    }
     #[cfg(feature = "freetype")]
     if let Ok(freetype) = pkg_config::probe_library("freetype2") {
         // Mirror CMake behavior: when building with FreeType, also keep stb_truetype enabled
@@ -365,6 +372,9 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     build.file(imgui_src.join("imgui_demo.cpp"));
     build.file(cimgui_root.join("cimgui.cpp"));
     build.define("IMGUI_USE_WCHAR32", None);
+    if cfg!(feature = "test-engine") {
+        build.define("IMGUI_ENABLE_TEST_ENGINE", None);
+    }
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
         let use_static = cfg.use_static_crt();
@@ -403,7 +413,14 @@ fn export_include_paths(cfg: &BuildConfig) {
     println!("cargo:THIRD_PARTY={}", cfg.imgui_src().display());
     println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
-    println!("cargo:DEFINE_IMGUITEST=0");
+    println!(
+        "cargo:DEFINE_IMGUITEST={}",
+        if cfg!(feature = "test-engine") {
+            "1"
+        } else {
+            "0"
+        }
+    );
     println!("cargo:DEFINE_IMGUI_USE_WCHAR32=1");
 }
 
@@ -519,6 +536,9 @@ fn build_with_cc_wasm(cfg: &BuildConfig) {
     build.define("IMGUI_DISABLE_OSX_FUNCTIONS", None);
     build.define("IMGUI_DISABLE_WIN32_FUNCTIONS", None);
     build.define("IMGUI_USE_WCHAR32", None);
+    if cfg!(feature = "test-engine") {
+        build.define("IMGUI_ENABLE_TEST_ENGINE", None);
+    }
 
     // Avoid exceptions/RTTI
     build.flag_if_supported("-fno-exceptions");

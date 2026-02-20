@@ -38,6 +38,7 @@ README_FILES = [
     "extensions/dear-imguizmo/README.md",
     "extensions/dear-implot3d/README.md",
     "extensions/dear-imguizmo-quat/README.md",
+    "extensions/dear-imgui-test-engine/README.md",
     "extensions/dear-file-browser/README.md",
     "extensions/dear-imgui-reflect/README.md",
 ]

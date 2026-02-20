@@ -34,6 +34,8 @@ multi-viewport = []
 tracing = ["dep:tracing", "dep:tracing-subscriber"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
+# Enable Dear ImGui test engine hooks in dear-imgui-sys.
+test-engine = ["dear-imgui-sys/test-engine"]
 serde = ["dep:serde"]
 # Enable for WASM targets (import-style provider)
 wasm = ["dear-imgui-sys/wasm"]

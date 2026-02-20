@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL/Vulkan backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, file browser, reflection-based UI).
+`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL/Vulkan backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, ImGui Test Engine, file browser, reflection-based UI).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
@@ -38,6 +38,7 @@
   - `dear-implot` — plotting (cimplot C API)
   - `dear-implot3d` — 3D plotting (cimplot3d C API)
   - `dear-imguizmo-quat` — quaternion + 3D gizmo (cimguizmo_quat C API)
+  - `dear-imgui-test-engine` — Dear ImGui UI automation/test runner integration
   - `dear-file-browser` — native dialogs (rfd) + pure ImGui in-UI file browser
   - `dear-imgui-reflect` — reflection-based UI helpers (auto-generate ImGui widgets from Rust types)
 
@@ -83,6 +84,7 @@ cargo run --bin imnodes_basic --features imnodes
 cargo run --bin implot_basic --features implot
 cargo run --bin imguizmo_quat_basic --features imguizmo-quat
 cargo run --bin reflect_demo --features reflect
+cargo run --bin imgui_test_engine_basic --features test-engine
 
 # implot3d example (uses dear-app)
 cargo run --bin implot3d_basic --features implot3d
@@ -171,6 +173,9 @@ dear-imguizmo-quat = "0.10"    # Quaternion-based gizmo
 
 # Node Editor
 dear-imnodes = "0.10"
+
+# Test automation
+dear-imgui-test-engine = "0.10"
 
 # File Browser
 dear-file-browser = "0.10"  # Native dialogs + ImGui file browser
@@ -264,6 +269,7 @@ Extensions
 | dear-file-browser   | 0.10.x   | 0.10.x                 | —                           | ImGui UI + native (rfd) backends       |
 | dear-implot3d       | 0.10.x   | 0.10.x                 | dear-implot3d-sys 0.10.x    | 3D plotting                            |
 | dear-imguizmo-quat  | 0.10.x   | 0.10.x                 | dear-imguizmo-quat-sys 0.10.x | Quaternion gizmo                       |
+| dear-imgui-test-engine | 0.10.x | 0.10.x                 | dear-imgui-test-engine-sys 0.10.x | UI automation and test runner      |
 | dear-imgui-reflect  | 0.10.x   | 0.10.x                 | —                           | Reflection-based UI helpers (pure Rust)|
 
 Note: if your ecosystem is pinned to `wgpu = 27` (e.g. a release train), you can use
@@ -308,6 +314,7 @@ extensions/
   dear-implot/         # ImPlot (2D plotting)
   dear-implot3d/       # ImPlot3D (3D plotting)
   dear-imguizmo-quat/  # ImGuIZMO.quat (quaternion gizmo)
+  dear-imgui-test-engine/ # ImGui Test Engine integration
   dear-file-browser/   # File dialogs (rfd) + pure ImGui browser
   dear-imgui-reflect/  # Reflection-based UI helpers for dear-imgui-rs
 ```

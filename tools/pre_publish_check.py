@@ -35,6 +35,7 @@ SYS_CRATES = [
     ("dear-imguizmo-sys", "extensions/dear-imguizmo-sys"),
     ("dear-implot3d-sys", "extensions/dear-implot3d-sys"),
     ("dear-imguizmo-quat-sys", "extensions/dear-imguizmo-quat-sys"),
+    ("dear-imgui-test-engine-sys", "extensions/dear-imgui-test-engine-sys"),
 ]
 
 # All publishable crates
@@ -57,6 +58,8 @@ ALL_CRATES = [
     ("dear-implot3d", "extensions/dear-implot3d"),
     ("dear-imguizmo-quat-sys", "extensions/dear-imguizmo-quat-sys"),
     ("dear-imguizmo-quat", "extensions/dear-imguizmo-quat"),
+    ("dear-imgui-test-engine-sys", "extensions/dear-imgui-test-engine-sys"),
+    ("dear-imgui-test-engine", "extensions/dear-imgui-test-engine"),
     ("dear-file-browser", "extensions/dear-file-browser"),
     ("dear-imgui-reflect-derive", "extensions/dear-imgui-reflect-derive"),
     ("dear-imgui-reflect", "extensions/dear-imgui-reflect"),

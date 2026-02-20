@@ -14,6 +14,7 @@ implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
 file-browser = ["dep:dear-file-browser", "dear-file-browser/thumbnails-image"]
 reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
+test-engine = ["dep:dear-imgui-test-engine"]
 multi-viewport = [
     "dear-imgui-rs/multi-viewport",
     "dear-imgui-winit/multi-viewport",
@@ -231,6 +232,11 @@ name = "reflect_demo"
 path = "reflect_demo.rs"
 required-features = ["reflect"]
 
+[[bin]]
+name = "imgui_test_engine_basic"
+path = "imgui_test_engine_basic.rs"
+required-features = ["test-engine"]
+
 [dependencies]
 dear-imgui-rs = { path = "../dear-imgui", version = "0.10" }
 dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.10" }
@@ -247,6 +253,7 @@ dear-imguizmo-quat = { path = "../extensions/dear-imguizmo-quat", optional = tru
 dear-implot3d = { path = "../extensions/dear-implot3d", optional = true }
 dear-file-browser = { path = "../extensions/dear-file-browser", optional = true }
 dear-imgui-reflect = { path = "../extensions/dear-imgui-reflect", optional = true, features = ["glam"] }
+dear-imgui-test-engine = { path = "../extensions/dear-imgui-test-engine", optional = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 glam = { workspace = true }

@@ -47,6 +47,8 @@ WORKSPACE_CRATES = [
     "extensions/dear-implot3d",
     "extensions/dear-imguizmo-quat-sys",
     "extensions/dear-imguizmo-quat",
+    "extensions/dear-imgui-test-engine-sys",
+    "extensions/dear-imgui-test-engine",
     "extensions/dear-file-browser",
     "extensions/dear-imgui-reflect-derive",
     "extensions/dear-imgui-reflect",

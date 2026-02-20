@@ -18,6 +18,8 @@ members = [
     "extensions/dear-imguizmo",
     "extensions/dear-imguizmo-quat-sys",
     "extensions/dear-imguizmo-quat",
+    "extensions/dear-imgui-test-engine-sys",
+    "extensions/dear-imgui-test-engine",
     "extensions/dear-imnodes-sys",
     "extensions/dear-imnodes",
     "extensions/dear-imgui-reflect",

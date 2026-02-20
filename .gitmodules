@@ -18,3 +18,6 @@
 [submodule "extensions/dear-implot3d-sys/third-party/cimplot3d"]
 	path = extensions/dear-implot3d-sys/third-party/cimplot3d
 	url = https://github.com/cimgui/cimplot3d
+[submodule "extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine"]
+	path = extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine
+	url = https://github.com/ocornut/imgui_test_engine
