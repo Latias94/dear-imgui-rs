@@ -8,6 +8,7 @@ extern "C" {
 
 typedef struct ImGuiContext ImGuiContext;
 typedef struct ImGuiTestEngine ImGuiTestEngine;
+typedef struct ImGuiTestEngineScript ImGuiTestEngineScript;
 
 typedef enum ImGuiTestEngineRunSpeed {
     ImGuiTestEngineRunSpeed_Fast = 0,
@@ -85,6 +86,32 @@ bool imgui_test_engine_is_running_tests(ImGuiTestEngine* engine);
 bool imgui_test_engine_is_requesting_max_app_speed(ImGuiTestEngine* engine);
 
 void imgui_test_engine_install_default_crash_handler(void);
+
+// Register a small set of built-in demo tests (useful to validate integration).
+// This does not start the engine; it only registers tests into the engine instance.
+void imgui_test_engine_register_default_tests(ImGuiTestEngine* engine);
+
+// Script tests: a small Rust-friendly API to register tests without writing C++ callbacks.
+//
+// The script is executed by the C++ test engine (ImGuiTestContext) when the test runs.
+// It does not provide a GUI function: script tests are meant to drive your application's
+// existing UI.
+ImGuiTestEngineScript* imgui_test_engine_script_create(void);
+void imgui_test_engine_script_destroy(ImGuiTestEngineScript* script);
+void imgui_test_engine_script_set_ref(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_item_click(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_item_open(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_item_check(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_item_uncheck(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_item_input_int(ImGuiTestEngineScript* script, const char* ref, int v);
+void imgui_test_engine_script_item_input_str(ImGuiTestEngineScript* script, const char* ref, const char* v);
+void imgui_test_engine_script_yield(ImGuiTestEngineScript* script, int frames);
+void imgui_test_engine_register_script_test(
+    ImGuiTestEngine* engine,
+    const char* category,
+    const char* name,
+    ImGuiTestEngineScript* script
+);
 
 #ifdef __cplusplus
 }

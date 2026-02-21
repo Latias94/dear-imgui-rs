@@ -5,6 +5,11 @@
 pub struct ImGuiTestEngine {
     _unused: [u8; 0],
 }
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ImGuiTestEngineScript {
+    _unused: [u8; 0],
+}
 pub const ImGuiTestEngineRunSpeed_Fast: ImGuiTestEngineRunSpeed = 0;
 pub const ImGuiTestEngineRunSpeed_Normal: ImGuiTestEngineRunSpeed = 1;
 pub const ImGuiTestEngineRunSpeed_Cinematic: ImGuiTestEngineRunSpeed = 2;
@@ -102,4 +107,68 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_install_default_crash_handler();
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_register_default_tests(engine: *mut ImGuiTestEngine);
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_create() -> *mut ImGuiTestEngineScript;
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_destroy(script: *mut ImGuiTestEngineScript);
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_set_ref(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_click(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_open(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_check(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_uncheck(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_input_int(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        v: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_input_str(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        v: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_yield(script: *mut ImGuiTestEngineScript, frames: ::std::os::raw::c_int);
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_register_script_test(
+        engine: *mut ImGuiTestEngine,
+        category: *const ::std::os::raw::c_char,
+        name: *const ::std::os::raw::c_char,
+        script: *mut ImGuiTestEngineScript,
+    );
 }

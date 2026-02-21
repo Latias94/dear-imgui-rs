@@ -1,7 +1,11 @@
 #include "cimgui_test_engine.h"
 
 #include "imgui_te_engine.h"
+#include "imgui_te_internal.h"
 #include "imgui_te_ui.h"
+
+// Implemented in script_tests.cpp (internal cleanup hook).
+void imgui_test_engine__script_cleanup(ImGuiTestEngine* engine);
 
 extern "C" {
 
@@ -10,6 +14,19 @@ ImGuiTestEngine* imgui_test_engine_create_context(void) {
 }
 
 void imgui_test_engine_destroy_context(ImGuiTestEngine* engine) {
+    if (engine == nullptr) {
+        return;
+    }
+
+    imgui_test_engine__script_cleanup(engine);
+
+    // Upstream asserts if the engine is still bound to an ImGuiContext while saved settings are enabled.
+    // For safety/ergonomics in Rust (where drop order may be hard to control, e.g. when using helper
+    // runners), we degrade gracefully by disabling saved settings in that case to avoid aborting.
+    if (engine->IO.ConfigSavedSettings && engine->UiContextTarget != nullptr) {
+        engine->IO.ConfigSavedSettings = false;
+    }
+
     ImGuiTestEngine_DestroyContext(engine);
 }
 

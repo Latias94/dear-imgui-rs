@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut test_engine = TestEngine::create();
             test_engine.set_verbose_level(VerboseLevel::Info);
             test_engine.set_run_speed(RunSpeed::Normal);
+            test_engine.register_default_tests();
             test_engine.start(ctx);
             *engine_setup.borrow_mut() = Some(test_engine);
             TestEngine::install_default_crash_handler();
@@ -67,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             engine.show_windows(ui, None);
         })
         .on_exit(move |_ctx| {
-            if let Some(mut engine) = engine_exit.borrow_mut().take() {
+            if let Some(engine) = engine_exit.borrow_mut().as_mut() {
                 engine.stop();
             }
         })

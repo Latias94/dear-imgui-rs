@@ -3,7 +3,7 @@ name = "dear-imgui-test-engine-sys"
 version = "0.10.0"
 edition.workspace = true
 description = "Low-level FFI bindings for Dear ImGui Test Engine"
-license.workspace = true
+license-file = "LICENSE.txt"
 repository.workspace = true
 homepage.workspace = true
 categories.workspace = true
@@ -33,5 +33,7 @@ bindgen.workspace = true
 cc.workspace = true
 
 [features]
-default = []
+default = ["capture", "coroutine-stdthread"]
 freetype = ["dear-imgui-sys/freetype"]
+capture = []
+coroutine-stdthread = []

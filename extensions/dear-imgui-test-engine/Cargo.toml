@@ -12,12 +12,14 @@ readme = "README.md"
 
 [dependencies]
 dear-imgui-rs = { path = "../../dear-imgui", version = "0.10", features = ["test-engine"] }
-dear-imgui-test-engine-sys = { path = "../dear-imgui-test-engine-sys", version = "0.10" }
+dear-imgui-test-engine-sys = { path = "../dear-imgui-test-engine-sys", version = "0.10", default-features = false }
 bitflags.workspace = true
 
 [features]
-default = []
+default = ["capture", "coroutine-stdthread"]
 freetype = [
     "dear-imgui-rs/freetype",
     "dear-imgui-test-engine-sys/freetype",
 ]
+capture = ["dear-imgui-test-engine-sys/capture"]
+coroutine-stdthread = ["dear-imgui-test-engine-sys/coroutine-stdthread"]
