@@ -110,6 +110,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if env::var("CARGO_FEATURE_FREETYPE").is_ok() {
             v.push("freetype");
         }
+        if env::var("CARGO_FEATURE_TEST_ENGINE").is_ok() {
+            v.push("test-engine");
+        }
         features = v.join(",");
     } else {
         let mut user: Vec<String> = features
@@ -128,17 +131,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     fs::create_dir_all(&pkg_dir)?;
 
-    let ft_suffix = if features.split(',').any(|f| f.trim() == "freetype") {
-        Some("-freetype")
-    } else {
+    let has_freetype = features.split(',').any(|f| f.trim() == "freetype");
+    let has_test_engine = features.split(',').any(|f| f.trim() == "test-engine");
+    let mut suffix = String::new();
+    if has_freetype {
+        suffix.push_str("-freetype");
+    }
+    if has_test_engine {
+        suffix.push_str("-test-engine");
+    }
+    let suffix = if suffix.is_empty() {
         None
+    } else {
+        Some(suffix)
     };
     let ar_name = compose_archive_name(
         "dear-imgui",
         &crate_version,
         &target,
         link_type,
-        ft_suffix,
+        suffix.as_deref(),
         crt,
     );
 

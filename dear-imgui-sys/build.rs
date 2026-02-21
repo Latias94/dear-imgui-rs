@@ -487,6 +487,13 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
     if cfg!(feature = "freetype") && !prebuilt_manifest_has_feature(dir, "freetype") {
         return false;
     }
+    // If test-engine feature is enabled, only accept prebuilt if manifest declares it.
+    //
+    // Without this, cargo could silently use a non-test-engine prebuilt while the Rust side
+    // expects IMGUI_ENABLE_TEST_ENGINE hooks to be present, leading to confusing runtime failures.
+    if cfg!(feature = "test-engine") && !prebuilt_manifest_has_feature(dir, "test-engine") {
+        return false;
+    }
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");
     true
@@ -585,17 +592,25 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
         ""
     };
 
-    // Candidate archive names: prefer freetype variant when feature is enabled
+    // Candidate archive names: match enabled features exactly (e.g. -freetype, -test-engine,
+    // -freetype-test-engine). We still validate the manifest in `try_link_prebuilt()`, but this
+    // avoids downloading/trying obviously incompatible prebuilts.
     let mut candidates: Vec<String> = Vec::new();
     let target = &cfg.target_triple;
-    #[cfg(feature = "freetype")]
-    {
+    let mut suffix = String::new();
+    if cfg!(feature = "freetype") {
+        suffix.push_str("-freetype");
+    }
+    if cfg!(feature = "test-engine") {
+        suffix.push_str("-test-engine");
+    }
+    if suffix.is_empty() {
         candidates.push(build_support::compose_archive_name(
             "dear-imgui",
             &version,
             target,
             link_type,
-            Some("-freetype"),
+            None,
             crt,
         ));
         candidates.push(build_support::compose_archive_name(
@@ -603,26 +618,27 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
             &version,
             target,
             link_type,
-            Some("-freetype"),
+            None,
+            "",
+        ));
+    } else {
+        candidates.push(build_support::compose_archive_name(
+            "dear-imgui",
+            &version,
+            target,
+            link_type,
+            Some(suffix.as_str()),
+            crt,
+        ));
+        candidates.push(build_support::compose_archive_name(
+            "dear-imgui",
+            &version,
+            target,
+            link_type,
+            Some(suffix.as_str()),
             "",
         ));
     }
-    candidates.push(build_support::compose_archive_name(
-        "dear-imgui",
-        &version,
-        target,
-        link_type,
-        None,
-        crt,
-    ));
-    candidates.push(build_support::compose_archive_name(
-        "dear-imgui",
-        &version,
-        target,
-        link_type,
-        None,
-        "",
-    ));
 
     let tags = build_support::release_tags("dear-imgui-sys", &version);
 
