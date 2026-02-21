@@ -65,8 +65,6 @@ pub struct ResultSummary {
 /// The upstream engine is not thread-safe; create and use it on the same thread as the target ImGui context.
 pub struct TestEngine {
     raw: *mut sys::ImGuiTestEngine,
-    started: bool,
-    started_ctx: *mut dear_imgui_rs::sys::ImGuiContext,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
@@ -206,8 +204,6 @@ impl TestEngine {
         }
         Ok(Self {
             raw,
-            started: false,
-            started_ctx: std::ptr::null_mut(),
             _not_send_sync: PhantomData,
         })
     }
@@ -224,11 +220,24 @@ impl TestEngine {
         self.raw
     }
 
+    pub fn is_bound(&self) -> bool {
+        unsafe { sys::imgui_test_engine_is_bound(self.raw) }
+    }
+
+    pub fn is_started(&self) -> bool {
+        unsafe { sys::imgui_test_engine_is_started(self.raw) }
+    }
+
+    fn ui_context_target(&self) -> *mut dear_imgui_rs::sys::ImGuiContext {
+        unsafe { sys::imgui_test_engine_get_ui_context_target(self.raw) }
+    }
+
     /// Tries to start (bind) the test engine to an ImGui context.
     ///
     /// Calling this multiple times with the same context is a no-op.
     ///
-    /// Returns an error if the engine is already started with a different context.
+    /// Returns an error if the engine is already bound to a different context, or if the engine
+    /// was previously stopped but is still bound (call `shutdown()` to detach first).
     pub fn try_start(&mut self, imgui_ctx: &Context) -> ImGuiResult<()> {
         let ctx = imgui_ctx.as_raw();
         if ctx.is_null() {
@@ -237,18 +246,23 @@ impl TestEngine {
             ));
         }
 
-        if self.started {
-            if self.started_ctx == ctx {
-                return Ok(());
+        let bound = self.ui_context_target();
+        if !bound.is_null() {
+            if bound == ctx {
+                if self.is_started() {
+                    return Ok(());
+                }
+                return Err(ImGuiError::invalid_operation(
+                    "TestEngine::try_start() called but the engine is already bound (and not started). \
+                     Call TestEngine::shutdown() to detach, then start again.",
+                ));
             }
             return Err(ImGuiError::invalid_operation(
-                "TestEngine::try_start() called while already started with a different ImGui context",
+                "TestEngine::try_start() called while already bound to a different ImGui context",
             ));
         }
 
         unsafe { sys::imgui_test_engine_start(self.raw, ctx) };
-        self.started = true;
-        self.started_ctx = ctx;
         Ok(())
     }
 
@@ -263,13 +277,17 @@ impl TestEngine {
             .expect("Failed to start Dear ImGui Test Engine context");
     }
 
+    /// Stops the test coroutine and exports results, but keeps the engine bound to the ImGui context.
     pub fn stop(&mut self) {
-        if !self.started {
-            return;
-        }
         unsafe { sys::imgui_test_engine_stop(self.raw) };
-        self.started = false;
-        self.started_ctx = std::ptr::null_mut();
+    }
+
+    /// Stops (if needed) and detaches the engine from the bound ImGui context.
+    ///
+    /// This is the most ergonomic shutdown path for Rust applications: it avoids relying on drop order
+    /// between `Context` and `TestEngine`.
+    pub fn shutdown(&mut self) {
+        unsafe { sys::imgui_test_engine_unbind(self.raw) };
     }
 
     pub fn post_swap(&mut self) {

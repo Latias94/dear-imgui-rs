@@ -53,6 +53,15 @@ typedef struct ImGuiTestEngineResultSummary_c {
 ImGuiTestEngine* imgui_test_engine_create_context(void);
 void imgui_test_engine_destroy_context(ImGuiTestEngine* engine);
 
+// Introspection helpers (avoid relying on internal struct layout from Rust).
+ImGuiContext* imgui_test_engine_get_ui_context_target(ImGuiTestEngine* engine);
+bool imgui_test_engine_is_bound(ImGuiTestEngine* engine);
+bool imgui_test_engine_is_started(ImGuiTestEngine* engine);
+
+// Stop (if needed) and detach the engine from the target ImGui context.
+// This is a safe alternative to relying on drop order between the ImGui context and the engine.
+void imgui_test_engine_unbind(ImGuiTestEngine* engine);
+
 void imgui_test_engine_start(ImGuiTestEngine* engine, ImGuiContext* ui_ctx);
 void imgui_test_engine_stop(ImGuiTestEngine* engine);
 void imgui_test_engine_post_swap(ImGuiTestEngine* engine);

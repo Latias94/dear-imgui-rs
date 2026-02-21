@@ -50,6 +50,18 @@ unsafe extern "C" {
     pub fn imgui_test_engine_destroy_context(engine: *mut ImGuiTestEngine);
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_get_ui_context_target(engine: *mut ImGuiTestEngine) -> *mut ImGuiContext;
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_is_bound(engine: *mut ImGuiTestEngine) -> bool;
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_is_started(engine: *mut ImGuiTestEngine) -> bool;
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_unbind(engine: *mut ImGuiTestEngine);
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_start(engine: *mut ImGuiTestEngine, ui_ctx: *mut ImGuiContext);
 }
 unsafe extern "C" {

@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .on_exit(move |_ctx| {
             if let Some(engine) = engine_exit.borrow_mut().as_mut() {
-                engine.stop();
+                engine.shutdown();
             }
         })
         .run()?;

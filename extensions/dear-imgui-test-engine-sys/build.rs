@@ -304,6 +304,18 @@ fn main() {
         );
     }
 
+    // Allow skipping native compilation even if submodules/sources are not available.
+    // This is useful for cross-target `cargo check` or constrained environments.
+    if env::var("IMGUI_TEST_ENGINE_SYS_SKIP_CC").is_ok() {
+        if !use_pregenerated_bindings(&cfg.out_dir) {
+            panic!(
+                "IMGUI_TEST_ENGINE_SYS_SKIP_CC is set but no pregenerated bindings were found. \
+                 Please ensure src/bindings_pregenerated.rs exists, or unset IMGUI_TEST_ENGINE_SYS_SKIP_CC."
+            );
+        }
+        return;
+    }
+
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let test_engine_root = cfg
         .manifest_dir
@@ -323,16 +335,6 @@ fn main() {
 
     if parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
         generate_bindings(&cfg);
-        return;
-    }
-
-    if env::var("IMGUI_TEST_ENGINE_SYS_SKIP_CC").is_ok() {
-        if !use_pregenerated_bindings(&cfg.out_dir) {
-            panic!(
-                "IMGUI_TEST_ENGINE_SYS_SKIP_CC is set but no pregenerated bindings were found. \
-                 Please ensure src/bindings_pregenerated.rs exists, or unset IMGUI_TEST_ENGINE_SYS_SKIP_CC."
-            );
-        }
         return;
     }
 

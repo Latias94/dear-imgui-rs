@@ -40,8 +40,8 @@ dear-imgui-test-engine = "0.10"
 use dear_imgui_rs as imgui;
 use dear_imgui_test_engine as test_engine;
 
-let mut imgui_ctx = imgui::Context::create();
 let mut engine = test_engine::TestEngine::create();
+let mut imgui_ctx = imgui::Context::create();
 
 engine
     .try_start(&imgui_ctx)
@@ -59,12 +59,13 @@ let _ = engine.queue_tests(
 );
 
 // On shutdown, stop the engine before dropping the ImGui context.
-engine.stop();
+engine.shutdown();
 ```
 
 ## Notes
 
 - `dear-imgui-test-engine-sys` automatically enables the required `IMGUI_ENABLE_TEST_ENGINE` define on `dear-imgui-sys`.
+- If you care about preserving test engine `.ini` settings, make sure the ImGui context is destroyed before the engine context.
 - Upstream Dear ImGui Test Engine has its own license terms; review `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine/imgui_test_engine/LICENSE.txt` before shipping commercial products.
 
 ## Features

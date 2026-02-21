@@ -9,6 +9,20 @@ void imgui_test_engine__script_cleanup(ImGuiTestEngine* engine);
 
 extern "C" {
 
+static ImGuiContext* imgui_test_engine__set_current_if_needed(ImGuiContext* ctx) {
+    ImGuiContext* prev = ImGui::GetCurrentContext();
+    if (ctx != nullptr && prev != ctx) {
+        ImGui::SetCurrentContext(ctx);
+    }
+    return prev;
+}
+
+static void imgui_test_engine__restore_current_if_needed(ImGuiContext* prev, ImGuiContext* ctx) {
+    if (ctx != nullptr && prev != ctx) {
+        ImGui::SetCurrentContext(prev);
+    }
+}
+
 ImGuiTestEngine* imgui_test_engine_create_context(void) {
     return ImGuiTestEngine_CreateContext();
 }
@@ -20,6 +34,9 @@ void imgui_test_engine_destroy_context(ImGuiTestEngine* engine) {
 
     imgui_test_engine__script_cleanup(engine);
 
+    ImGuiContext* target = engine->UiContextTarget;
+    ImGuiContext* prev = imgui_test_engine__set_current_if_needed(target);
+
     // Upstream asserts if the engine is still bound to an ImGuiContext while saved settings are enabled.
     // For safety/ergonomics in Rust (where drop order may be hard to control, e.g. when using helper
     // runners), we degrade gracefully by disabling saved settings in that case to avoid aborting.
@@ -28,34 +45,93 @@ void imgui_test_engine_destroy_context(ImGuiTestEngine* engine) {
     }
 
     ImGuiTestEngine_DestroyContext(engine);
+
+    imgui_test_engine__restore_current_if_needed(prev, target);
+}
+
+ImGuiContext* imgui_test_engine_get_ui_context_target(ImGuiTestEngine* engine) {
+    if (engine == nullptr) {
+        return nullptr;
+    }
+    return engine->UiContextTarget;
+}
+
+bool imgui_test_engine_is_bound(ImGuiTestEngine* engine) {
+    return imgui_test_engine_get_ui_context_target(engine) != nullptr;
+}
+
+bool imgui_test_engine_is_started(ImGuiTestEngine* engine) {
+    if (engine == nullptr) {
+        return false;
+    }
+    return engine->Started;
+}
+
+void imgui_test_engine_unbind(ImGuiTestEngine* engine) {
+    if (engine == nullptr) {
+        return;
+    }
+
+    if (engine->Started) {
+        ImGuiTestEngine_Stop(engine);
+    }
+
+    ImGuiContext* target = engine->UiContextTarget;
+    if (target == nullptr) {
+        return;
+    }
+
+    ImGuiContext* prev = imgui_test_engine__set_current_if_needed(target);
+    ImGuiTestEngine_UnbindImGuiContext(engine, target);
+    imgui_test_engine__restore_current_if_needed(prev, target);
 }
 
 void imgui_test_engine_start(ImGuiTestEngine* engine, ImGuiContext* ui_ctx) {
     if (engine == nullptr || ui_ctx == nullptr) {
         return;
     }
+    ImGuiContext* prev = imgui_test_engine__set_current_if_needed(ui_ctx);
     ImGuiTestEngine_Start(engine, ui_ctx);
+    imgui_test_engine__restore_current_if_needed(prev, ui_ctx);
 }
 
 void imgui_test_engine_stop(ImGuiTestEngine* engine) {
     if (engine == nullptr) {
         return;
     }
+    if (!engine->Started) {
+        return;
+    }
+    ImGuiContext* target = engine->UiContextTarget;
+    ImGuiContext* prev = imgui_test_engine__set_current_if_needed(target);
     ImGuiTestEngine_Stop(engine);
+    imgui_test_engine__restore_current_if_needed(prev, target);
 }
 
 void imgui_test_engine_post_swap(ImGuiTestEngine* engine) {
     if (engine == nullptr) {
         return;
     }
+    if (engine->UiContextTarget == nullptr) {
+        return;
+    }
+    ImGuiContext* target = engine->UiContextTarget;
+    ImGuiContext* prev = imgui_test_engine__set_current_if_needed(target);
     ImGuiTestEngine_PostSwap(engine);
+    imgui_test_engine__restore_current_if_needed(prev, target);
 }
 
 void imgui_test_engine_show_windows(ImGuiTestEngine* engine, bool* p_open) {
     if (engine == nullptr) {
         return;
     }
+    if (engine->UiContextTarget == nullptr) {
+        return;
+    }
+    ImGuiContext* target = engine->UiContextTarget;
+    ImGuiContext* prev = imgui_test_engine__set_current_if_needed(target);
     ImGuiTestEngine_ShowTestEngineWindows(engine, p_open);
+    imgui_test_engine__restore_current_if_needed(prev, target);
 }
 
 void imgui_test_engine_queue_tests(
