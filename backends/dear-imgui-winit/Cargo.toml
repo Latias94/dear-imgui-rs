@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-winit"
-version = "0.10.0"
+version = "0.10.1"
 edition.workspace = true
 description = "Winit platform backend for dear-imgui-rs"
 license.workspace = true

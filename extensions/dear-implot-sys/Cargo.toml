@@ -1,6 +1,6 @@
 [package]
 name = "dear-implot-sys"
-version = "0.10.0"
+version = "0.10.1"
 edition.workspace = true
 description = "Low-level FFI bindings for ImPlot via cimplot (C API)"
 license.workspace = true

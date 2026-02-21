@@ -1,6 +1,6 @@
 [package]
 name = "dear-app"
-version = "0.10.0"
+version = "0.10.1"
 edition.workspace = true
 description = "Convenient Dear ImGui application runner for dear-imgui-rs (Winit + WGPU, docking, themes, add-ons)"
 license.workspace = true
