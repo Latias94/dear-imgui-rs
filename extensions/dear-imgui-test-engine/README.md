@@ -53,6 +53,9 @@ let _ = engine.queue_tests(
     None,
     test_engine::RunFlags::RUN_FROM_COMMAND_LINE,
 );
+
+// On shutdown, stop the engine before dropping the ImGui context.
+engine.stop();
 ```
 
 ## Notes
@@ -84,3 +87,6 @@ engine.add_script_test("my_app", "open_settings", |t| {
     Ok(())
 })?;
 ```
+
+Script tests do not provide a `GuiFunc` (they don't draw any UI). They are meant to drive UI that your
+application already renders every frame.
