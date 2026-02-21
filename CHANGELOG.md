@@ -13,20 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Extensions
   - `dear-imgui-test-engine` / `dear-imgui-test-engine-sys`: Dear ImGui Test Engine support (PR #17, thanks @honeyspoon).
-  - Test Engine: built-in demo tests and a script-test shim for writing simple tests from Rust.
-
-### Changed
-
-- Extensions
-  - Test Engine: simplify default features (default to `capture` only; coroutine implementation is enabled in the sys build).
-- CI
-  - Check `dear-imgui-test-engine` with `--no-default-features`.
-
-### Fixed
-
-- Extensions
-  - Test Engine: avoid aborting when querying result summary while tests are running.
-  - Demo tests: fix item ID collisions to improve stability.
 
 ## [0.10.0] - 2026-02-19
 

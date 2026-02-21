@@ -32,15 +32,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Minimal Rust-authored test (scripted): keeps everything on the C++ side at runtime,
             // while letting you define the intent in Rust without FFI callbacks.
-            let _ = test_engine.add_script_test("rust_tests", "script_smoke", |t| {
-                t.set_ref("Script Target###RustScriptTarget")?;
-                t.item_click("Click Me")?;
-                t.item_check("Node/Checkbox")?;
-                t.item_uncheck("Node/Checkbox")?;
-                t.yield_frames(2);
-                Ok(())
-            });
-            test_engine.start(ctx);
+            test_engine
+                .add_script_test("rust_tests", "script_smoke", |t| {
+                    t.set_ref("Script Target###RustScriptTarget")?;
+                    t.item_click("Click Me")?;
+                    t.item_check("Node/Checkbox")?;
+                    t.item_uncheck("Node/Checkbox")?;
+                    t.yield_frames(2);
+                    Ok(())
+                })
+                .expect("Failed to register script_smoke test");
+
+            test_engine
+                .try_start(ctx)
+                .expect("Failed to start Dear ImGui Test Engine");
             *engine_setup.borrow_mut() = Some(test_engine);
             TestEngine::install_default_crash_handler();
         })

@@ -10,6 +10,8 @@ Safe, idiomatic Rust integration for [Dear ImGui Test Engine](https://github.com
 - Runtime controls: speed, verbosity, capture, abort.
 - UI integration: show built-in test engine windows in an active ImGui frame.
 
+For native build/link options, see `extensions/dear-imgui-test-engine-sys/README.md`.
+
 ## Links
 
 - Upstream: https://github.com/ocornut/imgui_test_engine
@@ -41,8 +43,9 @@ use dear_imgui_test_engine as test_engine;
 let mut imgui_ctx = imgui::Context::create();
 let mut engine = test_engine::TestEngine::create();
 
-// Prefer `try_start()` if you want to handle errors (e.g. "already started with a different context")
-let _ = engine.try_start(&imgui_ctx);
+engine
+    .try_start(&imgui_ctx)
+    .expect("Failed to start Dear ImGui Test Engine");
 
 // In your frame loop
 let ui = imgui_ctx.frame();
