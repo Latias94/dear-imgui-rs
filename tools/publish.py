@@ -288,10 +288,15 @@ def publish_crate(
     print_info(f"Path: {crate_path}")
 
     # Special handling: keep dear-imgui-sdl3 vendored backends in sync before publishing.
-    if crate_name == "dear-imgui-sdl3":
+    #
+    # Note: in --dry-run mode, do NOT modify the working tree. The dry run is meant to
+    # show the publish plan without side effects.
+    if crate_name == "dear-imgui-sdl3" and not dry_run:
         if not sync_dear_imgui_sdl3_backends(repo_root):
             print_error("Failed to sync dear-imgui-sdl3 backends; aborting publish")
             return False
+    elif crate_name == "dear-imgui-sdl3" and dry_run:
+        print_info("DRY RUN: skipping dear-imgui-sdl3 backend sync")
 
     # Check if already published
     if not dry_run and check_crate_published(crate_name, version):
