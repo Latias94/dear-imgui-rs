@@ -414,6 +414,14 @@ fn export_include_paths(cfg: &BuildConfig) {
     println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
     println!(
+        "cargo:DEFINE_IMGUI_ENABLE_TEST_ENGINE={}",
+        if cfg!(feature = "test-engine") {
+            "1"
+        } else {
+            "0"
+        }
+    );
+    println!(
         "cargo:DEFINE_IMGUITEST={}",
         if cfg!(feature = "test-engine") {
             "1"

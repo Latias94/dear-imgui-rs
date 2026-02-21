@@ -102,6 +102,11 @@ impl Context {
             .expect("Failed to create Dear ImGui context")
     }
 
+    /// Returns the raw `ImGuiContext*` for FFI integrations.
+    pub fn as_raw(&self) -> *mut sys::ImGuiContext {
+        self.raw
+    }
+
     // removed legacy create_or_panic variants (use create()/try_create())
 
     fn try_create_internal(

@@ -59,3 +59,29 @@ let _ = engine.queue_tests(
 
 - `dear-imgui-test-engine-sys` automatically enables the required `IMGUI_ENABLE_TEST_ENGINE` define on `dear-imgui-sys`.
 - Upstream Dear ImGui Test Engine has its own license terms; review `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine/imgui_test_engine/LICENSE.txt` before shipping commercial products.
+
+## Features
+
+- `capture` (default): enable screenshot/video capture helpers.
+- `coroutine-stdthread` (default): enable the built-in coroutine implementation using `std::thread`.
+- `freetype`: passthrough to `dear-imgui-rs/freetype` and `dear-imgui-test-engine-sys/freetype`.
+
+## Demo Tests
+
+This crate bundles a small set of built-in demo tests (for validating integration):
+
+```rust
+let mut engine = test_engine::TestEngine::create();
+engine.register_default_tests();
+```
+
+To write tests from Rust without dealing with C++ callbacks, use script tests:
+
+```rust
+engine.add_script_test("my_app", "open_settings", |t| {
+    t.set_ref("Main Window")?;
+    t.item_click("Settings")?;
+    t.yield_frames(2);
+    Ok(())
+})?;
+```

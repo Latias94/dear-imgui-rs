@@ -9,6 +9,7 @@ struct BuildConfig {
     out_dir: PathBuf,
     target_os: String,
     target_env: String,
+    target_arch: String,
     docs_rs: bool,
 }
 
@@ -19,6 +20,7 @@ impl BuildConfig {
             out_dir: PathBuf::from(env::var("OUT_DIR").unwrap()),
             target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
             target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
+            target_arch: env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default(),
             docs_rs: env::var("DOCS_RS").is_ok(),
         }
     }
@@ -38,6 +40,10 @@ impl BuildConfig {
                 .unwrap_or_default()
                 .split(',')
                 .any(|f| f == "crt-static")
+    }
+
+    fn is_wasm(&self) -> bool {
+        self.target_arch == "wasm32"
     }
 }
 
@@ -132,11 +138,19 @@ fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, c
     }
 
     build.define("IMGUI_ENABLE_TEST_ENGINE", None);
+    build.define("IMGUI_USE_WCHAR32", None);
+    build.define(
+        "IMGUI_TEST_ENGINE_ENABLE_CAPTURE",
+        Some(if cfg!(feature = "capture") { "1" } else { "0" }),
+    );
     build.define(
         "IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL",
-        Some("1"),
+        Some(if cfg!(feature = "coroutine-stdthread") {
+            "1"
+        } else {
+            "0"
+        }),
     );
-    build.define("IMGUI_USE_WCHAR32", None);
 
     build.include(imgui_src);
     build.include(cimgui_root);
@@ -153,6 +167,8 @@ fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, c
     build.file(test_engine_root.join("imgui_te_ui.cpp"));
     build.file(test_engine_root.join("imgui_te_utils.cpp"));
     build.file(cfg.manifest_dir.join("shim/cimgui_test_engine.cpp"));
+    build.file(cfg.manifest_dir.join("shim/default_tests.cpp"));
+    build.file(cfg.manifest_dir.join("shim/script_tests.cpp"));
 
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -176,7 +192,10 @@ fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, c
 }
 
 fn ensure_imgui_test_engine_enabled() {
-    let enabled = env::var("DEP_DEAR_IMGUI_DEFINE_IMGUITEST").unwrap_or_else(|_| "0".to_string());
+    let enabled = env::var("DEP_DEAR_IMGUI_DEFINE_IMGUI_ENABLE_TEST_ENGINE")
+        .or_else(|_| env::var("DEP_DEAR_IMGUI_DEFINE_IMGUITEST"))
+        .unwrap_or_else(|_| "0".to_string());
+
     if enabled != "1" {
         panic!(
             "dear-imgui-test-engine-sys requires dear-imgui-sys to be compiled with IMGUI_ENABLE_TEST_ENGINE. \
@@ -246,6 +265,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.h");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.cpp");
+    println!("cargo:rerun-if-changed=shim/default_tests.cpp");
+    println!("cargo:rerun-if-changed=shim/script_tests.cpp");
     println!(
         "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_capture_tool.cpp"
     );
@@ -270,6 +291,7 @@ fn main() {
     println!(
         "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_te_utils.cpp"
     );
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUI_ENABLE_TEST_ENGINE");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUITEST");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
     println!("cargo:rerun-if-env-changed=IMGUI_TEST_ENGINE_SYS_SKIP_CC");
@@ -277,6 +299,13 @@ fn main() {
     if cfg.docs_rs {
         docsrs_build(&cfg);
         return;
+    }
+
+    if cfg.is_wasm() {
+        panic!(
+            "dear-imgui-test-engine-sys does not support wasm32 targets. \
+             The upstream imgui_test_engine is a native-only library (threads, OS interaction, capture tooling)."
+        );
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);

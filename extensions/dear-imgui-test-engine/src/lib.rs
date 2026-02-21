@@ -4,7 +4,7 @@
 //! engine lifetime management and per-frame UI integration.
 
 use bitflags::bitflags;
-use dear_imgui_rs::{Context, ImGuiError, ImGuiResult, Ui, with_scratch_txt};
+use dear_imgui_rs::{Context, ImGuiError, ImGuiResult, Ui, with_scratch_txt, with_scratch_txt_two};
 use dear_imgui_test_engine_sys as sys;
 
 pub use dear_imgui_test_engine_sys as raw;
@@ -39,16 +39,16 @@ pub enum TestGroup {
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct RunFlags: u32 {
-        const NONE = sys::ImGuiTestEngineRunFlags_None;
-        const GUI_FUNC_DISABLE = sys::ImGuiTestEngineRunFlags_GuiFuncDisable;
-        const GUI_FUNC_ONLY = sys::ImGuiTestEngineRunFlags_GuiFuncOnly;
-        const NO_SUCCESS_MSG = sys::ImGuiTestEngineRunFlags_NoSuccessMsg;
-        const ENABLE_RAW_INPUTS = sys::ImGuiTestEngineRunFlags_EnableRawInputs;
-        const RUN_FROM_GUI = sys::ImGuiTestEngineRunFlags_RunFromGui;
-        const RUN_FROM_COMMAND_LINE = sys::ImGuiTestEngineRunFlags_RunFromCommandLine;
-        const NO_ERROR = sys::ImGuiTestEngineRunFlags_NoError;
-        const SHARE_VARS = sys::ImGuiTestEngineRunFlags_ShareVars;
-        const SHARE_TEST_CONTEXT = sys::ImGuiTestEngineRunFlags_ShareTestContext;
+        const NONE = sys::ImGuiTestEngineRunFlags_None as u32;
+        const GUI_FUNC_DISABLE = sys::ImGuiTestEngineRunFlags_GuiFuncDisable as u32;
+        const GUI_FUNC_ONLY = sys::ImGuiTestEngineRunFlags_GuiFuncOnly as u32;
+        const NO_SUCCESS_MSG = sys::ImGuiTestEngineRunFlags_NoSuccessMsg as u32;
+        const ENABLE_RAW_INPUTS = sys::ImGuiTestEngineRunFlags_EnableRawInputs as u32;
+        const RUN_FROM_GUI = sys::ImGuiTestEngineRunFlags_RunFromGui as u32;
+        const RUN_FROM_COMMAND_LINE = sys::ImGuiTestEngineRunFlags_RunFromCommandLine as u32;
+        const NO_ERROR = sys::ImGuiTestEngineRunFlags_NoError as u32;
+        const SHARE_VARS = sys::ImGuiTestEngineRunFlags_ShareVars as u32;
+        const SHARE_TEST_CONTEXT = sys::ImGuiTestEngineRunFlags_ShareTestContext as u32;
     }
 }
 
@@ -62,6 +62,132 @@ pub struct ResultSummary {
 pub struct TestEngine {
     raw: *mut sys::ImGuiTestEngine,
     started: bool,
+    started_ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+}
+
+struct Script {
+    raw: *mut sys::ImGuiTestEngineScript,
+}
+
+impl Script {
+    fn create() -> ImGuiResult<Self> {
+        let raw = unsafe { sys::imgui_test_engine_script_create() };
+        if raw.is_null() {
+            return Err(ImGuiError::invalid_operation(
+                "imgui_test_engine_script_create returned null",
+            ));
+        }
+        Ok(Self { raw })
+    }
+
+    fn into_raw(mut self) -> *mut sys::ImGuiTestEngineScript {
+        let raw = self.raw;
+        self.raw = std::ptr::null_mut();
+        raw
+    }
+}
+
+impl Drop for Script {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe { sys::imgui_test_engine_script_destroy(self.raw) };
+            self.raw = std::ptr::null_mut();
+        }
+    }
+}
+
+pub struct ScriptTest<'a> {
+    script: &'a mut Script,
+}
+
+impl ScriptTest<'_> {
+    pub fn set_ref(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "set_ref contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_set_ref(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_click(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_click contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_click(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_open(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_open contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_open(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_check(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_check contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_check(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_uncheck(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_uncheck contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_uncheck(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_input_int(&mut self, r#ref: &str, v: i32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_input_int contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_input_int(self.script.raw, ptr, v)
+        });
+        Ok(())
+    }
+
+    pub fn item_input_str(&mut self, r#ref: &str, v: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') || v.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_input_str contained interior NUL",
+            ));
+        }
+        with_scratch_txt_two(r#ref, v, |ref_ptr, v_ptr| unsafe {
+            sys::imgui_test_engine_script_item_input_str(self.script.raw, ref_ptr, v_ptr)
+        });
+        Ok(())
+    }
+
+    pub fn yield_frames(&mut self, frames: i32) {
+        unsafe { sys::imgui_test_engine_script_yield(self.script.raw, frames) };
+    }
 }
 
 impl TestEngine {
@@ -75,6 +201,7 @@ impl TestEngine {
         Ok(Self {
             raw,
             started: false,
+            started_ctx: std::ptr::null_mut(),
         })
     }
 
@@ -86,14 +213,24 @@ impl TestEngine {
         self.raw
     }
 
-    pub fn start(&mut self, _imgui_ctx: &Context) {
-        if self.started {
+    pub fn start(&mut self, imgui_ctx: &Context) {
+        let ctx = imgui_ctx.as_raw();
+        if ctx.is_null() {
             return;
         }
-        unsafe {
-            sys::imgui_test_engine_start(self.raw, dear_imgui_rs::sys::igGetCurrentContext())
-        };
+
+        if self.started {
+            if self.started_ctx == ctx {
+                return;
+            }
+            panic!(
+                "TestEngine::start() called while already started with a different ImGui context"
+            );
+        }
+
+        unsafe { sys::imgui_test_engine_start(self.raw, ctx) };
         self.started = true;
+        self.started_ctx = ctx;
     }
 
     pub fn stop(&mut self) {
@@ -102,6 +239,7 @@ impl TestEngine {
         }
         unsafe { sys::imgui_test_engine_stop(self.raw) };
         self.started = false;
+        self.started_ctx = std::ptr::null_mut();
     }
 
     pub fn post_swap(&mut self) {
@@ -111,6 +249,42 @@ impl TestEngine {
     pub fn show_windows(&mut self, _ui: &Ui, opened: Option<&mut bool>) {
         let ptr = opened.map_or(std::ptr::null_mut(), |b| b as *mut bool);
         unsafe { sys::imgui_test_engine_show_windows(self.raw, ptr) };
+    }
+
+    /// Registers a small set of built-in demo tests (useful to validate integration).
+    pub fn register_default_tests(&mut self) {
+        unsafe { sys::imgui_test_engine_register_default_tests(self.raw) };
+    }
+
+    /// Registers a script-driven test.
+    ///
+    /// Script tests do not provide a GUI function: they are meant to drive your application's existing UI.
+    pub fn add_script_test<F>(&mut self, category: &str, name: &str, build: F) -> ImGuiResult<()>
+    where
+        F: FnOnce(&mut ScriptTest<'_>) -> ImGuiResult<()>,
+    {
+        if category.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "add_script_test category contained interior NUL",
+            ));
+        }
+        if name.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "add_script_test name contained interior NUL",
+            ));
+        }
+
+        let mut script = Script::create()?;
+        build(&mut ScriptTest {
+            script: &mut script,
+        })?;
+        let script_raw = script.into_raw();
+
+        with_scratch_txt_two(category, name, |cat_ptr, name_ptr| unsafe {
+            sys::imgui_test_engine_register_script_test(self.raw, cat_ptr, name_ptr, script_raw)
+        });
+
+        Ok(())
     }
 
     pub fn queue_tests(
@@ -212,10 +386,6 @@ impl TestEngine {
 impl Drop for TestEngine {
     fn drop(&mut self) {
         if !self.raw.is_null() {
-            if self.started {
-                unsafe { sys::imgui_test_engine_stop(self.raw) };
-                self.started = false;
-            }
             unsafe { sys::imgui_test_engine_destroy_context(self.raw) };
             self.raw = std::ptr::null_mut();
         }

@@ -10,6 +10,9 @@ This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most 
 ## Features
 
 - `freetype`: passthrough to `dear-imgui-sys/freetype`.
+- `capture` (default): enable screenshot/video capture helpers (`IMGUI_TEST_ENGINE_ENABLE_CAPTURE=1`).
+- `coroutine-stdthread` (default): enable the built-in coroutine implementation using `std::thread`
+  (`IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1`).
 
 ## Build Modes
 
@@ -34,4 +37,6 @@ The build script also consumes values exported by `dear-imgui-sys`:
 
 - This crate requires `dear-imgui-sys` to be compiled with `IMGUI_ENABLE_TEST_ENGINE` (enabled automatically through dependency features).
 - Linking of the base ImGui static library is handled by `dear-imgui-sys`.
-- Upstream Dear ImGui Test Engine has custom license terms. Review `third-party/imgui_test_engine/imgui_test_engine/LICENSE.txt` for usage conditions.
+- A small built-in demo test set is bundled for validating integration via `imgui_test_engine_register_default_tests()`.
+- Upstream Dear ImGui Test Engine has custom license terms. Review `LICENSE.txt` (this crate) and
+  `third-party/imgui_test_engine/imgui_test_engine/LICENSE.txt` (upstream) for usage conditions.
