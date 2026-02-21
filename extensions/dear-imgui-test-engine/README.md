@@ -103,3 +103,9 @@ engine.add_script_test("my_app", "open_settings", |t| {
 
 Script tests do not provide a `GuiFunc` (they don't draw any UI). They are meant to drive UI that your
 application already renders every frame.
+
+## Build notes
+
+- This crate enables `dear-imgui-rs/test-engine` (and therefore `dear-imgui-sys/test-engine`) because the upstream Test Engine relies on ImGui hook symbols.
+- If you see linker errors mentioning `ImGuiTestEngineHook_*`, it usually means `dear-imgui-sys/test-engine` is enabled but `dear-imgui-test-engine(-sys)` is not linked into the final binary.
+  Build feature groups separately instead of using `--workspace --all-features`.

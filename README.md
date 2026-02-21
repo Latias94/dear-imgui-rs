@@ -213,6 +213,16 @@ fn ui_frame(ui: &reflect::imgui::Ui, settings: &mut Settings) {
 - Windows: we publish prebuilt packages (MD/MT, with/without `freetype`). Linux/macOS may have CI artifacts but are not used automatically.
 - Opt-in prebuilt download from Release: enable the crate feature `prebuilt` (the env toggle `<CRATE>_SYS_USE_PREBUILT=1` is still accepted but requires that feature). Otherwise builds only use prebuilt when you explicitly point to them (e.g., `<CRATE>_SYS_LIB_DIR` or `<CRATE>_SYS_PREBUILT_URL`).
 
+Test engine hooks (important):
+
+- Enabling `dear-imgui-sys/test-engine` defines `IMGUI_ENABLE_TEST_ENGINE` and makes the ImGui objects reference hook symbols (e.g. `ImGuiTestEngineHook_*`).
+  - This is required for Dear ImGui Test Engine, but it also means you must link `dear-imgui-test-engine-sys` (usually via `dear-imgui-test-engine`) in the final binary.
+- Avoid `cargo build --workspace --all-features` for this repo: it can mix feature sets and produce confusing linker errors.
+  - Recommended workflow:
+    - Build the core workspace (no examples): `cargo build --workspace --exclude dear-imgui-examples --exclude dear-imgui-web-demo --exclude xtask`
+    - Build examples without test engine: `cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat"`
+    - Build the test engine example separately: `cargo build -p dear-imgui-examples --features test-engine --bin imgui_test_engine_basic`
+
 Env vars per -sys crate:
 - `<CRATE>_SYS_LIB_DIR` — link from a dir containing the static lib
 - `<CRATE>_SYS_PREBUILT_URL` — explicit URL or local path to `.a/.lib` or `.tar.gz` (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`)

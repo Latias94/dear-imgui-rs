@@ -38,3 +38,10 @@ The build script also consumes values exported by `dear-imgui-sys`:
 - A small built-in demo test set is bundled for validating integration via `imgui_test_engine_register_default_tests()`.
 - Upstream Dear ImGui Test Engine has custom license terms. Review `LICENSE.txt` (this crate) and
   `third-party/imgui_test_engine/imgui_test_engine/LICENSE.txt` (upstream) for usage conditions.
+
+Feature consistency:
+
+- If you enable `dear-imgui-sys/test-engine`, the compiled ImGui objects reference hook symbols (e.g. `ImGuiTestEngineHook_*`).
+  Those symbols are provided by the upstream Test Engine code compiled by this crate.
+- In practice: either link a binary with `dear-imgui-test-engine(-sys)`, or keep `dear-imgui-sys/test-engine` disabled.
+  Avoid mixing feature sets in large `--workspace --all-features` builds.

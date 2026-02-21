@@ -22,13 +22,17 @@ struct ImGuiTestEngineScript {
         ItemClick,
         ItemDoubleClick,
         ItemOpen,
+        ItemClose,
         ItemCheck,
         ItemUncheck,
         ItemInputInt,
         ItemInputStr,
         MouseMove,
+        MouseWheel,
         KeyDown,
+        KeyUp,
         KeyPress,
+        KeyHold,
         KeyChars,
         KeyCharsAppend,
         KeyCharsAppendEnter,
@@ -53,6 +57,7 @@ struct ImGuiTestEngineScript {
         int I = 0;
         int J = 0;
         float F = 0.0f;
+        float G = 0.0f;
     };
 
     std::string Category{};
@@ -100,6 +105,9 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::ItemOpen:
                 ctx->ItemOpen(cmd.A.c_str());
                 break;
+            case ImGuiTestEngineScript::CmdKind::ItemClose:
+                ctx->ItemClose(cmd.A.c_str());
+                break;
             case ImGuiTestEngineScript::CmdKind::ItemCheck:
                 ctx->ItemCheck(cmd.A.c_str());
                 break;
@@ -115,11 +123,20 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::MouseMove:
                 ctx->MouseMove(cmd.A.c_str());
                 break;
+            case ImGuiTestEngineScript::CmdKind::MouseWheel:
+                ctx->MouseWheel(ImVec2(cmd.F, cmd.G));
+                break;
             case ImGuiTestEngineScript::CmdKind::KeyDown:
                 ctx->KeyDown(static_cast<ImGuiKeyChord>(cmd.I));
                 break;
+            case ImGuiTestEngineScript::CmdKind::KeyUp:
+                ctx->KeyUp(static_cast<ImGuiKeyChord>(cmd.I));
+                break;
             case ImGuiTestEngineScript::CmdKind::KeyPress:
                 ctx->KeyPress(static_cast<ImGuiKeyChord>(cmd.I), cmd.J);
+                break;
+            case ImGuiTestEngineScript::CmdKind::KeyHold:
+                ctx->KeyHold(static_cast<ImGuiKeyChord>(cmd.I), cmd.F);
                 break;
             case ImGuiTestEngineScript::CmdKind::KeyChars:
                 ctx->KeyChars(cmd.A.c_str());
@@ -429,6 +446,18 @@ void imgui_test_engine_script_item_open(ImGuiTestEngineScript* script, const cha
     });
 }
 
+void imgui_test_engine_script_item_close(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::ItemClose,
+        ref ? ref : "",
+        {},
+        0,
+    });
+}
+
 void imgui_test_engine_script_item_check(ImGuiTestEngineScript* script, const char* ref) {
     if (script == nullptr) {
         return;
@@ -488,12 +517,35 @@ void imgui_test_engine_script_mouse_move(ImGuiTestEngineScript* script, const ch
     });
 }
 
+void imgui_test_engine_script_mouse_wheel(ImGuiTestEngineScript* script, float dx, float dy) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseWheel;
+    cmd.F = dx;
+    cmd.G = dy;
+    script->Cmds.push_back(std::move(cmd));
+}
+
 void imgui_test_engine_script_key_down(ImGuiTestEngineScript* script, int key_chord) {
     if (script == nullptr) {
         return;
     }
     script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
         ImGuiTestEngineScript::CmdKind::KeyDown,
+        {},
+        {},
+        key_chord,
+    });
+}
+
+void imgui_test_engine_script_key_up(ImGuiTestEngineScript* script, int key_chord) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::KeyUp,
         {},
         {},
         key_chord,
@@ -508,6 +560,17 @@ void imgui_test_engine_script_key_press(ImGuiTestEngineScript* script, int key_c
     cmd.Kind = ImGuiTestEngineScript::CmdKind::KeyPress;
     cmd.I = key_chord;
     cmd.J = count;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_key_hold(ImGuiTestEngineScript* script, int key_chord, float time_in_seconds) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::KeyHold;
+    cmd.I = key_chord;
+    cmd.F = time_in_seconds;
     script->Cmds.push_back(std::move(cmd));
 }
 

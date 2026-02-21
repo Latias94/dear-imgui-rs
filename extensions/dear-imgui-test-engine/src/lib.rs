@@ -154,6 +154,26 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
+    pub fn item_close(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_close contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_close(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_set_opened(&mut self, r#ref: &str, opened: bool) -> ImGuiResult<()> {
+        if opened {
+            self.item_open(r#ref)
+        } else {
+            self.item_close(r#ref)
+        }
+    }
+
     pub fn item_check(&mut self, r#ref: &str) -> ImGuiResult<()> {
         if r#ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
@@ -164,6 +184,14 @@ impl ScriptTest<'_> {
             sys::imgui_test_engine_script_item_check(self.script.raw, ptr)
         });
         Ok(())
+    }
+
+    pub fn item_set_checked(&mut self, r#ref: &str, checked: bool) -> ImGuiResult<()> {
+        if checked {
+            self.item_check(r#ref)
+        } else {
+            self.item_uncheck(r#ref)
+        }
     }
 
     pub fn item_uncheck(&mut self, r#ref: &str) -> ImGuiResult<()> {
@@ -214,8 +242,22 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
+    pub fn mouse_wheel(&mut self, dx: f32, dy: f32) -> ImGuiResult<()> {
+        if !dx.is_finite() || !dy.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "mouse_wheel requires finite values",
+            ));
+        }
+        unsafe { sys::imgui_test_engine_script_mouse_wheel(self.script.raw, dx, dy) };
+        Ok(())
+    }
+
     pub fn key_down(&mut self, key_chord: KeyChord) {
         unsafe { sys::imgui_test_engine_script_key_down(self.script.raw, key_chord.raw()) };
+    }
+
+    pub fn key_up(&mut self, key_chord: KeyChord) {
+        unsafe { sys::imgui_test_engine_script_key_up(self.script.raw, key_chord.raw()) };
     }
 
     pub fn key_press(&mut self, key_chord: KeyChord, count: i32) -> ImGuiResult<()> {
@@ -225,6 +267,18 @@ impl ScriptTest<'_> {
             ));
         }
         unsafe { sys::imgui_test_engine_script_key_press(self.script.raw, key_chord.raw(), count) };
+        Ok(())
+    }
+
+    pub fn key_hold(&mut self, key_chord: KeyChord, seconds: f32) -> ImGuiResult<()> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(ImGuiError::invalid_operation(
+                "key_hold requires a finite non-negative value",
+            ));
+        }
+        unsafe {
+            sys::imgui_test_engine_script_key_hold(self.script.raw, key_chord.raw(), seconds)
+        };
         Ok(())
     }
 
