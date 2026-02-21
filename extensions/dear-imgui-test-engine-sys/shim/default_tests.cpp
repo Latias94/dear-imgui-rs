@@ -25,20 +25,21 @@ void imgui_test_engine_register_default_tests(ImGuiTestEngine* engine) {
         IM_UNUSED(ctx);
         ImGui::Begin("Test Window###DefaultTests", nullptr, ImGuiWindowFlags_NoSavedSettings);
         ImGui::TextUnformatted("Hello, automation world");
-        ImGui::Button("Click Me###DefaultTests");
-        if (ImGui::TreeNode("Node###DefaultTests")) {
+        // Note: avoid reusing the same `###id` for multiple items (it causes ID collisions).
+        ImGui::Button("Click Me");
+        if (ImGui::TreeNode("Node")) {
             static bool b = false;
-            ImGui::Checkbox("Checkbox###DefaultTests", &b);
+            ImGui::Checkbox("Checkbox", &b);
             ImGui::TreePop();
         }
         ImGui::End();
     };
     t->TestFunc = [](ImGuiTestContext* ctx) {
         ctx->SetRef("Test Window###DefaultTests");
-        ctx->ItemClick("Click Me###DefaultTests");
-        ctx->ItemOpen("Node###DefaultTests");
-        ctx->ItemCheck("Node###DefaultTests/Checkbox###DefaultTests");
-        ctx->ItemUncheck("Node###DefaultTests/Checkbox###DefaultTests");
+        ctx->ItemClick("Click Me");
+        // Optional as ItemCheck("Node/Checkbox") can open parent tree nodes automatically.
+        ctx->ItemCheck("Node/Checkbox");
+        ctx->ItemUncheck("Node/Checkbox");
     };
 
     // Demo: value entry (slider int)
@@ -50,17 +51,16 @@ void imgui_test_engine_register_default_tests(ImGuiTestEngine* engine) {
     t->GuiFunc = [](ImGuiTestContext* ctx) {
         TestVars2& vars = ctx->GetVars<TestVars2>();
         ImGui::Begin("Test Window###DefaultTests", nullptr, ImGuiWindowFlags_NoSavedSettings);
-        ImGui::SliderInt("Slider###DefaultTests", &vars.MyInt, 0, 1000);
+        ImGui::SliderInt("Slider", &vars.MyInt, 0, 1000);
         ImGui::End();
     };
     t->TestFunc = [](ImGuiTestContext* ctx) {
         TestVars2& vars = ctx->GetVars<TestVars2>();
         ctx->SetRef("Test Window###DefaultTests");
         IM_CHECK_EQ(vars.MyInt, 42);
-        ctx->ItemInputValue("Slider###DefaultTests", 123);
+        ctx->ItemInputValue("Slider", 123);
         IM_CHECK_EQ(vars.MyInt, 123);
     };
 }
 
 } // extern "C"
-

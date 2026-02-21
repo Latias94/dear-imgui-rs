@@ -104,12 +104,30 @@ void imgui_test_engine_get_result_summary(
         return;
     }
 
-    ImGuiTestEngineResultSummary summary{};
-    ImGuiTestEngine_GetResultSummary(engine, &summary);
+    // Upstream `ImGuiTestEngine_GetResultSummary()` asserts if any test is currently running.
+    // For bindings, we prefer returning a best-effort snapshot instead of aborting.
+    int count_tested = 0;
+    int count_success = 0;
+    int count_remaining = 0;
+    for (int n = 0; n < engine->TestsAll.Size; n++) {
+        ImGuiTest* test = engine->TestsAll[n];
+        ImGuiTestStatus status = test->Output.Status;
+        if (status == ImGuiTestStatus_Unknown) {
+            continue;
+        }
+        if (status == ImGuiTestStatus_Queued || status == ImGuiTestStatus_Running) {
+            count_remaining++;
+            continue;
+        }
+        count_tested++;
+        if (status == ImGuiTestStatus_Success) {
+            count_success++;
+        }
+    }
 
-    out_summary->CountTested = summary.CountTested;
-    out_summary->CountSuccess = summary.CountSuccess;
-    out_summary->CountInQueue = summary.CountInQueue;
+    out_summary->CountTested = count_tested;
+    out_summary->CountSuccess = count_success;
+    out_summary->CountInQueue = count_remaining;
 }
 
 void imgui_test_engine_set_run_speed(ImGuiTestEngine* engine, ImGuiTestEngineRunSpeed speed) {
