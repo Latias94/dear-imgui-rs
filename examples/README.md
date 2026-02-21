@@ -49,6 +49,7 @@ Quick picks:
   - If your workspace doesn’t pre-enable dear-app add-on features, use: `cargo run --bin implot3d_basic --features "implot3d, dear-app/implot3d"`
 - Reflect demo: `cargo run --bin reflect_demo --features reflect`
 - ImGui Test Engine: `cargo run --bin imgui_test_engine_basic --features test-engine`
+  - Smoke test (auto-run + exit): `cargo run --bin imgui_test_engine_basic --features test-engine -- --exit-when-done --group tests`
 
 Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
 - Extensions (e.g., ImPlot): `cargo run --bin implot_basic --features implot`

@@ -85,6 +85,8 @@ cargo run --bin implot_basic --features implot
 cargo run --bin imguizmo_quat_basic --features imguizmo-quat
 cargo run --bin reflect_demo --features reflect
 cargo run --bin imgui_test_engine_basic --features test-engine
+  # Smoke test (auto-run + exit)
+  cargo run --bin imgui_test_engine_basic --features test-engine -- --exit-when-done --group tests
 
 # implot3d example (uses dear-app)
 cargo run --bin implot3d_basic --features implot3d
