@@ -28,6 +28,8 @@ struct ImGuiTestEngineScript {
         ItemInputInt,
         ItemInputStr,
         MouseMove,
+        MouseMoveToVoid,
+        MouseClickOnVoid,
         MouseWheel,
         KeyDown,
         KeyUp,
@@ -38,9 +40,18 @@ struct ImGuiTestEngineScript {
         KeyCharsAppendEnter,
         KeyCharsReplace,
         KeyCharsReplaceEnter,
+        ItemHold,
+        ItemDragWithDelta,
+        ScrollToItemX,
+        ScrollToItemY,
+        MenuClick,
+        MenuCheck,
+        MenuUncheck,
         Sleep,
         AssertItemExists,
         AssertItemVisible,
+        AssertItemReadIntEq,
+        AssertItemReadStrEq,
         WaitForItem,
         WaitForItemVisible,
         AssertItemChecked,
@@ -123,6 +134,12 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::MouseMove:
                 ctx->MouseMove(cmd.A.c_str());
                 break;
+            case ImGuiTestEngineScript::CmdKind::MouseMoveToVoid:
+                ctx->MouseMoveToVoid();
+                break;
+            case ImGuiTestEngineScript::CmdKind::MouseClickOnVoid:
+                ctx->MouseClickMulti(static_cast<ImGuiMouseButton>(cmd.I), cmd.J);
+                break;
             case ImGuiTestEngineScript::CmdKind::MouseWheel:
                 ctx->MouseWheel(ImVec2(cmd.F, cmd.G));
                 break;
@@ -152,6 +169,27 @@ static void script_test_func(ImGuiTestContext* ctx) {
                 break;
             case ImGuiTestEngineScript::CmdKind::KeyCharsReplaceEnter:
                 ctx->KeyCharsReplaceEnter(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::ItemHold:
+                ctx->ItemHold(cmd.A.c_str(), cmd.F);
+                break;
+            case ImGuiTestEngineScript::CmdKind::ItemDragWithDelta:
+                ctx->ItemDragWithDelta(cmd.A.c_str(), ImVec2(cmd.F, cmd.G));
+                break;
+            case ImGuiTestEngineScript::CmdKind::ScrollToItemX:
+                ctx->ScrollToItemX(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::ScrollToItemY:
+                ctx->ScrollToItemY(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::MenuClick:
+                ctx->MenuClick(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::MenuCheck:
+                ctx->MenuCheck(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::MenuUncheck:
+                ctx->MenuUncheck(cmd.A.c_str());
                 break;
             case ImGuiTestEngineScript::CmdKind::Sleep:
                 ctx->Sleep(cmd.F);
@@ -193,6 +231,67 @@ static void script_test_func(ImGuiTestContext* ctx) {
                         ImGuiTestCheckFlags_None,
                         "Script assertion failed: item is not visible: '%s' (ref='%s')",
                         cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::AssertItemReadIntEq: {
+                if (!ctx->ItemExists(cmd.A.c_str())) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item does not exist: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                int got = ctx->ItemReadAsInt(cmd.A.c_str());
+                if (got != cmd.I) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: ItemReadAsInt('%s') == %d, expected %d (ref='%s')",
+                        cmd.A.c_str(),
+                        got,
+                        cmd.I,
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::AssertItemReadStrEq: {
+                if (!ctx->ItemExists(cmd.A.c_str())) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item does not exist: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                const char* got = ctx->ItemReadAsString(cmd.A.c_str());
+                std::string got_s = got ? got : "";
+                if (got_s != cmd.B) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: ItemReadAsString('%s') == '%s', expected '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        got_s.c_str(),
+                        cmd.B.c_str(),
                         ctx->RefStr
                     );
                     return;
@@ -517,6 +616,29 @@ void imgui_test_engine_script_mouse_move(ImGuiTestEngineScript* script, const ch
     });
 }
 
+void imgui_test_engine_script_mouse_move_to_void(ImGuiTestEngineScript* script) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::MouseMoveToVoid,
+        {},
+        {},
+        0,
+    });
+}
+
+void imgui_test_engine_script_mouse_click_on_void(ImGuiTestEngineScript* script, int button, int count) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseClickOnVoid;
+    cmd.I = button;
+    cmd.J = count;
+    script->Cmds.push_back(std::move(cmd));
+}
+
 void imgui_test_engine_script_mouse_wheel(ImGuiTestEngineScript* script, float dx, float dy) {
     if (script == nullptr) {
         return;
@@ -624,6 +746,79 @@ void imgui_test_engine_script_key_chars_replace_enter(ImGuiTestEngineScript* scr
     script->Cmds.push_back(std::move(cmd));
 }
 
+void imgui_test_engine_script_item_hold(ImGuiTestEngineScript* script, const char* ref, float time_in_seconds) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ItemHold;
+    cmd.A = ref ? ref : "";
+    cmd.F = time_in_seconds;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_item_drag_with_delta(ImGuiTestEngineScript* script, const char* ref, float dx, float dy) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ItemDragWithDelta;
+    cmd.A = ref ? ref : "";
+    cmd.F = dx;
+    cmd.G = dy;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_scroll_to_item_x(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ScrollToItemX;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_scroll_to_item_y(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ScrollToItemY;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_menu_click(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MenuClick;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_menu_check(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MenuCheck;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_menu_uncheck(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MenuUncheck;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
 void imgui_test_engine_script_sleep(ImGuiTestEngineScript* script, float time_in_seconds) {
     if (script == nullptr) {
         return;
@@ -656,6 +851,28 @@ void imgui_test_engine_script_assert_item_visible(ImGuiTestEngineScript* script,
         {},
         0,
     });
+}
+
+void imgui_test_engine_script_assert_item_read_int_eq(ImGuiTestEngineScript* script, const char* ref, int expected) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::AssertItemReadIntEq;
+    cmd.A = ref ? ref : "";
+    cmd.I = expected;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_assert_item_read_str_eq(ImGuiTestEngineScript* script, const char* ref, const char* expected) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::AssertItemReadStrEq;
+    cmd.A = ref ? ref : "";
+    cmd.B = expected ? expected : "";
+    script->Cmds.push_back(std::move(cmd));
 }
 
 void imgui_test_engine_script_wait_for_item(ImGuiTestEngineScript* script, const char* ref, int max_frames) {

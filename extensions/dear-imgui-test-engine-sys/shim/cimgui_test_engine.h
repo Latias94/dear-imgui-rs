@@ -117,6 +117,8 @@ void imgui_test_engine_script_item_uncheck(ImGuiTestEngineScript* script, const 
 void imgui_test_engine_script_item_input_int(ImGuiTestEngineScript* script, const char* ref, int v);
 void imgui_test_engine_script_item_input_str(ImGuiTestEngineScript* script, const char* ref, const char* v);
 void imgui_test_engine_script_mouse_move(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_mouse_move_to_void(ImGuiTestEngineScript* script);
+void imgui_test_engine_script_mouse_click_on_void(ImGuiTestEngineScript* script, int button, int count);
 void imgui_test_engine_script_mouse_wheel(ImGuiTestEngineScript* script, float dx, float dy);
 // Key chord is `ImGuiKeyChord` (an int) from Dear ImGui.
 void imgui_test_engine_script_key_down(ImGuiTestEngineScript* script, int key_chord);
@@ -129,8 +131,21 @@ void imgui_test_engine_script_key_chars_append(ImGuiTestEngineScript* script, co
 void imgui_test_engine_script_key_chars_append_enter(ImGuiTestEngineScript* script, const char* chars);
 void imgui_test_engine_script_key_chars_replace(ImGuiTestEngineScript* script, const char* chars);
 void imgui_test_engine_script_key_chars_replace_enter(ImGuiTestEngineScript* script, const char* chars);
+void imgui_test_engine_script_item_hold(ImGuiTestEngineScript* script, const char* ref, float time_in_seconds);
+void imgui_test_engine_script_item_drag_with_delta(ImGuiTestEngineScript* script, const char* ref, float dx, float dy);
+void imgui_test_engine_script_scroll_to_item_x(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_scroll_to_item_y(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_menu_click(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_menu_check(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_menu_uncheck(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_assert_item_exists(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_assert_item_visible(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_assert_item_read_int_eq(ImGuiTestEngineScript* script, const char* ref, int expected);
+void imgui_test_engine_script_assert_item_read_str_eq(
+    ImGuiTestEngineScript* script,
+    const char* ref,
+    const char* expected
+);
 void imgui_test_engine_script_wait_for_item(ImGuiTestEngineScript* script, const char* ref, int max_frames);
 void imgui_test_engine_script_wait_for_item_visible(ImGuiTestEngineScript* script, const char* ref, int max_frames);
 void imgui_test_engine_script_assert_item_checked(ImGuiTestEngineScript* script, const char* ref);

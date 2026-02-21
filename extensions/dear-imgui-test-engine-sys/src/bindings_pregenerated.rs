@@ -192,6 +192,16 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_move_to_void(script: *mut ImGuiTestEngineScript);
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_click_on_void(
+        script: *mut ImGuiTestEngineScript,
+        button: ::std::os::raw::c_int,
+        count: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_mouse_wheel(
         script: *mut ImGuiTestEngineScript,
         dx: ::std::os::raw::c_float,
@@ -255,6 +265,51 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_hold(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        time_in_seconds: ::std::os::raw::c_float,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_drag_with_delta(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        dx: ::std::os::raw::c_float,
+        dy: ::std::os::raw::c_float,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_scroll_to_item_x(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_scroll_to_item_y(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_menu_click(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_menu_check(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_menu_uncheck(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_sleep(
         script: *mut ImGuiTestEngineScript,
         time_in_seconds: ::std::os::raw::c_float,
@@ -270,6 +325,20 @@ unsafe extern "C" {
     pub fn imgui_test_engine_script_assert_item_visible(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_assert_item_read_int_eq(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        expected: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_assert_item_read_str_eq(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        expected: *const ::std::os::raw::c_char,
     );
 }
 unsafe extern "C" {

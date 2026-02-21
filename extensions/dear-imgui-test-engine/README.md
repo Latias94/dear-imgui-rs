@@ -96,6 +96,8 @@ engine.add_script_test("my_app", "open_settings", |t| {
     t.wait_for_item_visible("Settings", 60)?;
     t.item_click("Settings")?;
     t.input_text_replace("Search", "foo", true)?;
+    t.menu_click("File/Save")?;
+    t.scroll_to_item_y("Advanced Options")?;
     t.yield_frames(2);
     Ok(())
 })?;

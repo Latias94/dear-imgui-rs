@@ -7,6 +7,7 @@ struct ScriptTargetState {
     checkbox: bool,
     slider: i32,
     input: String,
+    my_int: i32,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,6 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         checkbox: false,
         slider: 42,
         input: String::new(),
+        my_int: 42,
     }));
 
     let engine_setup = Rc::clone(&engine);
@@ -42,6 +44,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     t.item_click("Click Me")?;
                     t.wait_for_item_visible("Input", 120)?;
                     t.input_text_replace("Input", "hello from script", false)?;
+                    t.wait_for_item_visible("MyInt", 120)?;
+                    t.item_input_int("MyInt", 123)?;
+                    t.assert_item_read_int_eq("MyInt", 123)?;
                     t.item_check("Node/Checkbox")?;
                     t.item_uncheck("Node/Checkbox")?;
                     t.yield_frames(2);
@@ -69,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ui.text("This window is owned by the app (not a test GuiFunc).");
                     ui.button("Click Me");
                     ui.input_text("Input", &mut state.input).build();
+                    ui.input_int("MyInt", &mut state.my_int);
                     if let Some(_node) = ui.tree_node("Node") {
                         ui.checkbox("Checkbox", &mut state.checkbox);
                     }
