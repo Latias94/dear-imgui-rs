@@ -59,6 +59,9 @@ pub struct ResultSummary {
     pub count_in_queue: i32,
 }
 
+/// Dear ImGui Test Engine context.
+///
+/// The upstream engine is not thread-safe; create and use it on the same thread as the target ImGui context.
 pub struct TestEngine {
     raw: *mut sys::ImGuiTestEngine,
     started: bool,
