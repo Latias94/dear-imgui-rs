@@ -380,6 +380,23 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
+    pub fn item_hold_for_frames(&mut self, r#ref: &str, frames: i32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_hold_for_frames contained interior NUL",
+            ));
+        }
+        if frames < 1 {
+            return Err(ImGuiError::invalid_operation(
+                "item_hold_for_frames frames must be >= 1",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_hold_for_frames(self.script.raw, ptr, frames)
+        });
+        Ok(())
+    }
+
     pub fn item_drag_with_delta(&mut self, r#ref: &str, dx: f32, dy: f32) -> ImGuiResult<()> {
         if r#ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
@@ -417,6 +434,66 @@ impl ScriptTest<'_> {
         }
         with_scratch_txt(r#ref, |ptr| unsafe {
             sys::imgui_test_engine_script_scroll_to_item_y(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_top(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_top contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_top(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_bottom(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_bottom contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_bottom(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn tab_close(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "tab_close contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_tab_close(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn combo_click(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "combo_click contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_combo_click(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn combo_click_all(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "combo_click_all contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_combo_click_all(self.script.raw, ptr)
         });
         Ok(())
     }
@@ -514,6 +591,33 @@ impl ScriptTest<'_> {
                 self.script.raw,
                 ref_ptr,
                 expected_ptr,
+            )
+        });
+        Ok(())
+    }
+
+    pub fn assert_item_read_float_eq(
+        &mut self,
+        r#ref: &str,
+        expected: f32,
+        epsilon: f32,
+    ) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_read_float_eq contained interior NUL",
+            ));
+        }
+        if !expected.is_finite() || !epsilon.is_finite() || epsilon < 0.0 {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_read_float_eq requires finite expected and finite non-negative epsilon",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_read_float_eq(
+                self.script.raw,
+                ptr,
+                expected,
+                epsilon,
             )
         });
         Ok(())

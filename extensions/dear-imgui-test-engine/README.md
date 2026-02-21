@@ -98,6 +98,7 @@ engine.add_script_test("my_app", "open_settings", |t| {
     t.input_text_replace("Search", "foo", true)?;
     t.menu_click("File/Save")?;
     t.scroll_to_item_y("Advanced Options")?;
+    t.scroll_to_top("Advanced Options")?;
     t.yield_frames(2);
     Ok(())
 })?;

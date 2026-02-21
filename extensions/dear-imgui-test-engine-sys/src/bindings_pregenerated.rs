@@ -272,6 +272,13 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_hold_for_frames(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        frames: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_item_drag_with_delta(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
@@ -287,6 +294,36 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_script_scroll_to_item_y(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_scroll_to_top(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_scroll_to_bottom(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_tab_close(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_combo_click(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_combo_click_all(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
     );
@@ -339,6 +376,14 @@ unsafe extern "C" {
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
         expected: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_assert_item_read_float_eq(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        expected: ::std::os::raw::c_float,
+        epsilon: ::std::os::raw::c_float,
     );
 }
 unsafe extern "C" {

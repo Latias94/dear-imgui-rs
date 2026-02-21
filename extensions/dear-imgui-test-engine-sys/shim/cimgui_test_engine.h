@@ -132,9 +132,15 @@ void imgui_test_engine_script_key_chars_append_enter(ImGuiTestEngineScript* scri
 void imgui_test_engine_script_key_chars_replace(ImGuiTestEngineScript* script, const char* chars);
 void imgui_test_engine_script_key_chars_replace_enter(ImGuiTestEngineScript* script, const char* chars);
 void imgui_test_engine_script_item_hold(ImGuiTestEngineScript* script, const char* ref, float time_in_seconds);
+void imgui_test_engine_script_item_hold_for_frames(ImGuiTestEngineScript* script, const char* ref, int frames);
 void imgui_test_engine_script_item_drag_with_delta(ImGuiTestEngineScript* script, const char* ref, float dx, float dy);
 void imgui_test_engine_script_scroll_to_item_x(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_scroll_to_item_y(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_scroll_to_top(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_scroll_to_bottom(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_tab_close(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_combo_click(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_combo_click_all(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_menu_click(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_menu_check(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_menu_uncheck(ImGuiTestEngineScript* script, const char* ref);
@@ -145,6 +151,12 @@ void imgui_test_engine_script_assert_item_read_str_eq(
     ImGuiTestEngineScript* script,
     const char* ref,
     const char* expected
+);
+void imgui_test_engine_script_assert_item_read_float_eq(
+    ImGuiTestEngineScript* script,
+    const char* ref,
+    float expected,
+    float epsilon
 );
 void imgui_test_engine_script_wait_for_item(ImGuiTestEngineScript* script, const char* ref, int max_frames);
 void imgui_test_engine_script_wait_for_item_visible(ImGuiTestEngineScript* script, const char* ref, int max_frames);

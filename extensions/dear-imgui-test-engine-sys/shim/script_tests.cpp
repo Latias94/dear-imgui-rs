@@ -41,9 +41,15 @@ struct ImGuiTestEngineScript {
         KeyCharsReplace,
         KeyCharsReplaceEnter,
         ItemHold,
+        ItemHoldForFrames,
         ItemDragWithDelta,
         ScrollToItemX,
         ScrollToItemY,
+        ScrollToTop,
+        ScrollToBottom,
+        TabClose,
+        ComboClick,
+        ComboClickAll,
         MenuClick,
         MenuCheck,
         MenuUncheck,
@@ -52,6 +58,7 @@ struct ImGuiTestEngineScript {
         AssertItemVisible,
         AssertItemReadIntEq,
         AssertItemReadStrEq,
+        AssertItemReadFloatEq,
         WaitForItem,
         WaitForItemVisible,
         AssertItemChecked,
@@ -138,7 +145,9 @@ static void script_test_func(ImGuiTestContext* ctx) {
                 ctx->MouseMoveToVoid();
                 break;
             case ImGuiTestEngineScript::CmdKind::MouseClickOnVoid:
-                ctx->MouseClickMulti(static_cast<ImGuiMouseButton>(cmd.I), cmd.J);
+                for (int n = 0; n < cmd.J; n++) {
+                    ctx->MouseClickOnVoid(static_cast<ImGuiMouseButton>(cmd.I));
+                }
                 break;
             case ImGuiTestEngineScript::CmdKind::MouseWheel:
                 ctx->MouseWheel(ImVec2(cmd.F, cmd.G));
@@ -173,6 +182,9 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::ItemHold:
                 ctx->ItemHold(cmd.A.c_str(), cmd.F);
                 break;
+            case ImGuiTestEngineScript::CmdKind::ItemHoldForFrames:
+                ctx->ItemHoldForFrames(cmd.A.c_str(), cmd.I);
+                break;
             case ImGuiTestEngineScript::CmdKind::ItemDragWithDelta:
                 ctx->ItemDragWithDelta(cmd.A.c_str(), ImVec2(cmd.F, cmd.G));
                 break;
@@ -181,6 +193,21 @@ static void script_test_func(ImGuiTestContext* ctx) {
                 break;
             case ImGuiTestEngineScript::CmdKind::ScrollToItemY:
                 ctx->ScrollToItemY(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::ScrollToTop:
+                ctx->ScrollToTop(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::ScrollToBottom:
+                ctx->ScrollToBottom(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::TabClose:
+                ctx->TabClose(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::ComboClick:
+                ctx->ComboClick(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::ComboClickAll:
+                ctx->ComboClickAll(cmd.A.c_str());
                 break;
             case ImGuiTestEngineScript::CmdKind::MenuClick:
                 ctx->MenuClick(cmd.A.c_str());
@@ -292,6 +319,45 @@ static void script_test_func(ImGuiTestContext* ctx) {
                         cmd.A.c_str(),
                         got_s.c_str(),
                         cmd.B.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::AssertItemReadFloatEq: {
+                if (!ctx->ItemExists(cmd.A.c_str())) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item does not exist: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                float got = ctx->ItemReadAsFloat(cmd.A.c_str());
+                float diff = got - cmd.F;
+                if (diff < 0.0f) {
+                    diff = -diff;
+                }
+                float eps = cmd.G;
+                if (eps < 0.0f) {
+                    eps = -eps;
+                }
+                if (diff > eps) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: ItemReadAsFloat('%s') == %f, expected %f (eps=%f, ref='%s')",
+                        cmd.A.c_str(),
+                        got,
+                        cmd.F,
+                        eps,
                         ctx->RefStr
                     );
                     return;
@@ -757,6 +823,17 @@ void imgui_test_engine_script_item_hold(ImGuiTestEngineScript* script, const cha
     script->Cmds.push_back(std::move(cmd));
 }
 
+void imgui_test_engine_script_item_hold_for_frames(ImGuiTestEngineScript* script, const char* ref, int frames) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ItemHoldForFrames;
+    cmd.A = ref ? ref : "";
+    cmd.I = frames;
+    script->Cmds.push_back(std::move(cmd));
+}
+
 void imgui_test_engine_script_item_drag_with_delta(ImGuiTestEngineScript* script, const char* ref, float dx, float dy) {
     if (script == nullptr) {
         return;
@@ -785,6 +862,56 @@ void imgui_test_engine_script_scroll_to_item_y(ImGuiTestEngineScript* script, co
     }
     ImGuiTestEngineScript::Cmd cmd;
     cmd.Kind = ImGuiTestEngineScript::CmdKind::ScrollToItemY;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_scroll_to_top(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ScrollToTop;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_scroll_to_bottom(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ScrollToBottom;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_tab_close(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::TabClose;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_combo_click(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ComboClick;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_combo_click_all(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ComboClickAll;
     cmd.A = ref ? ref : "";
     script->Cmds.push_back(std::move(cmd));
 }
@@ -872,6 +999,23 @@ void imgui_test_engine_script_assert_item_read_str_eq(ImGuiTestEngineScript* scr
     cmd.Kind = ImGuiTestEngineScript::CmdKind::AssertItemReadStrEq;
     cmd.A = ref ? ref : "";
     cmd.B = expected ? expected : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_assert_item_read_float_eq(
+    ImGuiTestEngineScript* script,
+    const char* ref,
+    float expected,
+    float epsilon
+) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::AssertItemReadFloatEq;
+    cmd.A = ref ? ref : "";
+    cmd.F = expected;
+    cmd.G = epsilon;
     script->Cmds.push_back(std::move(cmd));
 }
 
