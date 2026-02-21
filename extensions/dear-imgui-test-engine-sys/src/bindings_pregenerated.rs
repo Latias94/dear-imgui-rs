@@ -205,6 +205,25 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_assert_item_exists(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_assert_item_visible(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_wait_for_item(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        max_frames: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_yield(script: *mut ImGuiTestEngineScript, frames: ::std::os::raw::c_int);
 }
 unsafe extern "C" {

@@ -35,6 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             test_engine
                 .add_script_test("rust_tests", "script_smoke", |t| {
                     t.set_ref("Script Target###RustScriptTarget")?;
+                    t.wait_for_item("Click Me", 120)?;
+                    t.assert_item_visible("Click Me")?;
                     t.item_click("Click Me")?;
                     t.item_check("Node/Checkbox")?;
                     t.item_uncheck("Node/Checkbox")?;

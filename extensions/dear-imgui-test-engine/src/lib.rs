@@ -238,6 +238,47 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
+    pub fn assert_item_exists(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_exists contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_exists(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn assert_item_visible(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_visible contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_visible(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn wait_for_item(&mut self, r#ref: &str, max_frames: i32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item contained interior NUL",
+            ));
+        }
+        if max_frames < 1 {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item max_frames must be >= 1",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_wait_for_item(self.script.raw, ptr, max_frames)
+        });
+        Ok(())
+    }
+
     pub fn yield_frames(&mut self, frames: i32) {
         unsafe { sys::imgui_test_engine_script_yield(self.script.raw, frames) };
     }

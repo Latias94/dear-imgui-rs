@@ -30,6 +30,9 @@ struct ImGuiTestEngineScript {
         KeyDown,
         KeyPress,
         Sleep,
+        AssertItemExists,
+        AssertItemVisible,
+        WaitForItem,
         Yield,
     };
 
@@ -71,6 +74,9 @@ static void script_test_func(ImGuiTestContext* ctx) {
     }
 
     for (const ImGuiTestEngineScript::Cmd& cmd : script->Cmds) {
+        if (ctx->IsError()) {
+            return;
+        }
         switch (cmd.Kind) {
             case ImGuiTestEngineScript::CmdKind::SetRef:
                 ctx->SetRef(cmd.A.c_str());
@@ -108,6 +114,78 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::Sleep:
                 ctx->Sleep(cmd.F);
                 break;
+            case ImGuiTestEngineScript::CmdKind::AssertItemExists: {
+                if (!ctx->ItemExists(cmd.A.c_str())) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item does not exist: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::AssertItemVisible: {
+                if (!ctx->ItemExists(cmd.A.c_str())) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item does not exist: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                ImGuiTestItemInfo info = ctx->ItemInfo(cmd.A.c_str());
+                if ((info.StatusFlags & ImGuiItemStatusFlags_Visible) == 0) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item is not visible: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::WaitForItem: {
+                int max_frames = cmd.I;
+                if (max_frames < 1) {
+                    max_frames = 1;
+                }
+                for (int n = 0; n < max_frames; n++) {
+                    if (ctx->ItemExists(cmd.A.c_str())) {
+                        break;
+                    }
+                    ctx->Yield(1);
+                    if (ctx->IsError()) {
+                        return;
+                    }
+                }
+                if (!ctx->ItemExists(cmd.A.c_str())) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Timed out waiting for item: '%s' (%d frames, ref='%s')",
+                        cmd.A.c_str(),
+                        max_frames,
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
             case ImGuiTestEngineScript::CmdKind::Yield:
                 ctx->Yield(cmd.I);
                 break;
@@ -264,6 +342,42 @@ void imgui_test_engine_script_sleep(ImGuiTestEngineScript* script, float time_in
     cmd.Kind = ImGuiTestEngineScript::CmdKind::Sleep;
     cmd.F = time_in_seconds;
     script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_assert_item_exists(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::AssertItemExists,
+        ref ? ref : "",
+        {},
+        0,
+    });
+}
+
+void imgui_test_engine_script_assert_item_visible(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::AssertItemVisible,
+        ref ? ref : "",
+        {},
+        0,
+    });
+}
+
+void imgui_test_engine_script_wait_for_item(ImGuiTestEngineScript* script, const char* ref, int max_frames) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::WaitForItem,
+        ref ? ref : "",
+        {},
+        max_frames,
+    });
 }
 
 void imgui_test_engine_script_yield(ImGuiTestEngineScript* script, int frames) {
