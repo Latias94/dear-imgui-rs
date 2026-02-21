@@ -13,14 +13,14 @@ pub struct ImGuiTestEngineScript {
 pub const ImGuiTestEngineRunSpeed_Fast: ImGuiTestEngineRunSpeed = 0;
 pub const ImGuiTestEngineRunSpeed_Normal: ImGuiTestEngineRunSpeed = 1;
 pub const ImGuiTestEngineRunSpeed_Cinematic: ImGuiTestEngineRunSpeed = 2;
-pub type ImGuiTestEngineRunSpeed = ::std::os::raw::c_uint;
+pub type ImGuiTestEngineRunSpeed = ::std::os::raw::c_int;
 pub const ImGuiTestEngineVerboseLevel_Silent: ImGuiTestEngineVerboseLevel = 0;
 pub const ImGuiTestEngineVerboseLevel_Error: ImGuiTestEngineVerboseLevel = 1;
 pub const ImGuiTestEngineVerboseLevel_Warning: ImGuiTestEngineVerboseLevel = 2;
 pub const ImGuiTestEngineVerboseLevel_Info: ImGuiTestEngineVerboseLevel = 3;
 pub const ImGuiTestEngineVerboseLevel_Debug: ImGuiTestEngineVerboseLevel = 4;
 pub const ImGuiTestEngineVerboseLevel_Trace: ImGuiTestEngineVerboseLevel = 5;
-pub type ImGuiTestEngineVerboseLevel = ::std::os::raw::c_uint;
+pub type ImGuiTestEngineVerboseLevel = ::std::os::raw::c_int;
 pub const ImGuiTestEngineGroup_Unknown: ImGuiTestEngineGroup = -1;
 pub const ImGuiTestEngineGroup_Tests: ImGuiTestEngineGroup = 0;
 pub const ImGuiTestEngineGroup_Perfs: ImGuiTestEngineGroup = 1;
@@ -35,7 +35,7 @@ pub const ImGuiTestEngineRunFlags_RunFromCommandLine: ImGuiTestEngineRunFlags = 
 pub const ImGuiTestEngineRunFlags_NoError: ImGuiTestEngineRunFlags = 1024;
 pub const ImGuiTestEngineRunFlags_ShareVars: ImGuiTestEngineRunFlags = 2048;
 pub const ImGuiTestEngineRunFlags_ShareTestContext: ImGuiTestEngineRunFlags = 4096;
-pub type ImGuiTestEngineRunFlags = ::std::os::raw::c_uint;
+pub type ImGuiTestEngineRunFlags = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiTestEngineResultSummary_c {
@@ -50,7 +50,9 @@ unsafe extern "C" {
     pub fn imgui_test_engine_destroy_context(engine: *mut ImGuiTestEngine);
 }
 unsafe extern "C" {
-    pub fn imgui_test_engine_get_ui_context_target(engine: *mut ImGuiTestEngine) -> *mut ImGuiContext;
+    pub fn imgui_test_engine_get_ui_context_target(
+        engine: *mut ImGuiTestEngine,
+    ) -> *mut ImGuiContext;
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_is_bound(engine: *mut ImGuiTestEngine) -> bool;
@@ -201,15 +203,15 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn imgui_test_engine_script_mouse_move_to_pos(
         script: *mut ImGuiTestEngineScript,
-        x: ::std::os::raw::c_float,
-        y: ::std::os::raw::c_float,
+        x: f32,
+        y: f32,
     );
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_script_mouse_teleport_to_pos(
         script: *mut ImGuiTestEngineScript,
-        x: ::std::os::raw::c_float,
-        y: ::std::os::raw::c_float,
+        x: f32,
+        y: f32,
     );
 }
 unsafe extern "C" {
@@ -255,8 +257,8 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn imgui_test_engine_script_mouse_drag_with_delta(
         script: *mut ImGuiTestEngineScript,
-        dx: ::std::os::raw::c_float,
-        dy: ::std::os::raw::c_float,
+        dx: f32,
+        dy: f32,
         button: ::std::os::raw::c_int,
     );
 }
@@ -270,8 +272,8 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn imgui_test_engine_script_mouse_wheel(
         script: *mut ImGuiTestEngineScript,
-        dx: ::std::os::raw::c_float,
-        dy: ::std::os::raw::c_float,
+        dx: f32,
+        dy: f32,
     );
 }
 unsafe extern "C" {
@@ -297,8 +299,11 @@ unsafe extern "C" {
     pub fn imgui_test_engine_script_key_hold(
         script: *mut ImGuiTestEngineScript,
         key_chord: ::std::os::raw::c_int,
-        time_in_seconds: ::std::os::raw::c_float,
+        time_in_seconds: f32,
     );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_sleep(script: *mut ImGuiTestEngineScript, time_in_seconds: f32);
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_script_key_chars(
@@ -334,7 +339,7 @@ unsafe extern "C" {
     pub fn imgui_test_engine_script_item_hold(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
-        time_in_seconds: ::std::os::raw::c_float,
+        time_in_seconds: f32,
     );
 }
 unsafe extern "C" {
@@ -342,14 +347,6 @@ unsafe extern "C" {
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
         frames: ::std::os::raw::c_int,
-    );
-}
-unsafe extern "C" {
-    pub fn imgui_test_engine_script_item_drag_with_delta(
-        script: *mut ImGuiTestEngineScript,
-        ref_: *const ::std::os::raw::c_char,
-        dx: ::std::os::raw::c_float,
-        dy: ::std::os::raw::c_float,
     );
 }
 unsafe extern "C" {
@@ -368,31 +365,39 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_drag_with_delta(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        dx: f32,
+        dy: f32,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_scroll_to_x(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
-        scroll_x: ::std::os::raw::c_float,
+        scroll_x: f32,
     );
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_script_scroll_to_y(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
-        scroll_y: ::std::os::raw::c_float,
+        scroll_y: f32,
     );
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_script_scroll_to_pos_x(
         script: *mut ImGuiTestEngineScript,
         window_ref: *const ::std::os::raw::c_char,
-        pos_x: ::std::os::raw::c_float,
+        pos_x: f32,
     );
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_script_scroll_to_pos_y(
         script: *mut ImGuiTestEngineScript,
         window_ref: *const ::std::os::raw::c_char,
-        pos_y: ::std::os::raw::c_float,
+        pos_y: f32,
     );
 }
 unsafe extern "C" {
@@ -438,58 +443,11 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
-    pub fn imgui_test_engine_script_item_open_all(
-        script: *mut ImGuiTestEngineScript,
-        ref_parent: *const ::std::os::raw::c_char,
-        depth: ::std::os::raw::c_int,
-        passes: ::std::os::raw::c_int,
-    );
-}
-unsafe extern "C" {
-    pub fn imgui_test_engine_script_item_close_all(
-        script: *mut ImGuiTestEngineScript,
-        ref_parent: *const ::std::os::raw::c_char,
-        depth: ::std::os::raw::c_int,
-        passes: ::std::os::raw::c_int,
-    );
-}
-unsafe extern "C" {
     pub fn imgui_test_engine_script_table_click_header(
         script: *mut ImGuiTestEngineScript,
         table_ref: *const ::std::os::raw::c_char,
         label: *const ::std::os::raw::c_char,
         key_mods: ::std::os::raw::c_int,
-    );
-}
-unsafe extern "C" {
-    pub fn imgui_test_engine_script_table_open_context_menu(
-        script: *mut ImGuiTestEngineScript,
-        table_ref: *const ::std::os::raw::c_char,
-        column_n: ::std::os::raw::c_int,
-    );
-}
-unsafe extern "C" {
-    pub fn imgui_test_engine_script_table_set_column_enabled(
-        script: *mut ImGuiTestEngineScript,
-        table_ref: *const ::std::os::raw::c_char,
-        column_n: ::std::os::raw::c_int,
-        enabled: bool,
-    );
-}
-unsafe extern "C" {
-    pub fn imgui_test_engine_script_table_set_column_enabled_by_label(
-        script: *mut ImGuiTestEngineScript,
-        table_ref: *const ::std::os::raw::c_char,
-        label: *const ::std::os::raw::c_char,
-        enabled: bool,
-    );
-}
-unsafe extern "C" {
-    pub fn imgui_test_engine_script_table_resize_column(
-        script: *mut ImGuiTestEngineScript,
-        table_ref: *const ::std::os::raw::c_char,
-        column_n: ::std::os::raw::c_int,
-        width: ::std::os::raw::c_float,
     );
 }
 unsafe extern "C" {
@@ -541,6 +499,22 @@ unsafe extern "C" {
     pub fn imgui_test_engine_script_nav_input(script: *mut ImGuiTestEngineScript);
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_open_all(
+        script: *mut ImGuiTestEngineScript,
+        ref_parent: *const ::std::os::raw::c_char,
+        depth: ::std::os::raw::c_int,
+        passes: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_close_all(
+        script: *mut ImGuiTestEngineScript,
+        ref_parent: *const ::std::os::raw::c_char,
+        depth: ::std::os::raw::c_int,
+        passes: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_window_close(
         script: *mut ImGuiTestEngineScript,
         window_ref: *const ::std::os::raw::c_char,
@@ -569,22 +543,47 @@ unsafe extern "C" {
     pub fn imgui_test_engine_script_window_move(
         script: *mut ImGuiTestEngineScript,
         window_ref: *const ::std::os::raw::c_char,
-        x: ::std::os::raw::c_float,
-        y: ::std::os::raw::c_float,
+        x: f32,
+        y: f32,
     );
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_script_window_resize(
         script: *mut ImGuiTestEngineScript,
         window_ref: *const ::std::os::raw::c_char,
-        w: ::std::os::raw::c_float,
-        h: ::std::os::raw::c_float,
+        w: f32,
+        h: f32,
     );
 }
 unsafe extern "C" {
-    pub fn imgui_test_engine_script_sleep(
+    pub fn imgui_test_engine_script_table_open_context_menu(
         script: *mut ImGuiTestEngineScript,
-        time_in_seconds: ::std::os::raw::c_float,
+        table_ref: *const ::std::os::raw::c_char,
+        column_n: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_table_set_column_enabled(
+        script: *mut ImGuiTestEngineScript,
+        table_ref: *const ::std::os::raw::c_char,
+        column_n: ::std::os::raw::c_int,
+        enabled: bool,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_table_set_column_enabled_by_label(
+        script: *mut ImGuiTestEngineScript,
+        table_ref: *const ::std::os::raw::c_char,
+        label: *const ::std::os::raw::c_char,
+        enabled: bool,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_table_resize_column(
+        script: *mut ImGuiTestEngineScript,
+        table_ref: *const ::std::os::raw::c_char,
+        column_n: ::std::os::raw::c_int,
+        width: f32,
     );
 }
 unsafe extern "C" {
@@ -617,8 +616,8 @@ unsafe extern "C" {
     pub fn imgui_test_engine_script_assert_item_read_float_eq(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
-        expected: ::std::os::raw::c_float,
-        epsilon: ::std::os::raw::c_float,
+        expected: f32,
+        epsilon: f32,
     );
 }
 unsafe extern "C" {
@@ -662,7 +661,10 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
-    pub fn imgui_test_engine_script_yield(script: *mut ImGuiTestEngineScript, frames: ::std::os::raw::c_int);
+    pub fn imgui_test_engine_script_yield(
+        script: *mut ImGuiTestEngineScript,
+        frames: ::std::os::raw::c_int,
+    );
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_register_script_test(
