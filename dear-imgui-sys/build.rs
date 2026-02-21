@@ -494,6 +494,11 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
     if cfg!(feature = "test-engine") && !prebuilt_manifest_has_feature(dir, "test-engine") {
         return false;
     }
+    // Conversely, if test-engine is disabled, reject prebuilts that were built with it enabled:
+    // those objects reference hook symbols that won't be linked, causing undefined symbols at link time.
+    if !cfg!(feature = "test-engine") && prebuilt_manifest_has_feature(dir, "test-engine") {
+        return false;
+    }
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");
     true
