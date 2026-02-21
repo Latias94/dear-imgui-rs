@@ -307,16 +307,39 @@ def check_tests(repo_root: Path) -> Tuple[bool, List[str]]:
     """Check that tests pass."""
     print_check("Running tests")
 
-    # Stream test output in real-time
-    code, stdout, stderr = run_command(
-        ["cargo", "test", "--workspace", "--lib"],
+    # NOTE: The workspace contains `dear-imgui-test-engine(-sys)`, which enables
+    # `IMGUI_ENABLE_TEST_ENGINE` in `dear-imgui-sys` via Cargo feature unification.
+    # Running `cargo test --workspace` would then try to link test binaries that do
+    # not depend on the test engine library, causing unresolved hook symbols on
+    # some platforms (notably MSVC).
+    #
+    # We run tests in two passes:
+    # 1) All crates except the test-engine crates (no test-engine hooks enabled).
+    # 2) The safe test-engine crate itself (ensures the feature-gated path builds/links).
+
+    base_cmd = ["cargo", "test", "--workspace", "--lib"]
+    base_cmd += ["--exclude", "dear-imgui-test-engine", "--exclude", "dear-imgui-test-engine-sys"]
+
+    # Pass 1: core/backends/extensions (excluding test-engine crates)
+    code, _stdout, _stderr = run_command(
+        base_cmd,
         cwd=repo_root,
-        capture=False  # Stream output in real-time
+        capture=False,  # Stream output in real-time
+    )
+    if code != 0:
+        print_error("Tests failed (workspace without test-engine)")
+        return False, ["Tests failed (workspace without test-engine)"]
+
+    # Pass 2: test-engine crate
+    code, _stdout, _stderr = run_command(
+        ["cargo", "test", "-p", "dear-imgui-test-engine", "--lib"],
+        cwd=repo_root,
+        capture=False,  # Stream output in real-time
     )
 
     if code != 0:
-        print_error("Tests failed")
-        return False, ["Tests failed"]
+        print_error("Tests failed (dear-imgui-test-engine)")
+        return False, ["Tests failed (dear-imgui-test-engine)"]
     else:
         print_success("All tests passed")
         return True, []

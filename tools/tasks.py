@@ -123,14 +123,35 @@ def task_publish(args, repo_root: Path) -> int:
 
 def task_test(args, repo_root: Path) -> int:
     """Run tests."""
+    # See notes in tools/pre_publish_check.py: with test-engine present, feature unification can enable
+    # ImGui test engine hooks in `dear-imgui-sys`, and a full workspace test run may try to link crates
+    # that don't depend on the test engine library.
+    #
+    # Default behaviour: run tests in two passes.
+    # - Pass 1: all workspace crates excluding test-engine crates.
+    # - Pass 2: test-engine crate itself.
+    #
+    # If `--package` is provided, run a normal single-package test.
+    if getattr(args, "package", None):
+        cmd = ["cargo", "test", "--workspace", "-p", args.package]
+        if getattr(args, "lib_only", False):
+            cmd.append("--lib")
+        return run_command(cmd, cwd=repo_root)
+
     cmd = ["cargo", "test", "--workspace"]
     
     if getattr(args, "lib_only", False):
         cmd.append("--lib")
-    if getattr(args, "package", None):
-        cmd.extend(["-p", args.package])
-    
-    return run_command(cmd, cwd=repo_root)
+
+    pass1 = cmd + ["--exclude", "dear-imgui-test-engine", "--exclude", "dear-imgui-test-engine-sys"]
+    rc = run_command(pass1, cwd=repo_root)
+    if rc != 0:
+        return rc
+
+    pass2 = ["cargo", "test", "-p", "dear-imgui-test-engine"]
+    if getattr(args, "lib_only", False):
+        pass2.append("--lib")
+    return run_command(pass2, cwd=repo_root)
 
 
 def task_doc(args, repo_root: Path) -> int:
