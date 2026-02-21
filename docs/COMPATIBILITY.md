@@ -5,7 +5,7 @@ This document tracks compatibility across the workspace crates, upstream Dear Im
 ## Versioning Policy
 
 - Unified release train: all `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current train: unified `v0.10.0` (use `version = "0.10"`).
+- Current train: unified `v0.10.1` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
 - Internal dependency constraints in this repo also pin to the unified minor (e.g., `0.5`). Mixing different minors across our crates is unsupported.
@@ -58,7 +58,7 @@ Extensions
 
 Release Train 0.10 (current)
 
-- All crates unified to 0.10.0 across the workspace (use `version = "0.10"`).
+- All crates unified to 0.10.1 across the workspace (use `version = "0.10"`).
 - Core + backends aligned with Dear ImGui v1.92.6 (docking) via cimgui.
 - External dependencies baseline: wgpu 28, winit 0.30.12, glow 0.16, sdl3 0.17.
 - Minimum supported Rust: 1.92 (required by `wgpu` 28).

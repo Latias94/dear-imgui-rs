@@ -88,7 +88,10 @@ jobs:
         run: cargo build -p dear-app --features "implot imnodes implot3d"
 
       - name: Build examples (all extensions)
-        run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat test-engine"
+        run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat"
+
+      - name: Build examples (test-engine)
+        run: cargo build -p dear-imgui-examples --features "test-engine" --bin imgui_test_engine_basic
 
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
