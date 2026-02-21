@@ -42,6 +42,5 @@ The build script also consumes values exported by `dear-imgui-sys`:
 Feature consistency:
 
 - If you enable `dear-imgui-sys/test-engine`, the compiled ImGui objects reference hook symbols (e.g. `ImGuiTestEngineHook_*`).
-  Those symbols are provided by the upstream Test Engine code compiled by this crate.
-- In practice: either link a binary with `dear-imgui-test-engine(-sys)`, or keep `dear-imgui-sys/test-engine` disabled.
-  Avoid mixing feature sets in large `--workspace --all-features` builds.
+  When that feature is enabled, `dear-imgui-sys` provides the hook symbols so workspace feature-unification won't cause linker errors.
+- To actually run tests, link a binary with `dear-imgui-test-engine(-sys)`, which registers the real hook implementations at runtime.

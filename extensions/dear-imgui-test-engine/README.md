@@ -110,5 +110,5 @@ application already renders every frame.
 ## Build notes
 
 - This crate enables `dear-imgui-rs/test-engine` (and therefore `dear-imgui-sys/test-engine`) because the upstream Test Engine relies on ImGui hook symbols.
-- If you see linker errors mentioning `ImGuiTestEngineHook_*`, it usually means `dear-imgui-sys/test-engine` is enabled but `dear-imgui-test-engine(-sys)` is not linked into the final binary.
-  Build feature groups separately instead of using `--workspace --all-features`.
+- `dear-imgui-sys` provides the hook symbols when `test-engine` is enabled. This avoids workspace feature-unification causing linker errors.
+- If your tests don't seem to interact with the UI, ensure you actually depend on `dear-imgui-test-engine` (or `dear-imgui-test-engine-sys`) and call `engine.start()/try_start()`.

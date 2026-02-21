@@ -148,6 +148,26 @@ fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, c
         Some("1"),
     );
 
+    // Avoid link-time conflicts and workspace feature-unification footguns:
+    // dear-imgui-sys provides the public hook symbols, while this crate builds upstream
+    // implementations under renamed identifiers and registers them at runtime.
+    build.define(
+        "ImGuiTestEngineHook_ItemAdd",
+        Some("DearImGuiRs_ImGuiTestEngineHook_ItemAdd_Impl"),
+    );
+    build.define(
+        "ImGuiTestEngineHook_ItemInfo",
+        Some("DearImGuiRs_ImGuiTestEngineHook_ItemInfo_Impl"),
+    );
+    build.define(
+        "ImGuiTestEngineHook_Log",
+        Some("DearImGuiRs_ImGuiTestEngineHook_Log_Impl"),
+    );
+    build.define(
+        "ImGuiTestEngine_FindItemDebugLabel",
+        Some("DearImGuiRs_ImGuiTestEngine_FindItemDebugLabel_Impl"),
+    );
+
     build.include(imgui_src);
     build.include(cimgui_root);
     build.include(test_engine_root);
@@ -164,6 +184,10 @@ fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, c
     build.file(test_engine_root.join("imgui_te_utils.cpp"));
     build.file(cfg.manifest_dir.join("shim/cimgui_test_engine.cpp"));
     build.file(cfg.manifest_dir.join("shim/default_tests.cpp"));
+    build.file(
+        cfg.manifest_dir
+            .join("shim/imgui_test_engine_hooks_register.cpp"),
+    );
     build.file(cfg.manifest_dir.join("shim/script_tests.cpp"));
 
     if cfg.is_msvc() && cfg.is_windows() {
@@ -262,6 +286,7 @@ fn main() {
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.h");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.cpp");
     println!("cargo:rerun-if-changed=shim/default_tests.cpp");
+    println!("cargo:rerun-if-changed=shim/imgui_test_engine_hooks_register.cpp");
     println!("cargo:rerun-if-changed=shim/script_tests.cpp");
     println!(
         "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_capture_tool.cpp"

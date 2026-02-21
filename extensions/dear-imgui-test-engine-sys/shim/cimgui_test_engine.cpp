@@ -9,6 +9,8 @@ void imgui_test_engine__script_cleanup(ImGuiTestEngine* engine);
 
 extern "C" {
 
+void dear_imgui_test_engine_sys_register_imgui_hooks(void);
+
 static ImGuiContext* imgui_test_engine__set_current_if_needed(ImGuiContext* ctx) {
     ImGuiContext* prev = ImGui::GetCurrentContext();
     if (ctx != nullptr && prev != ctx) {
@@ -36,6 +38,15 @@ void imgui_test_engine_destroy_context(ImGuiTestEngine* engine) {
 
     ImGuiContext* target = engine->UiContextTarget;
     ImGuiContext* prev = imgui_test_engine__set_current_if_needed(target);
+
+    // Ensure the engine isn't still bound: upstream requires `UiContextTarget == nullptr` when destroying.
+    // This also makes Rust drop order less error-prone.
+    if (engine->UiContextTarget != nullptr) {
+        if (engine->Started) {
+            ImGuiTestEngine_Stop(engine);
+        }
+        ImGuiTestEngine_UnbindImGuiContext(engine, target);
+    }
 
     // Upstream asserts if the engine is still bound to an ImGuiContext while saved settings are enabled.
     // For safety/ergonomics in Rust (where drop order may be hard to control, e.g. when using helper
@@ -90,6 +101,7 @@ void imgui_test_engine_start(ImGuiTestEngine* engine, ImGuiContext* ui_ctx) {
     if (engine == nullptr || ui_ctx == nullptr) {
         return;
     }
+    dear_imgui_test_engine_sys_register_imgui_hooks();
     ImGuiContext* prev = imgui_test_engine__set_current_if_needed(ui_ctx);
     ImGuiTestEngine_Start(engine, ui_ctx);
     imgui_test_engine__restore_current_if_needed(prev, ui_ctx);

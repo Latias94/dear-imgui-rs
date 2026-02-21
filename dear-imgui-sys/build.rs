@@ -74,6 +74,7 @@ fn main() {
     // Track them so `cargo check` picks up refreshed bindings immediately.
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
+    println!("cargo:rerun-if-changed=src/imgui_test_engine_hooks.cpp");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_FORCE_BUILD");
@@ -374,6 +375,7 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     build.define("IMGUI_USE_WCHAR32", None);
     if cfg!(feature = "test-engine") {
         build.define("IMGUI_ENABLE_TEST_ENGINE", None);
+        build.file(cfg.manifest_dir.join("src/imgui_test_engine_hooks.cpp"));
     }
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -558,6 +560,7 @@ fn build_with_cc_wasm(cfg: &BuildConfig) {
     build.define("IMGUI_USE_WCHAR32", None);
     if cfg!(feature = "test-engine") {
         build.define("IMGUI_ENABLE_TEST_ENGINE", None);
+        build.file(cfg.manifest_dir.join("src/imgui_test_engine_hooks.cpp"));
     }
 
     // Avoid exceptions/RTTI
