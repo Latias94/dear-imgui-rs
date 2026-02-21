@@ -33,7 +33,6 @@ bindgen.workspace = true
 cc.workspace = true
 
 [features]
-default = ["capture", "coroutine-stdthread"]
+default = ["capture"]
 freetype = ["dear-imgui-sys/freetype"]
 capture = []
-coroutine-stdthread = []

@@ -145,11 +145,7 @@ fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, c
     );
     build.define(
         "IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL",
-        Some(if cfg!(feature = "coroutine-stdthread") {
-            "1"
-        } else {
-            "0"
-        }),
+        Some("1"),
     );
 
     build.include(imgui_src);

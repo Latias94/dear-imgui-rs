@@ -63,7 +63,6 @@ let _ = engine.queue_tests(
 ## Features
 
 - `capture` (default): enable screenshot/video capture helpers.
-- `coroutine-stdthread` (default): enable the built-in coroutine implementation using `std::thread`.
 - `freetype`: passthrough to `dear-imgui-rs/freetype` and `dear-imgui-test-engine-sys/freetype`.
 
 ## Demo Tests

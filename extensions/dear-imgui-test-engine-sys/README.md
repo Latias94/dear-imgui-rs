@@ -11,8 +11,6 @@ This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most 
 
 - `freetype`: passthrough to `dear-imgui-sys/freetype`.
 - `capture` (default): enable screenshot/video capture helpers (`IMGUI_TEST_ENGINE_ENABLE_CAPTURE=1`).
-- `coroutine-stdthread` (default): enable the built-in coroutine implementation using `std::thread`
-  (`IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1`).
 
 ## Build Modes
 

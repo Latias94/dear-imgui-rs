@@ -16,10 +16,9 @@ dear-imgui-test-engine-sys = { path = "../dear-imgui-test-engine-sys", version =
 bitflags.workspace = true
 
 [features]
-default = ["capture", "coroutine-stdthread"]
+default = ["capture"]
 freetype = [
     "dear-imgui-rs/freetype",
     "dear-imgui-test-engine-sys/freetype",
 ]
 capture = ["dear-imgui-test-engine-sys/capture"]
-coroutine-stdthread = ["dear-imgui-test-engine-sys/coroutine-stdthread"]
