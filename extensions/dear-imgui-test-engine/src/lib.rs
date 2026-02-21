@@ -191,6 +191,7 @@ impl ScriptTest<'_> {
 }
 
 impl TestEngine {
+    /// Creates a new test engine context.
     pub fn try_create() -> ImGuiResult<Self> {
         let raw = unsafe { sys::imgui_test_engine_create_context() };
         if raw.is_null() {
@@ -205,6 +206,10 @@ impl TestEngine {
         })
     }
 
+    /// Creates a new test engine context.
+    ///
+    /// # Panics
+    /// Panics if the underlying context creation fails.
     pub fn create() -> Self {
         Self::try_create().expect("Failed to create Dear ImGui Test Engine context")
     }
@@ -213,6 +218,12 @@ impl TestEngine {
         self.raw
     }
 
+    /// Starts (binds) the test engine to an ImGui context.
+    ///
+    /// Calling this multiple times with the same context is a no-op.
+    ///
+    /// # Panics
+    /// Panics if called while already started with a different ImGui context.
     pub fn start(&mut self, imgui_ctx: &Context) {
         let ctx = imgui_ctx.as_raw();
         if ctx.is_null() {
@@ -325,6 +336,10 @@ impl TestEngine {
         let _ = self.queue_tests(TestGroup::Tests, None, RunFlags::NONE);
     }
 
+    /// Returns a best-effort snapshot of test results.
+    ///
+    /// Note: upstream asserts if queried while a test is running; our sys shim
+    /// intentionally avoids aborting and will count `Running` tests as "remaining".
     pub fn result_summary(&self) -> ResultSummary {
         let mut raw = sys::ImGuiTestEngineResultSummary_c {
             CountTested: 0,
