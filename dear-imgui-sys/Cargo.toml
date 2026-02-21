@@ -63,6 +63,8 @@ default = []
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = []
+# Enable Dear ImGui test engine hooks (requires linking dear-imgui-test-engine-sys)
+test-engine = []
 # Enable freetype font rasterizer
 freetype = ["pkg-config"]
 # Enable for WASM targets

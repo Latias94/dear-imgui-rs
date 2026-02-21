@@ -1,0 +1,23 @@
+[package]
+name = "dear-imgui-test-engine"
+version = "0.10.0"
+edition.workspace = true
+description = "Safe Rust wrapper for Dear ImGui Test Engine"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[dependencies]
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.10", features = ["test-engine"] }
+dear-imgui-test-engine-sys = { path = "../dear-imgui-test-engine-sys", version = "0.10" }
+bitflags.workspace = true
+
+[features]
+default = []
+freetype = [
+    "dear-imgui-rs/freetype",
+    "dear-imgui-test-engine-sys/freetype",
+]

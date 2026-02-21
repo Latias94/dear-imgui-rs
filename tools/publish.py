@@ -9,9 +9,9 @@ Publishing Order:
 1. Core: dear-imgui-sys -> dear-imgui-rs
 2. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-ash, dear-imgui-sdl3
 3. Extensions (sys): dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys,
-                     dear-implot3d-sys, dear-imguizmo-quat-sys
+                     dear-implot3d-sys, dear-imguizmo-quat-sys, dear-imgui-test-engine-sys
 4. Extensions (high-level): dear-implot, dear-imnodes, dear-imguizmo,
-                            dear-implot3d, dear-imguizmo-quat, dear-file-browser,
+                            dear-implot3d, dear-imguizmo-quat, dear-imgui-test-engine, dear-file-browser,
                             dear-imgui-reflect-derive, dear-imgui-reflect
 5. Application: dear-app
 
@@ -66,6 +66,7 @@ PUBLISH_ORDER = [
     ("dear-imguizmo-sys", "extensions/dear-imguizmo-sys"),
     ("dear-implot3d-sys", "extensions/dear-implot3d-sys"),
     ("dear-imguizmo-quat-sys", "extensions/dear-imguizmo-quat-sys"),
+    ("dear-imgui-test-engine-sys", "extensions/dear-imgui-test-engine-sys"),
     
     # Extension high-level crates (depend on dear-imgui-rs and their sys crates)
     ("dear-implot", "extensions/dear-implot"),
@@ -73,6 +74,7 @@ PUBLISH_ORDER = [
     ("dear-imguizmo", "extensions/dear-imguizmo"),
     ("dear-implot3d", "extensions/dear-implot3d"),
     ("dear-imguizmo-quat", "extensions/dear-imguizmo-quat"),
+    ("dear-imgui-test-engine", "extensions/dear-imgui-test-engine"),
     ("dear-file-browser", "extensions/dear-file-browser"),
     ("dear-imgui-reflect-derive", "extensions/dear-imgui-reflect-derive"),
     ("dear-imgui-reflect", "extensions/dear-imgui-reflect"),

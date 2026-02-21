@@ -838,6 +838,7 @@ dependencies = [
  "dear-imgui-reflect",
  "dear-imgui-rs",
  "dear-imgui-sdl3",
+ "dear-imgui-test-engine",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "dear-imguizmo",
@@ -941,6 +942,24 @@ dependencies = [
  "pkg-config",
  "tar",
  "xshell",
+]
+
+[[package]]
+name = "dear-imgui-test-engine"
+version = "0.10.0"
+dependencies = [
+ "bitflags 2.11.0",
+ "dear-imgui-rs",
+ "dear-imgui-test-engine-sys",
+]
+
+[[package]]
+name = "dear-imgui-test-engine-sys"
+version = "0.10.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "dear-imgui-sys",
 ]
 
 [[package]]

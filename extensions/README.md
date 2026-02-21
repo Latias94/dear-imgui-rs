@@ -8,6 +8,7 @@ Extensions in this workspace build on top of `dear-imgui-sys` (cimgui C API) and
 | ImGuizmo       | 3D transform gizmos             | Complete  | [dear-imguizmo](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo)     | [cimgui/cimguizmo](https://github.com/cimgui/cimguizmo)      |
 | ImGuIZMO.quat  | Quaternion + 3D gizmo           | Complete  | [dear-imguizmo-quat](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imguizmo-quat) | [cimgui/cimguizmo_quat](https://github.com/cimgui/cimguizmo_quat) |
 | ImNodes        | Node editor widgets             | Complete  | [dear-imnodes](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imnodes)       | [cimgui/cimnodes](https://github.com/cimgui/cimnodes)        |
+| ImGui Test Engine | UI automation and test runner | Preview | [dear-imgui-test-engine](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imgui-test-engine) | [ocornut/imgui_test_engine](https://github.com/ocornut/imgui_test_engine) |
 | File Browser   | File dialogs + in-UI browser    | Preview   | [dear-file-browser](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-file-browser) | Pure ImGui UI + rfd (native)                                 |
 | ImGui Reflect  | Reflection-based UI from types  | Preview   | [dear-imgui-reflect](https://github.com/Latias94/dear-imgui-rs/tree/main/extensions/dear-imgui-reflect) | C++ ImReflect (reference only; pure Rust implementation)     |
 
@@ -41,6 +42,7 @@ Environment variables:
 - ImGuizmo: `IMGUIZMO_SYS_LIB_DIR`, `IMGUIZMO_SYS_PREBUILT_URL`, `IMGUIZMO_SYS_SKIP_CC`.
 - ImNodes: `IMNODES_SYS_LIB_DIR`, `IMNODES_SYS_PREBUILT_URL`, `IMNODES_SYS_SKIP_CC`.
 - ImGuIZMO.quat: `IMGUIZMO_QUAT_SYS_LIB_DIR`, `IMGUIZMO_QUAT_SYS_PREBUILT_URL`, `IMGUIZMO_QUAT_SYS_SKIP_CC`.
+- ImGui Test Engine: source build only (`IMGUI_TEST_ENGINE_SYS_SKIP_CC` supported for pregenerated-bindings check/docs workflows).
 
 Optional toggles:
 
@@ -51,6 +53,7 @@ See also:
 - ImPlot details: `extensions/dear-implot-sys/README.md`.
 - ImGuizmo details: `extensions/dear-imguizmo-sys/README.md`.
 - ImNodes details: `extensions/dear-imnodes-sys/README.md`.
+- ImGui Test Engine details: `extensions/dear-imgui-test-engine-sys/README.md`.
 
 ## Submodules
 
@@ -75,6 +78,7 @@ Examples are in the top-level `examples/` crate and are feature-gated per extens
 - `imnodes_basic` -> `--features imnodes`
 - `reflect_demo` -> `--features reflect`
 - `file_dialog_native` / `file_browser_imgui` -> `--features file-browser`
+- `imgui_test_engine_basic` -> `--features test-engine`
 
 Run:
 
@@ -83,6 +87,7 @@ cargo run -p dear-imgui-examples --bin implot_basic --features implot
 cargo run -p dear-imgui-examples --bin imguizmo_basic --features imguizmo
 cargo run -p dear-imgui-examples --bin imnodes_basic --features imnodes
 cargo run -p dear-imgui-examples --bin reflect_demo --features reflect
+cargo run -p dear-imgui-examples --bin imgui_test_engine_basic --features test-engine
 
 # File Browser (new)
 # Native dialog (rfd):

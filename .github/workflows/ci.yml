@@ -88,7 +88,7 @@ jobs:
         run: cargo build -p dear-app --features "implot imnodes implot3d"
 
       - name: Build examples (all extensions)
-        run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat"
+        run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat test-engine"
 
   ffi-cross-check:
     name: FFI signedness check (armv7)

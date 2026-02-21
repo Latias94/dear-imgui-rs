@@ -20,6 +20,7 @@ Run any example with:
   - `--features implot3d` for ImPlot3D (and, if your workspace doesn’t pre-enable add-ons on dear-app, also add `, dear-app/implot3d`)
   - `--features file-browser` for File Browser / Dialogs
   - `--features reflect` for dear-imgui-reflect demo
+  - `--features test-engine` for ImGui Test Engine
 
 Quick picks:
 
@@ -47,6 +48,7 @@ Quick picks:
 - ImPlot3D Demo: `cargo run --bin implot3d_basic --features "implot3d"`
   - If your workspace doesn’t pre-enable dear-app add-on features, use: `cargo run --bin implot3d_basic --features "implot3d, dear-app/implot3d"`
 - Reflect demo: `cargo run --bin reflect_demo --features reflect`
+- ImGui Test Engine: `cargo run --bin imgui_test_engine_basic --features test-engine`
 
 Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
 - Extensions (e.g., ImPlot): `cargo run --bin implot_basic --features implot`
@@ -114,6 +116,7 @@ This is the intended organization.
   - ImNodes: `imnodes_basic.rs` with multiple tabs.
   - ImGuizmo: `imguizmo_basic.rs` + notes on camera math.
   - Reflect: `reflect_demo.rs` (struct/enum reflection + auto-generated UI).
+  - ImGui Test Engine: `imgui_test_engine_basic.rs`.
 
 - 04-integration patterns (real-world snippets)
   - `wgpu_rtt_gameview.rs`: Render-to-texture Game View drawn in an ImGui window.
@@ -132,7 +135,7 @@ This is the intended organization.
 - Docking: `02-docking/dockspace_minimal.rs`, `02-docking/game_engine_docking.rs` (+ `examples/02-docking/game_engine_docking.ini`)
 - Integration: `04-integration/wgpu_rtt_gameview.rs`, `04-integration/console_log.rs`, `04-integration/asset_browser_grid.rs`
   and `04-integration/file_dialog_native.rs`, `04-integration/file_browser_imgui.rs`
-- Extensions: `implot_basic.rs`, `imnodes_basic.rs`, `imguizmo_basic.rs`, `reflect_demo.rs`
+- Extensions: `implot_basic.rs`, `imnodes_basic.rs`, `imguizmo_basic.rs`, `reflect_demo.rs`, `imgui_test_engine_basic.rs`
 
 ### dear-app helpers
 

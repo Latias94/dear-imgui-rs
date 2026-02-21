@@ -13,6 +13,7 @@ Supported crates (native bindings):
   - extensions/dear-imnodes-sys (cimnodes)
   - extensions/dear-imguizmo-sys (cimguizmo)
   - extensions/dear-imguizmo-quat-sys (cimguizmo_quat)
+  - extensions/dear-imgui-test-engine-sys (imgui_test_engine)
 
 WASM pregenerated bindings:
   - dear-imgui-sys: via `xtask wasm-bindgen`
@@ -32,7 +33,8 @@ Usage examples:
       python3 tools/update_submodule_and_bindings.py --crates all --profile release \
         --submodules update \
         --cimgui-branch docking_inter --cimplot-branch master \
-        --cimnodes-branch master --cimguizmo-branch master
+        --cimnodes-branch master --cimguizmo-branch master \
+        --imgui-test-engine-branch master
 
   - Only regenerate pregenerated bindings without touching submodules:
       python3 tools/update_submodule_and_bindings.py --crates dear-implot-sys,dear-imnodes-sys \
@@ -92,6 +94,11 @@ def main() -> int:
     parser.add_argument("--cimplot3d-branch", default="main", help="Branch for cimplot3d submodule (dear-implot3d-sys)")
     parser.add_argument("--cimnodes-branch", default="master", help="Branch for cimnodes submodule (dear-imnodes-sys)")
     parser.add_argument("--cimguizmo-branch", default="master", help="Branch for cimguizmo submodule (dear-imguizmo-sys)")
+    parser.add_argument(
+        "--imgui-test-engine-branch",
+        default="master",
+        help="Branch for imgui_test_engine submodule (dear-imgui-test-engine-sys)",
+    )
     parser.add_argument("--remote", default="origin", help="Remote name for submodules")
     parser.add_argument("--wasm", action="store_true", help="Additionally generate wasm pregenerated bindings for dear-imgui-sys")
     parser.add_argument("--wasm-import", default="imgui-sys-v0", help="WASM import module name for generated bindings")
@@ -115,6 +122,7 @@ def main() -> int:
         "dear-imnodes-sys": repo_root / "extensions/dear-imnodes-sys",
         "dear-imguizmo-sys": repo_root / "extensions/dear-imguizmo-sys",
         "dear-imguizmo-quat-sys": repo_root / "extensions/dear-imguizmo-quat-sys",
+        "dear-imgui-test-engine-sys": repo_root / "extensions/dear-imgui-test-engine-sys",
     }
     submodules = {
         "dear-imgui-sys": (crate_roots["dear-imgui-sys"] / "third-party/cimgui", args.cimgui_branch),
@@ -123,6 +131,10 @@ def main() -> int:
         "dear-imnodes-sys": (crate_roots["dear-imnodes-sys"] / "third-party/cimnodes", args.cimnodes_branch),
         "dear-imguizmo-sys": (crate_roots["dear-imguizmo-sys"] / "third-party/cimguizmo", args.cimguizmo_branch),
         "dear-imguizmo-quat-sys": (crate_roots["dear-imguizmo-quat-sys"] / "third-party/cimguizmo_quat", args.cimguizmo_branch),
+        "dear-imgui-test-engine-sys": (
+            crate_roots["dear-imgui-test-engine-sys"] / "third-party/imgui_test_engine",
+            args.imgui_test_engine_branch,
+        ),
     }
 
     # Parse crates list
@@ -167,6 +179,7 @@ def main() -> int:
         "dear-imnodes-sys": "IMNODES_SYS_SKIP_CC",
         "dear-imguizmo-sys": "IMGUIZMO_SYS_SKIP_CC",
         "dear-imguizmo-quat-sys": "IMGUIZMO_QUAT_SYS_SKIP_CC",
+        "dear-imgui-test-engine-sys": "IMGUI_TEST_ENGINE_SYS_SKIP_CC",
     }
     target_dir = Path(env_base.get("CARGO_TARGET_DIR", repo_root / "target"))
     for crate in crates:

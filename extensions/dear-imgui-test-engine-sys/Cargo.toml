@@ -1,0 +1,37 @@
+[package]
+name = "dear-imgui-test-engine-sys"
+version = "0.10.0"
+edition.workspace = true
+description = "Low-level FFI bindings for Dear ImGui Test Engine"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+build = "build.rs"
+links = "dear_imgui_test_engine"
+
+exclude = [
+    "third-party/imgui_test_engine/.github/**",
+    "third-party/imgui_test_engine/build_scripts/**",
+    "third-party/imgui_test_engine/docs/**",
+    "third-party/imgui_test_engine/imgui_test_suite/**",
+    "third-party/imgui_test_engine/shared/**",
+]
+
+[package.metadata.docs.rs]
+no-default-features = true
+all-features = false
+features = []
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.10", features = ["test-engine"] }
+
+[build-dependencies]
+bindgen.workspace = true
+cc.workspace = true
+
+[features]
+default = []
+freetype = ["dear-imgui-sys/freetype"]
