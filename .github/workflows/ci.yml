@@ -90,6 +90,9 @@ jobs:
       - name: Build examples (all extensions)
         run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat test-engine"
 
+      - name: Check test-engine (no capture)
+        run: cargo check -p dear-imgui-test-engine --no-default-features
+
   ffi-cross-check:
     name: FFI signedness check (armv7)
     runs-on: ubuntu-latest
