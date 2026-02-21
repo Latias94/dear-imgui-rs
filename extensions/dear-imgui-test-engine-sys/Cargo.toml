@@ -6,8 +6,10 @@ description = "Low-level FFI bindings for Dear ImGui Test Engine"
 license-file = "LICENSE.txt"
 repository.workspace = true
 homepage.workspace = true
+documentation = "https://docs.rs/dear-imgui-test-engine-sys"
 categories.workspace = true
 keywords.workspace = true
+readme = "README.md"
 build = "build.rs"
 links = "dear_imgui_test_engine"
 
