@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Extensions
+  - `dear-imgui-test-engine`: expanded script-test helpers (text input via `KeyChars*`, plus richer waits/assertions).
+
 ## [0.10.1] - 2026-02-21
 
 ### Added

@@ -6,6 +6,7 @@ use std::{cell::RefCell, rc::Rc};
 struct ScriptTargetState {
     checkbox: bool,
     slider: i32,
+    input: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,6 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let script_target_state = Rc::new(RefCell::new(ScriptTargetState {
         checkbox: false,
         slider: 42,
+        input: String::new(),
     }));
 
     let engine_setup = Rc::clone(&engine);
@@ -38,6 +40,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     t.wait_for_item("Click Me", 120)?;
                     t.assert_item_visible("Click Me")?;
                     t.item_click("Click Me")?;
+                    t.wait_for_item_visible("Input", 120)?;
+                    t.input_text_replace("Input", "hello from script", false)?;
                     t.item_check("Node/Checkbox")?;
                     t.item_uncheck("Node/Checkbox")?;
                     t.yield_frames(2);
@@ -64,6 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .build(|| {
                     ui.text("This window is owned by the app (not a test GuiFunc).");
                     ui.button("Click Me");
+                    ui.input_text("Input", &mut state.input).build();
                     if let Some(_node) = ui.tree_node("Node") {
                         ui.checkbox("Checkbox", &mut state.checkbox);
                     }

@@ -29,10 +29,20 @@ struct ImGuiTestEngineScript {
         MouseMove,
         KeyDown,
         KeyPress,
+        KeyChars,
+        KeyCharsAppend,
+        KeyCharsAppendEnter,
+        KeyCharsReplace,
+        KeyCharsReplaceEnter,
         Sleep,
         AssertItemExists,
         AssertItemVisible,
         WaitForItem,
+        WaitForItemVisible,
+        AssertItemChecked,
+        AssertItemOpened,
+        WaitForItemChecked,
+        WaitForItemOpened,
         Yield,
     };
 
@@ -111,6 +121,21 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::KeyPress:
                 ctx->KeyPress(static_cast<ImGuiKeyChord>(cmd.I), cmd.J);
                 break;
+            case ImGuiTestEngineScript::CmdKind::KeyChars:
+                ctx->KeyChars(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::KeyCharsAppend:
+                ctx->KeyCharsAppend(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::KeyCharsAppendEnter:
+                ctx->KeyCharsAppendEnter(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::KeyCharsReplace:
+                ctx->KeyCharsReplace(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::KeyCharsReplaceEnter:
+                ctx->KeyCharsReplaceEnter(cmd.A.c_str());
+                break;
             case ImGuiTestEngineScript::CmdKind::Sleep:
                 ctx->Sleep(cmd.F);
                 break;
@@ -178,6 +203,158 @@ static void script_test_func(ImGuiTestContext* ctx) {
                         __LINE__,
                         ImGuiTestCheckFlags_None,
                         "Timed out waiting for item: '%s' (%d frames, ref='%s')",
+                        cmd.A.c_str(),
+                        max_frames,
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::WaitForItemVisible: {
+                int max_frames = cmd.I;
+                if (max_frames < 1) {
+                    max_frames = 1;
+                }
+                bool ok = false;
+                for (int n = 0; n < max_frames; n++) {
+                    ImGuiTestItemInfo info = ctx->ItemInfo(cmd.A.c_str(), ImGuiTestOpFlags_NoError);
+                    if (info.ID != 0 && (info.StatusFlags & ImGuiItemStatusFlags_Visible) != 0) {
+                        ok = true;
+                        break;
+                    }
+                    ctx->Yield(1);
+                    if (ctx->IsError()) {
+                        return;
+                    }
+                }
+                if (!ok) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Timed out waiting for item to be visible: '%s' (%d frames, ref='%s')",
+                        cmd.A.c_str(),
+                        max_frames,
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::AssertItemChecked: {
+                ImGuiTestItemInfo info = ctx->ItemInfo(cmd.A.c_str(), ImGuiTestOpFlags_NoError);
+                if (info.ID == 0) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item does not exist: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                if ((info.StatusFlags & ImGuiItemStatusFlags_Checked) == 0) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item is not checked: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::AssertItemOpened: {
+                ImGuiTestItemInfo info = ctx->ItemInfo(cmd.A.c_str(), ImGuiTestOpFlags_NoError);
+                if (info.ID == 0) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item does not exist: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                if ((info.StatusFlags & ImGuiItemStatusFlags_Opened) == 0) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script assertion failed: item is not opened: '%s' (ref='%s')",
+                        cmd.A.c_str(),
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::WaitForItemChecked: {
+                int max_frames = cmd.I;
+                if (max_frames < 1) {
+                    max_frames = 1;
+                }
+                bool ok = false;
+                for (int n = 0; n < max_frames; n++) {
+                    ImGuiTestItemInfo info = ctx->ItemInfo(cmd.A.c_str(), ImGuiTestOpFlags_NoError);
+                    if (info.ID != 0 && (info.StatusFlags & ImGuiItemStatusFlags_Checked) != 0) {
+                        ok = true;
+                        break;
+                    }
+                    ctx->Yield(1);
+                    if (ctx->IsError()) {
+                        return;
+                    }
+                }
+                if (!ok) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Timed out waiting for item to be checked: '%s' (%d frames, ref='%s')",
+                        cmd.A.c_str(),
+                        max_frames,
+                        ctx->RefStr
+                    );
+                    return;
+                }
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::WaitForItemOpened: {
+                int max_frames = cmd.I;
+                if (max_frames < 1) {
+                    max_frames = 1;
+                }
+                bool ok = false;
+                for (int n = 0; n < max_frames; n++) {
+                    ImGuiTestItemInfo info = ctx->ItemInfo(cmd.A.c_str(), ImGuiTestOpFlags_NoError);
+                    if (info.ID != 0 && (info.StatusFlags & ImGuiItemStatusFlags_Opened) != 0) {
+                        ok = true;
+                        break;
+                    }
+                    ctx->Yield(1);
+                    if (ctx->IsError()) {
+                        return;
+                    }
+                }
+                if (!ok) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Timed out waiting for item to be opened: '%s' (%d frames, ref='%s')",
                         cmd.A.c_str(),
                         max_frames,
                         ctx->RefStr
@@ -334,6 +511,56 @@ void imgui_test_engine_script_key_press(ImGuiTestEngineScript* script, int key_c
     script->Cmds.push_back(std::move(cmd));
 }
 
+void imgui_test_engine_script_key_chars(ImGuiTestEngineScript* script, const char* chars) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::KeyChars;
+    cmd.A = chars ? chars : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_key_chars_append(ImGuiTestEngineScript* script, const char* chars) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::KeyCharsAppend;
+    cmd.A = chars ? chars : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_key_chars_append_enter(ImGuiTestEngineScript* script, const char* chars) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::KeyCharsAppendEnter;
+    cmd.A = chars ? chars : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_key_chars_replace(ImGuiTestEngineScript* script, const char* chars) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::KeyCharsReplace;
+    cmd.A = chars ? chars : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_key_chars_replace_enter(ImGuiTestEngineScript* script, const char* chars) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::KeyCharsReplaceEnter;
+    cmd.A = chars ? chars : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
 void imgui_test_engine_script_sleep(ImGuiTestEngineScript* script, float time_in_seconds) {
     if (script == nullptr) {
         return;
@@ -374,6 +601,66 @@ void imgui_test_engine_script_wait_for_item(ImGuiTestEngineScript* script, const
     }
     script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
         ImGuiTestEngineScript::CmdKind::WaitForItem,
+        ref ? ref : "",
+        {},
+        max_frames,
+    });
+}
+
+void imgui_test_engine_script_wait_for_item_visible(ImGuiTestEngineScript* script, const char* ref, int max_frames) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::WaitForItemVisible,
+        ref ? ref : "",
+        {},
+        max_frames,
+    });
+}
+
+void imgui_test_engine_script_assert_item_checked(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::AssertItemChecked,
+        ref ? ref : "",
+        {},
+        0,
+    });
+}
+
+void imgui_test_engine_script_assert_item_opened(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::AssertItemOpened,
+        ref ? ref : "",
+        {},
+        0,
+    });
+}
+
+void imgui_test_engine_script_wait_for_item_checked(ImGuiTestEngineScript* script, const char* ref, int max_frames) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::WaitForItemChecked,
+        ref ? ref : "",
+        {},
+        max_frames,
+    });
+}
+
+void imgui_test_engine_script_wait_for_item_opened(ImGuiTestEngineScript* script, const char* ref, int max_frames) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::WaitForItemOpened,
         ref ? ref : "",
         {},
         max_frames,

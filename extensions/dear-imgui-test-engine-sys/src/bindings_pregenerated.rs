@@ -199,6 +199,36 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_key_chars(
+        script: *mut ImGuiTestEngineScript,
+        chars: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_key_chars_append(
+        script: *mut ImGuiTestEngineScript,
+        chars: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_key_chars_append_enter(
+        script: *mut ImGuiTestEngineScript,
+        chars: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_key_chars_replace(
+        script: *mut ImGuiTestEngineScript,
+        chars: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_key_chars_replace_enter(
+        script: *mut ImGuiTestEngineScript,
+        chars: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_sleep(
         script: *mut ImGuiTestEngineScript,
         time_in_seconds: ::std::os::raw::c_float,
@@ -218,6 +248,39 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_script_wait_for_item(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        max_frames: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_wait_for_item_visible(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        max_frames: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_assert_item_checked(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_assert_item_opened(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_wait_for_item_checked(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        max_frames: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_wait_for_item_opened(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
         max_frames: ::std::os::raw::c_int,

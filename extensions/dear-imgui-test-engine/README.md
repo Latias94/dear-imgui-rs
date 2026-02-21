@@ -93,8 +93,9 @@ To write tests from Rust without dealing with C++ callbacks, use script tests:
 engine.add_script_test("my_app", "open_settings", |t| {
     t.set_ref("Main Window")?;
     t.wait_for_item("Settings", 60)?;
-    t.assert_item_visible("Settings")?;
+    t.wait_for_item_visible("Settings", 60)?;
     t.item_click("Settings")?;
+    t.input_text_replace("Search", "foo", true)?;
     t.yield_frames(2);
     Ok(())
 })?;

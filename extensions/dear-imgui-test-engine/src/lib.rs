@@ -228,6 +228,66 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
+    pub fn key_chars(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn key_chars_append(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars_append contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars_append(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn key_chars_append_enter(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars_append_enter contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars_append_enter(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn key_chars_replace(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars_replace contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars_replace(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn key_chars_replace_enter(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars_replace_enter contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars_replace_enter(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
     pub fn sleep_seconds(&mut self, seconds: f32) -> ImGuiResult<()> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(ImGuiError::invalid_operation(
@@ -262,6 +322,30 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
+    pub fn assert_item_checked(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_checked contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_checked(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn assert_item_opened(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_opened contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_opened(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
     pub fn wait_for_item(&mut self, r#ref: &str, max_frames: i32) -> ImGuiResult<()> {
         if r#ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
@@ -276,6 +360,72 @@ impl ScriptTest<'_> {
         with_scratch_txt(r#ref, |ptr| unsafe {
             sys::imgui_test_engine_script_wait_for_item(self.script.raw, ptr, max_frames)
         });
+        Ok(())
+    }
+
+    pub fn wait_for_item_visible(&mut self, r#ref: &str, max_frames: i32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item_visible contained interior NUL",
+            ));
+        }
+        if max_frames < 1 {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item_visible max_frames must be >= 1",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_wait_for_item_visible(self.script.raw, ptr, max_frames)
+        });
+        Ok(())
+    }
+
+    pub fn wait_for_item_checked(&mut self, r#ref: &str, max_frames: i32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item_checked contained interior NUL",
+            ));
+        }
+        if max_frames < 1 {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item_checked max_frames must be >= 1",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_wait_for_item_checked(self.script.raw, ptr, max_frames)
+        });
+        Ok(())
+    }
+
+    pub fn wait_for_item_opened(&mut self, r#ref: &str, max_frames: i32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item_opened contained interior NUL",
+            ));
+        }
+        if max_frames < 1 {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item_opened max_frames must be >= 1",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_wait_for_item_opened(self.script.raw, ptr, max_frames)
+        });
+        Ok(())
+    }
+
+    pub fn input_text_replace(
+        &mut self,
+        r#ref: &str,
+        text: &str,
+        submit_enter: bool,
+    ) -> ImGuiResult<()> {
+        self.item_click(r#ref)?;
+        if submit_enter {
+            self.key_chars_replace_enter(text)?;
+        } else {
+            self.key_chars_replace(text)?;
+        }
         Ok(())
     }
 

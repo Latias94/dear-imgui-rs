@@ -120,9 +120,19 @@ void imgui_test_engine_script_mouse_move(ImGuiTestEngineScript* script, const ch
 void imgui_test_engine_script_key_down(ImGuiTestEngineScript* script, int key_chord);
 void imgui_test_engine_script_key_press(ImGuiTestEngineScript* script, int key_chord, int count);
 void imgui_test_engine_script_sleep(ImGuiTestEngineScript* script, float time_in_seconds);
+void imgui_test_engine_script_key_chars(ImGuiTestEngineScript* script, const char* chars);
+void imgui_test_engine_script_key_chars_append(ImGuiTestEngineScript* script, const char* chars);
+void imgui_test_engine_script_key_chars_append_enter(ImGuiTestEngineScript* script, const char* chars);
+void imgui_test_engine_script_key_chars_replace(ImGuiTestEngineScript* script, const char* chars);
+void imgui_test_engine_script_key_chars_replace_enter(ImGuiTestEngineScript* script, const char* chars);
 void imgui_test_engine_script_assert_item_exists(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_assert_item_visible(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_wait_for_item(ImGuiTestEngineScript* script, const char* ref, int max_frames);
+void imgui_test_engine_script_wait_for_item_visible(ImGuiTestEngineScript* script, const char* ref, int max_frames);
+void imgui_test_engine_script_assert_item_checked(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_assert_item_opened(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_wait_for_item_checked(ImGuiTestEngineScript* script, const char* ref, int max_frames);
+void imgui_test_engine_script_wait_for_item_opened(ImGuiTestEngineScript* script, const char* ref, int max_frames);
 void imgui_test_engine_script_yield(ImGuiTestEngineScript* script, int frames);
 void imgui_test_engine_register_script_test(
     ImGuiTestEngine* engine,
