@@ -6,6 +6,7 @@
 use bitflags::bitflags;
 use dear_imgui_rs::{Context, ImGuiError, ImGuiResult, Ui, with_scratch_txt, with_scratch_txt_two};
 use dear_imgui_test_engine_sys as sys;
+use std::{marker::PhantomData, rc::Rc};
 
 pub use dear_imgui_test_engine_sys as raw;
 
@@ -66,6 +67,7 @@ pub struct TestEngine {
     raw: *mut sys::ImGuiTestEngine,
     started: bool,
     started_ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 struct Script {
@@ -206,6 +208,7 @@ impl TestEngine {
             raw,
             started: false,
             started_ctx: std::ptr::null_mut(),
+            _not_send_sync: PhantomData,
         })
     }
 
@@ -221,6 +224,34 @@ impl TestEngine {
         self.raw
     }
 
+    /// Tries to start (bind) the test engine to an ImGui context.
+    ///
+    /// Calling this multiple times with the same context is a no-op.
+    ///
+    /// Returns an error if the engine is already started with a different context.
+    pub fn try_start(&mut self, imgui_ctx: &Context) -> ImGuiResult<()> {
+        let ctx = imgui_ctx.as_raw();
+        if ctx.is_null() {
+            return Err(ImGuiError::invalid_operation(
+                "TestEngine::try_start() called with a null ImGui context",
+            ));
+        }
+
+        if self.started {
+            if self.started_ctx == ctx {
+                return Ok(());
+            }
+            return Err(ImGuiError::invalid_operation(
+                "TestEngine::try_start() called while already started with a different ImGui context",
+            ));
+        }
+
+        unsafe { sys::imgui_test_engine_start(self.raw, ctx) };
+        self.started = true;
+        self.started_ctx = ctx;
+        Ok(())
+    }
+
     /// Starts (binds) the test engine to an ImGui context.
     ///
     /// Calling this multiple times with the same context is a no-op.
@@ -228,23 +259,8 @@ impl TestEngine {
     /// # Panics
     /// Panics if called while already started with a different ImGui context.
     pub fn start(&mut self, imgui_ctx: &Context) {
-        let ctx = imgui_ctx.as_raw();
-        if ctx.is_null() {
-            return;
-        }
-
-        if self.started {
-            if self.started_ctx == ctx {
-                return;
-            }
-            panic!(
-                "TestEngine::start() called while already started with a different ImGui context"
-            );
-        }
-
-        unsafe { sys::imgui_test_engine_start(self.raw, ctx) };
-        self.started = true;
-        self.started_ctx = ctx;
+        self.try_start(imgui_ctx)
+            .expect("Failed to start Dear ImGui Test Engine context");
     }
 
     pub fn stop(&mut self) {

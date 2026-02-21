@@ -41,7 +41,8 @@ use dear_imgui_test_engine as test_engine;
 let mut imgui_ctx = imgui::Context::create();
 let mut engine = test_engine::TestEngine::create();
 
-engine.start(&imgui_ctx);
+// Prefer `try_start()` if you want to handle errors (e.g. "already started with a different context")
+let _ = engine.try_start(&imgui_ctx);
 
 // In your frame loop
 let ui = imgui_ctx.frame();
