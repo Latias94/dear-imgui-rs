@@ -42,7 +42,13 @@ struct ImGuiTestEngineScript {
         KeyCharsReplaceEnter,
         ItemHold,
         ItemHoldForFrames,
+        ItemDragOverAndHold,
+        ItemDragAndDrop,
         ItemDragWithDelta,
+        ScrollToX,
+        ScrollToY,
+        ScrollToPosX,
+        ScrollToPosY,
         ScrollToItemX,
         ScrollToItemY,
         ScrollToTop,
@@ -50,6 +56,7 @@ struct ImGuiTestEngineScript {
         TabClose,
         ComboClick,
         ComboClickAll,
+        TableClickHeader,
         MenuClick,
         MenuCheck,
         MenuUncheck,
@@ -185,8 +192,26 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::ItemHoldForFrames:
                 ctx->ItemHoldForFrames(cmd.A.c_str(), cmd.I);
                 break;
+            case ImGuiTestEngineScript::CmdKind::ItemDragOverAndHold:
+                ctx->ItemDragOverAndHold(cmd.A.c_str(), cmd.B.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::ItemDragAndDrop:
+                ctx->ItemDragAndDrop(cmd.A.c_str(), cmd.B.c_str(), static_cast<ImGuiMouseButton>(cmd.I));
+                break;
             case ImGuiTestEngineScript::CmdKind::ItemDragWithDelta:
                 ctx->ItemDragWithDelta(cmd.A.c_str(), ImVec2(cmd.F, cmd.G));
+                break;
+            case ImGuiTestEngineScript::CmdKind::ScrollToX:
+                ctx->ScrollToX(cmd.A.c_str(), cmd.F);
+                break;
+            case ImGuiTestEngineScript::CmdKind::ScrollToY:
+                ctx->ScrollToY(cmd.A.c_str(), cmd.F);
+                break;
+            case ImGuiTestEngineScript::CmdKind::ScrollToPosX:
+                ctx->ScrollToPosX(cmd.A.c_str(), cmd.F);
+                break;
+            case ImGuiTestEngineScript::CmdKind::ScrollToPosY:
+                ctx->ScrollToPosY(cmd.A.c_str(), cmd.F);
                 break;
             case ImGuiTestEngineScript::CmdKind::ScrollToItemX:
                 ctx->ScrollToItemX(cmd.A.c_str());
@@ -208,6 +233,9 @@ static void script_test_func(ImGuiTestContext* ctx) {
                 break;
             case ImGuiTestEngineScript::CmdKind::ComboClickAll:
                 ctx->ComboClickAll(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::TableClickHeader:
+                (void)ctx->TableClickHeader(cmd.A.c_str(), cmd.B.c_str(), static_cast<ImGuiKeyChord>(cmd.I));
                 break;
             case ImGuiTestEngineScript::CmdKind::MenuClick:
                 ctx->MenuClick(cmd.A.c_str());
@@ -834,6 +862,38 @@ void imgui_test_engine_script_item_hold_for_frames(ImGuiTestEngineScript* script
     script->Cmds.push_back(std::move(cmd));
 }
 
+void imgui_test_engine_script_item_drag_over_and_hold(
+    ImGuiTestEngineScript* script,
+    const char* ref_src,
+    const char* ref_dst
+) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ItemDragOverAndHold;
+    cmd.A = ref_src ? ref_src : "";
+    cmd.B = ref_dst ? ref_dst : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_item_drag_and_drop(
+    ImGuiTestEngineScript* script,
+    const char* ref_src,
+    const char* ref_dst,
+    int button
+) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ItemDragAndDrop;
+    cmd.A = ref_src ? ref_src : "";
+    cmd.B = ref_dst ? ref_dst : "";
+    cmd.I = button;
+    script->Cmds.push_back(std::move(cmd));
+}
+
 void imgui_test_engine_script_item_drag_with_delta(ImGuiTestEngineScript* script, const char* ref, float dx, float dy) {
     if (script == nullptr) {
         return;
@@ -843,6 +903,50 @@ void imgui_test_engine_script_item_drag_with_delta(ImGuiTestEngineScript* script
     cmd.A = ref ? ref : "";
     cmd.F = dx;
     cmd.G = dy;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_scroll_to_x(ImGuiTestEngineScript* script, const char* ref, float scroll_x) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ScrollToX;
+    cmd.A = ref ? ref : "";
+    cmd.F = scroll_x;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_scroll_to_y(ImGuiTestEngineScript* script, const char* ref, float scroll_y) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ScrollToY;
+    cmd.A = ref ? ref : "";
+    cmd.F = scroll_y;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_scroll_to_pos_x(ImGuiTestEngineScript* script, const char* window_ref, float pos_x) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ScrollToPosX;
+    cmd.A = window_ref ? window_ref : "";
+    cmd.F = pos_x;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_scroll_to_pos_y(ImGuiTestEngineScript* script, const char* window_ref, float pos_y) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ScrollToPosY;
+    cmd.A = window_ref ? window_ref : "";
+    cmd.F = pos_y;
     script->Cmds.push_back(std::move(cmd));
 }
 
@@ -913,6 +1017,23 @@ void imgui_test_engine_script_combo_click_all(ImGuiTestEngineScript* script, con
     ImGuiTestEngineScript::Cmd cmd;
     cmd.Kind = ImGuiTestEngineScript::CmdKind::ComboClickAll;
     cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_table_click_header(
+    ImGuiTestEngineScript* script,
+    const char* table_ref,
+    const char* label,
+    int key_mods
+) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::TableClickHeader;
+    cmd.A = table_ref ? table_ref : "";
+    cmd.B = label ? label : "";
+    cmd.I = key_mods;
     script->Cmds.push_back(std::move(cmd));
 }
 

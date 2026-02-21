@@ -133,7 +133,22 @@ void imgui_test_engine_script_key_chars_replace(ImGuiTestEngineScript* script, c
 void imgui_test_engine_script_key_chars_replace_enter(ImGuiTestEngineScript* script, const char* chars);
 void imgui_test_engine_script_item_hold(ImGuiTestEngineScript* script, const char* ref, float time_in_seconds);
 void imgui_test_engine_script_item_hold_for_frames(ImGuiTestEngineScript* script, const char* ref, int frames);
+void imgui_test_engine_script_item_drag_over_and_hold(
+    ImGuiTestEngineScript* script,
+    const char* ref_src,
+    const char* ref_dst
+);
+void imgui_test_engine_script_item_drag_and_drop(
+    ImGuiTestEngineScript* script,
+    const char* ref_src,
+    const char* ref_dst,
+    int button
+);
 void imgui_test_engine_script_item_drag_with_delta(ImGuiTestEngineScript* script, const char* ref, float dx, float dy);
+void imgui_test_engine_script_scroll_to_x(ImGuiTestEngineScript* script, const char* ref, float scroll_x);
+void imgui_test_engine_script_scroll_to_y(ImGuiTestEngineScript* script, const char* ref, float scroll_y);
+void imgui_test_engine_script_scroll_to_pos_x(ImGuiTestEngineScript* script, const char* window_ref, float pos_x);
+void imgui_test_engine_script_scroll_to_pos_y(ImGuiTestEngineScript* script, const char* window_ref, float pos_y);
 void imgui_test_engine_script_scroll_to_item_x(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_scroll_to_item_y(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_scroll_to_top(ImGuiTestEngineScript* script, const char* ref);
@@ -141,6 +156,12 @@ void imgui_test_engine_script_scroll_to_bottom(ImGuiTestEngineScript* script, co
 void imgui_test_engine_script_tab_close(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_combo_click(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_combo_click_all(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_table_click_header(
+    ImGuiTestEngineScript* script,
+    const char* table_ref,
+    const char* label,
+    int key_mods
+);
 void imgui_test_engine_script_menu_click(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_menu_check(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_menu_uncheck(ImGuiTestEngineScript* script, const char* ref);

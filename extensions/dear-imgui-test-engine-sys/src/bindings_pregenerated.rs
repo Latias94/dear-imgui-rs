@@ -287,6 +287,49 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_drag_over_and_hold(
+        script: *mut ImGuiTestEngineScript,
+        ref_src: *const ::std::os::raw::c_char,
+        ref_dst: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_drag_and_drop(
+        script: *mut ImGuiTestEngineScript,
+        ref_src: *const ::std::os::raw::c_char,
+        ref_dst: *const ::std::os::raw::c_char,
+        button: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_scroll_to_x(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        scroll_x: ::std::os::raw::c_float,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_scroll_to_y(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        scroll_y: ::std::os::raw::c_float,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_scroll_to_pos_x(
+        script: *mut ImGuiTestEngineScript,
+        window_ref: *const ::std::os::raw::c_char,
+        pos_x: ::std::os::raw::c_float,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_scroll_to_pos_y(
+        script: *mut ImGuiTestEngineScript,
+        window_ref: *const ::std::os::raw::c_char,
+        pos_y: ::std::os::raw::c_float,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_scroll_to_item_x(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
@@ -326,6 +369,14 @@ unsafe extern "C" {
     pub fn imgui_test_engine_script_combo_click_all(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_table_click_header(
+        script: *mut ImGuiTestEngineScript,
+        table_ref: *const ::std::os::raw::c_char,
+        label: *const ::std::os::raw::c_char,
+        key_mods: ::std::os::raw::c_int,
     );
 }
 unsafe extern "C" {
