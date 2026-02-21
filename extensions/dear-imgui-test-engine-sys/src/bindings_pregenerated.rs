@@ -142,6 +142,12 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_double_click(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_item_open(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
@@ -171,6 +177,31 @@ unsafe extern "C" {
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
         v: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_move(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_key_down(
+        script: *mut ImGuiTestEngineScript,
+        key_chord: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_key_press(
+        script: *mut ImGuiTestEngineScript,
+        key_chord: ::std::os::raw::c_int,
+        count: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_sleep(
+        script: *mut ImGuiTestEngineScript,
+        time_in_seconds: ::std::os::raw::c_float,
     );
 }
 unsafe extern "C" {

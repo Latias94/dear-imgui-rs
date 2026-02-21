@@ -65,7 +65,12 @@ engine.shutdown();
 ## Notes
 
 - `dear-imgui-test-engine-sys` automatically enables the required `IMGUI_ENABLE_TEST_ENGINE` define on `dear-imgui-sys`.
-- If you care about preserving test engine `.ini` settings, make sure the ImGui context is destroyed before the engine context.
+- If you care about preserving test engine `.ini` settings, prefer:
+  - `engine.stop()`
+  - drop the ImGui context
+  - drop the engine
+  - This lets the upstream context hook unbind cleanly during `ImGui::DestroyContext()`.
+- `engine.shutdown()` is more robust if you can't guarantee drop order, but may not preserve `.ini` settings.
 - Upstream Dear ImGui Test Engine has its own license terms; review `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine/imgui_test_engine/LICENSE.txt` before shipping commercial products.
 
 ## Features

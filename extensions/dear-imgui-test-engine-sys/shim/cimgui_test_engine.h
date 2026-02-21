@@ -109,11 +109,17 @@ ImGuiTestEngineScript* imgui_test_engine_script_create(void);
 void imgui_test_engine_script_destroy(ImGuiTestEngineScript* script);
 void imgui_test_engine_script_set_ref(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_item_click(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_item_double_click(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_item_open(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_item_check(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_item_uncheck(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_item_input_int(ImGuiTestEngineScript* script, const char* ref, int v);
 void imgui_test_engine_script_item_input_str(ImGuiTestEngineScript* script, const char* ref, const char* v);
+void imgui_test_engine_script_mouse_move(ImGuiTestEngineScript* script, const char* ref);
+// Key chord is `ImGuiKeyChord` (an int) from Dear ImGui.
+void imgui_test_engine_script_key_down(ImGuiTestEngineScript* script, int key_chord);
+void imgui_test_engine_script_key_press(ImGuiTestEngineScript* script, int key_chord, int count);
+void imgui_test_engine_script_sleep(ImGuiTestEngineScript* script, float time_in_seconds);
 void imgui_test_engine_script_yield(ImGuiTestEngineScript* script, int frames);
 void imgui_test_engine_register_script_test(
     ImGuiTestEngine* engine,

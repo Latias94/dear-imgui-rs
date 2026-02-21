@@ -4,7 +4,9 @@
 //! engine lifetime management and per-frame UI integration.
 
 use bitflags::bitflags;
-use dear_imgui_rs::{Context, ImGuiError, ImGuiResult, Ui, with_scratch_txt, with_scratch_txt_two};
+use dear_imgui_rs::{
+    Context, ImGuiError, ImGuiResult, KeyChord, Ui, with_scratch_txt, with_scratch_txt_two,
+};
 use dear_imgui_test_engine_sys as sys;
 use std::{marker::PhantomData, rc::Rc};
 
@@ -128,6 +130,18 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
+    pub fn item_double_click(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_double_click contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_double_click(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
     pub fn item_open(&mut self, r#ref: &str) -> ImGuiResult<()> {
         if r#ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
@@ -185,6 +199,42 @@ impl ScriptTest<'_> {
         with_scratch_txt_two(r#ref, v, |ref_ptr, v_ptr| unsafe {
             sys::imgui_test_engine_script_item_input_str(self.script.raw, ref_ptr, v_ptr)
         });
+        Ok(())
+    }
+
+    pub fn mouse_move(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "mouse_move contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_mouse_move(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn key_down(&mut self, key_chord: KeyChord) {
+        unsafe { sys::imgui_test_engine_script_key_down(self.script.raw, key_chord.raw()) };
+    }
+
+    pub fn key_press(&mut self, key_chord: KeyChord, count: i32) -> ImGuiResult<()> {
+        if count < 1 {
+            return Err(ImGuiError::invalid_operation(
+                "key_press count must be >= 1",
+            ));
+        }
+        unsafe { sys::imgui_test_engine_script_key_press(self.script.raw, key_chord.raw(), count) };
+        Ok(())
+    }
+
+    pub fn sleep_seconds(&mut self, seconds: f32) -> ImGuiResult<()> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(ImGuiError::invalid_operation(
+                "sleep_seconds requires a finite non-negative value",
+            ));
+        }
+        unsafe { sys::imgui_test_engine_script_sleep(self.script.raw, seconds) };
         Ok(())
     }
 
