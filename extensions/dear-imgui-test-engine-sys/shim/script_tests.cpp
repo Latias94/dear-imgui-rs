@@ -20,6 +20,7 @@ struct ImGuiTestEngineScript {
     enum class CmdKind {
         SetRef,
         ItemClick,
+        ItemClickWithButton,
         ItemDoubleClick,
         ItemOpen,
         ItemClose,
@@ -28,7 +29,16 @@ struct ImGuiTestEngineScript {
         ItemInputInt,
         ItemInputStr,
         MouseMove,
+        MouseMoveToPos,
+        MouseTeleportToPos,
         MouseMoveToVoid,
+        MouseClick,
+        MouseClickMulti,
+        MouseDoubleClick,
+        MouseDown,
+        MouseUp,
+        MouseLiftDragThreshold,
+        MouseDragWithDelta,
         MouseClickOnVoid,
         MouseWheel,
         KeyDown,
@@ -56,10 +66,28 @@ struct ImGuiTestEngineScript {
         TabClose,
         ComboClick,
         ComboClickAll,
+        ItemOpenAll,
+        ItemCloseAll,
         TableClickHeader,
+        TableOpenContextMenu,
+        TableSetColumnEnabled,
+        TableSetColumnEnabledByLabel,
+        TableResizeColumn,
         MenuClick,
         MenuCheck,
         MenuUncheck,
+        MenuCheckAll,
+        MenuUncheckAll,
+        SetInputMode,
+        NavMoveTo,
+        NavActivate,
+        NavInput,
+        WindowClose,
+        WindowCollapse,
+        WindowFocus,
+        WindowBringToFront,
+        WindowMove,
+        WindowResize,
         Sleep,
         AssertItemExists,
         AssertItemVisible,
@@ -124,6 +152,9 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::ItemClick:
                 ctx->ItemClick(cmd.A.c_str());
                 break;
+            case ImGuiTestEngineScript::CmdKind::ItemClickWithButton:
+                ctx->ItemClick(cmd.A.c_str(), static_cast<ImGuiMouseButton>(cmd.I));
+                break;
             case ImGuiTestEngineScript::CmdKind::ItemDoubleClick:
                 ctx->ItemDoubleClick(cmd.A.c_str());
                 break;
@@ -148,8 +179,35 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::MouseMove:
                 ctx->MouseMove(cmd.A.c_str());
                 break;
+            case ImGuiTestEngineScript::CmdKind::MouseMoveToPos:
+                ctx->MouseMoveToPos(ImVec2(cmd.F, cmd.G));
+                break;
+            case ImGuiTestEngineScript::CmdKind::MouseTeleportToPos:
+                ctx->MouseTeleportToPos(ImVec2(cmd.F, cmd.G));
+                break;
             case ImGuiTestEngineScript::CmdKind::MouseMoveToVoid:
                 ctx->MouseMoveToVoid();
+                break;
+            case ImGuiTestEngineScript::CmdKind::MouseClick:
+                ctx->MouseClick(static_cast<ImGuiMouseButton>(cmd.I));
+                break;
+            case ImGuiTestEngineScript::CmdKind::MouseClickMulti:
+                ctx->MouseClickMulti(static_cast<ImGuiMouseButton>(cmd.I), cmd.J);
+                break;
+            case ImGuiTestEngineScript::CmdKind::MouseDoubleClick:
+                ctx->MouseDoubleClick(static_cast<ImGuiMouseButton>(cmd.I));
+                break;
+            case ImGuiTestEngineScript::CmdKind::MouseDown:
+                ctx->MouseDown(static_cast<ImGuiMouseButton>(cmd.I));
+                break;
+            case ImGuiTestEngineScript::CmdKind::MouseUp:
+                ctx->MouseUp(static_cast<ImGuiMouseButton>(cmd.I));
+                break;
+            case ImGuiTestEngineScript::CmdKind::MouseLiftDragThreshold:
+                ctx->MouseLiftDragThreshold(static_cast<ImGuiMouseButton>(cmd.I));
+                break;
+            case ImGuiTestEngineScript::CmdKind::MouseDragWithDelta:
+                ctx->MouseDragWithDelta(ImVec2(cmd.F, cmd.G), static_cast<ImGuiMouseButton>(cmd.I));
                 break;
             case ImGuiTestEngineScript::CmdKind::MouseClickOnVoid:
                 for (int n = 0; n < cmd.J; n++) {
@@ -234,8 +292,26 @@ static void script_test_func(ImGuiTestContext* ctx) {
             case ImGuiTestEngineScript::CmdKind::ComboClickAll:
                 ctx->ComboClickAll(cmd.A.c_str());
                 break;
+            case ImGuiTestEngineScript::CmdKind::ItemOpenAll:
+                ctx->ItemOpenAll(cmd.A.c_str(), cmd.I, cmd.J);
+                break;
+            case ImGuiTestEngineScript::CmdKind::ItemCloseAll:
+                ctx->ItemCloseAll(cmd.A.c_str(), cmd.I, cmd.J);
+                break;
             case ImGuiTestEngineScript::CmdKind::TableClickHeader:
                 (void)ctx->TableClickHeader(cmd.A.c_str(), cmd.B.c_str(), static_cast<ImGuiKeyChord>(cmd.I));
+                break;
+            case ImGuiTestEngineScript::CmdKind::TableOpenContextMenu:
+                ctx->TableOpenContextMenu(cmd.A.c_str(), cmd.I);
+                break;
+            case ImGuiTestEngineScript::CmdKind::TableSetColumnEnabled:
+                ctx->TableSetColumnEnabled(cmd.A.c_str(), cmd.I, cmd.J != 0);
+                break;
+            case ImGuiTestEngineScript::CmdKind::TableSetColumnEnabledByLabel:
+                ctx->TableSetColumnEnabled(cmd.A.c_str(), cmd.B.c_str(), cmd.I != 0);
+                break;
+            case ImGuiTestEngineScript::CmdKind::TableResizeColumn:
+                ctx->TableResizeColumn(cmd.A.c_str(), cmd.I, cmd.F);
                 break;
             case ImGuiTestEngineScript::CmdKind::MenuClick:
                 ctx->MenuClick(cmd.A.c_str());
@@ -245,6 +321,42 @@ static void script_test_func(ImGuiTestContext* ctx) {
                 break;
             case ImGuiTestEngineScript::CmdKind::MenuUncheck:
                 ctx->MenuUncheck(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::MenuCheckAll:
+                ctx->MenuCheckAll(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::MenuUncheckAll:
+                ctx->MenuUncheckAll(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::SetInputMode:
+                ctx->SetInputMode(static_cast<ImGuiInputSource>(cmd.I));
+                break;
+            case ImGuiTestEngineScript::CmdKind::NavMoveTo:
+                ctx->NavMoveTo(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::NavActivate:
+                ctx->NavActivate();
+                break;
+            case ImGuiTestEngineScript::CmdKind::NavInput:
+                ctx->NavInput();
+                break;
+            case ImGuiTestEngineScript::CmdKind::WindowClose:
+                ctx->WindowClose(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::WindowCollapse:
+                ctx->WindowCollapse(cmd.A.c_str(), cmd.I != 0);
+                break;
+            case ImGuiTestEngineScript::CmdKind::WindowFocus:
+                ctx->WindowFocus(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::WindowBringToFront:
+                ctx->WindowBringToFront(cmd.A.c_str());
+                break;
+            case ImGuiTestEngineScript::CmdKind::WindowMove:
+                ctx->WindowMove(cmd.A.c_str(), ImVec2(cmd.F, cmd.G));
+                break;
+            case ImGuiTestEngineScript::CmdKind::WindowResize:
+                ctx->WindowResize(cmd.A.c_str(), ImVec2(cmd.F, cmd.G));
                 break;
             case ImGuiTestEngineScript::CmdKind::Sleep:
                 ctx->Sleep(cmd.F);
@@ -615,6 +727,17 @@ void imgui_test_engine_script_item_click(ImGuiTestEngineScript* script, const ch
     });
 }
 
+void imgui_test_engine_script_item_click_with_button(ImGuiTestEngineScript* script, const char* ref, int button) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ItemClickWithButton;
+    cmd.A = ref ? ref : "";
+    cmd.I = button;
+    script->Cmds.push_back(std::move(cmd));
+}
+
 void imgui_test_engine_script_item_double_click(ImGuiTestEngineScript* script, const char* ref) {
     if (script == nullptr) {
         return;
@@ -710,6 +833,28 @@ void imgui_test_engine_script_mouse_move(ImGuiTestEngineScript* script, const ch
     });
 }
 
+void imgui_test_engine_script_mouse_move_to_pos(ImGuiTestEngineScript* script, float x, float y) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseMoveToPos;
+    cmd.F = x;
+    cmd.G = y;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_mouse_teleport_to_pos(ImGuiTestEngineScript* script, float x, float y) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseTeleportToPos;
+    cmd.F = x;
+    cmd.G = y;
+    script->Cmds.push_back(std::move(cmd));
+}
+
 void imgui_test_engine_script_mouse_move_to_void(ImGuiTestEngineScript* script) {
     if (script == nullptr) {
         return;
@@ -720,6 +865,79 @@ void imgui_test_engine_script_mouse_move_to_void(ImGuiTestEngineScript* script) 
         {},
         0,
     });
+}
+
+void imgui_test_engine_script_mouse_click(ImGuiTestEngineScript* script, int button) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseClick;
+    cmd.I = button;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_mouse_click_multi(ImGuiTestEngineScript* script, int button, int count) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseClickMulti;
+    cmd.I = button;
+    cmd.J = count;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_mouse_double_click(ImGuiTestEngineScript* script, int button) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseDoubleClick;
+    cmd.I = button;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_mouse_down(ImGuiTestEngineScript* script, int button) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseDown;
+    cmd.I = button;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_mouse_up(ImGuiTestEngineScript* script, int button) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseUp;
+    cmd.I = button;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_mouse_lift_drag_threshold(ImGuiTestEngineScript* script, int button) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseLiftDragThreshold;
+    cmd.I = button;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_mouse_drag_with_delta(ImGuiTestEngineScript* script, float dx, float dy, int button) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MouseDragWithDelta;
+    cmd.I = button;
+    cmd.F = dx;
+    cmd.G = dy;
+    script->Cmds.push_back(std::move(cmd));
 }
 
 void imgui_test_engine_script_mouse_click_on_void(ImGuiTestEngineScript* script, int button, int count) {
@@ -1020,6 +1238,30 @@ void imgui_test_engine_script_combo_click_all(ImGuiTestEngineScript* script, con
     script->Cmds.push_back(std::move(cmd));
 }
 
+void imgui_test_engine_script_item_open_all(ImGuiTestEngineScript* script, const char* ref_parent, int depth, int passes) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ItemOpenAll;
+    cmd.A = ref_parent ? ref_parent : "";
+    cmd.I = depth;
+    cmd.J = passes;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_item_close_all(ImGuiTestEngineScript* script, const char* ref_parent, int depth, int passes) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::ItemCloseAll;
+    cmd.A = ref_parent ? ref_parent : "";
+    cmd.I = depth;
+    cmd.J = passes;
+    script->Cmds.push_back(std::move(cmd));
+}
+
 void imgui_test_engine_script_table_click_header(
     ImGuiTestEngineScript* script,
     const char* table_ref,
@@ -1034,6 +1276,58 @@ void imgui_test_engine_script_table_click_header(
     cmd.A = table_ref ? table_ref : "";
     cmd.B = label ? label : "";
     cmd.I = key_mods;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_table_open_context_menu(ImGuiTestEngineScript* script, const char* table_ref, int column_n) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::TableOpenContextMenu;
+    cmd.A = table_ref ? table_ref : "";
+    cmd.I = column_n;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_table_set_column_enabled(ImGuiTestEngineScript* script, const char* table_ref, int column_n, bool enabled) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::TableSetColumnEnabled;
+    cmd.A = table_ref ? table_ref : "";
+    cmd.I = column_n;
+    cmd.J = enabled ? 1 : 0;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_table_set_column_enabled_by_label(
+    ImGuiTestEngineScript* script,
+    const char* table_ref,
+    const char* label,
+    bool enabled
+) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::TableSetColumnEnabledByLabel;
+    cmd.A = table_ref ? table_ref : "";
+    cmd.B = label ? label : "";
+    cmd.I = enabled ? 1 : 0;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_table_resize_column(ImGuiTestEngineScript* script, const char* table_ref, int column_n, float width) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::TableResizeColumn;
+    cmd.A = table_ref ? table_ref : "";
+    cmd.I = column_n;
+    cmd.F = width;
     script->Cmds.push_back(std::move(cmd));
 }
 
@@ -1064,6 +1358,129 @@ void imgui_test_engine_script_menu_uncheck(ImGuiTestEngineScript* script, const 
     ImGuiTestEngineScript::Cmd cmd;
     cmd.Kind = ImGuiTestEngineScript::CmdKind::MenuUncheck;
     cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_menu_check_all(ImGuiTestEngineScript* script, const char* ref_parent) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MenuCheckAll;
+    cmd.A = ref_parent ? ref_parent : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_menu_uncheck_all(ImGuiTestEngineScript* script, const char* ref_parent) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::MenuUncheckAll;
+    cmd.A = ref_parent ? ref_parent : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_set_input_mode(ImGuiTestEngineScript* script, int input_source) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::SetInputMode;
+    cmd.I = input_source;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_nav_move_to(ImGuiTestEngineScript* script, const char* ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::NavMoveTo;
+    cmd.A = ref ? ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_nav_activate(ImGuiTestEngineScript* script) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::NavActivate,
+    });
+}
+
+void imgui_test_engine_script_nav_input(ImGuiTestEngineScript* script) {
+    if (script == nullptr) {
+        return;
+    }
+    script->Cmds.push_back(ImGuiTestEngineScript::Cmd{
+        ImGuiTestEngineScript::CmdKind::NavInput,
+    });
+}
+
+void imgui_test_engine_script_window_close(ImGuiTestEngineScript* script, const char* window_ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::WindowClose;
+    cmd.A = window_ref ? window_ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_window_collapse(ImGuiTestEngineScript* script, const char* window_ref, bool collapsed) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::WindowCollapse;
+    cmd.A = window_ref ? window_ref : "";
+    cmd.I = collapsed ? 1 : 0;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_window_focus(ImGuiTestEngineScript* script, const char* window_ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::WindowFocus;
+    cmd.A = window_ref ? window_ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_window_bring_to_front(ImGuiTestEngineScript* script, const char* window_ref) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::WindowBringToFront;
+    cmd.A = window_ref ? window_ref : "";
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_window_move(ImGuiTestEngineScript* script, const char* window_ref, float x, float y) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::WindowMove;
+    cmd.A = window_ref ? window_ref : "";
+    cmd.F = x;
+    cmd.G = y;
+    script->Cmds.push_back(std::move(cmd));
+}
+
+void imgui_test_engine_script_window_resize(ImGuiTestEngineScript* script, const char* window_ref, float w, float h) {
+    if (script == nullptr) {
+        return;
+    }
+    ImGuiTestEngineScript::Cmd cmd;
+    cmd.Kind = ImGuiTestEngineScript::CmdKind::WindowResize;
+    cmd.A = window_ref ? window_ref : "";
+    cmd.F = w;
+    cmd.G = h;
     script->Cmds.push_back(std::move(cmd));
 }
 

@@ -109,6 +109,7 @@ ImGuiTestEngineScript* imgui_test_engine_script_create(void);
 void imgui_test_engine_script_destroy(ImGuiTestEngineScript* script);
 void imgui_test_engine_script_set_ref(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_item_click(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_item_click_with_button(ImGuiTestEngineScript* script, const char* ref, int button);
 void imgui_test_engine_script_item_double_click(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_item_open(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_item_close(ImGuiTestEngineScript* script, const char* ref);
@@ -117,7 +118,16 @@ void imgui_test_engine_script_item_uncheck(ImGuiTestEngineScript* script, const 
 void imgui_test_engine_script_item_input_int(ImGuiTestEngineScript* script, const char* ref, int v);
 void imgui_test_engine_script_item_input_str(ImGuiTestEngineScript* script, const char* ref, const char* v);
 void imgui_test_engine_script_mouse_move(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_mouse_move_to_pos(ImGuiTestEngineScript* script, float x, float y);
+void imgui_test_engine_script_mouse_teleport_to_pos(ImGuiTestEngineScript* script, float x, float y);
 void imgui_test_engine_script_mouse_move_to_void(ImGuiTestEngineScript* script);
+void imgui_test_engine_script_mouse_click(ImGuiTestEngineScript* script, int button);
+void imgui_test_engine_script_mouse_click_multi(ImGuiTestEngineScript* script, int button, int count);
+void imgui_test_engine_script_mouse_double_click(ImGuiTestEngineScript* script, int button);
+void imgui_test_engine_script_mouse_down(ImGuiTestEngineScript* script, int button);
+void imgui_test_engine_script_mouse_up(ImGuiTestEngineScript* script, int button);
+void imgui_test_engine_script_mouse_lift_drag_threshold(ImGuiTestEngineScript* script, int button);
+void imgui_test_engine_script_mouse_drag_with_delta(ImGuiTestEngineScript* script, float dx, float dy, int button);
 void imgui_test_engine_script_mouse_click_on_void(ImGuiTestEngineScript* script, int button, int count);
 void imgui_test_engine_script_mouse_wheel(ImGuiTestEngineScript* script, float dx, float dy);
 // Key chord is `ImGuiKeyChord` (an int) from Dear ImGui.
@@ -165,6 +175,29 @@ void imgui_test_engine_script_table_click_header(
 void imgui_test_engine_script_menu_click(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_menu_check(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_menu_uncheck(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_menu_check_all(ImGuiTestEngineScript* script, const char* ref_parent);
+void imgui_test_engine_script_menu_uncheck_all(ImGuiTestEngineScript* script, const char* ref_parent);
+void imgui_test_engine_script_set_input_mode(ImGuiTestEngineScript* script, int input_source);
+void imgui_test_engine_script_nav_move_to(ImGuiTestEngineScript* script, const char* ref);
+void imgui_test_engine_script_nav_activate(ImGuiTestEngineScript* script);
+void imgui_test_engine_script_nav_input(ImGuiTestEngineScript* script);
+void imgui_test_engine_script_item_open_all(ImGuiTestEngineScript* script, const char* ref_parent, int depth, int passes);
+void imgui_test_engine_script_item_close_all(ImGuiTestEngineScript* script, const char* ref_parent, int depth, int passes);
+void imgui_test_engine_script_window_close(ImGuiTestEngineScript* script, const char* window_ref);
+void imgui_test_engine_script_window_collapse(ImGuiTestEngineScript* script, const char* window_ref, bool collapsed);
+void imgui_test_engine_script_window_focus(ImGuiTestEngineScript* script, const char* window_ref);
+void imgui_test_engine_script_window_bring_to_front(ImGuiTestEngineScript* script, const char* window_ref);
+void imgui_test_engine_script_window_move(ImGuiTestEngineScript* script, const char* window_ref, float x, float y);
+void imgui_test_engine_script_window_resize(ImGuiTestEngineScript* script, const char* window_ref, float w, float h);
+void imgui_test_engine_script_table_open_context_menu(ImGuiTestEngineScript* script, const char* table_ref, int column_n);
+void imgui_test_engine_script_table_set_column_enabled(ImGuiTestEngineScript* script, const char* table_ref, int column_n, bool enabled);
+void imgui_test_engine_script_table_set_column_enabled_by_label(
+    ImGuiTestEngineScript* script,
+    const char* table_ref,
+    const char* label,
+    bool enabled
+);
+void imgui_test_engine_script_table_resize_column(ImGuiTestEngineScript* script, const char* table_ref, int column_n, float width);
 void imgui_test_engine_script_assert_item_exists(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_assert_item_visible(ImGuiTestEngineScript* script, const char* ref);
 void imgui_test_engine_script_assert_item_read_int_eq(ImGuiTestEngineScript* script, const char* ref, int expected);

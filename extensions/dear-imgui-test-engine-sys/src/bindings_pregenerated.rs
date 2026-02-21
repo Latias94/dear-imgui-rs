@@ -142,6 +142,13 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_click_with_button(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+        button: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_item_double_click(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
@@ -192,7 +199,66 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_move_to_pos(
+        script: *mut ImGuiTestEngineScript,
+        x: ::std::os::raw::c_float,
+        y: ::std::os::raw::c_float,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_teleport_to_pos(
+        script: *mut ImGuiTestEngineScript,
+        x: ::std::os::raw::c_float,
+        y: ::std::os::raw::c_float,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_mouse_move_to_void(script: *mut ImGuiTestEngineScript);
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_click(
+        script: *mut ImGuiTestEngineScript,
+        button: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_click_multi(
+        script: *mut ImGuiTestEngineScript,
+        button: ::std::os::raw::c_int,
+        count: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_double_click(
+        script: *mut ImGuiTestEngineScript,
+        button: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_down(
+        script: *mut ImGuiTestEngineScript,
+        button: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_up(
+        script: *mut ImGuiTestEngineScript,
+        button: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_lift_drag_threshold(
+        script: *mut ImGuiTestEngineScript,
+        button: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_mouse_drag_with_delta(
+        script: *mut ImGuiTestEngineScript,
+        dx: ::std::os::raw::c_float,
+        dy: ::std::os::raw::c_float,
+        button: ::std::os::raw::c_int,
+    );
 }
 unsafe extern "C" {
     pub fn imgui_test_engine_script_mouse_click_on_void(
@@ -372,11 +438,58 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_open_all(
+        script: *mut ImGuiTestEngineScript,
+        ref_parent: *const ::std::os::raw::c_char,
+        depth: ::std::os::raw::c_int,
+        passes: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_item_close_all(
+        script: *mut ImGuiTestEngineScript,
+        ref_parent: *const ::std::os::raw::c_char,
+        depth: ::std::os::raw::c_int,
+        passes: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
     pub fn imgui_test_engine_script_table_click_header(
         script: *mut ImGuiTestEngineScript,
         table_ref: *const ::std::os::raw::c_char,
         label: *const ::std::os::raw::c_char,
         key_mods: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_table_open_context_menu(
+        script: *mut ImGuiTestEngineScript,
+        table_ref: *const ::std::os::raw::c_char,
+        column_n: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_table_set_column_enabled(
+        script: *mut ImGuiTestEngineScript,
+        table_ref: *const ::std::os::raw::c_char,
+        column_n: ::std::os::raw::c_int,
+        enabled: bool,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_table_set_column_enabled_by_label(
+        script: *mut ImGuiTestEngineScript,
+        table_ref: *const ::std::os::raw::c_char,
+        label: *const ::std::os::raw::c_char,
+        enabled: bool,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_table_resize_column(
+        script: *mut ImGuiTestEngineScript,
+        table_ref: *const ::std::os::raw::c_char,
+        column_n: ::std::os::raw::c_int,
+        width: ::std::os::raw::c_float,
     );
 }
 unsafe extern "C" {
@@ -395,6 +508,77 @@ unsafe extern "C" {
     pub fn imgui_test_engine_script_menu_uncheck(
         script: *mut ImGuiTestEngineScript,
         ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_menu_check_all(
+        script: *mut ImGuiTestEngineScript,
+        ref_parent: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_menu_uncheck_all(
+        script: *mut ImGuiTestEngineScript,
+        ref_parent: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_set_input_mode(
+        script: *mut ImGuiTestEngineScript,
+        input_source: ::std::os::raw::c_int,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_nav_move_to(
+        script: *mut ImGuiTestEngineScript,
+        ref_: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_nav_activate(script: *mut ImGuiTestEngineScript);
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_nav_input(script: *mut ImGuiTestEngineScript);
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_window_close(
+        script: *mut ImGuiTestEngineScript,
+        window_ref: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_window_collapse(
+        script: *mut ImGuiTestEngineScript,
+        window_ref: *const ::std::os::raw::c_char,
+        collapsed: bool,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_window_focus(
+        script: *mut ImGuiTestEngineScript,
+        window_ref: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_window_bring_to_front(
+        script: *mut ImGuiTestEngineScript,
+        window_ref: *const ::std::os::raw::c_char,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_window_move(
+        script: *mut ImGuiTestEngineScript,
+        window_ref: *const ::std::os::raw::c_char,
+        x: ::std::os::raw::c_float,
+        y: ::std::os::raw::c_float,
+    );
+}
+unsafe extern "C" {
+    pub fn imgui_test_engine_script_window_resize(
+        script: *mut ImGuiTestEngineScript,
+        window_ref: *const ::std::os::raw::c_char,
+        w: ::std::os::raw::c_float,
+        h: ::std::os::raw::c_float,
     );
 }
 unsafe extern "C" {
