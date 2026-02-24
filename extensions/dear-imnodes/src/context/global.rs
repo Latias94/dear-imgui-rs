@@ -32,6 +32,7 @@ impl Context {
 
     /// Set as current ImNodes context
     pub fn set_as_current(&self) {
+        unsafe { sys::imnodes_SetImGuiContext(self.imgui_ctx_raw) };
         unsafe { sys::imnodes_SetCurrentContext(self.raw) };
     }
 
@@ -56,6 +57,7 @@ impl Drop for Context {
     fn drop(&mut self) {
         if !self.raw.is_null() {
             unsafe {
+                sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
                 if sys::imnodes_GetCurrentContext() == self.raw {
                     sys::imnodes_SetCurrentContext(std::ptr::null_mut());
                 }
@@ -68,6 +70,21 @@ impl Drop for Context {
 // ImNodes context interacts with Dear ImGui state and is not thread-safe.
 
 impl EditorContext {
+    #[inline]
+    fn bind_current(&self) {
+        let imgui_ctx_raw = unsafe { imgui_sys::igGetCurrentContext() };
+        assert!(
+            !imgui_ctx_raw.is_null(),
+            "dear-imnodes: EditorContext methods require an active ImGui context"
+        );
+        unsafe { sys::imnodes_SetImGuiContext(imgui_ctx_raw) };
+        assert!(
+            !unsafe { sys::imnodes_GetCurrentContext() }.is_null(),
+            "dear-imnodes: EditorContext methods require an active ImNodes context (call Context::set_as_current or use NodesUi)"
+        );
+        unsafe { sys::imnodes_EditorContextSet(self.raw) };
+    }
+
     pub fn try_create() -> dear_imgui_rs::ImGuiResult<Self> {
         let raw = unsafe { sys::imnodes_EditorContextCreate() };
         if raw.is_null() {
@@ -86,17 +103,17 @@ impl EditorContext {
     }
 
     pub fn set_current(&self) {
-        unsafe { sys::imnodes_EditorContextSet(self.raw) };
+        self.bind_current();
     }
 
     pub fn get_panning(&self) -> [f32; 2] {
-        unsafe { sys::imnodes_EditorContextSet(self.raw) };
+        self.bind_current();
         let out = unsafe { crate::compat_ffi::imnodes_EditorContextGetPanning() };
         [out.x, out.y]
     }
 
     pub fn reset_panning(&self, pos: [f32; 2]) {
-        unsafe { sys::imnodes_EditorContextSet(self.raw) };
+        self.bind_current();
         unsafe {
             sys::imnodes_EditorContextResetPanning(sys::ImVec2_c {
                 x: pos[0],
@@ -106,12 +123,13 @@ impl EditorContext {
     }
 
     pub fn move_to_node(&self, node_id: i32) {
-        unsafe { sys::imnodes_EditorContextSet(self.raw) };
+        self.bind_current();
         unsafe { sys::imnodes_EditorContextMoveToNode(node_id) };
     }
 
     /// Save this editor's state to an INI string
     pub fn save_state_to_ini_string(&self) -> String {
+        self.bind_current();
         unsafe {
             let mut size: usize = 0;
             let ptr = sys::imnodes_SaveEditorStateToIniString(self.raw, &mut size as *mut usize);
@@ -128,6 +146,7 @@ impl EditorContext {
 
     /// Load this editor's state from an INI string
     pub fn load_state_from_ini_string(&self, data: &str) {
+        self.bind_current();
         unsafe {
             sys::imnodes_LoadEditorStateFromIniString(
                 self.raw,
@@ -139,6 +158,7 @@ impl EditorContext {
 
     /// Save this editor's state directly to an INI file
     pub fn save_state_to_ini_file(&self, file_name: &str) {
+        self.bind_current();
         let file_name = if file_name.contains('\0') {
             ""
         } else {
@@ -151,6 +171,7 @@ impl EditorContext {
 
     /// Load this editor's state from an INI file
     pub fn load_state_from_ini_file(&self, file_name: &str) {
+        self.bind_current();
         let file_name = if file_name.contains('\0') {
             ""
         } else {

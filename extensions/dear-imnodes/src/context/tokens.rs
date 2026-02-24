@@ -1,11 +1,11 @@
 use crate::sys;
 
-use super::ImNodesScope;
+use super::{Context, ImNodesScope};
 
 /// RAII token for a node block
 pub struct NodeToken<'a> {
     pub(super) scope: ImNodesScope,
-    pub(crate) _phantom: std::marker::PhantomData<&'a ()>,
+    pub(crate) _phantom: std::marker::PhantomData<&'a Context>,
 }
 
 impl<'a> NodeToken<'a> {
@@ -42,7 +42,7 @@ pub(crate) enum AttrKind {
 pub struct AttributeToken<'a> {
     pub(crate) kind: AttrKind,
     pub(super) scope: ImNodesScope,
-    pub(crate) _phantom: std::marker::PhantomData<&'a ()>,
+    pub(crate) _phantom: std::marker::PhantomData<&'a Context>,
 }
 
 impl<'a> AttributeToken<'a> {

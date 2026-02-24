@@ -30,7 +30,7 @@ pub struct EditorContext {
 }
 
 #[derive(Copy, Clone)]
-struct ImNodesScope {
+pub(crate) struct ImNodesScope {
     imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
     ctx_raw: *mut sys::ImNodesContext,
     editor_raw: Option<*mut sys::ImNodesEditorContext>,
@@ -38,7 +38,7 @@ struct ImNodesScope {
 
 impl ImNodesScope {
     #[inline]
-    fn bind(self) {
+    pub(crate) fn bind(self) {
         unsafe {
             sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
             sys::imnodes_SetCurrentContext(self.ctx_raw);

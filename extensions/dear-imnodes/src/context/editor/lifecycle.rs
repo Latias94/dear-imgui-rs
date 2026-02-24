@@ -26,6 +26,11 @@ impl<'ui> NodeEditor<'ui> {
     }
 
     #[inline]
+    pub(crate) fn scope(&self) -> ImNodesScope {
+        self.scope
+    }
+
+    #[inline]
     pub(super) fn style_ptr(&self) -> *mut sys::ImNodesStyle {
         self.bind();
         let ptr = unsafe { sys::imnodes_GetStyle() };

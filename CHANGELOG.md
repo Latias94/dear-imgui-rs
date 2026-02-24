@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-02-24
+
+### Fixed
+
+- Extensions
+  - `dear-imnodes`: fix potential use-after-free hazards by scoping editor post-frame handles and style tokens to the active editor/frame lifetime.
+  - `dear-imnodes`: ensure minimap callbacks remain alive for the full editor frame.
+  - `dear-imnodes`: harden context binding (ImGui/ImNodes/editor) for editor operations and token drops.
+
+### Changed
+
+- Extensions
+  - `dear-imnodes`: refactor the context module into smaller submodules (no public API semantic changes intended).
+
 ## [0.10.1] - 2026-02-21
 
 ### Added
