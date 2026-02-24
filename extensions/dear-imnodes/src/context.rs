@@ -10,9 +10,9 @@ pub struct Context {
 
 impl Context {
     /// Try to create a new ImNodes context bound to the current Dear ImGui context
-    pub fn try_create(_imgui: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
+    pub fn try_create(imgui: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
         unsafe {
-            sys::imnodes_SetImGuiContext(imgui_sys::igGetCurrentContext());
+            sys::imnodes_SetImGuiContext(imgui.as_raw());
         }
         let raw = unsafe { sys::imnodes_CreateContext() };
         if raw.is_null() {
