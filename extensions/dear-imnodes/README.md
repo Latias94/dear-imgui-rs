@@ -39,17 +39,17 @@ Basic setup and per-frame usage:
 use dear_imgui_rs::Ui;
 use dear_imnodes as imnodes;
 
-// One-time setup (alongside your ImGui context)
-fn init(imgui_ctx: &dear_imgui_rs::Context) -> (imnodes::Context, imnodes::EditorContext) {
-    let nodes_ctx = imnodes::Context::create(imgui_ctx);
-    let editor_ctx = imnodes::EditorContext::create();
-    (nodes_ctx, editor_ctx)
-}
+ // One-time setup (alongside your ImGui context)
+ fn init(imgui_ctx: &dear_imgui_rs::Context) -> (imnodes::Context, imnodes::EditorContext) {
+     let nodes_ctx = imnodes::Context::create(imgui_ctx);
+     let editor_ctx = nodes_ctx.create_editor_context();
+     (nodes_ctx, editor_ctx)
+ }
 
 // Per-frame draw
-fn draw(ui: &Ui, nodes_ctx: &imnodes::Context, editor_ctx: &imnodes::EditorContext) {
-    let nodes = ui.imnodes(nodes_ctx);
-    let editor = nodes.editor(Some(editor_ctx));
+ fn draw(ui: &Ui, nodes_ctx: &imnodes::Context, editor_ctx: &imnodes::EditorContext) {
+     let nodes = ui.imnodes(nodes_ctx);
+     let editor = nodes.editor(Some(editor_ctx));
 
     // A simple node with input/output pins
     let _n = editor.node(1).title_bar(|| ui.text("My Node"));
@@ -60,18 +60,19 @@ fn draw(ui: &Ui, nodes_ctx: &imnodes::Context, editor_ctx: &imnodes::EditorConte
     ui.text("Out");
     _out.end();
 
-    // Draw a link
-    editor.link(100, 10, 11);
+     // Draw a link
+     editor.link(100, 10, 11);
 
-    // Handle new link creation
-    if let Some(link) = editor.is_link_created() {
-        // link.start_attr, link.end_attr, link.from_snap
-    }
+     // Optional: Mini-map
+     editor.minimap(0.25, imnodes::MiniMapLocation::TopRight);
 
-    // Optional: Mini-map
-    editor.minimap(0.25, imnodes::MiniMapLocation::TopRight);
-}
-```
+     // End the editor and handle post-editor interactions
+     let post = editor.end();
+     if let Some(link) = post.is_link_created() {
+         // link.start_attr, link.end_attr, link.from_snap
+     }
+ }
+ ```
 
 ### IO and Interaction
 
@@ -116,49 +117,53 @@ editor.set_color(imnodes::ColorElement::GridLinePrimary, [0.6, 0.6, 0.8, 1.0]);
 
 ### Node Positions and Queries
 
-```rust
-// Position nodes (grid/editor/screen space helpers available)
-editor.set_node_pos_grid(1, [100.0, 120.0]);
-let size = editor.get_node_dimensions(1); // [w, h]
+ ```rust
+ // Position nodes (grid/editor/screen space helpers available)
+ editor.set_node_pos_grid(1, [100.0, 120.0]);
+ let size = editor.get_node_dimensions(1); // [w, h]
 
-// Hover/active queries
-if editor.is_editor_hovered() { /* ... */ }
-if let Some(node_id) = editor.hovered_node() { /* ... */ }
-if editor.is_attribute_active() { /* ... */ }
-```
+ // End the editor before running post-editor queries
+ let post = editor.end();
+ if post.is_editor_hovered() { /* ... */ }
+ if let Some(node_id) = post.hovered_node() { /* ... */ }
+ if post.is_attribute_active() { /* ... */ }
+ ```
 
 ### Selection and Link Lifecycle
 
-```rust
-// Selection helpers
-let selected_nodes = editor.selected_nodes();
-let selected_links = editor.selected_links();
+ ```rust
+ let post = editor.end();
 
-// Link lifecycle
-if let Some(created) = editor.is_link_created_with_nodes() {
-    // created.start_node, created.start_attr, created.end_node, created.end_attr, created.from_snap
-}
-if let Some(link_id) = editor.is_link_destroyed() {
-    // handle removal
-}
-```
+ // Selection helpers
+ let selected_nodes = post.selected_nodes();
+ let selected_links = post.selected_links();
+
+ // Link lifecycle
+ if let Some(created) = post.is_link_created_with_nodes() {
+     // created.start_node, created.start_attr, created.end_node, created.end_attr, created.from_snap
+ }
+ if let Some(link_id) = post.is_link_destroyed() {
+     // handle removal
+ }
+ ```
 
 ### Saving/Loading Editor State
 
-Use `EditorContext` to persist per-editor state across sessions, or use post-editor helpers for the current editor:
+ Use `EditorContext` to persist per-editor state across sessions, or use post-editor helpers for the current editor:
 
-```rust
-// Per-editor state (no active frame required)
-let s = editor_ctx.save_state_to_ini_string();
-editor_ctx.load_state_from_ini_string(&s);
-editor_ctx.save_state_to_ini_file("nodes.ini");
-editor_ctx.load_state_from_ini_file("nodes.ini");
+ ```rust
+ // Per-editor state (no active frame required)
+ let bound = nodes_ctx.bind_editor(editor_ctx);
+ let s = bound.save_state_to_ini_string();
+ bound.load_state_from_ini_string(&s);
+ bound.save_state_to_ini_file("nodes.ini");
+ bound.load_state_from_ini_file("nodes.ini");
 
-// Or directly after ending a frame
-let post = editor.end();
-let s2 = post.save_state_to_ini_string();
-post.load_state_from_ini_string(&s2);
-post.save_state_to_ini_file("nodes.ini");
-```
+ // Or directly after ending a frame
+ let post = editor.end();
+ let s2 = post.save_state_to_ini_string();
+ post.load_state_from_ini_string(&s2);
+ post.save_state_to_ini_file("nodes.ini");
+ ```
 
 See crate docs for the full API surface and patterns.

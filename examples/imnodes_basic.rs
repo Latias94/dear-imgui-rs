@@ -188,8 +188,10 @@ impl AppWindow {
 
         // Setup ImNodes
         let nodes_context = imnodes::Context::create(&context);
-        let editor_context = imnodes::EditorContext::create();
-        let editor_context_b = imnodes::EditorContext::create();
+        let editor_context = nodes_context.create_editor_context();
+        let editor_context_b = nodes_context.create_editor_context();
+        let editor_context_shader = nodes_context.create_editor_context();
+        let editor_context_style = nodes_context.create_editor_context();
 
         let imgui = ImguiState {
             context,
@@ -198,8 +200,8 @@ impl AppWindow {
             nodes_context,
             editor_context,
             editor_context_b,
-            editor_context_shader: imnodes::EditorContext::create(),
-            editor_context_style: imnodes::EditorContext::create(),
+            editor_context_shader,
+            editor_context_style,
             saved_ini: None,
             clear_color: wgpu::Color {
                 r: 0.1,
@@ -484,7 +486,11 @@ impl AppWindow {
                                 EditorACtxAction::AddNodeHere(pos) => {
                                     let nid = self.graph.next_node_id;
                                     self.graph.next_node_id += 1;
-                                    let panning = self.imgui.editor_context.get_panning();
+                                    let panning = self
+                                        .imgui
+                                        .nodes_context
+                                        .bind_editor(&self.imgui.editor_context)
+                                        .get_panning();
                                     let grid_pos = [
                                         pos[0] - self.editor_a_canvas_origin[0] - panning[0],
                                         pos[1] - self.editor_a_canvas_origin[1] - panning[1],
@@ -755,30 +761,34 @@ impl AppWindow {
                             &self.imgui.nodes_context,
                             Some(&self.imgui.editor_context_b),
                         );
-                        let _c_title = editor.push_color(
-                            dear_imnodes::ColorElement::TitleBar,
-                            [0.90, 0.50, 0.30, 1.0],
-                        );
-                        let _c_link = editor
-                            .push_color(dear_imnodes::ColorElement::Link, [0.10, 0.80, 0.40, 1.0]);
-                        let _n1 = editor.node(201);
-                        _n1.title_bar(|| ui.text("Scoped Node 201"));
                         {
-                            let _out = editor.output_attr(211, imnodes::PinShape::CircleFilled);
-                            ui.text("Out");
-                            _out.end();
+                            let _c_title = editor.push_color(
+                                dear_imnodes::ColorElement::TitleBar,
+                                [0.90, 0.50, 0.30, 1.0],
+                            );
+                            let _c_link = editor.push_color(
+                                dear_imnodes::ColorElement::Link,
+                                [0.10, 0.80, 0.40, 1.0],
+                            );
+                            let _n1 = editor.node(201);
+                            _n1.title_bar(|| ui.text("Scoped Node 201"));
+                            {
+                                let _out = editor.output_attr(211, imnodes::PinShape::CircleFilled);
+                                ui.text("Out");
+                                _out.end();
+                            }
+                            _n1.end();
+                            let _n2 = editor.node(202);
+                            _n2.title_bar(|| ui.text("Scoped Node 202"));
+                            {
+                                let _in = editor.input_attr(220, imnodes::PinShape::Circle);
+                                ui.text("In");
+                                _in.end();
+                            }
+                            _n2.end();
+                            editor.link(5000, 211, 220);
                         }
-                        _n1.end();
-                        let _n2 = editor.node(202);
-                        _n2.title_bar(|| ui.text("Scoped Node 202"));
-                        {
-                            let _in = editor.input_attr(220, imnodes::PinShape::Circle);
-                            ui.text("In");
-                            _in.end();
-                        }
-                        _n2.end();
-                        editor.link(5000, 211, 220);
-                        editor.end();
+                        let _post = editor.end();
                         tab.end();
                     }
                     if let Some(tab) = ui.tab_item("Advanced Style") {

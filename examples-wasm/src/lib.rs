@@ -149,7 +149,7 @@ impl AppWindow {
         #[cfg(feature = "imnodes")]
         let imnodes_ctx = ImnodesContext::create(&context);
         #[cfg(feature = "imnodes")]
-        let imnodes_editor = ImnodesEditorContext::create();
+        let imnodes_editor = imnodes_ctx.create_editor_context();
         #[cfg(feature = "imguizmo")]
         let guizmo_model = [
             1.0, 0.0, 0.0, 0.0, //
