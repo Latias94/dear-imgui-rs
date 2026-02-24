@@ -32,12 +32,12 @@ use winit::{
 };
 
 struct ImguiState {
-    context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
     plot_context: PlotContext,
     clear_color: wgpu::Color,
     last_frame: Instant,
+    context: Context,
 }
 
 struct AppWindow {
@@ -129,7 +129,6 @@ impl AppWindow {
         let plot_context = PlotContext::create(&context);
 
         let imgui = ImguiState {
-            context,
             platform,
             renderer,
             plot_context,
@@ -140,6 +139,7 @@ impl AppWindow {
                 a: 1.0,
             },
             last_frame: Instant::now(),
+            context,
         };
 
         Ok(Self {

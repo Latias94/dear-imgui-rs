@@ -29,7 +29,6 @@ use winit::{
 type WindowRc = Rc<Window>;
 
 struct ImguiState {
-    context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
     clear_color: wgpu::Color,
@@ -48,6 +47,7 @@ struct ImguiState {
     guizmo_model: [f32; 16],
     #[cfg(feature = "imguizmo-quat")]
     quat_rot: [f32; 4],
+    context: Context,
 }
 
 struct AppWindow {
@@ -161,7 +161,6 @@ impl AppWindow {
         let quat_rot = [0.0_f32, 0.0, 0.0, 1.0];
 
         let imgui = ImguiState {
-            context,
             platform,
             renderer,
             clear_color: wgpu::Color {
@@ -185,6 +184,7 @@ impl AppWindow {
             guizmo_model,
             #[cfg(feature = "imguizmo-quat")]
             quat_rot,
+            context,
         };
 
         Ok(Self {

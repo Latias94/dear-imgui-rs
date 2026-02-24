@@ -184,7 +184,6 @@ impl Default for GameEngineState {
 }
 
 struct ImguiState {
-    context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
     #[allow(dead_code)] // Only used when the multi-viewport feature is enabled.
@@ -199,6 +198,7 @@ struct ImguiState {
     first_frame: bool,
     #[cfg(feature = "implot")]
     plot_context: PlotContext,
+    context: Context,
 }
 
 impl Drop for ImguiState {
@@ -993,7 +993,6 @@ impl AppWindow {
         let plot_context = PlotContext::create(&context);
 
         self.imgui = Some(ImguiState {
-            context,
             platform,
             renderer,
             enable_viewports,
@@ -1007,6 +1006,7 @@ impl AppWindow {
             first_frame: true,
             #[cfg(feature = "implot")]
             plot_context,
+            context,
         });
     }
 
