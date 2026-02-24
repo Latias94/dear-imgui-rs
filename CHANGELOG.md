@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imnodes`: harden context binding (ImGui/ImNodes/editor) for editor operations and token drops.
   - `dear-imnodes`: guard ImGui context rebinding against dropped contexts (panic instead of UB on misuse).
   - `dear-imnodes`: validate raw style-var indices in `push_style_var_*` helpers to avoid out-of-bounds access in release builds.
+  - `dear-implot`: harden ImGui context binding and guard context `Drop` against dropped ImGui contexts (best-effort leak instead of UB).
+  - `dear-implot3d`: guard context `Drop` against dropped ImGui contexts (best-effort leak instead of UB).
+  - `dear-imgui-test-engine`: record bound ImGui context liveness and guard shutdown/drop order hazards (panic or best-effort leak instead of UB).
 
 ### Changed
 

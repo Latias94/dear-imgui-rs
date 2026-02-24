@@ -12,6 +12,8 @@ use std::{cell::RefCell, rc::Rc};
 /// You need both contexts to create plots.
 pub struct PlotContext {
     raw: *mut sys::ImPlotContext,
+    imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+    imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
 }
 
 impl PlotContext {
@@ -19,13 +21,19 @@ impl PlotContext {
     ///
     /// This should be called after creating the Dear ImGui context.
     /// The ImPlot context will use the same Dear ImGui context internally.
-    pub fn try_create(_imgui_ctx: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
-        // Bind ImPlot to the current Dear ImGui context before creating.
+    pub fn try_create(imgui_ctx: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
+        let imgui_ctx_raw = imgui_ctx.as_raw();
+        let imgui_alive = Some(imgui_ctx.alive_token());
+        assert_eq!(
+            unsafe { imgui_sys::igGetCurrentContext() },
+            imgui_ctx_raw,
+            "dear-implot: PlotContext must be created with the currently-active ImGui context"
+        );
+
+        // Bind ImPlot to the ImGui context before creating.
         // On some toolchains/platforms, not setting this can lead to crashes
         // if ImPlot initialization queries ImGui state during CreateContext.
-        unsafe {
-            sys::ImPlot_SetImGuiContext(imgui_sys::igGetCurrentContext());
-        }
+        unsafe { sys::ImPlot_SetImGuiContext(imgui_ctx_raw) };
 
         let raw = unsafe { sys::ImPlot_CreateContext() };
         if raw.is_null() {
@@ -35,11 +43,13 @@ impl PlotContext {
         }
 
         // Ensure the newly created context is current (defensive, CreateContext should do this).
-        unsafe {
-            sys::ImPlot_SetCurrentContext(raw);
-        }
+        unsafe { sys::ImPlot_SetCurrentContext(raw) };
 
-        Ok(Self { raw })
+        Ok(Self {
+            raw,
+            imgui_ctx_raw,
+            imgui_alive,
+        })
     }
 
     /// Create a new ImPlot context (panics on error)
@@ -55,12 +65,23 @@ impl PlotContext {
         if raw.is_null() {
             None
         } else {
-            Some(Self { raw })
+            Some(Self {
+                raw,
+                imgui_ctx_raw: unsafe { imgui_sys::igGetCurrentContext() },
+                imgui_alive: None,
+            })
         }
     }
 
     /// Set this context as the current ImPlot context
     pub fn set_as_current(&self) {
+        if let Some(alive) = &self.imgui_alive {
+            assert!(
+                alive.is_alive(),
+                "dear-implot: ImGui context has been dropped"
+            );
+            unsafe { sys::ImPlot_SetImGuiContext(self.imgui_ctx_raw) };
+        }
         unsafe {
             sys::ImPlot_SetCurrentContext(self.raw);
         }
@@ -71,6 +92,18 @@ impl PlotContext {
     /// This borrows both the ImPlot context and the Dear ImGui Ui,
     /// ensuring that plots can only be created when both are available.
     pub fn get_plot_ui<'ui>(&'ui self, ui: &'ui Ui) -> PlotUi<'ui> {
+        if let Some(alive) = &self.imgui_alive {
+            assert!(
+                alive.is_alive(),
+                "dear-implot: ImGui context has been dropped"
+            );
+            assert_eq!(
+                unsafe { imgui_sys::igGetCurrentContext() },
+                self.imgui_ctx_raw,
+                "dear-implot: PlotUi must be used with the currently-active ImGui context"
+            );
+        }
+        self.set_as_current();
         PlotUi { context: self, ui }
     }
 
@@ -88,7 +121,18 @@ impl PlotContext {
 impl Drop for PlotContext {
     fn drop(&mut self) {
         if !self.raw.is_null() {
+            if let Some(alive) = &self.imgui_alive {
+                if !alive.is_alive() {
+                    // Avoid calling into ImGui allocators after the context has been dropped.
+                    // Best-effort: leak the ImPlot context instead of risking UB.
+                    return;
+                }
+                unsafe { sys::ImPlot_SetImGuiContext(self.imgui_ctx_raw) };
+            }
             unsafe {
+                if sys::ImPlot_GetCurrentContext() == self.raw {
+                    sys::ImPlot_SetCurrentContext(std::ptr::null_mut());
+                }
                 sys::ImPlot_DestroyContext(self.raw);
             }
         }

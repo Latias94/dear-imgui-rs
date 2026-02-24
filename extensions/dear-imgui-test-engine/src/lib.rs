@@ -5,8 +5,8 @@
 
 use bitflags::bitflags;
 use dear_imgui_rs::{
-    Context, ImGuiError, ImGuiResult, KeyChord, KeyMods, MouseButton, Ui, with_scratch_txt,
-    with_scratch_txt_two,
+    Context, ContextAliveToken, ImGuiError, ImGuiResult, KeyChord, KeyMods, MouseButton, Ui,
+    with_scratch_txt, with_scratch_txt_two,
 };
 use dear_imgui_test_engine_sys as sys;
 use std::{marker::PhantomData, rc::Rc};
@@ -76,6 +76,8 @@ pub struct ResultSummary {
 /// The upstream engine is not thread-safe; create and use it on the same thread as the target ImGui context.
 pub struct TestEngine {
     raw: *mut sys::ImGuiTestEngine,
+    bound_imgui_ctx_raw: Option<*mut dear_imgui_rs::sys::ImGuiContext>,
+    bound_imgui_alive: Option<ContextAliveToken>,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
@@ -1220,6 +1222,8 @@ impl TestEngine {
         }
         Ok(Self {
             raw,
+            bound_imgui_ctx_raw: None,
+            bound_imgui_alive: None,
             _not_send_sync: PhantomData,
         })
     }
@@ -1279,6 +1283,8 @@ impl TestEngine {
         }
 
         unsafe { sys::imgui_test_engine_start(self.raw, ctx) };
+        self.bound_imgui_ctx_raw = Some(ctx);
+        self.bound_imgui_alive = Some(imgui_ctx.alive_token());
         Ok(())
     }
 
@@ -1303,7 +1309,15 @@ impl TestEngine {
     /// This is the most ergonomic shutdown path for Rust applications: it avoids relying on drop order
     /// between `Context` and `TestEngine`.
     pub fn shutdown(&mut self) {
+        if let Some(alive) = &self.bound_imgui_alive {
+            assert!(
+                alive.is_alive(),
+                "dear-imgui-test-engine: ImGui context has been dropped"
+            );
+        }
         unsafe { sys::imgui_test_engine_unbind(self.raw) };
+        self.bound_imgui_ctx_raw = None;
+        self.bound_imgui_alive = None;
     }
 
     pub fn post_swap(&mut self) {
@@ -1454,6 +1468,29 @@ impl TestEngine {
 impl Drop for TestEngine {
     fn drop(&mut self) {
         if !self.raw.is_null() {
+            if let Some(alive) = &self.bound_imgui_alive {
+                if !alive.is_alive() {
+                    // Avoid calling into ImGui allocators after the context has been dropped.
+                    // Best-effort: leak the test engine context instead of risking UB.
+                    return;
+                }
+            }
+            if self.ui_context_target().is_null() {
+                self.bound_imgui_ctx_raw = None;
+                self.bound_imgui_alive = None;
+            }
+            if !self.ui_context_target().is_null() {
+                if let Some(bound) = self.bound_imgui_ctx_raw {
+                    unsafe {
+                        let prev = dear_imgui_rs::sys::igGetCurrentContext();
+                        dear_imgui_rs::sys::igSetCurrentContext(bound);
+                        sys::imgui_test_engine_unbind(self.raw);
+                        dear_imgui_rs::sys::igSetCurrentContext(prev);
+                    }
+                } else {
+                    unsafe { sys::imgui_test_engine_unbind(self.raw) };
+                }
+            }
             unsafe { sys::imgui_test_engine_destroy_context(self.raw) };
             self.raw = std::ptr::null_mut();
         }

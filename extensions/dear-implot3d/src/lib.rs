@@ -306,13 +306,22 @@ pub fn show_metrics_window_with_flag(p_open: &mut bool) {
 /// ```
 pub struct Plot3DContext {
     raw: *mut sys::ImPlot3DContext,
+    imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+    imgui_alive: dear_imgui_rs::ContextAliveToken,
 }
 
 impl Plot3DContext {
     /// Try to create a new ImPlot3D context.
     ///
     /// This should be called once after creating your ImGui context.
-    pub fn try_create(_imgui: &Context) -> dear_imgui_rs::ImGuiResult<Self> {
+    pub fn try_create(imgui: &Context) -> dear_imgui_rs::ImGuiResult<Self> {
+        let imgui_ctx_raw = imgui.as_raw();
+        let imgui_alive = imgui.alive_token();
+        assert_eq!(
+            unsafe { imgui_sys::igGetCurrentContext() },
+            imgui_ctx_raw,
+            "dear-implot3d: Plot3DContext must be created with the currently-active ImGui context"
+        );
         unsafe {
             let ctx = sys::ImPlot3D_CreateContext();
             if ctx.is_null() {
@@ -323,7 +332,11 @@ impl Plot3DContext {
 
             // Ensure our new context is set as current even if another existed.
             sys::ImPlot3D_SetCurrentContext(ctx);
-            Ok(Self { raw: ctx })
+            Ok(Self {
+                raw: ctx,
+                imgui_ctx_raw,
+                imgui_alive,
+            })
         }
     }
 
@@ -362,11 +375,22 @@ impl Drop for Plot3DContext {
             return;
         }
 
+        if !self.imgui_alive.is_alive() {
+            // Avoid calling into ImGui allocators after the context has been dropped.
+            // Best-effort: leak the Plot3D context instead of risking UB.
+            return;
+        }
+
         unsafe {
+            let prev_imgui = imgui_sys::igGetCurrentContext();
+            imgui_sys::igSetCurrentContext(self.imgui_ctx_raw);
+
             if sys::ImPlot3D_GetCurrentContext() == self.raw {
                 sys::ImPlot3D_SetCurrentContext(std::ptr::null_mut());
             }
             sys::ImPlot3D_DestroyContext(self.raw);
+
+            imgui_sys::igSetCurrentContext(prev_imgui);
         }
     }
 }
