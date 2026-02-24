@@ -73,11 +73,13 @@ impl Drop for AttributeFlagToken {
 /// Style helpers available from NodeEditor
 impl<'ui> crate::NodeEditor<'ui> {
     pub fn push_attribute_flag(&self, flag: crate::AttributeFlags) -> AttributeFlagToken {
+        self.bind();
         unsafe { sys::imnodes_PushAttributeFlag(flag.bits()) };
         AttributeFlagToken
     }
 
     pub fn push_color(&self, elem: ColorElement, color: [f32; 4]) -> ColorToken {
+        self.bind();
         // Use Dear ImGui's helper for packing RGBA -> ABGR (u32)
         let col = unsafe {
             imgui_sys::igColorConvertFloat4ToU32(imgui_sys::ImVec4 {
@@ -92,6 +94,7 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var(&self, var: crate::StyleVar, value: StyleVarValue) -> StyleVarToken {
+        self.bind();
         match value {
             StyleVarValue::Float(v) => unsafe { sys::imnodes_PushStyleVar_Float(var as i32, v) },
             StyleVarValue::Vec2(v) => unsafe {
@@ -102,11 +105,13 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var_f32(&self, var: i32, value: f32) -> StyleVarToken {
+        self.bind();
         unsafe { sys::imnodes_PushStyleVar_Float(var, value) };
         StyleVarToken
     }
 
     pub fn push_style_var_vec2(&self, var: i32, value: [f32; 2]) -> StyleVarToken {
+        self.bind();
         unsafe {
             sys::imnodes_PushStyleVar_Vec2(
                 var,
