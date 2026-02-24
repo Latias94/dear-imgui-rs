@@ -22,29 +22,49 @@ impl<'ui> NodeEditor<'ui> {
     /// Enable link detach with Ctrl by binding to ImGui IO KeyCtrl
     pub fn enable_link_detach_with_ctrl(&self) {
         let io = self.io_ptr();
+        let imgui_io = unsafe { imgui_sys::igGetIO_Nil() };
+        assert!(
+            !imgui_io.is_null(),
+            "dear-imnodes: ImGui IO must be available"
+        );
         unsafe {
-            (*io).LinkDetachWithModifierClick.Modifier = sys::getIOKeyCtrlPtr();
+            (*io).LinkDetachWithModifierClick.Modifier = std::ptr::addr_of!((*imgui_io).KeyCtrl);
         }
     }
     /// Enable multiple select modifier as Ctrl
     pub fn enable_multiple_select_with_ctrl(&self) {
         let io = self.io_ptr();
+        let imgui_io = unsafe { imgui_sys::igGetIO_Nil() };
+        assert!(
+            !imgui_io.is_null(),
+            "dear-imnodes: ImGui IO must be available"
+        );
         unsafe {
-            (*io).MultipleSelectModifier.Modifier = sys::getIOKeyCtrlPtr();
+            (*io).MultipleSelectModifier.Modifier = std::ptr::addr_of!((*imgui_io).KeyCtrl);
         }
     }
     /// Enable multiple select modifier as Shift
     pub fn enable_multiple_select_with_shift(&self) {
         let io = self.io_ptr();
+        let imgui_io = unsafe { imgui_sys::igGetIO_Nil() };
+        assert!(
+            !imgui_io.is_null(),
+            "dear-imnodes: ImGui IO must be available"
+        );
         unsafe {
-            (*io).MultipleSelectModifier.Modifier = sys::imnodes_getIOKeyShiftPtr();
+            (*io).MultipleSelectModifier.Modifier = std::ptr::addr_of!((*imgui_io).KeyShift);
         }
     }
     /// Emulate three-button mouse with Alt
     pub fn emulate_three_button_mouse_with_alt(&self) {
         let io = self.io_ptr();
+        let imgui_io = unsafe { imgui_sys::igGetIO_Nil() };
+        assert!(
+            !imgui_io.is_null(),
+            "dear-imnodes: ImGui IO must be available"
+        );
         unsafe {
-            (*io).EmulateThreeButtonMouse.Modifier = sys::imnodes_getIOKeyAltPtr();
+            (*io).EmulateThreeButtonMouse.Modifier = std::ptr::addr_of!((*imgui_io).KeyAlt);
         }
     }
     /// IO tweaks

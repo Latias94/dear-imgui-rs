@@ -6,6 +6,9 @@
 
 use dear_imnodes_sys as sys;
 
+const _: [(); std::mem::size_of::<sys::ImVec2>()] = [(); std::mem::size_of::<sys::ImVec2_c>()];
+const _: [(); std::mem::align_of::<sys::ImVec2>()] = [(); std::mem::align_of::<sys::ImVec2_c>()];
+
 // Similar to ImGui 1.92+ return-by-value changes, generated bindings for
 // `dear-imnodes-sys` may exist in the build directory in both the legacy
 // out-parameter form and the newer return-by-value form. rust-analyzer can end

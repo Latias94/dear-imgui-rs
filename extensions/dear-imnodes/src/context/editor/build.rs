@@ -26,7 +26,7 @@ impl<'ui> NodeEditor<'ui> {
     /// Begin an output attribute pin
     pub fn output_attr(&self, id: i32, shape: crate::PinShape) -> AttributeToken<'_> {
         self.bind();
-        unsafe { sys::imnodes_BeginOutputAttribute(id, shape as i32) };
+        unsafe { sys::imnodes_BeginOutputAttribute(id, shape as sys::ImNodesPinShape) };
         AttributeToken {
             kind: AttrKind::Output,
             scope: self.scope,
