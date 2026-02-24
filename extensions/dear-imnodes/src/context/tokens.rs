@@ -10,15 +10,27 @@ pub struct NodeToken<'a> {
 
 impl NodeToken<'_> {
     pub fn title_bar<F: FnOnce()>(&self, f: F) {
+        struct TitleBarToken {
+            scope: ImNodesScope,
+        }
+
+        impl Drop for TitleBarToken {
+            fn drop(&mut self) {
+                unsafe {
+                    self.scope.bind();
+                    sys::imnodes_EndNodeTitleBar();
+                }
+            }
+        }
+
         unsafe {
             self.scope.bind();
             sys::imnodes_BeginNodeTitleBar();
         }
+        let _title_bar = TitleBarToken {
+            scope: self.scope.clone(),
+        };
         f();
-        unsafe {
-            self.scope.bind();
-            sys::imnodes_EndNodeTitleBar();
-        }
     }
 
     pub fn end(self) {}
