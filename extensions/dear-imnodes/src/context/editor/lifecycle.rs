@@ -6,6 +6,7 @@ impl<'ui> NodeEditor<'ui> {
     pub(crate) fn begin(ui: &'ui Ui, ctx: &'ui Context, editor: Option<&EditorContext>) -> Self {
         let scope = ImNodesScope {
             imgui_ctx_raw: ctx.imgui_ctx_raw,
+            imgui_alive: ctx.imgui_alive.clone(),
             ctx_raw: ctx.raw,
             editor_raw: editor.map(|ed| ed.raw),
         };
@@ -27,7 +28,7 @@ impl<'ui> NodeEditor<'ui> {
 
     #[inline]
     pub(crate) fn scope(&self) -> ImNodesScope {
-        self.scope
+        self.scope.clone()
     }
 
     #[inline]

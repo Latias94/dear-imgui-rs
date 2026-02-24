@@ -1,7 +1,7 @@
 use super::super::NodeEditor;
 use crate::sys;
 
-impl<'ui> Drop for NodeEditor<'ui> {
+impl Drop for NodeEditor<'_> {
     fn drop(&mut self) {
         if !self.ended {
             self.bind();

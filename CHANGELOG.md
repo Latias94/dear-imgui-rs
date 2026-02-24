@@ -9,12 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.2] - 2026-02-24
 
+### Added
+
+- Core (`dear-imgui-rs`)
+  - `Context::alive_token()` / `ContextAliveToken`: allow extension crates to detect if an ImGui context has been dropped (helps avoid calling FFI with dangling `ImGuiContext*`).
+
 ### Fixed
 
 - Extensions
   - `dear-imnodes`: fix potential use-after-free hazards by scoping editor post-frame handles and style tokens to the active editor/frame lifetime.
   - `dear-imnodes`: ensure minimap callbacks remain alive for the full editor frame.
   - `dear-imnodes`: harden context binding (ImGui/ImNodes/editor) for editor operations and token drops.
+  - `dear-imnodes`: guard ImGui context rebinding against dropped contexts (panic instead of UB on misuse).
 
 ### Changed
 

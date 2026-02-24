@@ -11,12 +11,13 @@ impl<'ui> NodesUi<'ui> {
             ctx.imgui_ctx_raw,
             "dear-imnodes: NodesUi must be used with the currently-active ImGui context"
         );
-        ImNodesScope {
+        let scope = ImNodesScope {
             imgui_ctx_raw: ctx.imgui_ctx_raw,
+            imgui_alive: ctx.imgui_alive.clone(),
             ctx_raw: ctx.raw,
             editor_raw: None,
-        }
-        .bind();
+        };
+        scope.bind();
         Self { _ui: ui, _ctx: ctx }
     }
 

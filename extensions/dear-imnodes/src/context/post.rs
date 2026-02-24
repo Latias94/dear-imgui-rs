@@ -145,7 +145,7 @@ impl<'ui> NodeEditor<'ui> {
         PostEditor {
             _ui: self._ui,
             _ctx: self._ctx,
-            scope: self.scope,
+            scope: self.scope.clone(),
             editor_hovered,
             hovered_node,
             hovered_link,

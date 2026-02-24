@@ -18,6 +18,7 @@ pub use tokens::{AttributeToken, NodeToken};
 pub struct Context {
     raw: *mut sys::ImNodesContext,
     imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+    imgui_alive: dear_imgui_rs::ContextAliveToken,
     // ImNodes context interacts with Dear ImGui state and is not thread-safe.
     _not_send_sync: PhantomData<Rc<()>>,
 }
@@ -29,16 +30,21 @@ pub struct EditorContext {
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub(crate) struct ImNodesScope {
     imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+    imgui_alive: dear_imgui_rs::ContextAliveToken,
     ctx_raw: *mut sys::ImNodesContext,
     editor_raw: Option<*mut sys::ImNodesEditorContext>,
 }
 
 impl ImNodesScope {
     #[inline]
-    pub(crate) fn bind(self) {
+    pub(crate) fn bind(&self) {
+        assert!(
+            self.imgui_alive.is_alive(),
+            "dear-imnodes: ImGui context has been dropped"
+        );
         unsafe {
             sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
             sys::imnodes_SetCurrentContext(self.ctx_raw);

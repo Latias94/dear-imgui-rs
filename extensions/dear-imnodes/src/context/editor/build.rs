@@ -7,7 +7,7 @@ impl<'ui> NodeEditor<'ui> {
         self.bind();
         unsafe { sys::imnodes_BeginNode(id) };
         NodeToken {
-            scope: self.scope,
+            scope: self.scope(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -18,7 +18,7 @@ impl<'ui> NodeEditor<'ui> {
         unsafe { sys::imnodes_BeginInputAttribute(id, shape as sys::ImNodesPinShape) };
         AttributeToken {
             kind: AttrKind::Input,
-            scope: self.scope,
+            scope: self.scope(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -29,7 +29,7 @@ impl<'ui> NodeEditor<'ui> {
         unsafe { sys::imnodes_BeginOutputAttribute(id, shape as sys::ImNodesPinShape) };
         AttributeToken {
             kind: AttrKind::Output,
-            scope: self.scope,
+            scope: self.scope(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -40,7 +40,7 @@ impl<'ui> NodeEditor<'ui> {
         unsafe { sys::imnodes_BeginStaticAttribute(id) };
         AttributeToken {
             kind: AttrKind::Static,
-            scope: self.scope,
+            scope: self.scope(),
             _phantom: std::marker::PhantomData,
         }
     }

@@ -10,6 +10,7 @@ impl Context {
     /// Try to create a new ImNodes context bound to the current Dear ImGui context
     pub fn try_create(imgui: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
         let imgui_ctx_raw = imgui.as_raw();
+        let imgui_alive = imgui.alive_token();
         unsafe { sys::imnodes_SetImGuiContext(imgui_ctx_raw) };
         let raw = unsafe { sys::imnodes_CreateContext() };
         if raw.is_null() {
@@ -21,6 +22,7 @@ impl Context {
         Ok(Self {
             raw,
             imgui_ctx_raw,
+            imgui_alive,
             _not_send_sync: PhantomData,
         })
     }
@@ -32,6 +34,10 @@ impl Context {
 
     /// Set as current ImNodes context
     pub fn set_as_current(&self) {
+        assert!(
+            self.imgui_alive.is_alive(),
+            "dear-imnodes: ImGui context has been dropped"
+        );
         unsafe { sys::imnodes_SetImGuiContext(self.imgui_ctx_raw) };
         unsafe { sys::imnodes_SetCurrentContext(self.raw) };
     }
@@ -56,10 +62,20 @@ impl Context {
 impl Drop for Context {
     fn drop(&mut self) {
         if !self.raw.is_null() {
-            unsafe {
-                sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
-                if sys::imnodes_GetCurrentContext() == self.raw {
-                    sys::imnodes_SetCurrentContext(std::ptr::null_mut());
+            if self.imgui_alive.is_alive() {
+                unsafe {
+                    sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
+                    if sys::imnodes_GetCurrentContext() == self.raw {
+                        sys::imnodes_SetCurrentContext(std::ptr::null_mut());
+                    }
+                }
+            } else {
+                // Avoid calling `SetImGuiContext` with a dangling pointer.
+                // Best-effort cleanup: destroy the ImNodes context without rebinding ImGui.
+                unsafe {
+                    if sys::imnodes_GetCurrentContext() == self.raw {
+                        sys::imnodes_SetCurrentContext(std::ptr::null_mut());
+                    }
                 }
             }
             unsafe { sys::imnodes_DestroyContext(self.raw) };

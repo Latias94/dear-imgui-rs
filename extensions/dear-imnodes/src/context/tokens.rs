@@ -8,7 +8,7 @@ pub struct NodeToken<'a> {
     pub(crate) _phantom: std::marker::PhantomData<&'a Context>,
 }
 
-impl<'a> NodeToken<'a> {
+impl NodeToken<'_> {
     pub fn title_bar<F: FnOnce()>(&self, f: F) {
         unsafe {
             self.scope.bind();
@@ -24,7 +24,7 @@ impl<'a> NodeToken<'a> {
     pub fn end(self) {}
 }
 
-impl<'a> Drop for NodeToken<'a> {
+impl Drop for NodeToken<'_> {
     fn drop(&mut self) {
         unsafe {
             self.scope.bind();
@@ -45,11 +45,11 @@ pub struct AttributeToken<'a> {
     pub(crate) _phantom: std::marker::PhantomData<&'a Context>,
 }
 
-impl<'a> AttributeToken<'a> {
+impl AttributeToken<'_> {
     pub fn end(self) {}
 }
 
-impl<'a> Drop for AttributeToken<'a> {
+impl Drop for AttributeToken<'_> {
     fn drop(&mut self) {
         unsafe {
             self.scope.bind();
