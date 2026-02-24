@@ -10,6 +10,7 @@ mod post;
 mod tokens;
 mod ui;
 
+pub use global::BoundEditor;
 pub use post::PostEditor;
 pub(crate) use tokens::AttrKind;
 pub use tokens::{AttributeToken, NodeToken};

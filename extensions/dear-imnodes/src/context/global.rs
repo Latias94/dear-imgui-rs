@@ -1,10 +1,109 @@
-use super::{Context, EditorContext};
+use super::{Context, EditorContext, ImNodesScope};
 use crate::sys;
 use dear_imgui_rs::Context as ImGuiContext;
 use dear_imgui_rs::sys as imgui_sys;
 use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::ptr::NonNull;
+
+/// An ImNodes editor context bound to a specific ImNodes context.
+///
+/// Prefer using this type over calling methods directly on `EditorContext` to avoid
+/// accidentally operating on the wrong global ImNodes context.
+pub struct BoundEditor<'a> {
+    scope: ImNodesScope,
+    _ctx: &'a Context,
+    _editor: &'a EditorContext,
+}
+
+impl<'a> BoundEditor<'a> {
+    #[inline]
+    fn bind(&self) {
+        self.scope.bind();
+    }
+
+    #[inline]
+    pub fn set_current(&self) {
+        self.bind();
+    }
+
+    pub fn get_panning(&self) -> [f32; 2] {
+        self.bind();
+        let out = unsafe { crate::compat_ffi::imnodes_EditorContextGetPanning() };
+        [out.x, out.y]
+    }
+
+    pub fn reset_panning(&self, pos: [f32; 2]) {
+        self.bind();
+        unsafe {
+            sys::imnodes_EditorContextResetPanning(sys::ImVec2_c {
+                x: pos[0],
+                y: pos[1],
+            })
+        };
+    }
+
+    pub fn move_to_node(&self, node_id: i32) {
+        self.bind();
+        unsafe { sys::imnodes_EditorContextMoveToNode(node_id) };
+    }
+
+    /// Save this editor's state to an INI string.
+    pub fn save_state_to_ini_string(&self) -> String {
+        self.bind();
+        unsafe {
+            let mut size: usize = 0;
+            let ptr =
+                sys::imnodes_SaveEditorStateToIniString(self._editor.raw, &mut size as *mut usize);
+            if ptr.is_null() || size == 0 {
+                return String::new();
+            }
+            let mut slice = std::slice::from_raw_parts(ptr as *const u8, size);
+            if slice.last() == Some(&0) {
+                slice = &slice[..slice.len().saturating_sub(1)];
+            }
+            String::from_utf8_lossy(slice).into_owned()
+        }
+    }
+
+    /// Load this editor's state from an INI string.
+    pub fn load_state_from_ini_string(&self, data: &str) {
+        self.bind();
+        unsafe {
+            sys::imnodes_LoadEditorStateFromIniString(
+                self._editor.raw,
+                data.as_ptr() as *const c_char,
+                data.len(),
+            )
+        }
+    }
+
+    /// Save this editor's state directly to an INI file.
+    pub fn save_state_to_ini_file(&self, file_name: &str) {
+        self.bind();
+        let file_name = if file_name.contains('\0') {
+            ""
+        } else {
+            file_name
+        };
+        dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
+            sys::imnodes_SaveEditorStateToIniFile(self._editor.raw, ptr)
+        })
+    }
+
+    /// Load this editor's state from an INI file.
+    pub fn load_state_from_ini_file(&self, file_name: &str) {
+        self.bind();
+        let file_name = if file_name.contains('\0') {
+            ""
+        } else {
+            file_name
+        };
+        dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
+            sys::imnodes_LoadEditorStateFromIniFile(self._editor.raw, ptr)
+        })
+    }
+}
 
 impl Context {
     /// Try to create a new ImNodes context bound to the current Dear ImGui context
@@ -56,6 +155,21 @@ impl Context {
     pub fn current_raw() -> Option<NonNull<sys::ImNodesContext>> {
         let ptr = unsafe { sys::imnodes_GetCurrentContext() };
         NonNull::new(ptr)
+    }
+
+    /// Bind an `EditorContext` to this ImNodes context.
+    pub fn bind_editor<'a>(&'a self, editor: &'a EditorContext) -> BoundEditor<'a> {
+        let scope = ImNodesScope {
+            imgui_ctx_raw: self.imgui_ctx_raw,
+            imgui_alive: self.imgui_alive.clone(),
+            ctx_raw: self.raw,
+            editor_raw: Some(editor.raw),
+        };
+        BoundEditor {
+            scope,
+            _ctx: self,
+            _editor: editor,
+        }
     }
 }
 
@@ -118,16 +232,25 @@ impl EditorContext {
         Self::try_create().expect("Failed to create ImNodes editor context")
     }
 
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.bind_editor(&editor).set_current()`."
+    )]
     pub fn set_current(&self) {
         self.bind_current();
     }
 
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.bind_editor(&editor).get_panning()`."
+    )]
     pub fn get_panning(&self) -> [f32; 2] {
         self.bind_current();
         let out = unsafe { crate::compat_ffi::imnodes_EditorContextGetPanning() };
         [out.x, out.y]
     }
 
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.bind_editor(&editor).reset_panning(...)`."
+    )]
     pub fn reset_panning(&self, pos: [f32; 2]) {
         self.bind_current();
         unsafe {
@@ -138,12 +261,18 @@ impl EditorContext {
         };
     }
 
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.bind_editor(&editor).move_to_node(...)`."
+    )]
     pub fn move_to_node(&self, node_id: i32) {
         self.bind_current();
         unsafe { sys::imnodes_EditorContextMoveToNode(node_id) };
     }
 
     /// Save this editor's state to an INI string
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.bind_editor(&editor).save_state_to_ini_string()`."
+    )]
     pub fn save_state_to_ini_string(&self) -> String {
         self.bind_current();
         unsafe {
@@ -161,6 +290,9 @@ impl EditorContext {
     }
 
     /// Load this editor's state from an INI string
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.bind_editor(&editor).load_state_from_ini_string(...)`."
+    )]
     pub fn load_state_from_ini_string(&self, data: &str) {
         self.bind_current();
         unsafe {
@@ -173,6 +305,9 @@ impl EditorContext {
     }
 
     /// Save this editor's state directly to an INI file
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.bind_editor(&editor).save_state_to_ini_file(...)`."
+    )]
     pub fn save_state_to_ini_file(&self, file_name: &str) {
         self.bind_current();
         let file_name = if file_name.contains('\0') {
@@ -186,6 +321,9 @@ impl EditorContext {
     }
 
     /// Load this editor's state from an INI file
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.bind_editor(&editor).load_state_from_ini_file(...)`."
+    )]
     pub fn load_state_from_ini_file(&self, file_name: &str) {
         self.bind_current();
         let file_name = if file_name.contains('\0') {

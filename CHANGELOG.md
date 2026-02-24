@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deprecated
+
+- Extensions
+  - `dear-imnodes`: `EditorContext::*` methods that rely on the global current ImNodes context are deprecated and will be removed in `0.11.0`. Use `Context::bind_editor(&EditorContext)` instead.
+
 ## [0.10.2] - 2026-02-24
 
 ### Added
