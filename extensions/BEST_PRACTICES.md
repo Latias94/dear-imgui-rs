@@ -90,10 +90,10 @@ Rationale: it prevents undefined behavior from querying ImGui state through a st
 ## Layering
 
 ```
-your-extension/
+  your-extension/
   your-extension-sys/      # Low-level FFI (C binding + bindgen)
     build.rs             # cc + bindgen, inherits DEP_DEAR_IMGUI_* paths/defines
-    src/lib.rs           # include!(concat!(OUT_DIR, "/bindings.rs"))
+    src/lib.rs           # expose bindings module (prefer committed pregenerated bindings; if using OUT_DIR, keep include! in a dedicated module)
     third-party/           # upstream C API (git submodule)
   your-extension/          # High-level safe API
     src/lib.rs           # RAII tokens, builders, bitflags
