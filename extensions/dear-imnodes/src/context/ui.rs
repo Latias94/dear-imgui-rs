@@ -6,7 +6,7 @@ impl<'ui> NodesUi<'ui> {
     pub(crate) fn new(ui: &'ui Ui, ctx: &'ui Context) -> Self {
         // Keep ImNodes bound to the ImGui context this ImNodes context was created with.
         // This avoids accidental cross-context use when users manage multiple ImGui contexts.
-        debug_assert_eq!(
+        assert_eq!(
             unsafe { imgui_sys::igGetCurrentContext() },
             ctx.imgui_ctx_raw,
             "dear-imnodes: NodesUi must be used with the currently-active ImGui context"
@@ -23,6 +23,20 @@ impl<'ui> NodesUi<'ui> {
 
     /// Begin a node editor with an optional EditorContext
     pub fn editor(&self, editor: Option<&'ui EditorContext>) -> NodeEditor<'ui> {
+        if let Some(editor) = editor {
+            if let Some(bound) = editor.bound_ctx_raw {
+                assert_eq!(
+                    bound, self._ctx.raw,
+                    "dear-imnodes: EditorContext is bound to a different ImNodes context"
+                );
+            }
+            if let Some(bound) = editor.bound_imgui_ctx_raw {
+                assert_eq!(
+                    bound, self._ctx.imgui_ctx_raw,
+                    "dear-imnodes: EditorContext is bound to a different ImGui context"
+                );
+            }
+        }
         NodeEditor::begin(self._ui, self._ctx, editor)
     }
 }
