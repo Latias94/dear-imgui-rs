@@ -11,6 +11,7 @@ use std::ffi::CString;
 use std::ops::Drop;
 use std::path::PathBuf;
 use std::ptr;
+use std::rc::{Rc, Weak};
 
 use crate::clipboard::{ClipboardBackend, ClipboardContext};
 use crate::fonts::{Font, FontAtlas, SharedFontAtlas};
@@ -46,6 +47,7 @@ use crate::sys;
 #[derive(Debug)]
 pub struct Context {
     raw: *mut sys::ImGuiContext,
+    alive: Rc<()>,
     shared_font_atlas: Option<SharedFontAtlas>,
     ini_filename: Option<CString>,
     log_filename: Option<CString>,
@@ -107,6 +109,14 @@ impl Context {
         self.raw
     }
 
+    /// Returns a token that can be used to check whether this context is still alive.
+    ///
+    /// Useful for extension crates that store raw pointers and need to avoid calling into FFI
+    /// after the owning `Context` has been dropped.
+    pub fn alive_token(&self) -> ContextAliveToken {
+        ContextAliveToken(Rc::downgrade(&self.alive))
+    }
+
     // removed legacy create_or_panic variants (use create()/try_create())
 
     fn try_create_internal(
@@ -138,6 +148,7 @@ impl Context {
 
         Ok(Context {
             raw,
+            alive: Rc::new(()),
             shared_font_atlas,
             ini_filename: None,
             log_filename: None,
@@ -795,6 +806,17 @@ impl Drop for Context {
 #[derive(Debug)]
 pub struct SuspendedContext(Context);
 
+/// A weak token that indicates whether a `Context` is still alive.
+#[derive(Clone, Debug)]
+pub struct ContextAliveToken(Weak<()>);
+
+impl ContextAliveToken {
+    /// Returns true if the originating `Context` has not been dropped.
+    pub fn is_alive(&self) -> bool {
+        self.0.upgrade().is_some()
+    }
+}
+
 impl SuspendedContext {
     /// Tries to create a new suspended Dear ImGui context
     pub fn try_create() -> crate::error::ImGuiResult<Self> {
@@ -840,6 +862,7 @@ impl SuspendedContext {
 
         let ctx = Context {
             raw,
+            alive: Rc::new(()),
             shared_font_atlas,
             ini_filename: None,
             log_filename: None,
