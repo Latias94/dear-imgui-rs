@@ -126,6 +126,7 @@ impl<'ui, T: Mat4Like> Manipulate<'ui, T> {
 
     /// Executes the manipulation and returns whether it was used this frame.
     pub fn build(self) -> bool {
+        self.giz.bind();
         let mut model_arr = self.model.to_cols_array();
         let mut delta_arr = match &self.delta_out {
             Some(dm) => dm.to_cols_array(),
