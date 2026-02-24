@@ -27,6 +27,7 @@ struct ImguiState {
     editor_context: imnodes::EditorContext,
     editor_context_b: imnodes::EditorContext,
     editor_context_shader: imnodes::EditorContext,
+    editor_context_style: imnodes::EditorContext,
     saved_ini: Option<String>,
     clear_color: wgpu::Color,
     last_frame: Instant,
@@ -80,6 +81,19 @@ struct AppWindow {
     minimap_hovered: Option<i32>,
     minimap_size: f32,
     minimap_location: imnodes::MiniMapLocation,
+    editor_a_canvas_origin: [f32; 2],
+    editor_a_ctx_open_pos: Option<[f32; 2]>,
+    editor_a_ctx_hovered_link: Option<i32>,
+    editor_a_ctx_hovered_node: Option<i32>,
+    editor_a_ctx_action: Option<EditorACtxAction>,
+    style_preview_initialized: bool,
+}
+
+#[derive(Clone, Copy)]
+enum EditorACtxAction {
+    DeleteLink(i32),
+    DeleteNode(i32),
+    AddNodeHere([f32; 2]),
 }
 
 fn nid_to_pin_in(nid: i32) -> i32 {
@@ -185,6 +199,7 @@ impl AppWindow {
             editor_context,
             editor_context_b,
             editor_context_shader: imnodes::EditorContext::create(),
+            editor_context_style: imnodes::EditorContext::create(),
             saved_ini: None,
             clear_color: wgpu::Color {
                 r: 0.1,
@@ -253,6 +268,12 @@ impl AppWindow {
             minimap_hovered: None,
             minimap_size: 0.25,
             minimap_location: imnodes::MiniMapLocation::BottomRight,
+            editor_a_canvas_origin: [0.0, 0.0],
+            editor_a_ctx_open_pos: None,
+            editor_a_ctx_hovered_link: None,
+            editor_a_ctx_hovered_node: None,
+            editor_a_ctx_action: None,
+            style_preview_initialized: false,
         })
     }
 
@@ -287,6 +308,11 @@ impl AppWindow {
             .build(|| {
                 if let Some(tab_bar) = ui.tab_bar("imnodes_tabs") {
                     if let Some(tab) = ui.tab_item("Hello") {
+                        // ImNodes uses ImGui's cursor screen position as the editor canvas origin.
+                        // Capture it so we can place new nodes from a popup action without relying
+                        // on ImNodes' screen->grid conversion helpers (which depend on global
+                        // editor state).
+                        self.editor_a_canvas_origin = ui.cursor_screen_pos();
                         let editor = ui.imnodes_editor(
                             &self.imgui.nodes_context,
                             Some(&self.imgui.editor_context),
@@ -331,7 +357,7 @@ impl AppWindow {
                         _n2.end();
 
                         // Added nodes rendering
-                        for (nid, pending_pos) in &mut self.graph.added_nodes {
+                        for (nid, _pending_pos) in &mut self.graph.added_nodes {
                             let _n = editor.node(*nid);
                             _n.title_bar(|| ui.text(format!("Node {}", nid)));
                             {
@@ -349,9 +375,6 @@ impl AppWindow {
                                 _out.end();
                             }
                             _n.end();
-                            if let Some(pos) = pending_pos.take() {
-                                editor.set_node_pos_screen(*nid, pos);
-                            }
                         }
 
                         // Existing links (render)
@@ -359,11 +382,119 @@ impl AppWindow {
                             editor.link(*id, *a, *b);
                         }
 
-                        // Show link count only; style toggles moved to Style tab to avoid interaction conflicts
+                        // Minimap + post-editor queries must be driven by the same Begin/EndNodeEditor
+                        // frame that actually built the editor contents. Running post-editor queries
+                        // from a minimap-only frame can leave ImNodes in an inconsistent state.
+                        editor.minimap(self.minimap_size, self.minimap_location);
+
+                        // Ensure NodeEditor ends before post-editor queries / TabItem end.
+                        let post = editor.end();
+
+                        // Selection counts (Editor A)
+                        let sel_nodes = post.selected_nodes();
+                        let sel_links = post.selected_links();
                         ui.separator();
-                        ui.text(format!("Links: {}", self.graph.links.len()));
-                        // Ensure NodeEditor ends before closing the TabItem to keep ImGui ID stack balanced
-                        editor.end();
+                        ui.text(format!(
+                            "Selected: {} nodes, {} links",
+                            sel_nodes.len(),
+                            sel_links.len()
+                        ));
+
+                        // New link event (must be after EndNodeEditor)
+                        if let Some(link) = post.is_link_created() {
+                            self.graph.links.push((
+                                self.graph.next_link_id,
+                                link.start_attr,
+                                link.end_attr,
+                            ));
+                            self.graph.next_link_id += 1;
+                        }
+                        if let Some(link_id) = post.is_link_destroyed() {
+                            self.graph.links.retain(|(id, _, _)| *id != link_id);
+                        }
+                        if let Some(start_attr) = post.is_link_dropped(true) {
+                            ui.text(format!(
+                                "Link dropped (including detached) from attr #{start_attr}"
+                            ));
+                        }
+
+                        // Controls that require EndNodeEditor
+                        if ui.button("Delete Selected Links") {
+                            let selected = post.selected_links();
+                            self.graph.links.retain(|(id, _, _)| !selected.contains(id));
+                            post.clear_selection();
+                        }
+                        ui.same_line();
+                        if ui.button("Clear Selection") {
+                            post.clear_selection();
+                        }
+
+                        // Right-click context menu on Editor A.
+                        //
+                        // Avoid calling ImNodes hover queries from inside the popup window itself:
+                        // ImNodes' hover state is associated with the editor canvas, while the
+                        // current ImGui window during popup rendering is the popup window.
+                        if post.is_editor_hovered()
+                            && ui.get_mouse_clicked_count(MouseButton::Right) > 0
+                        {
+                            self.editor_a_ctx_open_pos = Some(ui.get_mouse_pos());
+                            self.editor_a_ctx_hovered_link = post.hovered_link();
+                            self.editor_a_ctx_hovered_node = post.hovered_node();
+                            ui.open_popup("editor_a_ctx");
+                        }
+                        ui.popup("editor_a_ctx", || {
+                            if let Some(lid) = self.editor_a_ctx_hovered_link {
+                                if ui.selectable_config(&format!("Delete Link #{lid}")).build() {
+                                    self.editor_a_ctx_action =
+                                        Some(EditorACtxAction::DeleteLink(lid));
+                                    ui.close_current_popup();
+                                }
+                            } else if let Some(nid) = self.editor_a_ctx_hovered_node {
+                                if ui.selectable_config(&format!("Delete Node #{nid}")).build() {
+                                    self.editor_a_ctx_action =
+                                        Some(EditorACtxAction::DeleteNode(nid));
+                                    ui.close_current_popup();
+                                }
+                            } else if ui.selectable_config("Add Node Here").build() {
+                                let pos = self
+                                    .editor_a_ctx_open_pos
+                                    .unwrap_or_else(|| ui.get_mouse_pos());
+                                self.editor_a_ctx_action = Some(EditorACtxAction::AddNodeHere(pos));
+                                ui.close_current_popup();
+                            }
+                        });
+                        if let Some(action) = self.editor_a_ctx_action.take() {
+                            match action {
+                                EditorACtxAction::DeleteLink(lid) => {
+                                    self.graph.links.retain(|(id, _, _)| *id != lid);
+                                }
+                                EditorACtxAction::DeleteNode(nid) => {
+                                    // Remove links attached to this node (by attribute ids)
+                                    let pin_in = nid_to_pin_in(nid);
+                                    let pin_out = nid_to_pin_out(nid);
+                                    self.graph.links.retain(|(_, a, b)| {
+                                        *a != pin_in
+                                            && *a != pin_out
+                                            && *b != pin_in
+                                            && *b != pin_out
+                                    });
+                                    // Remove from added nodes if present
+                                    self.graph.added_nodes.retain(|(id, _)| *id != nid);
+                                }
+                                EditorACtxAction::AddNodeHere(pos) => {
+                                    let nid = self.graph.next_node_id;
+                                    self.graph.next_node_id += 1;
+                                    let panning = self.imgui.editor_context.get_panning();
+                                    let grid_pos = [
+                                        pos[0] - self.editor_a_canvas_origin[0] - panning[0],
+                                        pos[1] - self.editor_a_canvas_origin[1] - panning[1],
+                                    ];
+                                    post.set_node_pos_grid(nid, grid_pos);
+                                    self.graph.added_nodes.push((nid, None));
+                                }
+                            }
+                        }
+
                         tab.end();
                     }
                     if let Some(tab) = ui.tab_item("Multi-Editor") {
@@ -651,113 +782,196 @@ impl AppWindow {
                         tab.end();
                     }
                     if let Some(tab) = ui.tab_item("Advanced Style") {
-                        ui.text("Link & Pin tuning");
-                        if ui.slider_f32(
-                            "Link Segments/Len",
-                            &mut self.node_options.link_segments_per_len,
-                            0.0,
-                            2.0,
-                        ) {
-                            let e = ui.imnodes_editor(
-                                &self.imgui.nodes_context,
-                                Some(&self.imgui.editor_context),
-                            );
-                            e.set_link_line_segments_per_length(
-                                self.node_options.link_segments_per_len,
-                            );
-                            e.end();
-                        }
-                        if ui.slider_f32(
-                            "Link Hover Dist",
-                            &mut self.node_options.link_hover_distance,
-                            0.0,
-                            50.0,
-                        ) {
-                            let e = ui.imnodes_editor(
-                                &self.imgui.nodes_context,
-                                Some(&self.imgui.editor_context),
-                            );
-                            e.set_link_hover_distance(self.node_options.link_hover_distance);
-                            e.end();
-                        }
-                        if ui.slider_f32(
-                            "Pin Circle Radius",
-                            &mut self.node_options.pin_circle_radius,
-                            1.0,
-                            20.0,
-                        ) {
-                            let e = ui.imnodes_editor(
-                                &self.imgui.nodes_context,
-                                Some(&self.imgui.editor_context),
-                            );
-                            e.set_pin_circle_radius(self.node_options.pin_circle_radius);
-                            e.end();
-                        }
-                        if ui.slider_f32(
-                            "Pin Quad Side",
-                            &mut self.node_options.pin_quad_side,
-                            1.0,
-                            30.0,
-                        ) {
-                            let e = ui.imnodes_editor(
-                                &self.imgui.nodes_context,
-                                Some(&self.imgui.editor_context),
-                            );
-                            e.set_pin_quad_side_length(self.node_options.pin_quad_side);
-                            e.end();
-                        }
-                        if ui.slider_f32(
-                            "Pin Triangle Side",
-                            &mut self.node_options.pin_triangle_side,
-                            1.0,
-                            30.0,
-                        ) {
-                            let e = ui.imnodes_editor(
-                                &self.imgui.nodes_context,
-                                Some(&self.imgui.editor_context),
-                            );
-                            e.set_pin_triangle_side_length(self.node_options.pin_triangle_side);
-                            e.end();
-                        }
-                        if ui.slider_f32(
-                            "Pin Line Thickness",
-                            &mut self.node_options.pin_line_thickness,
-                            0.0,
-                            8.0,
-                        ) {
-                            let e = ui.imnodes_editor(
-                                &self.imgui.nodes_context,
-                                Some(&self.imgui.editor_context),
-                            );
-                            e.set_pin_line_thickness(self.node_options.pin_line_thickness);
-                            e.end();
-                        }
-                        if ui.slider_f32(
-                            "Pin Hover Radius",
-                            &mut self.node_options.pin_hover_radius,
-                            0.0,
-                            30.0,
-                        ) {
-                            let e = ui.imnodes_editor(
-                                &self.imgui.nodes_context,
-                                Some(&self.imgui.editor_context),
-                            );
-                            e.set_pin_hover_radius(self.node_options.pin_hover_radius);
-                            e.end();
-                        }
-                        if ui.slider_f32(
-                            "Pin Offset",
-                            &mut self.node_options.pin_offset,
-                            -10.0,
-                            10.0,
-                        ) {
-                            let e = ui.imnodes_editor(
-                                &self.imgui.nodes_context,
-                                Some(&self.imgui.editor_context),
-                            );
-                            e.set_pin_offset(self.node_options.pin_offset);
-                            e.end();
-                        }
+                        let avail = ui.content_region_avail();
+                        let controls_w = 360.0_f32.min(avail[0] * 0.45);
+
+                        ui.child_window("advanced_style_controls")
+                            .size([controls_w, avail[1]])
+                            .border(true)
+                            .build(&ui, || {
+                                ui.text("Style Flags");
+                                ui.checkbox("Grid Lines", &mut self.node_options.show_grid);
+                                ui.checkbox("Primary Lines", &mut self.node_options.primary_lines);
+                                ui.checkbox("Grid Snapping", &mut self.node_options.grid_snapping);
+
+                                ui.separator();
+                                ui.text("Grid / Node");
+                                ui.slider_f32(
+                                    "Grid Spacing",
+                                    &mut self.node_options.grid_spacing,
+                                    4.0,
+                                    64.0,
+                                );
+                                ui.slider_f32(
+                                    "Node Padding X",
+                                    &mut self.node_options.node_padding[0],
+                                    0.0,
+                                    20.0,
+                                );
+                                ui.slider_f32(
+                                    "Node Padding Y",
+                                    &mut self.node_options.node_padding[1],
+                                    0.0,
+                                    20.0,
+                                );
+                                ui.slider_f32(
+                                    "Node Rounding",
+                                    &mut self.node_options.corner_round,
+                                    0.0,
+                                    12.0,
+                                );
+                                ui.slider_f32(
+                                    "Node Border Thickness",
+                                    &mut self.node_options.node_border_thickness,
+                                    0.0,
+                                    8.0,
+                                );
+
+                                ui.separator();
+                                ui.text("Links");
+                                ui.slider_f32(
+                                    "Link Thickness",
+                                    &mut self.node_options.link_thickness,
+                                    0.0,
+                                    8.0,
+                                );
+                                ui.slider_f32(
+                                    "Link Segments/Len",
+                                    &mut self.node_options.link_segments_per_len,
+                                    0.0,
+                                    2.0,
+                                );
+                                ui.slider_f32(
+                                    "Link Hover Dist",
+                                    &mut self.node_options.link_hover_distance,
+                                    0.0,
+                                    50.0,
+                                );
+
+                                ui.separator();
+                                ui.text("Pins");
+                                ui.slider_f32(
+                                    "Pin Circle Radius",
+                                    &mut self.node_options.pin_circle_radius,
+                                    1.0,
+                                    20.0,
+                                );
+                                ui.slider_f32(
+                                    "Pin Quad Side",
+                                    &mut self.node_options.pin_quad_side,
+                                    1.0,
+                                    30.0,
+                                );
+                                ui.slider_f32(
+                                    "Pin Triangle Side",
+                                    &mut self.node_options.pin_triangle_side,
+                                    1.0,
+                                    30.0,
+                                );
+                                ui.slider_f32(
+                                    "Pin Line Thickness",
+                                    &mut self.node_options.pin_line_thickness,
+                                    0.0,
+                                    8.0,
+                                );
+                                ui.slider_f32(
+                                    "Pin Hover Radius",
+                                    &mut self.node_options.pin_hover_radius,
+                                    0.0,
+                                    30.0,
+                                );
+                                ui.slider_f32(
+                                    "Pin Offset",
+                                    &mut self.node_options.pin_offset,
+                                    -10.0,
+                                    10.0,
+                                );
+
+                                ui.separator();
+                                ui.text("Auto Pan");
+                                ui.slider_f32(
+                                    "Auto Pan Speed (LMB Box)",
+                                    &mut self.node_options.auto_panning_speed,
+                                    0.0,
+                                    2000.0,
+                                );
+                            });
+
+                        ui.same_line();
+                        ui.child_window("advanced_style_preview")
+                            .size([0.0, avail[1]])
+                            .border(true)
+                            .build(&ui, || {
+                                ui.text("Preview");
+
+                                let editor = ui.imnodes_editor(
+                                    &self.imgui.nodes_context,
+                                    Some(&self.imgui.editor_context_style),
+                                );
+                                editor.set_style_flag(
+                                    dear_imnodes::StyleFlags::GRID_LINES,
+                                    self.node_options.show_grid,
+                                );
+                                editor.set_style_flag(
+                                    dear_imnodes::StyleFlags::GRID_LINES_PRIMARY,
+                                    self.node_options.primary_lines,
+                                );
+                                editor.set_style_flag(
+                                    dear_imnodes::StyleFlags::GRID_SNAPPING,
+                                    self.node_options.grid_snapping,
+                                );
+
+                                editor.set_grid_spacing(self.node_options.grid_spacing);
+                                editor.set_link_thickness(self.node_options.link_thickness);
+                                editor.set_node_corner_rounding(self.node_options.corner_round);
+                                editor.set_node_padding(self.node_options.node_padding);
+                                editor.set_node_border_thickness(
+                                    self.node_options.node_border_thickness,
+                                );
+                                editor.set_link_line_segments_per_length(
+                                    self.node_options.link_segments_per_len,
+                                );
+                                editor
+                                    .set_link_hover_distance(self.node_options.link_hover_distance);
+                                editor.set_pin_circle_radius(self.node_options.pin_circle_radius);
+                                editor.set_pin_quad_side_length(self.node_options.pin_quad_side);
+                                editor.set_pin_triangle_side_length(
+                                    self.node_options.pin_triangle_side,
+                                );
+                                editor.set_pin_line_thickness(self.node_options.pin_line_thickness);
+                                editor.set_pin_hover_radius(self.node_options.pin_hover_radius);
+                                editor.set_pin_offset(self.node_options.pin_offset);
+                                editor.set_auto_panning_speed(self.node_options.auto_panning_speed);
+
+                                if !self.style_preview_initialized {
+                                    editor.set_node_pos_grid(9001, [120.0, 140.0]);
+                                    editor.set_node_pos_grid(9002, [440.0, 220.0]);
+                                    self.style_preview_initialized = true;
+                                }
+
+                                let n1 = editor.node(9001);
+                                n1.title_bar(|| ui.text("Preview A"));
+                                {
+                                    let out =
+                                        editor.output_attr(9011, imnodes::PinShape::TriangleFilled);
+                                    ui.text("Out");
+                                    out.end();
+                                }
+                                n1.end();
+
+                                let n2 = editor.node(9002);
+                                n2.title_bar(|| ui.text("Preview B"));
+                                {
+                                    let input =
+                                        editor.input_attr(9020, imnodes::PinShape::CircleFilled);
+                                    ui.text("In");
+                                    input.end();
+                                }
+                                n2.end();
+
+                                editor.link(90001, 9011, 9020);
+                                editor.end();
+                            });
                         tab.end();
                     }
                     if let Some(tab) = ui.tab_item("Shader Graph") {
@@ -916,20 +1130,17 @@ impl AppWindow {
                             }
                         }
                         // Draw Editor A minimap with a callback capturing hovered node id
-                        let editor = ui.imnodes_editor(
+                        let mut editor = ui.imnodes_editor(
                             &self.imgui.nodes_context,
                             Some(&self.imgui.editor_context),
                         );
-                        {
-                            let mut cb = |node_id: i32| {
+                        editor.minimap_with_callback(
+                            self.minimap_size,
+                            self.minimap_location,
+                            |node_id: i32| {
                                 self.minimap_hovered = Some(node_id);
-                            };
-                            editor.minimap_with_callback(
-                                self.minimap_size,
-                                self.minimap_location,
-                                &mut cb,
-                            );
-                        }
+                            },
+                        );
                         editor.end();
                         match self.minimap_hovered {
                             Some(id) => ui.text(format!("Hovered node: {}", id)),
@@ -939,83 +1150,6 @@ impl AppWindow {
                     }
                     tab_bar.end();
                 }
-
-                // Minimap
-                // Use A context for minimap
-                let editor_a =
-                    ui.imnodes_editor(&self.imgui.nodes_context, Some(&self.imgui.editor_context));
-                editor_a.minimap(self.minimap_size, self.minimap_location);
-                let post = editor_a.end();
-                // Selection counts (Editor A)
-                let sel_nodes = post.selected_nodes();
-                let sel_links = post.selected_links();
-                ui.text(format!(
-                    "Selected: {} nodes, {} links",
-                    sel_nodes.len(),
-                    sel_links.len()
-                ));
-
-                // New link event (must be after EndNodeEditor)
-                if let Some(link) = post.is_link_created() {
-                    self.graph.links.push((
-                        self.graph.next_link_id,
-                        link.start_attr,
-                        link.end_attr,
-                    ));
-                    self.graph.next_link_id += 1;
-                }
-                if let Some(link_id) = post.is_link_destroyed() {
-                    self.graph.links.retain(|(id, _, _)| *id != link_id);
-                }
-                if let Some(start_attr) = post.is_link_dropped(true) {
-                    ui.text(format!(
-                        "Link dropped (including detached) from attr #{start_attr}"
-                    ));
-                }
-
-                // Controls that require EndNodeEditor
-                if ui.button("Delete Selected Links") {
-                    let selected = post.selected_links();
-                    self.graph.links.retain(|(id, _, _)| !selected.contains(id));
-                    post.clear_selection();
-                }
-                ui.same_line();
-                if ui.button("Clear Selection") {
-                    post.clear_selection();
-                }
-
-                // Right-click context menu on Editor A
-                if post.is_editor_hovered() && ui.get_mouse_clicked_count(MouseButton::Right) > 0 {
-                    ui.open_popup("editor_a_ctx");
-                }
-                ui.popup("editor_a_ctx", || {
-                    let hovered_link = post.hovered_link();
-                    let hovered_node = post.hovered_node();
-                    if let Some(lid) = hovered_link {
-                        if ui.selectable_config(&format!("Delete Link #{lid}")).build() {
-                            self.graph.links.retain(|(id, _, _)| *id != lid);
-                            ui.close_current_popup();
-                        }
-                    } else if let Some(nid) = hovered_node {
-                        if ui.selectable_config(&format!("Delete Node #{nid}")).build() {
-                            // Remove links attached to this node (by attribute ids)
-                            let pin_in = nid_to_pin_in(nid);
-                            let pin_out = nid_to_pin_out(nid);
-                            self.graph.links.retain(|(_, a, b)| {
-                                *a != pin_in && *a != pin_out && *b != pin_in && *b != pin_out
-                            });
-                            // Remove from added nodes if present
-                            self.graph.added_nodes.retain(|(id, _)| *id != nid);
-                            ui.close_current_popup();
-                        }
-                    } else if ui.selectable_config("Add Node Here").build() {
-                        let pos = ui.get_mouse_pos_on_opening_current_popup();
-                        let nid = self.graph.next_node_id;
-                        self.graph.next_node_id += 1;
-                        self.graph.added_nodes.push((nid, Some(pos)));
-                        ui.close_current_popup();
-                    }
-                });
             });
 
         // Render

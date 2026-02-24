@@ -172,6 +172,13 @@ pub struct NodesUi<'ui> {
 impl<'ui> NodesUi<'ui> {
     pub(crate) fn new(ui: &'ui Ui, ctx: &'ui Context) -> Self {
         // ensure current context
+        // Keep ImNodes bound to the currently-active Dear ImGui context.
+        // ImGui context switching can happen outside of ImNodes (e.g. multi-viewport
+        // backends or user code). Binding per-frame is cheap and avoids UB if the
+        // context ever changes.
+        unsafe {
+            sys::imnodes_SetImGuiContext(imgui_sys::igGetCurrentContext());
+        }
         ctx.set_as_current();
         Self { _ui: ui, _ctx: ctx }
     }
@@ -186,6 +193,7 @@ impl<'ui> NodesUi<'ui> {
 pub struct NodeEditor<'ui> {
     _ui: &'ui Ui,
     ended: bool,
+    minimap_callback: Option<Box<MiniMapCallbackHolder<'ui>>>,
 }
 
 impl<'ui> NodeEditor<'ui> {
@@ -197,6 +205,7 @@ impl<'ui> NodeEditor<'ui> {
         Self {
             _ui: ui,
             ended: false,
+            minimap_callback: None,
         }
     }
 
@@ -213,27 +222,38 @@ impl<'ui> NodeEditor<'ui> {
     }
 
     /// Draw a minimap with a node-hover callback (invoked during this call)
-    pub fn minimap_with_callback<F: FnMut(i32)>(
-        &self,
+    pub fn minimap_with_callback<F>(
+        &mut self,
         size_fraction: f32,
         location: crate::MiniMapLocation,
-        callback: &mut F,
-    ) {
+        callback: F,
+    ) where
+        F: FnMut(i32) + 'ui,
+    {
         unsafe extern "C" fn trampoline(node_id: i32, user: *mut c_void) {
             if user.is_null() {
                 return;
             }
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                let closure = &mut *(user as *mut &mut dyn FnMut(i32));
-                (closure)(node_id);
+                let holder = &mut *(user as *mut MiniMapCallbackHolder<'_>);
+                (holder.callback)(node_id);
             }));
             if res.is_err() {
                 eprintln!("dear-imnodes: panic in minimap callback");
                 std::process::abort();
             }
         }
-        let mut cb_obj: &mut dyn FnMut(i32) = callback;
-        let user_ptr = &mut cb_obj as *mut _ as *mut c_void;
+
+        // ImNodes may invoke the callback during EndNodeEditor(). Keep the closure alive for the
+        // whole editor frame by storing it inside the NodeEditor token.
+        self.minimap_callback = Some(Box::new(MiniMapCallbackHolder {
+            callback: Box::new(callback),
+        }));
+        let user_ptr = self
+            .minimap_callback
+            .as_mut()
+            .map(|b| b.as_mut() as *mut MiniMapCallbackHolder<'ui> as *mut c_void)
+            .unwrap_or(std::ptr::null_mut());
         unsafe {
             sys::imnodes_MiniMap(
                 size_fraction,
@@ -675,6 +695,10 @@ impl<'ui> Drop for NodeEditor<'ui> {
     }
 }
 
+struct MiniMapCallbackHolder<'a> {
+    callback: Box<dyn FnMut(i32) + 'a>,
+}
+
 /// RAII token for a node block
 pub struct NodeToken<'a> {
     pub(crate) _phantom: std::marker::PhantomData<&'a ()>,
@@ -921,6 +945,31 @@ impl PostEditor {
             Some(id)
         } else {
             None
+        }
+    }
+
+    /// Set a node's position in screen space for the current editor context.
+    pub fn set_node_pos_screen(&self, node_id: i32, pos: [f32; 2]) {
+        unsafe {
+            sys::imnodes_SetNodeScreenSpacePos(
+                node_id,
+                sys::ImVec2_c {
+                    x: pos[0],
+                    y: pos[1],
+                },
+            )
+        }
+    }
+    /// Set a node's position in grid space for the current editor context.
+    pub fn set_node_pos_grid(&self, node_id: i32, pos: [f32; 2]) {
+        unsafe {
+            sys::imnodes_SetNodeGridSpacePos(
+                node_id,
+                sys::ImVec2_c {
+                    x: pos[0],
+                    y: pos[1],
+                },
+            )
         }
     }
     pub fn is_attribute_active(&self) -> bool {
