@@ -159,6 +159,12 @@ impl Context {
 
     /// Bind an `EditorContext` to this ImNodes context.
     pub fn bind_editor<'a>(&'a self, editor: &'a EditorContext) -> BoundEditor<'a> {
+        if let Some(bound) = editor.bound_ctx_raw {
+            assert_eq!(
+                bound, self.raw,
+                "dear-imnodes: EditorContext is bound to a different ImNodes context"
+            );
+        }
         let scope = ImNodesScope {
             imgui_ctx_raw: self.imgui_ctx_raw,
             imgui_alive: self.imgui_alive.clone(),
@@ -170,6 +176,35 @@ impl Context {
             _ctx: self,
             _editor: editor,
         }
+    }
+
+    pub fn try_create_editor_context(&self) -> dear_imgui_rs::ImGuiResult<EditorContext> {
+        assert!(
+            self.imgui_alive.is_alive(),
+            "dear-imnodes: ImGui context has been dropped"
+        );
+        unsafe {
+            sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
+            sys::imnodes_SetCurrentContext(self.raw);
+        }
+        let raw = unsafe { sys::imnodes_EditorContextCreate() };
+        if raw.is_null() {
+            return Err(dear_imgui_rs::ImGuiError::context_creation(
+                "imnodes_EditorContextCreate returned null",
+            ));
+        }
+        Ok(EditorContext {
+            raw,
+            bound_ctx_raw: Some(self.raw),
+            bound_imgui_ctx_raw: Some(self.imgui_ctx_raw),
+            bound_imgui_alive: Some(self.imgui_alive.clone()),
+            _not_send_sync: PhantomData,
+        })
+    }
+
+    pub fn create_editor_context(&self) -> EditorContext {
+        self.try_create_editor_context()
+            .expect("Failed to create ImNodes editor context")
     }
 }
 
@@ -215,6 +250,9 @@ impl EditorContext {
         unsafe { sys::imnodes_EditorContextSet(self.raw) };
     }
 
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.try_create_editor_context()`."
+    )]
     pub fn try_create() -> dear_imgui_rs::ImGuiResult<Self> {
         let raw = unsafe { sys::imnodes_EditorContextCreate() };
         if raw.is_null() {
@@ -224,12 +262,21 @@ impl EditorContext {
         }
         Ok(Self {
             raw,
+            bound_ctx_raw: None,
+            bound_imgui_ctx_raw: None,
+            bound_imgui_alive: None,
             _not_send_sync: PhantomData,
         })
     }
 
+    #[deprecated(
+        note = "Deprecated: will be removed in 0.11.0. Use `ctx.create_editor_context()`."
+    )]
     pub fn create() -> Self {
-        Self::try_create().expect("Failed to create ImNodes editor context")
+        #[allow(deprecated)]
+        {
+            Self::try_create().expect("Failed to create ImNodes editor context")
+        }
     }
 
     #[deprecated(
@@ -340,6 +387,19 @@ impl EditorContext {
 impl Drop for EditorContext {
     fn drop(&mut self) {
         if !self.raw.is_null() {
+            if let Some(alive) = &self.bound_imgui_alive {
+                if !alive.is_alive() {
+                    // Avoid calling into ImGui allocators after the context has been dropped.
+                    // Best-effort: leak the editor context instead of risking UB.
+                    return;
+                }
+            }
+            if let Some(imgui_ctx_raw) = self.bound_imgui_ctx_raw {
+                unsafe { sys::imnodes_SetImGuiContext(imgui_ctx_raw) };
+            }
+            if let Some(ctx_raw) = self.bound_ctx_raw {
+                unsafe { sys::imnodes_SetCurrentContext(ctx_raw) };
+            }
             unsafe { sys::imnodes_EditorContextFree(self.raw) };
         }
     }

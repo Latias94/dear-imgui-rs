@@ -27,6 +27,9 @@ pub struct Context {
 /// An editor context allows multiple independent editors
 pub struct EditorContext {
     raw: *mut sys::ImNodesEditorContext,
+    bound_ctx_raw: Option<*mut sys::ImNodesContext>,
+    bound_imgui_ctx_raw: Option<*mut imgui_sys::ImGuiContext>,
+    bound_imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
     // Editor contexts are also tied to global ImNodes/ImGui state and must not cross threads.
     _not_send_sync: PhantomData<Rc<()>>,
 }

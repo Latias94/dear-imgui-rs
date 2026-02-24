@@ -10,7 +10,7 @@ fn basic_editor_smoke_test() {
     let imnodes_ctx = imnodes::Context::create(&imgui);
 
     // One editor context for this test
-    let editor = imnodes::EditorContext::create();
+    let editor = imnodes_ctx.create_editor_context();
 
     {
         let io = imgui.io_mut();
