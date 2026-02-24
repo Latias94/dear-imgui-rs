@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imnodes`: ensure minimap callbacks remain alive for the full editor frame.
   - `dear-imnodes`: harden context binding (ImGui/ImNodes/editor) for editor operations and token drops.
   - `dear-imnodes`: guard ImGui context rebinding against dropped contexts (panic instead of UB on misuse).
+  - `dear-imnodes`: validate raw style-var indices in `push_style_var_*` helpers to avoid out-of-bounds access in release builds.
 
 ### Changed
 

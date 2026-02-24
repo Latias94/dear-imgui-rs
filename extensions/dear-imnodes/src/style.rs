@@ -134,6 +134,11 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var_f32(&self, var: i32, value: f32) -> StyleVarToken<'_> {
+        let max = sys::ImNodesStyleVar_COUNT as i32;
+        assert!(
+            (0..max).contains(&var),
+            "dear-imnodes: invalid style var index {var}"
+        );
         self.bind();
         unsafe { sys::imnodes_PushStyleVar_Float(var, value) };
         StyleVarToken {
@@ -143,6 +148,11 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var_vec2(&self, var: i32, value: [f32; 2]) -> StyleVarToken<'_> {
+        let max = sys::ImNodesStyleVar_COUNT as i32;
+        assert!(
+            (0..max).contains(&var),
+            "dear-imnodes: invalid style var index {var}"
+        );
         self.bind();
         unsafe {
             sys::imnodes_PushStyleVar_Vec2(
