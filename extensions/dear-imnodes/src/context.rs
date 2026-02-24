@@ -49,6 +49,11 @@ impl Context {
 impl Drop for Context {
     fn drop(&mut self) {
         if !self.raw.is_null() {
+            unsafe {
+                if sys::imnodes_GetCurrentContext() == self.raw {
+                    sys::imnodes_SetCurrentContext(std::ptr::null_mut());
+                }
+            }
             unsafe { sys::imnodes_DestroyContext(self.raw) };
         }
     }
