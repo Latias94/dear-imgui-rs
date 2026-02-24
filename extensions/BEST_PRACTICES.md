@@ -61,23 +61,31 @@ Naming convention for Ui extensions and entry points:
 
 ## Context Binding to Dear ImGui
 
-Extensions that keep their own global/context state must explicitly bind to the current Dear ImGui context before creating or using that state. Do this at the moment you create/use the extension context or begin its frame:
+Extensions that keep their own global/context state must explicitly bind to the current Dear ImGui context before creating or using that state.
+
+Prefer doing this inside your safe wrapper entry points (e.g. `Ui` extension methods and context constructors) so callers don't need to touch `-sys` APIs.
 
 ```rust
+// Safe wrapper usage (recommended)
+let implot = dear_implot::PlotContext::create(&imgui_ctx);
+let giz = ui.guizmo(); // binds and calls BeginFrame
+let imnodes = dear_imnodes::Context::create(&imgui_ctx);
+
+// Low-level / -sys glue (only when building the wrapper)
 // ImPlot context creation
 unsafe { dear_implot_sys::ImPlot_SetImGuiContext(dear_imgui_sys::igGetCurrentContext()) }
 let implot = dear_implot::PlotContext::create(&imgui_ctx);
 
 // ImGuizmo per-frame setup
 unsafe { dear_imguizmo_sys::ImGuizmo_SetImGuiContext(dear_imgui_sys::igGetCurrentContext()) }
-dear_imguizmo::GuizmoContext::new().begin_frame(&ui);
+dear_imguizmo::GuizmoContext::new().begin_frame(ui);
 
 // ImNodes context creation
 unsafe { dear_imnodes_sys::imnodes_SetImGuiContext(dear_imgui_sys::igGetCurrentContext()) }
 let imnodes = dear_imnodes::Context::create(&imgui_ctx);
 ```
 
-Rationale: it prevents undefined behavior from querying ImGui state through a stale or null context inside the extension.
+Rationale: it prevents undefined behavior from querying ImGui state through a stale or null context inside the extension. If your wrapper stores raw pointers and may be dropped after the owning `Context`, record `ContextAliveToken` and guard drops/calls (panic or best-effort leak instead of UB).
 
 ## Layering
 
