@@ -19,7 +19,12 @@ impl GuizmoContext {
     /// Call exactly once per frame before using GizmoUi functions.
     pub fn begin_frame<'ui>(&self, _ui: &'ui Ui) -> GizmoUi<'ui> {
         unsafe {
-            sys::ImGuizmo_SetImGuiContext(imgui_sys::igGetCurrentContext());
+            let imgui_ctx = imgui_sys::igGetCurrentContext();
+            assert!(
+                !imgui_ctx.is_null(),
+                "dear-imguizmo: begin_frame requires an active ImGui context"
+            );
+            sys::ImGuizmo_SetImGuiContext(imgui_ctx);
             // ImGuizmo::BeginFrame() creates a helper ImGui window named "gizmo".
             // When ImGui viewports are enabled, this helper window can accidentally
             // get its own platform viewport on some backends, resulting in an extra
