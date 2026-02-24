@@ -759,7 +759,12 @@ impl<'a> Drop for AttributeToken<'a> {
 }
 
 /// Post-editor queries (must be called after EndNodeEditor)
-pub struct PostEditor;
+pub struct PostEditor {
+    editor_hovered: bool,
+    hovered_node: Option<i32>,
+    hovered_link: Option<i32>,
+    hovered_pin: Option<i32>,
+}
 
 impl<'ui> NodeEditor<'ui> {
     /// Explicitly end the node editor and return post-editor query handle
@@ -768,7 +773,34 @@ impl<'ui> NodeEditor<'ui> {
             unsafe { sys::imnodes_EndNodeEditor() };
             self.ended = true;
         }
-        PostEditor
+        // Capture hover state immediately after EndNodeEditor while the current ImGui window
+        // is still the editor host window. This avoids calling ImNodes hover queries later
+        // from a different window (e.g. a popup), which can lead to inconsistent behavior.
+        let editor_hovered = unsafe { sys::imnodes_IsEditorHovered() };
+        let mut hovered_node = 0i32;
+        let hovered_node = if unsafe { sys::imnodes_IsNodeHovered(&mut hovered_node) } {
+            Some(hovered_node)
+        } else {
+            None
+        };
+        let mut hovered_link = 0i32;
+        let hovered_link = if unsafe { sys::imnodes_IsLinkHovered(&mut hovered_link) } {
+            Some(hovered_link)
+        } else {
+            None
+        };
+        let mut hovered_pin = 0i32;
+        let hovered_pin = if unsafe { sys::imnodes_IsPinHovered(&mut hovered_pin) } {
+            Some(hovered_pin)
+        } else {
+            None
+        };
+        PostEditor {
+            editor_hovered,
+            hovered_node,
+            hovered_link,
+            hovered_pin,
+        }
     }
 }
 
@@ -935,31 +967,16 @@ impl PostEditor {
     }
 
     pub fn is_editor_hovered(&self) -> bool {
-        unsafe { sys::imnodes_IsEditorHovered() }
+        self.editor_hovered
     }
     pub fn hovered_node(&self) -> Option<i32> {
-        let mut id = 0;
-        if unsafe { sys::imnodes_IsNodeHovered(&mut id) } {
-            Some(id)
-        } else {
-            None
-        }
+        self.hovered_node
     }
     pub fn hovered_link(&self) -> Option<i32> {
-        let mut id = 0;
-        if unsafe { sys::imnodes_IsLinkHovered(&mut id) } {
-            Some(id)
-        } else {
-            None
-        }
+        self.hovered_link
     }
     pub fn hovered_pin(&self) -> Option<i32> {
-        let mut id = 0;
-        if unsafe { sys::imnodes_IsPinHovered(&mut id) } {
-            Some(id)
-        } else {
-            None
-        }
+        self.hovered_pin
     }
 
     /// Set a node's position in screen space for the current editor context.
