@@ -96,6 +96,50 @@ jobs:
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
 
+  windows-gnu:
+    name: Windows GNU link check
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install LLVM (libclang) for bindgen (Windows)
+        run: choco install -y llvm
+
+      - name: Setup MSYS2 (mingw64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+
+      - name: Add windows-gnu target
+        run: rustup target add x86_64-pc-windows-gnu
+
+      - name: Cargo test (no-run) - dear-imgui-sys (windows-gnu)
+        run: cargo test -p dear-imgui-sys --target x86_64-pc-windows-gnu --no-run
+        env:
+          # Validate MinGW/GNU link flags (e.g. shell32) via an actual link step.
+          IMGUI_SYS_FORCE_BUILD: "1"
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
+          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
+          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
+
   ffi-cross-check:
     name: FFI signedness check (armv7)
     runs-on: ubuntu-latest
