@@ -156,6 +156,15 @@ fn main() {
         );
     }
 
+    // ImGui core includes a default "open in shell" implementation on Windows that calls
+    // `ShellExecuteW` (shell32). MSVC honors the `#pragma comment(lib, ...)` in imgui.cpp,
+    // but MinGW/gnu toolchains do not, so we must link it explicitly here.
+    //
+    // Ref: https://github.com/Latias94/dear-imgui-rs/issues/20
+    if cfg.is_windows() && cfg.target_arch != "wasm32" {
+        println!("cargo:rustc-link-lib=shell32");
+    }
+
     // Export include paths/defines for extensions
     export_include_paths(&cfg);
 }
