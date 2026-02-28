@@ -127,6 +127,9 @@ jobs:
           install: >-
             mingw-w64-x86_64-toolchain
 
+      - name: Add MinGW64 to PATH
+        run: echo C:\msys64\mingw64\bin >> $env:GITHUB_PATH
+
       - name: Add windows-gnu target
         run: rustup target add x86_64-pc-windows-gnu
 
@@ -135,10 +138,12 @@ jobs:
         env:
           # Validate MinGW/GNU link flags (e.g. shell32) via an actual link step.
           IMGUI_SYS_FORCE_BUILD: "1"
-          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
-          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
-          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
-          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
+          # Pin absolute tool paths to avoid accidentally picking up an incomplete MinGW/LLVM toolchain
+          # where `gcc` exists but `ar` does not (cc-rs requires a working archiver).
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: 'C:\msys64\mingw64\bin\x86_64-w64-mingw32-gcc.exe'
+          CC_x86_64_pc_windows_gnu: 'C:\msys64\mingw64\bin\x86_64-w64-mingw32-gcc.exe'
+          CXX_x86_64_pc_windows_gnu: 'C:\msys64\mingw64\bin\x86_64-w64-mingw32-g++.exe'
+          AR_x86_64_pc_windows_gnu: 'C:\msys64\mingw64\bin\x86_64-w64-mingw32-ar.exe'
 
   ffi-cross-check:
     name: FFI signedness check (armv7)
