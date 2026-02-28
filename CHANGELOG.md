@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imnodes`: `EditorContext::*` methods that rely on the global current ImNodes context are deprecated and will be removed in `0.11.0`. Use `Context::bind_editor(&EditorContext)` instead.
   - `dear-imnodes`: `EditorContext::create/try_create` are deprecated and will be removed in `0.11.0`. Use `Context::{create_editor_context,try_create_editor_context}` instead.
 
+## [0.10.3] - 2026-02-28
+
+### Fixed
+
+- `dear-imgui-sys`
+  - Link `shell32` explicitly on Windows to fix GNU/MinGW toolchains that ignore ImGui's `#pragma comment(lib, ...)` (Fixes #20).
+
+### CI
+
+- Add a Windows GNU (MinGW) link check job to catch missing system libraries (e.g. `shell32`) at PR time.
+
 ## [0.10.2] - 2026-02-24
 
 ### Added
