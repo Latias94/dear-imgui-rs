@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `dear-imgui-sys`
-  - Link `shell32` explicitly on Windows to fix GNU/MinGW toolchains that ignore ImGui's `#pragma comment(lib, ...)` (Fixes #20).
+  - Link `shell32`/`user32`/`kernel32`/`imm32` explicitly on Windows to fix GNU/MinGW toolchains that ignore ImGui's `#pragma comment(lib, ...)` (Fixes #20).
 
 ### CI
 

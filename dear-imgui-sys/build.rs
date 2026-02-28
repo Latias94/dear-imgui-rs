@@ -156,13 +156,16 @@ fn main() {
         );
     }
 
-    // ImGui core includes a default "open in shell" implementation on Windows that calls
-    // `ShellExecuteW` (shell32). MSVC honors the `#pragma comment(lib, ...)` in imgui.cpp,
-    // but MinGW/gnu toolchains do not, so we must link it explicitly here.
+    // ImGui core includes default platform handlers on Windows (clipboard, IME, open-in-shell)
+    // which call Win32 APIs. MSVC honors the `#pragma comment(lib, ...)` directives in imgui.cpp,
+    // but MinGW/GNU toolchains do not, so we must link these system libraries explicitly.
     //
     // Ref: https://github.com/Latias94/dear-imgui-rs/issues/20
     if cfg.is_windows() && cfg.target_arch != "wasm32" {
-        println!("cargo:rustc-link-lib=shell32");
+        println!("cargo:rustc-link-lib=user32"); // OpenClipboard, etc.
+        println!("cargo:rustc-link-lib=kernel32"); // MultiByteToWideChar, etc.
+        println!("cargo:rustc-link-lib=shell32"); // ShellExecuteW
+        println!("cargo:rustc-link-lib=imm32"); // IME support (ImmGetContext, etc.)
     }
 
     // Export include paths/defines for extensions
