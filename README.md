@@ -50,6 +50,11 @@ All crates are maintained together in this workspace.
 use dear_imgui_rs::*;
 
 let mut ctx = Context::create();
+// If you are not using a platform backend (e.g. dear-imgui-winit / dear-imgui-sdl3),
+// you must set `io.DisplaySize` before calling `Context::frame()`.
+ctx.io_mut().set_display_size([300.0, 120.0]);
+ctx.io_mut().set_delta_time(1.0 / 60.0);
+
 let ui = ctx.frame();
 ui.window("Hello")
   .size([300.0, 120.0], Condition::FirstUseEver)
@@ -57,6 +62,7 @@ ui.window("Hello")
       ui.text("Hello, world!");
       if ui.button("Click me") { println!("clicked"); }
   });
+let _draw_data = ctx.render();
 // Rendering is done by a backend (e.g. dear-imgui-wgpu or dear-imgui-glow)
 // Tip: pass `.opened(&mut open)` if you want a title-bar close button (X).
 

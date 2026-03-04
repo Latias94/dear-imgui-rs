@@ -209,11 +209,29 @@ impl Context {
         }
     }
 
-    /// Creates a new frame and returns a Ui object for building the interface
+    /// Creates a new frame and returns a Ui object for building the interface.
+    ///
+    /// Note: you must update `io.DisplaySize` (and usually `io.DeltaTime`) before calling this,
+    /// unless you are using a platform backend that does it for you (e.g. `dear-imgui-winit`).
     pub fn frame(&mut self) -> &mut crate::ui::Ui {
         let _guard = CTX_MUTEX.lock();
 
         unsafe {
+            // Dear ImGui initializes DisplaySize to (-1, -1). Calling NewFrame() without a
+            // platform backend (or without setting DisplaySize manually) will trip an internal
+            // assertion and abort the process. Fail fast with a Rust panic to make the setup
+            // requirement obvious.
+            let io = sys::igGetIO_Nil();
+            if !io.is_null() && ((*io).DisplaySize.x < 0.0 || (*io).DisplaySize.y < 0.0) {
+                panic!(
+                    "Context::frame() called with invalid io.DisplaySize ({}, {}). \
+Set io.DisplaySize (and typically io.DeltaTime) before starting a frame. \
+If you are using a windowing/event-loop library, prefer a platform backend such as \
+dear-imgui-winit::WinitPlatform::prepare_frame().",
+                    (*io).DisplaySize.x,
+                    (*io).DisplaySize.y
+                );
+            }
             sys::igNewFrame();
         }
         &mut self.ui
