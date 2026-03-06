@@ -259,13 +259,13 @@ impl<'ui, Label: AsRef<str>> ComboBox<'ui, Label> {
 /// Tracks a combo box that can be ended by calling `.end()` or by dropping
 #[must_use]
 pub struct ComboBoxToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> ComboBoxToken<'ui> {
     /// Creates a new combo box token
     fn new(ui: &'ui Ui) -> Self {
-        ComboBoxToken { ui }
+        ComboBoxToken { _ui: ui }
     }
 
     /// Ends the combo box

@@ -220,13 +220,13 @@ impl Ui {
 /// Tracks a main menu bar that can be ended by calling `.end()` or by dropping
 #[must_use]
 pub struct MainMenuBarToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> MainMenuBarToken<'ui> {
     /// Creates a new main menu bar token
     fn new(ui: &'ui Ui) -> Self {
-        MainMenuBarToken { ui }
+        MainMenuBarToken { _ui: ui }
     }
 
     /// Ends the main menu bar
@@ -246,13 +246,13 @@ impl<'ui> Drop for MainMenuBarToken<'ui> {
 /// Tracks a menu bar that can be ended by calling `.end()` or by dropping
 #[must_use]
 pub struct MenuBarToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> MenuBarToken<'ui> {
     /// Creates a new menu bar token
     fn new(ui: &'ui Ui) -> Self {
-        MenuBarToken { ui }
+        MenuBarToken { _ui: ui }
     }
 
     /// Ends the menu bar
@@ -272,13 +272,13 @@ impl<'ui> Drop for MenuBarToken<'ui> {
 /// Tracks a menu that can be ended by calling `.end()` or by dropping
 #[must_use]
 pub struct MenuToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> MenuToken<'ui> {
     /// Creates a new menu token
     fn new(ui: &'ui Ui) -> Self {
-        MenuToken { ui }
+        MenuToken { _ui: ui }
     }
 
     /// Ends the menu

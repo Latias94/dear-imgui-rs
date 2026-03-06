@@ -128,13 +128,13 @@ impl<T: AsRef<str>> TabBar<T> {
 #[derive(Debug)]
 #[must_use]
 pub struct TabBarToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> TabBarToken<'ui> {
     /// Creates a new tab bar token
     pub(crate) fn new(ui: &'ui Ui) -> Self {
-        Self { ui }
+        Self { _ui: ui }
     }
 
     /// Ends the tab bar
@@ -205,13 +205,13 @@ impl<'a, T: AsRef<str>> TabItem<'a, T> {
 #[derive(Debug)]
 #[must_use]
 pub struct TabItemToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> TabItemToken<'ui> {
     /// Creates a new tab item token
     pub(crate) fn new(ui: &'ui Ui) -> Self {
-        Self { ui }
+        Self { _ui: ui }
     }
 
     /// Ends the tab item

@@ -1533,50 +1533,6 @@ impl TextCallbackData {
 pub struct PassthroughCallback;
 impl InputTextCallbackHandler for PassthroughCallback {}
 
-/// This is our default callback function that routes ImGui callbacks to our trait methods.
-extern "C" fn callback(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-    if data.is_null() {
-        return 0;
-    }
-
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-        let event_flag = InputTextFlags::from_bits_truncate((*data).EventFlag as i32);
-        let buffer_ptr = (*data).UserData as *mut String;
-
-        if buffer_ptr.is_null() {
-            return;
-        }
-
-        match event_flag {
-            InputTextFlags::CALLBACK_RESIZE => {
-                let requested_i32 = (*data).BufSize;
-                if requested_i32 < 0 {
-                    return;
-                }
-                let requested_size = requested_i32 as usize;
-                let buffer = &mut *buffer_ptr;
-
-                debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
-
-                if requested_size > buffer.capacity() {
-                    let additional_bytes = requested_size.saturating_sub(buffer.len());
-                    buffer.reserve(additional_bytes);
-
-                    (*data).Buf = buffer.as_mut_ptr() as *mut _;
-                    (*data).BufDirty = true;
-                }
-            }
-            _ => {}
-        }
-    }));
-
-    if res.is_err() {
-        eprintln!("dear-imgui-rs: panic in legacy InputText callback");
-        std::process::abort();
-    }
-    0
-}
-
 /// Builder for an input scalar widget.
 #[must_use]
 pub struct InputScalar<'ui, 'p, T, L, F = &'static str> {

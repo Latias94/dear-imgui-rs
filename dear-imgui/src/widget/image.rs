@@ -78,7 +78,7 @@ impl Ui {
 #[derive(Debug)]
 #[must_use]
 pub struct Image<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
     texture: TextureRef,
     size: [f32; 2],
     uv0: [f32; 2],
@@ -91,7 +91,7 @@ impl<'ui> Image<'ui> {
     /// Creates a new image builder
     pub fn new(ui: &'ui Ui, texture: impl Into<TextureRef>, size: [f32; 2]) -> Self {
         Self {
-            ui,
+            _ui: ui,
             texture: texture.into(),
             size,
             uv0: [0.0, 0.0],

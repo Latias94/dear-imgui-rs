@@ -154,11 +154,6 @@ impl SharedFontAtlas {
         }
     }
 
-    /// Returns a raw pointer to the underlying ImFontAtlas
-    pub(crate) fn as_ptr(&self) -> *const sys::ImFontAtlas {
-        *self.0
-    }
-
     /// Returns a mutable raw pointer to the underlying ImFontAtlas
     pub(crate) fn as_ptr_mut(&mut self) -> *mut sys::ImFontAtlas {
         *self.0

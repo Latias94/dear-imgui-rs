@@ -381,10 +381,6 @@ impl PlatformIo {
     /// - `raw` is non-null and points to a valid `ImGuiPlatformIO`.
     /// - The platform IO outlives the returned reference (e.g. it belongs to the
     ///   currently active ImGui context).
-    pub(crate) unsafe fn from_raw<'a>(raw: *const sys::ImGuiPlatformIO) -> &'a Self {
-        unsafe { &*(raw as *const Self) }
-    }
-
     /// Get a mutable reference to the platform IO from a raw pointer
     ///
     /// # Safety

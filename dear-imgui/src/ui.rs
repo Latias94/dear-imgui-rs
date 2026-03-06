@@ -74,17 +74,6 @@ impl Ui {
         }
     }
 
-    /// Internal method to push an option text to our scratch buffer.
-    pub(crate) fn scratch_txt_opt(
-        &self,
-        txt: Option<impl AsRef<str>>,
-    ) -> *const std::os::raw::c_char {
-        unsafe {
-            let handle = &mut *self.buffer.get();
-            handle.scratch_txt_opt(txt)
-        }
-    }
-
     /// Helper method for two strings
     pub(crate) fn scratch_txt_two(
         &self,

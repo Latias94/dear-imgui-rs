@@ -282,13 +282,13 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
 /// Tracks a tree node that can be popped by calling `.pop()` or by dropping
 #[must_use]
 pub struct TreeNodeToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> TreeNodeToken<'ui> {
     /// Creates a new tree node token
     fn new(ui: &'ui Ui) -> Self {
-        TreeNodeToken { ui }
+        TreeNodeToken { _ui: ui }
     }
 
     /// Pops the tree node

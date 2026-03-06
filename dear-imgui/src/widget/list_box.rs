@@ -75,13 +75,13 @@ impl<T: AsRef<str>> ListBox<T> {
 /// Tracks a list box that can be ended by calling `.end()`
 /// or by dropping
 pub struct ListBoxToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> ListBoxToken<'ui> {
     /// Creates a new list box token
     pub fn new(ui: &'ui Ui) -> Self {
-        Self { ui }
+        Self { _ui: ui }
     }
 
     /// Ends the list box

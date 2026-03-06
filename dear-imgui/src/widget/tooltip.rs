@@ -223,13 +223,13 @@ impl Ui {
 /// Tracks a tooltip that can be ended by calling `.end()` or by dropping
 #[must_use]
 pub struct TooltipToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> TooltipToken<'ui> {
     /// Creates a new tooltip token
     fn new(ui: &'ui Ui) -> Self {
-        TooltipToken { ui }
+        TooltipToken { _ui: ui }
     }
 
     /// Ends the tooltip

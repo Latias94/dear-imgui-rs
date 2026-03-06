@@ -163,7 +163,7 @@
 //! This crate offers two ways to edit text:
 //! - String-backed builders: `ui.input_text(label, &mut String)` and
 //!   `ui.input_text_multiline(label, &mut String, size)`.
-//!   - Internally stage a growable UTF‑8 buffer for the call and copy the
+//!   - Internally stage a growable UTF�? buffer for the call and copy the
 //!     edited bytes back into your `String` afterwards.
 //!   - For very large fields, use `.capacity_hint(bytes)` on the builder to
 //!     reduce reallocations, e.g.:
@@ -179,7 +179,7 @@
 //!   `ui.input_text_multiline_imstr(label, &mut ImString, size)`.
 //!   - Zero‑copy: pass your `ImString` buffer directly to ImGui.
 //!   - Uses ImGui's `CallbackResize` under the hood to grow the same buffer the
-//!     widget edits — no copy before/after the call.
+//!     widget edits �?no copy before/after the call.
 //!
 //! Choose String for convenience (especially for small/medium inputs). Prefer
 //! ImString when you want to avoid copies for large or frequently edited text.
@@ -217,7 +217,7 @@
 //!     method docs for safety requirements.
 
 #![deny(rust_2018_idioms)]
-#![cfg_attr(test, allow(clippy::float_cmp))]
+#![cfg_attr(test, allow(clippy::float_cmp, deprecated))]
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

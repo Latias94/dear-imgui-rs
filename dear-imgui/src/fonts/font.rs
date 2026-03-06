@@ -27,20 +27,6 @@ const _: [(); std::mem::size_of::<sys::ImFont>()] = [(); std::mem::size_of::<Fon
 const _: [(); std::mem::align_of::<sys::ImFont>()] = [(); std::mem::align_of::<Font>()];
 
 impl Font {
-    #[inline]
-    fn inner(&self) -> &sys::ImFont {
-        // Safety: this wrapper is a view into an ImGui-owned `ImFont`. Dear ImGui may mutate the
-        // font data while Rust holds `&Font`, so we store the value behind `UnsafeCell` to make
-        // that interior mutability explicit.
-        unsafe { &*self.0.get() }
-    }
-
-    #[inline]
-    fn inner_mut(&mut self) -> &mut sys::ImFont {
-        // Safety: caller has `&mut Font`, so this is a unique Rust borrow for this wrapper.
-        unsafe { &mut *self.0.get() }
-    }
-
     /// Constructs a shared reference from a raw pointer.
     ///
     /// Safety: caller guarantees the pointer is valid for the returned lifetime.

@@ -362,13 +362,13 @@ impl<'ui> ModalPopup<'ui> {
 /// Tracks a popup that can be ended by calling `.end()` or by dropping
 #[must_use]
 pub struct PopupToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> PopupToken<'ui> {
     /// Creates a new popup token
     fn new(ui: &'ui Ui) -> Self {
-        PopupToken { ui }
+        PopupToken { _ui: ui }
     }
 
     /// Ends the popup
@@ -388,13 +388,13 @@ impl<'ui> Drop for PopupToken<'ui> {
 /// Tracks a modal popup that can be ended by calling `.end()` or by dropping
 #[must_use]
 pub struct ModalPopupToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> ModalPopupToken<'ui> {
     /// Creates a new modal popup token
     fn new(ui: &'ui Ui) -> Self {
-        ModalPopupToken { ui }
+        ModalPopupToken { _ui: ui }
     }
 
     /// Ends the modal popup

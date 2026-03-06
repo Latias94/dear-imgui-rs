@@ -135,37 +135,40 @@ impl Drop for GlyphRangesBuilder {
 mod tests {
     use super::*;
 
-    #[test]
     #[allow(deprecated)]
+    fn build_ranges_from(input: &[u32]) -> Vec<u32> {
+        let mut b = GlyphRangesBuilder::new();
+        b.add_ranges(input);
+        b.build_ranges()
+    }
+
+    #[allow(deprecated)]
+    fn add_ranges_expect_panic(input: &[u32]) {
+        let mut b = GlyphRangesBuilder::new();
+        b.add_ranges(input);
+    }
+
+    #[test]
     fn add_ranges_rejects_non_bmp_codepoints_when_wchar16() {
         if std::mem::size_of::<sys::ImWchar>() != 2 {
             return;
         }
-        let res = std::panic::catch_unwind(|| {
-            let mut b = GlyphRangesBuilder::new();
-            b.add_ranges(&[0x1_0000, 0]);
-        });
+        let res = std::panic::catch_unwind(|| add_ranges_expect_panic(&[0x1_0000, 0]));
         assert!(res.is_err());
     }
 
     #[test]
-    #[allow(deprecated)]
     fn add_ranges_appends_terminator_if_missing() {
-        let mut b = GlyphRangesBuilder::new();
-        b.add_ranges(&[0x20, 0x7E]);
-        let ranges = b.build_ranges();
+        let ranges = build_ranges_from(&[0x20, 0x7E]);
         assert_eq!(ranges.last().copied(), Some(0));
     }
 
     #[test]
-    #[allow(deprecated)]
     fn add_ranges_accepts_non_bmp_when_wchar32() {
         if std::mem::size_of::<sys::ImWchar>() != 4 {
             return;
         }
-        let mut b = GlyphRangesBuilder::new();
-        b.add_ranges(&[0x1_0000, 0x1_0001]);
-        let ranges = b.build_ranges();
+        let ranges = build_ranges_from(&[0x1_0000, 0x1_0001]);
         assert_eq!(ranges.last().copied(), Some(0));
         assert!(ranges.contains(&0x1_0000));
         assert!(ranges.contains(&0x1_0001));

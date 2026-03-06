@@ -537,13 +537,13 @@ impl<'a> Iterator for TableSortSpecsIter<'a> {
 /// Tracks a table that can be ended by calling `.end()` or by dropping
 #[must_use]
 pub struct TableToken<'ui> {
-    ui: &'ui Ui,
+    _ui: &'ui Ui,
 }
 
 impl<'ui> TableToken<'ui> {
     /// Creates a new table token
     fn new(ui: &'ui Ui) -> Self {
-        TableToken { ui }
+        TableToken { _ui: ui }
     }
 
     /// Ends the table
