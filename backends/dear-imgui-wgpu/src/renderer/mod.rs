@@ -18,7 +18,7 @@ use crate::{
     FrameResources, RenderResources, RendererError, RendererResult, ShaderManager, Uniforms,
     WgpuBackendData, WgpuInitInfo, WgpuTextureManager,
 };
-use dear_imgui_rs::{BackendFlags, Context, render::DrawData};
+use dear_imgui_rs::{BackendFlags, Context, render::DrawData, sys};
 #[cfg(feature = "mv-log")]
 use std::sync::{Mutex, OnceLock};
 use wgpu::*;
@@ -44,8 +44,6 @@ pub struct WgpuRenderer {
     texture_manager: WgpuTextureManager,
     /// Default texture for fallback
     default_texture: Option<TextureView>,
-    /// Registered font atlas texture id (if created via font-atlas fallback)
-    font_texture_id: Option<u64>,
     /// Gamma mode: automatic (by format), force linear (1.0), or force 2.2
     gamma_mode: GammaMode,
     /// Clear color used for secondary viewports (multi-viewport mode)
@@ -120,7 +118,6 @@ impl WgpuRenderer {
             shader_manager: ShaderManager::new(),
             texture_manager: WgpuTextureManager::new(),
             default_texture: None,
-            font_texture_id: None,
             gamma_mode: GammaMode::Auto,
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: Color::BLACK,
@@ -283,20 +280,25 @@ impl WgpuRenderer {
                 return Ok(());
             }
 
-            // Legacy fallback: upload font atlas texture immediately and assign TexID.
-            if self.font_texture_id.is_none() {
-                if let Some(tex_id) =
+            // Legacy fallback: only upload when the atlas does not already resolve to a live
+            // WGPU texture. This keeps the backend idempotent without carrying a separate
+            // renderer-side font texture cache now that the managed ImTextureData path is the
+            // primary mode.
+            let mut tex_ref = imgui_ctx.font_atlas().get_tex_ref();
+            let existing_tex_id = unsafe { sys::ImTextureRef_GetTexID(&mut tex_ref) };
+            let has_live_font_texture =
+                existing_tex_id != 0 && self.texture_manager.contains_texture(existing_tex_id);
+
+            if !has_live_font_texture
+                && let Some(tex_id) =
                     self.try_upload_font_atlas_legacy(imgui_ctx, &device, &queue)?
-                {
-                    if cfg!(debug_assertions) {
-                        tracing::debug!(
-                            target: "dear-imgui-wgpu",
-                            "[dear-imgui-wgpu][debug] Font atlas uploaded via legacy fallback path. tex_id={}",
-                            tex_id
-                        );
-                    }
-                    self.font_texture_id = Some(tex_id);
-                }
+                && cfg!(debug_assertions)
+            {
+                tracing::debug!(
+                    target: "dear-imgui-wgpu",
+                    "[dear-imgui-wgpu][debug] Font atlas uploaded via legacy fallback path. tex_id={}",
+                    tex_id
+                );
             }
         }
         Ok(())
@@ -861,7 +863,6 @@ impl WgpuRenderer {
         // Clear texture manager
         self.texture_manager.clear();
         self.default_texture = None;
-        self.font_texture_id = None;
 
         Ok(())
     }
