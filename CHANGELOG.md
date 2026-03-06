@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+# Changelog
+
+
+
+### Fixes
+
+- guard frame against unset DisplaySize (207269f…)
+
+- preserve managed atlas refs in glow [textures] (22fed59…)
+
+
+### Refactor
+
+- clean up token and test warnings [core] (60fa50d…)
+
+- split input widget module [core] (fbf3b06…)
+
+- split platform io module [core] (a39ec90…)
+
+
 
 ### Deprecated
 
