@@ -11,6 +11,15 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ### Fixes
 
+- preserve managed atlas refs in glow [textures] (22fed59…)
+
+
+# Changelog
+
+
+
+### Fixes
+
 - fix readme (18ae52b…)
 
 
