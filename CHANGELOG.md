@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imnodes`: `EditorContext::*` methods that rely on the global current ImNodes context are deprecated and will be removed in `0.11.0`. Use `Context::bind_editor(&EditorContext)` instead.
   - `dear-imnodes`: `EditorContext::create/try_create` are deprecated and will be removed in `0.11.0`. Use `Context::{create_editor_context,try_create_editor_context}` instead.
 
+### Fixed
+
+- Core (`dear-imgui-rs`)
+  - Fonts: keep `FontAtlas::set_texture_id()` aligned with the managed `ImTextureData` path so the atlas `TexRef` continues to track backend-driven texture ID updates instead of degrading to a legacy ID-only reference.
+- Backends
+  - `dear-imgui-glow`: harden the modern texture update path by keeping the fallback font-atlas texture in sync with managed atlas create/update/destroy requests.
+  - `dear-imgui-glow`: align texture destroy handling with other renderers by setting `WantDestroyNextFrame` before marking managed textures as `Destroyed`.
+  - `dear-imgui-glow`: refactor sub-rectangle RGBA conversion into a reusable helper and add regression tests mirroring the `dear-imgui-wgpu` coverage for `RGBA32` / `Alpha8` uploads.
+
 ## [0.10.3] - 2026-02-28
 
 ### Fixed

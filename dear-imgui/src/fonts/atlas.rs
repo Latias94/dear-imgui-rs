@@ -37,7 +37,7 @@ pub struct FontId(pub(crate) *const sys::ImFont);
 /// allowing custom font loading implementations.
 pub struct FontLoader {
     raw: sys::ImFontLoader,
-    name: CString,
+    _name: CString,
 }
 
 impl FontLoader {
@@ -58,7 +58,7 @@ impl FontLoader {
 
         Ok(Self {
             raw,
-            name: name_cstring,
+            _name: name_cstring,
         })
     }
 
@@ -764,20 +764,21 @@ impl FontAtlas {
     }
 
     /// Convenience: set atlas texture id and mark status OK
-    /// Also updates TexRef so draw commands use this texture id.
+    /// Also updates TexRef so draw commands continue to follow the managed
+    /// `ImTextureData` when one is available.
     pub fn set_texture_id(&mut self, tex_id: crate::texture::TextureId) {
-        // Update TexRef used by draw commands
-        let tex_ref = sys::ImTextureRef {
-            _TexData: std::ptr::null_mut(),
-            _TexID: tex_id.id() as sys::ImTextureID,
-        };
-        self.set_tex_ref(tex_ref);
-
-        // Update ImTextureData (if present)
-        if let Some(td) = self.tex_data_mut() {
+        let tex_ref = if let Some(td) = self.tex_data_mut() {
             td.set_tex_id(tex_id);
             td.set_status(crate::texture::TextureStatus::OK);
-        }
+            td.texture_ref().raw()
+        } else {
+            sys::ImTextureRef {
+                _TexData: std::ptr::null_mut(),
+                _TexID: tex_id.id() as sys::ImTextureID,
+            }
+        };
+
+        self.set_tex_ref(tex_ref);
     }
 
     /// Get texture data pointer
@@ -1071,6 +1072,25 @@ mod tests {
                 .add_font_from_memory_ttf(&[0u8; 10], 13.0, None, None)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn set_texture_id_preserves_managed_tex_data_reference() {
+        let mut ctx = crate::Context::create();
+        let mut fonts = ctx.font_atlas_mut();
+        let _ = fonts.build();
+
+        let raw_tex_data = fonts.get_tex_data();
+        assert!(!raw_tex_data.is_null());
+
+        let texture_id = crate::texture::TextureId::new(0x1234);
+        fonts.set_texture_id(texture_id);
+
+        let mut tex_ref = fonts.get_tex_ref();
+        assert_eq!(tex_ref._TexData, raw_tex_data);
+
+        let resolved = unsafe { sys::ImTextureRef_GetTexID(&mut tex_ref) };
+        assert_eq!(resolved, texture_id.id() as sys::ImTextureID);
     }
 }
 

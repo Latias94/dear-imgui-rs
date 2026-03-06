@@ -511,6 +511,12 @@ impl TextureData {
         }
     }
 
+    /// Get the current texture reference for this managed texture.
+    #[inline]
+    pub fn texture_ref(&mut self) -> TextureRef {
+        unsafe { TextureRef::from_raw(sys::ImTextureData_GetTexRef(self.as_raw_mut())) }
+    }
+
     /// Get the texture format
     pub fn format(&self) -> TextureFormat {
         TextureFormat::from(self.inner().Format)

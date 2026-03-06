@@ -4,6 +4,7 @@ use dear_imgui_rs::{
     Context as ImGuiContext, TextureData, TextureFormat, TextureId,
     internal::RawWrapper,
     render::{DrawCmd, DrawCmdParams, DrawData, DrawVert},
+    sys,
 };
 use glow::{Context, HasContext};
 use std::mem::size_of;
@@ -30,6 +31,7 @@ pub struct GlowRenderer {
     pub vbo_handle: Option<GlBuffer>,
     pub ebo_handle: Option<GlBuffer>,
     pub font_atlas_texture: Option<GlTexture>,
+    font_atlas_texture_data: *mut sys::ImTextureData,
     #[cfg(feature = "bind_vertex_array_support")]
     pub vertex_array_object: Option<GlVertexArray>,
     pub gl_version: GlVersion,
@@ -185,6 +187,7 @@ impl GlowRenderer {
         Self::configure_imgui_context_static(imgui_context);
 
         let font_atlas_texture = Self::prepare_font_atlas(gl, imgui_context, &mut *texture_map)?;
+        let font_atlas_texture_data = imgui_context.fonts().get_tex_data();
 
         let shaders = Shaders::new(gl, gl_version)?;
         let vbo_handle = unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?;
@@ -198,6 +201,7 @@ impl GlowRenderer {
             vbo_handle: Some(vbo_handle),
             ebo_handle: Some(ebo_handle),
             font_atlas_texture: Some(font_atlas_texture),
+            font_atlas_texture_data,
             #[cfg(feature = "bind_vertex_array_support")]
             vertex_array_object: None,
             gl_version,
@@ -545,21 +549,6 @@ impl GlowRenderer {
         }
 
         gl_debug_message(gl, "dear-imgui-glow: start render");
-
-        // Catch up with texture updates. Most of the times, the list will have 1 element with an OK status, aka nothing to do.
-        // (This almost always points to ImGui::GetPlatformIO().Textures[] but is part of ImDrawData to allow overriding or disabling texture updates).
-        // Following the original Dear ImGui OpenGL3 implementation
-        // Note: This is commented out for now as it requires mutable access to texture_map
-        // TODO: Implement proper texture update handling
-        /*
-        if let Some(textures) = draw_data.textures() {
-            for texture_data in textures {
-                if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
-                    self.update_texture_from_data(gl, texture_map, texture_data)?;
-                }
-            }
-        }
-        */
 
         self.state_backup.backup(gl, self.gl_version);
 
@@ -977,6 +966,66 @@ impl GlowRenderer {
 }
 
 impl GlowRenderer {
+    #[inline]
+    fn is_font_atlas_texture(&self, texture_data: &dear_imgui_rs::TextureData) -> bool {
+        !self.font_atlas_texture_data.is_null()
+            && std::ptr::eq(
+                texture_data.as_raw(),
+                self.font_atlas_texture_data.cast_const(),
+            )
+    }
+
+    fn convert_subrect_to_rgba(
+        texture_data: &dear_imgui_rs::TextureData,
+        rect: dear_imgui_rs::texture::TextureRect,
+    ) -> Option<Vec<u8>> {
+        let pixels = texture_data.pixels()?;
+        let tex_w = texture_data.width() as usize;
+        let tex_h = texture_data.height() as usize;
+        if tex_w == 0 || tex_h == 0 {
+            return None;
+        }
+
+        let bpp = texture_data.bytes_per_pixel() as usize;
+        let (rx, ry, rw, rh) = (
+            rect.x as usize,
+            rect.y as usize,
+            rect.w as usize,
+            rect.h as usize,
+        );
+        if rw == 0 || rh == 0 || rx >= tex_w || ry >= tex_h {
+            return None;
+        }
+
+        let rw = rw.min(tex_w.saturating_sub(rx));
+        let rh = rh.min(tex_h.saturating_sub(ry));
+
+        let mut out = vec![0u8; rw * rh * 4];
+        match texture_data.format() {
+            dear_imgui_rs::TextureFormat::RGBA32 => {
+                for row in 0..rh {
+                    let src_off = ((ry + row) * tex_w + rx) * bpp;
+                    let dst_off = row * rw * 4;
+                    out[dst_off..dst_off + rw * 4]
+                        .copy_from_slice(&pixels[src_off..src_off + rw * 4]);
+                }
+            }
+            dear_imgui_rs::TextureFormat::Alpha8 => {
+                for row in 0..rh {
+                    let src_off = ((ry + row) * tex_w + rx) * bpp;
+                    let dst_off = row * rw * 4;
+                    for i in 0..rw {
+                        let a = pixels[src_off + i];
+                        let dst = &mut out[dst_off + i * 4..dst_off + i * 4 + 4];
+                        dst.copy_from_slice(&[255, 255, 255, a]);
+                    }
+                }
+            }
+        }
+
+        Some(out)
+    }
+
     /// Update texture from Dear ImGui texture data
     /// Following the original Dear ImGui OpenGL3 implementation
     fn update_texture_from_data(
@@ -1011,6 +1060,7 @@ impl GlowRenderer {
         &mut self,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
+        let is_font_atlas = self.is_font_atlas_texture(texture_data);
         let gl = self.get_gl_context()?;
         let width = texture_data.width() as u32;
         let height = texture_data.height() as u32;
@@ -1114,6 +1164,9 @@ impl GlowRenderer {
             );
             texture_data.set_tex_id(tex_id);
             texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
+            if is_font_atlas {
+                self.font_atlas_texture = Some(gl_texture);
+            }
         }
 
         Ok(())
@@ -1124,6 +1177,7 @@ impl GlowRenderer {
         &mut self,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
+        let is_font_atlas = self.is_font_atlas_texture(texture_data);
         let gl = self.get_gl_context()?;
         let tex_id = texture_data.tex_id();
         let gl_texture = match self.texture_map().get(tex_id) {
@@ -1134,12 +1188,8 @@ impl GlowRenderer {
             }
         };
 
-        let width = texture_data.width() as u32;
-        let height = texture_data.height() as u32;
-        let bpp = texture_data.bytes_per_pixel() as usize;
-
-        let pixels = match texture_data.pixels() {
-            Some(p) => p,
+        match texture_data.pixels() {
+            Some(_) => {}
             None => {
                 // No CPU pixels available this frame; nothing to upload.
                 // Mark as OK to avoid retry storm and proceed with existing GPU texture.
@@ -1185,78 +1235,15 @@ impl GlowRenderer {
         }
 
         // Iterate update rects and upload each sub-region
-        // Reuse a single staging buffer to avoid repeated allocations
-        let mut sub_rgba: Vec<u8> = Vec::new();
         for rect in rects.into_iter() {
             let rx = rect.x as u32;
             let ry = rect.y as u32;
             let rw = rect.w as u32;
             let rh = rect.h as u32;
 
-            if rw == 0 || rh == 0 {
+            let Some(sub_rgba) = Self::convert_subrect_to_rgba(texture_data, rect) else {
                 continue;
-            }
-            if rx >= width || ry >= height {
-                continue;
-            }
-
-            let rw = rw.min(width - rx);
-            let rh = rh.min(height - ry);
-            if rw == 0 || rh == 0 {
-                continue;
-            }
-
-            let row_stride = (width as usize).checked_mul(bpp).unwrap_or(0);
-            if row_stride == 0 {
-                continue;
-            }
-
-            let needed = (rw as usize)
-                .checked_mul(rh as usize)
-                .and_then(|v| v.checked_mul(4))
-                .unwrap_or(0);
-            if needed == 0 {
-                continue;
-            }
-            if sub_rgba.capacity() < needed {
-                sub_rgba.reserve(needed - sub_rgba.capacity());
-            }
-            sub_rgba.clear();
-
-            for row in 0..(rh as usize) {
-                let src_row_start = match (ry as usize + row)
-                    .checked_mul(row_stride)
-                    .and_then(|v| v.checked_add((rx as usize).saturating_mul(bpp)))
-                {
-                    Some(v) => v,
-                    None => break,
-                };
-                let src_row_len = match (rw as usize).checked_mul(bpp) {
-                    Some(v) => v,
-                    None => break,
-                };
-                let Some(src_end) = src_row_start.checked_add(src_row_len) else {
-                    break;
-                };
-                if src_end > pixels.len() {
-                    break;
-                }
-                let src = &pixels[src_row_start..src_end];
-
-                match texture_data.format() {
-                    dear_imgui_rs::TextureFormat::RGBA32 => {
-                        // Already RGBA, just append
-                        sub_rgba.extend_from_slice(src);
-                    }
-                    dear_imgui_rs::TextureFormat::Alpha8 => {
-                        // NOTE(opt): Could use GL RED + TEXTURE_SWIZZLE (if available) to avoid expansion.
-                        // Convert A8 -> RGBA8 with white RGB
-                        for &a in src.iter() {
-                            sub_rgba.extend_from_slice(&[255, 255, 255, a]);
-                        }
-                    }
-                }
-            }
+            };
 
             unsafe {
                 gl.tex_sub_image_2d(
@@ -1282,6 +1269,9 @@ impl GlowRenderer {
 
         // Mark status OK after updates
         texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
+        if is_font_atlas {
+            self.font_atlas_texture = Some(gl_texture);
+        }
         Ok(())
     }
 
@@ -1290,6 +1280,7 @@ impl GlowRenderer {
         &mut self,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
+        let is_font_atlas = self.is_font_atlas_texture(texture_data);
         let gl = self.get_gl_context()?;
         let texture_id = texture_data.tex_id();
 
@@ -1300,7 +1291,13 @@ impl GlowRenderer {
             self.texture_map_mut().remove(texture_id);
         }
 
+        unsafe {
+            (*texture_data.as_raw_mut()).WantDestroyNextFrame = true;
+        }
         texture_data.set_status(dear_imgui_rs::TextureStatus::Destroyed);
+        if is_font_atlas {
+            self.font_atlas_texture = None;
+        }
 
         Ok(())
     }
@@ -1360,6 +1357,71 @@ impl GlowRenderer {
         self.texture_map
             .as_deref_mut()?
             .get_texture_data_mut(texture_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GlowRenderer;
+    use dear_imgui_rs::{TextureData, TextureFormat, texture::TextureRect};
+
+    #[test]
+    fn convert_subrect_to_rgba_rgba32_full_rect() {
+        let mut tex = TextureData::new();
+        tex.create(TextureFormat::RGBA32, 2, 2);
+
+        let pixels: [u8; 16] = [
+            10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160,
+        ];
+        tex.set_data(&pixels);
+
+        let rect = TextureRect {
+            x: 0,
+            y: 0,
+            w: 2,
+            h: 2,
+        };
+
+        let out = GlowRenderer::convert_subrect_to_rgba(&tex, rect).expect("expected data");
+        assert_eq!(out, pixels);
+    }
+
+    #[test]
+    fn convert_subrect_to_rgba_alpha8_partial_rect() {
+        let mut tex = TextureData::new();
+        tex.create(TextureFormat::Alpha8, 3, 2);
+
+        let alphas: [u8; 6] = [0, 10, 20, 30, 40, 50];
+        tex.set_data(&alphas);
+
+        let rect = TextureRect {
+            x: 1,
+            y: 0,
+            w: 2,
+            h: 2,
+        };
+
+        let out = GlowRenderer::convert_subrect_to_rgba(&tex, rect).expect("expected data");
+        assert_eq!(
+            out,
+            vec![
+                255, 255, 255, 10, 255, 255, 255, 20, 255, 255, 255, 40, 255, 255, 255, 50,
+            ]
+        );
+    }
+
+    #[test]
+    fn convert_subrect_to_rgba_out_of_bounds_returns_none() {
+        let mut tex = TextureData::new();
+        tex.create(TextureFormat::RGBA32, 2, 2);
+        let rect = TextureRect {
+            x: 10,
+            y: 10,
+            w: 1,
+            h: 1,
+        };
+
+        assert!(GlowRenderer::convert_subrect_to_rgba(&tex, rect).is_none());
     }
 }
 
