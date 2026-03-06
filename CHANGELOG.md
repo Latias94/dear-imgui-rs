@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core (`dear-imgui-rs`)
   - Widgets: split `widget::input` into focused submodules for text callbacks and numeric builders without intended public API changes.
+  - Platform: split platform_io into focused submodules for viewport wrappers and callback trampolines without intended public API changes.
 
 ### Fixed
 
