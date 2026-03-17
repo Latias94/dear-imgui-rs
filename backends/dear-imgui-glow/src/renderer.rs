@@ -502,18 +502,21 @@ impl GlowRenderer {
 
     /// Render Dear ImGui draw data
     pub fn render(&mut self, draw_data: &DrawData) -> RenderResult<()> {
+        let gl = self.gl_context.clone().ok_or_else(|| {
+            RenderError::Generic(
+                "No OpenGL context available. Use render_with_context() for externally managed contexts."
+                    .to_string(),
+            )
+        })?;
+
         // Handle texture updates first, following the original Dear ImGui OpenGL3 implementation
         for mut texture_data in draw_data.textures() {
             if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
-                self.update_texture_from_data(&mut *texture_data)?;
+                self.update_texture_from_data(Some(&gl), &mut *texture_data)?;
             }
         }
 
-        if let Some(gl) = self.gl_context.clone() {
-            self.render_internal(&gl, draw_data)
-        } else {
-            Err(RenderError::Generic("No OpenGL context available. Use render_with_context() for externally managed contexts.".to_string()))
-        }
+        self.render_internal(&gl, draw_data)
     }
 
     /// Advanced render method with external OpenGL context
@@ -521,19 +524,11 @@ impl GlowRenderer {
         // Handle texture updates first
         for mut texture_data in draw_data.textures() {
             if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
-                self.update_texture_from_data(&mut *texture_data)?;
+                self.update_texture_from_data(Some(gl), &mut *texture_data)?;
             }
         }
 
         self.render_internal(gl, draw_data)
-    }
-
-    /// Get OpenGL context reference (owned or external)
-    fn get_gl_context(&self) -> RenderResult<&Context> {
-        match &self.gl_context {
-            Some(gl) => Ok(gl),
-            None => Err(RenderError::Generic("No OpenGL context available. Use render_with_context() for externally managed contexts.".to_string())),
-        }
     }
 
     /// Internal render implementation
@@ -1030,6 +1025,7 @@ impl GlowRenderer {
     /// Following the original Dear ImGui OpenGL3 implementation
     fn update_texture_from_data(
         &mut self,
+        gl: Option<&Context>,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
         use dear_imgui_rs::TextureStatus;
@@ -1037,15 +1033,17 @@ impl GlowRenderer {
         match texture_data.status() {
             TextureStatus::WantCreate => {
                 // Create new texture and assign ID back to Dear ImGui
-                self.create_texture_from_data(texture_data)?;
+                let gl = Self::required_gl_context(gl)?;
+                self.create_texture_from_data(gl, texture_data)?;
             }
             TextureStatus::WantUpdates => {
                 // Update existing texture
-                self.update_existing_texture_from_data(texture_data)?;
+                let gl = Self::required_gl_context(gl)?;
+                self.update_existing_texture_from_data(gl, texture_data)?;
             }
             TextureStatus::WantDestroy => {
                 // Destroy texture
-                self.destroy_texture_from_data(texture_data)?;
+                self.destroy_texture_from_data(gl, texture_data)?;
             }
             TextureStatus::OK | TextureStatus::Destroyed => {
                 // Nothing to do
@@ -1055,13 +1053,22 @@ impl GlowRenderer {
         Ok(())
     }
 
+    fn required_gl_context(gl: Option<&Context>) -> RenderResult<&Context> {
+        gl.ok_or_else(|| {
+            RenderError::Generic(
+                "No OpenGL context available. Use render_with_context() for externally managed contexts."
+                    .to_string(),
+            )
+        })
+    }
+
     /// Create a new texture from ImTextureData
     fn create_texture_from_data(
         &mut self,
+        gl: &Context,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
         let is_font_atlas = self.is_font_atlas_texture(texture_data);
-        let gl = self.get_gl_context()?;
         let width = texture_data.width() as u32;
         let height = texture_data.height() as u32;
         let format = texture_data.format();
@@ -1175,16 +1182,16 @@ impl GlowRenderer {
     /// Update an existing texture from ImTextureData
     fn update_existing_texture_from_data(
         &mut self,
+        gl: &Context,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
         let is_font_atlas = self.is_font_atlas_texture(texture_data);
-        let gl = self.get_gl_context()?;
         let tex_id = texture_data.tex_id();
         let gl_texture = match self.texture_map().get(tex_id) {
             Some(t) => t,
             None => {
                 // If texture doesn't exist, create it fully
-                return self.create_texture_from_data(texture_data);
+                return self.create_texture_from_data(gl, texture_data);
             }
         };
 
@@ -1278,13 +1285,14 @@ impl GlowRenderer {
     /// Destroy a texture from ImTextureData
     fn destroy_texture_from_data(
         &mut self,
+        gl: Option<&Context>,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
         let is_font_atlas = self.is_font_atlas_texture(texture_data);
-        let gl = self.get_gl_context()?;
         let texture_id = texture_data.tex_id();
 
         if let Some(gl_texture) = self.texture_map().get(texture_id) {
+            let gl = Self::required_gl_context(gl)?;
             unsafe {
                 gl.delete_texture(gl_texture);
             }
@@ -1310,10 +1318,25 @@ impl GlowRenderer {
         height: u32,
         data: &[u8],
     ) -> InitResult<()> {
+        let gl = self.gl_context.clone().ok_or_else(|| {
+            InitError::Generic(
+                "No OpenGL context available. Use update_texture_with_context() for externally managed contexts."
+                    .to_string(),
+            )
+        })?;
+        self.update_texture_with_context(&gl, texture_id, width, height, data)
+    }
+
+    /// Update a texture using an externally managed OpenGL context.
+    pub fn update_texture_with_context(
+        &mut self,
+        gl: &Context,
+        texture_id: TextureId,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> InitResult<()> {
         use crate::texture::update_imgui_texture;
-        let gl = self
-            .get_gl_context()
-            .map_err(|e| InitError::Generic(e.to_string()))?;
         let gl_texture = update_imgui_texture(gl, texture_id, width, height, data)?;
 
         // Update the texture mapping with modern texture management
@@ -1331,11 +1354,25 @@ impl GlowRenderer {
         format: TextureFormat,
         data: &[u8],
     ) -> InitResult<TextureId> {
-        use crate::texture::create_texture_from_rgba;
+        let gl = self.gl_context.clone().ok_or_else(|| {
+            InitError::Generic(
+                "No OpenGL context available. Use register_texture_with_context() for externally managed contexts."
+                    .to_string(),
+            )
+        })?;
+        self.register_texture_with_context(&gl, width, height, format, data)
+    }
 
-        let gl = self
-            .get_gl_context()
-            .map_err(|e| InitError::Generic(e.to_string()))?;
+    /// Register a new texture using an externally managed OpenGL context.
+    pub fn register_texture_with_context(
+        &mut self,
+        gl: &Context,
+        width: u32,
+        height: u32,
+        format: TextureFormat,
+        data: &[u8],
+    ) -> InitResult<TextureId> {
+        use crate::texture::create_texture_from_rgba;
         let gl_texture = create_texture_from_rgba(gl, width, height, data)?;
         let texture_id = self.texture_map_mut().register_texture(
             gl_texture,
@@ -1363,7 +1400,45 @@ impl GlowRenderer {
 #[cfg(test)]
 mod tests {
     use super::GlowRenderer;
-    use dear_imgui_rs::{TextureData, TextureFormat, texture::TextureRect};
+    use crate::{
+        shaders::Shaders, state::GlStateBackup, texture::SimpleTextureMap, versions::GlVersion,
+    };
+    use dear_imgui_rs::{
+        TextureData, TextureFormat, TextureId, TextureStatus, texture::TextureRect,
+    };
+
+    fn make_test_renderer() -> GlowRenderer {
+        GlowRenderer {
+            shaders: Shaders {
+                program: None,
+                attrib_location_tex: None,
+                attrib_location_proj_mtx: None,
+                attrib_location_color_gamma: None,
+                attrib_location_vtx_pos: 0,
+                attrib_location_vtx_uv: 0,
+                attrib_location_vtx_color: 0,
+            },
+            state_backup: GlStateBackup::default(),
+            vbo_handle: None,
+            ebo_handle: None,
+            font_atlas_texture: None,
+            font_atlas_texture_data: std::ptr::null_mut(),
+            #[cfg(feature = "bind_vertex_array_support")]
+            vertex_array_object: None,
+            gl_version: GlVersion {
+                major: 3,
+                minor: 3,
+                is_es: false,
+            },
+            has_clip_origin_support: false,
+            is_destroyed: false,
+            gl_context: None,
+            texture_map: Some(Box::new(SimpleTextureMap::default())),
+            framebuffer_srgb: false,
+            color_gamma_override: None,
+            viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
 
     #[test]
     fn convert_subrect_to_rgba_rgba32_full_rect() {
@@ -1422,6 +1497,22 @@ mod tests {
         };
 
         assert!(GlowRenderer::convert_subrect_to_rgba(&tex, rect).is_none());
+    }
+
+    #[test]
+    fn destroy_texture_with_external_context_does_not_require_owned_gl_context() {
+        let mut renderer = make_test_renderer();
+
+        let texture_id = TextureId::new(42);
+        let mut tex = TextureData::new();
+        tex.set_tex_id(texture_id);
+        tex.set_status(TextureStatus::WantDestroy);
+
+        renderer
+            .update_texture_from_data(None, &mut tex)
+            .expect("destroying an unknown texture should not require an owned GL context");
+
+        assert_eq!(tex.status(), TextureStatus::Destroyed);
     }
 }
 

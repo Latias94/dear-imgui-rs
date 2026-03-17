@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-glow`: harden the modern texture update path by keeping the fallback font-atlas texture in sync with managed atlas create/update/destroy requests.
   - `dear-imgui-glow`: align texture destroy handling with other renderers by setting `WantDestroyNextFrame` before marking managed textures as `Destroyed`.
   - `dear-imgui-glow`: refactor sub-rectangle RGBA conversion into a reusable helper and add regression tests mirroring the `dear-imgui-wgpu` coverage for `RGBA32` / `Alpha8` uploads.
+  - `dear-imgui-glow`: fix external-context rendering so `render_with_context()` now uses the caller-provided GL context for managed texture create/update/destroy requests from `DrawData::textures()` instead of failing when the renderer does not own the context. Fixes #22, thanks @CoffeeCatRailway.
+  - `dear-imgui-glow`: add `register_texture_with_context()` / `update_texture_with_context()` helpers plus a runnable external-context regression example covering the create/update/destroy flow.
   - `dear-imgui-wgpu`: stop tracking a separate renderer-side font atlas ID cache in the fallback path; legacy fallback uploads now check the atlas `TexRef` plus live texture-manager state directly, keeping modern managed textures as the source of truth.
 
 ## [0.10.3] - 2026-02-28

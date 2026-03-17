@@ -109,6 +109,10 @@ name = "glow_textures"
 path = "01-renderers/glow_textures.rs"
 
 [[bin]]
+name = "glow_external_context_regression"
+path = "01-renderers/glow_external_context_regression.rs"
+
+[[bin]]
 name = "dockspace_minimal"
 path = "02-docking/dockspace_minimal.rs"
 
