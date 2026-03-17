@@ -1,6 +1,6 @@
 [package]
 name = "dear-file-browser"
-version = "0.10.3"
+version = "0.10.4"
 edition.workspace = true
 description = "File dialogs and in-UI file browser for dear-imgui-rs"
 license.workspace = true

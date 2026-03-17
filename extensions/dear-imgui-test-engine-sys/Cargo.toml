@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-test-engine-sys"
-version = "0.10.3"
+version = "0.10.4"
 edition.workspace = true
 description = "Low-level FFI bindings for Dear ImGui Test Engine"
 license-file = "LICENSE.txt"
