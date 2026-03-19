@@ -213,17 +213,18 @@ impl AppWindow {
             self.pending_merge_cjk = false;
         }
 
-        let frame = match self.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.surface_desc);
                 return Ok(());
             }
-            Err(wgpu::SurfaceError::Timeout) => {
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 return Ok(());
             }
-            Err(e) => {
-                return Err(Box::new(e));
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
             }
         };
         let view = frame
@@ -362,6 +363,9 @@ impl AppWindow {
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.surface_desc);
+        }
         Ok(())
     }
 }

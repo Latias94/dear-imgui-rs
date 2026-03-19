@@ -148,9 +148,9 @@ impl Default for DemoState {
 
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let window = {
@@ -744,7 +744,20 @@ impl AppWindow {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("imgui encoder"),
             });
-        let output = self.surface.get_current_texture()?;
+        let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
+        };
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -772,6 +785,9 @@ impl AppWindow {
         drop(rpass);
         self.queue.submit(Some(encoder.finish()));
         output.present();
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.surface_desc);
+        }
 
         Ok(())
     }

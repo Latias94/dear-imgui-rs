@@ -443,7 +443,20 @@ impl AppWindow {
         }
 
         // Render to swapchain
-        let frame = self.surface.get_current_texture()?;
+        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
+        };
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -484,6 +497,9 @@ impl AppWindow {
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.surface_desc);
+        }
 
         Ok(())
     }

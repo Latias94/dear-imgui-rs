@@ -332,7 +332,7 @@ var<uniform> u: SceneUniform;
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("simple_scene_pipeline_layout"),
-            bind_group_layouts: &[&uniform_layout],
+            bind_group_layouts: &[Some(&uniform_layout)],
             immediate_size: 0,
         });
 
@@ -357,15 +357,15 @@ var<uniform> u: SceneUniform;
 
         let depth_state_grid = wgpu::DepthStencilState {
             format: depth_format,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: Default::default(),
             bias: Default::default(),
         };
         let depth_state_cube = wgpu::DepthStencilState {
             format: depth_format,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: Default::default(),
             bias: Default::default(),
         };
@@ -830,9 +830,9 @@ struct App {
 
 impl AppWindow {
     fn setup_gpu(event_loop: &ActiveEventLoop) -> Self {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let window = {
@@ -1010,7 +1010,7 @@ impl AppWindow {
         });
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let imgui = self.imgui.as_mut().unwrap();
 
         let now = Instant::now();
@@ -1021,7 +1021,20 @@ impl AppWindow {
             .set_delta_time(delta_time.as_secs_f32());
         imgui.last_frame = now;
 
-        let frame = self.surface.get_current_texture()?;
+        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
+        };
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -1152,6 +1165,9 @@ impl AppWindow {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.surface_desc);
+        }
 
         #[cfg(feature = "multi-viewport")]
         if imgui.enable_viewports {
@@ -2694,21 +2710,9 @@ impl ApplicationHandler for App {
                     let render_result = window.render();
                     match render_result {
                         Ok(_) => {}
-                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            eprintln!("Surface lost/outdated, reconfiguring");
-                            window
-                                .surface
-                                .configure(&window.device, &window.surface_desc);
-                        }
-                        Err(wgpu::SurfaceError::OutOfMemory) => {
-                            eprintln!("OutOfMemory");
+                        Err(e) => {
+                            eprintln!("Render error: {e}");
                             event_loop.exit();
-                        }
-                        Err(wgpu::SurfaceError::Timeout) => {
-                            eprintln!("Surface timeout");
-                        }
-                        Err(wgpu::SurfaceError::Other) => {
-                            eprintln!("Other surface error occurred");
                         }
                     }
                     window.window.request_redraw();

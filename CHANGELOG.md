@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Backends
+  - `dear-imgui-wgpu`: add feature-gated support for `wgpu` v29, make `wgpu-29` the default backend path, and keep `wgpu-28` / `wgpu-27` as explicit compatibility features.
+
+### Dependencies
+
+- Workspace
+  - Bump the default `wgpu` baseline to v29.
+
 ## [0.10.4] - 2026-03-17
 
 ### Deprecated

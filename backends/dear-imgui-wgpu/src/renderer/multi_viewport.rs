@@ -13,9 +13,11 @@ use winit::window::Window;
 
 /// Per-viewport WGPU data stored in ImGuiViewport::RendererUserData
 struct ViewportWgpuData {
+    pub device: wgpu::Device,
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub pending_frame: Option<wgpu::SurfaceTexture>,
+    pub pending_reconfigure: bool,
     // Last values we logged for this viewport (to avoid per-frame spam).
     #[cfg(feature = "mv-log")]
     pub last_log_display_size: [f32; 2],
@@ -286,9 +288,11 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let data = ViewportWgpuData {
+                device: global.device.clone(),
                 surface,
                 config,
                 pending_frame: None,
+                pending_reconfigure: false,
                 #[cfg(feature = "mv-log")]
                 last_log_display_size: [0.0, 0.0],
                 #[cfg(feature = "mv-log")]
@@ -455,9 +459,11 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
             let fb_w = data.config.width;
             let fb_h = data.config.height;
             // Acquire frame with basic recovery on Outdated/Lost/Timeout
-            let frame = match data.surface.get_current_texture() {
-                Ok(f) => f,
-                Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Lost) => {
+            #[cfg(feature = "wgpu-29")]
+            let (frame, reconfigure_after_present) = match data.surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+                wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                     // Reconfigure with current window size and retry next frame
                     #[cfg(not(target_arch = "wasm32"))]
                     {
@@ -468,6 +474,34 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                                 data.config.width = size.width;
                                 data.config.height = size.height;
                                 data.surface.configure(&device, &data.config);
+                            }
+                        }
+                    }
+                    return;
+                }
+                wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                    // Skip this frame silently
+                    return;
+                }
+                wgpu::CurrentSurfaceTexture::Validation => {
+                    eprintln!("[wgpu-mv] get_current_texture failed with a validation error");
+                    return;
+                }
+            };
+            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
+            let (frame, reconfigure_after_present) = match data.surface.get_current_texture() {
+                Ok(frame) => (frame, false),
+                Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Lost) => {
+                    // Reconfigure with current window size and retry next frame
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if !platform_handle.is_null() {
+                            let window: &winit::window::Window = &*(platform_handle as *const _);
+                            let size = window.inner_size();
+                            if size.width > 0 && size.height > 0 {
+                                data.config.width = size.width;
+                                data.config.height = size.height;
+                                data.surface.configure(&data.device, &data.config);
                             }
                         }
                     }
@@ -504,6 +538,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                         })],
                         depth_stencil_attachment: None,
                         occlusion_query_set: None,
+                        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
                         multiview_mask: None,
                         timestamp_writes: None,
                     });
@@ -528,6 +563,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                 return;
             }
             data.pending_frame = Some(frame);
+            data.pending_reconfigure = reconfigure_after_present;
         }
     }));
     if res.is_err() {
@@ -551,6 +587,10 @@ pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *
         if let Some(data) = viewport_user_data_mut(vpm) {
             if let Some(frame) = data.pending_frame.take() {
                 frame.present();
+                if data.pending_reconfigure {
+                    data.surface.configure(&data.device, &data.config);
+                    data.pending_reconfigure = false;
+                }
             }
         }
     }));

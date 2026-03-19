@@ -59,9 +59,9 @@ impl AppWindow {
     }
 
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let window = {
@@ -197,18 +197,21 @@ impl AppWindow {
         self.imgui.context.io_mut().set_delta_time(delta_secs);
         self.imgui.last_frame = now;
 
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 // Surface changed (e.g., moved between monitors / DPI change); reconfigure
                 self.surface.configure(&self.device, &self.surface_desc);
                 return Ok(());
             }
-            Err(wgpu::SurfaceError::Timeout) => {
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 // Non-fatal; skip this frame
                 return Ok(());
             }
-            Err(e) => return Err(Box::new(e)),
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
         };
 
         self.imgui
@@ -352,6 +355,9 @@ impl AppWindow {
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.surface_desc);
+        }
         Ok(())
     }
 }

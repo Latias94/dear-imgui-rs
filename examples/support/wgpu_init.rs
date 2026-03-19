@@ -26,7 +26,7 @@ pub fn init_wgpu_for_window(
     ),
     Box<dyn std::error::Error>,
 > {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
     // SAFETY: winit guarantees the window outlives the surface; using Arc<Window> gives 'static.
     let surface = instance.create_surface(window.clone())?;

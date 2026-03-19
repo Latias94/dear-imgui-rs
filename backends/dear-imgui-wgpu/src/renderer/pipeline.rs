@@ -32,6 +32,13 @@ impl WgpuRenderer {
             })?;
 
         // Create pipeline layout
+        #[cfg(feature = "wgpu-29")]
+        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Dear ImGui Pipeline Layout"),
+            bind_group_layouts: &[Some(uniform_layout), Some(image_layout)],
+            immediate_size: 0,
+        });
+        #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Dear ImGui Pipeline Layout"),
             bind_group_layouts: &[uniform_layout, image_layout],
@@ -90,9 +97,32 @@ impl WgpuRenderer {
         );
 
         // Create depth stencil state if needed (matches imgui_impl_wgpu.cpp depth-stencil setup)
-        let depth_stencil = backend_data
-            .depth_stencil_format
-            .map(|format| DepthStencilState {
+        let depth_stencil = backend_data.depth_stencil_format.map(|format| {
+            #[cfg(feature = "wgpu-29")]
+            let state = DepthStencilState {
+                format,
+                depth_write_enabled: Some(false), // matches WGPUOptionalBool_False in C++
+                depth_compare: Some(CompareFunction::Always), // matches WGPUCompareFunction_Always
+                stencil: StencilState {
+                    front: StencilFaceState {
+                        compare: CompareFunction::Always, // matches WGPUCompareFunction_Always
+                        fail_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
+                        depth_fail_op: StencilOperation::Keep, // matches WGPUStencilOperation_Keep
+                        pass_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
+                    },
+                    back: StencilFaceState {
+                        compare: CompareFunction::Always, // matches WGPUCompareFunction_Always
+                        fail_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
+                        depth_fail_op: StencilOperation::Keep, // matches WGPUStencilOperation_Keep
+                        pass_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
+                    },
+                    read_mask: 0xff,  // default value
+                    write_mask: 0xff, // default value
+                },
+                bias: DepthBiasState::default(),
+            };
+            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
+            let state = DepthStencilState {
                 format,
                 depth_write_enabled: false, // matches WGPUOptionalBool_False in C++
                 depth_compare: CompareFunction::Always, // matches WGPUCompareFunction_Always
@@ -113,7 +143,9 @@ impl WgpuRenderer {
                     write_mask: 0xff, // default value
                 },
                 bias: DepthBiasState::default(),
-            });
+            };
+            state
+        });
 
         // Create render pipeline
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
@@ -132,7 +164,7 @@ impl WgpuRenderer {
             depth_stencil,
             multisample: backend_data.init_info.pipeline_multisample_state,
             fragment: Some(fragment_state),
-            #[cfg(feature = "wgpu-28")]
+            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
             multiview_mask: None,
             #[cfg(feature = "wgpu-27")]
             multiview: None,

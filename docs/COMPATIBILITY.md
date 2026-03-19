@@ -24,7 +24,7 @@ Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.10.x  | wgpu = 28              | WebGPU renderer (experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
+| dear-imgui-wgpu   | 0.10.x  | wgpu = 29/28/27        | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features; experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
 | dear-imgui-glow   | 0.10.x  | glow = 0.16            | OpenGL renderer (winit/glutin) |
 | dear-imgui-ash    | 0.10.x  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
 | dear-imgui-winit  | 0.10.x  | winit = 0.30.12        | Winit platform backend |
@@ -51,8 +51,8 @@ Extensions
 ## Trunk (Unreleased)
 
 - Target release train: `0.11.0` (unreleased).
-- Minimum supported Rust: 1.92 (required by `wgpu` 28).
-- External dependencies baseline: wgpu 28, winit 0.30.12, glow 0.16, sdl3 0.17.
+- Minimum supported Rust: 1.92 (workspace baseline).
+- External dependencies baseline: wgpu 29, winit 0.30.12, glow 0.16, sdl3 0.17.
 
 ## History
 
@@ -60,8 +60,8 @@ Release Train 0.10 (current)
 
 - All crates unified to 0.10.4 across the workspace (use `version = "0.10"`).
 - Core + backends aligned with Dear ImGui v1.92.6 (docking) via cimgui.
-- External dependencies baseline: wgpu 28, winit 0.30.12, glow 0.16, sdl3 0.17.
-- Minimum supported Rust: 1.92 (required by `wgpu` 28).
+- External dependencies baseline: wgpu 29, winit 0.30.12, glow 0.16, sdl3 0.17.
+- Minimum supported Rust: 1.92 (workspace baseline).
 
 Release Train 0.9 (previous)
 

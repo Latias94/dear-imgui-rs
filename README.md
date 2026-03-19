@@ -151,6 +151,17 @@ dear-imgui-wgpu = "0.10"   # or dear-imgui-glow / dear-imgui-ash
 dear-imgui-winit = "0.10"  # or dear-imgui-sdl3
 ```
 
+`dear-imgui-wgpu` defaults to `wgpu-29` on the current `main` branch.
+
+If you need `wgpu = 28` compatibility for the WGPU renderer backend:
+
+```toml
+[dependencies]
+dear-imgui-rs = "0.10"
+dear-imgui-wgpu = { version = "0.10", default-features = false, features = ["wgpu-28"] }
+dear-imgui-winit = "0.10"
+```
+
 If you need `wgpu = 27` compatibility for the WGPU renderer backend:
 
 ```toml
@@ -261,7 +272,7 @@ Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.10.x   | wgpu = 28/27      | WebGPU renderer (default wgpu 28; optional wgpu 27 via features). Experimental multi-viewport on native via winit/SDL3; disabled on wasm |
+| dear-imgui-wgpu  | 0.10.x   | wgpu = 29/28/27   | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features). Experimental multi-viewport on native via winit/SDL3; disabled on wasm |
 | dear-imgui-glow  | 0.10.x   | glow = 0.16       | OpenGL renderer (winit/glutin) |
 | dear-imgui-ash   | 0.10.x   | ash = 0.38        | Vulkan renderer (optional multi-viewport helpers via winit/SDL3; native only) |
 | dear-imgui-winit | 0.10.x   | winit = 0.30.12   | Winit platform backend         |
@@ -286,9 +297,10 @@ Extensions
 | dear-imgui-test-engine | 0.10.x | 0.10.x                 | dear-imgui-test-engine-sys 0.10.x | UI automation and test runner      |
 | dear-imgui-reflect  | 0.10.x   | 0.10.x                 | —                           | Reflection-based UI helpers (pure Rust)|
 
-Note: if your ecosystem is pinned to `wgpu = 27` (e.g. a release train), you can use
-`dear-imgui-wgpu 0.10.x` with `default-features = false, features = ["wgpu-27"]`. `dear-app` stays
-on the default `wgpu = 28` path.
+Note: if your ecosystem is pinned to `wgpu = 28` or `wgpu = 27`, you can use
+`dear-imgui-wgpu 0.10.x` with `default-features = false, features = ["wgpu-28"]` or
+`default-features = false, features = ["wgpu-27"]`. `dear-app` follows the workspace default
+`wgpu = 29` path.
 
 Maintenance rules
 

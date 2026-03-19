@@ -477,7 +477,7 @@ fn create_scene_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> 
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("quat-scene-pipeline-layout"),
-        bind_group_layouts: &[&bind_layout],
+        bind_group_layouts: &[Some(&bind_layout)],
         immediate_size: 0,
     });
 
@@ -501,8 +501,8 @@ fn create_scene_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> 
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
@@ -598,7 +598,7 @@ struct App {
 
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
         let window = {
             let size = LogicalSize::new(1280.0, 720.0);
@@ -732,16 +732,19 @@ impl AppWindow {
         self.imgui.context.io_mut().set_delta_time(delta_s);
         self.imgui.last_frame = now;
 
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.surface_desc);
                 return Ok(());
             }
-            Err(wgpu::SurfaceError::Timeout) => {
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 return Ok(());
             }
-            Err(e) => return Err(Box::new(e)),
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
         };
 
         self.imgui
@@ -864,6 +867,9 @@ impl AppWindow {
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.surface_desc);
+        }
 
         // Update offscreen scene after presenting (applies next frame)
         self.render_scene_to_offscreen(&rot, &light_dir, &pan_dolly);

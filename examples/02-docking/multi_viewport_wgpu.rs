@@ -75,7 +75,7 @@ impl AppWindow {
         ));
 
         // Create WGPU instance first (also used by renderer for per-viewport surfaces)
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
         let window: Arc<Window> = Arc::new(
             event_loop
@@ -194,17 +194,18 @@ impl AppWindow {
     fn redraw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // Delta time is set by the platform backend in `prepare_frame()`.
 
-        let frame = match self.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.surface_config);
                 return Ok(());
             }
-            Err(wgpu::SurfaceError::Timeout) => {
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 return Ok(());
             }
-            Err(e) => {
-                return Err(Box::new(e));
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
             }
         };
         let view = frame
@@ -327,6 +328,9 @@ impl AppWindow {
         // Submit and present main frame first to avoid cross-surface validation hazards
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.surface_config);
+        }
 
         // Update + render all platform windows (secondary viewports)
         if self.enable_viewports {

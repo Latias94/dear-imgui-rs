@@ -20,9 +20,11 @@ compile_error!("`multi-viewport-sdl3` is not supported on wasm32 targets.");
 
 /// Per-viewport WGPU data stored in ImGuiViewport::RendererUserData
 struct ViewportWgpuData {
+    pub device: wgpu::Device,
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub pending_frame: Option<wgpu::SurfaceTexture>,
+    pub pending_reconfigure: bool,
 }
 
 static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
@@ -285,9 +287,11 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
         surface.configure(&global.device, &config);
 
         let data = ViewportWgpuData {
+            device: global.device.clone(),
             surface,
             config,
             pending_frame: None,
+            pending_reconfigure: false,
         };
         vpm.set_renderer_user_data(Box::into_raw(Box::new(data)) as *mut c_void);
     }));
@@ -410,9 +414,11 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         if let Some(data) = viewport_user_data_mut(vpm) {
             let fb_w = data.config.width;
             let fb_h = data.config.height;
-            let frame = match data.surface.get_current_texture() {
-                Ok(f) => f,
-                Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Lost) => {
+            #[cfg(feature = "wgpu-29")]
+            let (frame, reconfigure_after_present) = match data.surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+                wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                     // Reconfigure from actual SDL3 pixel size and retry next frame.
                     if let Some(window_id) = window_id {
                         if let Some(target) = Sdl3SurfaceTarget::from_window_id(window_id) {
@@ -427,6 +433,37 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                                 data.config.width = w;
                                 data.config.height = h;
                                 data.surface.configure(&device, &data.config);
+                            }
+                        }
+                    }
+                    return;
+                }
+                wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                    return;
+                }
+                wgpu::CurrentSurfaceTexture::Validation => {
+                    eprintln!("[wgpu-mv-sdl3] get_current_texture failed with a validation error");
+                    return;
+                }
+            };
+            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
+            let (frame, reconfigure_after_present) = match data.surface.get_current_texture() {
+                Ok(frame) => (frame, false),
+                Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Lost) => {
+                    // Reconfigure from actual SDL3 pixel size and retry next frame.
+                    if let Some(window_id) = window_id {
+                        if let Some(target) = Sdl3SurfaceTarget::from_window_id(window_id) {
+                            let raw_window = target.raw_window();
+                            let mut w: i32 = 0;
+                            let mut h: i32 = 0;
+                            if sdl3_sys::video::SDL_GetWindowSizeInPixels(
+                                raw_window, &mut w, &mut h,
+                            ) {
+                                let w = clamp_i32_pixels_to_u32(w);
+                                let h = clamp_i32_pixels_to_u32(h);
+                                data.config.width = w;
+                                data.config.height = h;
+                                data.surface.configure(&data.device, &data.config);
                             }
                         }
                     }
@@ -461,6 +498,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                         })],
                         depth_stencil_attachment: None,
                         occlusion_query_set: None,
+                        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
                         multiview_mask: None,
                         timestamp_writes: None,
                     });
@@ -486,6 +524,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
             }
 
             data.pending_frame = Some(frame);
+            data.pending_reconfigure = reconfigure_after_present;
         }
     }));
     if res.is_err() {
@@ -510,6 +549,10 @@ pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *
         if let Some(data) = viewport_user_data_mut(vpm) {
             if let Some(frame) = data.pending_frame.take() {
                 frame.present();
+                if data.pending_reconfigure {
+                    data.surface.configure(&data.device, &data.config);
+                    data.pending_reconfigure = false;
+                }
             }
         }
     }));

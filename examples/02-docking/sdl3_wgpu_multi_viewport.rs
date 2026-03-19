@@ -51,9 +51,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let _ = video.gl_set_swap_interval(SwapInterval::Immediate);
 
     // WGPU instance/surface/device/queue.
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
-        ..Default::default()
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
 
     // SAFETY: SDL3 window handle is valid for the duration of the surface.
@@ -194,14 +194,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let draw_data = imgui.render();
 
-        let frame = match surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+        let (frame, reconfigure_after_present) = match surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 surface.configure(&device, &surface_config);
                 continue;
             }
-            Err(wgpu::SurfaceError::Timeout) => continue,
-            Err(e) => return Err(Box::new(e)),
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                continue;
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
         };
 
         let view = frame
@@ -246,6 +251,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         queue.submit(std::iter::once(encoder.finish()));
         frame.present();
+        if reconfigure_after_present {
+            surface.configure(&device, &surface_config);
+        }
 
         if ENABLE_VIEWPORTS {
             let io_flags = imgui.io().config_flags();

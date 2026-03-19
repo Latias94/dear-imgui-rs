@@ -29,7 +29,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::{error, info};
-use wgpu::SurfaceError;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
@@ -54,8 +53,6 @@ pub enum DearAppError {
     SurfaceOutdated,
     #[error("WGPU surface timeout")]
     SurfaceTimeout,
-    #[error("WGPU error: {0}")]
-    Wgpu(#[from] wgpu::SurfaceError),
     #[error("Window creation error: {0}")]
     WindowCreation(#[from] winit::error::EventLoopError),
     #[error("Generic error: {0}")]
@@ -552,9 +549,9 @@ impl AppWindow {
         let _ = addons;
 
         // WGPU instance and window
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: cfg.wgpu.backends,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let window = {
@@ -799,14 +796,21 @@ impl AppWindow {
         let draw_data = self.imgui.context.render();
 
         // Acquire the swapchain image as late as possible to reduce time holding it.
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(SurfaceError::Lost | SurfaceError::Outdated) => {
+        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.surface_desc);
                 return Ok(());
             }
-            Err(SurfaceError::Timeout) => return Ok(()),
-            Err(e) => return Err(DearAppError::from(e)),
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err(DearAppError::Generic(
+                    "surface acquisition failed with a WGPU validation error".into(),
+                ));
+            }
         };
 
         let view = frame
@@ -848,6 +852,9 @@ impl AppWindow {
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.surface_desc);
+        }
         Ok(())
     }
 }

@@ -53,7 +53,7 @@ serde = { version = "1", features = ["derive"] }
 glam = "0.32"
 
 # Graphics and windowing
-wgpu = "28.0"
+wgpu = "29.0"
 winit = "0.30.12"
 glow = "0.16"
 glutin = "0.32"

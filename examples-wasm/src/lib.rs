@@ -257,10 +257,22 @@ impl AppWindow {
             self.resize(physical);
         }
 
-        let frame = self
-            .surface
-            .get_current_texture()
-            .map_err(|e| JsValue::from_str(&format!("get_current_texture: {e}")))?;
+        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err(JsValue::from_str(
+                    "get_current_texture failed with a WGPU validation error",
+                ));
+            }
+        };
 
         let ui = self.imgui.context.frame();
 
@@ -448,6 +460,9 @@ impl AppWindow {
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        if reconfigure_after_present {
+            self.surface.configure(&self.device, &self.surface_desc);
+        }
         Ok(())
     }
 }
@@ -464,7 +479,7 @@ impl ApplicationHandler for App {
 
         // Create window + surface synchronously, then finish GPU init asynchronously.
         use winit::platform::web::WindowAttributesExtWebSys;
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
         // Acquire target canvas from the page
         let win = web_sys::window().expect("no window");

@@ -40,7 +40,7 @@ impl RenderResources {
         fn linear_mipmap_filter() -> FilterMode {
             FilterMode::Linear
         }
-        #[cfg(feature = "wgpu-28")]
+        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
         fn linear_mipmap_filter() -> MipmapFilterMode {
             MipmapFilterMode::Linear
         }
