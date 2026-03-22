@@ -965,8 +965,10 @@ dependencies = [
  "flate2",
  "glam",
  "mint",
+ "ndk-sys",
  "pkg-config",
  "tar",
+ "windows 0.62.2",
  "xshell",
 ]
 

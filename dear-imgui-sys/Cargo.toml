@@ -17,7 +17,7 @@ exclude = [
     # Exclude heavy upstream folders from cimgui/imgui submodule
     "third-party/cimgui/imgui/.github/**",
     "third-party/cimgui/imgui/backends/**",
-    "third-party/cimgui/imgui/docs/**", 
+    "third-party/cimgui/imgui/docs/**",
     "third-party/cimgui/imgui/examples/**",
     "third-party/cimgui/imgui/misc/cpp/**",
     "third-party/cimgui/imgui/misc/debuggers/**",
@@ -53,6 +53,14 @@ xshell = { workspace = true }
 cmake = "0.1"
 build-support = { package = "dear-imgui-build-support", version = "0.2", path = "../tools/build-support" }
 
+[target.'cfg(target_os = "android")'.dependencies]
+ndk-sys = { version = ">=0.6.0", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = ">=0.62", optional = true, features = [
+    "Win32_Graphics_Direct3D11",
+] }
+
 [[bin]]
 name = "package"
 path = "bin/package/main.rs"
@@ -73,3 +81,8 @@ package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
 prebuilt = ["build-support/download"]
 build-from-source = []
 glam = ["dep:glam"]
+cxx-static = []
+backend-android = ["dep:ndk-sys"]
+backend-dx11 = ["dep:windows"]
+backend-opengl3 = []
+backend-win32 = ["dep:windows"]

@@ -45,6 +45,11 @@ wasm-font-atlas-experimental = []
 # Optional math interop: enable glam support in the sys crate so draw/list APIs
 # taking Into<sys::ImVec2>/ImVec4 can accept glam vectors directly.
 glam = ["dep:glam", "dear-imgui-sys/glam"]
+cxx-static = ["dear-imgui-sys/cxx-static"]
+backend-android = ["dear-imgui-sys/backend-android"]
+backend-dx11 = ["dear-imgui-sys/backend-dx11"]
+backend-opengl3 = ["dear-imgui-sys/backend-opengl3"]
+backend-win32 = ["dear-imgui-sys/backend-win32"]
 
 [dev-dependencies]
 approx = "0.5"

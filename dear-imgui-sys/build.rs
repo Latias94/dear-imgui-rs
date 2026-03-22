@@ -27,6 +27,9 @@ impl BuildConfig {
             docs_rs: env::var("DOCS_RS").is_ok(),
         }
     }
+    fn is_android(&self) -> bool {
+        self.target_os == "android"
+    }
     fn is_windows(&self) -> bool {
         self.target_os == "windows"
     }
@@ -420,6 +423,25 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
         }
         build.file(cfg.imgui_src().join("misc/freetype/imgui_freetype.cpp"));
     }
+
+    build.define("IMGUI_IMPL_API", "extern \"C\"");
+    if cfg.is_windows() {
+        #[cfg(feature = "backend-dx11")]
+        build.file(imgui_src.join("backends/imgui_impl_dx11.cpp"));
+        #[cfg(feature = "backend-win32")]
+        build
+            .file("src/win32.cpp")
+            .include(imgui_src.join("backends"));
+    }
+    if cfg.is_android() {
+        #[cfg(feature = "cxx-static")]
+        build.cpp_link_stdlib("c++_static");
+        #[cfg(feature = "backend-android")]
+        build.file(imgui_src.join("backends/imgui_impl_android.cpp"));
+        #[cfg(feature = "backend-opengl3")]
+        build.file(imgui_src.join("backends/imgui_impl_opengl3.cpp"));
+    }
+
     build.compile("dear_imgui");
 }
 
