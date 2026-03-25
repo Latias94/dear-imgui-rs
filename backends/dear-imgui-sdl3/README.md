@@ -20,8 +20,9 @@ Typical use cases:
 
 - This crate assumes a single Dear ImGui context and a single SDL3 event pump. The upstream
   SDL3 backend notes that multi-context usage is not well tested and may be dysfunctional.
-- The vendored SDL3 backend sources currently include a few compatibility branches for
-  older SDL 3.x preview APIs; these will be removed as upstream APIs stabilize.
+- The upstream SDL3/OpenGL3 backend sources are compiled from the Dear ImGui tree packaged by
+  `dear-imgui-sys`, while this crate keeps the SDL3-specific build logic, Rust API, and C shim
+  boundary.
 
 ## Features
 

@@ -41,25 +41,12 @@
 mod ffi;
 pub use ffi::*;
 
-#[cfg(all(target_os = "windows", feature = "backend-dx11"))]
-pub mod dx11;
-#[cfg(all(target_os = "windows", feature = "backend-dx11"))]
-pub use dx11::*;
-
-#[cfg(all(target_os = "windows", feature = "backend-win32"))]
-pub mod win32;
-#[cfg(all(target_os = "windows", feature = "backend-win32"))]
-pub use win32::*;
-
-#[cfg(all(target_os = "android", feature = "backend-android"))]
-pub mod android;
-#[cfg(all(target_os = "android", feature = "backend-android"))]
-pub use android::*;
-
-#[cfg(all(target_os = "android", feature = "backend-opengl3"))]
-pub mod opengl3;
-#[cfg(all(target_os = "android", feature = "backend-opengl3"))]
-pub use opengl3::*;
+/// Optional raw backend entry points for downstream integrations.
+///
+/// These modules expose low-level unsafe declarations only. They do not imply
+/// that `dear-imgui-sys` or `dear-imgui-rs` owns full backend integration,
+/// backend source compilation, or safe wrappers for those backends.
+pub mod raw_backend;
 
 // This project always builds Dear ImGui with `IMGUI_USE_WCHAR32`, so `ImWchar` must be 32-bit.
 const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];

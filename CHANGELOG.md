@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Core (`dear-imgui-sys`)
+  - Add `raw_backend::{win32, dx11, android, opengl3}` behind `raw-backend-*` feature gates as a shared low-level backend surface for downstream backend crates and third-party integrations. Document the intended usage pattern, including the C++ ABI / crate-local shim expectation for official Dear ImGui backend code. Based on PR #23, thanks @EtherealPsyche.
+
 ### Changed
 
+- Core (`dear-imgui-rs`)
+  - Keep raw backend feature gates in `dear-imgui-sys` only for now; the safe crate no longer re-exports backend-specific toggles until it owns corresponding safe wrappers.
 - Backends
   - `dear-imgui-wgpu`: add feature-gated support for `wgpu` v29, make `wgpu-29` the default backend path, and keep `wgpu-28` / `wgpu-27` as explicit compatibility features.
+  - `dear-imgui-sdl3`: stop vendoring local copies of `imgui_impl_sdl3` / `imgui_impl_opengl3`; build the upstream backend sources directly from the `dear-imgui-sys` package while keeping the SDL3-specific build logic and Rust-facing shim layer in the backend crate.
 
 ### Dependencies
 
