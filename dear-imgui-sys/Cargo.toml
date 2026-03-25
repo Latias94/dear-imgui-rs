@@ -16,8 +16,7 @@ links = "dear-imgui"
 exclude = [
     # Exclude heavy upstream folders from cimgui/imgui submodule
     "third-party/cimgui/imgui/.github/**",
-    "third-party/cimgui/imgui/backends/**",
-    "third-party/cimgui/imgui/docs/**", 
+    "third-party/cimgui/imgui/docs/**",
     "third-party/cimgui/imgui/examples/**",
     "third-party/cimgui/imgui/misc/cpp/**",
     "third-party/cimgui/imgui/misc/debuggers/**",
@@ -73,3 +72,7 @@ package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
 prebuilt = ["build-support/download"]
 build-from-source = []
 glam = ["dep:glam"]
+raw-backend-android = []
+raw-backend-dx11 = []
+raw-backend-opengl3 = []
+raw-backend-win32 = []

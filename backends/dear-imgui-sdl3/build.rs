@@ -4,10 +4,9 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=wrapper.cpp");
-    println!("cargo:rerun-if-changed=backends/imgui_impl_sdl3.cpp");
-    println!("cargo:rerun-if-changed=backends/imgui_impl_sdl3.h");
-    println!("cargo:rerun-if-changed=backends/imgui_impl_opengl3.cpp");
-    println!("cargo:rerun-if-changed=backends/imgui_impl_opengl3.h");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_IMGUI_BACKENDS_PATH");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_THIRD_PARTY");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH");
 
     // The upstream SDL3 backend uses Win32 APIs (e.g. GetWindowLong/SetWindowLong) on Windows.
     if env::var("CARGO_CFG_TARGET_OS")
@@ -18,8 +17,6 @@ fn main() {
     }
 
     // Upstream Dear ImGui core headers (imgui.h etc.) are provided by dear-imgui-sys.
-    // We vend the backend sources (imgui_impl_sdl3/imgui_impl_opengl3) directly in this
-    // crate to avoid relying on dear-imgui-sys packaging internal backends sources.
     let imgui_root = env::var("DEP_DEAR_IMGUI_THIRD_PARTY")
         .or_else(|_| env::var("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH"))
         .expect(
@@ -28,19 +25,42 @@ fn main() {
         );
 
     let imgui_root = PathBuf::from(imgui_root);
+    let backends_root = env::var("DEP_DEAR_IMGUI_IMGUI_BACKENDS_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| imgui_root.join("backends"));
+    let backends_parent = backends_root.parent().unwrap_or(&imgui_root);
 
-    // Crate-local copy of Dear ImGui SDL3/OpenGL3 backends (headers + sources).
-    let crate_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let local_backends = crate_root.join("backends");
+    if !backends_root.join("imgui_impl_sdl3.h").exists() {
+        panic!(
+            "dear-imgui-sdl3: could not find Dear ImGui backend sources at {}. \
+             Make sure dear-imgui-sys packages the upstream imgui/backends directory.",
+            backends_root.display()
+        );
+    }
+
+    println!(
+        "cargo:rerun-if-changed={}",
+        backends_root.join("imgui_impl_sdl3.cpp").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        backends_root.join("imgui_impl_sdl3.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        backends_root.join("imgui_impl_opengl3.cpp").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        backends_root.join("imgui_impl_opengl3.h").display()
+    );
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
 
     // Dear ImGui core includes
     build.include(&imgui_root);
-
-    // Local backend includes (vendored from upstream imgui/backends)
-    build.include(&crate_root);
+    build.include(backends_parent);
 
     // SDL3 includes:
     //
@@ -115,13 +135,13 @@ fn main() {
         );
     }
 
-    // Backend sources: SDL3 platform backend (vendored copy).
-    build.file(local_backends.join("imgui_impl_sdl3.cpp"));
+    // Backend sources come from the upstream Dear ImGui tree packaged by dear-imgui-sys.
+    build.file(backends_root.join("imgui_impl_sdl3.cpp"));
 
     // Optional OpenGL3 renderer backend.
     if cfg!(feature = "opengl3-renderer") {
         build.define("DEAR_IMGUI_SDL3_OPENGL3_RENDERER", None);
-        build.file(local_backends.join("imgui_impl_opengl3.cpp"));
+        build.file(backends_root.join("imgui_impl_opengl3.cpp"));
     }
 
     // C wrappers used by Rust FFI (see wrapper.cpp).

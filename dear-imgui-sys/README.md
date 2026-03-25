@@ -4,7 +4,7 @@ Low-level Rust bindings for Dear ImGui via cimgui (C API) + bindgen.
 
 ## Overview
 
-This crate provides unsafe Rust bindings to Dear ImGui v1.92.6 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. By using cimgui's C interface instead of directly binding to the C++ API, we completely avoid C++ ABI compatibility issues while maintaining full access to Dear ImGui's functionality.
+This crate provides unsafe Rust bindings to Dear ImGui v1.92.6 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. By using cimgui's C interface instead of directly binding to the C++ API, we avoid C++ ABI compatibility issues for the core `ig*` API while maintaining full access to Dear ImGui's functionality.
 
 ## Key Features
 
@@ -14,6 +14,7 @@ This crate provides unsafe Rust bindings to Dear ImGui v1.92.6 (docking branch) 
 - **Cross-platform**: Consistent builds on Windows (MSVC/MinGW), Linux, macOS, and WebAssembly
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for docs.rs and offline environments
+- **Optional raw backend declarations**: Shared low-level backend declarations for downstream backend crates and engine integrations
 
 ## Build Strategies
 
@@ -129,10 +130,10 @@ This is a low-level sys crate providing unsafe FFI bindings. Most users should u
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.7"
+dear-imgui-sys = "0.10"
 
 # Enable features as needed
-dear-imgui-sys = { version = "0.7", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "0.10", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -157,6 +158,98 @@ unsafe {
     igDestroyContext(ctx);
 }
 ```
+
+## Raw Backend Features (Advanced)
+
+For backend crates and engine integrations, `dear-imgui-sys` can also expose low-level backend declarations behind `raw-backend-*` features:
+
+```toml
+[dependencies]
+dear-imgui-sys = { version = "0.10", features = ["raw-backend-opengl3"] }
+```
+
+These features expose modules such as:
+
+- `dear_imgui_sys::raw_backend::win32`
+- `dear_imgui_sys::raw_backend::dx11`
+- `dear_imgui_sys::raw_backend::android`
+- `dear_imgui_sys::raw_backend::opengl3`
+
+Important scope note:
+
+- `raw-backend-*` only exposes low-level declarations
+- it does not compile the corresponding `imgui_impl_*.cpp` files for you
+- it does not mean `dear-imgui-rs` already provides a safe backend wrapper for that backend
+
+### Why ABI Still Matters
+
+The core `ig*` API comes from cimgui, so it is a normal C ABI boundary.
+
+The official Dear ImGui backend entry points (`imgui_impl_win32.cpp`, `imgui_impl_dx11.cpp`, `imgui_impl_opengl3.cpp`, etc.) are different:
+
+- they are implemented as C++ backend code
+- downstream crates usually still need a tiny crate-local C shim
+- Rust then calls that shim, not the raw C++ entry point directly
+
+In other words, the raw backend modules are a shared low-level surface so downstream crates do not need to keep redeclaring the same FFI contract, but backend crates still own their backend build/link strategy.
+
+### Typical Downstream Pattern
+
+The recommended pattern is:
+
+1. Enable the matching `raw-backend-*` feature in `dear-imgui-sys`
+2. Read the backend source path exported by `dear-imgui-sys` in your backend crate build script
+3. Compile the upstream backend source you need in your backend crate
+4. Export a tiny `extern "C"` shim from your backend crate
+5. Call that shim from Rust
+
+`dear-imgui-sys` exports the upstream backend directory to dependents as cargo metadata:
+
+```rust
+// build.rs
+use std::env;
+use std::path::PathBuf;
+
+let imgui_backends = PathBuf::from(
+    env::var("DEP_DEAR_IMGUI_IMGUI_BACKENDS_PATH")
+        .expect("dear-imgui-sys did not export IMGUI_BACKENDS_PATH"),
+);
+let imgui_root = imgui_backends
+    .parent()
+    .expect("IMGUI_BACKENDS_PATH should point to imgui/backends");
+```
+
+Then compile the selected backend source from that path:
+
+```rust
+// build.rs
+cc::Build::new()
+    .cpp(true)
+    .include(imgui_root)
+    .file(imgui_backends.join("imgui_impl_opengl3.cpp"))
+    .compile("my-imgui-backend");
+```
+
+For example, an OpenGL3 wrapper crate will often look like this:
+
+```cpp
+// wrapper.cpp
+#include "backends/imgui_impl_opengl3.h"
+
+extern "C" bool ImGui_ImplOpenGL3_Init_Rust(const char* glsl_version) {
+    return ImGui_ImplOpenGL3_Init(glsl_version);
+}
+```
+
+```rust
+use std::ffi::c_char;
+
+unsafe extern "C" {
+    fn ImGui_ImplOpenGL3_Init_Rust(glsl_version: *const c_char) -> bool;
+}
+```
+
+For a concrete in-tree reference, see the `dear-imgui-sdl3` backend crate. It keeps SDL3-specific build logic and safe API in the backend crate, while using a small C shim layer to bridge the official SDL3/OpenGL3 backend code to Rust.
 
 ## Technical Details
 

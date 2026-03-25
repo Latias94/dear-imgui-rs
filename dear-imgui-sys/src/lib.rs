@@ -41,6 +41,13 @@
 mod ffi;
 pub use ffi::*;
 
+/// Optional raw backend entry points for downstream integrations.
+///
+/// These modules expose low-level unsafe declarations only. They do not imply
+/// that `dear-imgui-sys` or `dear-imgui-rs` owns full backend integration,
+/// backend source compilation, or safe wrappers for those backends.
+pub mod raw_backend;
+
 // This project always builds Dear ImGui with `IMGUI_USE_WCHAR32`, so `ImWchar` must be 32-bit.
 const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
 

@@ -182,6 +182,10 @@ fn docsrs_build(cfg: &BuildConfig) {
     let imgui_src = cfg.imgui_src();
     // Expose include paths to dependent crates during docs.rs builds
     println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
+    println!(
+        "cargo:IMGUI_BACKENDS_PATH={}",
+        imgui_src.join("backends").display()
+    );
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
     let mut bindings = bindgen::Builder::default()
         .header(cimgui_root.join("cimgui.h").to_string_lossy())
@@ -216,6 +220,10 @@ fn docsrs_build(cfg: &BuildConfig) {
         .expect("Couldn't write bindings (docs.rs)!");
     sanitize_bindings_file(&out);
     println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
+    println!(
+        "cargo:IMGUI_BACKENDS_PATH={}",
+        cfg.imgui_src().join("backends").display()
+    );
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
 }
 
@@ -224,6 +232,10 @@ fn generate_bindings_native(cfg: &BuildConfig) {
     if cfg.target_arch == "wasm32" && use_pregenerated_bindings(&cfg.out_dir) {
         // Expose include paths to dependent crates during wasm builds
         println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
+        println!(
+            "cargo:IMGUI_BACKENDS_PATH={}",
+            cfg.imgui_src().join("backends").display()
+        );
         println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
         return;
     }
@@ -420,12 +432,17 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
         }
         build.file(cfg.imgui_src().join("misc/freetype/imgui_freetype.cpp"));
     }
+
     build.compile("dear_imgui");
 }
 
 fn export_include_paths(cfg: &BuildConfig) {
     println!("cargo:THIRD_PARTY={}", cfg.imgui_src().display());
     println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
+    println!(
+        "cargo:IMGUI_BACKENDS_PATH={}",
+        cfg.imgui_src().join("backends").display()
+    );
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
     println!(
         "cargo:DEFINE_IMGUI_ENABLE_TEST_ENGINE={}",
@@ -769,7 +786,12 @@ fn build_with_cmake(manifest_dir: &Path) -> bool {
         "cargo:IMGUI_INCLUDE_PATH={}",
         cimgui_root.join("imgui").display()
     );
+    println!(
+        "cargo:IMGUI_BACKENDS_PATH={}",
+        cimgui_root.join("imgui").join("backends").display()
+    );
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
+    println!("cargo:THIRD_PARTY={}", cimgui_root.join("imgui").display());
     true
 }
 
