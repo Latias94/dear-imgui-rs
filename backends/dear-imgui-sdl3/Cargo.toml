@@ -28,6 +28,13 @@ sdl3 = { version = "0.17", features = ["build-from-source"] }
 # building from source to avoid CMake permission/toolchain issues.
 sdl3 = { version = "0.17" }
 
+[target.'cfg(target_os = "android")'.dependencies]
+# On Android, keep SDL3 acquisition owned by the consuming application.
+# Apps may either provide SDL3 headers/libs themselves, or add their own direct
+# `sdl3 = { features = ["build-from-source"] }` dependency and rely on Cargo
+# feature unification to make sdl3-sys export headers via DEP_SDL3_OUT_DIR.
+sdl3 = { version = "0.17" }
+
 [build-dependencies]
 cc.workspace = true
 pkg-config.workspace = true
@@ -36,6 +43,6 @@ pkg-config.workspace = true
 default = []
 # Enable the official C++ OpenGL3 renderer backend (imgui_impl_opengl3).
 # Off by default to keep SDL3 platform-only mode lightweight.
-opengl3-renderer = []
+opengl3-renderer = ["dear-imgui-sys/backend-shim-opengl3"]
 # Enable multi-viewport helpers (requires multi-viewport support in dear-imgui-rs).
 multi-viewport = ["dear-imgui-rs/multi-viewport"]

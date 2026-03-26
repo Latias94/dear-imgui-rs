@@ -75,6 +75,10 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/imgui_test_engine_hooks.cpp");
+    println!("cargo:rerun-if-changed=backend-shims/opengl3.cpp");
+    println!("cargo:rerun-if-changed=backend-shims/android.cpp");
+    println!("cargo:rerun-if-changed=backend-shims/win32.cpp");
+    println!("cargo:rerun-if-changed=backend-shims/dx11.cpp");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_FORCE_BUILD");
@@ -98,6 +102,12 @@ fn main() {
     // Bindings: default to generating via bindgen, but allow skipping all native
     // toolchain usage (cc + bindgen) via IMGUI_SYS_SKIP_CC.
     if env::var("IMGUI_SYS_SKIP_CC").is_ok() {
+        if any_backend_shim_enabled() {
+            panic!(
+                "IMGUI_SYS_SKIP_CC is incompatible with backend-shim-* features. \
+                 Disable backend shims or allow native C++ compilation."
+            );
+        }
         if !use_pregenerated_bindings(&cfg.out_dir) {
             panic!(
                 "IMGUI_SYS_SKIP_CC is set but no pregenerated bindings were found. \
@@ -107,6 +117,12 @@ fn main() {
     } else {
         // Native: generate bindings from cimgui
         generate_bindings_native(&cfg);
+    }
+
+    // Build optional backend shim libraries before linking the core library so
+    // static link order remains backend-shim first, core dear_imgui second.
+    if env::var("IMGUI_SYS_SKIP_CC").is_err() {
+        build_backend_shims(&cfg);
     }
 
     // Build strategy selection via features + env var override
@@ -187,6 +203,10 @@ fn docsrs_build(cfg: &BuildConfig) {
         imgui_src.join("backends").display()
     );
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
+    println!(
+        "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
+        cfg.manifest_dir.join("backend-shims").display()
+    );
     let mut bindings = bindgen::Builder::default()
         .header(cimgui_root.join("cimgui.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -225,18 +245,29 @@ fn docsrs_build(cfg: &BuildConfig) {
         cfg.imgui_src().join("backends").display()
     );
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
+    println!(
+        "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
+        cfg.manifest_dir.join("backend-shims").display()
+    );
 }
 
 fn generate_bindings_native(cfg: &BuildConfig) {
-    // For wasm targets, prefer pregenerated bindings to avoid requiring a C sysroot
-    if cfg.target_arch == "wasm32" && use_pregenerated_bindings(&cfg.out_dir) {
-        // Expose include paths to dependent crates during wasm builds
+    // For wasm and Android targets, prefer pregenerated bindings to avoid
+    // requiring a fully configured cross-target sysroot during bindgen.
+    if (cfg.target_arch == "wasm32" || cfg.target_os == "android")
+        && use_pregenerated_bindings(&cfg.out_dir)
+    {
+        // Expose include paths to dependent crates during pregenerated-binding builds
         println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
         println!(
             "cargo:IMGUI_BACKENDS_PATH={}",
             cfg.imgui_src().join("backends").display()
         );
         println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
+        println!(
+            "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
+            cfg.manifest_dir.join("backend-shims").display()
+        );
         return;
     }
 
@@ -381,12 +412,10 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
 }
 
 fn build_with_cc_cfg(cfg: &BuildConfig) {
-    let mut build = cc::Build::new();
-    build.cpp(true).std("c++17");
     let cimgui_root = cfg.cimgui_root();
     let imgui_src = cfg.imgui_src();
+    let mut build = new_native_cpp_build(cfg);
     build.include(&cimgui_root);
-    build.include(&imgui_src);
     build.file(imgui_src.join("imgui.cpp"));
     build.file(imgui_src.join("imgui_draw.cpp"));
     build.file(imgui_src.join("imgui_widgets.cpp"));
@@ -396,28 +425,9 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     // This is excluded from the WASM single‑module path below.
     build.file(imgui_src.join("imgui_demo.cpp"));
     build.file(cimgui_root.join("cimgui.cpp"));
-    build.define("IMGUI_USE_WCHAR32", None);
     if cfg!(feature = "test-engine") {
         build.define("IMGUI_ENABLE_TEST_ENGINE", None);
         build.file(cfg.manifest_dir.join("src/imgui_test_engine_hooks.cpp"));
-    }
-    if cfg.is_msvc() && cfg.is_windows() {
-        build.flag("/EHsc");
-        let use_static = cfg.use_static_crt();
-        build.static_crt(use_static);
-        if use_static {
-            build.flag("/MT");
-        } else {
-            build.flag("/MD");
-        }
-        if cfg.is_debug() {
-            build.debug(true);
-            build.opt_level(0);
-        } else {
-            build.debug(false);
-            build.opt_level(2);
-        }
-        build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
     }
     #[cfg(feature = "freetype")]
     if let Ok(freetype) = pkg_config::probe_library("freetype2") {
@@ -436,6 +446,115 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     build.compile("dear_imgui");
 }
 
+fn any_backend_shim_enabled() -> bool {
+    cfg!(feature = "backend-shim-android")
+        || cfg!(feature = "backend-shim-dx11")
+        || cfg!(feature = "backend-shim-opengl3")
+        || cfg!(feature = "backend-shim-win32")
+}
+
+fn new_native_cpp_build(cfg: &BuildConfig) -> cc::Build {
+    let mut build = cc::Build::new();
+    build.cpp(true).std("c++17");
+    build.include(cfg.imgui_src());
+    build.define("IMGUI_USE_WCHAR32", None);
+    if cfg.is_msvc() && cfg.is_windows() {
+        build.flag("/EHsc");
+        let use_static = cfg.use_static_crt();
+        build.static_crt(use_static);
+        if use_static {
+            build.flag("/MT");
+        } else {
+            build.flag("/MD");
+        }
+        if cfg.is_debug() {
+            build.debug(true);
+            build.opt_level(0);
+        } else {
+            build.debug(false);
+            build.opt_level(2);
+        }
+        build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
+    }
+    build
+}
+
+fn build_backend_shims(cfg: &BuildConfig) {
+    if !any_backend_shim_enabled() {
+        return;
+    }
+
+    if cfg.target_arch == "wasm32" {
+        panic!("backend-shim-* features are not supported for wasm targets yet.");
+    }
+
+    if cfg!(feature = "backend-shim-opengl3") {
+        build_backend_shim_opengl3(cfg);
+    }
+    if cfg.is_windows() && cfg!(feature = "backend-shim-win32") {
+        build_backend_shim_win32(cfg);
+    }
+    if cfg.is_windows() && cfg!(feature = "backend-shim-dx11") {
+        build_backend_shim_dx11(cfg);
+    }
+    if cfg.target_os == "android" && cfg!(feature = "backend-shim-android") {
+        build_backend_shim_android(cfg);
+    }
+}
+
+fn build_backend_shim_opengl3(cfg: &BuildConfig) {
+    let imgui_src = cfg.imgui_src();
+    let shim_root = cfg.manifest_dir.join("backend-shims");
+    let mut build = new_native_cpp_build(cfg);
+    build.file(imgui_src.join("backends/imgui_impl_opengl3.cpp"));
+    build.file(shim_root.join("opengl3.cpp"));
+    build.compile("dear_imgui_backend_opengl3");
+
+    if matches!(cfg.target_os.as_str(), "linux" | "android") {
+        println!("cargo:rustc-link-lib=dl");
+    }
+    if cfg.target_os == "android" {
+        // The official OpenGL3 backend references GLES entry points directly.
+        // Link the Android GLES loader explicitly so NativeActivity can load the
+        // final cdylib before the application creates its own EGL/GLES context.
+        println!("cargo:rustc-link-lib=GLESv3");
+    }
+}
+
+fn build_backend_shim_android(cfg: &BuildConfig) {
+    let imgui_src = cfg.imgui_src();
+    let shim_root = cfg.manifest_dir.join("backend-shims");
+    let mut build = new_native_cpp_build(cfg);
+    build.file(imgui_src.join("backends/imgui_impl_android.cpp"));
+    build.file(shim_root.join("android.cpp"));
+    build.compile("dear_imgui_backend_android");
+}
+
+fn build_backend_shim_win32(cfg: &BuildConfig) {
+    let imgui_src = cfg.imgui_src();
+    let shim_root = cfg.manifest_dir.join("backend-shims");
+    let mut build = new_native_cpp_build(cfg);
+    build.file(imgui_src.join("backends/imgui_impl_win32.cpp"));
+    build.file(shim_root.join("win32.cpp"));
+    build.compile("dear_imgui_backend_win32");
+
+    println!("cargo:rustc-link-lib=gdi32");
+    println!("cargo:rustc-link-lib=dwmapi");
+}
+
+fn build_backend_shim_dx11(cfg: &BuildConfig) {
+    let imgui_src = cfg.imgui_src();
+    let shim_root = cfg.manifest_dir.join("backend-shims");
+    let mut build = new_native_cpp_build(cfg);
+    build.file(imgui_src.join("backends/imgui_impl_dx11.cpp"));
+    build.file(shim_root.join("dx11.cpp"));
+    build.compile("dear_imgui_backend_dx11");
+
+    println!("cargo:rustc-link-lib=d3d11");
+    println!("cargo:rustc-link-lib=dxgi");
+    println!("cargo:rustc-link-lib=d3dcompiler");
+}
+
 fn export_include_paths(cfg: &BuildConfig) {
     println!("cargo:THIRD_PARTY={}", cfg.imgui_src().display());
     println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
@@ -444,6 +563,10 @@ fn export_include_paths(cfg: &BuildConfig) {
         cfg.imgui_src().join("backends").display()
     );
     println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
+    println!(
+        "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
+        cfg.manifest_dir.join("backend-shims").display()
+    );
     println!(
         "cargo:DEFINE_IMGUI_ENABLE_TEST_ENGINE={}",
         if cfg!(feature = "test-engine") {

@@ -1,10 +1,9 @@
 //! SDL3 platform backend bindings for `dear-imgui-rs`.
 //!
 //! This crate is a thin, opinionated wrapper around the official C++ SDL3
-//! platform backend (`imgui_impl_sdl3.cpp`) and, when the `opengl3-renderer`
-//! feature is enabled, the official OpenGL3 renderer backend
-//! (`imgui_impl_opengl3.cpp`). Both are compiled from the upstream Dear ImGui
-//! tree used by `dear-imgui-sys`.
+//! platform backend (`imgui_impl_sdl3.cpp`). When the `opengl3-renderer`
+//! feature is enabled, the renderer path uses the shared OpenGL3 backend shim
+//! exported by `dear-imgui-sys`.
 //!
 //! The intent is to provide a simple, safe-ish API that:
 //! - plugs into an existing `dear-imgui-rs::Context`
@@ -12,17 +11,19 @@
 //! - supports Dear ImGui multi-viewport via the official backend behavior.
 //!
 //! By default, this crate builds the SDL3 platform backend only. Enable
-//! `opengl3-renderer` to use the official OpenGL3 renderer.
+//! `opengl3-renderer` to pair it with the official OpenGL3 renderer shim.
 
-use std::ffi::c_void;
 #[cfg(feature = "opengl3-renderer")]
-use std::ffi::{CString, c_char};
+use std::ffi::CString;
+use std::ffi::c_void;
 
 use dear_imgui_rs::Context;
 #[cfg(feature = "opengl3-renderer")]
 use dear_imgui_rs::{TextureData, render::DrawData};
 #[cfg(feature = "opengl3-renderer")]
 use dear_imgui_sys as sys;
+#[cfg(feature = "opengl3-renderer")]
+use dear_imgui_sys::backend_shim::opengl3 as opengl3_backend;
 use sdl3::video::{GLContext, Window};
 use sdl3_sys::events::SDL_Event;
 
@@ -54,17 +55,6 @@ mod ffi {
             manual_gamepads_array: *const *mut sdl3_sys::gamepad::SDL_Gamepad,
             manual_gamepads_count: i32,
         );
-    }
-
-    #[cfg(feature = "opengl3-renderer")]
-    unsafe extern "C" {
-        pub fn ImGui_ImplOpenGL3_Init_Rust(glsl_version: *const c_char) -> bool;
-        pub fn ImGui_ImplOpenGL3_CreateDeviceObjects_Rust() -> bool;
-        pub fn ImGui_ImplOpenGL3_DestroyDeviceObjects_Rust();
-        pub fn ImGui_ImplOpenGL3_Shutdown_Rust();
-        pub fn ImGui_ImplOpenGL3_NewFrame_Rust();
-        pub fn ImGui_ImplOpenGL3_RenderDrawData_Rust(draw_data: *const sys::ImDrawData);
-        pub fn ImGui_ImplOpenGL3_UpdateTexture_Rust(tex: *mut sys::ImTextureData);
     }
 }
 
@@ -152,7 +142,7 @@ pub fn init_for_opengl(
         if !ffi::ImGui_ImplSDL3_InitForOpenGL_Rust(sdl_window, sdl_gl as *mut c_void) {
             return Err(Sdl3BackendError::Sdl3InitFailed);
         }
-        if !ffi::ImGui_ImplOpenGL3_Init_Rust(glsl.as_ptr()) {
+        if !opengl3_backend::dear_imgui_backend_opengl3_init(glsl.as_ptr()) {
             return Err(Sdl3BackendError::OpenGlInitFailed);
         }
     }
@@ -178,7 +168,7 @@ pub fn init_for_opengl_default(
         if !ffi::ImGui_ImplSDL3_InitForOpenGL_Rust(sdl_window, sdl_gl as *mut c_void) {
             return Err(Sdl3BackendError::Sdl3InitFailed);
         }
-        if !ffi::ImGui_ImplOpenGL3_Init_Rust(std::ptr::null()) {
+        if !opengl3_backend::dear_imgui_backend_opengl3_init(std::ptr::null()) {
             return Err(Sdl3BackendError::OpenGlInitFailed);
         }
     }
@@ -306,7 +296,7 @@ pub fn init_for_sdl_gpu(_imgui: &mut Context, window: &Window) -> Result<(), Sdl
 #[cfg(feature = "opengl3-renderer")]
 pub fn shutdown_for_opengl(_imgui: &mut Context) {
     unsafe {
-        ffi::ImGui_ImplOpenGL3_Shutdown_Rust();
+        opengl3_backend::dear_imgui_backend_opengl3_shutdown();
         ffi::ImGui_ImplSDL3_Shutdown_Rust();
     }
 }
@@ -327,7 +317,7 @@ pub fn shutdown(_imgui: &mut Context) {
 #[cfg(feature = "opengl3-renderer")]
 pub fn new_frame(_imgui: &mut Context) {
     unsafe {
-        ffi::ImGui_ImplOpenGL3_NewFrame_Rust();
+        opengl3_backend::dear_imgui_backend_opengl3_new_frame();
         ffi::ImGui_ImplSDL3_NewFrame_Rust();
     }
 }
@@ -370,7 +360,7 @@ pub fn render(draw_data: &DrawData) {
     // Render main viewport
     unsafe {
         let raw = draw_data as *const DrawData as *const sys::ImDrawData;
-        ffi::ImGui_ImplOpenGL3_RenderDrawData_Rust(raw);
+        opengl3_backend::dear_imgui_backend_opengl3_render_draw_data(raw);
     }
 }
 
@@ -380,7 +370,7 @@ pub fn render(draw_data: &DrawData) {
 #[cfg(feature = "opengl3-renderer")]
 pub fn update_texture(tex: &mut TextureData) {
     unsafe {
-        ffi::ImGui_ImplOpenGL3_UpdateTexture_Rust(tex.as_raw_mut());
+        opengl3_backend::dear_imgui_backend_opengl3_update_texture(tex.as_raw_mut());
     }
 }
 
@@ -389,7 +379,7 @@ pub fn update_texture(tex: &mut TextureData) {
 /// This is an optional advanced helper mirroring `ImGui_ImplOpenGL3_CreateDeviceObjects`.
 #[cfg(feature = "opengl3-renderer")]
 pub fn create_device_objects() -> bool {
-    unsafe { ffi::ImGui_ImplOpenGL3_CreateDeviceObjects_Rust() }
+    unsafe { opengl3_backend::dear_imgui_backend_opengl3_create_device_objects() }
 }
 
 /// Destroy OpenGL3 renderer device objects.
@@ -398,6 +388,6 @@ pub fn create_device_objects() -> bool {
 #[cfg(feature = "opengl3-renderer")]
 pub fn destroy_device_objects() {
     unsafe {
-        ffi::ImGui_ImplOpenGL3_DestroyDeviceObjects_Rust();
+        opengl3_backend::dear_imgui_backend_opengl3_destroy_device_objects();
     }
 }

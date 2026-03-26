@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+
+[package]
+name = "dear-imgui-android-smoke"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "dear_imgui_android_smoke"
+crate-type = ["cdylib"]
+
+[package.metadata.android]
+package = "org.dearimgui.smoke"
+build_targets = ["aarch64-linux-android"]
+apk_name = "dear-imgui-android-smoke"
+use_aapt2 = true
+include_cplusplus_shared = true
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 36
+
+[package.metadata.android.application]
+label = "Dear ImGui Android Smoke"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+extract_native_libs = true
+
+[[package.metadata.android.application.activity]]
+name = "android.app.NativeActivity"
+config_changes = "orientation|screenSize|screenLayout|keyboardHidden"
+exported = true
+
+[[package.metadata.android.application.activity.meta_data]]
+name = "android.app.lib_name"
+value = "dear_imgui_android_smoke"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]
+
+[dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = "0.15"
+dear-imgui-rs = { path = "../../dear-imgui" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", features = ["backend-shim-android", "backend-shim-opengl3"] }
+log = "0.4"
+ndk = { version = "0.9", features = ["nativewindow"] }

@@ -10,15 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Core (`dear-imgui-sys`)
-  - Add `raw_backend::{win32, dx11, android, opengl3}` behind `raw-backend-*` feature gates as a shared low-level backend surface for downstream backend crates and third-party integrations. Document the intended usage pattern, including the C++ ABI / crate-local shim expectation for official Dear ImGui backend code. Based on PR #23, thanks @EtherealPsyche.
+  - Replace the provisional `raw_backend::{win32, dx11, android, opengl3}` surface with `backend_shim::{win32, dx11, android, opengl3}` behind `backend-shim-*` feature gates. The sys crate now owns the repository-defined C shim ABI for self-contained official backends instead of exposing direct declarations for upstream C++ backend symbols.
+- Examples
+  - Add a standalone repository-local `examples-android/dear-imgui-android-smoke` Android template that demonstrates the low-level `dear-imgui-rs` + `dear-imgui-sys` route without introducing a new published crate or changing the workspace's default build matrix.
+  - Add minimal `cargo-apk2` packaging metadata to the Android smoke template and verify that it can produce a signed debug `NativeActivity` APK for `aarch64-linux-android`.
+  - Add a PowerShell packaging helper for the Android smoke template and document release signing plus per-ABI APK packaging while keeping the checked-in smoke path single-ABI and repository-local.
 
 ### Changed
 
 - Core (`dear-imgui-rs`)
-  - Keep raw backend feature gates in `dear-imgui-sys` only for now; the safe crate no longer re-exports backend-specific toggles until it owns corresponding safe wrappers.
+  - Keep backend shim feature gates in `dear-imgui-sys` only; the safe crate does not re-export backend-specific toggles until it owns corresponding safe wrappers.
+- Core (`dear-imgui-sys`)
+  - Link `GLESv3` for the Android OpenGL3 backend shim so downstream Android `NativeActivity` binaries can load successfully before the application creates its own EGL / GLES context.
+  - Expand the crate and module documentation around `backend_shim` so the repository-owned shim ABI, Android low-level route, and ownership split with application packaging are explicit in the main docs.
 - Backends
   - `dear-imgui-wgpu`: add feature-gated support for `wgpu` v29, make `wgpu-29` the default backend path, and keep `wgpu-28` / `wgpu-27` as explicit compatibility features.
-  - `dear-imgui-sdl3`: stop vendoring local copies of `imgui_impl_sdl3` / `imgui_impl_opengl3`; build the upstream backend sources directly from the `dear-imgui-sys` package while keeping the SDL3-specific build logic and Rust-facing shim layer in the backend crate.
+  - `dear-imgui-sdl3`: keep SDL3-specific wrapper/build ownership in the backend crate, but route the optional official OpenGL3 renderer path through `dear-imgui-sys::backend_shim::opengl3` instead of compiling a second local OpenGL3 shim layer.
+  - `dear-imgui-sdl3`: stop forcing `sdl3/build-from-source` on Android from the backend crate itself. Android SDL3 acquisition now remains application-owned: consumers may either provide `SDL3_INCLUDE_DIR` or opt into `sdl3/build-from-source` in their own dependency graph.
+- Examples
+  - Upgrade `examples-android/dear-imgui-android-smoke` from a startup-only smoke path to a minimal NativeActivity + EGL / GLES3 render loop that displays Dear ImGui windows on-device while preserving app-owned Android packaging and lifecycle glue, without turning the template into a published runtime crate.
 
 ### Dependencies
 

@@ -7,6 +7,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_IMGUI_BACKENDS_PATH");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_THIRD_PARTY");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH");
+    println!("cargo:rerun-if-env-changed=SDL3_INCLUDE_DIR");
 
     // The upstream SDL3 backend uses Win32 APIs (e.g. GetWindowLong/SetWindowLong) on Windows.
     if env::var("CARGO_CFG_TARGET_OS")
@@ -46,14 +47,6 @@ fn main() {
         "cargo:rerun-if-changed={}",
         backends_root.join("imgui_impl_sdl3.h").display()
     );
-    println!(
-        "cargo:rerun-if-changed={}",
-        backends_root.join("imgui_impl_opengl3.cpp").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        backends_root.join("imgui_impl_opengl3.h").display()
-    );
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
@@ -68,7 +61,8 @@ fn main() {
     // 2. Try pkg-config "sdl3" (if available).
     // 3. Try a few common default locations (Homebrew, /usr/local).
     // 4. As a fallback, try the include path produced by sdl3-sys when
-    //    building SDL3 from source (DEP_SDL3_OUT_DIR/include).
+    //    the final dependency graph enables `sdl3/build-from-source`
+    //    (DEP_SDL3_OUT_DIR/include).
     let mut have_sdl_headers = false;
 
     if let Ok(dir) = env::var("SDL3_INCLUDE_DIR") {
@@ -126,23 +120,29 @@ fn main() {
     }
 
     if !have_sdl_headers {
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        if target_os == "android" {
+            panic!(
+                "dear-imgui-sdl3: could not find SDL3 headers for Android. \
+                 Set SDL3_INCLUDE_DIR to an include root containing SDL3/SDL.h, \
+                 or make the final application dependency graph enable \
+                 `sdl3/build-from-source` so sdl3-sys can expose headers via \
+                 DEP_SDL3_OUT_DIR. Android application / NDK / CMake setup still \
+                 belongs to the consuming application."
+            );
+        }
+
         panic!(
             "dear-imgui-sdl3: could not find SDL3 headers. \
              Install SDL3 development files (e.g. `brew install sdl3`), \
              set SDL3_INCLUDE_DIR to the SDL3 include path, \
-             or enable `build-from-source` on the `sdl3` crate so sdl3-sys can \
-             build SDL3 and expose headers via DEP_SDL3_OUT_DIR."
+             or make the final dependency graph enable `sdl3/build-from-source` \
+             so sdl3-sys can build SDL3 and expose headers via DEP_SDL3_OUT_DIR."
         );
     }
 
     // Backend sources come from the upstream Dear ImGui tree packaged by dear-imgui-sys.
     build.file(backends_root.join("imgui_impl_sdl3.cpp"));
-
-    // Optional OpenGL3 renderer backend.
-    if cfg!(feature = "opengl3-renderer") {
-        build.define("DEAR_IMGUI_SDL3_OPENGL3_RENDERER", None);
-        build.file(backends_root.join("imgui_impl_opengl3.cpp"));
-    }
 
     // C wrappers used by Rust FFI (see wrapper.cpp).
     build.file("wrapper.cpp");

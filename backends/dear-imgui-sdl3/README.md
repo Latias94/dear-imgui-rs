@@ -4,7 +4,7 @@ SDL3 platform backend (with optional OpenGL3 renderer) for the `dear-imgui-rs`
 crate. This wraps the official Dear ImGui C++ backends:
 
 - `imgui_impl_sdl3.cpp` (platform layer)
-- `imgui_impl_opengl3.cpp` (OpenGL3 renderer)
+- `imgui_impl_opengl3.cpp` (OpenGL3 renderer, via the shared sys shim)
 
 and exposes a small, Rust-friendly API that plugs into an existing
 `dear-imgui-rs::Context`.
@@ -20,13 +20,15 @@ Typical use cases:
 
 - This crate assumes a single Dear ImGui context and a single SDL3 event pump. The upstream
   SDL3 backend notes that multi-context usage is not well tested and may be dysfunctional.
-- The upstream SDL3/OpenGL3 backend sources are compiled from the Dear ImGui tree packaged by
-  `dear-imgui-sys`, while this crate keeps the SDL3-specific build logic, Rust API, and C shim
-  boundary.
+- The upstream SDL3 backend source is compiled from the Dear ImGui tree packaged by
+  `dear-imgui-sys`, while this crate keeps the SDL3-specific build logic, Rust API, and SDL3
+  wrapper boundary.
+- When `opengl3-renderer` is enabled, this crate uses the shared OpenGL3 backend shim exported by
+  `dear-imgui-sys` instead of compiling a second local OpenGL3 wrapper layer.
 
 ## Features
 
-- `opengl3-renderer`: builds and exposes the official C++ OpenGL3 renderer backend.
+- `opengl3-renderer`: enables the shared official OpenGL3 renderer shim from `dear-imgui-sys`.
 - `multi-viewport`: enables multi-viewport helpers (requires `dear-imgui-rs/multi-viewport`).
 
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
@@ -185,6 +187,17 @@ Build behavior is aligned with `Cargo.toml`:
   - Linking parameters are handled by `sdl3-sys` / `sdl3`; this crate only
     needs the headers to build the C++ backend sources.
 
+- **Android**
+  - The crate depends on the safe `sdl3` crate on Android targets as well, but it
+    does **not** force `sdl3/build-from-source`.
+  - Android application / NDK / activity packaging still belongs to the consuming
+    application.
+  - Treat this as a supported integration direction, not a zero-config turn-key path.
+  - There are two supported ways to satisfy the SDL3 headers needed by this crate:
+    - provide SDL3 headers yourself and set `SDL3_INCLUDE_DIR` when discovery is not enough
+    - make the final application dependency graph enable `sdl3/build-from-source`, so
+      `sdl3-sys` exports headers via `DEP_SDL3_OUT_DIR`
+
 ### Header Search Order and `SDL3_INCLUDE_DIR`
 
 For cases where a system SDL3 is used, `build.rs` locates the headers in the
@@ -220,6 +233,10 @@ Set this when SDL3 is installed in a non-standard location:
 `build.rs` adds this directory to the C/C++ include path and expects to find
 `SDL3/SDL.h` under it.
 
+This is the preferred Android route when your application already owns the SDL3
+integration (Gradle/NDK/Prefab/custom packaging) and just needs
+`dear-imgui-sdl3` to compile the official Dear ImGui SDL3 backend sources.
+
 **2. `pkg-config sdl3`**
 
 If `SDL3_INCLUDE_DIR` is not set, the build script tries:
@@ -238,6 +255,15 @@ If both the environment variable and pkg-config checks fail, `build.rs` tries
 a few common include roots (such as Homebrew / MacPorts locations) and looks
 for `SDL3/SDL.h` there.
 
+**4. `sdl3/build-from-source` feature unification**
+
+If the final dependency graph enables `sdl3/build-from-source`, `sdl3-sys`
+builds SDL3 from source and exports `DEP_SDL3_OUT_DIR`. This crate will then
+reuse `DEP_SDL3_OUT_DIR/include` automatically.
+
+This is especially useful when the application wants Cargo to drive the SDL3
+build instead of relying on a system install.
+
 ### When Headers Cannot Be Found
 
 If the build script cannot locate SDL3 headers, it will panic with a message
@@ -250,7 +276,96 @@ similar to:
 To fix this:
 
 1. Install SDL3 development packages and verify `pkg-config sdl3` works, **or**
-2. Set `SDL3_INCLUDE_DIR` to the correct include root.
+2. Set `SDL3_INCLUDE_DIR` to the correct include root, **or**
+3. Enable `sdl3/build-from-source` in the final dependency graph so `sdl3-sys`
+   exports SDL3 headers via `DEP_SDL3_OUT_DIR`.
+
+## Android Integration Notes
+
+Android support in this crate should be understood as a low-friction integration
+path, not as a turn-key Android application template.
+
+Recommended model:
+
+1. The consuming application owns SDL3 Android packaging, entry-point, and NDK
+   toolchain decisions.
+2. `dear-imgui-sdl3` owns the Dear ImGui SDL3 backend wrapper and can reuse
+   whatever SDL3 headers the application chose to provide.
+3. If the application wants Cargo to build SDL3 from source, it should add a
+   direct `sdl3` dependency with `features = ["build-from-source"]`.
+
+Example:
+
+```toml
+[dependencies]
+dear-imgui-sdl3 = { version = "0.10", features = ["opengl3-renderer"] }
+sdl3 = { version = "0.17", features = ["build-from-source"] }
+```
+
+On Android, that route usually also requires the standard SDL/NDK build
+toolchain environment expected by `sdl3-sys`, for example:
+
+- `ANDROID_NDK` / `ANDROID_NDK_HOME`
+- `ANDROID_ABI` / `CMAKE_ANDROID_ARCH_ABI` (for example `arm64-v8a`)
+- `CMAKE_TOOLCHAIN_FILE`
+- `CMAKE_GENERATOR=Ninja`
+- a working `ninja` executable
+
+In practice, this usually means the final application should drive the Android
+build through a tool that already owns the ABI/toolchain contract
+(`cargo-ndk`, Gradle+CMake, or an equivalent application build system) instead
+of expecting `dear-imgui-sdl3` alone to infer the full Android CMake setup.
+
+### Common Android Failure Modes
+
+If you choose the `sdl3/build-from-source` route on Android, the most common
+failures are application-toolchain issues rather than `dear-imgui-sdl3`
+wrapper issues:
+
+- `dear-imgui-sdl3: could not find SDL3 headers`
+  - Your final dependency graph did not actually enable `sdl3/build-from-source`,
+    or your application did not provide `SDL3_INCLUDE_DIR`.
+- `CMake was unable to find a build program corresponding to "Ninja"`
+  - `sdl3-sys` is trying to drive SDL3's Android CMake build, but your
+    application environment did not make `ninja` available to CMake.
+- Android ABI mismatch during CMake compiler checks
+  - Example shape: CMake defaults to `armv7` while Rust is building
+    `aarch64-linux-android`.
+  - In that case the application usually needs to set
+    `ANDROID_ABI=arm64-v8a` and/or `CMAKE_ANDROID_ARCH_ABI=arm64-v8a`, or use
+    a tool such as `cargo-ndk` / Gradle+CMake that manages those values.
+
+The important boundary is:
+
+- `dear-imgui-sdl3` can reuse SDL3 once the application has made SDL3 headers
+  and toolchain metadata available
+- `dear-imgui-sdl3` does not try to become the Android application build system
+
+### PowerShell Sketch For `aarch64-linux-android`
+
+If your application owns the Android build directly from Cargo, the setup often
+looks roughly like this before you invoke your actual app build command:
+
+```powershell
+$ndk = $env:ANDROID_NDK_HOME
+$llvm = Join-Path $ndk 'toolchains/llvm/prebuilt/windows-x86_64/bin'
+
+$env:ANDROID_NDK = $ndk
+$env:ANDROID_ABI = 'arm64-v8a'
+$env:CMAKE_ANDROID_ARCH_ABI = 'arm64-v8a'
+$env:CMAKE_TOOLCHAIN_FILE = Join-Path $ndk 'build/cmake/android.toolchain.cmake'
+$env:CMAKE_GENERATOR = 'Ninja'
+
+$env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = Join-Path $llvm 'aarch64-linux-android24-clang.cmd'
+$env:CC_aarch64_linux_android = Join-Path $llvm 'aarch64-linux-android24-clang.cmd'
+$env:CXX_aarch64_linux_android = Join-Path $llvm 'aarch64-linux-android24-clang++.cmd'
+```
+
+This is not something `dear-imgui-sdl3` can infer safely on behalf of the
+application. The final app build must own it.
+
+If you do not want SDL3 at all, you can still build an Android backend manually
+on top of `dear-imgui-rs` plus `dear-imgui-sys::backend_shim::{android, opengl3}`.
 
 ## IME and Gamepad Configuration
 

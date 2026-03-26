@@ -5,9 +5,11 @@
 //!
 //! ## Features
 //!
-//! - **docking**: Enable docking and multi-viewport features (default)
+//! - **docking**: Always enabled in this crate
 //! - **freetype**: Enable FreeType font rasterizer support
 //! - **wasm**: Enable WebAssembly compatibility
+//! - **backend-shim-\***: Expose selected repository-owned backend shim modules
+//!   for low-level integrations
 //!
 //! ## WebAssembly Support
 //!
@@ -25,6 +27,52 @@
 //!
 //! This crate is typically not used directly. Instead, use the `dear-imgui-rs` crate
 //! which provides safe, idiomatic Rust bindings built on top of these FFI bindings.
+//!
+//! ## Backend Shim Modules
+//!
+//! For downstream backend crates, engine integrations, and platform-specific
+//! application glue, `dear-imgui-sys` can expose selected official backend
+//! pieces through `backend_shim::*`.
+//!
+//! Important boundary:
+//!
+//! - these modules expose the repository-owned C shim ABI
+//! - they do not expose upstream `imgui_impl_*` C++ symbol names as a stable
+//!   Rust-facing contract
+//! - enabling `backend-shim-*` features does not imply that `dear-imgui-rs`
+//!   already owns a safe wrapper for those backends
+//!
+//! Typical feature gates:
+//!
+//! - `backend-shim-opengl3`
+//! - `backend-shim-android`
+//! - `backend-shim-win32`
+//! - `backend-shim-dx11`
+//!
+//! ## Android Direction
+//!
+//! The current Android story is intentionally low-level but supported.
+//!
+//! ```toml
+//! [dependencies]
+//! dear-imgui-rs = "0.10"
+//! dear-imgui-sys = { version = "0.10", features = ["backend-shim-android", "backend-shim-opengl3"] }
+//! ```
+//!
+//! Recommended split of responsibilities:
+//!
+//! - `dear-imgui-rs` owns the safe core `Context`, `Io`, frame lifecycle, and
+//!   render snapshots
+//! - `dear-imgui-sys::backend_shim::{android, opengl3}` exposes the low-level
+//!   official backend pieces
+//! - the Android application still owns lifecycle glue, input translation
+//!   strategy, EGL / GLES context creation, and packaging
+//!
+//! The repository's concrete reference for this path is
+//! `examples-android/dear-imgui-android-smoke/`, which now carries a minimal
+//! NativeActivity + EGL / GLES3 render loop proving that downstream users can
+//! build Android support on top of `dear-imgui-rs` + `dear-imgui-sys` even
+//! before a dedicated first-party Android convenience crate exists.
 
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
@@ -41,12 +89,13 @@
 mod ffi;
 pub use ffi::*;
 
-/// Optional raw backend entry points for downstream integrations.
+/// Optional backend shim entry points for downstream integrations.
 ///
-/// These modules expose low-level unsafe declarations only. They do not imply
-/// that `dear-imgui-sys` or `dear-imgui-rs` owns full backend integration,
-/// backend source compilation, or safe wrappers for those backends.
-pub mod raw_backend;
+/// These modules expose the repository-owned C shim ABI for selected official
+/// Dear ImGui backends. They do not expose the upstream C++ symbols directly,
+/// and they do not imply that `dear-imgui-sys` or `dear-imgui-rs` owns full
+/// safe integration for those backends.
+pub mod backend_shim;
 
 // This project always builds Dear ImGui with `IMGUI_USE_WCHAR32`, so `ImWchar` must be 32-bit.
 const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];

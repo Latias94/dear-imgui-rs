@@ -178,6 +178,44 @@ dear-imgui-winit = "0.10"
 dear-app = "0.10"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```
 
+## Low-level Backend Shim And Android
+
+Most users should stay on the safe backends (`dear-imgui-winit`,
+`dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`).
+
+For engine integrations or platform stacks that are not wrapped by a dedicated
+crate yet, `dear-imgui-sys` can expose selected official backend pieces behind
+`backend-shim-*` feature gates. These are repository-owned C shim entry points,
+not direct promises about the upstream `imgui_impl_*` C++ ABI.
+
+Example: low-level Android route without a dedicated first-party Android crate:
+
+```toml
+[dependencies]
+dear-imgui-rs = "0.10"
+dear-imgui-sys = { version = "0.10", features = ["backend-shim-android", "backend-shim-opengl3"] }
+```
+
+Recommended ownership split:
+
+- `dear-imgui-rs` owns the safe core `Context`, `Io`, frame lifecycle, and draw
+  data handling.
+- `dear-imgui-sys::backend_shim::{android, opengl3}` exposes the low-level
+  official backend pieces.
+- The application still owns Android lifecycle glue, EGL / GLES context
+  creation, packaging, and signing.
+
+The repository includes a concrete template for this path at
+`examples-android/dear-imgui-android-smoke/`. It is intentionally kept outside
+the default workspace build so we can document and validate the Android route
+without expanding the normal desktop/web CI matrix, and it is not intended to
+be a separately published runtime crate.
+
+If your application already uses SDL3, prefer `dear-imgui-sdl3` as the higher
+level Android integration direction. Even there, the application still owns SDL3
+Android packaging, NDK toolchain configuration, and final APK / app-bundle
+assembly.
+
 ### Extensions
 
 ```toml
