@@ -293,8 +293,9 @@ ash-window = "0.13"
 # need a pre-installed system SDL3. This uses sdl3-sys + CMake internally.
 sdl3 = { version = "0.17", features = ["raw-window-handle", "build-from-source", "ash"], optional = true }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-# On macOS, rely on a system SDL3 install (e.g. `brew install sdl3`) instead of
-# building from source to avoid CMake permission/toolchain issues on user
-# machines. The `raw-window-handle` feature is still required for WGPU.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+# On Apple targets, keep SDL3 acquisition owned by the consuming application.
+# On macOS that usually means a Homebrew/system install. On iOS that usually
+# means an app-provided SDL3.xcframework or an app-owned build-from-source
+# setup. The `raw-window-handle` feature is still required for WGPU.
 sdl3 = { version = "0.17", features = ["raw-window-handle", "ash"], optional = true }

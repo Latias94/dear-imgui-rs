@@ -178,6 +178,24 @@ dear-imgui-winit = "0.10"
 dear-app = "0.10"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```
 
+### Apple Platform Examples
+
+For Apple/mobile integration, use the repository-owned iOS smoke examples as
+reference integrations:
+
+- `examples-ios/dear-imgui-ios-smoke`
+  - `dear-imgui-winit + dear-imgui-wgpu`
+- `examples-ios/dear-imgui-ios-sdl3-smoke`
+  - `dear-imgui-sdl3 + dear-imgui-wgpu`
+
+These examples exist to validate and teach the integration boundary. They are
+not a turn-key mobile runtime layer.
+
+For Apple-specific integration notes and example boundaries, see
+[`docs/workstreams/apple-platform-support.md`](docs/workstreams/apple-platform-support.md).
+For the checked-in iOS smoke templates and a quick route-selection index, see
+[`examples-ios/README.md`](examples-ios/README.md).
+
 ## Low-level Backend Shim And Android
 
 Most users should stay on the safe backends (`dear-imgui-winit`,
@@ -188,7 +206,7 @@ crate yet, `dear-imgui-sys` can expose selected official backend pieces behind
 `backend-shim-*` feature gates. These are repository-owned C shim entry points,
 not direct promises about the upstream `imgui_impl_*` C++ ABI.
 
-Example: low-level Android route without a dedicated first-party Android crate:
+Example: low-level Android route without a dedicated Android convenience crate:
 
 ```toml
 [dependencies]
@@ -210,6 +228,8 @@ The repository includes a concrete template for this path at
 the default workspace build so we can document and validate the Android route
 without expanding the normal desktop/web CI matrix, and it is not intended to
 be a separately published runtime crate.
+For the current Android smoke-template overview, see
+[`examples-android/README.md`](examples-android/README.md).
 
 If your application already uses SDL3, prefer `dear-imgui-sdl3` as the higher
 level Android integration direction. Even there, the application still owns SDL3

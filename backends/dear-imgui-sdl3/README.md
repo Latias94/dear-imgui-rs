@@ -194,6 +194,24 @@ Build behavior is aligned with `Cargo.toml`:
   - Linking parameters are handled by `sdl3-sys` / `sdl3`; this crate only
     needs the headers to build the C++ backend sources.
 
+- **iOS**
+  - The crate depends on the safe `sdl3` crate on iOS targets as well, but it
+    does **not** force one SDL3 acquisition strategy.
+  - Treat this as an app-owned integration route:
+    - provide SDL3 headers yourself and set `SDL3_INCLUDE_DIR` when discovery is not enough
+    - make the final application dependency graph enable `sdl3/build-from-source`
+    - or use an app-owned `SDL3.xcframework` / `sdl3/link-framework` setup
+  - The consuming app still owns:
+    - SDL3 framework packaging
+    - the host `main` entry point (`SDL_RunApp` or an `sdl3-main` callback setup)
+    - Xcode signing and bundle layout
+  - A repository-owned integration shape lives in
+    `examples-ios/dear-imgui-ios-sdl3-smoke/`.
+  - That smoke template now includes a checked-in Xcode host stub which keeps
+    the packaging boundary explicit: it can either consume an app-owned
+    `SDL3.framework` / `SDL3.xcframework`, or build `SDL3.framework` from the
+    upstream SDL source distributed through `sdl3-src`.
+
 - **Android**
   - The crate depends on the safe `sdl3` crate on Android targets as well, but it
     does **not** force `sdl3/build-from-source`.
@@ -289,7 +307,7 @@ To fix this:
 
 ## Android Integration Notes
 
-Android support in this crate should be understood as a low-friction integration
+Android integration in this crate should be understood as a low-friction
 path, not as a turn-key Android application template.
 
 Recommended model:

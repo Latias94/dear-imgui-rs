@@ -1,0 +1,361 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 54;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B20000000000000000000020 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* main.m */; };
+		B20000000000000000000021 /* SDL3.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000E /* SDL3.framework */; };
+		B20000000000000000000022 /* SDL3.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000E /* SDL3.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B20000000000000000000023 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000F /* UIKit.framework */; };
+		B20000000000000000000024 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* Foundation.framework */; };
+		B20000000000000000000025 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* QuartzCore.framework */; };
+		B20000000000000000000026 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000012 /* Metal.framework */; };
+		B20000000000000000000027 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000013 /* CoreFoundation.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B20000000000000000000028 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				B20000000000000000000022 /* SDL3.framework in Embed Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		B20000000000000000000009 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		B2000000000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B2000000000000000000000B /* build-rust.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "scripts/build-rust.py"; sourceTree = "<group>"; };
+		B2000000000000000000000C /* build-sdl3-framework.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "scripts/build-sdl3-framework.py"; sourceTree = "<group>"; };
+		B2000000000000000000000D /* DearImguiIosSdl3SmokeHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DearImguiIosSdl3SmokeHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B2000000000000000000000E /* SDL3.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = "build/frameworks/SDL3.framework"; sourceTree = "<group>"; };
+		B2000000000000000000000F /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		B20000000000000000000010 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
+		B20000000000000000000011 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		B20000000000000000000012 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		B20000000000000000000013 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = System/Library/Frameworks/CoreFoundation.framework; sourceTree = SDKROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B2000000000000000000001D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B20000000000000000000027 /* CoreFoundation.framework in Frameworks */,
+				B20000000000000000000026 /* Metal.framework in Frameworks */,
+				B20000000000000000000025 /* QuartzCore.framework in Frameworks */,
+				B20000000000000000000024 /* Foundation.framework in Frameworks */,
+				B20000000000000000000023 /* UIKit.framework in Frameworks */,
+				B20000000000000000000021 /* SDL3.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B20000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000008 /* App */,
+				B20000000000000000000006 /* Products */,
+				B20000000000000000000007 /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		B20000000000000000000006 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B2000000000000000000000D /* DearImguiIosSdl3SmokeHost.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B20000000000000000000007 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B2000000000000000000000E /* SDL3.framework */,
+				B20000000000000000000013 /* CoreFoundation.framework */,
+				B20000000000000000000012 /* Metal.framework */,
+				B20000000000000000000011 /* QuartzCore.framework */,
+				B20000000000000000000010 /* Foundation.framework */,
+				B2000000000000000000000F /* UIKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B20000000000000000000008 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				B2000000000000000000000A /* Info.plist */,
+				B20000000000000000000009 /* main.m */,
+				B20000000000000000000030 /* Scripts */,
+			);
+			name = App;
+			sourceTree = "<group>";
+		};
+		B20000000000000000000030 /* Scripts */ = {
+			isa = PBXGroup;
+			children = (
+				B2000000000000000000000B /* build-rust.py */,
+				B2000000000000000000000C /* build-sdl3-framework.py */,
+			);
+			path = scripts;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B20000000000000000000018 /* DearImguiIosSdl3SmokeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B20000000000000000000019 /* Build configuration list for PBXNativeTarget "DearImguiIosSdl3SmokeHost" */;
+			buildPhases = (
+				B2000000000000000000001E /* Build SDL3 Framework */,
+				B2000000000000000000001F /* Build Rust Static Library */,
+				B2000000000000000000001C /* Sources */,
+				B2000000000000000000001D /* Frameworks */,
+				B20000000000000000000028 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DearImguiIosSdl3SmokeHost;
+			productName = DearImguiIosSdl3SmokeHost;
+			productReference = B2000000000000000000000D /* DearImguiIosSdl3SmokeHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B20000000000000000000002 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2620;
+				ORGANIZATIONNAME = "dear-imgui-rs";
+				TargetAttributes = {
+					B20000000000000000000018 = {
+						CreatedOnToolsVersion = 26.2;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = B20000000000000000000003 /* Build configuration list for PBXProject "DearImguiIosSdl3SmokeHost" */;
+			compatibilityVersion = "Xcode 13.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B20000000000000000000001;
+			productRefGroup = B20000000000000000000006 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B20000000000000000000018 /* DearImguiIosSdl3SmokeHost */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B2000000000000000000001E /* Build SDL3 Framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../Cargo.toml",
+				"$(SRCROOT)/../Cargo.lock",
+				"$(SRCROOT)/scripts/build-sdl3-framework.py",
+			);
+			name = "Build SDL3 Framework";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/build/frameworks/SDL3.framework/SDL3",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nexport PATH=\"$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\npython3 \"${SRCROOT}/scripts/build-sdl3-framework.py\"\n";
+			showEnvVarsInLog = 0;
+		};
+		B2000000000000000000001F /* Build Rust Static Library */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../Cargo.toml",
+				"$(SRCROOT)/../src/lib.rs",
+				"$(SRCROOT)/scripts/build-rust.py",
+			);
+			name = "Build Rust Static Library";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/build/rust/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)/libdear_imgui_ios_sdl3_smoke.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nexport PATH=\"$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\npython3 \"${SRCROOT}/scripts/build-rust.py\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B2000000000000000000001C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B20000000000000000000020 /* main.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B20000000000000000000004 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+			};
+			name = Debug;
+		};
+		B20000000000000000000005 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+			};
+			name = Release;
+		};
+		B2000000000000000000001A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/build/frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "$(SRCROOT)/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/build/rust/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ldear_imgui_ios_sdl3_smoke",
+					"-lc++",
+					"-liconv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.dearimgui.ios.sdl3.smoke.host;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/../include";
+			};
+			name = Debug;
+		};
+		B2000000000000000000001B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/build/frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "$(SRCROOT)/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/build/rust/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ldear_imgui_ios_sdl3_smoke",
+					"-lc++",
+					"-liconv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.dearimgui.ios.sdl3.smoke.host;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/../include";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B20000000000000000000003 /* Build configuration list for PBXProject "DearImguiIosSdl3SmokeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B20000000000000000000004 /* Debug */,
+				B20000000000000000000005 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B20000000000000000000019 /* Build configuration list for PBXNativeTarget "DearImguiIosSdl3SmokeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B2000000000000000000001A /* Debug */,
+				B2000000000000000000001B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B20000000000000000000002 /* Project object */;
+}

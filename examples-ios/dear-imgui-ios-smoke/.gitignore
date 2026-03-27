@@ -1,0 +1,4 @@
+/target
+/dist
+/xcode-host/build
+/xcode-host/scripts/__pycache__

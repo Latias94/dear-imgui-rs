@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Add a standalone repository-local `examples-android/dear-imgui-android-smoke` Android template that demonstrates the low-level `dear-imgui-rs` + `dear-imgui-sys` route without introducing a new published crate or changing the workspace's default build matrix.
   - Add minimal `cargo-apk2` packaging metadata to the Android smoke template and verify that it can produce a signed debug `NativeActivity` APK for `aarch64-linux-android`.
   - Add a repository-local APK packaging helper for the Android smoke template and document release signing plus per-ABI APK packaging while keeping the checked-in smoke path single-ABI and repository-local.
+  - Add a standalone repository-local `examples-ios/dear-imgui-ios-smoke` example that demonstrates a `dear-imgui-winit + dear-imgui-wgpu` iOS integration shape, including XCFramework packaging helpers and a checked-in Xcode host stub for simulator/device validation.
+  - Add a standalone repository-local `examples-ios/dear-imgui-ios-sdl3-smoke` example that demonstrates a `dear-imgui-sdl3 + dear-imgui-wgpu` iOS integration shape, including a checked-in Xcode host stub and an SDL3 framework helper that can consume app-owned framework artifacts or build `SDL3.framework` from the upstream `sdl3-src` source tree.
   - Add an `sdl3_sdlrenderer` example plus the `sdl3-sdlrenderer3` example feature for Dear ImGui on SDL3 + SDL_Renderer.
 
 ### Changed
@@ -31,9 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-wgpu`: add feature-gated support for `wgpu` v29, make `wgpu-29` the default backend path, and keep `wgpu-28` / `wgpu-27` as explicit compatibility features.
   - `dear-imgui-sdl3`: keep SDL3-specific wrapper/build ownership in the backend crate, but route the optional official OpenGL3 renderer path through `dear-imgui-sys::backend_shim::opengl3` instead of compiling a second local OpenGL3 shim layer.
   - `dear-imgui-sdl3`: stop forcing `sdl3/build-from-source` on Android from the backend crate itself. Android SDL3 acquisition now remains application-owned: consumers may either provide `SDL3_INCLUDE_DIR` or opt into `sdl3/build-from-source` in their own dependency graph.
+  - `dear-imgui-sdl3`: on Apple targets, keep SDL3 acquisition application-owned instead of forcing `sdl3/build-from-source` from the backend/examples crates. macOS continues to use the system/Homebrew SDL3 path, while iOS is now documented as an app-owned framework or app-owned build-from-source route.
 - Examples
   - Upgrade `examples-android/dear-imgui-android-smoke` from a startup-only smoke path to a minimal NativeActivity + EGL / GLES3 render loop that displays Dear ImGui windows on-device while preserving app-owned Android packaging and lifecycle glue, without turning the template into a published runtime crate.
   - Switch the Android smoke APK helper from a Windows-only PowerShell script to a cross-platform Python script, and tune the README screenshot presentation for GitHub rendering.
+  - Document the Apple example split explicitly: keep desktop/native `cargo run` demos in `examples/`, and keep iOS/Android smoke templates in top-level `examples-ios/` / `examples-android/` folders because they require host projects, packaging steps, or mobile-specific tooling.
+- Docs
+  - Add Apple integration notes that explain how to use the repository-owned iOS examples as reference/teaching material without presenting them as a turn-key mobile runtime layer.
+  - Add platform notes and README navigation for the new iOS/Android smoke templates, including a checked-in iOS Simulator screenshot for the SDL3 iOS smoke path.
+
+### CI
+
+- Add an `apple-mobile-check` job that validates the documented iOS integration surface with `cargo check` sentinels for device and simulator targets, including the repository-local iOS smoke templates.
 
 ### Dependencies
 

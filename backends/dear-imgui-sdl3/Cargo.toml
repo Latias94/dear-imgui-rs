@@ -23,9 +23,11 @@ thiserror.workspace = true
 # a pre-installed system SDL3. sdl3-sys will download and build SDL3 via CMake.
 sdl3 = { version = "0.17", features = ["build-from-source"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-# On macOS, rely on a system SDL3 install (e.g. `brew install sdl3`) instead of
-# building from source to avoid CMake permission/toolchain issues.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+# On Apple targets, keep SDL3 acquisition owned by the consuming application.
+# On macOS that usually means a Homebrew/system install. On iOS that usually
+# means an app-provided SDL3.xcframework or an app-owned build-from-source
+# setup via a direct `sdl3` dependency.
 sdl3 = { version = "0.17" }
 
 [target.'cfg(target_os = "android")'.dependencies]

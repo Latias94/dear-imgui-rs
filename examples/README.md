@@ -8,6 +8,13 @@ This workspace ships a single `dear-imgui-examples` crate with multiple example 
 - Demonstrate multiple backend stacks: `winit` + `wgpu`, and `glow` + `glutin`.
 
 Also see `examples-wasm/` for WebAssembly (WASM) examples.
+Mobile smoke templates intentionally live outside this crate:
+
+- `examples-ios/` for iOS smoke / Xcode-host integration templates
+- `examples-android/` for Android smoke / packaging templates
+
+They are not regular `cargo run --bin ...` examples, because they need platform
+packaging, host-project glue, or mobile-specific build tooling.
 
 Run any example with:
 
@@ -112,7 +119,7 @@ This is the intended organization.
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
     - Uses SDL3 platform backend for window management and `dear-imgui-ash` to render all viewports via `Platform_CreateVkSurface`.
 
-- 03-extensions (feature-gated)
+- 03-extensions (logical group; these examples still live as top-level bins today)
   - ImPlot: `implot_basic.rs`.
   - ImNodes: `imnodes_basic.rs` with multiple tabs.
   - ImGuizmo: `imguizmo_basic.rs` + notes on camera math.

@@ -24,7 +24,7 @@ This sample is intentionally:
 - `dear-imgui-sys::backend_shim::android` can own the official Android platform
   backend lifecycle (`Init`, `NewFrame`, `Shutdown`).
 - a downstream Android app can translate lifecycle and input itself without
-  waiting for a dedicated first-party Android convenience crate.
+  waiting for a dedicated Android convenience crate.
 - the sample owns a minimal EGL display / context / window-surface setup and
   wires it into `dear-imgui-sys::backend_shim::opengl3`.
 - a downstream Android app can keep this ownership split and swap in its own

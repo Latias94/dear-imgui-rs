@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+
+[package]
+name = "dear-imgui-ios-sdl3-smoke"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "dear_imgui_ios_sdl3_smoke"
+crate-type = ["staticlib"]
+
+[dependencies]
+dear-imgui-rs = { path = "../../dear-imgui" }
+dear-imgui-sdl3 = { path = "../../backends/dear-imgui-sdl3" }
+dear-imgui-wgpu = { path = "../../backends/dear-imgui-wgpu" }
+pollster = "0.4"
+sdl3 = { version = "0.17", features = ["raw-window-handle"] }
+wgpu = "29.0"

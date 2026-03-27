@@ -189,6 +189,58 @@ jobs:
           IMPLOT_SYS_SKIP_CC: "1"
           IMNODES_SYS_SKIP_CC: "1"
 
+  apple-mobile-check:
+    name: Apple mobile compile check (iOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install macOS deps
+        run: |
+          brew update
+          brew install sdl3
+
+      - name: Cargo check (iOS device)
+        run: cargo check -p dear-imgui-rs -p dear-imgui-winit -p dear-imgui-wgpu --lib --target aarch64-apple-ios
+        env:
+          # This is a compile-target sentinel only. Skip native C/C++ builds so
+          # the job validates Rust target support rather than cross-linker setup.
+          IMGUI_SYS_SKIP_CC: "1"
+
+      - name: Cargo check (iOS simulator)
+        run: cargo check -p dear-imgui-rs -p dear-imgui-winit -p dear-imgui-wgpu --lib --target aarch64-apple-ios-sim
+        env:
+          IMGUI_SYS_SKIP_CC: "1"
+
+      - name: Cargo check (iOS smoke example, simulator)
+        run: cargo check --manifest-path examples-ios/dear-imgui-ios-smoke/Cargo.toml --lib --target aarch64-apple-ios-sim
+        env:
+          IMGUI_SYS_SKIP_CC: "1"
+
+      - name: Cargo check (SDL3 backend, iOS device)
+        run: cargo check -p dear-imgui-sdl3 --lib --target aarch64-apple-ios
+
+      - name: Cargo check (SDL3 iOS smoke, device)
+        run: cargo check --manifest-path examples-ios/dear-imgui-ios-sdl3-smoke/Cargo.toml --lib --target aarch64-apple-ios
+
+      - name: Cargo check (SDL3 iOS smoke, simulator)
+        run: cargo check --manifest-path examples-ios/dear-imgui-ios-sdl3-smoke/Cargo.toml --lib --target aarch64-apple-ios-sim
+
   publish-check:
     name: Package check (ubuntu)
     runs-on: ubuntu-latest

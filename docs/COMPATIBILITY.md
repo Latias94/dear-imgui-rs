@@ -2,6 +2,9 @@
 
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps history and upgrade guidance.
 
+For Apple-specific integration notes and the repository-owned iOS example
+paths, see `docs/workstreams/apple-platform-support.md`.
+
 ## Versioning Policy
 
 - Unified release train: all `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.

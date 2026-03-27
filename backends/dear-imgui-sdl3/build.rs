@@ -131,6 +131,17 @@ fn main() {
                  belongs to the consuming application."
             );
         }
+        if target_os == "ios" {
+            panic!(
+                "dear-imgui-sdl3: could not find SDL3 headers for iOS. \
+                 Set SDL3_INCLUDE_DIR to an include root containing SDL3/SDL.h, \
+                 or make the final application dependency graph enable \
+                 `sdl3/build-from-source` so sdl3-sys can expose headers via \
+                 DEP_SDL3_OUT_DIR. If your app links an SDL3.xcframework from Xcode, \
+                 framework packaging, signing, and the host app entry point still \
+                 belong to the consuming application."
+            );
+        }
 
         panic!(
             "dear-imgui-sdl3: could not find SDL3 headers. \
