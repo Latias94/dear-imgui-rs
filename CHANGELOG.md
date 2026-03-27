@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+# Changelog
+
+
+
+### Features
+
+- add wgpu v29 support [wgpu] (ab5f151…)
+
+
+### Refactor
+
+- introduce backend shims and android smoke template (f25c351…)
+
+
 
 ### Added
 
