@@ -52,6 +52,12 @@ xshell = { workspace = true }
 cmake = "0.1"
 build-support = { package = "dear-imgui-build-support", version = "0.2", path = "../tools/build-support" }
 
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.build-dependencies]
+sdl3-sys = { version = "0.6", optional = true, features = ["build-from-source"] }
+
+[target.'cfg(not(any(target_os = "linux", target_os = "windows")))'.build-dependencies]
+sdl3-sys = { version = "0.6", optional = true }
+
 [[bin]]
 name = "package"
 path = "bin/package/main.rs"
@@ -75,5 +81,5 @@ glam = ["dep:glam"]
 backend-shim-android = []
 backend-shim-dx11 = []
 backend-shim-opengl3 = []
-backend-shim-sdlrenderer3 = []
+backend-shim-sdlrenderer3 = ["pkg-config", "dep:sdl3-sys"]
 backend-shim-win32 = []

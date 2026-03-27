@@ -86,6 +86,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_USE_CMAKE");
     println!("cargo:rerun-if-env-changed=CARGO_NET_OFFLINE");
+    println!("cargo:rerun-if-env-changed=SDL3_INCLUDE_DIR");
 
     // docs.rs: generate bindings only
     if cfg.docs_rs {
@@ -526,10 +527,106 @@ fn build_backend_shim_opengl3(cfg: &BuildConfig) {
     }
 }
 
+fn add_sdl3_include_path(build: &mut cc::Build, cfg: &BuildConfig) -> Result<(), String> {
+    if let Ok(dir) = env::var("SDL3_INCLUDE_DIR") {
+        build.include(&dir);
+        println!("cargo:warning=dear-imgui-sys: using SDL3 headers from SDL3_INCLUDE_DIR={dir}");
+        return Ok(());
+    }
+
+    #[cfg(feature = "pkg-config")]
+    if let Ok(lib) = pkg_config::Config::new()
+        .print_system_libs(false)
+        .probe("sdl3")
+    {
+        for include_path in lib.include_paths {
+            build.include(&include_path);
+        }
+        println!("cargo:warning=dear-imgui-sys: using SDL3 headers from pkg-config (sdl3)");
+        return Ok(());
+    }
+
+    for candidate in [
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/local/include",
+    ] {
+        let header = PathBuf::from(candidate).join("SDL3/SDL.h");
+        if header.exists() {
+            build.include(candidate);
+            println!("cargo:warning=dear-imgui-sys: using SDL3 headers from {candidate}");
+            return Ok(());
+        }
+    }
+
+    if let Ok(out_dir) = env::var("DEP_SDL3_OUT_DIR") {
+        let include_root = PathBuf::from(out_dir).join("include");
+        let header = include_root.join("SDL3/SDL.h");
+        if header.exists() {
+            build.include(&include_root);
+            println!(
+                "cargo:warning=dear-imgui-sys: using SDL3 headers from sdl3-sys OUT_DIR={}",
+                include_root.display()
+            );
+            return Ok(());
+        }
+    }
+
+    let mut cargo_build_dir = cfg.out_dir.clone();
+    while cargo_build_dir
+        .file_name()
+        .is_some_and(|name| name != "build")
+    {
+        if !cargo_build_dir.pop() {
+            break;
+        }
+    }
+    if cargo_build_dir
+        .file_name()
+        .is_some_and(|name| name == "build")
+        && let Ok(entries) = std::fs::read_dir(&cargo_build_dir)
+    {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            if !file_name.to_string_lossy().starts_with("sdl3-sys-") {
+                continue;
+            }
+
+            let include_root = entry.path().join("out/include");
+            let header = include_root.join("SDL3/SDL.h");
+            if header.exists() {
+                build.include(&include_root);
+                println!(
+                    "cargo:warning=dear-imgui-sys: using SDL3 headers from Cargo target dir={}",
+                    include_root.display()
+                );
+                return Ok(());
+            }
+        }
+    }
+
+    if cfg.target_os == "android" {
+        return Err("dear-imgui-sys: could not find SDL3 headers required for \
+             backend-shim-sdlrenderer3 on Android. Set SDL3_INCLUDE_DIR to an \
+             include root containing SDL3/SDL.h, or provide SDL3 headers/libs \
+             as part of the consuming application's Android build setup."
+            .to_string());
+    }
+
+    Err("dear-imgui-sys: could not find SDL3 headers required for \
+         backend-shim-sdlrenderer3. Install SDL3 development files, set \
+         SDL3_INCLUDE_DIR to an include root containing SDL3/SDL.h, or use a \
+         build where sdl3-sys exposes headers under Cargo's target/build cache."
+        .to_string())
+}
+
 fn build_backend_shim_sdlrenderer3(cfg: &BuildConfig) {
     let imgui_src = cfg.imgui_src();
     let shim_root = cfg.manifest_dir.join("backend-shims");
     let mut build = new_native_cpp_build(cfg);
+    if let Err(message) = add_sdl3_include_path(&mut build, cfg) {
+        panic!("{message}");
+    }
     build.file(imgui_src.join("backends/imgui_impl_sdlrenderer3.cpp"));
     build.file(shim_root.join("sdlrenderer3.cpp"));
     build.compile("dear_imgui_backend_sdlrenderer3");

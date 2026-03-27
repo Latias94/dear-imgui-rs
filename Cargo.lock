@@ -966,6 +966,7 @@ dependencies = [
  "glam",
  "mint",
  "pkg-config",
+ "sdl3-sys",
  "tar",
  "xshell",
 ]
