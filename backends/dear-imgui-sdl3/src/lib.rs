@@ -319,7 +319,7 @@ pub fn init_for_canvas(
             return Err(Sdl3BackendError::Sdl3InitFailed);
         }
         if !sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_init(
-            sdl_renderer as *mut std::ffi::c_void
+            sdl_renderer as *mut std::ffi::c_void,
         ) {
             return Err(Sdl3BackendError::Renderer3InitFailed);
         }
