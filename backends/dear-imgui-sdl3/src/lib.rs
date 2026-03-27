@@ -11,19 +11,24 @@
 //! - supports Dear ImGui multi-viewport via the official backend behavior.
 //!
 //! By default, this crate builds the SDL3 platform backend only. Enable
-//! `opengl3-renderer` to pair it with the official OpenGL3 renderer shim.
+//! `opengl3-renderer` to pair it with the official OpenGL3 renderer shim
+//! or `sdlrenderer3-renderer` to pair it with the official SDLRenderer3 shim.
 
 #[cfg(feature = "opengl3-renderer")]
 use std::ffi::CString;
 use std::ffi::c_void;
 
 use dear_imgui_rs::Context;
-#[cfg(feature = "opengl3-renderer")]
+#[cfg(any(feature = "opengl3-renderer", feature = "sdlrenderer3-renderer"))]
 use dear_imgui_rs::{TextureData, render::DrawData};
-#[cfg(feature = "opengl3-renderer")]
+#[cfg(any(feature = "opengl3-renderer", feature = "sdlrenderer3-renderer"))]
 use dear_imgui_sys as sys;
 #[cfg(feature = "opengl3-renderer")]
 use dear_imgui_sys::backend_shim::opengl3 as opengl3_backend;
+#[cfg(feature = "sdlrenderer3-renderer")]
+use dear_imgui_sys::backend_shim::sdlrenderer3 as sdlrenderer3_backend;
+#[cfg(feature = "sdlrenderer3-renderer")]
+use sdl3::render::WindowCanvas;
 use sdl3::video::{GLContext, Window};
 use sdl3_sys::events::SDL_Event;
 
@@ -67,6 +72,8 @@ pub enum Sdl3BackendError {
     OpenGlInitFailed,
     #[error("Invalid GLSL version string")]
     InvalidGlslVersion,
+    #[error("ImGui_ImplSDLRenderer3_Init returned false")]
+    Renderer3InitFailed,
 }
 
 /// Gamepad handling mode used by the SDL3 backend.
@@ -290,6 +297,31 @@ pub fn init_for_sdl_gpu(_imgui: &mut Context, window: &Window) -> Result<(), Sdl
     Ok(())
 }
 
+/// Initialize the Dear ImGui SDL3 + SDLRenderer3 backend.
+///
+/// This assumes that:
+/// - a `dear_imgui_rs::Context` already exists;
+/// - the window related to the renderer/canvas.
+/// - the canvas will exist for at least until `shutdown_for_canvas` is called.
+///
+/// Requires the `sdlrenderer3-renderer` feature.
+#[cfg(feature = "sdlrenderer3-renderer")]
+pub fn init_for_canvas(_imgui: &mut Context, window: &Window, canvas: &WindowCanvas) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+    let sdl_renderer = canvas.raw();
+
+    unsafe {
+        if !ffi::ImGui_ImplSDL3_InitForSDLRenderer_Rust(sdl_window, sdl_renderer) {
+            return Err(Sdl3BackendError::Sdl3InitFailed);
+        }
+        if !sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_init(sdl_renderer as *mut std::ffi::c_void) {
+            return Err(Sdl3BackendError::Renderer3InitFailed);
+        }
+    }
+
+    Ok(())
+}
+
 /// Shutdown the SDL3 + OpenGL3 backends.
 ///
 /// Call this before destroying the ImGui context or the SDL3 window.
@@ -311,6 +343,17 @@ pub fn shutdown(_imgui: &mut Context) {
     }
 }
 
+/// Shutdown the SDL3 + SDLRenderer3 backend.
+///
+/// Call this before destroying the ImGui context or the SDL3 canvas or window.
+#[cfg(feature = "sdlrenderer3-renderer")]
+pub fn shutdown_for_canvas(_imgui: &mut Context) {
+    unsafe {
+        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_shutdown();
+        ffi::ImGui_ImplSDL3_Shutdown_Rust();
+    }
+}
+
 /// Begin a new ImGui frame for SDL3 + OpenGL.
 ///
 /// Call this before `imgui.frame()`.
@@ -327,6 +370,17 @@ pub fn new_frame(_imgui: &mut Context) {
 /// This is intended for non-OpenGL renderers such as WGPU.
 pub fn sdl3_new_frame(_imgui: &mut Context) {
     unsafe {
+        ffi::ImGui_ImplSDL3_NewFrame_Rust();
+    }
+}
+
+/// Begin a new ImGui frame for SDL3 + SDLRenderer3.
+///
+/// Call this before `imgui.frame()`.
+#[cfg(feature = "sdlrenderer3-renderer")]
+pub fn canvas_new_frame(_imgui: &mut Context) {
+    unsafe {
+        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_new_frame();
         ffi::ImGui_ImplSDL3_NewFrame_Rust();
     }
 }
@@ -364,6 +418,17 @@ pub fn render(draw_data: &DrawData) {
     }
 }
 
+/// Render Dear ImGui draw data using the SDLRenderer3 backend.
+#[cfg(feature = "sdlrenderer3-renderer")]
+pub fn canvas_render(draw_data: &DrawData, canvas: &WindowCanvas) {
+    let sdl_renderer = canvas.raw();
+    // Render main viewport
+    unsafe {
+        let raw = draw_data as *const DrawData as *const sys::ImDrawData;
+        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_render_draw_data(raw, sdl_renderer as *mut std::ffi::c_void);
+    }
+}
+
 /// Update a single ImGui texture using the OpenGL3 backend.
 ///
 /// This is an advanced helper that delegates to `ImGui_ImplOpenGL3_UpdateTexture`.
@@ -371,6 +436,16 @@ pub fn render(draw_data: &DrawData) {
 pub fn update_texture(tex: &mut TextureData) {
     unsafe {
         opengl3_backend::dear_imgui_backend_opengl3_update_texture(tex.as_raw_mut());
+    }
+}
+
+/// Update a single ImGui texture using the SDLRenderer3 backend.
+///
+/// This is an advanced helper that delegates to `ImGui_ImplSDLRenderer3_UpdateTexture`.
+#[cfg(feature = "sdlrenderer3-renderer")]
+pub fn canvas_update_texture(tex: &mut TextureData) {
+    unsafe {
+        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_update_texture(tex.as_raw_mut());
     }
 }
 
@@ -389,5 +464,23 @@ pub fn create_device_objects() -> bool {
 pub fn destroy_device_objects() {
     unsafe {
         opengl3_backend::dear_imgui_backend_opengl3_destroy_device_objects();
+    }
+}
+
+/// Create SDLRenderer3 renderer device objects.
+///
+/// This is an optional advanced helper mirroring `ImGui_ImplSDLRenderer3_CreateDeviceObjects`.
+#[cfg(feature = "sdlrenderer3-renderer")]
+pub fn canvas_create_device_objects() {
+    unsafe { sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_create_device_objects() }
+}
+
+/// Destroy SDLRenderer3 renderer device objects.
+///
+/// This is an optional advanced helper mirroring `ImGui_ImplSDLRenderer3_DestroyDeviceObjects`.
+#[cfg(feature = "sdlrenderer3-renderer")]
+pub fn canvas_destroy_device_objects() {
+    unsafe {
+        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_destroy_device_objects();
     }
 }

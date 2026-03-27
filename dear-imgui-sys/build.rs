@@ -76,6 +76,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/imgui_test_engine_hooks.cpp");
     println!("cargo:rerun-if-changed=backend-shims/opengl3.cpp");
+    println!("cargo:rerun-if-changed=backend-shims/sdlrenderer3.cpp");
     println!("cargo:rerun-if-changed=backend-shims/android.cpp");
     println!("cargo:rerun-if-changed=backend-shims/win32.cpp");
     println!("cargo:rerun-if-changed=backend-shims/dx11.cpp");
@@ -450,6 +451,7 @@ fn any_backend_shim_enabled() -> bool {
     cfg!(feature = "backend-shim-android")
         || cfg!(feature = "backend-shim-dx11")
         || cfg!(feature = "backend-shim-opengl3")
+        || cfg!(feature = "backend-shim-sdlrenderer3")
         || cfg!(feature = "backend-shim-win32")
 }
 
@@ -491,6 +493,9 @@ fn build_backend_shims(cfg: &BuildConfig) {
     if cfg!(feature = "backend-shim-opengl3") {
         build_backend_shim_opengl3(cfg);
     }
+    if cfg!(feature = "backend-shim-sdlrenderer3") {
+        build_backend_shim_sdlrenderer3(cfg);
+    }
     if cfg.is_windows() && cfg!(feature = "backend-shim-win32") {
         build_backend_shim_win32(cfg);
     }
@@ -518,6 +523,19 @@ fn build_backend_shim_opengl3(cfg: &BuildConfig) {
         // Link the Android GLES loader explicitly so NativeActivity can load the
         // final cdylib before the application creates its own EGL/GLES context.
         println!("cargo:rustc-link-lib=GLESv3");
+    }
+}
+
+fn build_backend_shim_sdlrenderer3(cfg: &BuildConfig) {
+    let imgui_src = cfg.imgui_src();
+    let shim_root = cfg.manifest_dir.join("backend-shims");
+    let mut build = new_native_cpp_build(cfg);
+    build.file(imgui_src.join("backends/imgui_impl_sdlrenderer3.cpp"));
+    build.file(shim_root.join("sdlrenderer3.cpp"));
+    build.compile("dear_imgui_backend_sdlrenderer3");
+
+    if matches!(cfg.target_os.as_str(), "linux" | "android") {
+        println!("cargo:rustc-link-lib=dl");
     }
 }
 

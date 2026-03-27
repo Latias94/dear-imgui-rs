@@ -60,6 +60,12 @@ sdl3-opengl3 = [
     "dear-imgui-sdl3/opengl3-renderer",
 ]
 
+# SDL3 + official SDLRenderer3 renderer backend.
+sdl3-sdlrenderer3 = [
+    "sdl3-platform",
+    "dear-imgui-sdl3/sdlrenderer3-renderer",
+]
+
 [[bin]]
 name = "wgpu_basic"
 path = "00-quickstart/wgpu_basic.rs"
@@ -140,6 +146,11 @@ required-features = ["multi-viewport", "sdl3-platform"]
 name = "sdl3_wgpu"
 path = "01-renderers/sdl3_wgpu.rs"
 required-features = ["sdl3-platform"]
+
+[[bin]]
+name = "sdl3_sdlrenderer"
+path = "01-renderers/sdl3_sdlrenderer.rs"
+required-features = ["sdl3-sdlrenderer3"]
 
 [[bin]]
 name = "sdl3_wgpu_multi_viewport"
