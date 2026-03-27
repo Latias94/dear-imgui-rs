@@ -11,10 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core (`dear-imgui-sys`)
   - Replace the provisional `raw_backend::{win32, dx11, android, opengl3}` surface with `backend_shim::{win32, dx11, android, opengl3}` behind `backend-shim-*` feature gates. The sys crate now owns the repository-defined C shim ABI for self-contained official backends instead of exposing direct declarations for upstream C++ backend symbols.
+  - Extend that backend shim surface with feature-gated `backend_shim::sdlrenderer3` support for Dear ImGui's official SDLRenderer3 backend, including SDL3 header discovery for both system-provided SDL3 installs and `sdl3-sys` build-from-source outputs (PR #24, thanks @flowkclav).
+- Backends
+  - `dear-imgui-sdl3`: add optional `sdlrenderer3-renderer` support and wrapper APIs for the official SDL3 + SDLRenderer3 path, including `init_for_canvas` / `canvas_new_frame` / `canvas_render` / `shutdown_for_canvas`.
 - Examples
   - Add a standalone repository-local `examples-android/dear-imgui-android-smoke` Android template that demonstrates the low-level `dear-imgui-rs` + `dear-imgui-sys` route without introducing a new published crate or changing the workspace's default build matrix.
   - Add minimal `cargo-apk2` packaging metadata to the Android smoke template and verify that it can produce a signed debug `NativeActivity` APK for `aarch64-linux-android`.
   - Add a repository-local APK packaging helper for the Android smoke template and document release signing plus per-ABI APK packaging while keeping the checked-in smoke path single-ABI and repository-local.
+  - Add an `sdl3_sdlrenderer` example plus the `sdl3-sdlrenderer3` example feature for Dear ImGui on SDL3 + SDL_Renderer.
 
 ### Changed
 
