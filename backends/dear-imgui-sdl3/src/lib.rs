@@ -306,7 +306,11 @@ pub fn init_for_sdl_gpu(_imgui: &mut Context, window: &Window) -> Result<(), Sdl
 ///
 /// Requires the `sdlrenderer3-renderer` feature.
 #[cfg(feature = "sdlrenderer3-renderer")]
-pub fn init_for_canvas(_imgui: &mut Context, window: &Window, canvas: &WindowCanvas) -> Result<(), Sdl3BackendError> {
+pub fn init_for_canvas(
+    _imgui: &mut Context,
+    window: &Window,
+    canvas: &WindowCanvas,
+) -> Result<(), Sdl3BackendError> {
     let sdl_window = window.raw();
     let sdl_renderer = canvas.raw();
 
@@ -314,7 +318,9 @@ pub fn init_for_canvas(_imgui: &mut Context, window: &Window, canvas: &WindowCan
         if !ffi::ImGui_ImplSDL3_InitForSDLRenderer_Rust(sdl_window, sdl_renderer) {
             return Err(Sdl3BackendError::Sdl3InitFailed);
         }
-        if !sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_init(sdl_renderer as *mut std::ffi::c_void) {
+        if !sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_init(
+            sdl_renderer as *mut std::ffi::c_void
+        ) {
             return Err(Sdl3BackendError::Renderer3InitFailed);
         }
     }
@@ -425,7 +431,10 @@ pub fn canvas_render(draw_data: &DrawData, canvas: &WindowCanvas) {
     // Render main viewport
     unsafe {
         let raw = draw_data as *const DrawData as *const sys::ImDrawData;
-        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_render_draw_data(raw, sdl_renderer as *mut std::ffi::c_void);
+        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_render_draw_data(
+            raw,
+            sdl_renderer as *mut std::ffi::c_void,
+        );
     }
 }
 

@@ -23,9 +23,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sdl_ctx = sdl3::init()?;
     let video = sdl_ctx.video()?;
 
-    let main_scale = video.get_primary_display()?.get_content_scale().unwrap_or(1.0);
+    let main_scale = video
+        .get_primary_display()?
+        .get_content_scale()
+        .unwrap_or(1.0);
     let window = video
-        .window("SDL Test", (1200.0 * main_scale) as u32, (720.0 * main_scale) as u32)
+        .window(
+            "SDL Test",
+            (1200.0 * main_scale) as u32,
+            (720.0 * main_scale) as u32,
+        )
         .position_centered()
         .resizable()
         .high_pixel_density()
@@ -73,13 +80,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         imgui_sdl3_backend::canvas_new_frame(&mut imgui);
         let ui = imgui.frame();
 
-        ui.window("SDL3 + IMGUI").size([400.0, 200.0], Condition::FirstUseEver).build(|| {
-            ui.text("Dear ImGui running on SDL3 + SDL_Renderer");
-            ui.separator();
-            ui.checkbox("Show demo window", &mut show_demo);
-            ui.checkbox("Show debug log window", &mut show_debug);
-            ui.checkbox("Show about window", &mut show_about);
-        });
+        ui.window("SDL3 + IMGUI")
+            .size([400.0, 200.0], Condition::FirstUseEver)
+            .build(|| {
+                ui.text("Dear ImGui running on SDL3 + SDL_Renderer");
+                ui.separator();
+                ui.checkbox("Show demo window", &mut show_demo);
+                ui.checkbox("Show debug log window", &mut show_debug);
+                ui.checkbox("Show about window", &mut show_about);
+            });
 
         if show_demo {
             ui.show_demo_window(&mut show_demo);
