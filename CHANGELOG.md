@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Examples
   - Add a standalone repository-local `examples-android/dear-imgui-android-smoke` Android template that demonstrates the low-level `dear-imgui-rs` + `dear-imgui-sys` route without introducing a new published crate or changing the workspace's default build matrix.
   - Add minimal `cargo-apk2` packaging metadata to the Android smoke template and verify that it can produce a signed debug `NativeActivity` APK for `aarch64-linux-android`.
-  - Add a PowerShell packaging helper for the Android smoke template and document release signing plus per-ABI APK packaging while keeping the checked-in smoke path single-ABI and repository-local.
+  - Add a repository-local APK packaging helper for the Android smoke template and document release signing plus per-ABI APK packaging while keeping the checked-in smoke path single-ABI and repository-local.
 
 ### Changed
 
@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-sdl3`: stop forcing `sdl3/build-from-source` on Android from the backend crate itself. Android SDL3 acquisition now remains application-owned: consumers may either provide `SDL3_INCLUDE_DIR` or opt into `sdl3/build-from-source` in their own dependency graph.
 - Examples
   - Upgrade `examples-android/dear-imgui-android-smoke` from a startup-only smoke path to a minimal NativeActivity + EGL / GLES3 render loop that displays Dear ImGui windows on-device while preserving app-owned Android packaging and lifecycle glue, without turning the template into a published runtime crate.
+  - Switch the Android smoke APK helper from a Windows-only PowerShell script to a cross-platform Python script, and tune the README screenshot presentation for GitHub rendering.
 
 ### Dependencies
 

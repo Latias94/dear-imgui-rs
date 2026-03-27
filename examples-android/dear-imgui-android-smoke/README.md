@@ -4,7 +4,13 @@ Minimal Android compile-target template for the low-level
 `dear-imgui-rs` + `dear-imgui-sys` route, including a minimal
 EGL / OpenGL ES 3 render loop.
 
-![Dear ImGui Android Smoke on device](https://github.com/user-attachments/assets/914e3df9-8957-4890-aa79-cf2473224206)
+<p align="center">
+  <img
+    src="https://github.com/user-attachments/assets/914e3df9-8957-4890-aa79-cf2473224206"
+    alt="Dear ImGui Android Smoke on device"
+    width="360"
+  />
+</p>
 
 This sample is intentionally:
 
@@ -36,6 +42,37 @@ access, you can route those events to
 `dear_imgui_sys::backend_shim::android::dear_imgui_backend_android_handle_input_event`
 instead.
 
+## Prerequisites
+
+Install and configure these tools before using the smoke template:
+
+- Rust with the Android target you want to build, at minimum
+  `aarch64-linux-android` for the checked-in smoke path
+- Android SDK with:
+  - `platform-tools` for `adb`
+  - `build-tools` for `aapt2`, `zipalign`, and `apksigner`
+  - `platforms;android-36` (or another installed platform that matches your
+    chosen `target_sdk_version`)
+- Android NDK, exposed through `ANDROID_NDK_ROOT` or `ANDROID_NDK_HOME`
+- Android SDK path, exposed through `ANDROID_HOME`
+- A JDK, exposed through `JAVA_HOME`, with `keytool` available
+- Python 3 if you want to use the repository-local `scripts/build-apk.py`
+  helper
+
+Install the default Rust Android target once:
+
+```powershell
+rustup target add aarch64-linux-android
+```
+
+Optional but useful during smoke testing:
+
+- a real device or emulator visible in `adb devices`
+- extra Rust targets such as `x86_64-linux-android` if you want multi-ABI
+  packaging or emulator builds
+
+This smoke path does not require Gradle.
+
 ## Build
 
 PowerShell example for `aarch64-linux-android`:
@@ -62,6 +99,9 @@ Install the packager once:
 ```powershell
 cargo install cargo-apk2 --locked
 ```
+
+If you open a fresh shell before packaging, re-apply the Android linker setup
+from the `Build` section above first.
 
 Then build a debug APK:
 
@@ -92,16 +132,14 @@ Notes:
 
 ## Release Signing
 
-For release packaging, prefer environment variables over committing signing
-paths or passwords into `Cargo.toml`.
+For release packaging, prefer passing signing data through environment
+variables or helper-script arguments instead of committing signing paths or
+passwords into `Cargo.toml`.
 
-Direct `cargo-apk2` example:
+Cross-platform helper example:
 
-```powershell
-$env:CARGO_APK_RELEASE_KEYSTORE = 'C:\android\release.keystore'
-$env:CARGO_APK_RELEASE_KEYSTORE_PASSWORD = 'replace-me'
-
-cargo apk2 build --release --manifest-path examples-android/dear-imgui-android-smoke/Cargo.toml
+```text
+python examples-android/dear-imgui-android-smoke/scripts/build-apk.py --profile release --targets aarch64-linux-android --keystore-path /path/to/release.keystore --keystore-password replace-me
 ```
 
 The release APK is written to:
@@ -123,9 +161,8 @@ This template keeps the checked-in manifest on a single ABI (`aarch64`) so the
 smoke path stays fast and deterministic. For practical multi-ABI packaging, the
 repository includes a helper script:
 
-```powershell
-pwsh -File examples-android/dear-imgui-android-smoke/scripts/build-apk.ps1 `
-  -Targets aarch64-linux-android,x86_64-linux-android
+```text
+python examples-android/dear-imgui-android-smoke/scripts/build-apk.py --targets aarch64-linux-android,x86_64-linux-android
 ```
 
 Why the script exists:
@@ -149,12 +186,8 @@ rustup target add x86_64-linux-android armv7-linux-androideabi
 
 The helper script also supports release packaging:
 
-```powershell
-pwsh -File examples-android/dear-imgui-android-smoke/scripts/build-apk.ps1 `
-  -Profile Release `
-  -Targets aarch64-linux-android,x86_64-linux-android `
-  -KeystorePath C:\android\release.keystore `
-  -KeystorePassword replace-me
+```text
+python examples-android/dear-imgui-android-smoke/scripts/build-apk.py --profile release --targets aarch64-linux-android,x86_64-linux-android --keystore-path /path/to/release.keystore --keystore-password replace-me
 ```
 
 ## What You Still Need In A Real App
