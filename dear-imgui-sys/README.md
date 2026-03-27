@@ -175,6 +175,7 @@ These features expose modules such as:
 - `dear_imgui_sys::backend_shim::dx11`
 - `dear_imgui_sys::backend_shim::android`
 - `dear_imgui_sys::backend_shim::opengl3`
+- `dear_imgui_sys::backend_shim::sdlrenderer3`
 
 Important scope note:
 

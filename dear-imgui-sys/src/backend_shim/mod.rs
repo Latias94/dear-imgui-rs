@@ -16,6 +16,8 @@
 //!   `backend-shim-android`
 //! - `opengl3` requires feature `backend-shim-opengl3` and is currently
 //!   available on non-wasm targets
+//! - `sdlrenderer3` requires feature `backend-shim-sdlrenderer3` and is
+//!   currently available on non-wasm targets
 //! - `win32` requires `target_os = "windows"` and feature
 //!   `backend-shim-win32`
 //! - `dx11` requires `target_os = "windows"` and feature
@@ -40,6 +42,9 @@ pub mod dx11;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "backend-shim-opengl3"))]
 pub mod opengl3;
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "backend-shim-sdlrenderer3"))]
+pub mod sdlrenderer3;
 
 #[cfg(all(target_os = "windows", feature = "backend-shim-win32"))]
 pub mod win32;

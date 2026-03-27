@@ -45,6 +45,7 @@
 //! Typical feature gates:
 //!
 //! - `backend-shim-opengl3`
+//! - `backend-shim-sdlrenderer3`
 //! - `backend-shim-android`
 //! - `backend-shim-win32`
 //! - `backend-shim-dx11`
