@@ -293,11 +293,6 @@ impl<'a> SimpleStairsPlot<'a> {
         let Ok(count) = i32::try_from(self.y_data.len()) else {
             return;
         };
-        // Generate x data
-        let x_data: Vec<f64> = (0..self.y_data.len())
-            .map(|i| self.x_start + i as f64 * self.x_scale)
-            .collect();
-
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -305,11 +300,12 @@ impl<'a> SimpleStairsPlot<'a> {
                 0,
                 std::mem::size_of::<f64>() as i32,
             );
-            sys::ImPlot_PlotStairs_doublePtrdoublePtr(
+            sys::ImPlot_PlotStairs_doublePtrInt(
                 label_ptr,
-                x_data.as_ptr(),
                 self.y_data.as_ptr(),
                 count,
+                self.x_scale,
+                self.x_start,
                 spec,
             );
         })

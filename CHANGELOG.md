@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Add Apple integration notes that explain how to use the repository-owned iOS examples as reference/teaching material without presenting them as a turn-key mobile runtime layer.
   - Add platform notes and README navigation for the new iOS/Android smoke templates, including a checked-in iOS Simulator screenshot for the SDL3 iOS smoke path.
 
+### Fixed
+
+- Core (`dear-imgui-rs`)
+  - Implement the previously placeholder `Ui::set_window_font_scale()` wrapper on top of Dear ImGui's exposed internal window/font-size state, so legacy per-window font scaling now works from the safe API instead of remaining a no-op.
+  - Implement `Ui::is_any_column_resizing()` by reading the current window's legacy columns state, so it no longer always reports `false`.
+- Extensions
+  - `dear-implot`: wire `ErrorBarsPlot::horizontal()` to `ImPlotErrorBarsFlags_Horizontal`, add matching `horizontal()` plus `with_offset()` / `with_stride()` on `AsymmetricErrorBarsPlot`, and route simple line/scatter/shaded/stairs/stems builders through the existing single-array ImPlot C bindings instead of allocating temporary X-coordinate buffers.
+
 ### CI
 
 - Add an `apple-mobile-check` job that validates the documented iOS integration surface with `cargo check` sentinels for device and simulator targets, including the repository-local iOS smoke templates.

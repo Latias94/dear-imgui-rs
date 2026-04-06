@@ -183,12 +183,23 @@ impl Ui {
     // Column state utilities
     // ============================================================================
 
-    /// Check if any column is being resized.
-    /// Note: This is a placeholder implementation as the underlying C++ function is not available
+    /// Check if any column in the current legacy columns set is being resized.
+    ///
+    /// Returns `false` when the current window is not inside a legacy columns set.
     pub fn is_any_column_resizing(&self) -> bool {
-        // TODO: Implement when the proper C++ binding is available
-        // The ImGui_GetCurrentWindow function is not available in our bindings
-        false
+        unsafe {
+            let window = sys::igGetCurrentWindowRead();
+            if window.is_null() {
+                return false;
+            }
+
+            let columns = (*window).DC.CurrentColumns;
+            if columns.is_null() {
+                return false;
+            }
+
+            (*columns).IsBeingResized
+        }
     }
 
     /// Get the total width of all columns.
@@ -252,5 +263,37 @@ pub struct ColumnsToken<'ui> {
 impl Drop for ColumnsToken<'_> {
     fn drop(&mut self) {
         self.ui.end_columns();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OldColumnFlags;
+
+    #[test]
+    fn is_any_column_resizing_reads_current_columns_state() {
+        let mut ctx = crate::Context::create();
+        let _ = ctx.font_atlas_mut().build();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        let ui = ctx.frame();
+
+        ui.window("columns_resize_test").build(|| {
+            assert!(!ui.is_any_column_resizing());
+
+            let _columns = ui.begin_columns_token("legacy_columns", 2, OldColumnFlags::NONE);
+            let window = unsafe { crate::sys::igGetCurrentWindowRead() };
+            assert!(!window.is_null());
+
+            let columns = unsafe { (*window).DC.CurrentColumns };
+            assert!(!columns.is_null());
+            assert!(!ui.is_any_column_resizing());
+
+            unsafe {
+                (*columns).IsBeingResized = true;
+            }
+
+            assert!(ui.is_any_column_resizing());
+        });
     }
 }

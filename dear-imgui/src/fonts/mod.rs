@@ -75,13 +75,42 @@ impl Ui {
         }
     }
 
-    /// Sets the font scale of the current window
+    /// Sets the legacy per-window font scale of the current window.
     ///
-    /// Note: This function is not available in our Dear ImGui version.
-    /// Font scaling should be handled through font size instead.
+    /// Prefer [`Ui::push_font_with_size`] or `style.FontScaleMain` for new code.
     #[doc(alias = "SetWindowFontScale")]
-    pub fn set_window_font_scale(&self, _scale: f32) {
-        // TODO: Implement when SetWindowFontScale is available in our Dear ImGui version
-        // unsafe { crate::sys::igSetWindowFontScale(scale) }
+    pub fn set_window_font_scale(&self, scale: f32) {
+        assert!(scale > 0.0, "window font scale must be positive");
+
+        unsafe {
+            let window = crate::sys::igGetCurrentWindow();
+            if window.is_null() {
+                return;
+            }
+            (*window).FontWindowScale = scale;
+            crate::sys::igUpdateCurrentFontSize(0.0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn set_window_font_scale_updates_current_window_state() {
+        let mut ctx = crate::Context::create();
+        let _ = ctx.font_atlas_mut().build();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        let ui = ctx.frame();
+
+        ui.window("font_scale_test").build(|| {
+            let window = unsafe { crate::sys::igGetCurrentWindowRead() };
+            assert!(!window.is_null());
+            assert_eq!(unsafe { (*window).FontWindowScale }, 1.0);
+
+            ui.set_window_font_scale(1.5);
+
+            assert_eq!(unsafe { (*window).FontWindowScale }, 1.5);
+        });
     }
 }

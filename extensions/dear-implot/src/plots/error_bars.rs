@@ -72,9 +72,8 @@ impl<'a> ErrorBarsPlot<'a> {
     }
 
     /// Make error bars horizontal instead of vertical
-    pub fn horizontal(self) -> Self {
-        // Note: This would require a different flag or function
-        // For now, we'll keep it as a placeholder
+    pub fn horizontal(mut self) -> Self {
+        self.flags |= ErrorBarsFlags::HORIZONTAL;
         self
     }
 
@@ -135,6 +134,8 @@ pub struct AsymmetricErrorBarsPlot<'a> {
     style: PlotItemStyle,
     flags: ErrorBarsFlags,
     item_flags: ItemFlags,
+    offset: i32,
+    stride: i32,
 }
 
 impl<'a> super::PlotItemStyled for AsymmetricErrorBarsPlot<'a> {
@@ -168,6 +169,8 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
             style: PlotItemStyle::default(),
             flags: ErrorBarsFlags::NONE,
             item_flags: ItemFlags::NONE,
+            offset: 0,
+            stride: std::mem::size_of::<f64>() as i32,
         }
     }
 
@@ -180,6 +183,24 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
     /// Set common item flags for this plot item (applies to all plot types)
     pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
         self.item_flags = flags;
+        self
+    }
+
+    /// Set data offset for partial plotting
+    pub fn with_offset(mut self, offset: i32) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Set data stride for non-contiguous data
+    pub fn with_stride(mut self, stride: i32) -> Self {
+        self.stride = stride;
+        self
+    }
+
+    /// Make error bars horizontal instead of vertical
+    pub fn horizontal(mut self) -> Self {
+        self.flags |= ErrorBarsFlags::HORIZONTAL;
         self
     }
 
@@ -212,8 +233,8 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                std::mem::size_of::<f64>() as i32,
+                self.offset,
+                self.stride,
             );
             sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrdoublePtr(
                 label_ptr,

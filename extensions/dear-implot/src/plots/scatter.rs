@@ -233,18 +233,14 @@ impl<'a> Plot for SimpleScatterPlot<'a> {
             return;
         };
 
-        // Create temporary X data
-        let x_data: Vec<f64> = (0..self.values.len())
-            .map(|i| self.x_start + i as f64 * self.x_scale)
-            .collect();
-
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(self.style, 0, 0, std::mem::size_of::<f64>() as i32);
-            sys::ImPlot_PlotScatter_doublePtrdoublePtr(
+            sys::ImPlot_PlotScatter_doublePtrInt(
                 label_ptr,
-                x_data.as_ptr(),
                 self.values.as_ptr(),
                 count,
+                self.x_scale,
+                self.x_start,
                 spec,
             );
         })
