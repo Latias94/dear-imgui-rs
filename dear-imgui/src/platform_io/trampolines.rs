@@ -15,23 +15,34 @@ pub static PLATFORM_SHOW_WINDOW_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewp
 pub static PLATFORM_SET_WINDOW_POS_CB: Mutex<
     Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>,
 > = Mutex::new(None);
+pub static PLATFORM_GET_WINDOW_POS_RAW_CB: Mutex<
+    Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
+> = Mutex::new(None);
 pub static PLATFORM_GET_WINDOW_POS_CB: Mutex<
     Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
 > = Mutex::new(None);
 pub static PLATFORM_SET_WINDOW_SIZE_CB: Mutex<
     Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>,
 > = Mutex::new(None);
+pub static PLATFORM_GET_WINDOW_SIZE_RAW_CB: Mutex<
+    Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
+> = Mutex::new(None);
 pub static PLATFORM_GET_WINDOW_SIZE_CB: Mutex<
     Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
 > = Mutex::new(None);
 pub static PLATFORM_SET_WINDOW_FOCUS_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
     Mutex::new(None);
+pub static PLATFORM_GET_WINDOW_DPI_SCALE_CB: Mutex<
+    Option<unsafe extern "C" fn(*mut Viewport) -> f32>,
+> = Mutex::new(None);
 pub static PLATFORM_GET_WINDOW_FOCUS_CB: Mutex<
     Option<unsafe extern "C" fn(*mut Viewport) -> bool>,
 > = Mutex::new(None);
 pub static PLATFORM_GET_WINDOW_MINIMIZED_CB: Mutex<
     Option<unsafe extern "C" fn(*mut Viewport) -> bool>,
 > = Mutex::new(None);
+pub static PLATFORM_ON_CHANGED_VIEWPORT_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
+    Mutex::new(None);
 pub static PLATFORM_SET_WINDOW_TITLE_CB: Mutex<
     Option<unsafe extern "C" fn(*mut Viewport, *const c_char)>,
 > = Mutex::new(None);
@@ -134,18 +145,6 @@ pub unsafe extern "C" fn platform_set_window_pos(vp: *mut sys::ImGuiViewport, p:
         );
     }
 }
-pub unsafe extern "C" fn platform_get_window_pos(vp: *mut sys::ImGuiViewport) -> sys::ImVec2 {
-    if vp.is_null() {
-        return sys::ImVec2 { x: 0.0, y: 0.0 };
-    }
-    if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_POS_CB) {
-        return abort_if_panicked(
-            "Platform_GetWindowPos",
-            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp as *mut Viewport) })),
-        );
-    }
-    sys::ImVec2 { x: 0.0, y: 0.0 }
-}
 pub unsafe extern "C" fn platform_set_window_size(vp: *mut sys::ImGuiViewport, s: sys::ImVec2) {
     if vp.is_null() {
         return;
@@ -157,17 +156,57 @@ pub unsafe extern "C" fn platform_set_window_size(vp: *mut sys::ImGuiViewport, s
         );
     }
 }
-pub unsafe extern "C" fn platform_get_window_size(vp: *mut sys::ImGuiViewport) -> sys::ImVec2 {
-    if vp.is_null() {
-        return sys::ImVec2 { x: 0.0, y: 0.0 };
+pub unsafe extern "C" fn platform_get_window_pos_out(
+    vp: *mut sys::ImGuiViewport,
+    out_pos: *mut sys::ImVec2,
+) {
+    if out_pos.is_null() {
+        return;
     }
-    if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_SIZE_CB) {
-        return abort_if_panicked(
+
+    let pos = if vp.is_null() {
+        sys::ImVec2 { x: 0.0, y: 0.0 }
+    } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB) {
+        abort_if_panicked(
+            "Platform_GetWindowPos",
+            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp) })),
+        )
+    } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_POS_CB) {
+        abort_if_panicked(
+            "Platform_GetWindowPos",
+            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp as *mut Viewport) })),
+        )
+    } else {
+        sys::ImVec2 { x: 0.0, y: 0.0 }
+    };
+
+    unsafe { *out_pos = pos };
+}
+pub unsafe extern "C" fn platform_get_window_size_out(
+    vp: *mut sys::ImGuiViewport,
+    out_size: *mut sys::ImVec2,
+) {
+    if out_size.is_null() {
+        return;
+    }
+
+    let size = if vp.is_null() {
+        sys::ImVec2 { x: 0.0, y: 0.0 }
+    } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB) {
+        abort_if_panicked(
+            "Platform_GetWindowSize",
+            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp) })),
+        )
+    } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_SIZE_CB) {
+        abort_if_panicked(
             "Platform_GetWindowSize",
             catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp as *mut Viewport) })),
-        );
-    }
-    sys::ImVec2 { x: 0.0, y: 0.0 }
+        )
+    } else {
+        sys::ImVec2 { x: 0.0, y: 0.0 }
+    };
+
+    unsafe { *out_size = size };
 }
 pub unsafe extern "C" fn platform_set_window_focus(vp: *mut sys::ImGuiViewport) {
     if vp.is_null() {
@@ -192,6 +231,18 @@ pub unsafe extern "C" fn platform_get_window_focus(vp: *mut sys::ImGuiViewport) 
     }
     false
 }
+pub unsafe extern "C" fn platform_get_window_dpi_scale(vp: *mut sys::ImGuiViewport) -> f32 {
+    if vp.is_null() {
+        return 0.0;
+    }
+    if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_DPI_SCALE_CB) {
+        return abort_if_panicked(
+            "Platform_GetWindowDpiScale",
+            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp as *mut Viewport) })),
+        );
+    }
+    0.0
+}
 pub unsafe extern "C" fn platform_get_window_minimized(vp: *mut sys::ImGuiViewport) -> bool {
     if vp.is_null() {
         return false;
@@ -203,6 +254,17 @@ pub unsafe extern "C" fn platform_get_window_minimized(vp: *mut sys::ImGuiViewpo
         );
     }
     false
+}
+pub unsafe extern "C" fn platform_on_changed_viewport(vp: *mut sys::ImGuiViewport) {
+    if vp.is_null() {
+        return;
+    }
+    if let Some(cb) = load_cb(&PLATFORM_ON_CHANGED_VIEWPORT_CB) {
+        abort_if_panicked(
+            "Platform_OnChangedViewport",
+            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp as *mut Viewport) })),
+        );
+    }
 }
 pub unsafe extern "C" fn platform_set_window_title(
     vp: *mut sys::ImGuiViewport,

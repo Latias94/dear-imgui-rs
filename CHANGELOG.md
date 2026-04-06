@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core (`dear-imgui-rs`)
   - Implement the previously placeholder `Ui::set_window_font_scale()` wrapper on top of Dear ImGui's exposed internal window/font-size state, so legacy per-window font scaling now works from the safe API instead of remaining a no-op.
   - Implement `Ui::is_any_column_resizing()` by reading the current window's legacy columns state, so it no longer always reports `false`.
+  - Route `PlatformIo::{set_platform_get_window_pos*,set_platform_get_window_size*}` through cimgui's compatibility helpers instead of installing direct `ImVec2`-returning function pointers, fixing the ABI mismatch on platforms where those `ImGuiPlatformIO` callback slots are not C-compatible.
+  - Add the missing `Context::platform_io()` shared accessor plus the remaining small `PlatformIo` / `Viewport` wrapper gaps around handler clearing, window DPI / changed-viewport callbacks, viewport centers, and raw platform handles, so this multi-viewport surface no longer forces callers down to `sys` for those basic operations.
 - Extensions
   - `dear-implot`: wire `ErrorBarsPlot::horizontal()` to `ImPlotErrorBarsFlags_Horizontal`, add matching `horizontal()` plus `with_offset()` / `with_stride()` on `AsymmetricErrorBarsPlot`, and route simple line/scatter/shaded/stairs/stems builders through the existing single-array ImPlot C bindings instead of allocating temporary X-coordinate buffers.
   - `dear-implot`: finish aligning the remaining `Simple*Plot` builders with their full-builder counterparts by threading through the relevant plot/item flags on simple line/scatter/stem/shaded/error-bar/bar-group helpers as well.

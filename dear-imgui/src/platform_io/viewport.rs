@@ -106,6 +106,24 @@ impl Viewport {
         [self.inner().WorkSize.x, self.inner().WorkSize.y]
     }
 
+    /// Get the center of the viewport rectangle.
+    #[doc(alias = "GetCenter")]
+    pub fn center(&self) -> [f32; 2] {
+        unsafe {
+            let center = sys::ImGuiViewport_GetCenter(self.as_raw().cast_mut());
+            [center.x, center.y]
+        }
+    }
+
+    /// Get the center of the work rectangle.
+    #[doc(alias = "GetWorkCenter")]
+    pub fn work_center(&self) -> [f32; 2] {
+        unsafe {
+            let center = sys::ImGuiViewport_GetWorkCenter(self.as_raw().cast_mut());
+            [center.x, center.y]
+        }
+    }
+
     /// Check if this is the main viewport
     ///
     /// Note: Main viewport is typically identified by ID == 0 or by checking if it's not a platform window
@@ -181,6 +199,18 @@ impl Viewport {
     /// Set the platform handle
     pub fn set_platform_handle(&mut self, handle: *mut c_void) {
         self.inner_mut().PlatformHandle = handle;
+    }
+
+    /// Get the raw platform handle.
+    ///
+    /// This is backend/platform specific. For example, on Win32 this may be an `HWND`.
+    pub fn platform_handle_raw(&self) -> *mut c_void {
+        self.inner().PlatformHandleRaw
+    }
+
+    /// Set the raw platform handle.
+    pub fn set_platform_handle_raw(&mut self, handle: *mut c_void) {
+        self.inner_mut().PlatformHandleRaw = handle;
     }
 
     /// Check if the platform window was created
@@ -287,5 +317,57 @@ impl Viewport {
     pub fn set_framebuffer_scale(&mut self, scale: [f32; 2]) {
         self.inner_mut().FramebufferScale.x = scale[0];
         self.inner_mut().FramebufferScale.y = scale[1];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Viewport;
+    use crate::sys;
+    use std::ffi::c_void;
+
+    fn new_viewport() -> *mut sys::ImGuiViewport {
+        unsafe {
+            let ptr = sys::ImGuiViewport_ImGuiViewport();
+            assert!(
+                !ptr.is_null(),
+                "ImGuiViewport_ImGuiViewport() returned null"
+            );
+            ptr
+        }
+    }
+
+    #[test]
+    fn viewport_center_and_work_center_follow_imgui_helpers() {
+        let raw = new_viewport();
+        unsafe {
+            (*raw).Pos.x = 10.0;
+            (*raw).Pos.y = 20.0;
+            (*raw).Size.x = 100.0;
+            (*raw).Size.y = 40.0;
+            (*raw).WorkPos.x = 30.0;
+            (*raw).WorkPos.y = 50.0;
+            (*raw).WorkSize.x = 20.0;
+            (*raw).WorkSize.y = 10.0;
+
+            let viewport = Viewport::from_raw_mut(raw);
+            assert_eq!(viewport.center(), [60.0, 40.0]);
+            assert_eq!(viewport.work_center(), [40.0, 55.0]);
+
+            sys::ImGuiViewport_destroy(raw);
+        }
+    }
+
+    #[test]
+    fn viewport_platform_handle_raw_roundtrips() {
+        let raw = new_viewport();
+        unsafe {
+            let viewport = Viewport::from_raw_mut(raw);
+            let handle = 0x1234usize as *mut c_void;
+            viewport.set_platform_handle_raw(handle);
+            assert_eq!(viewport.platform_handle_raw(), handle);
+
+            sys::ImGuiViewport_destroy(raw);
+        }
     }
 }

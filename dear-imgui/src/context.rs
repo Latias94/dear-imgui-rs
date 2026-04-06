@@ -462,6 +462,21 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
 
     // removed legacy set_renderer_name_or_panic (use set_renderer_name())
 
+    /// Get shared access to the platform IO.
+    ///
+    /// Note: `ImGuiPlatformIO` exists even when multi-viewport is disabled. We expose it
+    /// unconditionally so callers can use ImGui 1.92+ texture management via `PlatformIO.Textures[]`.
+    pub fn platform_io(&self) -> &crate::platform_io::PlatformIo {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            let pio = sys::igGetPlatformIO_Nil();
+            if pio.is_null() {
+                panic!("Context::platform_io() requires an active ImGui context");
+            }
+            crate::platform_io::PlatformIo::from_raw(pio)
+        }
+    }
+
     /// Get mutable access to the platform IO.
     ///
     /// Note: `ImGuiPlatformIO` exists even when multi-viewport is disabled. We expose it
@@ -815,6 +830,51 @@ impl Drop for Context {
                 sys::igDestroyContext(self.raw);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Context;
+
+    #[test]
+    fn platform_io_shared_and_mut_views_match() {
+        let mut ctx = Context::create();
+        let shared = ctx.platform_io().as_raw();
+        let mutable = ctx.platform_io_mut().as_raw();
+        assert_eq!(shared, mutable);
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn platform_io_get_window_pos_and_size_setters_install_handlers() {
+        unsafe extern "C" fn get_pos(
+            _viewport: *mut crate::sys::ImGuiViewport,
+        ) -> crate::sys::ImVec2 {
+            crate::sys::ImVec2 { x: 10.0, y: 20.0 }
+        }
+        unsafe extern "C" fn get_size(
+            _viewport: *mut crate::sys::ImGuiViewport,
+        ) -> crate::sys::ImVec2 {
+            crate::sys::ImVec2 { x: 30.0, y: 40.0 }
+        }
+
+        let mut ctx = Context::create();
+        let pio = ctx.platform_io_mut();
+
+        pio.set_platform_get_window_pos_raw(Some(get_pos));
+        pio.set_platform_get_window_size_raw(Some(get_size));
+
+        let raw = unsafe { &*pio.as_raw() };
+        assert!(raw.Platform_GetWindowPos.is_some());
+        assert!(raw.Platform_GetWindowSize.is_some());
+
+        pio.set_platform_get_window_pos_raw(None);
+        pio.set_platform_get_window_size_raw(None);
+
+        let raw = unsafe { &*pio.as_raw() };
+        assert!(raw.Platform_GetWindowPos.is_none());
+        assert!(raw.Platform_GetWindowSize.is_none());
     }
 }
 

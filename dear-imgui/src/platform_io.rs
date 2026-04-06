@@ -61,6 +61,10 @@ impl PlatformIo {
     /// - `raw` is non-null and points to a valid `ImGuiPlatformIO`.
     /// - The platform IO outlives the returned reference (e.g. it belongs to the
     ///   currently active ImGui context).
+    pub unsafe fn from_raw<'a>(raw: *const sys::ImGuiPlatformIO) -> &'a Self {
+        unsafe { &*(raw as *const Self) }
+    }
+
     /// Get a mutable reference to the platform IO from a raw pointer
     ///
     /// # Safety
@@ -82,6 +86,22 @@ impl PlatformIo {
     /// Get the raw mutable pointer to the underlying `ImGuiPlatformIO`
     pub fn as_raw_mut(&mut self) -> *mut sys::ImGuiPlatformIO {
         self.raw.get()
+    }
+
+    /// Clear all platform backend handlers.
+    ///
+    /// This resets the `Platform_*` callback table stored in `ImGuiPlatformIO`.
+    #[cfg(feature = "multi-viewport")]
+    pub fn clear_platform_handlers(&mut self) {
+        unsafe { sys::ImGuiPlatformIO_ClearPlatformHandlers(self.as_raw_mut()) }
+    }
+
+    /// Clear all renderer backend handlers.
+    ///
+    /// This resets the `Renderer_*` callback table stored in `ImGuiPlatformIO`.
+    #[cfg(feature = "multi-viewport")]
+    pub fn clear_renderer_handlers(&mut self) {
+        unsafe { sys::ImGuiPlatformIO_ClearRendererHandlers(self.as_raw_mut()) }
     }
 
     /// Set platform create window callback (raw sys pointer)
@@ -200,7 +220,23 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
     ) {
-        self.inner_mut().Platform_GetWindowPos = callback;
+        use trampolines::*;
+
+        store_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, callback);
+        store_cb(&PLATFORM_GET_WINDOW_POS_CB, None);
+
+        unsafe {
+            match callback {
+                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowPos(
+                    self.as_raw_mut(),
+                    Some(
+                        trampolines::platform_get_window_pos_out
+                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+                    ),
+                ),
+                None => self.inner_mut().Platform_GetWindowPos = None,
+            }
+        }
     }
 
     /// Set platform get window position callback (typed Viewport).
@@ -214,11 +250,21 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
     ) {
         use trampolines::*;
+        store_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, None);
         store_cb(&PLATFORM_GET_WINDOW_POS_CB, callback);
-        self.set_platform_get_window_pos_raw(callback.map(|_| {
-            trampolines::platform_get_window_pos
-                as unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2
-        }));
+
+        unsafe {
+            match callback {
+                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowPos(
+                    self.as_raw_mut(),
+                    Some(
+                        trampolines::platform_get_window_pos_out
+                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+                    ),
+                ),
+                None => self.inner_mut().Platform_GetWindowPos = None,
+            }
+        }
     }
 
     /// Set platform set window size callback (raw)
@@ -254,7 +300,23 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
     ) {
-        self.inner_mut().Platform_GetWindowSize = callback;
+        use trampolines::*;
+
+        store_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, callback);
+        store_cb(&PLATFORM_GET_WINDOW_SIZE_CB, None);
+
+        unsafe {
+            match callback {
+                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowSize(
+                    self.as_raw_mut(),
+                    Some(
+                        trampolines::platform_get_window_size_out
+                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+                    ),
+                ),
+                None => self.inner_mut().Platform_GetWindowSize = None,
+            }
+        }
     }
 
     /// Set platform get window size callback (typed Viewport).
@@ -268,11 +330,21 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
     ) {
         use trampolines::*;
+        store_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, None);
         store_cb(&PLATFORM_GET_WINDOW_SIZE_CB, callback);
-        self.set_platform_get_window_size_raw(callback.map(|_| {
-            trampolines::platform_get_window_size
-                as unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2
-        }));
+
+        unsafe {
+            match callback {
+                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowSize(
+                    self.as_raw_mut(),
+                    Some(
+                        trampolines::platform_get_window_size_out
+                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+                    ),
+                ),
+                None => self.inner_mut().Platform_GetWindowSize = None,
+            }
+        }
     }
 
     /// Set platform set window focus callback (raw)
@@ -298,6 +370,33 @@ impl PlatformIo {
         store_cb(&PLATFORM_SET_WINDOW_FOCUS_CB, callback);
         self.set_platform_set_window_focus_raw(callback.map(|_| {
             trampolines::platform_set_window_focus as unsafe extern "C" fn(*mut sys::ImGuiViewport)
+        }));
+    }
+
+    /// Set platform get window DPI scale callback (raw)
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_get_window_dpi_scale_raw(
+        &mut self,
+        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> f32>,
+    ) {
+        self.inner_mut().Platform_GetWindowDpiScale = callback;
+    }
+
+    /// Set platform get window DPI scale callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
+    #[cfg(feature = "multi-viewport")]
+    pub unsafe fn set_platform_get_window_dpi_scale(
+        &mut self,
+        callback: Option<unsafe extern "C" fn(*mut Viewport) -> f32>,
+    ) {
+        use trampolines::*;
+        store_cb(&PLATFORM_GET_WINDOW_DPI_SCALE_CB, callback);
+        self.set_platform_get_window_dpi_scale_raw(callback.map(|_| {
+            trampolines::platform_get_window_dpi_scale
+                as unsafe extern "C" fn(*mut sys::ImGuiViewport) -> f32
         }));
     }
 
@@ -352,6 +451,33 @@ impl PlatformIo {
         self.set_platform_get_window_minimized_raw(callback.map(|_| {
             trampolines::platform_get_window_minimized
                 as unsafe extern "C" fn(*mut sys::ImGuiViewport) -> bool
+        }));
+    }
+
+    /// Set platform on changed viewport callback (raw)
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_on_changed_viewport_raw(
+        &mut self,
+        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
+    ) {
+        self.inner_mut().Platform_OnChangedViewport = callback;
+    }
+
+    /// Set platform on changed viewport callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
+    #[cfg(feature = "multi-viewport")]
+    pub unsafe fn set_platform_on_changed_viewport(
+        &mut self,
+        callback: Option<unsafe extern "C" fn(*mut Viewport)>,
+    ) {
+        use trampolines::*;
+        store_cb(&PLATFORM_ON_CHANGED_VIEWPORT_CB, callback);
+        self.set_platform_on_changed_viewport_raw(callback.map(|_| {
+            trampolines::platform_on_changed_viewport
+                as unsafe extern "C" fn(*mut sys::ImGuiViewport)
         }));
     }
 
@@ -919,6 +1045,46 @@ mod tests {
         assert_eq!(pio.textures().count(), 0);
         assert_eq!(pio.textures_count(), 0);
         assert!(pio.texture(0).is_none());
+    }
+
+    #[test]
+    fn platform_io_from_raw_matches_mut_wrapper() {
+        let mut raw: sys::ImGuiPlatformIO = new_platform_io();
+        let raw_ptr = (&mut raw) as *mut sys::ImGuiPlatformIO;
+
+        let shared = unsafe { PlatformIo::from_raw(raw_ptr.cast_const()) };
+        let mutable = unsafe { PlatformIo::from_raw_mut(raw_ptr) };
+
+        assert_eq!(shared.as_raw(), mutable.as_raw());
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn platform_io_clear_handlers_resets_platform_and_renderer_callbacks() {
+        unsafe extern "C" fn platform_cb(_viewport: *mut sys::ImGuiViewport) {}
+        unsafe extern "C" fn renderer_cb(_viewport: *mut sys::ImGuiViewport) {}
+        unsafe extern "C" fn platform_dpi_scale_cb(_viewport: *mut sys::ImGuiViewport) -> f32 {
+            1.0
+        }
+
+        let mut raw: sys::ImGuiPlatformIO = new_platform_io();
+        raw.Platform_CreateWindow = Some(platform_cb);
+        raw.Platform_DestroyWindow = Some(platform_cb);
+        raw.Platform_GetWindowDpiScale = Some(platform_dpi_scale_cb);
+        raw.Platform_OnChangedViewport = Some(platform_cb);
+        raw.Renderer_CreateWindow = Some(renderer_cb);
+        raw.Renderer_DestroyWindow = Some(renderer_cb);
+
+        let pio = unsafe { PlatformIo::from_raw_mut((&mut raw) as *mut sys::ImGuiPlatformIO) };
+        pio.clear_platform_handlers();
+        pio.clear_renderer_handlers();
+
+        assert!(raw.Platform_CreateWindow.is_none());
+        assert!(raw.Platform_DestroyWindow.is_none());
+        assert!(raw.Platform_GetWindowDpiScale.is_none());
+        assert!(raw.Platform_OnChangedViewport.is_none());
+        assert!(raw.Renderer_CreateWindow.is_none());
+        assert!(raw.Renderer_DestroyWindow.is_none());
     }
 }
 
