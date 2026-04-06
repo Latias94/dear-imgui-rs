@@ -118,6 +118,8 @@ pub struct ShadedBetweenPlot<'a> {
     style: PlotItemStyle,
     flags: ShadedFlags,
     item_flags: ItemFlags,
+    offset: i32,
+    stride: i32,
 }
 
 impl<'a> super::PlotItemStyled for ShadedBetweenPlot<'a> {
@@ -137,6 +139,8 @@ impl<'a> ShadedBetweenPlot<'a> {
             style: PlotItemStyle::default(),
             flags: ShadedFlags::NONE,
             item_flags: ItemFlags::NONE,
+            offset: 0,
+            stride: crate::IMPLOT_AUTO,
         }
     }
 
@@ -149,6 +153,18 @@ impl<'a> ShadedBetweenPlot<'a> {
     /// Set common item flags for this plot item (applies to all plot types)
     pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
         self.item_flags = flags;
+        self
+    }
+
+    /// Set data offset for partial plotting
+    pub fn with_offset(mut self, offset: i32) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Set data stride for non-contiguous data
+    pub fn with_stride(mut self, stride: i32) -> Self {
+        self.stride = stride;
         self
     }
 
@@ -169,14 +185,12 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
             return;
         };
 
-        // Note: This would require a different wrapper function for shaded between two lines
-        // For now, we'll use the single line version with the first Y data
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                crate::IMPLOT_AUTO,
+                self.offset,
+                self.stride,
             );
             sys::ImPlot_PlotShaded_doublePtrdoublePtrdoublePtr(
                 label_ptr,

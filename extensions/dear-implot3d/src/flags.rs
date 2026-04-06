@@ -131,6 +131,7 @@ bitflags::bitflags! {
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Marker3D {
+    Auto = sys::ImPlot3DMarker_Auto as i32,
     None = sys::ImPlot3DMarker_None as i32,
     Circle = sys::ImPlot3DMarker_Circle as i32,
     Square = sys::ImPlot3DMarker_Square as i32,

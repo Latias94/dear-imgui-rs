@@ -146,6 +146,32 @@ let points = vec![
 plot_ui.plot_line_mint("Line", &points, Line3DFlags::NONE);
 ```
 
+## Item Styling
+
+Spec-backed plot builders expose a shared per-item styling surface through
+`Plot3DItemStyle` / `Plot3DItemStyled`:
+
+```rust
+use dear_implot3d::*;
+
+let line = Line3D::f32("Line", &xs, &ys, &zs)
+    .with_line_color([0.15, 0.70, 0.35, 1.0])
+    .with_line_weight(2.0)
+    .with_marker(Marker3D::Auto)
+    .with_marker_size(4.0);
+
+line.plot(&plot_ui);
+
+plot_ui
+    .surface_f32("Surface", &grid_x, &grid_y, &grid_z)
+    .with_fill_alpha(0.35)
+    .with_line_color([0.95, 0.95, 0.95, 1.0])
+    .plot();
+```
+
+The legacy `set_next_*_style()` helpers remain available for immediate-mode
+paths that still plot directly without a builder value.
+
 ## Notes
 
 - The underlying C API comes from `cimplot3d` which depends on `implot3d`.
