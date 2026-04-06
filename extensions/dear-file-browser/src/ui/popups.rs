@@ -93,18 +93,31 @@ pub(super) fn try_create_new_folder_in_cwd(
     }
 }
 
-pub(super) fn draw_columns_popup(ui: &Ui, state: &mut FileDialogState) {
+pub(super) fn draw_columns_popup(
+    ui: &Ui,
+    state: &mut FileDialogState,
+    has_thumbnail_backend: bool,
+) {
     if let Some(_popup) = ui.begin_popup("##fb_columns_popup") {
         match state.ui.file_list_view {
             FileListViewMode::List => {
                 let mut enabled = state.ui.thumbnails_enabled;
-                if ui.checkbox("Enable thumbnails", &mut enabled) {
-                    state.ui.thumbnails_enabled = enabled;
+                {
+                    let _disabled = ui.begin_disabled_with_cond(!has_thumbnail_backend);
+                    if ui.checkbox("Enable thumbnails", &mut enabled) {
+                        state.ui.thumbnails_enabled = enabled;
+                    }
                 }
-                if state.ui.thumbnails_enabled {
+                if !has_thumbnail_backend {
+                    ui.same_line();
+                    ui.text_disabled("No thumbnail backend");
+                }
+                if state.ui.thumbnails_enabled && has_thumbnail_backend {
                     ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
-                } else {
+                } else if has_thumbnail_backend {
                     ui.text_disabled("Preview (enable thumbnails)");
+                } else {
+                    ui.text_disabled("Preview (no thumbnail backend)");
                 }
             }
             FileListViewMode::ThumbnailsList => {

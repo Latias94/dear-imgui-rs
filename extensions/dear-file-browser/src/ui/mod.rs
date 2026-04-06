@@ -4,7 +4,7 @@ use crate::core::{DialogMode, FileDialogError, LayoutStyle, Selection};
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, CoreEvent};
 use crate::dialog_state::CustomPaneDock;
-use crate::dialog_state::FileDialogState;
+use crate::dialog_state::{FileDialogState, FileListViewMode};
 use crate::fs::{FileSystem, StdFileSystem};
 use crate::thumbnails::ThumbnailBackend;
 use dear_imgui_rs::Ui;
@@ -780,7 +780,7 @@ fn draw_contents_with_fs_and_hooks(
     }
 
     places::draw_minimal_places_popup(ui, state);
-    popups::draw_columns_popup(ui, state);
+    popups::draw_columns_popup(ui, state, has_thumbnail_backend);
     popups::draw_options_popup(ui, state, has_thumbnail_backend);
 
     places::draw_places_io_modal(ui, state);
@@ -805,15 +805,46 @@ fn splitter_width(ui: &Ui) -> f32 {
     w.clamp(4.0, 10.0)
 }
 
+pub(in crate::ui) fn apply_file_list_view_from_ui(
+    state: &mut FileDialogState,
+    view: FileListViewMode,
+    has_thumbnail_backend: bool,
+) -> bool {
+    match view {
+        FileListViewMode::List => {
+            state.ui.file_list_view = FileListViewMode::List;
+            true
+        }
+        FileListViewMode::ThumbnailsList => {
+            if !has_thumbnail_backend {
+                return false;
+            }
+            state.ui.file_list_view = FileListViewMode::ThumbnailsList;
+            state.ui.thumbnails_enabled = true;
+            state.ui.file_list_columns.show_preview = true;
+            true
+        }
+        FileListViewMode::Grid => {
+            if !has_thumbnail_backend {
+                return false;
+            }
+            state.ui.file_list_view = FileListViewMode::Grid;
+            state.ui.thumbnails_enabled = true;
+            true
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::file_table::{ListColumnLayout, list_column_layout, merged_order_with_current};
     use super::ops::{open_delete_modal_from_selection, open_rename_modal_from_selection};
-    use super::resolve_host_size_constraints;
+    use super::{apply_file_list_view_from_ui, resolve_host_size_constraints};
     use crate::core::DialogMode;
     use crate::dialog_core::EntryId;
     use crate::dialog_state::{
         FileDialogState, FileListColumnWeightOverrides, FileListColumnsConfig, FileListDataColumn,
+        FileListViewMode,
     };
     use crate::fs::{FileSystem, FsEntry, FsMetadata};
     use std::path::{Path, PathBuf};
@@ -1054,6 +1085,71 @@ mod tests {
                 modified: Some(2),
             }
         );
+    }
+
+    #[test]
+    fn apply_file_list_view_from_ui_rejects_thumbnail_views_without_backend() {
+        let mut state = FileDialogState::new(DialogMode::OpenFile);
+        state.ui.file_list_view = FileListViewMode::List;
+        state.ui.thumbnails_enabled = false;
+        state.ui.file_list_columns.show_preview = false;
+
+        assert!(!apply_file_list_view_from_ui(
+            &mut state,
+            FileListViewMode::ThumbnailsList,
+            false
+        ));
+        assert_eq!(state.ui.file_list_view, FileListViewMode::List);
+        assert!(!state.ui.thumbnails_enabled);
+        assert!(!state.ui.file_list_columns.show_preview);
+
+        assert!(!apply_file_list_view_from_ui(
+            &mut state,
+            FileListViewMode::Grid,
+            false
+        ));
+        assert_eq!(state.ui.file_list_view, FileListViewMode::List);
+        assert!(!state.ui.thumbnails_enabled);
+    }
+
+    #[test]
+    fn apply_file_list_view_from_ui_enables_thumbnail_state_with_backend() {
+        let mut state = FileDialogState::new(DialogMode::OpenFile);
+        state.ui.file_list_columns.show_preview = false;
+
+        assert!(apply_file_list_view_from_ui(
+            &mut state,
+            FileListViewMode::ThumbnailsList,
+            true
+        ));
+        assert_eq!(state.ui.file_list_view, FileListViewMode::ThumbnailsList);
+        assert!(state.ui.thumbnails_enabled);
+        assert!(state.ui.file_list_columns.show_preview);
+
+        state.ui.file_list_columns.show_preview = false;
+        assert!(apply_file_list_view_from_ui(
+            &mut state,
+            FileListViewMode::Grid,
+            true
+        ));
+        assert_eq!(state.ui.file_list_view, FileListViewMode::Grid);
+        assert!(state.ui.thumbnails_enabled);
+        assert!(!state.ui.file_list_columns.show_preview);
+    }
+
+    #[test]
+    fn apply_file_list_view_from_ui_keeps_list_view_available() {
+        let mut state = FileDialogState::new(DialogMode::OpenFile);
+        state.ui.file_list_view = FileListViewMode::Grid;
+        state.ui.thumbnails_enabled = true;
+
+        assert!(apply_file_list_view_from_ui(
+            &mut state,
+            FileListViewMode::List,
+            false
+        ));
+        assert_eq!(state.ui.file_list_view, FileListViewMode::List);
+        assert!(state.ui.thumbnails_enabled);
     }
 
     #[test]

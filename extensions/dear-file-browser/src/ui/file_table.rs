@@ -36,6 +36,7 @@ use columns::{
 use format::{format_modified_ago, format_size};
 use style::{TextColorToken, style_visual_for_entry};
 
+use super::apply_file_list_view_from_ui;
 #[cfg(test)]
 pub(in crate::ui) use columns::{ListColumnLayout, list_column_layout, merged_order_with_current};
 
@@ -235,7 +236,7 @@ fn draw_file_list_window_context_menu(
 
     if let Some(_menu) = ui.begin_menu("View") {
         if ui.menu_item_enabled_selected("File List", None::<&str>, list_active, true) {
-            state.ui.file_list_view = FileListViewMode::List;
+            apply_file_list_view_from_ui(state, FileListViewMode::List, has_thumbnail_backend);
         }
         if ui.menu_item_enabled_selected(
             "Thumbnails List",
@@ -243,9 +244,11 @@ fn draw_file_list_window_context_menu(
             thumbs_active,
             has_thumbnail_backend,
         ) {
-            state.ui.file_list_view = FileListViewMode::ThumbnailsList;
-            state.ui.thumbnails_enabled = true;
-            state.ui.file_list_columns.show_preview = true;
+            apply_file_list_view_from_ui(
+                state,
+                FileListViewMode::ThumbnailsList,
+                has_thumbnail_backend,
+            );
         }
         if ui.menu_item_enabled_selected(
             "Thumbnails Grid",
@@ -253,8 +256,7 @@ fn draw_file_list_window_context_menu(
             grid_active,
             has_thumbnail_backend,
         ) {
-            state.ui.file_list_view = FileListViewMode::Grid;
-            state.ui.thumbnails_enabled = true;
+            apply_file_list_view_from_ui(state, FileListViewMode::Grid, has_thumbnail_backend);
         }
 
         if matches!(

@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extensions
   - `dear-implot`: wire `ErrorBarsPlot::horizontal()` to `ImPlotErrorBarsFlags_Horizontal`, add matching `horizontal()` plus `with_offset()` / `with_stride()` on `AsymmetricErrorBarsPlot`, and route simple line/scatter/shaded/stairs/stems builders through the existing single-array ImPlot C bindings instead of allocating temporary X-coordinate buffers.
   - `dear-implot`: finish aligning the remaining `Simple*Plot` builders with their full-builder counterparts by threading through the relevant plot/item flags on simple line/scatter/stem/shaded/error-bar/bar-group helpers as well.
+  - `dear-file-browser`: keep the built-in view/column controls aligned with thumbnail backend availability, so the standard toolbar, IGFD-style chrome, and `Columns...` popup no longer offer thumbnail-only toggles when no thumbnail backend is attached.
 
 ### CI
 

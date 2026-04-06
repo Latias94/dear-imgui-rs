@@ -9,7 +9,7 @@ use crate::dialog_state::{
 use crate::fs::FileSystem;
 use crate::places::Places;
 
-use super::path_bar;
+use super::{apply_file_list_view_from_ui, path_bar};
 
 fn toolbar_label(id: &str, text: &str, icon: Option<&str>, mode: ToolbarIconMode) -> String {
     let display = match mode {
@@ -240,36 +240,47 @@ pub(super) fn draw_chrome(
                 "List view",
                 list_active,
             ) {
-                state.ui.file_list_view = FileListViewMode::List;
+                apply_file_list_view_from_ui(state, FileListViewMode::List, has_thumbnail_backend);
             }
             ui.same_line();
-            if toolbar_toggle_button(
-                ui,
-                "view_thumbs",
-                "Thumbs",
-                None,
-                ToolbarIconMode::Text,
-                show_tooltips,
-                "Thumbnails list view",
-                thumbs_active,
-            ) {
-                state.ui.file_list_view = FileListViewMode::ThumbnailsList;
-                state.ui.thumbnails_enabled = true;
-                state.ui.file_list_columns.show_preview = true;
+            {
+                let _disabled = ui.begin_disabled_with_cond(!has_thumbnail_backend);
+                if toolbar_toggle_button(
+                    ui,
+                    "view_thumbs",
+                    "Thumbs",
+                    None,
+                    ToolbarIconMode::Text,
+                    show_tooltips,
+                    "Thumbnails list view",
+                    thumbs_active,
+                ) {
+                    apply_file_list_view_from_ui(
+                        state,
+                        FileListViewMode::ThumbnailsList,
+                        has_thumbnail_backend,
+                    );
+                }
             }
             ui.same_line();
-            if toolbar_toggle_button(
-                ui,
-                "view_grid",
-                "Grid",
-                None,
-                ToolbarIconMode::Text,
-                show_tooltips,
-                "Thumbnails grid view",
-                grid_active,
-            ) {
-                state.ui.file_list_view = FileListViewMode::Grid;
-                state.ui.thumbnails_enabled = true;
+            {
+                let _disabled = ui.begin_disabled_with_cond(!has_thumbnail_backend);
+                if toolbar_toggle_button(
+                    ui,
+                    "view_grid",
+                    "Grid",
+                    None,
+                    ToolbarIconMode::Text,
+                    show_tooltips,
+                    "Thumbnails grid view",
+                    grid_active,
+                ) {
+                    apply_file_list_view_from_ui(
+                        state,
+                        FileListViewMode::Grid,
+                        has_thumbnail_backend,
+                    );
+                }
             }
         } else {
             ui.text("View:");
@@ -285,7 +296,11 @@ pub(super) fn draw_chrome(
                     .selected(matches!(state.ui.file_list_view, FileListViewMode::List))
                     .build()
                 {
-                    state.ui.file_list_view = FileListViewMode::List;
+                    apply_file_list_view_from_ui(
+                        state,
+                        FileListViewMode::List,
+                        has_thumbnail_backend,
+                    );
                 }
                 if ui
                     .selectable_config("Thumbs")
@@ -293,19 +308,26 @@ pub(super) fn draw_chrome(
                         state.ui.file_list_view,
                         FileListViewMode::ThumbnailsList
                     ))
+                    .disabled(!has_thumbnail_backend)
                     .build()
                 {
-                    state.ui.file_list_view = FileListViewMode::ThumbnailsList;
-                    state.ui.thumbnails_enabled = true;
-                    state.ui.file_list_columns.show_preview = true;
+                    apply_file_list_view_from_ui(
+                        state,
+                        FileListViewMode::ThumbnailsList,
+                        has_thumbnail_backend,
+                    );
                 }
                 if ui
                     .selectable_config("Grid")
                     .selected(matches!(state.ui.file_list_view, FileListViewMode::Grid))
+                    .disabled(!has_thumbnail_backend)
                     .build()
                 {
-                    state.ui.file_list_view = FileListViewMode::Grid;
-                    state.ui.thumbnails_enabled = true;
+                    apply_file_list_view_from_ui(
+                        state,
+                        FileListViewMode::Grid,
+                        has_thumbnail_backend,
+                    );
                 }
             }
         }
@@ -848,7 +870,7 @@ pub(super) fn draw_chrome(
             "File List",
             list_active,
         ) {
-            state.ui.file_list_view = FileListViewMode::List;
+            apply_file_list_view_from_ui(state, FileListViewMode::List, has_thumbnail_backend);
         }
         ui.same_line();
         {
@@ -863,9 +885,11 @@ pub(super) fn draw_chrome(
                 "Thumbnails List",
                 thumbs_active,
             ) {
-                state.ui.file_list_view = FileListViewMode::ThumbnailsList;
-                state.ui.thumbnails_enabled = true;
-                state.ui.file_list_columns.show_preview = true;
+                apply_file_list_view_from_ui(
+                    state,
+                    FileListViewMode::ThumbnailsList,
+                    has_thumbnail_backend,
+                );
             }
         }
         ui.same_line();
@@ -881,8 +905,7 @@ pub(super) fn draw_chrome(
                 "Thumbnails Grid",
                 grid_active,
             ) {
-                state.ui.file_list_view = FileListViewMode::Grid;
-                state.ui.thumbnails_enabled = true;
+                apply_file_list_view_from_ui(state, FileListViewMode::Grid, has_thumbnail_backend);
             }
         }
         if has_thumbnail_backend
