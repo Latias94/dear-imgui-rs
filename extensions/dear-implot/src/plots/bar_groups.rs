@@ -296,6 +296,7 @@ pub struct SimpleBarGroupsPlot<'a> {
     style: PlotItemStyle,
     group_size: f64,
     flags: BarGroupsFlags,
+    item_flags: ItemFlags,
 }
 
 impl<'a> super::PlotItemStyled for SimpleBarGroupsPlot<'a> {
@@ -317,6 +318,7 @@ impl<'a> SimpleBarGroupsPlot<'a> {
             style: PlotItemStyle::default(),
             group_size: 0.67,
             flags: BarGroupsFlags::NONE,
+            item_flags: ItemFlags::NONE,
         }
     }
 
@@ -335,6 +337,12 @@ impl<'a> SimpleBarGroupsPlot<'a> {
     /// Set flags
     pub fn with_flags(mut self, flags: BarGroupsFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -374,7 +382,8 @@ impl<'a> SimpleBarGroupsPlot<'a> {
         let plot = BarGroupsPlot::new(self.labels, &flattened_data, item_count, group_count)
             .with_style(self.style)
             .with_group_size(self.group_size)
-            .with_flags(self.flags);
+            .with_flags(self.flags)
+            .with_item_flags(self.item_flags);
 
         plot.plot();
     }

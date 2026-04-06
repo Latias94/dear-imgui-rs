@@ -159,6 +159,8 @@ pub struct SimpleLinePlot<'a> {
     label: &'a str,
     values: &'a [f64],
     style: PlotItemStyle,
+    flags: LineFlags,
+    item_flags: ItemFlags,
     x_scale: f64,
     x_start: f64,
 }
@@ -176,6 +178,8 @@ impl<'a> SimpleLinePlot<'a> {
             label,
             values,
             style: PlotItemStyle::default(),
+            flags: LineFlags::NONE,
+            item_flags: ItemFlags::NONE,
             x_scale: 1.0,
             x_start: 0.0,
         }
@@ -235,6 +239,18 @@ impl<'a> SimpleLinePlot<'a> {
         self
     }
 
+    /// Set line flags for customization
+    pub fn with_flags(mut self, flags: LineFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
+        self
+    }
+
     /// Set X scale factor
     pub fn with_x_scale(mut self, scale: f64) -> Self {
         self.x_scale = scale;
@@ -258,7 +274,12 @@ impl<'a> Plot for SimpleLinePlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(self.style, 0, 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_with_style(
+                self.style,
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                std::mem::size_of::<f64>() as i32,
+            );
             sys::ImPlot_PlotLine_doublePtrInt(
                 label_ptr,
                 self.values.as_ptr(),
@@ -322,8 +343,12 @@ mod tests {
     #[test]
     fn test_simple_line_plot() {
         let values = [1.0, 2.0, 3.0, 4.0];
-        let plot = SimpleLinePlot::new("test", &values);
+        let plot = SimpleLinePlot::new("test", &values)
+            .with_flags(LineFlags::LOOP)
+            .with_item_flags(ItemFlags::NO_LEGEND);
         assert_eq!(plot.label(), "test");
+        assert_eq!(plot.flags.bits(), LineFlags::LOOP.bits());
+        assert_eq!(plot.item_flags, ItemFlags::NO_LEGEND);
     }
 
     #[test]

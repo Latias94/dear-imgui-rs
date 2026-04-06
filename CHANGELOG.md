@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implement `Ui::is_any_column_resizing()` by reading the current window's legacy columns state, so it no longer always reports `false`.
 - Extensions
   - `dear-implot`: wire `ErrorBarsPlot::horizontal()` to `ImPlotErrorBarsFlags_Horizontal`, add matching `horizontal()` plus `with_offset()` / `with_stride()` on `AsymmetricErrorBarsPlot`, and route simple line/scatter/shaded/stairs/stems builders through the existing single-array ImPlot C bindings instead of allocating temporary X-coordinate buffers.
+  - `dear-implot`: finish aligning the remaining `Simple*Plot` builders with their full-builder counterparts by threading through the relevant plot/item flags on simple line/scatter/stem/shaded/error-bar/bar-group helpers as well.
 
 ### CI
 

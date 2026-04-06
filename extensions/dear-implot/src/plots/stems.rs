@@ -116,6 +116,8 @@ pub struct SimpleStemPlot<'a> {
     values: &'a [f64],
     style: PlotItemStyle,
     y_ref: f64,
+    flags: StemsFlags,
+    item_flags: ItemFlags,
     x_scale: f64,
     x_start: f64,
 }
@@ -134,6 +136,8 @@ impl<'a> SimpleStemPlot<'a> {
             values,
             style: PlotItemStyle::default(),
             y_ref: 0.0,
+            flags: StemsFlags::NONE,
+            item_flags: ItemFlags::NONE,
             x_scale: 1.0,
             x_start: 0.0,
         }
@@ -142,6 +146,18 @@ impl<'a> SimpleStemPlot<'a> {
     /// Set the reference Y value for stems
     pub fn with_y_ref(mut self, y_ref: f64) -> Self {
         self.y_ref = y_ref;
+        self
+    }
+
+    /// Set stem flags for customization
+    pub fn with_flags(mut self, flags: StemsFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
         self
     }
 
@@ -168,7 +184,12 @@ impl<'a> Plot for SimpleStemPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(self.style, 0, 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_with_style(
+                self.style,
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                std::mem::size_of::<f64>() as i32,
+            );
             sys::ImPlot_PlotStems_doublePtrInt(
                 label_ptr,
                 self.values.as_ptr(),
@@ -262,8 +283,12 @@ mod tests {
     #[test]
     fn test_simple_stem_plot() {
         let values = [1.0, 2.0, 3.0, 4.0];
-        let plot = SimpleStemPlot::new("test", &values);
+        let plot = SimpleStemPlot::new("test", &values)
+            .with_flags(StemsFlags::HORIZONTAL)
+            .with_item_flags(ItemFlags::NO_LEGEND);
         assert_eq!(plot.label(), "test");
+        assert_eq!(plot.flags.bits(), StemsFlags::HORIZONTAL.bits());
+        assert_eq!(plot.item_flags, ItemFlags::NO_LEGEND);
     }
 
     #[test]

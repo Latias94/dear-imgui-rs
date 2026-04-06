@@ -259,6 +259,8 @@ pub struct SimpleErrorBarsPlot<'a> {
     values: &'a [f64],
     errors: &'a [f64],
     style: PlotItemStyle,
+    flags: ErrorBarsFlags,
+    item_flags: ItemFlags,
     x_scale: f64,
     x_start: f64,
 }
@@ -277,9 +279,29 @@ impl<'a> SimpleErrorBarsPlot<'a> {
             values,
             errors,
             style: PlotItemStyle::default(),
+            flags: ErrorBarsFlags::NONE,
+            item_flags: ItemFlags::NONE,
             x_scale: 1.0,
             x_start: 0.0,
         }
+    }
+
+    /// Set error bar flags for customization
+    pub fn with_flags(mut self, flags: ErrorBarsFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Set common item flags for this plot item (applies to all plot types)
+    pub fn with_item_flags(mut self, flags: ItemFlags) -> Self {
+        self.item_flags = flags;
+        self
+    }
+
+    /// Make error bars horizontal instead of vertical
+    pub fn horizontal(mut self) -> Self {
+        self.flags |= ErrorBarsFlags::HORIZONTAL;
+        self
     }
 
     /// Set X scale factor
@@ -323,7 +345,12 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(self.style, 0, 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_with_style(
+                self.style,
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                std::mem::size_of::<f64>() as i32,
+            );
             sys::ImPlot_PlotErrorBars_doublePtrdoublePtrdoublePtrInt(
                 label_ptr,
                 x_data.as_ptr(),
@@ -382,5 +409,22 @@ impl<'ui> crate::PlotUi<'ui> {
         plot.validate()?;
         plot.plot();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_error_bars_plot_flags() {
+        let values = [1.0, 2.0, 3.0, 4.0];
+        let errors = [0.1, 0.2, 0.3, 0.4];
+        let plot = SimpleErrorBarsPlot::new("test", &values, &errors)
+            .horizontal()
+            .with_item_flags(ItemFlags::NO_LEGEND);
+        assert_eq!(plot.label(), "test");
+        assert_eq!(plot.flags.bits(), ErrorBarsFlags::HORIZONTAL.bits());
+        assert_eq!(plot.item_flags, ItemFlags::NO_LEGEND);
     }
 }
