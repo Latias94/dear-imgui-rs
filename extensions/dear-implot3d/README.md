@@ -149,7 +149,8 @@ plot_ui.plot_line_mint("Line", &points, Line3DFlags::NONE);
 ## Item Styling
 
 Spec-backed plot builders expose a shared per-item styling surface through
-`Plot3DItemStyle` / `Plot3DItemStyled`:
+`Plot3DItemStyle` / `Plot3DItemStyled`, plus common item flags through
+`Plot3DItemFlagged`:
 
 ```rust
 use dear_implot3d::*;
@@ -158,7 +159,8 @@ let line = Line3D::f32("Line", &xs, &ys, &zs)
     .with_line_color([0.15, 0.70, 0.35, 1.0])
     .with_line_weight(2.0)
     .with_marker(Marker3D::Auto)
-    .with_marker_size(4.0);
+    .with_marker_size(4.0)
+    .with_item_flags(Item3DFlags::NO_LEGEND);
 
 line.plot(&plot_ui);
 

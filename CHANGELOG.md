@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extensions
   - `dear-implot`: add unified ImPlot v0.18 spec-backed item styling helpers across all `ImPlotSpec`-backed plot builders via `PlotItemStyle` / `PlotItemStyled`, including direct builder methods such as `with_line_color`, `with_fill_alpha`, `with_marker`, and `with_size`. This closes the high-level Rust API gap where plot item color/alpha styling was available in the C bindings but not exposed consistently by the safe layer (addresses #26, thanks @sstscrypto).
   - `dear-implot3d`: add unified `ImPlot3DSpec`-backed item styling helpers across spec-backed plot builders via `Plot3DItemStyle` / `Plot3DItemStyled`, covering both `plots::*` items and `Plot3DUi` builders such as `surface_f32()`, `image_by_axes()`, and `mesh()`. Also expose `Marker3D::Auto` so the safe API can round-trip ImPlot3D's default automatic marker selection.
+  - `dear-implot3d`: wire `Item3DFlags` into spec-backed plot wrappers/builders via `with_item_flags(...)`, so common `NO_LEGEND` / `NO_FIT` flags can now be composed from the safe API instead of remaining a defined-but-unreachable flag set.
 - Backends
   - `dear-imgui-sdl3`: add optional `sdlrenderer3-renderer` support and wrapper APIs for the official SDL3 + SDLRenderer3 path, including `init_for_canvas` / `canvas_new_frame` / `canvas_render` / `shutdown_for_canvas`.
 - Examples

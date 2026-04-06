@@ -113,7 +113,7 @@ fn default_plot3d_spec() -> sys::ImPlot3DSpec_c {
 
 fn plot3d_spec_from(flags: u32, offset: i32, stride: i32) -> sys::ImPlot3DSpec_c {
     let mut spec = take_next_plot3d_spec().unwrap_or_else(default_plot3d_spec);
-    spec.Flags = flags as sys::ImPlot3DItemFlags;
+    spec.Flags = ((spec.Flags as u32) | flags) as sys::ImPlot3DItemFlags;
     spec.Offset = offset;
     spec.Stride = stride;
     spec
@@ -1198,7 +1198,7 @@ impl<'ui> Plot3DUi<'ui> {
 
 /// Surface (grid) plot builder (f32 variant)
 pub struct Surface3DBuilder<'ui> {
-    ui: &'ui Plot3DUi<'ui>,
+    _ui: &'ui Plot3DUi<'ui>,
     label: Cow<'ui, str>,
     xs: &'ui [f32],
     ys: &'ui [f32],
@@ -1206,6 +1206,7 @@ pub struct Surface3DBuilder<'ui> {
     scale_min: f64,
     scale_max: f64,
     flags: Surface3DFlags,
+    item_flags: Item3DFlags,
     style: Plot3DItemStyle,
 }
 
@@ -1244,7 +1245,7 @@ impl<'ui> Surface3DBuilder<'ui> {
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             let spec = plot3d_spec_with_style(
                 self.style,
-                self.flags.bits(),
+                self.flags.bits() | self.item_flags.bits(),
                 0,
                 std::mem::size_of::<f32>() as i32,
             );
@@ -1273,7 +1274,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &'ui [f32],
     ) -> Surface3DBuilder<'ui> {
         Surface3DBuilder {
-            ui: self,
+            _ui: self,
             label: label.into(),
             xs,
             ys,
@@ -1281,6 +1282,7 @@ impl<'ui> Plot3DUi<'ui> {
             scale_min: f64::NAN,
             scale_max: f64::NAN,
             flags: Surface3DFlags::NONE,
+            item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
         }
     }
@@ -1409,6 +1411,7 @@ pub struct Image3DByAxesBuilder<'ui> {
     uv1: [f32; 2],
     tint: [f32; 4],
     flags: Image3DFlags,
+    item_flags: Item3DFlags,
     style: Plot3DItemStyle,
 }
 
@@ -1431,7 +1434,12 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
         let label = if label.contains('\0') { "image" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
-            let spec = plot3d_spec_with_style(self.style, self.flags.bits(), 0, IMPLOT3D_AUTO);
+            let spec = plot3d_spec_with_style(
+                self.style,
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                IMPLOT3D_AUTO,
+            );
             sys::ImPlot3D_PlotImage_Vec2(
                 label_ptr,
                 self.tex_ref,
@@ -1474,6 +1482,7 @@ pub struct Image3DByCornersBuilder<'ui> {
     uv3: [f32; 2],
     tint: [f32; 4],
     flags: Image3DFlags,
+    item_flags: Item3DFlags,
     style: Plot3DItemStyle,
 }
 
@@ -1498,7 +1507,12 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
         let label = if label.contains('\0') { "image" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
-            let spec = plot3d_spec_with_style(self.style, self.flags.bits(), 0, IMPLOT3D_AUTO);
+            let spec = plot3d_spec_with_style(
+                self.style,
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                IMPLOT3D_AUTO,
+            );
             sys::ImPlot3D_PlotImage_Plot3DPoint(
                 label_ptr,
                 self.tex_ref,
@@ -1560,6 +1574,7 @@ impl<'ui> Plot3DUi<'ui> {
             uv1: [1.0, 1.0],
             tint: [1.0, 1.0, 1.0, 1.0],
             flags: Image3DFlags::NONE,
+            item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
         }
     }
@@ -1594,6 +1609,7 @@ impl<'ui> Plot3DUi<'ui> {
             uv3: [0.0, 1.0],
             tint: [1.0, 1.0, 1.0, 1.0],
             flags: Image3DFlags::NONE,
+            item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
         }
     }
@@ -1837,6 +1853,7 @@ pub struct Mesh3DBuilder<'ui> {
     vertices: &'ui [[f32; 3]],
     indices: &'ui [u32],
     flags: Mesh3DFlags,
+    item_flags: Item3DFlags,
     style: Plot3DItemStyle,
 }
 
@@ -1871,7 +1888,12 @@ impl<'ui> Mesh3DBuilder<'ui> {
         let label = if label.contains('\0') { "mesh" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             debug_before_plot();
-            let spec = plot3d_spec_with_style(self.style, self.flags.bits(), 0, IMPLOT3D_AUTO);
+            let spec = plot3d_spec_with_style(
+                self.style,
+                self.flags.bits() | self.item_flags.bits(),
+                0,
+                IMPLOT3D_AUTO,
+            );
             sys::ImPlot3D_PlotMesh(
                 label_ptr,
                 vertices.as_ptr(),
@@ -1898,6 +1920,7 @@ impl<'ui> Plot3DUi<'ui> {
             vertices,
             indices,
             flags: Mesh3DFlags::NONE,
+            item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
         }
     }

@@ -117,10 +117,15 @@ pub(crate) fn plot3d_spec_with_style(
     spec
 }
 
-fn with_scoped_next_plot3d_spec<R>(style: Plot3DItemStyle, f: impl FnOnce() -> R) -> R {
+fn with_scoped_next_plot3d_spec<R>(
+    style: Plot3DItemStyle,
+    item_flags: crate::Item3DFlags,
+    f: impl FnOnce() -> R,
+) -> R {
     let previous = crate::take_next_plot3d_spec();
     let mut spec = previous.unwrap_or_else(crate::default_plot3d_spec);
     style.apply_to_spec(&mut spec);
+    spec.Flags = ((spec.Flags as u32) | item_flags.bits()) as sys::ImPlot3DItemFlags;
     crate::set_next_plot3d_spec(Some(spec));
 
     let out = f();
@@ -187,10 +192,26 @@ pub trait Plot3DItemStyled: Sized {
     }
 }
 
+/// Shared ImPlot3D item-flag builder methods for plot builders backed by `ImPlot3DSpec`.
+pub trait Plot3DItemFlagged: Sized {
+    /// The output type returned by item-flag building methods.
+    type Output;
+
+    fn map_item_flags<F>(self, f: F) -> Self::Output
+    where
+        F: FnOnce(&mut crate::Item3DFlags);
+
+    /// Set common item flags such as `NO_LEGEND` / `NO_FIT`.
+    fn with_item_flags(self, flags: crate::Item3DFlags) -> Self::Output {
+        self.map_item_flags(|current| *current = flags)
+    }
+}
+
 /// Styled wrapper for plot types that do not store item-style state directly.
 pub struct StyledPlot3D<T> {
     inner: T,
     style: Plot3DItemStyle,
+    item_flags: crate::Item3DFlags,
 }
 
 impl<T> StyledPlot3D<T> {
@@ -217,6 +238,18 @@ impl<T> Plot3DItemStyled for StyledPlot3D<T> {
     }
 }
 
+impl<T> Plot3DItemFlagged for StyledPlot3D<T> {
+    type Output = Self;
+
+    fn map_item_flags<F>(mut self, f: F) -> Self::Output
+    where
+        F: FnOnce(&mut crate::Item3DFlags),
+    {
+        f(&mut self.item_flags);
+        self
+    }
+}
+
 impl<T> Plot3D for StyledPlot3D<T>
 where
     T: Plot3D,
@@ -226,7 +259,7 @@ where
     }
 
     fn try_plot(&self, ui: &crate::Plot3DUi<'_>) -> Result<(), crate::plots::Plot3DError> {
-        with_scoped_next_plot3d_spec(self.style, || self.inner.try_plot(ui))
+        with_scoped_next_plot3d_spec(self.style, self.item_flags, || self.inner.try_plot(ui))
     }
 }
 
@@ -241,7 +274,32 @@ macro_rules! impl_wrapped_plot3d_item_styled {
             {
                 let mut style = Plot3DItemStyle::default();
                 f(&mut style);
-                StyledPlot3D { inner: self, style }
+                StyledPlot3D {
+                    inner: self,
+                    style,
+                    item_flags: crate::Item3DFlags::NONE,
+                }
+            }
+        }
+    };
+}
+
+macro_rules! impl_wrapped_plot3d_item_flagged {
+    ($ty:ty) => {
+        impl Plot3DItemFlagged for $ty {
+            type Output = StyledPlot3D<Self>;
+
+            fn map_item_flags<F>(self, f: F) -> Self::Output
+            where
+                F: FnOnce(&mut crate::Item3DFlags),
+            {
+                let mut item_flags = crate::Item3DFlags::NONE;
+                f(&mut item_flags);
+                StyledPlot3D {
+                    inner: self,
+                    style: Plot3DItemStyle::default(),
+                    item_flags,
+                }
             }
         }
     };
@@ -253,6 +311,12 @@ impl_wrapped_plot3d_item_styled!(crate::plots::Surface3D<'_>);
 impl_wrapped_plot3d_item_styled!(crate::plots::Triangles3D<'_>);
 impl_wrapped_plot3d_item_styled!(crate::plots::Quads3D<'_>);
 impl_wrapped_plot3d_item_styled!(crate::plots::Mesh3D<'_>);
+impl_wrapped_plot3d_item_flagged!(crate::plots::Line3D<'_>);
+impl_wrapped_plot3d_item_flagged!(crate::plots::Scatter3D<'_>);
+impl_wrapped_plot3d_item_flagged!(crate::plots::Surface3D<'_>);
+impl_wrapped_plot3d_item_flagged!(crate::plots::Triangles3D<'_>);
+impl_wrapped_plot3d_item_flagged!(crate::plots::Quads3D<'_>);
+impl_wrapped_plot3d_item_flagged!(crate::plots::Mesh3D<'_>);
 
 impl<'a, T> Plot3DItemStyled for crate::plots::Image3DByAxes<'a, T>
 where
@@ -266,7 +330,31 @@ where
     {
         let mut style = Plot3DItemStyle::default();
         f(&mut style);
-        StyledPlot3D { inner: self, style }
+        StyledPlot3D {
+            inner: self,
+            style,
+            item_flags: crate::Item3DFlags::NONE,
+        }
+    }
+}
+
+impl<'a, T> Plot3DItemFlagged for crate::plots::Image3DByAxes<'a, T>
+where
+    T: Into<TextureRef> + Copy,
+{
+    type Output = StyledPlot3D<Self>;
+
+    fn map_item_flags<F>(self, f: F) -> Self::Output
+    where
+        F: FnOnce(&mut crate::Item3DFlags),
+    {
+        let mut item_flags = crate::Item3DFlags::NONE;
+        f(&mut item_flags);
+        StyledPlot3D {
+            inner: self,
+            style: Plot3DItemStyle::default(),
+            item_flags,
+        }
     }
 }
 
@@ -282,7 +370,31 @@ where
     {
         let mut style = Plot3DItemStyle::default();
         f(&mut style);
-        StyledPlot3D { inner: self, style }
+        StyledPlot3D {
+            inner: self,
+            style,
+            item_flags: crate::Item3DFlags::NONE,
+        }
+    }
+}
+
+impl<'a, T> Plot3DItemFlagged for crate::plots::Image3DByCorners<'a, T>
+where
+    T: Into<TextureRef> + Copy,
+{
+    type Output = StyledPlot3D<Self>;
+
+    fn map_item_flags<F>(self, f: F) -> Self::Output
+    where
+        F: FnOnce(&mut crate::Item3DFlags),
+    {
+        let mut item_flags = crate::Item3DFlags::NONE;
+        f(&mut item_flags);
+        StyledPlot3D {
+            inner: self,
+            style: Plot3DItemStyle::default(),
+            item_flags,
+        }
     }
 }
 
@@ -302,15 +414,37 @@ macro_rules! impl_builder_plot3d_item_styled {
     };
 }
 
+macro_rules! impl_builder_plot3d_item_flagged {
+    ($ty:ty) => {
+        impl Plot3DItemFlagged for $ty {
+            type Output = Self;
+
+            fn map_item_flags<F>(mut self, f: F) -> Self::Output
+            where
+                F: FnOnce(&mut crate::Item3DFlags),
+            {
+                f(&mut self.item_flags);
+                self
+            }
+        }
+    };
+}
+
 impl_builder_plot3d_item_styled!(crate::Surface3DBuilder<'_>);
 impl_builder_plot3d_item_styled!(crate::Image3DByAxesBuilder<'_>);
 impl_builder_plot3d_item_styled!(crate::Image3DByCornersBuilder<'_>);
 impl_builder_plot3d_item_styled!(crate::Mesh3DBuilder<'_>);
+impl_builder_plot3d_item_flagged!(crate::Surface3DBuilder<'_>);
+impl_builder_plot3d_item_flagged!(crate::Image3DByAxesBuilder<'_>);
+impl_builder_plot3d_item_flagged!(crate::Image3DByCornersBuilder<'_>);
+impl_builder_plot3d_item_flagged!(crate::Mesh3DBuilder<'_>);
 
 #[cfg(test)]
 mod tests {
     use super::{Plot3DItemStyle, plot3d_spec_with_style, with_scoped_next_plot3d_spec};
-    use crate::{Marker3D, default_plot3d_spec, set_next_plot3d_spec, take_next_plot3d_spec};
+    use crate::{
+        Item3DFlags, Marker3D, default_plot3d_spec, set_next_plot3d_spec, take_next_plot3d_spec,
+    };
 
     #[test]
     fn plot3d_item_style_applies_fields() {
@@ -354,6 +488,7 @@ mod tests {
 
         let out = with_scoped_next_plot3d_spec(
             Plot3DItemStyle::new().with_line_weight(2.0),
+            Item3DFlags::NONE,
             || "no-plot",
         );
 
@@ -378,14 +513,33 @@ mod tests {
             Plot3DItemStyle::new()
                 .with_line_weight(3.0)
                 .with_marker(Marker3D::Auto),
+            Item3DFlags::NO_LEGEND,
             || crate::plot3d_spec_from(0, 5, 12),
         );
 
         assert_eq!(consumed.FillAlpha, 0.25);
         assert_eq!(consumed.LineWeight, 3.0);
         assert_eq!(consumed.Marker, crate::sys::ImPlot3DMarker_Auto as _);
+        assert_eq!(consumed.Flags as u32, Item3DFlags::NO_LEGEND.bits(),);
         assert_eq!(consumed.Offset, 5);
         assert_eq!(consumed.Stride, 12);
+        assert!(take_next_plot3d_spec().is_none());
+    }
+
+    #[test]
+    fn scoped_next_spec_item_flags_merge_with_plot_flags() {
+        set_next_plot3d_spec(None);
+
+        let consumed = with_scoped_next_plot3d_spec(
+            Plot3DItemStyle::default(),
+            Item3DFlags::NO_LEGEND,
+            || crate::plot3d_spec_from(crate::Line3DFlags::SEGMENTS.bits(), 0, 4),
+        );
+
+        assert_eq!(
+            consumed.Flags as u32,
+            Item3DFlags::NO_LEGEND.bits() | crate::Line3DFlags::SEGMENTS.bits(),
+        );
         assert!(take_next_plot3d_spec().is_none());
     }
 }
