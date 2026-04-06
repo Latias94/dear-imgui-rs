@@ -1,12 +1,13 @@
 //! Bar plot implementation
 
-use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
+use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
 use crate::{BarsFlags, ItemFlags, sys};
 
 /// Builder for bar plots with customization options
 pub struct BarPlot<'a> {
     label: &'a str,
     values: &'a [f64],
+    style: PlotItemStyle,
     bar_size: f64,
     shift: f64,
     flags: BarsFlags,
@@ -15,12 +16,19 @@ pub struct BarPlot<'a> {
     stride: i32,
 }
 
+impl<'a> super::PlotItemStyled for BarPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
+}
+
 impl<'a> BarPlot<'a> {
     /// Create a new bar plot with the given label and values
     pub fn new(label: &'a str, values: &'a [f64]) -> Self {
         Self {
             label,
             values,
+            style: PlotItemStyle::default(),
             bar_size: 0.67, // Default bar width
             shift: 0.0,
             flags: BarsFlags::NONE,
@@ -33,6 +41,12 @@ impl<'a> BarPlot<'a> {
     /// Set the bar width (in plot units)
     pub fn with_bar_size(mut self, bar_size: f64) -> Self {
         self.bar_size = bar_size;
+        self
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this bar plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
         self
     }
 
@@ -86,7 +100,8 @@ impl<'a> Plot for BarPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 self.offset,
                 self.stride,
@@ -112,9 +127,16 @@ pub struct PositionalBarPlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [f64],
+    style: PlotItemStyle,
     bar_size: f64,
     flags: BarsFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for PositionalBarPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> PositionalBarPlot<'a> {
@@ -124,6 +146,7 @@ impl<'a> PositionalBarPlot<'a> {
             label,
             x_data,
             y_data,
+            style: PlotItemStyle::default(),
             bar_size: 0.67,
             flags: BarsFlags::NONE,
             item_flags: ItemFlags::NONE,
@@ -133,6 +156,12 @@ impl<'a> PositionalBarPlot<'a> {
     /// Set the bar width (in plot units)
     pub fn with_bar_size(mut self, bar_size: f64) -> Self {
         self.bar_size = bar_size;
+        self
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this positional bar plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
         self
     }
 
@@ -164,7 +193,8 @@ impl<'a> Plot for PositionalBarPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 std::mem::size_of::<f64>() as i32,
@@ -225,6 +255,7 @@ impl<'ui> crate::PlotUi<'ui> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plots::PlotItemStyled;
 
     #[test]
     fn test_bar_plot_creation() {
@@ -258,5 +289,36 @@ mod tests {
 
         let plot = PositionalBarPlot::new("test", &x_data, &y_data);
         assert!(plot.validate().is_err());
+    }
+
+    #[test]
+    fn test_bar_plot_style_trait_builders() {
+        let values = [1.0, 2.0, 3.0, 4.0];
+        let plot = BarPlot::new("styled", &values)
+            .with_line_color([0.1, 0.2, 0.3, 0.4])
+            .with_fill_color([0.4, 0.3, 0.2, 0.1])
+            .with_fill_alpha(0.6)
+            .with_line_weight(2.5);
+
+        assert_eq!(
+            plot.style.line_color,
+            Some(sys::ImVec4_c {
+                x: 0.1,
+                y: 0.2,
+                z: 0.3,
+                w: 0.4,
+            })
+        );
+        assert_eq!(
+            plot.style.fill_color,
+            Some(sys::ImVec4_c {
+                x: 0.4,
+                y: 0.3,
+                z: 0.2,
+                w: 0.1,
+            })
+        );
+        assert_eq!(plot.style.fill_alpha, Some(0.6));
+        assert_eq!(plot.style.line_weight, Some(2.5));
     }
 }

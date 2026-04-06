@@ -1,18 +1,25 @@
 //! Bar groups plot implementation
 
-use super::{PlotData, PlotError, plot_spec_from, with_plot_str_slice};
+use super::{PlotData, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_slice};
 use crate::{BarGroupsFlags, ItemFlags, sys};
 
 /// Builder for bar groups plots with extensive customization options
 pub struct BarGroupsPlot<'a> {
     label_ids: Vec<&'a str>,
     values: &'a [f64],
+    style: PlotItemStyle,
     item_count: usize,
     group_count: usize,
     group_size: f64,
     shift: f64,
     flags: BarGroupsFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for BarGroupsPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> BarGroupsPlot<'a> {
@@ -32,6 +39,7 @@ impl<'a> BarGroupsPlot<'a> {
         Self {
             label_ids,
             values,
+            style: PlotItemStyle::default(),
             item_count,
             group_count,
             group_size: 0.67,
@@ -44,6 +52,12 @@ impl<'a> BarGroupsPlot<'a> {
     /// Set the group size (width of each group)
     pub fn with_group_size(mut self, group_size: f64) -> Self {
         self.group_size = group_size;
+        self
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this bar groups plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
         self
     }
 
@@ -106,7 +120,8 @@ impl<'a> BarGroupsPlot<'a> {
     /// Plot the bar groups
     pub fn plot(self) {
         with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 crate::IMPLOT_AUTO,
@@ -138,12 +153,19 @@ impl<'a> PlotData for BarGroupsPlot<'a> {
 pub struct BarGroupsPlotF32<'a> {
     label_ids: Vec<&'a str>,
     values: &'a [f32],
+    style: PlotItemStyle,
     item_count: usize,
     group_count: usize,
     group_size: f64,
     shift: f64,
     flags: BarGroupsFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for BarGroupsPlotF32<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> BarGroupsPlotF32<'a> {
@@ -157,6 +179,7 @@ impl<'a> BarGroupsPlotF32<'a> {
         Self {
             label_ids,
             values,
+            style: PlotItemStyle::default(),
             item_count,
             group_count,
             group_size: 0.67,
@@ -169,6 +192,12 @@ impl<'a> BarGroupsPlotF32<'a> {
     /// Set the group size
     pub fn with_group_size(mut self, group_size: f64) -> Self {
         self.group_size = group_size;
+        self
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this bar groups plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
         self
     }
 
@@ -231,7 +260,8 @@ impl<'a> BarGroupsPlotF32<'a> {
     /// Plot the bar groups
     pub fn plot(self) {
         with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 crate::IMPLOT_AUTO,
@@ -263,8 +293,15 @@ impl<'a> PlotData for BarGroupsPlotF32<'a> {
 pub struct SimpleBarGroupsPlot<'a> {
     labels: Vec<&'a str>,
     data: Vec<Vec<f64>>,
+    style: PlotItemStyle,
     group_size: f64,
     flags: BarGroupsFlags,
+}
+
+impl<'a> super::PlotItemStyled for SimpleBarGroupsPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> SimpleBarGroupsPlot<'a> {
@@ -277,9 +314,16 @@ impl<'a> SimpleBarGroupsPlot<'a> {
         Self {
             labels,
             data,
+            style: PlotItemStyle::default(),
             group_size: 0.67,
             flags: BarGroupsFlags::NONE,
         }
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this bar groups plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Set the group size
@@ -328,6 +372,7 @@ impl<'a> SimpleBarGroupsPlot<'a> {
         }
 
         let plot = BarGroupsPlot::new(self.labels, &flattened_data, item_count, group_count)
+            .with_style(self.style)
             .with_group_size(self.group_size)
             .with_flags(self.flags);
 

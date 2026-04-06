@@ -1,17 +1,27 @@
 //! Scatter plot implementation
 
-use super::{Plot, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
-use crate::{ItemFlags, ScatterFlags, sys};
+use super::{
+    Plot, PlotError, PlotItemStyle, plot_spec_with_style, validate_data_lengths,
+    with_plot_str_or_empty,
+};
+use crate::{ItemFlags, Marker, ScatterFlags, sys};
 
 /// Builder for scatter plots with customization options
 pub struct ScatterPlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [f64],
+    style: PlotItemStyle,
     flags: ScatterFlags,
     item_flags: ItemFlags,
     offset: i32,
     stride: i32,
+}
+
+impl<'a> super::PlotItemStyled for ScatterPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> ScatterPlot<'a> {
@@ -21,11 +31,54 @@ impl<'a> ScatterPlot<'a> {
             label,
             x_data,
             y_data,
+            style: PlotItemStyle::default(),
             flags: ScatterFlags::NONE,
             item_flags: ItemFlags::NONE,
             offset: 0,
             stride: std::mem::size_of::<f64>() as i32,
         }
+    }
+
+    /// Replace the entire item style override for this scatter plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Set the scatter line color. Use the alpha channel to control transparency.
+    pub fn with_line_color(mut self, color: [f32; 4]) -> Self {
+        self.style = self.style.with_line_color(color);
+        self
+    }
+
+    /// Set the outline width in pixels.
+    pub fn with_line_weight(mut self, weight: f32) -> Self {
+        self.style = self.style.with_line_weight(weight);
+        self
+    }
+
+    /// Set the marker type for the scatter plot.
+    pub fn with_marker(mut self, marker: Marker) -> Self {
+        self.style = self.style.with_marker(marker);
+        self
+    }
+
+    /// Set the marker size in pixels.
+    pub fn with_marker_size(mut self, size: f32) -> Self {
+        self.style = self.style.with_marker_size(size);
+        self
+    }
+
+    /// Set the marker outline color.
+    pub fn with_marker_line_color(mut self, color: [f32; 4]) -> Self {
+        self.style = self.style.with_marker_line_color(color);
+        self
+    }
+
+    /// Set the marker fill color.
+    pub fn with_marker_fill_color(mut self, color: [f32; 4]) -> Self {
+        self.style = self.style.with_marker_fill_color(color);
+        self
     }
 
     /// Set scatter flags for customization
@@ -68,7 +121,8 @@ impl<'a> Plot for ScatterPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 self.offset,
                 self.stride,
@@ -92,8 +146,15 @@ impl<'a> Plot for ScatterPlot<'a> {
 pub struct SimpleScatterPlot<'a> {
     label: &'a str,
     values: &'a [f64],
+    style: PlotItemStyle,
     x_scale: f64,
     x_start: f64,
+}
+
+impl<'a> super::PlotItemStyled for SimpleScatterPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> SimpleScatterPlot<'a> {
@@ -102,9 +163,52 @@ impl<'a> SimpleScatterPlot<'a> {
         Self {
             label,
             values,
+            style: PlotItemStyle::default(),
             x_scale: 1.0,
             x_start: 0.0,
         }
+    }
+
+    /// Replace the entire item style override for this scatter plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Set the scatter line color. Use the alpha channel to control transparency.
+    pub fn with_line_color(mut self, color: [f32; 4]) -> Self {
+        self.style = self.style.with_line_color(color);
+        self
+    }
+
+    /// Set the outline width in pixels.
+    pub fn with_line_weight(mut self, weight: f32) -> Self {
+        self.style = self.style.with_line_weight(weight);
+        self
+    }
+
+    /// Set the marker type for the scatter plot.
+    pub fn with_marker(mut self, marker: Marker) -> Self {
+        self.style = self.style.with_marker(marker);
+        self
+    }
+
+    /// Set the marker size in pixels.
+    pub fn with_marker_size(mut self, size: f32) -> Self {
+        self.style = self.style.with_marker_size(size);
+        self
+    }
+
+    /// Set the marker outline color.
+    pub fn with_marker_line_color(mut self, color: [f32; 4]) -> Self {
+        self.style = self.style.with_marker_line_color(color);
+        self
+    }
+
+    /// Set the marker fill color.
+    pub fn with_marker_fill_color(mut self, color: [f32; 4]) -> Self {
+        self.style = self.style.with_marker_fill_color(color);
+        self
     }
 
     /// Set X scale factor
@@ -135,7 +239,7 @@ impl<'a> Plot for SimpleScatterPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_with_style(self.style, 0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotScatter_doublePtrdoublePtr(
                 label_ptr,
                 x_data.as_ptr(),
@@ -205,5 +309,50 @@ mod tests {
         let values = [1.0, 2.0, 3.0, 4.0];
         let plot = SimpleScatterPlot::new("test", &values);
         assert_eq!(plot.label(), "test");
+    }
+
+    #[test]
+    fn test_scatter_plot_style_builders() {
+        let x_data = [1.0, 2.0, 3.0, 4.0];
+        let y_data = [1.0, 4.0, 2.0, 3.0];
+
+        let plot = ScatterPlot::new("styled", &x_data, &y_data)
+            .with_line_color([0.1, 0.2, 0.3, 0.4])
+            .with_line_weight(1.5)
+            .with_marker(Marker::Square)
+            .with_marker_size(8.0)
+            .with_marker_line_color([0.9, 0.8, 0.7, 0.6])
+            .with_marker_fill_color([0.6, 0.7, 0.8, 0.9]);
+
+        assert_eq!(
+            plot.style.line_color,
+            Some(sys::ImVec4_c {
+                x: 0.1,
+                y: 0.2,
+                z: 0.3,
+                w: 0.4,
+            })
+        );
+        assert_eq!(plot.style.line_weight, Some(1.5));
+        assert_eq!(plot.style.marker, Some(Marker::Square as sys::ImPlotMarker));
+        assert_eq!(plot.style.marker_size, Some(8.0));
+        assert_eq!(
+            plot.style.marker_line_color,
+            Some(sys::ImVec4_c {
+                x: 0.9,
+                y: 0.8,
+                z: 0.7,
+                w: 0.6,
+            })
+        );
+        assert_eq!(
+            plot.style.marker_fill_color,
+            Some(sys::ImVec4_c {
+                x: 0.6,
+                y: 0.7,
+                z: 0.8,
+                w: 0.9,
+            })
+        );
     }
 }

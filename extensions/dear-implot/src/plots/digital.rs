@@ -1,6 +1,9 @@
 //! Digital plot implementation
 
-use super::{PlotData, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
+use super::{
+    PlotData, PlotError, PlotItemStyle, plot_spec_with_style, validate_data_lengths,
+    with_plot_str_or_empty,
+};
 use crate::{DigitalFlags, ItemFlags, sys};
 
 /// Builder for digital plots with extensive customization options
@@ -11,10 +14,17 @@ pub struct DigitalPlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [f64],
+    style: PlotItemStyle,
     flags: DigitalFlags,
     item_flags: ItemFlags,
     offset: i32,
     stride: i32,
+}
+
+impl<'a> super::PlotItemStyled for DigitalPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> DigitalPlot<'a> {
@@ -24,6 +34,7 @@ impl<'a> DigitalPlot<'a> {
             label,
             x_data,
             y_data,
+            style: PlotItemStyle::default(),
             flags: DigitalFlags::NONE,
             item_flags: ItemFlags::NONE,
             offset: 0,
@@ -34,6 +45,12 @@ impl<'a> DigitalPlot<'a> {
     /// Set digital flags for customization
     pub fn with_flags(mut self, flags: DigitalFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this digital plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
         self
     }
 
@@ -70,7 +87,8 @@ impl<'a> DigitalPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 self.offset,
                 self.stride,
@@ -101,8 +119,15 @@ pub struct DigitalPlotF32<'a> {
     label: &'a str,
     x_data: &'a [f32],
     y_data: &'a [f32],
+    style: PlotItemStyle,
     flags: DigitalFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for DigitalPlotF32<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> DigitalPlotF32<'a> {
@@ -112,9 +137,16 @@ impl<'a> DigitalPlotF32<'a> {
             label,
             x_data,
             y_data,
+            style: PlotItemStyle::default(),
             flags: DigitalFlags::NONE,
             item_flags: ItemFlags::NONE,
         }
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this digital plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Set digital flags for customization
@@ -149,7 +181,8 @@ impl<'a> DigitalPlotF32<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 std::mem::size_of::<f32>() as i32,
@@ -179,10 +212,17 @@ impl<'a> PlotData for DigitalPlotF32<'a> {
 pub struct SimpleDigitalPlot<'a> {
     label: &'a str,
     y_data: &'a [f64],
+    style: PlotItemStyle,
     flags: DigitalFlags,
     item_flags: ItemFlags,
     x_scale: f64,
     x_start: f64,
+}
+
+impl<'a> super::PlotItemStyled for SimpleDigitalPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> SimpleDigitalPlot<'a> {
@@ -191,6 +231,7 @@ impl<'a> SimpleDigitalPlot<'a> {
         Self {
             label,
             y_data,
+            style: PlotItemStyle::default(),
             flags: DigitalFlags::NONE,
             item_flags: ItemFlags::NONE,
             x_scale: 1.0,
@@ -213,6 +254,12 @@ impl<'a> SimpleDigitalPlot<'a> {
     /// Set digital flags
     pub fn with_flags(mut self, flags: DigitalFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this digital plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
         self
     }
 
@@ -241,7 +288,8 @@ impl<'a> SimpleDigitalPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 std::mem::size_of::<f64>() as i32,
@@ -272,8 +320,15 @@ pub struct BooleanDigitalPlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [bool],
+    style: PlotItemStyle,
     flags: DigitalFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for BooleanDigitalPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> BooleanDigitalPlot<'a> {
@@ -283,9 +338,16 @@ impl<'a> BooleanDigitalPlot<'a> {
             label,
             x_data,
             y_data,
+            style: PlotItemStyle::default(),
             flags: DigitalFlags::NONE,
             item_flags: ItemFlags::NONE,
         }
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this digital plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Set digital flags for customization
@@ -327,7 +389,8 @@ impl<'a> BooleanDigitalPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 std::mem::size_of::<f64>() as i32,

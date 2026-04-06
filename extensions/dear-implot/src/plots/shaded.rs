@@ -1,6 +1,9 @@
 //! Shaded area plot implementation
 
-use super::{Plot, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
+use super::{
+    Plot, PlotError, PlotItemStyle, plot_spec_with_style, validate_data_lengths,
+    with_plot_str_or_empty,
+};
 use crate::{ItemFlags, ShadedFlags, sys};
 
 /// Builder for shaded area plots
@@ -8,11 +11,18 @@ pub struct ShadedPlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [f64],
+    style: PlotItemStyle,
     y_ref: f64,
     flags: ShadedFlags,
     item_flags: ItemFlags,
     offset: i32,
     stride: i32,
+}
+
+impl<'a> super::PlotItemStyled for ShadedPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> ShadedPlot<'a> {
@@ -22,6 +32,7 @@ impl<'a> ShadedPlot<'a> {
             label,
             x_data,
             y_data,
+            style: PlotItemStyle::default(),
             y_ref: 0.0, // Default reference line at Y=0
             flags: ShadedFlags::NONE,
             item_flags: ItemFlags::NONE,
@@ -76,7 +87,8 @@ impl<'a> Plot for ShadedPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 self.offset,
                 self.stride,
@@ -103,8 +115,15 @@ pub struct ShadedBetweenPlot<'a> {
     x_data: &'a [f64],
     y1_data: &'a [f64],
     y2_data: &'a [f64],
+    style: PlotItemStyle,
     flags: ShadedFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for ShadedBetweenPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> ShadedBetweenPlot<'a> {
@@ -115,6 +134,7 @@ impl<'a> ShadedBetweenPlot<'a> {
             x_data,
             y1_data,
             y2_data,
+            style: PlotItemStyle::default(),
             flags: ShadedFlags::NONE,
             item_flags: ItemFlags::NONE,
         }
@@ -152,7 +172,8 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
         // Note: This would require a different wrapper function for shaded between two lines
         // For now, we'll use the single line version with the first Y data
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 crate::IMPLOT_AUTO,
@@ -177,9 +198,16 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
 pub struct SimpleShadedPlot<'a> {
     label: &'a str,
     values: &'a [f64],
+    style: PlotItemStyle,
     y_ref: f64,
     x_scale: f64,
     x_start: f64,
+}
+
+impl<'a> super::PlotItemStyled for SimpleShadedPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> SimpleShadedPlot<'a> {
@@ -188,6 +216,7 @@ impl<'a> SimpleShadedPlot<'a> {
         Self {
             label,
             values,
+            style: PlotItemStyle::default(),
             y_ref: 0.0,
             x_scale: 1.0,
             x_start: 0.0,
@@ -228,7 +257,7 @@ impl<'a> Plot for SimpleShadedPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_with_style(self.style, 0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotShaded_doublePtrdoublePtrInt(
                 label_ptr,
                 x_data.as_ptr(),

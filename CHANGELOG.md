@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core (`dear-imgui-sys`)
   - Replace the provisional `raw_backend::{win32, dx11, android, opengl3}` surface with `backend_shim::{win32, dx11, android, opengl3}` behind `backend-shim-*` feature gates. The sys crate now owns the repository-defined C shim ABI for self-contained official backends instead of exposing direct declarations for upstream C++ backend symbols (PR #23, thanks @EtherealPsyche).
   - Extend that backend shim surface with feature-gated `backend_shim::sdlrenderer3` support for Dear ImGui's official SDLRenderer3 backend, including SDL3 header discovery for both system-provided SDL3 installs and `sdl3-sys` build-from-source outputs (PR #24, thanks @flowkclav).
+- Extensions
+  - `dear-implot`: add unified ImPlot v0.18 spec-backed item styling helpers across all `ImPlotSpec`-backed plot builders via `PlotItemStyle` / `PlotItemStyled`, including direct builder methods such as `with_line_color`, `with_fill_alpha`, `with_marker`, and `with_size`. This closes the high-level Rust API gap where plot item color/alpha styling was available in the C bindings but not exposed consistently by the safe layer.
 - Backends
   - `dear-imgui-sdl3`: add optional `sdlrenderer3-renderer` support and wrapper APIs for the official SDL3 + SDLRenderer3 path, including `init_for_canvas` / `canvas_new_frame` / `canvas_render` / `shutdown_for_canvas`.
 - Examples
@@ -26,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core (`dear-imgui-rs`)
   - Keep backend shim feature gates in `dear-imgui-sys` only; the safe crate does not re-export backend-specific toggles until it owns corresponding safe wrappers.
+- Extensions
+  - `dear-implot`: standardize plot-item styling so `LinePlot`, `ScatterPlot`, `BarPlot`, `HistogramPlot`, `HeatmapPlot`, `ErrorBarsPlot`, `ShadedPlot`, `StairsPlot`, `StemPlot`, `TextPlot`, and other `ImPlotSpec`-based builders now share the same styling surface instead of mixing per-type convenience methods with raw style-object-only paths.
 - Core (`dear-imgui-sys`)
   - Link `GLESv3` for the Android OpenGL3 backend shim so downstream Android `NativeActivity` binaries can load successfully before the application creates its own EGL / GLES context.
   - Expand the crate and module documentation around `backend_shim` so the repository-owned shim ABI, Android low-level route, and ownership split with application packaging are explicit in the main docs.

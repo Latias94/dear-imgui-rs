@@ -1,16 +1,23 @@
 //! Infinite lines plot implementation
 
-use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
+use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
 use crate::{InfLinesFlags, ItemFlags, sys};
 
 /// Builder for infinite lines plots
 pub struct InfLinesPlot<'a> {
     label: &'a str,
     positions: &'a [f64],
+    style: PlotItemStyle,
     flags: InfLinesFlags,
     item_flags: ItemFlags,
     offset: i32,
     stride: i32,
+}
+
+impl<'a> super::PlotItemStyled for InfLinesPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> InfLinesPlot<'a> {
@@ -19,6 +26,7 @@ impl<'a> InfLinesPlot<'a> {
         Self {
             label,
             positions,
+            style: PlotItemStyle::default(),
             flags: InfLinesFlags::NONE,
             item_flags: ItemFlags::NONE,
             offset: 0,
@@ -68,7 +76,8 @@ impl<'a> Plot for InfLinesPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 self.offset,
                 self.stride,

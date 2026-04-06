@@ -1,6 +1,8 @@
 //! Text plot implementation
 
-use super::{PlotData, PlotError, plot_spec_from, with_plot_str};
+use super::{
+    PlotData, PlotError, PlotItemStyle, PlotItemStyled, plot_spec_with_style, with_plot_str,
+};
 use crate::{ItemFlags, TextFlags, sys};
 
 /// Builder for text plots with extensive customization options
@@ -10,10 +12,17 @@ pub struct TextPlot<'a> {
     text: &'a str,
     x: f64,
     y: f64,
+    style: PlotItemStyle,
     pix_offset_x: f64,
     pix_offset_y: f64,
     flags: TextFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for TextPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> TextPlot<'a> {
@@ -23,6 +32,7 @@ impl<'a> TextPlot<'a> {
             text,
             x,
             y,
+            style: PlotItemStyle::default(),
             pix_offset_x: 0.0,
             pix_offset_y: 0.0,
             flags: TextFlags::NONE,
@@ -75,7 +85,8 @@ impl<'a> TextPlot<'a> {
             y: self.pix_offset_y as f32,
         };
         let _ = with_plot_str(self.text, |text_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 crate::IMPLOT_AUTO,
@@ -100,8 +111,15 @@ pub struct MultiTextPlot<'a> {
     texts: Vec<&'a str>,
     positions: Vec<(f64, f64)>,
     pixel_offsets: Vec<(f64, f64)>,
+    style: PlotItemStyle,
     flags: TextFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for MultiTextPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> MultiTextPlot<'a> {
@@ -112,6 +130,7 @@ impl<'a> MultiTextPlot<'a> {
             texts,
             positions,
             pixel_offsets,
+            style: PlotItemStyle::default(),
             flags: TextFlags::NONE,
             item_flags: ItemFlags::NONE,
         }
@@ -182,6 +201,7 @@ impl<'a> MultiTextPlot<'a> {
             let offset = self.pixel_offsets[i];
 
             let text_plot = TextPlot::new(text, position.0, position.1)
+                .with_style(self.style)
                 .with_pixel_offset(offset.0, offset.1)
                 .with_flags(self.flags)
                 .with_item_flags(self.item_flags);
@@ -206,10 +226,17 @@ pub struct FormattedTextPlot {
     text: String,
     x: f64,
     y: f64,
+    style: PlotItemStyle,
     pix_offset_x: f64,
     pix_offset_y: f64,
     flags: TextFlags,
     item_flags: ItemFlags,
+}
+
+impl super::PlotItemStyled for FormattedTextPlot {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl FormattedTextPlot {
@@ -219,6 +246,7 @@ impl FormattedTextPlot {
             text,
             x,
             y,
+            style: PlotItemStyle::default(),
             pix_offset_x: 0.0,
             pix_offset_y: 0.0,
             flags: TextFlags::NONE,
@@ -276,7 +304,8 @@ impl FormattedTextPlot {
             y: self.pix_offset_y as f32,
         };
         let _ = with_plot_str(&self.text, |text_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 crate::IMPLOT_AUTO,
@@ -309,9 +338,16 @@ pub struct TextAnnotation<'a> {
     text: &'a str,
     x: f64,
     y: f64,
+    style: PlotItemStyle,
     auto_offset: bool,
     flags: TextFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for TextAnnotation<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> TextAnnotation<'a> {
@@ -321,6 +357,7 @@ impl<'a> TextAnnotation<'a> {
             text,
             x,
             y,
+            style: PlotItemStyle::default(),
             auto_offset: true,
             flags: TextFlags::NONE,
             item_flags: ItemFlags::NONE,
@@ -361,6 +398,7 @@ impl<'a> TextAnnotation<'a> {
         };
 
         let text_plot = TextPlot::new(self.text, self.x, self.y)
+            .with_style(self.style)
             .with_pixel_offset(offset.0, offset.1)
             .with_flags(self.flags)
             .with_item_flags(self.item_flags);

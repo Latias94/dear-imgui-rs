@@ -42,6 +42,191 @@ pub use stairs::*;
 pub use stems::*;
 pub use text::*;
 
+fn color4(rgba: [f32; 4]) -> sys::ImVec4_c {
+    sys::ImVec4_c {
+        x: rgba[0],
+        y: rgba[1],
+        z: rgba[2],
+        w: rgba[3],
+    }
+}
+
+/// Common style overrides for plot items backed by `ImPlotSpec`.
+///
+/// This provides a stable high-level Rust entry point for ImPlot v0.18 item
+/// styling without exposing raw FFI structs at every call site.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PlotItemStyle {
+    pub(crate) line_color: Option<sys::ImVec4_c>,
+    pub(crate) line_weight: Option<f32>,
+    pub(crate) fill_color: Option<sys::ImVec4_c>,
+    pub(crate) fill_alpha: Option<f32>,
+    pub(crate) marker: Option<sys::ImPlotMarker>,
+    pub(crate) marker_size: Option<f32>,
+    pub(crate) marker_line_color: Option<sys::ImVec4_c>,
+    pub(crate) marker_fill_color: Option<sys::ImVec4_c>,
+    pub(crate) size: Option<f32>,
+}
+
+impl PlotItemStyle {
+    /// Create an empty style override that keeps ImPlot defaults.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Override the plot item's line color. Use the alpha channel for line transparency.
+    pub fn with_line_color(mut self, color: [f32; 4]) -> Self {
+        self.line_color = Some(color4(color));
+        self
+    }
+
+    /// Override the plot item's line width in pixels.
+    pub fn with_line_weight(mut self, weight: f32) -> Self {
+        self.line_weight = Some(weight);
+        self
+    }
+
+    /// Override the plot item's fill color.
+    pub fn with_fill_color(mut self, color: [f32; 4]) -> Self {
+        self.fill_color = Some(color4(color));
+        self
+    }
+
+    /// Override the fill alpha multiplier used by filled regions and marker faces.
+    pub fn with_fill_alpha(mut self, alpha: f32) -> Self {
+        self.fill_alpha = Some(alpha);
+        self
+    }
+
+    /// Override the marker type.
+    pub fn with_marker(mut self, marker: crate::Marker) -> Self {
+        self.marker = Some(marker as sys::ImPlotMarker);
+        self
+    }
+
+    /// Override the marker size in pixels.
+    pub fn with_marker_size(mut self, size: f32) -> Self {
+        self.marker_size = Some(size);
+        self
+    }
+
+    /// Override the marker outline color.
+    pub fn with_marker_line_color(mut self, color: [f32; 4]) -> Self {
+        self.marker_line_color = Some(color4(color));
+        self
+    }
+
+    /// Override the marker fill color.
+    pub fn with_marker_fill_color(mut self, color: [f32; 4]) -> Self {
+        self.marker_fill_color = Some(color4(color));
+        self
+    }
+
+    /// Override the generic size field used by some item types such as error bars.
+    pub fn with_size(mut self, size: f32) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    pub(crate) fn apply_to_spec(self, spec: &mut sys::ImPlotSpec_c) {
+        if let Some(line_color) = self.line_color {
+            spec.LineColor = line_color;
+        }
+        if let Some(line_weight) = self.line_weight {
+            spec.LineWeight = line_weight;
+        }
+        if let Some(fill_color) = self.fill_color {
+            spec.FillColor = fill_color;
+        }
+        if let Some(fill_alpha) = self.fill_alpha {
+            spec.FillAlpha = fill_alpha;
+        }
+        if let Some(marker) = self.marker {
+            spec.Marker = marker;
+        }
+        if let Some(marker_size) = self.marker_size {
+            spec.MarkerSize = marker_size;
+        }
+        if let Some(marker_line_color) = self.marker_line_color {
+            spec.MarkerLineColor = marker_line_color;
+        }
+        if let Some(marker_fill_color) = self.marker_fill_color {
+            spec.MarkerFillColor = marker_fill_color;
+        }
+        if let Some(size) = self.size {
+            spec.Size = size;
+        }
+    }
+}
+
+/// Shared ImPlot item-style builder methods for plot builders backed by `ImPlotSpec`.
+///
+/// Importing `dear_implot::*` brings this trait into scope, so every supported
+/// plot builder exposes the same styling methods.
+pub trait PlotItemStyled: Sized {
+    fn style_mut(&mut self) -> &mut PlotItemStyle;
+
+    /// Replace the entire item style override for this plot.
+    fn with_style(mut self, style: PlotItemStyle) -> Self {
+        *self.style_mut() = style;
+        self
+    }
+
+    /// Set the line color. Use the alpha channel to control line transparency.
+    fn with_line_color(mut self, color: [f32; 4]) -> Self {
+        self.style_mut().line_color = Some(color4(color));
+        self
+    }
+
+    /// Set the line width in pixels.
+    fn with_line_weight(mut self, weight: f32) -> Self {
+        self.style_mut().line_weight = Some(weight);
+        self
+    }
+
+    /// Set the fill color.
+    fn with_fill_color(mut self, color: [f32; 4]) -> Self {
+        self.style_mut().fill_color = Some(color4(color));
+        self
+    }
+
+    /// Set the fill alpha multiplier used for fills and marker faces.
+    fn with_fill_alpha(mut self, alpha: f32) -> Self {
+        self.style_mut().fill_alpha = Some(alpha);
+        self
+    }
+
+    /// Set the marker type.
+    fn with_marker(mut self, marker: crate::Marker) -> Self {
+        self.style_mut().marker = Some(marker as sys::ImPlotMarker);
+        self
+    }
+
+    /// Set the marker size in pixels.
+    fn with_marker_size(mut self, size: f32) -> Self {
+        self.style_mut().marker_size = Some(size);
+        self
+    }
+
+    /// Set the marker outline color.
+    fn with_marker_line_color(mut self, color: [f32; 4]) -> Self {
+        self.style_mut().marker_line_color = Some(color4(color));
+        self
+    }
+
+    /// Set the marker fill color.
+    fn with_marker_fill_color(mut self, color: [f32; 4]) -> Self {
+        self.style_mut().marker_fill_color = Some(color4(color));
+        self
+    }
+
+    /// Set the generic size field used by some plot types such as error bars and digital plots.
+    fn with_size(mut self, size: f32) -> Self {
+        self.style_mut().size = Some(size);
+        self
+    }
+}
+
 /// Common trait for all plot types
 pub trait Plot {
     /// Plot this element
@@ -191,6 +376,17 @@ pub(crate) fn plot_spec_from(flags: u32, offset: i32, stride: i32) -> sys::ImPlo
     spec.Flags = flags as sys::ImPlotItemFlags;
     spec.Offset = offset;
     spec.Stride = stride;
+    spec
+}
+
+pub(crate) fn plot_spec_with_style(
+    style: PlotItemStyle,
+    flags: u32,
+    offset: i32,
+    stride: i32,
+) -> sys::ImPlotSpec_c {
+    let mut spec = plot_spec_from(flags, offset, stride);
+    style.apply_to_spec(&mut spec);
     spec
 }
 

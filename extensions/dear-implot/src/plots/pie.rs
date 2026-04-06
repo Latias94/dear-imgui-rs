@@ -1,12 +1,13 @@
 //! Pie chart plot implementation
 
-use super::{Plot, PlotError, plot_spec_from, with_plot_str_slice_with_opt};
+use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_slice_with_opt};
 use crate::{ItemFlags, PieChartFlags, sys};
 
 /// Builder for pie chart plots
 pub struct PieChartPlot<'a> {
     label_ids: Vec<&'a str>,
     values: &'a [f64],
+    style: PlotItemStyle,
     center_x: f64,
     center_y: f64,
     radius: f64,
@@ -14,6 +15,12 @@ pub struct PieChartPlot<'a> {
     angle0: f64,
     flags: PieChartFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for PieChartPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> PieChartPlot<'a> {
@@ -35,6 +42,7 @@ impl<'a> PieChartPlot<'a> {
         Self {
             label_ids,
             values,
+            style: PlotItemStyle::default(),
             center_x,
             center_y,
             radius,
@@ -130,7 +138,8 @@ impl<'a> Plot for PieChartPlot<'a> {
             &self.label_ids,
             self.label_fmt,
             |label_ptrs, label_fmt_ptr| unsafe {
-                let spec = plot_spec_from(
+                let spec = plot_spec_with_style(
+                    self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     0,
                     crate::IMPLOT_AUTO,
@@ -159,6 +168,7 @@ impl<'a> Plot for PieChartPlot<'a> {
 pub struct PieChartPlotF32<'a> {
     label_ids: Vec<&'a str>,
     values: &'a [f32],
+    style: PlotItemStyle,
     center_x: f64,
     center_y: f64,
     radius: f64,
@@ -166,6 +176,12 @@ pub struct PieChartPlotF32<'a> {
     angle0: f64,
     flags: PieChartFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for PieChartPlotF32<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> PieChartPlotF32<'a> {
@@ -180,6 +196,7 @@ impl<'a> PieChartPlotF32<'a> {
         Self {
             label_ids,
             values,
+            style: PlotItemStyle::default(),
             center_x,
             center_y,
             radius,
@@ -273,7 +290,8 @@ impl<'a> Plot for PieChartPlotF32<'a> {
             &self.label_ids,
             self.label_fmt,
             |label_ptrs, label_fmt_ptr| unsafe {
-                let spec = plot_spec_from(
+                let spec = plot_spec_with_style(
+                    self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     0,
                     crate::IMPLOT_AUTO,

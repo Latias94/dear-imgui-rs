@@ -181,6 +181,7 @@ impl ImPlotExt for Ui {
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Marker {
+    Auto = sys::ImPlotMarker_Auto as i32,
     None = sys::ImPlotMarker_None as i32,
     Circle = sys::ImPlotMarker_Circle as i32,
     Square = sys::ImPlotMarker_Square as i32,

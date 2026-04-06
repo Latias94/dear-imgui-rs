@@ -1,6 +1,6 @@
 //! Image plot implementation
 
-use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
+use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
 use crate::{ImageFlags, ItemFlags, sys};
 
 /// Plot an image in plot coordinates using an ImTextureID
@@ -12,8 +12,15 @@ pub struct ImagePlot<'a> {
     uv0: [f32; 2],
     uv1: [f32; 2],
     tint: [f32; 4],
+    style: PlotItemStyle,
     flags: ImageFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for ImagePlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> ImagePlot<'a> {
@@ -31,6 +38,7 @@ impl<'a> ImagePlot<'a> {
             uv0: [0.0, 0.0],
             uv1: [1.0, 1.0],
             tint: [1.0, 1.0, 1.0, 1.0],
+            style: PlotItemStyle::default(),
             flags: ImageFlags::NONE,
             item_flags: ItemFlags::NONE,
         }
@@ -86,7 +94,8 @@ impl<'a> Plot for ImagePlot<'a> {
             _TexID: self.tex_id,
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 crate::IMPLOT_AUTO,

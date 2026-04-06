@@ -165,6 +165,22 @@ LinePlot::new("My Line", &x_data, &y_data).plot();
 
 // Scatter plot
 ScatterPlot::new("My Points", &x_data, &y_data).plot();
+
+// Item styling via ImPlotSpec-backed builder helpers
+LinePlot::new("Styled Line", &x_data, &y_data)
+    .with_line_color([0.20, 0.70, 1.00, 0.35]) // alpha comes from the color itself
+    .with_line_weight(2.0)
+    .with_marker(Marker::Circle)
+    .with_marker_size(6.0)
+    .with_marker_fill_color([0.20, 0.70, 1.00, 0.85])
+    .plot();
+
+// The same styling helpers are available on other ImPlotSpec-backed builders
+BarPlot::new("Styled Bars", &values)
+    .with_fill_color([0.90, 0.45, 0.20, 0.80])
+    .with_line_color([0.45, 0.15, 0.05, 1.00])
+    .with_line_weight(1.5)
+    .plot();
 ```
 
 ### Bar Charts

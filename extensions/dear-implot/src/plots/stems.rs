@@ -1,6 +1,9 @@
 //! Stem plot implementation
 
-use super::{Plot, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
+use super::{
+    Plot, PlotError, PlotItemStyle, plot_spec_with_style, validate_data_lengths,
+    with_plot_str_or_empty,
+};
 use crate::{ItemFlags, StemsFlags, sys};
 
 /// Builder for stem plots (lollipop charts)
@@ -8,11 +11,18 @@ pub struct StemPlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [f64],
+    style: PlotItemStyle,
     y_ref: f64,
     flags: StemsFlags,
     item_flags: ItemFlags,
     offset: i32,
     stride: i32,
+}
+
+impl<'a> super::PlotItemStyled for StemPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> StemPlot<'a> {
@@ -22,6 +32,7 @@ impl<'a> StemPlot<'a> {
             label,
             x_data,
             y_data,
+            style: PlotItemStyle::default(),
             y_ref: 0.0, // Default reference line at Y=0
             flags: StemsFlags::NONE,
             item_flags: ItemFlags::NONE,
@@ -77,7 +88,8 @@ impl<'a> Plot for StemPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 self.offset,
                 self.stride,
@@ -102,9 +114,16 @@ impl<'a> Plot for StemPlot<'a> {
 pub struct SimpleStemPlot<'a> {
     label: &'a str,
     values: &'a [f64],
+    style: PlotItemStyle,
     y_ref: f64,
     x_scale: f64,
     x_start: f64,
+}
+
+impl<'a> super::PlotItemStyled for SimpleStemPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> SimpleStemPlot<'a> {
@@ -113,6 +132,7 @@ impl<'a> SimpleStemPlot<'a> {
         Self {
             label,
             values,
+            style: PlotItemStyle::default(),
             y_ref: 0.0,
             x_scale: 1.0,
             x_start: 0.0,
@@ -153,7 +173,7 @@ impl<'a> Plot for SimpleStemPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
+            let spec = plot_spec_with_style(self.style, 0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotStems_doublePtrdoublePtr(
                 label_ptr,
                 x_data.as_ptr(),

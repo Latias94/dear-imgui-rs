@@ -1,6 +1,6 @@
 //! Histogram plot implementation
 
-use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
+use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
 use crate::sys;
 use crate::{BinMethod, HistogramFlags, ItemFlags};
 
@@ -8,11 +8,18 @@ use crate::{BinMethod, HistogramFlags, ItemFlags};
 pub struct HistogramPlot<'a> {
     label: &'a str,
     values: &'a [f64],
+    style: PlotItemStyle,
     bins: i32,
     bar_scale: f64,
     range: Option<sys::ImPlotRange>,
     flags: HistogramFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for HistogramPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> HistogramPlot<'a> {
@@ -21,6 +28,7 @@ impl<'a> HistogramPlot<'a> {
         Self {
             label,
             values,
+            style: PlotItemStyle::default(),
             bins: BinMethod::Sturges as i32,
             bar_scale: 1.0,
             range: None, // Auto-range
@@ -120,7 +128,8 @@ impl<'a> Plot for HistogramPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 crate::IMPLOT_AUTO,
@@ -147,11 +156,18 @@ pub struct Histogram2DPlot<'a> {
     label: &'a str,
     x_values: &'a [f64],
     y_values: &'a [f64],
+    style: PlotItemStyle,
     x_bins: i32,
     y_bins: i32,
     range: Option<sys::ImPlotRect>,
     flags: HistogramFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for Histogram2DPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> Histogram2DPlot<'a> {
@@ -161,6 +177,7 @@ impl<'a> Histogram2DPlot<'a> {
             label,
             x_values,
             y_values,
+            style: PlotItemStyle::default(),
             x_bins: BinMethod::Sturges as i32,
             y_bins: BinMethod::Sturges as i32,
             range: None, // Auto-range
@@ -252,7 +269,8 @@ impl<'a> Plot for Histogram2DPlot<'a> {
         };
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 crate::IMPLOT_AUTO,

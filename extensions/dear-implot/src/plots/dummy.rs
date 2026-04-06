@@ -1,6 +1,6 @@
 //! Dummy plot implementation
 
-use super::{PlotData, PlotError, plot_spec_from, with_plot_str_or_empty};
+use super::{PlotData, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
 use crate::{DummyFlags, ItemFlags, sys};
 
 /// Builder for dummy plots
@@ -9,8 +9,15 @@ use crate::{DummyFlags, ItemFlags, sys};
 /// This is useful for creating custom legend entries or placeholders.
 pub struct DummyPlot<'a> {
     label: &'a str,
+    style: PlotItemStyle,
     flags: DummyFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for DummyPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> DummyPlot<'a> {
@@ -18,9 +25,16 @@ impl<'a> DummyPlot<'a> {
     pub fn new(label: &'a str) -> Self {
         Self {
             label,
+            style: PlotItemStyle::default(),
             flags: DummyFlags::NONE,
             item_flags: ItemFlags::NONE,
         }
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this dummy plot.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Set dummy flags for customization
@@ -46,7 +60,8 @@ impl<'a> DummyPlot<'a> {
     /// Plot the dummy entry
     pub fn plot(self) {
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 crate::IMPLOT_AUTO,
@@ -69,8 +84,15 @@ impl<'a> PlotData for DummyPlot<'a> {
 /// Multiple dummy plots for creating legend sections
 pub struct MultiDummyPlot<'a> {
     labels: Vec<&'a str>,
+    style: PlotItemStyle,
     flags: DummyFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for MultiDummyPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> MultiDummyPlot<'a> {
@@ -78,9 +100,16 @@ impl<'a> MultiDummyPlot<'a> {
     pub fn new(labels: Vec<&'a str>) -> Self {
         Self {
             labels,
+            style: PlotItemStyle::default(),
             flags: DummyFlags::NONE,
             item_flags: ItemFlags::NONE,
         }
+    }
+
+    /// Set ImPlotSpec-backed style overrides for all dummy entries.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Set dummy flags for all entries
@@ -117,6 +146,7 @@ impl<'a> MultiDummyPlot<'a> {
     pub fn plot(self) {
         for &label in &self.labels {
             let dummy_plot = DummyPlot::new(label)
+                .with_style(self.style)
                 .with_flags(self.flags)
                 .with_item_flags(self.item_flags);
             dummy_plot.plot();
@@ -137,22 +167,41 @@ impl<'a> PlotData for MultiDummyPlot<'a> {
 /// Legend separator using dummy plots
 pub struct LegendSeparator<'a> {
     label: &'a str,
+    style: PlotItemStyle,
+}
+
+impl<'a> super::PlotItemStyled for LegendSeparator<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> LegendSeparator<'a> {
     /// Create a legend separator with optional label
     pub fn new(label: &'a str) -> Self {
-        Self { label }
+        Self {
+            label,
+            style: PlotItemStyle::default(),
+        }
     }
 
     /// Create an empty separator
     pub fn empty() -> Self {
-        Self { label: "---" }
+        Self {
+            label: "---",
+            style: PlotItemStyle::default(),
+        }
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this legend separator.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Plot the separator
     pub fn plot(self) {
-        let dummy_plot = DummyPlot::new(self.label);
+        let dummy_plot = DummyPlot::new(self.label).with_style(self.style);
         dummy_plot.plot();
     }
 }
@@ -160,17 +209,33 @@ impl<'a> LegendSeparator<'a> {
 /// Legend header using dummy plots
 pub struct LegendHeader<'a> {
     title: &'a str,
+    style: PlotItemStyle,
+}
+
+impl<'a> super::PlotItemStyled for LegendHeader<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> LegendHeader<'a> {
     /// Create a legend header
     pub fn new(title: &'a str) -> Self {
-        Self { title }
+        Self {
+            title,
+            style: PlotItemStyle::default(),
+        }
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this legend header.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Plot the header
     pub fn plot(self) {
-        let dummy_plot = DummyPlot::new(self.title);
+        let dummy_plot = DummyPlot::new(self.title).with_style(self.style);
         dummy_plot.plot();
     }
 }
@@ -178,8 +243,15 @@ impl<'a> LegendHeader<'a> {
 /// Custom legend entry builder
 pub struct CustomLegendEntry<'a> {
     label: &'a str,
+    style: PlotItemStyle,
     flags: DummyFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for CustomLegendEntry<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> CustomLegendEntry<'a> {
@@ -187,9 +259,16 @@ impl<'a> CustomLegendEntry<'a> {
     pub fn new(label: &'a str) -> Self {
         Self {
             label,
+            style: PlotItemStyle::default(),
             flags: DummyFlags::NONE,
             item_flags: ItemFlags::NONE,
         }
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this legend entry.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Set flags for the entry
@@ -207,6 +286,7 @@ impl<'a> CustomLegendEntry<'a> {
     /// Plot the custom entry
     pub fn plot(self) {
         let dummy_plot = DummyPlot::new(self.label)
+            .with_style(self.style)
             .with_flags(self.flags)
             .with_item_flags(self.item_flags);
         dummy_plot.plot();
@@ -217,7 +297,14 @@ impl<'a> CustomLegendEntry<'a> {
 pub struct LegendGroup<'a> {
     title: &'a str,
     entries: Vec<&'a str>,
+    style: PlotItemStyle,
     add_separator: bool,
+}
+
+impl<'a> super::PlotItemStyled for LegendGroup<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> LegendGroup<'a> {
@@ -226,8 +313,15 @@ impl<'a> LegendGroup<'a> {
         Self {
             title,
             entries,
+            style: PlotItemStyle::default(),
             add_separator: true,
         }
+    }
+
+    /// Set ImPlotSpec-backed style overrides for this legend group.
+    pub fn with_style(mut self, style: PlotItemStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Disable separator after the group
@@ -239,16 +333,16 @@ impl<'a> LegendGroup<'a> {
     /// Plot the legend group
     pub fn plot(self) {
         // Plot the header
-        LegendHeader::new(self.title).plot();
+        LegendHeader::new(self.title).with_style(self.style).plot();
 
         // Plot all entries
         for &entry in &self.entries {
-            DummyPlot::new(entry).plot();
+            DummyPlot::new(entry).with_style(self.style).plot();
         }
 
         // Add separator if requested
         if self.add_separator && !self.entries.is_empty() {
-            LegendSeparator::empty().plot();
+            LegendSeparator::empty().with_style(self.style).plot();
         }
     }
 }

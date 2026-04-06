@@ -1,6 +1,9 @@
 //! Stairs plot implementation
 
-use super::{PlotData, PlotError, plot_spec_from, validate_data_lengths, with_plot_str_or_empty};
+use super::{
+    PlotData, PlotError, PlotItemStyle, plot_spec_with_style, validate_data_lengths,
+    with_plot_str_or_empty,
+};
 use crate::{ItemFlags, StairsFlags, sys};
 
 /// Builder for stairs plots with extensive customization options
@@ -8,10 +11,17 @@ pub struct StairsPlot<'a> {
     label: &'a str,
     x_data: &'a [f64],
     y_data: &'a [f64],
+    style: PlotItemStyle,
     flags: StairsFlags,
     item_flags: ItemFlags,
     offset: i32,
     stride: i32,
+}
+
+impl<'a> super::PlotItemStyled for StairsPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> StairsPlot<'a> {
@@ -21,6 +31,7 @@ impl<'a> StairsPlot<'a> {
             label,
             x_data,
             y_data,
+            style: PlotItemStyle::default(),
             flags: StairsFlags::NONE,
             item_flags: ItemFlags::NONE,
             offset: 0,
@@ -75,7 +86,8 @@ impl<'a> StairsPlot<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 self.offset,
                 self.stride,
@@ -106,8 +118,15 @@ pub struct StairsPlotF32<'a> {
     label: &'a str,
     x_data: &'a [f32],
     y_data: &'a [f32],
+    style: PlotItemStyle,
     flags: StairsFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for StairsPlotF32<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> StairsPlotF32<'a> {
@@ -117,6 +136,7 @@ impl<'a> StairsPlotF32<'a> {
             label,
             x_data,
             y_data,
+            style: PlotItemStyle::default(),
             flags: StairsFlags::NONE,
             item_flags: ItemFlags::NONE,
         }
@@ -166,7 +186,8 @@ impl<'a> StairsPlotF32<'a> {
             return;
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 std::mem::size_of::<f32>() as i32,
@@ -196,10 +217,17 @@ impl<'a> PlotData for StairsPlotF32<'a> {
 pub struct SimpleStairsPlot<'a> {
     label: &'a str,
     y_data: &'a [f64],
+    style: PlotItemStyle,
     flags: StairsFlags,
     item_flags: ItemFlags,
     x_scale: f64,
     x_start: f64,
+}
+
+impl<'a> super::PlotItemStyled for SimpleStairsPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> SimpleStairsPlot<'a> {
@@ -208,6 +236,7 @@ impl<'a> SimpleStairsPlot<'a> {
         Self {
             label,
             y_data,
+            style: PlotItemStyle::default(),
             flags: StairsFlags::NONE,
             item_flags: ItemFlags::NONE,
             x_scale: 1.0,
@@ -270,7 +299,8 @@ impl<'a> SimpleStairsPlot<'a> {
             .collect();
 
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_from(
+            let spec = plot_spec_with_style(
+                self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
                 std::mem::size_of::<f64>() as i32,

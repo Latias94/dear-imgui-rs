@@ -1,6 +1,6 @@
 //! Heatmap plot implementation
 
-use super::{Plot, PlotError, plot_spec_from, with_plot_str_or_empty};
+use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
 use crate::{HeatmapFlags, ItemFlags, sys};
 use dear_imgui_rs::with_scratch_txt_two;
 
@@ -8,6 +8,7 @@ use dear_imgui_rs::with_scratch_txt_two;
 pub struct HeatmapPlot<'a> {
     label: &'a str,
     values: &'a [f64],
+    style: PlotItemStyle,
     rows: i32,
     cols: i32,
     scale_min: f64,
@@ -17,6 +18,12 @@ pub struct HeatmapPlot<'a> {
     bounds_max: sys::ImPlotPoint,
     flags: HeatmapFlags,
     item_flags: ItemFlags,
+}
+
+impl<'a> super::PlotItemStyled for HeatmapPlot<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
 }
 
 impl<'a> HeatmapPlot<'a> {
@@ -31,6 +38,7 @@ impl<'a> HeatmapPlot<'a> {
         Self {
             label,
             values,
+            style: PlotItemStyle::default(),
             rows: rows as i32,
             cols: cols as i32,
             scale_min: 0.0,
@@ -128,7 +136,8 @@ impl<'a> Plot for HeatmapPlot<'a> {
                     self.label
                 };
                 with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
-                    let spec = plot_spec_from(
+                    let spec = plot_spec_with_style(
+                        self.style,
                         self.flags.bits() | self.item_flags.bits(),
                         0,
                         crate::IMPLOT_AUTO,
@@ -148,7 +157,8 @@ impl<'a> Plot for HeatmapPlot<'a> {
                 })
             }
             None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-                let spec = plot_spec_from(
+                let spec = plot_spec_with_style(
+                    self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     0,
                     crate::IMPLOT_AUTO,
@@ -178,6 +188,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
 pub struct HeatmapPlotF32<'a> {
     label: &'a str,
     values: &'a [f32],
+    style: PlotItemStyle,
     rows: i32,
     cols: i32,
     scale_min: f64,
@@ -189,12 +200,19 @@ pub struct HeatmapPlotF32<'a> {
     item_flags: ItemFlags,
 }
 
+impl<'a> super::PlotItemStyled for HeatmapPlotF32<'a> {
+    fn style_mut(&mut self) -> &mut PlotItemStyle {
+        &mut self.style
+    }
+}
+
 impl<'a> HeatmapPlotF32<'a> {
     /// Create a new f32 heatmap plot
     pub fn new(label: &'a str, values: &'a [f32], rows: usize, cols: usize) -> Self {
         Self {
             label,
             values,
+            style: PlotItemStyle::default(),
             rows: rows as i32,
             cols: cols as i32,
             scale_min: 0.0,
@@ -283,7 +301,8 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                     self.label
                 };
                 with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
-                    let spec = plot_spec_from(
+                    let spec = plot_spec_with_style(
+                        self.style,
                         self.flags.bits() | self.item_flags.bits(),
                         0,
                         crate::IMPLOT_AUTO,
@@ -303,7 +322,8 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                 })
             }
             None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-                let spec = plot_spec_from(
+                let spec = plot_spec_with_style(
+                    self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     0,
                     crate::IMPLOT_AUTO,
