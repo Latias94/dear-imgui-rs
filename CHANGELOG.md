@@ -7,10 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Target release train: `0.11.0`.
+## [0.11.0] - 2026-04-07
 
-### Removed
+Upgrade to Dear ImGui v1.92.7 (docking branch) via cimgui `docking_inter`, refresh
+`cimplot` / `cimplot3d`, regenerate native + import-style WASM bindings, and expand
+the safe Rust API around the latest ImPlot / ImPlot3D spec-based item styling.
+This release also formalizes the repository-owned `backend_shim` surface in
+`dear-imgui-sys`, adds repository-local iOS / Android smoke examples, and
+simplifies publishing around the Python release scripts.
 
+### Highlights
+
+- Upgrade the core stack to Dear ImGui v1.92.7 and refresh the vendored
+  `cimgui` / `cimplot` / `cimplot3d` submodules with regenerated native + WASM bindings.
+- Introduce the repository-owned `dear-imgui-sys::backend_shim` surface for official backend glue,
+  including new SDLRenderer3 support and clearer low-level backend ownership.
+- Expand the ImPlot / ImPlot3D safe APIs around spec-backed item styling,
+  per-index array styling, color enums, and the remaining builder gaps.
+- Add repository-local iOS and Android smoke examples covering
+  `dear-imgui-winit + dear-imgui-wgpu`, `dear-imgui-sdl3 + dear-imgui-wgpu`,
+  and low-level Android `NativeActivity` + EGL / GLES integration shapes.
+- Simplify release operations by moving `dear-imgui-build-support` onto the unified
+  `0.11.0` train and removing the `release-plz` workflow in favor of the Python publishing scripts.
+
+### Breaking Changes
+
+- Core (`dear-imgui-sys`)
+  - Replace the provisional `raw_backend::{win32, dx11, android, opengl3}` surface with
+    `backend_shim::{win32, dx11, android, opengl3}` behind `backend-shim-*` feature gates.
+    Consumers using the old low-level sys surface must migrate to the new repository-owned shim ABI.
 - Extensions
   - `dear-imnodes`: remove the deprecated `EditorContext` methods that relied on the global current ImNodes context, as well as `EditorContext::create/try_create`. Use `Context::{create_editor_context,try_create_editor_context}` and `Context::bind_editor(&editor)` instead.
 
@@ -19,7 +44,6 @@ Target release train: `0.11.0`.
 - Core (`dear-imgui-rs`)
   - Expose the new Dear ImGui v1.92.7 surface in the safe API with `Ui::tree_node_get_open()`, `Viewport::debug_name()`, `StyleVar::SeparatorSize`, `ButtonFlags::ALLOW_OVERLAP`, and updated `MultiSelectFlags` names/compatibility aliases for the upstream `SelectOnAuto` rename.
 - Core (`dear-imgui-sys`)
-  - Replace the provisional `raw_backend::{win32, dx11, android, opengl3}` surface with `backend_shim::{win32, dx11, android, opengl3}` behind `backend-shim-*` feature gates. The sys crate now owns the repository-defined C shim ABI for self-contained official backends instead of exposing direct declarations for upstream C++ backend symbols (PR #23, thanks @EtherealPsyche).
   - Extend that backend shim surface with feature-gated `backend_shim::sdlrenderer3` support for Dear ImGui's official SDLRenderer3 backend, including SDL3 header discovery for both system-provided SDL3 installs and `sdl3-sys` build-from-source outputs (PR #24, thanks @flowkclav).
 - Extensions
   - `dear-implot`: add safe `PlotUi::plot_polygon()` / `PlotBuilder::polygon()` wrappers for upstream `PlotPolygon`, plus the new `PolygonFlags`.
