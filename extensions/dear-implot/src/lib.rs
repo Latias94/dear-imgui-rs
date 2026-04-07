@@ -116,6 +116,7 @@ pub use plots::{
     histogram::{Histogram2DPlot, HistogramPlot},
     line::{LinePlot, SimpleLinePlot},
     pie::{PieChartPlot, PieChartPlotF32},
+    polygon::PolygonPlot,
     scatter::{ScatterPlot, SimpleScatterPlot},
     shaded::{ShadedBetweenPlot, ShadedPlot, SimpleShadedPlot},
     stems::{SimpleStemPlot, StemPlot},
@@ -306,6 +307,7 @@ bitflags::bitflags! {
         const NORMALIZE = sys::ImPlotPieChartFlags_Normalize as u32;
         const IGNORE_HIDDEN = sys::ImPlotPieChartFlags_IgnoreHidden as u32;
         const EXPLODING = sys::ImPlotPieChartFlags_Exploding as u32;
+        const NO_SLICE_BORDER = sys::ImPlotPieChartFlags_NoSliceBorder as u32;
     }
 }
 
@@ -318,6 +320,14 @@ bitflags::bitflags! {
         const SKIP_NAN = sys::ImPlotLineFlags_SkipNaN as u32;
         const NO_CLIP = sys::ImPlotLineFlags_NoClip as u32;
         const SHADED = sys::ImPlotLineFlags_Shaded as u32;
+    }
+}
+
+bitflags::bitflags! {
+    /// Flags for polygon plots
+    pub struct PolygonFlags: u32 {
+        const NONE = sys::ImPlotPolygonFlags_None as u32;
+        const CONCAVE = sys::ImPlotPolygonFlags_Concave as u32;
     }
 }
 

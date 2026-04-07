@@ -8,7 +8,8 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current train: unified `v0.10.4` (use `version = "0.10"`).
+- Current train: unified `v0.11.0` (use `version = "0.11"`).
+- Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
 - Internal dependency constraints in this repo also pin to the unified minor (e.g., `0.5`). Mixing different minors across our crates is unsupported.
@@ -20,46 +21,54 @@ Core
 
 | Crate           | Version | Upstream        | Notes                                     |
 |-----------------|---------|-----------------|-------------------------------------------|
-| dear-imgui-rs   | 0.10.x  | —               | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.10.x  | ImGui v1.92.6   | Docking branch via cimgui                 |
+| dear-imgui-rs   | 0.11.0  | —               | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.11.0  | ImGui v1.92.7   | Docking branch via cimgui                 |
 
 Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.10.x  | wgpu = 29/28/27        | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features; experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
-| dear-imgui-glow   | 0.10.x  | glow = 0.16            | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash    | 0.10.x  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
-| dear-imgui-winit  | 0.10.x  | winit = 0.30.12        | Winit platform backend |
-| dear-imgui-sdl3   | 0.10.x  | sdl3 = 0.17, sdl3-sys  | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
+| dear-imgui-wgpu   | 0.11.0  | wgpu = 29/28/27        | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features; experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
+| dear-imgui-glow   | 0.11.0  | glow = 0.17            | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash    | 0.11.0  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
+| dear-imgui-winit  | 0.11.0  | winit = 0.30.13        | Winit platform backend |
+| dear-imgui-sdl3   | 0.11.0  | sdl3 = 0.17, sdl3-sys  | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
 
 Utilities
 
 | Crate     | Version | External deps | Notes |
 |-----------|---------|---------------|-------|
-| dear-app  | 0.10.x  | winit, wgpu   | App runner (docking, themes, add-ons) |
+| dear-app  | 0.11.0  | winit, wgpu   | App runner (docking, themes, add-ons) |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
 |---------------------|---------|------------------------|------------------------------|----------------------------------------|
-| dear-implot         | 0.10.x  | 0.10.x                 | dear-implot-sys 0.10.x       | 2D plotting                            |
-| dear-imnodes        | 0.10.x  | 0.10.x                 | dear-imnodes-sys 0.10.x      | Node editor                            |
-| dear-imguizmo       | 0.10.x  | 0.10.x                 | dear-imguizmo-sys 0.10.x     | 3D gizmo                               |
-| dear-file-browser   | 0.10.x  | 0.10.x                 | —                            | ImGui UI + native (rfd) backends       |
-| dear-implot3d       | 0.10.x  | 0.10.x                 | dear-implot3d-sys 0.10.x     | 3D plotting                            |
-| dear-imguizmo-quat  | 0.10.x  | 0.10.x                 | dear-imguizmo-quat-sys 0.10.x | Quaternion gizmo                      |
-| dear-imgui-reflect  | 0.10.x  | 0.10.x                 | —                            | Reflection-based UI helpers (pure Rust)|
+| dear-implot         | 0.11.0  | 0.11.0                 | dear-implot-sys 0.11.0       | 2D plotting                            |
+| dear-imnodes        | 0.11.0  | 0.11.0                 | dear-imnodes-sys 0.11.0      | Node editor                            |
+| dear-imguizmo       | 0.11.0  | 0.11.0                 | dear-imguizmo-sys 0.11.0     | 3D gizmo                               |
+| dear-file-browser   | 0.11.0  | 0.11.0                 | —                            | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.11.0  | 0.11.0                 | dear-implot3d-sys 0.11.0     | 3D plotting                            |
+| dear-imguizmo-quat  | 0.11.0  | 0.11.0                 | dear-imguizmo-quat-sys 0.11.0 | Quaternion gizmo                      |
+| dear-imgui-reflect  | 0.11.0  | 0.11.0                 | —                            | Reflection-based UI helpers (pure Rust)|
 
 ## Trunk (Unreleased)
 
 - Target release train: `0.11.0` (unreleased).
+- Core + backends aligned with Dear ImGui v1.92.7 (docking) via cimgui.
 - Minimum supported Rust: 1.92 (workspace baseline).
-- External dependencies baseline: wgpu 29, winit 0.30.12, glow 0.16, sdl3 0.17.
+- External dependencies baseline: wgpu 29, winit 0.30.13, glow 0.17, sdl3 0.17.
 
 ## History
 
-Release Train 0.10 (current)
+Release Train 0.11 (current)
+
+- All crates unified to 0.11.0 across the workspace (use `version = "0.11"`).
+- Core + backends aligned with Dear ImGui v1.92.7 (docking) via cimgui.
+- External dependencies baseline: wgpu 29, winit 0.30.13, glow 0.17, sdl3 0.17.
+- Minimum supported Rust: 1.92 (workspace baseline).
+
+Release Train 0.10 (previous)
 
 - All crates unified to 0.10.4 across the workspace (use `version = "0.10"`).
 - Core + backends aligned with Dear ImGui v1.92.6 (docking) via cimgui.

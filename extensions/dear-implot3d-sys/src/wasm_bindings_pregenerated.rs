@@ -558,6 +558,7 @@ pub struct ImGuiStyle {
     pub ColorButtonPosition: ImGuiDir,
     pub ButtonTextAlign: ImVec2_c,
     pub SelectableTextAlign: ImVec2_c,
+    pub SeparatorSize: f32,
     pub SeparatorTextBorderSize: f32,
     pub SeparatorTextAlign: ImVec2_c,
     pub SeparatorTextPadding: ImVec2_c,
@@ -888,15 +889,16 @@ impl Default for ImGuiStorage {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiListClipper {
-    pub Ctx: *mut ImGuiContext,
     pub DisplayStart: ::std::os::raw::c_int,
     pub DisplayEnd: ::std::os::raw::c_int,
+    pub UserIndex: ::std::os::raw::c_int,
     pub ItemsCount: ::std::os::raw::c_int,
     pub ItemsHeight: f32,
+    pub Flags: ImGuiListClipperFlags,
     pub StartPosY: f64,
     pub StartSeekOffsetY: f64,
+    pub Ctx: *mut ImGuiContext,
     pub TempData: *mut ::std::os::raw::c_void,
-    pub Flags: ImGuiListClipperFlags,
 }
 impl Default for ImGuiListClipper {
     fn default() -> Self {
@@ -2320,7 +2322,8 @@ pub struct ImGuiInputTextState {
     pub CursorFollow: bool,
     pub CursorCenterY: bool,
     pub SelectedAllMouseLock: bool,
-    pub Edited: bool,
+    pub EditedBefore: bool,
+    pub EditedThisFrame: bool,
     pub WantReloadUserBuf: bool,
     pub LastMoveDirectionLR: ImS8,
     pub ReloadSelectionStart: ::std::os::raw::c_int,
@@ -3703,7 +3706,7 @@ pub struct ImGuiViewportP {
     pub LastAlpha: f32,
     pub LastFocusedHadNavWindow: bool,
     pub PlatformMonitor: ::std::os::raw::c_short,
-    pub BgFgDrawListsLastFrame: [::std::os::raw::c_int; 2usize],
+    pub BgFgDrawListsLastTimeActive: [f32; 2usize],
     pub BgFgDrawLists: [*mut ImDrawList; 2usize],
     pub DrawDataP: ImDrawData,
     pub DrawDataBuilder: ImDrawDataBuilder,
@@ -3908,6 +3911,13 @@ impl Default for ImGuiContextHook {
         }
     }
 }
+pub type ImGuiDemoMarkerCallback = ::std::option::Option<
+    unsafe extern "C" fn(
+        file: *const ::std::os::raw::c_char,
+        line: ::std::os::raw::c_int,
+        section: *const ::std::os::raw::c_char,
+    ),
+>;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImFontAtlasPtr {
@@ -5391,8 +5401,9 @@ pub struct ImGuiTable {
     pub ResizedColumn: ImGuiTableColumnIdx,
     pub LastResizedColumn: ImGuiTableColumnIdx,
     pub HeldHeaderColumn: ImGuiTableColumnIdx,
+    pub LastHeldHeaderColumn: ImGuiTableColumnIdx,
     pub ReorderColumn: ImGuiTableColumnIdx,
-    pub ReorderColumnDir: ImGuiTableColumnIdx,
+    pub ReorderColumnDstOrder: ImGuiTableColumnIdx,
     pub LeftMostEnabledColumn: ImGuiTableColumnIdx,
     pub RightMostEnabledColumn: ImGuiTableColumnIdx,
     pub LeftMostStretchedColumn: ImGuiTableColumnIdx,
@@ -5889,16 +5900,21 @@ pub type ImPlot3DDummyFlags = ::std::os::raw::c_int;
 pub type ImPlot3DLegendFlags = ::std::os::raw::c_int;
 pub type ImPlot3DAxisFlags = ::std::os::raw::c_int;
 pub const ImPlot3DProp_LineColor: ImPlot3DProp_ = 0;
-pub const ImPlot3DProp_LineWeight: ImPlot3DProp_ = 1;
-pub const ImPlot3DProp_FillColor: ImPlot3DProp_ = 2;
-pub const ImPlot3DProp_FillAlpha: ImPlot3DProp_ = 3;
-pub const ImPlot3DProp_Marker: ImPlot3DProp_ = 4;
-pub const ImPlot3DProp_MarkerSize: ImPlot3DProp_ = 5;
-pub const ImPlot3DProp_MarkerLineColor: ImPlot3DProp_ = 6;
-pub const ImPlot3DProp_MarkerFillColor: ImPlot3DProp_ = 7;
-pub const ImPlot3DProp_Offset: ImPlot3DProp_ = 8;
-pub const ImPlot3DProp_Stride: ImPlot3DProp_ = 9;
-pub const ImPlot3DProp_Flags: ImPlot3DProp_ = 10;
+pub const ImPlot3DProp_LineColors: ImPlot3DProp_ = 1;
+pub const ImPlot3DProp_LineWeight: ImPlot3DProp_ = 2;
+pub const ImPlot3DProp_FillColor: ImPlot3DProp_ = 3;
+pub const ImPlot3DProp_FillColors: ImPlot3DProp_ = 4;
+pub const ImPlot3DProp_FillAlpha: ImPlot3DProp_ = 5;
+pub const ImPlot3DProp_Marker: ImPlot3DProp_ = 6;
+pub const ImPlot3DProp_MarkerSize: ImPlot3DProp_ = 7;
+pub const ImPlot3DProp_MarkerSizes: ImPlot3DProp_ = 8;
+pub const ImPlot3DProp_MarkerLineColor: ImPlot3DProp_ = 9;
+pub const ImPlot3DProp_MarkerLineColors: ImPlot3DProp_ = 10;
+pub const ImPlot3DProp_MarkerFillColor: ImPlot3DProp_ = 11;
+pub const ImPlot3DProp_MarkerFillColors: ImPlot3DProp_ = 12;
+pub const ImPlot3DProp_Offset: ImPlot3DProp_ = 13;
+pub const ImPlot3DProp_Stride: ImPlot3DProp_ = 14;
+pub const ImPlot3DProp_Flags: ImPlot3DProp_ = 15;
 pub type ImPlot3DProp_ = ::std::os::raw::c_int;
 pub const ImPlot3DFlags_None: ImPlot3DFlags_ = 0;
 pub const ImPlot3DFlags_NoTitle: ImPlot3DFlags_ = 1;
@@ -5928,7 +5944,10 @@ pub const ImPlot3DCol_LegendText: ImPlot3DCol_ = 7;
 pub const ImPlot3DCol_AxisText: ImPlot3DCol_ = 8;
 pub const ImPlot3DCol_AxisGrid: ImPlot3DCol_ = 9;
 pub const ImPlot3DCol_AxisTick: ImPlot3DCol_ = 10;
-pub const ImPlot3DCol_COUNT: ImPlot3DCol_ = 11;
+pub const ImPlot3DCol_AxisBg: ImPlot3DCol_ = 11;
+pub const ImPlot3DCol_AxisBgHovered: ImPlot3DCol_ = 12;
+pub const ImPlot3DCol_AxisBgActive: ImPlot3DCol_ = 13;
+pub const ImPlot3DCol_COUNT: ImPlot3DCol_ = 14;
 pub type ImPlot3DCol_ = ::std::os::raw::c_int;
 pub const ImPlot3DStyleVar_LineWeight: ImPlot3DStyleVar_ = 0;
 pub const ImPlot3DStyleVar_Marker: ImPlot3DStyleVar_ = 1;
@@ -6057,19 +6076,33 @@ pub const ImPlot3DColormap_Spectral: ImPlot3DColormap_ = 14;
 pub const ImPlot3DColormap_Greys: ImPlot3DColormap_ = 15;
 pub type ImPlot3DColormap_ = ::std::os::raw::c_int;
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImPlot3DSpec_c {
     pub LineColor: ImVec4_c,
+    pub LineColors: *mut ImU32,
     pub LineWeight: f32,
     pub FillColor: ImVec4_c,
+    pub FillColors: *mut ImU32,
     pub FillAlpha: f32,
     pub Marker: ImPlot3DMarker,
     pub MarkerSize: f32,
+    pub MarkerSizes: *mut f32,
     pub MarkerLineColor: ImVec4_c,
+    pub MarkerLineColors: *mut ImU32,
     pub MarkerFillColor: ImVec4_c,
+    pub MarkerFillColors: *mut ImU32,
     pub Offset: ::std::os::raw::c_int,
     pub Stride: ::std::os::raw::c_int,
     pub Flags: ImPlot3DItemFlags,
+}
+impl Default for ImPlot3DSpec_c {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
 }
 pub type ImPlot3DFormatter = ::std::option::Option<
     unsafe extern "C" fn(
@@ -6136,7 +6169,7 @@ pub struct ImPlot3DStyle_c {
     pub LegendPadding: ImVec2_c,
     pub LegendInnerPadding: ImVec2_c,
     pub LegendSpacing: ImVec2_c,
-    pub Colors: [ImVec4_c; 11usize],
+    pub Colors: [ImVec4_c; 14usize],
     pub Colormap: ImPlot3DColormap,
 }
 pub type ImPlot3DPoint = ImPlot3DPoint_c;
@@ -6871,10 +6904,129 @@ unsafe extern "C" {
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
-    pub fn ImPlot3D_PlotMesh(
+    pub fn ImPlot3D_PlotMesh_FloatPtr(
         label_id: *const ::std::os::raw::c_char,
-        vtx: *const ImPlot3DPoint,
-        idx: *const ::std::os::raw::c_uint,
+        vtx_xs: *const f32,
+        vtx_ys: *const f32,
+        vtx_zs: *const f32,
+        idxs: *const ::std::os::raw::c_uint,
+        vtx_count: ::std::os::raw::c_int,
+        idx_count: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot3D_PlotMesh_doublePtr(
+        label_id: *const ::std::os::raw::c_char,
+        vtx_xs: *const f64,
+        vtx_ys: *const f64,
+        vtx_zs: *const f64,
+        idxs: *const ::std::os::raw::c_uint,
+        vtx_count: ::std::os::raw::c_int,
+        idx_count: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot3D_PlotMesh_S8Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        vtx_xs: *const ImS8,
+        vtx_ys: *const ImS8,
+        vtx_zs: *const ImS8,
+        idxs: *const ::std::os::raw::c_uint,
+        vtx_count: ::std::os::raw::c_int,
+        idx_count: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot3D_PlotMesh_U8Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        vtx_xs: *const ImU8,
+        vtx_ys: *const ImU8,
+        vtx_zs: *const ImU8,
+        idxs: *const ::std::os::raw::c_uint,
+        vtx_count: ::std::os::raw::c_int,
+        idx_count: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot3D_PlotMesh_S16Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        vtx_xs: *const ImS16,
+        vtx_ys: *const ImS16,
+        vtx_zs: *const ImS16,
+        idxs: *const ::std::os::raw::c_uint,
+        vtx_count: ::std::os::raw::c_int,
+        idx_count: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot3D_PlotMesh_U16Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        vtx_xs: *const ImU16,
+        vtx_ys: *const ImU16,
+        vtx_zs: *const ImU16,
+        idxs: *const ::std::os::raw::c_uint,
+        vtx_count: ::std::os::raw::c_int,
+        idx_count: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot3D_PlotMesh_S32Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        vtx_xs: *const ImS32,
+        vtx_ys: *const ImS32,
+        vtx_zs: *const ImS32,
+        idxs: *const ::std::os::raw::c_uint,
+        vtx_count: ::std::os::raw::c_int,
+        idx_count: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot3D_PlotMesh_U32Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        vtx_xs: *const ImU32,
+        vtx_ys: *const ImU32,
+        vtx_zs: *const ImU32,
+        idxs: *const ::std::os::raw::c_uint,
+        vtx_count: ::std::os::raw::c_int,
+        idx_count: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot3D_PlotMesh_S64Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        vtx_xs: *const ImS64,
+        vtx_ys: *const ImS64,
+        vtx_zs: *const ImS64,
+        idxs: *const ::std::os::raw::c_uint,
+        vtx_count: ::std::os::raw::c_int,
+        idx_count: ::std::os::raw::c_int,
+        spec: ImPlot3DSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot3D_PlotMesh_U64Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        vtx_xs: *const ImU64,
+        vtx_ys: *const ImU64,
+        vtx_zs: *const ImU64,
+        idxs: *const ::std::os::raw::c_uint,
         vtx_count: ::std::os::raw::c_int,
         idx_count: ::std::os::raw::c_int,
         spec: ImPlot3DSpec_c,

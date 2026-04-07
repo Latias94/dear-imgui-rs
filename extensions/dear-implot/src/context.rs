@@ -239,6 +239,23 @@ impl<'ui> PlotUi<'ui> {
         })
     }
 
+    /// Plot a polygon with the given label and vertex data.
+    pub fn plot_polygon(&self, label: &str, x_data: &[f64], y_data: &[f64]) {
+        if x_data.len() != y_data.len() {
+            return;
+        }
+        let count = match i32::try_from(x_data.len()) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+
+        let label = if label.contains('\0') { "" } else { label };
+        with_scratch_txt(label, |ptr| unsafe {
+            let spec = crate::plots::plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
+            sys::ImPlot_PlotPolygon_doublePtr(ptr, x_data.as_ptr(), y_data.as_ptr(), count, spec);
+        })
+    }
+
     /// Check if the plot area is hovered
     pub fn is_plot_hovered(&self) -> bool {
         unsafe { sys::ImPlot_IsPlotHovered() }

@@ -106,6 +106,12 @@ impl Ui {
     pub fn tree_node_to_label_spacing(&self) -> f32 {
         unsafe { sys::igGetTreeNodeToLabelSpacing() }
     }
+
+    /// Returns whether the tree node identified by `storage_id` is open in storage.
+    #[doc(alias = "TreeNodeGetOpen")]
+    pub fn tree_node_get_open(&self, storage_id: crate::Id) -> bool {
+        unsafe { sys::igTreeNodeGetOpen(storage_id.raw()) }
+    }
 }
 
 /// Builder for a tree node widget

@@ -46,7 +46,7 @@ keywords = ["imgui", "ui", "graphics", "docking", "multiview"]
 
 [workspace.dependencies]
 # Core dependencies
-bitflags = "2.10"
+bitflags = "2.11"
 parking_lot = "0.12"
 cfg-if = "1.0"
 serde = { version = "1", features = ["derive"] }
@@ -54,8 +54,8 @@ glam = "0.32"
 
 # Graphics and windowing
 wgpu = "29.0"
-winit = "0.30.12"
-glow = "0.16"
+winit = "0.30.13"
+glow = "0.17"
 glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
@@ -85,12 +85,12 @@ web-time = "1.1"
 console_error_panic_hook = "0.1"
 console_log = "1"
 fern = "0.7"
-wasm-bindgen = "0.2.106"
+wasm-bindgen = "0.2.117"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 js-sys = "0.3"
 
 flate2 = "1"
 tar = "0.4"
-bytemuck = "1.0"
+bytemuck = "1.25"
 memoffset = "0.9"

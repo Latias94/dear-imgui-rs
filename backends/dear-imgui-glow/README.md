@@ -65,9 +65,9 @@ renderer.render(&draw_data)?;
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.10.x   |
-| dear-imgui-rs | 0.10.x   |
-| glow          | 0.16    |
+| Crate         | 0.11.0   |
+| dear-imgui-rs | 0.11.0   |
+| glow          | 0.17    |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 

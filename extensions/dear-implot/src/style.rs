@@ -2,6 +2,7 @@
 
 use crate::sys;
 use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_two};
+use std::borrow::Cow;
 use std::os::raw::c_char;
 
 /// Style variables that can be modified
@@ -84,6 +85,101 @@ impl Drop for StyleColorToken {
             }
         }
     }
+}
+
+/// One-shot array-backed item style overrides for the next plot submission.
+///
+/// This mirrors the new per-item array fields added to `ImPlotSpec` without storing
+/// borrowed pointers beyond the closure passed to [`with_next_plot_item_array_style`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlotItemArrayStyle<'a> {
+    line_colors: Option<Cow<'a, [u32]>>,
+    fill_colors: Option<Cow<'a, [u32]>>,
+    marker_sizes: Option<Cow<'a, [f32]>>,
+    marker_line_colors: Option<Cow<'a, [u32]>>,
+    marker_fill_colors: Option<Cow<'a, [u32]>>,
+}
+
+impl<'a> PlotItemArrayStyle<'a> {
+    /// Create an empty array-style override.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Override per-index line colors using Dear ImGui packed colors (`ImU32` / ABGR).
+    pub fn with_line_colors(mut self, colors: &'a [u32]) -> Self {
+        self.line_colors = Some(Cow::Borrowed(colors));
+        self
+    }
+
+    /// Override per-index fill colors using Dear ImGui packed colors (`ImU32` / ABGR).
+    pub fn with_fill_colors(mut self, colors: &'a [u32]) -> Self {
+        self.fill_colors = Some(Cow::Borrowed(colors));
+        self
+    }
+
+    /// Override per-index marker sizes in pixels.
+    pub fn with_marker_sizes(mut self, sizes: &'a [f32]) -> Self {
+        self.marker_sizes = Some(Cow::Borrowed(sizes));
+        self
+    }
+
+    /// Override per-index marker outline colors using Dear ImGui packed colors (`ImU32` / ABGR).
+    pub fn with_marker_line_colors(mut self, colors: &'a [u32]) -> Self {
+        self.marker_line_colors = Some(Cow::Borrowed(colors));
+        self
+    }
+
+    /// Override per-index marker fill colors using Dear ImGui packed colors (`ImU32` / ABGR).
+    pub fn with_marker_fill_colors(mut self, colors: &'a [u32]) -> Self {
+        self.marker_fill_colors = Some(Cow::Borrowed(colors));
+        self
+    }
+
+    fn apply_to_spec(&self, spec: &mut sys::ImPlotSpec_c) {
+        spec.LineColors = self
+            .line_colors
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
+        spec.FillColors = self
+            .fill_colors
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
+        spec.MarkerSizes = self
+            .marker_sizes
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |sizes| sizes.as_ptr() as *mut _);
+        spec.MarkerLineColors = self
+            .marker_line_colors
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
+        spec.MarkerFillColors = self
+            .marker_fill_colors
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
+    }
+}
+
+/// Apply array-backed item styling to the next plot submission executed inside `f`.
+///
+/// This is intentionally closure-scoped so borrowed slices stay valid for the entire
+/// duration of the next plot call and cannot leak into later frames accidentally.
+pub fn with_next_plot_item_array_style<'a, R>(
+    style: PlotItemArrayStyle<'a>,
+    f: impl FnOnce() -> R,
+) -> R {
+    let previous = crate::plots::take_next_plot_spec();
+    let mut spec = previous.unwrap_or_else(crate::plots::default_plot_spec);
+    style.apply_to_spec(&mut spec);
+    crate::plots::set_next_plot_spec(Some(spec));
+
+    let out = f();
+
+    if crate::plots::take_next_plot_spec().is_some() {
+        crate::plots::set_next_plot_spec(previous);
+    }
+
+    out
 }
 
 /// Push a float style variable to the stack
@@ -264,4 +360,50 @@ pub fn colormap_button(label: &str, size: [f32; 2], cmap: sys::ImPlotColormap) -
     with_scratch_txt(label, |ptr| unsafe {
         sys::ImPlot_ColormapButton(ptr, sz, cmap)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PlotItemArrayStyle, with_next_plot_item_array_style};
+
+    #[test]
+    fn next_plot_item_array_style_is_consumed_by_next_spec() {
+        let line_colors = [0x01020304u32, 0x05060708];
+        let fill_colors = [0x11121314u32];
+        let marker_sizes = [2.0f32, 4.0, 8.0];
+
+        with_next_plot_item_array_style(
+            PlotItemArrayStyle::new()
+                .with_line_colors(&line_colors)
+                .with_fill_colors(&fill_colors)
+                .with_marker_sizes(&marker_sizes),
+            || {
+                let spec = crate::plots::plot_spec_from(7, 3, 16);
+                assert_eq!(spec.Flags, 7);
+                assert_eq!(spec.Offset, 3);
+                assert_eq!(spec.Stride, 16);
+                assert_eq!(spec.LineColors, line_colors.as_ptr() as *mut _);
+                assert_eq!(spec.FillColors, fill_colors.as_ptr() as *mut _);
+                assert_eq!(spec.MarkerSizes, marker_sizes.as_ptr() as *mut _);
+            },
+        );
+
+        let spec = crate::plots::plot_spec_from(0, 0, crate::IMPLOT_AUTO);
+        assert!(spec.LineColors.is_null());
+        assert!(spec.FillColors.is_null());
+        assert!(spec.MarkerSizes.is_null());
+    }
+
+    #[test]
+    fn next_plot_item_array_style_is_restored_if_unused() {
+        let line_colors = [0xAABBCCDDu32];
+
+        with_next_plot_item_array_style(
+            PlotItemArrayStyle::new().with_line_colors(&line_colors),
+            || {},
+        );
+
+        let spec = crate::plots::plot_spec_from(0, 0, crate::IMPLOT_AUTO);
+        assert!(spec.LineColors.is_null());
+    }
 }

@@ -18,6 +18,8 @@ bitflags::bitflags! {
     pub struct ButtonFlags: i32 {
         /// No flags
         const NONE = 0;
+        /// Allow interaction overlap with following items.
+        const ALLOW_OVERLAP = sys::ImGuiButtonFlags_AllowOverlap as i32;
         /// React on left mouse button
         const MOUSE_BUTTON_LEFT = sys::ImGuiButtonFlags_MouseButtonLeft as i32;
         /// React on right mouse button

@@ -98,13 +98,18 @@ fn default_plot3d_spec() -> sys::ImPlot3DSpec_c {
 
     sys::ImPlot3DSpec_c {
         LineColor: auto_col,
+        LineColors: std::ptr::null_mut(),
         LineWeight: 1.0,
         FillColor: auto_col,
+        FillColors: std::ptr::null_mut(),
         FillAlpha: -1.0,
         Marker: sys::ImPlot3DMarker_Auto as _,
         MarkerSize: -1.0,
+        MarkerSizes: std::ptr::null_mut(),
         MarkerLineColor: auto_col,
+        MarkerLineColors: std::ptr::null_mut(),
         MarkerFillColor: auto_col,
+        MarkerFillColors: std::ptr::null_mut(),
         Offset: 0,
         Stride: IMPLOT3D_AUTO,
         Flags: sys::ImPlot3DItemFlags_None as _,
@@ -1869,20 +1874,14 @@ impl<'ui> Mesh3DBuilder<'ui> {
         let Some(idx_count) = len_i32(self.indices.len()) else {
             return;
         };
-        // ImPlot3DPoint is a C++ struct containing 3 doubles. Passing `[[f32; 3]]` by pointer
-        // would be a layout mismatch (UB). Convert to the exact FFI layout before calling C++.
-        let vertices: Vec<sys::ImPlot3DPoint> = self
-            .vertices
-            .iter()
-            .map(|v| {
-                let [x, y, z] = *v;
-                sys::ImPlot3DPoint_c {
-                    x: x as f64,
-                    y: y as f64,
-                    z: z as f64,
-                }
-            })
-            .collect();
+        let mut xs = Vec::with_capacity(self.vertices.len());
+        let mut ys = Vec::with_capacity(self.vertices.len());
+        let mut zs = Vec::with_capacity(self.vertices.len());
+        for [x, y, z] in self.vertices.iter().copied() {
+            xs.push(x);
+            ys.push(y);
+            zs.push(z);
+        }
 
         let label = self.label.as_ref();
         let label = if label.contains('\0') { "mesh" } else { label };
@@ -1892,11 +1891,13 @@ impl<'ui> Mesh3DBuilder<'ui> {
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
                 0,
-                IMPLOT3D_AUTO,
+                std::mem::size_of::<f32>() as i32,
             );
-            sys::ImPlot3D_PlotMesh(
+            sys::ImPlot3D_PlotMesh_FloatPtr(
                 label_ptr,
-                vertices.as_ptr(),
+                xs.as_ptr(),
+                ys.as_ptr(),
+                zs.as_ptr(),
                 self.indices.as_ptr(),
                 vtx_count,
                 idx_count,

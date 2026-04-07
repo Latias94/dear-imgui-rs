@@ -1,6 +1,6 @@
 use crate::sys;
 use std::cell::UnsafeCell;
-use std::ffi::c_void;
+use std::ffi::{CStr, c_void};
 
 // - Viewport management
 // - Platform backend callbacks
@@ -121,6 +121,19 @@ impl Viewport {
         unsafe {
             let center = sys::ImGuiViewport_GetWorkCenter(self.as_raw().cast_mut());
             [center.x, center.y]
+        }
+    }
+
+    /// Get the viewport debug name used by Dear ImGui tooling.
+    #[doc(alias = "GetDebugName")]
+    pub fn debug_name(&self) -> &str {
+        unsafe {
+            let ptr = sys::ImGuiViewport_GetDebugName(self.as_raw().cast_mut());
+            if ptr.is_null() {
+                ""
+            } else {
+                CStr::from_ptr(ptr).to_str().unwrap_or("")
+            }
         }
     }
 
@@ -323,6 +336,7 @@ impl Viewport {
 #[cfg(test)]
 mod tests {
     use super::Viewport;
+    use crate::Context;
     use crate::sys;
     use std::ffi::c_void;
 
@@ -369,5 +383,12 @@ mod tests {
 
             sys::ImGuiViewport_destroy(raw);
         }
+    }
+
+    #[test]
+    fn main_viewport_exposes_debug_name() {
+        let mut ctx = Context::create();
+        let viewport = ctx.main_viewport();
+        assert!(!viewport.debug_name().is_empty());
     }
 }

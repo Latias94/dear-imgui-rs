@@ -251,6 +251,9 @@ unsafe fn push_style_var(style_var: StyleVar) {
             let vec = sys::ImVec2 { x: p[0], y: p[1] };
             unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_SelectableTextAlign as i32, vec) }
         }
+        SeparatorSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_SeparatorSize as i32, v)
+        },
     }
 }
 

@@ -22,9 +22,9 @@ For native build/link options, see `extensions/dear-imgui-test-engine-sys/README
 
 | Item                        | Version |
 |-----------------------------|---------|
-| Crate                       | 0.10.x  |
-| dear-imgui-rs               | 0.10.x  |
-| dear-imgui-test-engine-sys  | 0.10.x  |
+| Crate                       | 0.11.0  |
+| dear-imgui-rs               | 0.11.0  |
+| dear-imgui-test-engine-sys  | 0.11.0  |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md).
 
@@ -32,8 +32,8 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.10"
-dear-imgui-test-engine = "0.10"
+dear-imgui-rs = "0.11.0"
+dear-imgui-test-engine = "0.11.0"
 ```
 
 ```rust

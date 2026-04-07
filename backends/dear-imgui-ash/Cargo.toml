@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-ash"
-version = "0.10.4"
+version = "0.11.0"
 edition.workspace = true
 description = "Vulkan (Ash) renderer backend for dear-imgui-rs"
 license.workspace = true
@@ -11,7 +11,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.10" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.11" }
 thiserror.workspace = true
 log.workspace = true
 
@@ -22,7 +22,7 @@ ash-window = { version = "0.13", optional = true }
 winit = { workspace = true, optional = true }
 
 # Optional allocators (native only)
-gpu-allocator = { version = "0.27", default-features = false, features = ["vulkan"], optional = true }
+gpu-allocator = { version = "0.28", default-features = false, features = ["vulkan"], optional = true }
 vk-mem = { version = "0.5", optional = true }
 
 [features]

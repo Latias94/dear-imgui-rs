@@ -14,6 +14,7 @@ pub mod image;
 pub mod inf_lines;
 pub mod line;
 pub mod pie;
+pub mod polygon;
 pub mod scatter;
 pub mod shaded;
 pub mod stairs;
@@ -22,6 +23,7 @@ pub mod text;
 
 use crate::sys;
 use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_slice_with_opt};
+use std::cell::RefCell;
 use std::os::raw::c_char;
 
 // Re-export all plot types for convenience
@@ -36,11 +38,16 @@ pub use image::*;
 pub use inf_lines::*;
 pub use line::*;
 pub use pie::*;
+pub use polygon::*;
 pub use scatter::*;
 pub use shaded::*;
 pub use stairs::*;
 pub use stems::*;
 pub use text::*;
+
+thread_local! {
+    static NEXT_PLOT_SPEC: RefCell<Option<sys::ImPlotSpec_c>> = RefCell::new(None);
+}
 
 fn color4(rgba: [f32; 4]) -> sys::ImVec4_c {
     sys::ImVec4_c {
@@ -357,13 +364,18 @@ pub(crate) fn default_plot_spec() -> sys::ImPlotSpec_c {
 
     sys::ImPlotSpec_c {
         LineColor: auto_col,
+        LineColors: std::ptr::null_mut(),
         LineWeight: 1.0,
         FillColor: auto_col,
+        FillColors: std::ptr::null_mut(),
         FillAlpha: 1.0,
         Marker: sys::ImPlotMarker_None as _,
         MarkerSize: 4.0,
+        MarkerSizes: std::ptr::null_mut(),
         MarkerLineColor: auto_col,
+        MarkerLineColors: std::ptr::null_mut(),
         MarkerFillColor: auto_col,
+        MarkerFillColors: std::ptr::null_mut(),
         Size: 4.0,
         Offset: 0,
         Stride: crate::IMPLOT_AUTO,
@@ -371,8 +383,18 @@ pub(crate) fn default_plot_spec() -> sys::ImPlotSpec_c {
     }
 }
 
+pub(crate) fn take_next_plot_spec() -> Option<sys::ImPlotSpec_c> {
+    NEXT_PLOT_SPEC.with(|cell| cell.borrow_mut().take())
+}
+
+pub(crate) fn set_next_plot_spec(spec: Option<sys::ImPlotSpec_c>) {
+    NEXT_PLOT_SPEC.with(|cell| {
+        *cell.borrow_mut() = spec;
+    })
+}
+
 pub(crate) fn plot_spec_from(flags: u32, offset: i32, stride: i32) -> sys::ImPlotSpec_c {
-    let mut spec = default_plot_spec();
+    let mut spec = take_next_plot_spec().unwrap_or_else(default_plot_spec);
     spec.Flags = flags as sys::ImPlotItemFlags;
     spec.Offset = offset;
     spec.Stride = stride;
@@ -428,6 +450,11 @@ pub enum PlotType<'a> {
         values: &'a [f64],
         center: (f64, f64),
         radius: f64,
+    },
+    Polygon {
+        label: &'a str,
+        x_data: &'a [f64],
+        y_data: &'a [f64],
     },
 }
 
@@ -505,6 +532,17 @@ impl<'a> PlotBuilder<'a> {
         }
     }
 
+    /// Create a polygon plot.
+    pub fn polygon(label: &'a str, x_data: &'a [f64], y_data: &'a [f64]) -> Self {
+        Self {
+            plot_type: PlotType::Polygon {
+                label,
+                x_data,
+                y_data,
+            },
+        }
+    }
+
     /// Build and plot the chart
     pub fn build(self) -> Result<(), PlotError> {
         match self.plot_type {
@@ -561,6 +599,15 @@ impl<'a> PlotBuilder<'a> {
                 radius,
             } => {
                 let plot = pie::PieChartPlot::new(labels, values, center.0, center.1, radius);
+                plot.validate()?;
+                plot.plot();
+            }
+            PlotType::Polygon {
+                label,
+                x_data,
+                y_data,
+            } => {
+                let plot = polygon::PolygonPlot::new(label, x_data, y_data);
                 plot.validate()?;
                 plot.plot();
             }

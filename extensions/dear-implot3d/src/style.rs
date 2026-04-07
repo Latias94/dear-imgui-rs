@@ -1,5 +1,26 @@
 use crate::flags::Marker3D;
 use crate::sys;
+use std::borrow::Cow;
+
+/// Colorable ImPlot3D style elements.
+#[repr(i32)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Plot3DColorElement {
+    TitleText = sys::ImPlot3DCol_TitleText as i32,
+    InlayText = sys::ImPlot3DCol_InlayText as i32,
+    FrameBg = sys::ImPlot3DCol_FrameBg as i32,
+    PlotBg = sys::ImPlot3DCol_PlotBg as i32,
+    PlotBorder = sys::ImPlot3DCol_PlotBorder as i32,
+    LegendBg = sys::ImPlot3DCol_LegendBg as i32,
+    LegendBorder = sys::ImPlot3DCol_LegendBorder as i32,
+    LegendText = sys::ImPlot3DCol_LegendText as i32,
+    AxisText = sys::ImPlot3DCol_AxisText as i32,
+    AxisGrid = sys::ImPlot3DCol_AxisGrid as i32,
+    AxisTick = sys::ImPlot3DCol_AxisTick as i32,
+    AxisBg = sys::ImPlot3DCol_AxisBg as i32,
+    AxisBgHovered = sys::ImPlot3DCol_AxisBgHovered as i32,
+    AxisBgActive = sys::ImPlot3DCol_AxisBgActive as i32,
+}
 
 #[inline]
 pub fn style_colors_dark() {
@@ -24,6 +45,13 @@ pub fn push_style_color(idx: i32, col: [f32; 4]) {
         sys::ImPlot3D_PushStyleColor_Vec4(idx, crate::imvec4(col[0], col[1], col[2], col[3]));
     }
 }
+
+/// Push a typed style color override.
+#[inline]
+pub fn push_style_color_element(element: Plot3DColorElement, col: [f32; 4]) {
+    push_style_color(element as i32, col);
+}
+
 #[inline]
 pub fn pop_style_color(count: i32) {
     unsafe { sys::ImPlot3D_PopStyleColor(count) }
@@ -84,6 +112,95 @@ pub fn set_next_marker_style(
         spec.MarkerLineColor = crate::imvec4(outline[0], outline[1], outline[2], outline[3]);
         spec.LineWeight = weight;
     })
+}
+
+/// One-shot array-backed item style overrides for the next ImPlot3D submission.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Plot3DItemArrayStyle<'a> {
+    line_colors: Option<Cow<'a, [u32]>>,
+    fill_colors: Option<Cow<'a, [u32]>>,
+    marker_sizes: Option<Cow<'a, [f32]>>,
+    marker_line_colors: Option<Cow<'a, [u32]>>,
+    marker_fill_colors: Option<Cow<'a, [u32]>>,
+}
+
+impl<'a> Plot3DItemArrayStyle<'a> {
+    /// Create an empty array-style override.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Override per-index line colors using Dear ImGui packed colors (`ImU32` / ABGR).
+    pub fn with_line_colors(mut self, colors: &'a [u32]) -> Self {
+        self.line_colors = Some(Cow::Borrowed(colors));
+        self
+    }
+
+    /// Override per-index fill colors using Dear ImGui packed colors (`ImU32` / ABGR).
+    pub fn with_fill_colors(mut self, colors: &'a [u32]) -> Self {
+        self.fill_colors = Some(Cow::Borrowed(colors));
+        self
+    }
+
+    /// Override per-index marker sizes in pixels.
+    pub fn with_marker_sizes(mut self, sizes: &'a [f32]) -> Self {
+        self.marker_sizes = Some(Cow::Borrowed(sizes));
+        self
+    }
+
+    /// Override per-index marker outline colors using Dear ImGui packed colors (`ImU32` / ABGR).
+    pub fn with_marker_line_colors(mut self, colors: &'a [u32]) -> Self {
+        self.marker_line_colors = Some(Cow::Borrowed(colors));
+        self
+    }
+
+    /// Override per-index marker fill colors using Dear ImGui packed colors (`ImU32` / ABGR).
+    pub fn with_marker_fill_colors(mut self, colors: &'a [u32]) -> Self {
+        self.marker_fill_colors = Some(Cow::Borrowed(colors));
+        self
+    }
+
+    fn apply_to_spec(&self, spec: &mut sys::ImPlot3DSpec_c) {
+        spec.LineColors = self
+            .line_colors
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
+        spec.FillColors = self
+            .fill_colors
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
+        spec.MarkerSizes = self
+            .marker_sizes
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |sizes| sizes.as_ptr() as *mut _);
+        spec.MarkerLineColors = self
+            .marker_line_colors
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
+        spec.MarkerFillColors = self
+            .marker_fill_colors
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
+    }
+}
+
+/// Apply array-backed item styling to the next ImPlot3D submission executed inside `f`.
+pub fn with_next_plot3d_item_array_style<'a, R>(
+    style: Plot3DItemArrayStyle<'a>,
+    f: impl FnOnce() -> R,
+) -> R {
+    let previous = crate::take_next_plot3d_spec();
+    let mut spec = previous.unwrap_or_else(crate::default_plot3d_spec);
+    style.apply_to_spec(&mut spec);
+    crate::set_next_plot3d_spec(Some(spec));
+
+    let out = f();
+
+    if crate::take_next_plot3d_spec().is_some() {
+        crate::set_next_plot3d_spec(previous);
+    }
+
+    out
 }
 
 #[inline]
@@ -198,5 +315,51 @@ pub fn next_colormap_color() -> [f32; 4] {
     unsafe {
         let out = crate::compat_ffi::ImPlot3D_NextColormapColor();
         [out.x, out.y, out.z, out.w]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Plot3DItemArrayStyle, with_next_plot3d_item_array_style};
+
+    #[test]
+    fn next_plot3d_item_array_style_is_consumed_by_next_spec() {
+        let line_colors = [0x01020304u32, 0x05060708];
+        let marker_sizes = [1.5f32, 2.5];
+        let marker_fill_colors = [0x11223344u32];
+
+        with_next_plot3d_item_array_style(
+            Plot3DItemArrayStyle::new()
+                .with_line_colors(&line_colors)
+                .with_marker_sizes(&marker_sizes)
+                .with_marker_fill_colors(&marker_fill_colors),
+            || {
+                let spec = crate::plot3d_spec_from(9, 2, 24);
+                assert_eq!(spec.Flags, 9);
+                assert_eq!(spec.Offset, 2);
+                assert_eq!(spec.Stride, 24);
+                assert_eq!(spec.LineColors, line_colors.as_ptr() as *mut _);
+                assert_eq!(spec.MarkerSizes, marker_sizes.as_ptr() as *mut _);
+                assert_eq!(spec.MarkerFillColors, marker_fill_colors.as_ptr() as *mut _);
+            },
+        );
+
+        let spec = crate::plot3d_spec_from(0, 0, -1);
+        assert!(spec.LineColors.is_null());
+        assert!(spec.MarkerSizes.is_null());
+        assert!(spec.MarkerFillColors.is_null());
+    }
+
+    #[test]
+    fn next_plot3d_item_array_style_is_restored_if_unused() {
+        let fill_colors = [0xAABBCCDDu32];
+
+        with_next_plot3d_item_array_style(
+            Plot3DItemArrayStyle::new().with_fill_colors(&fill_colors),
+            || {},
+        );
+
+        let spec = crate::plot3d_spec_from(0, 0, -1);
+        assert!(spec.FillColors.is_null());
     }
 }

@@ -631,15 +631,16 @@ impl Default for ImGuiStorage {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiListClipper {
-    pub Ctx: *mut ImGuiContext,
     pub DisplayStart: ::std::os::raw::c_int,
     pub DisplayEnd: ::std::os::raw::c_int,
+    pub UserIndex: ::std::os::raw::c_int,
     pub ItemsCount: ::std::os::raw::c_int,
     pub ItemsHeight: f32,
+    pub Flags: ImGuiListClipperFlags,
     pub StartPosY: f64,
     pub StartSeekOffsetY: f64,
+    pub Ctx: *mut ImGuiContext,
     pub TempData: *mut ::std::os::raw::c_void,
-    pub Flags: ImGuiListClipperFlags,
 }
 impl Default for ImGuiListClipper {
     fn default() -> Self {
@@ -2003,7 +2004,8 @@ pub struct ImGuiInputTextState {
     pub CursorFollow: bool,
     pub CursorCenterY: bool,
     pub SelectedAllMouseLock: bool,
-    pub Edited: bool,
+    pub EditedBefore: bool,
+    pub EditedThisFrame: bool,
     pub WantReloadUserBuf: bool,
     pub LastMoveDirectionLR: ImS8,
     pub ReloadSelectionStart: ::std::os::raw::c_int,
@@ -3332,7 +3334,7 @@ pub struct ImGuiViewportP {
     pub LastAlpha: f32,
     pub LastFocusedHadNavWindow: bool,
     pub PlatformMonitor: ::std::os::raw::c_short,
-    pub BgFgDrawListsLastFrame: [::std::os::raw::c_int; 2usize],
+    pub BgFgDrawListsLastTimeActive: [f32; 2usize],
     pub BgFgDrawLists: [*mut ImDrawList; 2usize],
     pub DrawDataP: ImDrawData,
     pub DrawDataBuilder: ImDrawDataBuilder,
@@ -3524,6 +3526,13 @@ impl Default for ImGuiContextHook {
         }
     }
 }
+pub type ImGuiDemoMarkerCallback = ::std::option::Option<
+    unsafe extern "C" fn(
+        file: *const ::std::os::raw::c_char,
+        line: ::std::os::raw::c_int,
+        section: *const ::std::os::raw::c_char,
+    ),
+>;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImFontAtlasPtr {
@@ -4994,8 +5003,9 @@ pub struct ImGuiTable {
     pub ResizedColumn: ImGuiTableColumnIdx,
     pub LastResizedColumn: ImGuiTableColumnIdx,
     pub HeldHeaderColumn: ImGuiTableColumnIdx,
+    pub LastHeldHeaderColumn: ImGuiTableColumnIdx,
     pub ReorderColumn: ImGuiTableColumnIdx,
-    pub ReorderColumnDir: ImGuiTableColumnIdx,
+    pub ReorderColumnDstOrder: ImGuiTableColumnIdx,
     pub LeftMostEnabledColumn: ImGuiTableColumnIdx,
     pub RightMostEnabledColumn: ImGuiTableColumnIdx,
     pub LeftMostStretchedColumn: ImGuiTableColumnIdx,
@@ -5578,6 +5588,7 @@ pub type ImPlotItemFlags = ::std::os::raw::c_int;
 pub type ImPlotLineFlags = ::std::os::raw::c_int;
 pub type ImPlotScatterFlags = ::std::os::raw::c_int;
 pub type ImPlotBubblesFlags = ::std::os::raw::c_int;
+pub type ImPlotPolygonFlags = ::std::os::raw::c_int;
 pub type ImPlotStairsFlags = ::std::os::raw::c_int;
 pub type ImPlotShadedFlags = ::std::os::raw::c_int;
 pub type ImPlotBarsFlags = ::std::os::raw::c_int;
@@ -5601,17 +5612,22 @@ pub type ImPlotColormap = ::std::os::raw::c_int;
 pub type ImPlotLocation = ::std::os::raw::c_int;
 pub type ImPlotBin = ::std::os::raw::c_int;
 pub const ImPlotProp_LineColor: ImPlotProp_ = 0;
-pub const ImPlotProp_LineWeight: ImPlotProp_ = 1;
-pub const ImPlotProp_FillColor: ImPlotProp_ = 2;
-pub const ImPlotProp_FillAlpha: ImPlotProp_ = 3;
-pub const ImPlotProp_Marker: ImPlotProp_ = 4;
-pub const ImPlotProp_MarkerSize: ImPlotProp_ = 5;
-pub const ImPlotProp_MarkerLineColor: ImPlotProp_ = 6;
-pub const ImPlotProp_MarkerFillColor: ImPlotProp_ = 7;
-pub const ImPlotProp_Size: ImPlotProp_ = 8;
-pub const ImPlotProp_Offset: ImPlotProp_ = 9;
-pub const ImPlotProp_Stride: ImPlotProp_ = 10;
-pub const ImPlotProp_Flags: ImPlotProp_ = 11;
+pub const ImPlotProp_LineColors: ImPlotProp_ = 1;
+pub const ImPlotProp_LineWeight: ImPlotProp_ = 2;
+pub const ImPlotProp_FillColor: ImPlotProp_ = 3;
+pub const ImPlotProp_FillColors: ImPlotProp_ = 4;
+pub const ImPlotProp_FillAlpha: ImPlotProp_ = 5;
+pub const ImPlotProp_Marker: ImPlotProp_ = 6;
+pub const ImPlotProp_MarkerSize: ImPlotProp_ = 7;
+pub const ImPlotProp_MarkerSizes: ImPlotProp_ = 8;
+pub const ImPlotProp_MarkerLineColor: ImPlotProp_ = 9;
+pub const ImPlotProp_MarkerLineColors: ImPlotProp_ = 10;
+pub const ImPlotProp_MarkerFillColor: ImPlotProp_ = 11;
+pub const ImPlotProp_MarkerFillColors: ImPlotProp_ = 12;
+pub const ImPlotProp_Size: ImPlotProp_ = 13;
+pub const ImPlotProp_Offset: ImPlotProp_ = 14;
+pub const ImPlotProp_Stride: ImPlotProp_ = 15;
+pub const ImPlotProp_Flags: ImPlotProp_ = 16;
 pub type ImPlotProp_ = ::std::os::raw::c_int;
 pub const ImPlotFlags_None: ImPlotFlags_ = 0;
 pub const ImPlotFlags_NoTitle: ImPlotFlags_ = 1;
@@ -5701,6 +5717,9 @@ pub const ImPlotScatterFlags_NoClip: ImPlotScatterFlags_ = 1024;
 pub type ImPlotScatterFlags_ = ::std::os::raw::c_int;
 pub const ImPlotBubblesFlags_None: ImPlotBubblesFlags_ = 0;
 pub type ImPlotBubblesFlags_ = ::std::os::raw::c_int;
+pub const ImPlotPolygonFlags_None: ImPlotPolygonFlags_ = 0;
+pub const ImPlotPolygonFlags_Concave: ImPlotPolygonFlags_ = 1024;
+pub type ImPlotPolygonFlags_ = ::std::os::raw::c_int;
 pub const ImPlotStairsFlags_None: ImPlotStairsFlags_ = 0;
 pub const ImPlotStairsFlags_PreStep: ImPlotStairsFlags_ = 1024;
 pub const ImPlotStairsFlags_Shaded: ImPlotStairsFlags_ = 2048;
@@ -5727,6 +5746,7 @@ pub const ImPlotPieChartFlags_None: ImPlotPieChartFlags_ = 0;
 pub const ImPlotPieChartFlags_Normalize: ImPlotPieChartFlags_ = 1024;
 pub const ImPlotPieChartFlags_IgnoreHidden: ImPlotPieChartFlags_ = 2048;
 pub const ImPlotPieChartFlags_Exploding: ImPlotPieChartFlags_ = 4096;
+pub const ImPlotPieChartFlags_NoSliceBorder: ImPlotPieChartFlags_ = 8192;
 pub type ImPlotPieChartFlags_ = ::std::os::raw::c_int;
 pub const ImPlotHeatmapFlags_None: ImPlotHeatmapFlags_ = 0;
 pub const ImPlotHeatmapFlags_ColMajor: ImPlotHeatmapFlags_ = 1024;
@@ -5843,20 +5863,34 @@ pub const ImPlotBin_Rice: ImPlotBin_ = -3;
 pub const ImPlotBin_Scott: ImPlotBin_ = -4;
 pub type ImPlotBin_ = ::std::os::raw::c_int;
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImPlotSpec_c {
     pub LineColor: ImVec4_c,
+    pub LineColors: *mut ImU32,
     pub LineWeight: f32,
     pub FillColor: ImVec4_c,
+    pub FillColors: *mut ImU32,
     pub FillAlpha: f32,
     pub Marker: ImPlotMarker,
     pub MarkerSize: f32,
+    pub MarkerSizes: *mut f32,
     pub MarkerLineColor: ImVec4_c,
+    pub MarkerLineColors: *mut ImU32,
     pub MarkerFillColor: ImVec4_c,
+    pub MarkerFillColors: *mut ImU32,
     pub Size: f32,
     pub Offset: ::std::os::raw::c_int,
     pub Stride: ::std::os::raw::c_int,
     pub Flags: ImPlotItemFlags,
+}
+impl Default for ImPlotSpec_c {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
 }
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -6465,7 +6499,7 @@ impl Default for ImPlotNextPlotData {
     }
 }
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImPlotNextItemData {
     pub Spec: ImPlotSpec_c,
     pub RenderLine: bool,
@@ -6476,6 +6510,15 @@ pub struct ImPlotNextItemData {
     pub HasHidden: bool,
     pub Hidden: bool,
     pub HiddenCond: ImPlotCond,
+}
+impl Default for ImPlotNextItemData {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -6696,6 +6739,14 @@ unsafe extern "C" {
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
     pub fn ImPlotSpec_SetProp_U64(self_: *mut ImPlotSpec, prop: ImPlotProp, v: ImU64);
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlotSpec_SetProp_U32Ptr(self_: *mut ImPlotSpec, prop: ImPlotProp, v: *mut ImU32);
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlotSpec_SetProp_FloatPtr(self_: *mut ImPlotSpec, prop: ImPlotProp, v: *mut f32);
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
@@ -7657,6 +7708,106 @@ unsafe extern "C" {
         xs: *const ImU64,
         ys: *const ImU64,
         szs: *const ImU64,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_FloatPtr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const f32,
+        ys: *const f32,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_doublePtr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const f64,
+        ys: *const f64,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_S8Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const ImS8,
+        ys: *const ImS8,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_U8Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const ImU8,
+        ys: *const ImU8,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_S16Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const ImS16,
+        ys: *const ImS16,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_U16Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const ImU16,
+        ys: *const ImU16,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_S32Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const ImS32,
+        ys: *const ImS32,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_U32Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const ImU32,
+        ys: *const ImU32,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_S64Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const ImS64,
+        ys: *const ImS64,
+        count: ::std::os::raw::c_int,
+        spec: ImPlotSpec_c,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImPlot_PlotPolygon_U64Ptr(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const ImU64,
+        ys: *const ImU64,
         count: ::std::os::raw::c_int,
         spec: ImPlotSpec_c,
     );

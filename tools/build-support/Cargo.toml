@@ -14,7 +14,7 @@ name = "build_support"
 path = "src/lib.rs"
 
 [dependencies]
-ureq = { version = "3.1", default-features = false, features = ["rustls"], optional = true }
+ureq = { version = "3.3", default-features = false, features = ["rustls"], optional = true }
 flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 

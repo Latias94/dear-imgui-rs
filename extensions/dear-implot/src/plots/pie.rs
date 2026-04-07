@@ -96,6 +96,12 @@ impl<'a> PieChartPlot<'a> {
         self
     }
 
+    /// Draw slices without the per-slice border stroke.
+    pub fn no_slice_border(mut self) -> Self {
+        self.flags |= PieChartFlags::NO_SLICE_BORDER;
+        self
+    }
+
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
         if self.values.is_empty() {
@@ -246,6 +252,12 @@ impl<'a> PieChartPlotF32<'a> {
     /// Enable exploding effect for legend-hovered slices
     pub fn exploding(mut self) -> Self {
         self.flags |= PieChartFlags::EXPLODING;
+        self
+    }
+
+    /// Draw slices without the per-slice border stroke.
+    pub fn no_slice_border(mut self) -> Self {
+        self.flags |= PieChartFlags::NO_SLICE_BORDER;
         self
     }
 

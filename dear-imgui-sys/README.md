@@ -4,13 +4,13 @@ Low-level Rust bindings for Dear ImGui via cimgui (C API) + bindgen.
 
 ## Overview
 
-This crate provides unsafe Rust bindings to Dear ImGui v1.92.6 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. By using cimgui's C interface instead of directly binding to the C++ API, we avoid C++ ABI compatibility issues for the core `ig*` API while maintaining full access to Dear ImGui's functionality.
+This crate provides unsafe Rust bindings to Dear ImGui v1.92.7 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. By using cimgui's C interface instead of directly binding to the C++ API, we avoid C++ ABI compatibility issues for the core `ig*` API while maintaining full access to Dear ImGui's functionality.
 
 ## Key Features
 
 - **cimgui C API**: Clean C interface eliminates C++ ABI issues across platforms and compilers
 - **Docking Support**: Full support for docking and multi-viewport features (multi-viewport WIP)
-- **Modern Dear ImGui**: Based on Dear ImGui v1.92.6 docking branch
+- **Modern Dear ImGui**: Based on Dear ImGui v1.92.7 docking branch
 - **Cross-platform**: Consistent builds on Windows (MSVC/MinGW), Linux, macOS, and WebAssembly
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for docs.rs and offline environments
@@ -130,10 +130,10 @@ This is a low-level sys crate providing unsafe FFI bindings. Most users should u
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.10"
+dear-imgui-sys = "0.11.0"
 
 # Enable features as needed
-dear-imgui-sys = { version = "0.10", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "0.11.0", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -166,7 +166,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.10", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.11.0", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose modules such as:
@@ -265,8 +265,8 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-rs = "0.10"
-   dear-imgui-sys = { version = "0.10", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-rs = "0.11.0"
+   dear-imgui-sys = { version = "0.11.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use `dear-imgui-rs` for the safe core (`Context`, IO, frame lifecycle,
@@ -322,8 +322,8 @@ This crate uses [cimgui](https://github.com/cimgui/cimgui) as the C API layer:
 
 ### Version Information
 
-- **Dear ImGui Version**: v1.92.6 (docking branch)
-- **cimgui Version**: Latest compatible with Dear ImGui v1.92.6
+- **Dear ImGui Version**: v1.92.7 (docking branch)
+- **cimgui Version**: Latest compatible with Dear ImGui v1.92.7
 - **Supported Features**: Docking, multi-viewport (WIP), FreeType font rendering
 
 ### Environment Variables

@@ -523,6 +523,13 @@ impl Style {
         self.inner_mut().TreeLinesRounding = v;
     }
 
+    pub fn separator_size(&self) -> f32 {
+        self.inner().SeparatorSize
+    }
+    pub fn set_separator_size(&mut self, v: f32) {
+        self.inner_mut().SeparatorSize = v;
+    }
+
     pub fn separator_text_border_size(&self) -> f32 {
         self.inner().SeparatorTextBorderSize
     }
@@ -791,6 +798,8 @@ pub enum StyleVar {
     ButtonTextAlign([f32; 2]),
     /// Alignment of selectable text when selectable is larger than text
     SelectableTextAlign([f32; 2]),
+    /// Thickness of border in `Separator()`
+    SeparatorSize(f32),
 }
 
 /// Which base preset to start from when applying a [`Theme`].
@@ -848,6 +857,7 @@ pub struct StyleTweaks {
     pub grab_min_size: Option<f32>,
 
     pub indent_spacing: Option<f32>,
+    pub separator_size: Option<f32>,
     pub scrollbar_rounding: Option<f32>,
     pub grab_rounding: Option<f32>,
     pub window_border_size: Option<f32>,
@@ -876,6 +886,7 @@ impl Default for StyleTweaks {
             scrollbar_size: None,
             grab_min_size: None,
             indent_spacing: None,
+            separator_size: None,
             scrollbar_rounding: None,
             grab_rounding: None,
             window_border_size: None,
@@ -929,6 +940,9 @@ impl StyleTweaks {
 
         if let Some(v) = self.indent_spacing {
             style.set_indent_spacing(v);
+        }
+        if let Some(v) = self.separator_size {
+            style.set_separator_size(v);
         }
         if let Some(v) = self.scrollbar_rounding {
             style.set_scrollbar_rounding(v);

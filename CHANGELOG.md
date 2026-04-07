@@ -7,14 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Target release train: `0.11.0`.
+
+### Removed
+
+- Extensions
+  - `dear-imnodes`: remove the deprecated `EditorContext` methods that relied on the global current ImNodes context, as well as `EditorContext::create/try_create`. Use `Context::{create_editor_context,try_create_editor_context}` and `Context::bind_editor(&editor)` instead.
+
 ### Added
 
+- Core (`dear-imgui-rs`)
+  - Expose the new Dear ImGui v1.92.7 surface in the safe API with `Ui::tree_node_get_open()`, `Viewport::debug_name()`, `StyleVar::SeparatorSize`, `ButtonFlags::ALLOW_OVERLAP`, and updated `MultiSelectFlags` names/compatibility aliases for the upstream `SelectOnAuto` rename.
 - Core (`dear-imgui-sys`)
   - Replace the provisional `raw_backend::{win32, dx11, android, opengl3}` surface with `backend_shim::{win32, dx11, android, opengl3}` behind `backend-shim-*` feature gates. The sys crate now owns the repository-defined C shim ABI for self-contained official backends instead of exposing direct declarations for upstream C++ backend symbols (PR #23, thanks @EtherealPsyche).
   - Extend that backend shim surface with feature-gated `backend_shim::sdlrenderer3` support for Dear ImGui's official SDLRenderer3 backend, including SDL3 header discovery for both system-provided SDL3 installs and `sdl3-sys` build-from-source outputs (PR #24, thanks @flowkclav).
 - Extensions
+  - `dear-implot`: add safe `PlotUi::plot_polygon()` / `PlotBuilder::polygon()` wrappers for upstream `PlotPolygon`, plus the new `PolygonFlags`.
   - `dear-implot`: add unified ImPlot v0.18 spec-backed item styling helpers across all `ImPlotSpec`-backed plot builders via `PlotItemStyle` / `PlotItemStyled`, including direct builder methods such as `with_line_color`, `with_fill_alpha`, `with_marker`, and `with_size`. This closes the high-level Rust API gap where plot item color/alpha styling was available in the C bindings but not exposed consistently by the safe layer (addresses #26, thanks @sstscrypto).
+  - `dear-implot`: add `PieChartFlags::NO_SLICE_BORDER` plus closure-scoped `PlotItemArrayStyle` / `with_next_plot_item_array_style(...)` helpers for the new upstream per-index `ImPlotSpec` arrays (`LineColors`, `FillColors`, `MarkerSizes`, `MarkerLineColors`, `MarkerFillColors`) without introducing dangling pointer hazards into the safe API.
   - `dear-implot3d`: add unified `ImPlot3DSpec`-backed item styling helpers across spec-backed plot builders via `Plot3DItemStyle` / `Plot3DItemStyled`, covering both `plots::*` items and `Plot3DUi` builders such as `surface_f32()`, `image_by_axes()`, and `mesh()`. Also expose `Marker3D::Auto` so the safe API can round-trip ImPlot3D's default automatic marker selection.
+  - `dear-implot3d`: add typed `Plot3DColorElement` values for style colors, including the new axis background slots, plus closure-scoped `Plot3DItemArrayStyle` / `with_next_plot3d_item_array_style(...)` helpers for the new upstream per-index `ImPlot3DSpec` arrays.
   - `dear-implot3d`: wire `Item3DFlags` into spec-backed plot wrappers/builders via `with_item_flags(...)`, so common `NO_LEGEND` / `NO_FIT` flags can now be composed from the safe API instead of remaining a defined-but-unreachable flag set.
 - Backends
   - `dear-imgui-sdl3`: add optional `sdlrenderer3-renderer` support and wrapper APIs for the official SDL3 + SDLRenderer3 path, including `init_for_canvas` / `canvas_new_frame` / `canvas_render` / `shutdown_for_canvas`.
@@ -28,15 +40,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Core (`dear-imgui-sys`)
+  - Upgrade vendored `cimgui` `docking_inter` to Dear ImGui v1.92.7 and regenerate native + import-style WASM bindings.
 - Core (`dear-imgui-rs`)
   - Keep backend shim feature gates in `dear-imgui-sys` only; the safe crate does not re-export backend-specific toggles until it owns corresponding safe wrappers.
 - Extensions
+  - `dear-implot-sys` / `dear-implot3d-sys`: refresh the vendored `cimplot` / `cimplot3d` submodules and regenerate native + WASM bindings.
+  - `dear-implot` / `dear-implot3d`: initialize the new upstream `ImPlotSpec` / `ImPlot3DSpec` array fields in the safe wrapper defaults so spec-backed plots remain ABI-correct after the latest `cimplot` / `cimplot3d` updates.
+  - `dear-implot3d`: adapt the safe `mesh()` wrapper to the new typed `ImPlot3D_PlotMesh_*Ptr` entry points while preserving the existing Rust-facing API shape.
   - `dear-implot`: standardize plot-item styling so `LinePlot`, `ScatterPlot`, `BarPlot`, `HistogramPlot`, `HeatmapPlot`, `ErrorBarsPlot`, `ShadedPlot`, `StairsPlot`, `StemPlot`, `TextPlot`, and other `ImPlotSpec`-based builders now share the same styling surface instead of mixing per-type convenience methods with raw style-object-only paths.
   - `dear-implot`: let `ShadedBetweenPlot` configure `offset` / `stride` like other spec-backed line-style builders, and remove an outdated comment that still described the old pre-wrapper state.
 - Core (`dear-imgui-sys`)
   - Link `GLESv3` for the Android OpenGL3 backend shim so downstream Android `NativeActivity` binaries can load successfully before the application creates its own EGL / GLES context.
   - Expand the crate and module documentation around `backend_shim` so the repository-owned shim ABI, Android low-level route, and ownership split with application packaging are explicit in the main docs.
 - Backends
+  - Re-verify the existing backend crates against the Dear ImGui v1.92.7 / cimgui refresh. No additional backend API surface changes were required for this upstream bump.
   - `dear-imgui-wgpu`: add feature-gated support for `wgpu` v29, make `wgpu-29` the default backend path, and keep `wgpu-28` / `wgpu-27` as explicit compatibility features.
   - `dear-imgui-sdl3`: keep SDL3-specific wrapper/build ownership in the backend crate, but route the optional official OpenGL3 renderer path through `dear-imgui-sys::backend_shim::opengl3` instead of compiling a second local OpenGL3 shim layer.
   - `dear-imgui-sdl3`: stop forcing `sdl3/build-from-source` on Android from the backend crate itself. Android SDL3 acquisition now remains application-owned: consumers may either provide `SDL3_INCLUDE_DIR` or opt into `sdl3/build-from-source` in their own dependency graph.
@@ -68,6 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Dependencies
 
 - Workspace
+  - Upgrade direct dependency baselines to `bitflags` 2.11, `winit` 0.30.13, `glow` 0.17, `wasm-bindgen` 0.2.117, and `bytemuck` 1.25.
+  - Upgrade `dear-imgui-ash`'s optional `gpu-allocator` integration to 0.28.
+  - Upgrade ancillary direct dependencies including `ureq` 3.3 and `regex` 1.12 where used in workspace tooling/extensions.
   - Bump the default `wgpu` baseline to v29.
 
 ## [0.10.4] - 2026-03-17

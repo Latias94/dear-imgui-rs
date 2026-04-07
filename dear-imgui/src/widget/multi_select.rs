@@ -57,8 +57,17 @@ bitflags::bitflags! {
         const SCOPE_WINDOW = sys::ImGuiMultiSelectFlags_ScopeWindow as i32;
         /// Scope is a rectangular region between `BeginMultiSelect()`/`EndMultiSelect()`.
         const SCOPE_RECT = sys::ImGuiMultiSelectFlags_ScopeRect as i32;
-        /// Apply selection to items on mouse down.
-        const SELECT_ON_CLICK = sys::ImGuiMultiSelectFlags_SelectOnClick as i32;
+        /// Apply selection using Dear ImGui's default click behavior.
+        ///
+        /// This maps to `SelectOnAuto`, which upstream now exposes explicitly.
+        const SELECT_ON_AUTO = sys::ImGuiMultiSelectFlags_SelectOnAuto as i32;
+        /// Backward-compatible alias for Dear ImGui's default click behavior.
+        ///
+        /// Upstream renamed `SelectOnClick` to `SelectOnAuto`.
+        const SELECT_ON_CLICK = sys::ImGuiMultiSelectFlags_SelectOnAuto as i32;
+        /// Apply selection on mouse down for any clicked item.
+        const SELECT_ON_CLICK_ALWAYS =
+            sys::ImGuiMultiSelectFlags_SelectOnClickAlways as i32;
         /// Apply selection on mouse release (allows dragging without altering selection).
         const SELECT_ON_CLICK_RELEASE =
             sys::ImGuiMultiSelectFlags_SelectOnClickRelease as i32;

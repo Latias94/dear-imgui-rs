@@ -20,13 +20,18 @@ renderer.render_draw_data(&imgui.render(), &mut render_pass)?;
 
 ## Selecting wgpu version
 
-By default this crate uses `wgpu` v28.
+By default this crate uses `wgpu` v29.
 
-If your ecosystem is pinned to `wgpu` v27 (e.g. a release train), select it explicitly:
+If your ecosystem is pinned to `wgpu` v28 or `wgpu` v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.10", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "0.11.0", default-features = false, features = ["wgpu-28"] }
+```
+
+```toml
+[dependencies]
+dear-imgui-wgpu = { version = "0.11.0", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
@@ -45,9 +50,9 @@ dear-imgui-wgpu = { version = "0.10", default-features = false, features = ["wgp
 
 | Item            | Version |
 |-----------------|---------|
-| Crate           | 0.10.x   |
-| dear-imgui-rs   | 0.10.x   |
-| wgpu            | 28 (default), 27 (feature `wgpu-27`) |
+| Crate           | 0.11.0   |
+| dear-imgui-rs   | 0.11.0   |
+| wgpu            | 29 (default), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -60,10 +65,12 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 - Default: no extra features required for native builds
 - WGPU version selection (mutually exclusive)
-  - `wgpu-28` (default)
+  - `wgpu-29` (default)
+  - `wgpu-28`
   - `wgpu-27`
 - WASM targets
-  - `webgl` / `webgpu` select the WASM route for the default `wgpu-28` build
+  - `webgl` / `webgpu` select the WASM route for the default `wgpu-29` build
+  - With `wgpu-28`, use `webgl-wgpu28` / `webgpu-wgpu28` instead
   - With `wgpu-27`, use `webgl-wgpu27` / `webgpu-wgpu27` instead
 
 Pick exactly one of `webgl` or `webgpu` for browser targets; for native leave both off.
