@@ -224,12 +224,12 @@ fn ensure_imgui_test_engine_enabled() {
     }
 }
 
-fn use_pregenerated_bindings(out_dir: &Path) -> bool {
+fn use_pregenerated_bindings(manifest_dir: &Path, out_dir: &Path) -> bool {
     if parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
         return false;
     }
 
-    let preg = Path::new("src").join("bindings_pregenerated.rs");
+    let preg = manifest_dir.join("src").join("bindings_pregenerated.rs");
     if !preg.exists() {
         return false;
     }
@@ -256,7 +256,7 @@ fn docsrs_build(cfg: &BuildConfig) {
     println!("cargo:warning=DOCS_RS detected: generating bindings, skipping native build");
     println!("cargo:rustc-cfg=docsrs");
 
-    if use_pregenerated_bindings(&cfg.out_dir) {
+    if use_pregenerated_bindings(&cfg.manifest_dir, &cfg.out_dir) {
         return;
     }
 
@@ -332,7 +332,7 @@ fn main() {
     // Allow skipping native compilation even if submodules/sources are not available.
     // This is useful for cross-target `cargo check` or constrained environments.
     if env::var("IMGUI_TEST_ENGINE_SYS_SKIP_CC").is_ok() {
-        if !use_pregenerated_bindings(&cfg.out_dir) {
+        if !use_pregenerated_bindings(&cfg.manifest_dir, &cfg.out_dir) {
             panic!(
                 "IMGUI_TEST_ENGINE_SYS_SKIP_CC is set but no pregenerated bindings were found. \
                  Please ensure src/bindings_pregenerated.rs exists, or unset IMGUI_TEST_ENGINE_SYS_SKIP_CC."

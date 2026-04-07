@@ -121,7 +121,7 @@ Centralize all prebuilt download/extract/naming logic via the shared helper crat
 - Depend on `dear-imgui-build-support` in your `-sys` crate as a build-dependency:
   ```toml
   [build-dependencies]
-  build-support = { package = "dear-imgui-build-support", version = "0.2" }
+  build-support = { package = "dear-imgui-build-support", version = "0.11" }
   ```
 
 - In `build.rs`, prefer the helpers instead of duplicating logic:

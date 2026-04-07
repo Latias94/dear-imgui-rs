@@ -92,6 +92,7 @@ simplifies publishing around the Python release scripts.
   - Add platform notes and README navigation for the new iOS/Android smoke templates, including a checked-in iOS Simulator screenshot for the SDL3 iOS smoke path.
 - Tooling
   - Remove the `release-plz` release path and keep the repository's Python publishing scripts as the single source of truth for release automation and publish order.
+  - Fix the `dear-imgui-test-engine-sys` pregenerated-bindings path handling so the standard bindings refresh flow works from the workspace root, and align the repository's `imgui_test_engine` update defaults with upstream `main`.
 
 ### Fixed
 
@@ -104,6 +105,7 @@ simplifies publishing around the Python release scripts.
   - `dear-implot`: wire `ErrorBarsPlot::horizontal()` to `ImPlotErrorBarsFlags_Horizontal`, add matching `horizontal()` plus `with_offset()` / `with_stride()` on `AsymmetricErrorBarsPlot`, and route simple line/scatter/shaded/stairs/stems builders through the existing single-array ImPlot C bindings instead of allocating temporary X-coordinate buffers.
   - `dear-implot`: finish aligning the remaining `Simple*Plot` builders with their full-builder counterparts by threading through the relevant plot/item flags on simple line/scatter/stem/shaded/error-bar/bar-group helpers as well.
   - `dear-file-browser`: keep the built-in view/column controls aligned with thumbnail backend availability, so the standard toolbar, IGFD-style chrome, and `Columns...` popup no longer offer thumbnail-only toggles when no thumbnail backend is attached.
+  - `dear-imgui-test-engine-sys`: refresh the vendored `imgui_test_engine` submodule to the latest upstream `main` compatible with the Dear ImGui v1.92.7 upgrade and regenerate pregenerated bindings.
 
 ### CI
 

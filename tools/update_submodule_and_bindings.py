@@ -34,7 +34,7 @@ Usage examples:
         --submodules update \
         --cimgui-branch docking_inter --cimplot-branch master \
         --cimnodes-branch master --cimguizmo-branch master \
-        --imgui-test-engine-branch master
+        --imgui-test-engine-branch main
 
   - Only regenerate pregenerated bindings without touching submodules:
       python3 tools/update_submodule_and_bindings.py --crates dear-implot-sys,dear-imnodes-sys \
@@ -96,7 +96,7 @@ def main() -> int:
     parser.add_argument("--cimguizmo-branch", default="master", help="Branch for cimguizmo submodule (dear-imguizmo-sys)")
     parser.add_argument(
         "--imgui-test-engine-branch",
-        default="master",
+        default="main",
         help="Branch for imgui_test_engine submodule (dear-imgui-test-engine-sys)",
     )
     parser.add_argument("--remote", default="origin", help="Remote name for submodules")
@@ -184,8 +184,14 @@ def main() -> int:
     target_dir = Path(env_base.get("CARGO_TARGET_DIR", repo_root / "target"))
     for crate in crates:
         env = env_base.copy()
-        env[crate_skip_env[crate]] = "1"
-        print(f"Generating bindings for {crate} (skip native build)...")
+        if crate != "dear-imgui-test-engine-sys":
+            env[crate_skip_env[crate]] = "1"
+            print(f"Generating bindings for {crate} (skip native build)...")
+        else:
+            # dear-imgui-test-engine-sys can regenerate bindings directly via
+            # DEAR_IMGUI_RS_REGEN_BINDINGS, but its build.rs intentionally
+            # rejects the SKIP_CC path when regeneration is requested.
+            print(f"Generating bindings for {crate} (regen-only build)...")
         rc = run(["cargo", "build", "-p", crate, *profile_flag], cwd=str(repo_root), env=env, dry=args.dry_run)
         if rc != 0:
             return rc
