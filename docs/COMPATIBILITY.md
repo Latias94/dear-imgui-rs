@@ -59,11 +59,9 @@ Extensions
 
 ## Trunk (Unreleased)
 
-- Target release train: `0.11.0` (unreleased).
-- Core + backends aligned with Dear ImGui v1.92.7 (docking) via cimgui.
-- Helper tooling crate `dear-imgui-build-support` now follows the unified `0.11.0` train.
-- Minimum supported Rust: 1.92 (workspace baseline).
-- External dependencies baseline: wgpu 29, winit 0.30.13, glow 0.17, sdl3 0.17.
+- Next release train: TBD.
+- Main branch currently reflects post-`0.11.0` development and may move independently until the next planned release is cut.
+- Current baselines after the `0.11.0` release: Dear ImGui v1.92.7 (docking) via cimgui, unified `dear-*` crate minor `0.11`, MSRV 1.92, and the external dependency baseline described above.
 
 ## History
 
