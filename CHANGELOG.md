@@ -66,6 +66,8 @@ Target release train: `0.11.0`.
 - Docs
   - Add Apple integration notes that explain how to use the repository-owned iOS examples as reference/teaching material without presenting them as a turn-key mobile runtime layer.
   - Add platform notes and README navigation for the new iOS/Android smoke templates, including a checked-in iOS Simulator screenshot for the SDL3 iOS smoke path.
+- Tooling
+  - Remove the `release-plz` release path and keep the repository's Python publishing scripts as the single source of truth for release automation and publish order.
 
 ### Fixed
 
@@ -82,6 +84,7 @@ Target release train: `0.11.0`.
 ### CI
 
 - Add an `apple-mobile-check` job that validates the documented iOS integration surface with `cargo check` sentinels for device and simulator targets, including the repository-local iOS smoke templates.
+- Align publish/package verification with the new `dear-imgui-build-support` dependency ordering: package the helper crate first and use `cargo package --list` for the pre-release `dear-imgui-sys` smoke check so CI can validate package contents before the helper crate is indexed on crates.io.
 
 ### Dependencies
 
@@ -89,7 +92,7 @@ Target release train: `0.11.0`.
   - Upgrade direct dependency baselines to `bitflags` 2.11, `winit` 0.30.13, `glow` 0.17, `wasm-bindgen` 0.2.117, and `bytemuck` 1.25.
   - Upgrade `dear-imgui-ash`'s optional `gpu-allocator` integration to 0.28.
   - Upgrade ancillary direct dependencies including `ureq` 3.3 and `regex` 1.12 where used in workspace tooling/extensions.
-  - Bump `dear-imgui-build-support` to `0.3.0` and update all `*-sys` crates to depend on `0.3`.
+  - Move `dear-imgui-build-support` into the unified `0.11.0` release train and update all `*-sys` crates to depend on `0.11`.
   - Bump the default `wgpu` baseline to v29.
 
 ## [0.10.4] - 2026-03-17

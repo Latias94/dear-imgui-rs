@@ -7,13 +7,12 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 
 ## Versioning Policy
 
-- Unified release train: all `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
+- Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
 - Current train: unified `v0.11.0` (use `version = "0.11"`).
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
 - Internal dependency constraints in this repo also pin to the unified minor (e.g., `0.5`). Mixing different minors across our crates is unsupported.
-- Exception: helper tooling like `tools/build-support` may follow an independent version and is not part of the unified train.
 
 ## Latest (Summary)
 
@@ -40,6 +39,12 @@ Utilities
 |-----------|---------|---------------|-------|
 | dear-app  | 0.11.0  | winit, wgpu   | App runner (docking, themes, add-ons) |
 
+Tooling
+
+| Crate                    | Version | External deps | Notes |
+|--------------------------|---------|---------------|-------|
+| dear-imgui-build-support | 0.11.0  | ureq = 3.3    | Shared build/publish helpers for `*-sys` crates and prebuilt archives |
+
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
@@ -56,6 +61,7 @@ Extensions
 
 - Target release train: `0.11.0` (unreleased).
 - Core + backends aligned with Dear ImGui v1.92.7 (docking) via cimgui.
+- Helper tooling crate `dear-imgui-build-support` now follows the unified `0.11.0` train.
 - Minimum supported Rust: 1.92 (workspace baseline).
 - External dependencies baseline: wgpu 29, winit 0.30.13, glow 0.17, sdl3 0.17.
 
@@ -65,6 +71,7 @@ Release Train 0.11 (current)
 
 - All crates unified to 0.11.0 across the workspace (use `version = "0.11"`).
 - Core + backends aligned with Dear ImGui v1.92.7 (docking) via cimgui.
+- `dear-imgui-build-support` now ships on the same `0.11.x` train as the published workspace crates.
 - External dependencies baseline: wgpu 29, winit 0.30.13, glow 0.17, sdl3 0.17.
 - Minimum supported Rust: 1.92 (workspace baseline).
 

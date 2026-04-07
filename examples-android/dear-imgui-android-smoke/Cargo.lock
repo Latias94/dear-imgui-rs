@@ -156,11 +156,11 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-build-support"
-version = "0.2.0"
+version = "0.11.0"
 
 [[package]]
 name = "dear-imgui-rs"
-version = "0.10.4"
+version = "0.11.0"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sys"
-version = "0.10.4"
+version = "0.11.0"
 dependencies = [
  "bindgen",
  "cc",

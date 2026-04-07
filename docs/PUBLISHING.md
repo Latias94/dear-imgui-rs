@@ -4,7 +4,7 @@ This guide explains how to publish new versions of the dear-imgui-rs workspace c
 
 ## Overview
 
-The workspace uses a **unified release train** model where all crates share the same version number (e.g., 0.4.0). This simplifies dependency management and ensures compatibility across the ecosystem.
+The workspace uses a **unified release train** model where all published crates share the same version number (e.g., 0.11.0). This simplifies dependency management and ensures compatibility across the ecosystem.
 
 ## Prerequisites
 
@@ -142,14 +142,20 @@ If you prefer to publish manually or need to publish individual crates:
 
 **IMPORTANT**: Crates must be published in this exact order to satisfy dependencies:
 
-1. **Core**
+1. **Tooling**
+   ```bash
+   cargo publish -p dear-imgui-build-support
+   # Wait for crates.io to index (~30 seconds)
+   ```
+
+2. **Core**
    ```bash
    cargo publish -p dear-imgui-sys
    # Wait for crates.io to index (~30 seconds)
    cargo publish -p dear-imgui-rs
    ```
 
-2. **Backends**
+3. **Backends**
    ```bash
    cargo publish -p dear-imgui-winit
    cargo publish -p dear-imgui-wgpu
@@ -158,7 +164,7 @@ If you prefer to publish manually or need to publish individual crates:
    cargo publish -p dear-imgui-sdl3
    ```
 
-3. **Extension Sys Crates**
+4. **Extension Sys Crates**
    ```bash
    cargo publish -p dear-implot-sys
    cargo publish -p dear-imnodes-sys
@@ -167,7 +173,7 @@ If you prefer to publish manually or need to publish individual crates:
    cargo publish -p dear-imguizmo-quat-sys
    ```
 
-4. **Extension High-Level Crates**
+5. **Extension High-Level Crates**
    ```bash
    cargo publish -p dear-implot
    cargo publish -p dear-imnodes
@@ -179,12 +185,12 @@ If you prefer to publish manually or need to publish individual crates:
    cargo publish -p dear-imgui-reflect
    ```
 
-5. **Application Runner**
+6. **Application Runner**
    ```bash
    cargo publish -p dear-app
    ```
 
-**Note**: Wait 30-60 seconds between publishes to allow crates.io to index the crates.
+**Note**: Wait 30-60 seconds between publishes to allow crates.io to index the crates. `dear-imgui-build-support` must be indexed before publishing `dear-imgui-sys` and the other `*-sys` crates.
 
 ## Post-Publishing
 

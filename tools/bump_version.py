@@ -27,8 +27,9 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 
 
-# All crates in the workspace (excluding examples and tools)
+# All published crates in the workspace (excluding examples and internal tools like xtask)
 WORKSPACE_CRATES = [
+    "tools/build-support",
     "dear-imgui-sys",
     "dear-imgui",
     "backends/dear-imgui-winit",
@@ -146,10 +147,6 @@ def update_cargo_toml(
     if count2 > 0:
         changes.append(f"Updated {count2} dependency version(s): {old_minor} -> {new_minor}")
         content = new_content
-    
-    # Pattern 3: Workspace dependency version
-    # dear-imgui-build-support = { version = "0.1", path = "..." }
-    # (We don't update build-support as it has independent versioning)
     
     if content == original_content:
         return True, ["No changes needed"]

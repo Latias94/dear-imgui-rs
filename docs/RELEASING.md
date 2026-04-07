@@ -104,6 +104,7 @@ git commit -m "chore(sys): update third-party and pregenerated bindings"
 ```
 3) Tag and publish crates (or use `python3 tools/publish.py`):
 ```
+cargo publish -p dear-imgui-build-support
 cargo publish -p dear-imgui-sys
 cargo publish -p dear-implot-sys
 cargo publish -p dear-imnodes-sys
@@ -125,7 +126,7 @@ Before tagging and publishing, verify the following:
 - If external deps changed (e.g., `wgpu`, `winit`, `glow`), backends’ readmes compatibility tables updated.
 - If interfaces changed, examples and crate-level docs updated accordingly.
 - Optional: Run `.github/workflows/prebuilt-binaries.yml` (workflow_dispatch) to produce prebuilt archives for the new tag.
-- Ensure GitHub secrets are set for automated release (e.g., `CARGO_REGISTRY_TOKEN` for release-plz).
+- Ensure the publishing environment has access to a valid crates.io token (`cargo login` or `CARGO_REGISTRY_TOKEN`) before running the Python publishing scripts.
 
 ## Notes
 - Docking is always enabled; the `multi-viewport` feature is currently commented out (WIP).

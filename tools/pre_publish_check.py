@@ -40,6 +40,7 @@ SYS_CRATES = [
 
 # All publishable crates
 ALL_CRATES = [
+    ("dear-imgui-build-support", "tools/build-support"),
     ("dear-imgui-sys", "dear-imgui-sys"),
     ("dear-imgui-rs", "dear-imgui"),
     ("dear-imgui-winit", "backends/dear-imgui-winit"),

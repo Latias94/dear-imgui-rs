@@ -262,17 +262,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Package the helper crate first so downstream manifests referencing it by
-          # version can pass `cargo package` checks.
+          # Package the helper crate first because published -sys crates depend on it.
           echo "::group::package dear-imgui-build-support"
           cargo package -p dear-imgui-build-support
           echo "::endgroup::"
 
-          # Then package the root -sys crate. Note: `cargo package` only verifies that
-          # dependencies have version requirements; it doesn't require that those versions
-          # already exist on crates.io. Actual publish will enforce existence.
-          echo "::group::package dear-imgui-sys"
-          cargo package -p dear-imgui-sys
+          # Then inspect the root -sys crate package file list. A full `cargo package`
+          # for dear-imgui-sys resolves the stripped manifest against crates.io, which
+          # will fail before release until dear-imgui-build-support has been published
+          # and indexed. `--list` still validates the package contents/excludes without
+          # requiring the helper crate to exist on crates.io yet.
+          echo "::group::package dear-imgui-sys (list)"
+          cargo package -p dear-imgui-sys --list
           echo "::endgroup::"
 
           # Note: other -sys crates depend on dear-imgui-sys by version and will fail

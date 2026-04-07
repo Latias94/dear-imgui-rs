@@ -6,14 +6,15 @@ This script publishes all crates in the correct dependency order, ensuring that
 dependencies are published before their dependents.
 
 Publishing Order:
-1. Core: dear-imgui-sys -> dear-imgui-rs
-2. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-ash, dear-imgui-sdl3
-3. Extensions (sys): dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys,
+1. Tooling: dear-imgui-build-support
+2. Core: dear-imgui-sys -> dear-imgui-rs
+3. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-ash, dear-imgui-sdl3
+4. Extensions (sys): dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys,
                      dear-implot3d-sys, dear-imguizmo-quat-sys, dear-imgui-test-engine-sys
-4. Extensions (high-level): dear-implot, dear-imnodes, dear-imguizmo,
+5. Extensions (high-level): dear-implot, dear-imnodes, dear-imguizmo,
                             dear-implot3d, dear-imguizmo-quat, dear-imgui-test-engine, dear-file-browser,
                             dear-imgui-reflect-derive, dear-imgui-reflect
-5. Application: dear-app
+6. Application: dear-app
 
 Usage:
   # Dry run (show what would be published)
@@ -49,7 +50,10 @@ from typing import List, Optional
 
 # Define all crates in dependency order
 PUBLISH_ORDER = [
-    # Core (must be first)
+    # Tooling (must be published before any -sys crate that depends on it)
+    ("dear-imgui-build-support", "tools/build-support"),
+
+    # Core
     ("dear-imgui-sys", "dear-imgui-sys"),
     ("dear-imgui-rs", "dear-imgui"),
     
