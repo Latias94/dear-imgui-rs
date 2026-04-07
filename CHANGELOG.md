@@ -89,6 +89,7 @@ Target release train: `0.11.0`.
   - Upgrade direct dependency baselines to `bitflags` 2.11, `winit` 0.30.13, `glow` 0.17, `wasm-bindgen` 0.2.117, and `bytemuck` 1.25.
   - Upgrade `dear-imgui-ash`'s optional `gpu-allocator` integration to 0.28.
   - Upgrade ancillary direct dependencies including `ureq` 3.3 and `regex` 1.12 where used in workspace tooling/extensions.
+  - Bump `dear-imgui-build-support` to `0.3.0` and update all `*-sys` crates to depend on `0.3`.
   - Bump the default `wgpu` baseline to v29.
 
 ## [0.10.4] - 2026-03-17
