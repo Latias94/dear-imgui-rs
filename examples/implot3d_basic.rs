@@ -102,6 +102,9 @@ fn main() {
                     // Custom Tab
                     if let Some(_tab) = ui.tab_item("Custom") {
                         demo_header(ui, "Custom Styles", || demo_custom_styles(ui, &plot_ui));
+                        demo_header(ui, "Array-backed Item Styles", || {
+                            demo_array_backed_item_styles(ui, &plot_ui)
+                        });
                         demo_header(ui, "Custom Rendering", || {
                             demo_custom_rendering(ui, &plot_ui)
                         });
@@ -1204,6 +1207,76 @@ fn demo_custom_styles(ui: &Ui, plot_ui: &Plot3DUi) {
 
         pop_style_var(4);
     }
+}
+
+fn demo_array_backed_item_styles(ui: &Ui, plot_ui: &Plot3DUi) {
+    ui.text("This demo exercises the new closure-scoped spec array helpers.");
+    ui.text_wrapped(
+        "Line colors, marker sizes, and marker colors are borrowed only for the next plot \
+         submission, which keeps the safe API honest about lifetimes.",
+    );
+    ui.spacing();
+
+    let xs = [0.0f32, 0.2, 0.4, 0.6, 0.8, 1.0];
+    let ys = [0.0f32, 0.55, 0.95, 0.75, 0.15, -0.35];
+    let zs = [0.0f32, 0.18, 0.36, 0.54, 0.72, 0.9];
+
+    let line_colors = [
+        Color::rgb(0.93, 0.30, 0.24).to_imgui_u32(),
+        Color::rgb(0.96, 0.53, 0.18).to_imgui_u32(),
+        Color::rgb(0.95, 0.74, 0.16).to_imgui_u32(),
+        Color::rgb(0.43, 0.79, 0.34).to_imgui_u32(),
+        Color::rgb(0.19, 0.70, 0.76).to_imgui_u32(),
+        Color::rgb(0.28, 0.50, 0.95).to_imgui_u32(),
+    ];
+    let marker_sizes = [5.0f32, 6.0, 7.5, 9.0, 7.0, 10.0];
+    let marker_colors = [
+        Color::rgb(0.93, 0.30, 0.24).to_imgui_u32(),
+        Color::rgb(0.96, 0.53, 0.18).to_imgui_u32(),
+        Color::rgb(0.95, 0.74, 0.16).to_imgui_u32(),
+        Color::rgb(0.43, 0.79, 0.34).to_imgui_u32(),
+        Color::rgb(0.19, 0.70, 0.76).to_imgui_u32(),
+        Color::rgb(0.28, 0.50, 0.95).to_imgui_u32(),
+    ];
+
+    push_style_color_element(Plot3DColorElement::AxisBg, [0.12, 0.18, 0.28, 0.18]);
+    push_style_color_element(Plot3DColorElement::AxisBgHovered, [0.22, 0.42, 0.78, 0.28]);
+    push_style_color_element(Plot3DColorElement::AxisBgActive, [0.88, 0.50, 0.18, 0.34]);
+
+    if let Some(_tok) = plot_ui.begin_plot("Array-backed Item Styles").build() {
+        plot_ui.setup_axes(
+            "X",
+            "Y",
+            "Z",
+            Axis3DFlags::NONE,
+            Axis3DFlags::NONE,
+            Axis3DFlags::NONE,
+        );
+        plot_ui.setup_axes_limits(-0.2, 1.2, -1.2, 1.2, -0.2, 1.2, Plot3DCond::Once);
+
+        with_next_plot3d_item_array_style(
+            Plot3DItemArrayStyle::new().with_line_colors(&line_colors),
+            || {
+                Line3D::f32("Gradient Path", &xs, &ys, &zs)
+                    .with_line_weight(3.0)
+                    .plot(plot_ui);
+            },
+        );
+
+        with_next_plot3d_item_array_style(
+            Plot3DItemArrayStyle::new()
+                .with_marker_sizes(&marker_sizes)
+                .with_marker_fill_colors(&marker_colors)
+                .with_marker_line_colors(&marker_colors),
+            || {
+                Scatter3D::f32("Colored Markers", &xs, &ys, &zs)
+                    .with_marker(Marker3D::Circle)
+                    .plot(plot_ui);
+            },
+        );
+    }
+
+    pop_style_color(3);
 }
 
 fn demo_custom_rendering(ui: &Ui, plot_ui: &Plot3DUi) {

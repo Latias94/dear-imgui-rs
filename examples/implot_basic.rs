@@ -11,6 +11,7 @@
 //! - Error bars and shaded plots
 //! - NEW: Stairs plots, Digital plots, Text annotations
 //! - NEW: Bar groups, Dummy plots, Stems plots
+//! - NEW: Polygon plots and closure-scoped array-backed item styling
 //! - Plot combinations in single charts
 //! - Error handling and validation
 //!
@@ -196,6 +197,31 @@ impl AppWindow {
         let stairs_y = vec![1.0, 3.0, 2.0, 4.0, 2.0, 5.0, 3.0];
         let digital_x = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
         let digital_y = vec![0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let styled_x = [0.0, 0.6, 1.2, 1.8, 2.4, 3.0, 3.6, 4.2];
+        let styled_y = [0.15, 0.85, 0.55, 1.05, 0.75, 1.25, 0.95, 1.4];
+        let styled_line_colors = [
+            Color::rgb(0.94, 0.28, 0.24).to_imgui_u32(),
+            Color::rgb(0.97, 0.48, 0.18).to_imgui_u32(),
+            Color::rgb(0.96, 0.68, 0.16).to_imgui_u32(),
+            Color::rgb(0.73, 0.82, 0.20).to_imgui_u32(),
+            Color::rgb(0.37, 0.78, 0.35).to_imgui_u32(),
+            Color::rgb(0.16, 0.72, 0.72).to_imgui_u32(),
+            Color::rgb(0.21, 0.55, 0.95).to_imgui_u32(),
+            Color::rgb(0.55, 0.40, 0.95).to_imgui_u32(),
+        ];
+        let styled_marker_sizes = [4.0, 5.0, 6.5, 8.0, 7.0, 6.0, 8.5, 10.0];
+        let styled_marker_colors = [
+            Color::rgb(0.94, 0.28, 0.24).to_imgui_u32(),
+            Color::rgb(0.97, 0.48, 0.18).to_imgui_u32(),
+            Color::rgb(0.96, 0.68, 0.16).to_imgui_u32(),
+            Color::rgb(0.73, 0.82, 0.20).to_imgui_u32(),
+            Color::rgb(0.37, 0.78, 0.35).to_imgui_u32(),
+            Color::rgb(0.16, 0.72, 0.72).to_imgui_u32(),
+            Color::rgb(0.21, 0.55, 0.95).to_imgui_u32(),
+            Color::rgb(0.55, 0.40, 0.95).to_imgui_u32(),
+        ];
+        let polygon_x = [0.05, 0.25, 0.55, 0.85, 0.7, 0.42, 0.12];
+        let polygon_y = [0.25, 0.82, 0.92, 0.45, 0.1, 0.18, 0.05];
 
         // Bar groups data: 3 series, 4 groups each
         let group_labels = vec!["Series A", "Series B", "Series C"];
@@ -360,6 +386,62 @@ impl AppWindow {
                         tab.end();
                     }
 
+                    // New in 0.11 Tab
+                    if let Some(tab) = ui.tab_item("New in 0.11") {
+                        ui.text("These plots exercise the new safe wrappers added for this release.");
+                        ui.columns(2, "new_api_plots", true);
+
+                        ui.text("Array-backed item styling:");
+                        if let Some(token) = plot_ui.begin_plot("Array-backed Item Style") {
+                            with_next_plot_item_array_style(
+                                PlotItemArrayStyle::new().with_line_colors(&styled_line_colors),
+                                || {
+                                    LinePlot::new("Gradient Line", &styled_x, &styled_y)
+                                        .with_line_weight(3.0)
+                                        .plot();
+                                },
+                            );
+
+                            with_next_plot_item_array_style(
+                                PlotItemArrayStyle::new()
+                                    .with_marker_sizes(&styled_marker_sizes)
+                                    .with_marker_fill_colors(&styled_marker_colors)
+                                    .with_marker_line_colors(&styled_marker_colors),
+                                || {
+                                    ScatterPlot::new("Variable Markers", &styled_x, &styled_y)
+                                        .with_marker(Marker::Circle)
+                                        .plot();
+                                },
+                            );
+
+                            token.end();
+                        }
+                        ui.text_wrapped(
+                            "The array-style helper is closure-scoped, so borrowed slices only live \
+                             for the next plot item submission.",
+                        );
+
+                        ui.next_column();
+
+                        ui.text("Polygon plot:");
+                        if let Some(token) = plot_ui.begin_plot("Polygon Plot") {
+                            PolygonPlot::new("Concave Region", &polygon_x, &polygon_y)
+                                .with_flags(PolygonFlags::CONCAVE)
+                                .with_fill_color([0.18, 0.62, 0.92, 0.35])
+                                .with_line_color([0.07, 0.34, 0.66, 1.0])
+                                .with_line_weight(2.0)
+                                .plot();
+                            token.end();
+                        }
+
+                        ui.columns(1, "reset_new_api", false);
+                        ui.text_wrapped(
+                            "The pie chart example in the Error & Shaded tab also uses \
+                             PieChartFlags::NO_SLICE_BORDER.",
+                        );
+                        tab.end();
+                    }
+
                     // Error & Shaded Plots Tab
                     if let Some(tab) = ui.tab_item("Error & Shaded") {
                         ui.columns(2, "error_plots", true);
@@ -388,6 +470,7 @@ impl AppWindow {
                             PieChartPlot::new(pie_labels, &pie_values, 0.5, 0.5, 0.35)
                                 .normalize()
                                 .exploding()
+                                .no_slice_border()
                                 .plot();
                             token.end();
                         }
