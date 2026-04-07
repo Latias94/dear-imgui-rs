@@ -1,0 +1,7 @@
+interface:
+  display_name: "Upgrade Dear ImGui"
+  short_description: "Upgrade the Dear ImGui workspace stack"
+  default_prompt: "Use $upgrade-dear-imgui-stack to upgrade Dear ImGui and related bindings in this repository."
+
+policy:
+  allow_implicit_invocation: true
