@@ -169,15 +169,68 @@ fn color_options_keep_single_choice_masks_out_of_flags() {
 fn tab_item_options_keep_placement_out_of_flags() {
     let placement_bits =
         imgui::sys::ImGuiTabItemFlags_Leading | imgui::sys::ImGuiTabItemFlags_Trailing;
+    let fitting_policy_bits = imgui::sys::ImGuiTabBarFlags_FittingPolicyMixed
+        | imgui::sys::ImGuiTabBarFlags_FittingPolicyShrink
+        | imgui::sys::ImGuiTabBarFlags_FittingPolicyScroll;
 
     assert!(
         !imgui::TabItemFlags::all()
             .intersects(imgui::TabItemFlags::from_bits_retain(placement_bits))
+    );
+    assert!(
+        !imgui::TabBarFlags::all()
+            .intersects(imgui::TabBarFlags::from_bits_retain(fitting_policy_bits))
     );
     assert_eq!(
         imgui::TabItemOptions::new()
             .placement(imgui::TabItemPlacement::Trailing)
             .bits(),
         imgui::sys::ImGuiTabItemFlags_Trailing
+    );
+    assert_eq!(
+        imgui::TabBarOptions::new()
+            .fitting_policy(imgui::TabBarFittingPolicy::Scroll)
+            .bits(),
+        imgui::sys::ImGuiTabBarFlags_FittingPolicyScroll
+    );
+}
+
+#[test]
+fn popup_context_options_keep_mouse_buttons_out_of_flags() {
+    let mouse_button_bits = imgui::sys::ImGuiPopupFlags_MouseButtonLeft
+        | imgui::sys::ImGuiPopupFlags_MouseButtonRight
+        | imgui::sys::ImGuiPopupFlags_MouseButtonMiddle;
+
+    assert!(
+        !imgui::PopupFlags::all()
+            .intersects(imgui::PopupFlags::from_bits_retain(mouse_button_bits))
+    );
+    assert_eq!(
+        imgui::PopupContextOptions::new().bits(),
+        imgui::sys::ImGuiPopupFlags_MouseButtonRight
+    );
+    assert_eq!(
+        imgui::PopupContextOptions::new()
+            .mouse_button(imgui::PopupContextMouseButton::Left)
+            .bits(),
+        imgui::sys::ImGuiPopupFlags_MouseButtonLeft
+    );
+}
+
+#[test]
+fn multi_select_options_keep_click_policy_out_of_flags() {
+    let click_policy_bits = imgui::sys::ImGuiMultiSelectFlags_SelectOnAuto
+        | imgui::sys::ImGuiMultiSelectFlags_SelectOnClickAlways
+        | imgui::sys::ImGuiMultiSelectFlags_SelectOnClickRelease;
+
+    assert!(
+        !imgui::MultiSelectFlags::all()
+            .intersects(imgui::MultiSelectFlags::from_bits_retain(click_policy_bits))
+    );
+    assert_eq!(
+        imgui::MultiSelectOptions::new()
+            .click_policy(imgui::MultiSelectClickPolicy::ClickRelease)
+            .bits(),
+        imgui::sys::ImGuiMultiSelectFlags_SelectOnClickRelease
     );
 }

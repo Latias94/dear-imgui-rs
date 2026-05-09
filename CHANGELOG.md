@@ -18,7 +18,7 @@ aligns the unified release train to `0.12.0` across the workspace.
 
 - Remove `Condition::Never` and make APIs that previously accepted invalid or
   overloaded condition/flag values use explicit option types instead.
-- Split the combo, table, color, tab, shortcut, drag/drop, and drag/slider
+- Split the combo, table, color, tab, popup, multi-select, shortcut, drag/drop, and drag/slider
   APIs so mutually exclusive Dear ImGui choices cannot be combined accidentally.
 - Update `dear-imgui-reflect` so numeric widget helpers route slider and drag
   flags through the correct safe wrapper types.
@@ -32,7 +32,8 @@ aligns the unified release train to `0.12.0` across the workspace.
     `DragDropPayloadCond`, `ShortcutFlags`, `NextItemShortcutFlags`,
     `ItemKeyOwnerFlags`, `DragFlags`, `ComboBoxOptions`, `TableOptions`,
     `TableColumnWidth`, `TableColumnStateFlags`, `ColorEditOptions`,
-    `ColorPickerOptions`, `ColorButtonOptions`, and `TabItemOptions`.
+    `ColorPickerOptions`, `ColorButtonOptions`, `TabBarOptions`,
+    `TabItemOptions`, `PopupContextOptions`, and `MultiSelectOptions`.
   - Update builder/setup structs to store typed options directly, including
     `ComboBox::options` and `TableColumnSetup::width`.
   - Remove the ambiguous `TableColumnSetup::init_width_or_weight()` helper in favor of
@@ -46,6 +47,9 @@ aligns the unified release train to `0.12.0` across the workspace.
   - Fixes #27, thanks @belst. Remove the invalid `Condition::Never` value that could reach
     Dear ImGui's assertion paths, and tighten the APIs that previously exposed unsupported
     condition values in helper builders.
+  - Split tab bar fitting policy, context popup mouse button, and multi-select click policy
+    out of their corresponding public flag sets so normal Rust code cannot combine invalid
+    single-choice flag values.
 - Extensions
   - `dear-imgui-reflect`: route slider and drag numeric flags through distinct helper methods
     so the derived widgets no longer emit invalid flag combinations for Dear ImGui.

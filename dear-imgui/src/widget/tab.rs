@@ -13,7 +13,10 @@ use crate::ui::Ui;
 use std::ptr;
 
 bitflags::bitflags! {
-    /// Flags for tab bar widgets
+    /// Independent flags for tab bar widgets.
+    ///
+    /// The fitting policy is a single-choice setting represented by
+    /// [`TabBarFittingPolicy`].
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct TabBarFlags: i32 {
@@ -33,16 +36,76 @@ bitflags::bitflags! {
         const NO_TOOLTIP = sys::ImGuiTabBarFlags_NoTooltip as i32;
         /// Draw selected tab with a different color
         const DRAW_SELECTED_OVERLINE = sys::ImGuiTabBarFlags_DrawSelectedOverline as i32;
-        /// Mixed fitting policy
-        const FITTING_POLICY_MIXED = sys::ImGuiTabBarFlags_FittingPolicyMixed as i32;
-        /// Shrink tabs when they don't fit
-        const FITTING_POLICY_SHRINK = sys::ImGuiTabBarFlags_FittingPolicyShrink as i32;
-        /// Add scroll buttons when tabs don't fit
-        const FITTING_POLICY_SCROLL = sys::ImGuiTabBarFlags_FittingPolicyScroll as i32;
-        /// Mask for fitting policy flags
-        const FITTING_POLICY_MASK = sys::ImGuiTabBarFlags_FittingPolicyMask_ as i32;
-        /// Default fitting policy
-        const FITTING_POLICY_DEFAULT = sys::ImGuiTabBarFlags_FittingPolicyDefault_ as i32;
+    }
+}
+
+/// Single fitting policy for a tab bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TabBarFittingPolicy {
+    /// Use Dear ImGui's mixed default policy.
+    Mixed,
+    /// Shrink tabs when they do not fit.
+    Shrink,
+    /// Add scrolling when tabs do not fit.
+    Scroll,
+}
+
+impl TabBarFittingPolicy {
+    #[inline]
+    const fn raw(self) -> i32 {
+        match self {
+            Self::Mixed => sys::ImGuiTabBarFlags_FittingPolicyMixed as i32,
+            Self::Shrink => sys::ImGuiTabBarFlags_FittingPolicyShrink as i32,
+            Self::Scroll => sys::ImGuiTabBarFlags_FittingPolicyScroll as i32,
+        }
+    }
+}
+
+/// Complete tab bar options assembled from independent flags and optional
+/// single fitting policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TabBarOptions {
+    pub flags: TabBarFlags,
+    pub fitting_policy: Option<TabBarFittingPolicy>,
+}
+
+impl TabBarOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: TabBarFlags::NONE,
+            fitting_policy: None,
+        }
+    }
+
+    pub fn flags(mut self, flags: TabBarFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn fitting_policy(mut self, policy: TabBarFittingPolicy) -> Self {
+        self.fitting_policy = Some(policy);
+        self
+    }
+
+    pub fn bits(self) -> i32 {
+        self.raw()
+    }
+
+    #[inline]
+    pub(crate) fn raw(self) -> i32 {
+        self.flags.bits() | self.fitting_policy.map_or(0, TabBarFittingPolicy::raw)
+    }
+}
+
+impl Default for TabBarOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<TabBarFlags> for TabBarOptions {
+    fn from(flags: TabBarFlags) -> Self {
+        Self::new().flags(flags)
     }
 }
 
@@ -142,7 +205,7 @@ impl From<TabItemFlags> for TabItemOptions {
 #[must_use]
 pub struct TabBar<T> {
     id: T,
-    flags: TabBarFlags,
+    options: TabBarOptions,
 }
 
 impl<T: AsRef<str>> TabBar<T> {
@@ -151,7 +214,7 @@ impl<T: AsRef<str>> TabBar<T> {
     pub fn new(id: T) -> Self {
         Self {
             id,
-            flags: TabBarFlags::NONE,
+            options: TabBarOptions::new(),
         }
     }
 
@@ -160,9 +223,9 @@ impl<T: AsRef<str>> TabBar<T> {
     /// Disabled by default
     pub fn reorderable(mut self, value: bool) -> Self {
         if value {
-            self.flags |= TabBarFlags::REORDERABLE;
+            self.options.flags |= TabBarFlags::REORDERABLE;
         } else {
-            self.flags &= !TabBarFlags::REORDERABLE;
+            self.options.flags &= !TabBarFlags::REORDERABLE;
         }
         self
     }
@@ -170,14 +233,20 @@ impl<T: AsRef<str>> TabBar<T> {
     /// Set the flags of the tab bar
     ///
     /// Flags are empty by default
-    pub fn flags(mut self, flags: TabBarFlags) -> Self {
-        self.flags = flags;
+    pub fn flags(mut self, flags: impl Into<TabBarOptions>) -> Self {
+        self.options = flags.into();
+        self
+    }
+
+    /// Set the tab fitting policy.
+    pub fn fitting_policy(mut self, policy: TabBarFittingPolicy) -> Self {
+        self.options.fitting_policy = Some(policy);
         self
     }
 
     /// Begins the tab bar and returns a token if successful
     pub fn begin(self, ui: &Ui) -> Option<TabBarToken<'_>> {
-        ui.tab_bar_with_flags(self.id, self.flags)
+        ui.tab_bar_with_flags(self.id, self.options)
     }
 
     /// Creates a tab bar and runs a closure to construct the contents.
@@ -315,10 +384,11 @@ impl Ui {
     pub fn tab_bar_with_flags(
         &self,
         id: impl AsRef<str>,
-        flags: TabBarFlags,
+        flags: impl Into<TabBarOptions>,
     ) -> Option<TabBarToken<'_>> {
+        let options = flags.into();
         let id_ptr = self.scratch_txt(id);
-        let should_render = unsafe { sys::igBeginTabBar(id_ptr, flags.bits()) };
+        let should_render = unsafe { sys::igBeginTabBar(id_ptr, options.raw()) };
 
         if should_render {
             Some(TabBarToken::new(self))

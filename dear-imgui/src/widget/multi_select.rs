@@ -21,10 +21,9 @@ use crate::sys;
 use std::collections::HashSet;
 
 bitflags::bitflags! {
-    /// Flags controlling multi-selection behavior.
+    /// Independent flags controlling multi-selection behavior.
     ///
-    /// These mirror Dear ImGui's `ImGuiMultiSelectFlags` and control how
-    /// selection works (single vs multi, box-select, keyboard shortcuts, etc).
+    /// The click-selection policy is represented by [`MultiSelectClickPolicy`].
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct MultiSelectFlags: i32 {
@@ -57,25 +56,82 @@ bitflags::bitflags! {
         const SCOPE_WINDOW = sys::ImGuiMultiSelectFlags_ScopeWindow as i32;
         /// Scope is a rectangular region between `BeginMultiSelect()`/`EndMultiSelect()`.
         const SCOPE_RECT = sys::ImGuiMultiSelectFlags_ScopeRect as i32;
-        /// Apply selection using Dear ImGui's default click behavior.
-        ///
-        /// This maps to `SelectOnAuto`, which upstream now exposes explicitly.
-        const SELECT_ON_AUTO = sys::ImGuiMultiSelectFlags_SelectOnAuto as i32;
-        /// Backward-compatible alias for Dear ImGui's default click behavior.
-        ///
-        /// Upstream renamed `SelectOnClick` to `SelectOnAuto`.
-        const SELECT_ON_CLICK = sys::ImGuiMultiSelectFlags_SelectOnAuto as i32;
-        /// Apply selection on mouse down for any clicked item.
-        const SELECT_ON_CLICK_ALWAYS =
-            sys::ImGuiMultiSelectFlags_SelectOnClickAlways as i32;
-        /// Apply selection on mouse release (allows dragging without altering selection).
-        const SELECT_ON_CLICK_RELEASE =
-            sys::ImGuiMultiSelectFlags_SelectOnClickRelease as i32;
         /// Enable X-axis navigation wrap helper.
         const NAV_WRAP_X = sys::ImGuiMultiSelectFlags_NavWrapX as i32;
         /// Disable default right-click behavior that selects item before opening a context menu.
         const NO_SELECT_ON_RIGHT_CLICK =
             sys::ImGuiMultiSelectFlags_NoSelectOnRightClick as i32;
+    }
+}
+
+/// Click-selection policy for multi-select scopes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MultiSelectClickPolicy {
+    /// Apply selection on mouse down for unselected items and on mouse up for
+    /// selected items.
+    Auto,
+    /// Apply selection on mouse down for any clicked item.
+    ClickAlways,
+    /// Apply selection on mouse release for unselected items.
+    ClickRelease,
+}
+
+impl MultiSelectClickPolicy {
+    #[inline]
+    const fn raw(self) -> i32 {
+        match self {
+            Self::Auto => sys::ImGuiMultiSelectFlags_SelectOnAuto as i32,
+            Self::ClickAlways => sys::ImGuiMultiSelectFlags_SelectOnClickAlways as i32,
+            Self::ClickRelease => sys::ImGuiMultiSelectFlags_SelectOnClickRelease as i32,
+        }
+    }
+}
+
+/// Complete multi-select options assembled from independent flags and an
+/// optional click-selection policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MultiSelectOptions {
+    pub flags: MultiSelectFlags,
+    pub click_policy: Option<MultiSelectClickPolicy>,
+}
+
+impl MultiSelectOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: MultiSelectFlags::NONE,
+            click_policy: None,
+        }
+    }
+
+    pub fn flags(mut self, flags: MultiSelectFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn click_policy(mut self, policy: MultiSelectClickPolicy) -> Self {
+        self.click_policy = Some(policy);
+        self
+    }
+
+    pub fn bits(self) -> i32 {
+        self.raw()
+    }
+
+    #[inline]
+    pub(crate) fn raw(self) -> i32 {
+        self.flags.bits() | self.click_policy.map_or(0, MultiSelectClickPolicy::raw)
+    }
+}
+
+impl Default for MultiSelectOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<MultiSelectFlags> for MultiSelectOptions {
+    fn from(flags: MultiSelectFlags) -> Self {
+        Self::new().flags(flags)
     }
 }
 
@@ -378,11 +434,16 @@ pub struct MultiSelectScope<'ui> {
 }
 
 impl<'ui> MultiSelectScope<'ui> {
-    fn new(flags: MultiSelectFlags, selection_size: Option<i32>, items_count: usize) -> Self {
+    fn new(
+        flags: impl Into<MultiSelectOptions>,
+        selection_size: Option<i32>,
+        items_count: usize,
+    ) -> Self {
+        let options = flags.into();
         let selection_size_i32 = selection_size.unwrap_or(-1);
         let items_count_i32 = i32::try_from(items_count).unwrap_or(i32::MAX);
         let ms_io_begin =
-            unsafe { sys::igBeginMultiSelect(flags.bits(), selection_size_i32, items_count_i32) };
+            unsafe { sys::igBeginMultiSelect(options.raw(), selection_size_i32, items_count_i32) };
         Self {
             ms_io_begin,
             items_count: items_count_i32,
@@ -471,7 +532,7 @@ impl Ui {
     /// implement custom patterns.
     pub fn begin_multi_select_raw(
         &self,
-        flags: MultiSelectFlags,
+        flags: impl Into<MultiSelectOptions>,
         selection_size: Option<i32>,
         items_count: usize,
     ) -> MultiSelectScope<'_> {
@@ -490,7 +551,7 @@ impl Ui {
     /// # let ui = ctx.frame();
     /// let mut selected = vec![false; 128];
     ///
-    /// ui.multi_select_indexed(&mut selected, MultiSelectFlags::NONE, |ui, idx, is_selected| {
+    /// ui.multi_select_indexed(&mut selected, MultiSelectOptions::new(), |ui, idx, is_selected| {
     ///     ui.text(format!(
     ///         "{} {}",
     ///         if is_selected { "[x]" } else { "[ ]" },
@@ -508,12 +569,13 @@ impl Ui {
     pub fn multi_select_indexed<S, F>(
         &self,
         storage: &mut S,
-        flags: MultiSelectFlags,
+        flags: impl Into<MultiSelectOptions>,
         mut render_item: F,
     ) where
         S: MultiSelectIndexStorage,
         F: FnMut(&Ui, usize, bool),
     {
+        let options = flags.into();
         let items_count = storage.len();
         let selection_size_i32 = storage
             .selected_count_hint()
@@ -522,7 +584,7 @@ impl Ui {
 
         // Begin multi-select scope.
         let ms_io_begin = unsafe {
-            sys::igBeginMultiSelect(flags.bits(), selection_size_i32, items_count as i32)
+            sys::igBeginMultiSelect(options.raw(), selection_size_i32, items_count as i32)
         };
 
         // Apply SetAll requests (if any) before submitting items.
@@ -556,12 +618,13 @@ impl Ui {
     pub fn table_multi_select_indexed<S, F>(
         &self,
         storage: &mut S,
-        flags: MultiSelectFlags,
+        flags: impl Into<MultiSelectOptions>,
         mut build_row: F,
     ) where
         S: MultiSelectIndexStorage,
         F: FnMut(&Ui, usize, bool),
     {
+        let options = flags.into();
         let row_count = storage.len();
         let selection_size_i32 = storage
             .selected_count_hint()
@@ -569,7 +632,7 @@ impl Ui {
             .unwrap_or(-1);
 
         let ms_io_begin =
-            unsafe { sys::igBeginMultiSelect(flags.bits(), selection_size_i32, row_count as i32) };
+            unsafe { sys::igBeginMultiSelect(options.raw(), selection_size_i32, row_count as i32) };
 
         unsafe {
             apply_multi_select_requests_indexed(ms_io_begin, storage);
@@ -604,7 +667,7 @@ impl Ui {
     pub fn multi_select_basic<G, F>(
         &self,
         selection: &mut BasicSelection,
-        flags: MultiSelectFlags,
+        flags: impl Into<MultiSelectOptions>,
         items_count: usize,
         mut id_at_index: G,
         mut render_item: F,
@@ -612,10 +675,11 @@ impl Ui {
         G: FnMut(usize) -> crate::Id,
         F: FnMut(&Ui, usize, crate::Id, bool),
     {
+        let options = flags.into();
         let selection_size_i32 = i32::try_from(selection.len()).unwrap_or(-1);
 
         let ms_io_begin = unsafe {
-            sys::igBeginMultiSelect(flags.bits(), selection_size_i32, items_count as i32)
+            sys::igBeginMultiSelect(options.raw(), selection_size_i32, items_count as i32)
         };
 
         unsafe {

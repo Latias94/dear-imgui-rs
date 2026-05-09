@@ -8,6 +8,7 @@
     clippy::cast_sign_loss,
     clippy::as_conversions
 )]
+use crate::MouseButton;
 use crate::sys;
 use crate::ui::Ui;
 use crate::window::WindowFlags;
@@ -34,9 +35,7 @@ impl Ui {
     #[doc(alias = "OpenPopup")]
     pub fn open_popup_with_flags(&self, str_id: impl AsRef<str>, flags: PopupFlags) {
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe {
-            sys::igOpenPopup_Str(str_id_ptr, flags.bits());
-        }
+        unsafe { sys::igOpenPopup_Str(str_id_ptr, flags.bits()) }
     }
 
     /// Opens a popup when the last item is clicked (typically right-click).
@@ -44,16 +43,21 @@ impl Ui {
     /// If `str_id` is `None`, the popup is associated with the last item ID.
     #[doc(alias = "OpenPopupOnItemClick")]
     pub fn open_popup_on_item_click(&self, str_id: Option<&str>) {
-        self.open_popup_on_item_click_with_flags(str_id, PopupFlags::MOUSE_BUTTON_RIGHT);
+        self.open_popup_on_item_click_with_flags(str_id, PopupContextOptions::new());
     }
 
     /// Opens a popup when the last item is clicked, with explicit flags.
     #[doc(alias = "OpenPopupOnItemClick")]
-    pub fn open_popup_on_item_click_with_flags(&self, str_id: Option<&str>, flags: PopupFlags) {
+    pub fn open_popup_on_item_click_with_flags(
+        &self,
+        str_id: Option<&str>,
+        flags: impl Into<PopupContextOptions>,
+    ) {
+        let options = flags.into();
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
-        unsafe { sys::igOpenPopupOnItemClick(str_id_ptr, flags.bits()) }
+        unsafe { sys::igOpenPopupOnItemClick(str_id_ptr, options.raw()) }
     }
 
     /// Construct a popup that can have any kind of content.
@@ -201,7 +205,7 @@ impl Ui {
     /// Begin a popup context menu for the last item.
     #[doc(alias = "BeginPopupContextItem")]
     pub fn begin_popup_context_item(&self) -> Option<PopupToken<'_>> {
-        self.begin_popup_context_item_with_flags(None, PopupFlags::NONE)
+        self.begin_popup_context_item_with_flags(None, PopupContextOptions::new())
     }
 
     /// Begin a popup context menu for the last item with a custom label.
@@ -210,7 +214,7 @@ impl Ui {
         &self,
         str_id: Option<&str>,
     ) -> Option<PopupToken<'_>> {
-        self.begin_popup_context_item_with_flags(str_id, PopupFlags::NONE)
+        self.begin_popup_context_item_with_flags(str_id, PopupContextOptions::new())
     }
 
     /// Begin a popup context menu for the last item with explicit popup flags.
@@ -218,13 +222,14 @@ impl Ui {
     pub fn begin_popup_context_item_with_flags(
         &self,
         str_id: Option<&str>,
-        flags: PopupFlags,
+        flags: impl Into<PopupContextOptions>,
     ) -> Option<PopupToken<'_>> {
+        let options = flags.into();
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe { sys::igBeginPopupContextItem(str_id_ptr, flags.bits()) };
+        let render = unsafe { sys::igBeginPopupContextItem(str_id_ptr, options.raw()) };
 
         render.then(|| PopupToken::new(self))
     }
@@ -232,7 +237,7 @@ impl Ui {
     /// Begin a popup context menu for the current window.
     #[doc(alias = "BeginPopupContextWindow")]
     pub fn begin_popup_context_window(&self) -> Option<PopupToken<'_>> {
-        self.begin_popup_context_window_with_flags(None, PopupFlags::NONE)
+        self.begin_popup_context_window_with_flags(None, PopupContextOptions::new())
     }
 
     /// Begin a popup context menu for the current window with a custom label.
@@ -241,7 +246,7 @@ impl Ui {
         &self,
         str_id: Option<&str>,
     ) -> Option<PopupToken<'_>> {
-        self.begin_popup_context_window_with_flags(str_id, PopupFlags::NONE)
+        self.begin_popup_context_window_with_flags(str_id, PopupContextOptions::new())
     }
 
     /// Begin a popup context menu for the current window with explicit popup flags.
@@ -249,13 +254,14 @@ impl Ui {
     pub fn begin_popup_context_window_with_flags(
         &self,
         str_id: Option<&str>,
-        flags: PopupFlags,
+        flags: impl Into<PopupContextOptions>,
     ) -> Option<PopupToken<'_>> {
+        let options = flags.into();
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe { sys::igBeginPopupContextWindow(str_id_ptr, flags.bits()) };
+        let render = unsafe { sys::igBeginPopupContextWindow(str_id_ptr, options.raw()) };
 
         render.then(|| PopupToken::new(self))
     }
@@ -263,7 +269,7 @@ impl Ui {
     /// Begin a popup context menu for empty space (void).
     #[doc(alias = "BeginPopupContextVoid")]
     pub fn begin_popup_context_void(&self) -> Option<PopupToken<'_>> {
-        self.begin_popup_context_void_with_flags(None, PopupFlags::NONE)
+        self.begin_popup_context_void_with_flags(None, PopupContextOptions::new())
     }
 
     /// Begin a popup context menu for empty space with a custom label.
@@ -272,7 +278,7 @@ impl Ui {
         &self,
         str_id: Option<&str>,
     ) -> Option<PopupToken<'_>> {
-        self.begin_popup_context_void_with_flags(str_id, PopupFlags::NONE)
+        self.begin_popup_context_void_with_flags(str_id, PopupContextOptions::new())
     }
 
     /// Begin a popup context menu for empty space (void) with explicit popup flags.
@@ -280,31 +286,31 @@ impl Ui {
     pub fn begin_popup_context_void_with_flags(
         &self,
         str_id: Option<&str>,
-        flags: PopupFlags,
+        flags: impl Into<PopupContextOptions>,
     ) -> Option<PopupToken<'_>> {
+        let options = flags.into();
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
 
-        let render = unsafe { sys::igBeginPopupContextVoid(str_id_ptr, flags.bits()) };
+        let render = unsafe { sys::igBeginPopupContextVoid(str_id_ptr, options.raw()) };
 
         render.then(|| PopupToken::new(self))
     }
 }
 
 bitflags::bitflags! {
-    /// Flags for popup functions
+    /// Independent flags for popup functions.
+    ///
+    /// Context popup mouse button selection is a single-choice setting
+    /// represented by [`PopupContextMouseButton`].
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct PopupFlags: i32 {
         /// No flags
         const NONE = sys::ImGuiPopupFlags_None as i32;
-        /// For BeginPopupContext*(): open on Left Mouse release. Guaranteed to always be == 0 (same as ImGuiMouseButton_Left)
-        const MOUSE_BUTTON_LEFT = sys::ImGuiPopupFlags_MouseButtonLeft as i32;
-        /// For BeginPopupContext*(): open on Right Mouse release. Guaranteed to always be == 1 (same as ImGuiMouseButton_Right)
-        const MOUSE_BUTTON_RIGHT = sys::ImGuiPopupFlags_MouseButtonRight as i32;
-        /// For BeginPopupContext*(): open on Middle Mouse release. Guaranteed to always be == 2 (same as ImGuiMouseButton_Middle)
-        const MOUSE_BUTTON_MIDDLE = sys::ImGuiPopupFlags_MouseButtonMiddle as i32;
+        /// Do not reopen the same popup if already open.
+        const NO_REOPEN = sys::ImGuiPopupFlags_NoReopen as i32;
         /// For OpenPopup*(), BeginPopupContext*(): don't open if there's already a popup at the same level of the popup stack
         const NO_OPEN_OVER_EXISTING_POPUP = sys::ImGuiPopupFlags_NoOpenOverExistingPopup as i32;
         /// For BeginPopupContext*(): don't return true when hovering items, only when hovering empty space
@@ -315,6 +321,104 @@ bitflags::bitflags! {
         const ANY_POPUP_LEVEL = sys::ImGuiPopupFlags_AnyPopupLevel as i32;
         /// For IsPopupOpen(): test for any popup
         const ANY_POPUP = Self::ANY_POPUP_ID.bits() | Self::ANY_POPUP_LEVEL.bits();
+    }
+}
+
+/// Single mouse button used by popup context helpers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PopupContextMouseButton {
+    /// Open on left mouse release.
+    Left,
+    /// Open on right mouse release.
+    #[default]
+    Right,
+    /// Open on middle mouse release.
+    Middle,
+}
+
+impl PopupContextMouseButton {
+    #[inline]
+    const fn raw(self) -> i32 {
+        match self {
+            Self::Left => sys::ImGuiPopupFlags_MouseButtonLeft as i32,
+            Self::Right => sys::ImGuiPopupFlags_MouseButtonRight as i32,
+            Self::Middle => sys::ImGuiPopupFlags_MouseButtonMiddle as i32,
+        }
+    }
+}
+
+impl From<MouseButton> for PopupContextMouseButton {
+    fn from(button: MouseButton) -> Self {
+        match button {
+            MouseButton::Left => Self::Left,
+            MouseButton::Right => Self::Right,
+            MouseButton::Middle => Self::Middle,
+            MouseButton::Extra1 | MouseButton::Extra2 => {
+                panic!(
+                    "Dear ImGui popup context helpers only support left, right, and middle buttons"
+                )
+            }
+        }
+    }
+}
+
+/// Complete popup options assembled from independent flags and optional
+/// single mouse button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PopupContextOptions {
+    pub flags: PopupFlags,
+    pub mouse_button: PopupContextMouseButton,
+}
+
+impl PopupContextOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: PopupFlags::NONE,
+            mouse_button: PopupContextMouseButton::Right,
+        }
+    }
+
+    pub fn flags(mut self, flags: PopupFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn mouse_button(mut self, button: impl Into<PopupContextMouseButton>) -> Self {
+        self.mouse_button = button.into();
+        self
+    }
+
+    pub fn bits(self) -> i32 {
+        self.raw()
+    }
+
+    #[inline]
+    pub(crate) fn raw(self) -> i32 {
+        self.flags.bits() | self.mouse_button.raw()
+    }
+}
+
+impl Default for PopupContextOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<PopupFlags> for PopupContextOptions {
+    fn from(flags: PopupFlags) -> Self {
+        Self::new().flags(flags)
+    }
+}
+
+impl From<PopupContextMouseButton> for PopupContextOptions {
+    fn from(button: PopupContextMouseButton) -> Self {
+        Self::new().mouse_button(button)
+    }
+}
+
+impl From<MouseButton> for PopupContextOptions {
+    fn from(button: MouseButton) -> Self {
+        Self::new().mouse_button(button)
     }
 }
 
