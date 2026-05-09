@@ -48,6 +48,20 @@ aligns the unified release train to `0.12.0` across the workspace.
 
 - Replace `Condition::Never` with the nearest valid intent, usually `Condition::Always`,
   `Condition::Once`, or `Condition::FirstUseEver`.
+- For one-choice flag domains, move the choice into the dedicated option type instead of
+  OR-ing unrelated bits together.
+  ```rust
+  // before
+  // ui.shortcut_with_flags(chord, ShortcutFlags::REPEAT | ShortcutFlags::ROUTE_GLOBAL);
+  //
+  // after
+  ui.shortcut_with_flags(
+      chord,
+      ShortcutOptions::new()
+          .flags(ShortcutFlags::REPEAT)
+          .route(ShortcutRoute::Global(ShortcutGlobalRouteFlags::NONE)),
+  );
+  ```
 - Update code that passed mixed flag domains to the new typed options instead of OR-ing
   everything into one flag value. The main new types are `ShortcutOptions`,
   `ShortcutRoute`, `TableColumnIndent`, `MultiSelectClickPolicy`,
@@ -55,6 +69,21 @@ aligns the unified release train to `0.12.0` across the workspace.
   `PolylineFlags`.
 - For rounded rectangles and image corners, use `DrawCornerFlags`. For closed paths,
   set `PolylineBuilder::closed(true)` or pass `PolylineFlags` only to polyline/path APIs.
+- For table columns, move width and indentation into the typed helpers instead of
+  encoding them into `TableColumnFlags`.
+  ```rust
+  // before
+  // ui.table_setup_column("Name", TableColumnFlags::INDENT_ENABLE, Some(140.0), 0);
+  //
+  // after
+  ui.table_setup_column_with_indent(
+      "Name",
+      TableColumnFlags::NONE,
+      Some(TableColumnWidth::Fixed(140.0)),
+      Some(TableColumnIndent::Enable),
+      0,
+  );
+  ```
 - Replace `TableColumnSetup::init_width_or_weight()` with `fixed_width()` or
   `stretch_weight()`, and move indentation to `TableColumnSetup::indent(...)` or
   `indent_enabled(...)`.
