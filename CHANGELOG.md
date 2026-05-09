@@ -33,11 +33,12 @@ aligns the unified release train to `0.12.0` across the workspace.
     `DragDropPayloadCond`, `ShortcutFlags`, `ShortcutOptions`,
     `ShortcutRoute`, `NextItemShortcutFlags`, `NextItemShortcutOptions`,
     `ItemKeyOwnerFlags`, `DragFlags`, `ComboBoxOptions`, `TableOptions`,
-    `TableColumnWidth`, `TableColumnStateFlags`, `ColorEditOptions`,
+    `TableColumnWidth`, `TableColumnIndent`, `TableColumnStateFlags`, `ColorEditOptions`,
     `ColorPickerOptions`, `ColorButtonOptions`, `TabBarOptions`,
-    `TabItemOptions`, `PopupContextOptions`, and `MultiSelectOptions`.
+    `TabItemOptions`, `PopupContextOptions`, `MultiSelectOptions`,
+    `MultiSelectBoxSelect`, `MultiSelectScopeKind`, `DrawCornerFlags`, and `PolylineFlags`.
   - Update builder/setup structs to store typed options directly, including
-    `ComboBox::options` and `TableColumnSetup::width`.
+    `ComboBox::options`, `TableColumnSetup::width`, and `TableColumnSetup::indent`.
   - Remove the ambiguous `TableColumnSetup::init_width_or_weight()` helper in favor of
     `fixed_width()` and `stretch_weight()`.
 - Extensions
@@ -49,12 +50,16 @@ aligns the unified release train to `0.12.0` across the workspace.
   - Fixes #27, thanks @belst. Remove the invalid `Condition::Never` value that could reach
     Dear ImGui's assertion paths, and tighten the APIs that previously exposed unsupported
     condition values in helper builders.
-  - Split tab bar fitting policy, context popup mouse button, and multi-select click policy
-    out of their corresponding public flag sets so normal Rust code cannot combine invalid
-    single-choice flag values.
+  - Split tab bar fitting policy, table column indent policy, context popup mouse button,
+    and multi-select click/box/scope policies out of their corresponding public flag sets so
+    normal Rust code cannot combine invalid single-choice flag values or request `NavWrapX`
+    outside Dear ImGui's supported window scope.
   - Split shortcut routing policy out of `ShortcutFlags` and
     `NextItemShortcutFlags`, and type global-only routing modifiers separately,
     so normal Rust code cannot combine route modes that Dear ImGui rejects.
+  - Split rectangle corner rounding and polyline/path-stroke flags into
+    `DrawCornerFlags` and `PolylineFlags`, so `ImDrawFlags_Closed` can no
+    longer be passed to rounded rectangle APIs that reject it.
 - Extensions
   - `dear-imgui-reflect`: route slider and drag numeric flags through distinct helper methods
     so the derived widgets no longer emit invalid flag combinations for Dear ImGui.

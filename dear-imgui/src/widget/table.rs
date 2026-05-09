@@ -41,8 +41,8 @@ use crate::draw::ImColor32;
 use crate::sys;
 use crate::ui::Ui;
 use crate::widget::{
-    TableColumnFlags, TableColumnStateFlags, TableColumnWidth, TableFlags, TableOptions,
-    TableSizingPolicy,
+    TableColumnFlags, TableColumnIndent, TableColumnStateFlags, TableColumnWidth, TableFlags,
+    TableOptions, TableSizingPolicy,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -55,6 +55,7 @@ pub struct TableColumnSetup<Name> {
     pub name: Name,
     pub flags: TableColumnFlags,
     pub width: Option<TableColumnWidth>,
+    pub indent: Option<TableColumnIndent>,
     pub user_id: u32,
 }
 
@@ -65,6 +66,7 @@ impl<Name> TableColumnSetup<Name> {
             name,
             flags: TableColumnFlags::NONE,
             width: None,
+            indent: None,
             user_id: 0,
         }
     }
@@ -84,6 +86,22 @@ impl<Name> TableColumnSetup<Name> {
     /// Sets an initial stretch weight for this column.
     pub fn stretch_weight(mut self, weight: f32) -> Self {
         self.width = Some(TableColumnWidth::Stretch(weight));
+        self
+    }
+
+    /// Sets this column's indentation policy.
+    pub fn indent(mut self, indent: TableColumnIndent) -> Self {
+        self.indent = Some(indent);
+        self
+    }
+
+    /// Enables or disables indentation for this column.
+    pub fn indent_enabled(mut self, enabled: bool) -> Self {
+        self.indent = Some(if enabled {
+            TableColumnIndent::Enable
+        } else {
+            TableColumnIndent::Disable
+        });
         self
     }
 
@@ -203,7 +221,13 @@ impl Ui {
         if let Some(token) = self.begin_table_with_flags(str_id, N, flags) {
             // Setup columns
             for column in &column_data {
-                self.table_setup_column(&column.name, column.flags, column.width, column.user_id);
+                self.table_setup_column_with_indent(
+                    &column.name,
+                    column.flags,
+                    column.width,
+                    column.indent,
+                    column.user_id,
+                );
             }
             self.table_headers_row();
             Some(token)
@@ -220,8 +244,22 @@ impl Ui {
         width: Option<TableColumnWidth>,
         user_id: u32,
     ) {
+        self.table_setup_column_with_indent(label, flags, width, None, user_id);
+    }
+
+    /// Setup a column for the current table, including explicit indent policy.
+    pub fn table_setup_column_with_indent(
+        &self,
+        label: impl AsRef<str>,
+        flags: TableColumnFlags,
+        width: Option<TableColumnWidth>,
+        indent: Option<TableColumnIndent>,
+        user_id: u32,
+    ) {
         let label_ptr = self.scratch_txt(label);
-        let raw_flags = flags.bits() | width.map_or(0, TableColumnWidth::raw_flags);
+        let raw_flags = flags.bits()
+            | width.map_or(0, TableColumnWidth::raw_flags)
+            | indent.map_or(0, TableColumnIndent::raw_flags);
         let init_width_or_weight = width.map_or(0.0, TableColumnWidth::value);
         unsafe {
             sys::igTableSetupColumn(label_ptr, raw_flags, init_width_or_weight, user_id);
@@ -802,6 +840,7 @@ impl<'ui> TableBuilder<'ui> {
                 name: c.name.into(),
                 flags: c.flags,
                 width: c.width,
+                indent: c.indent,
                 user_id: c.user_id,
             });
         }
@@ -814,6 +853,7 @@ impl<'ui> TableBuilder<'ui> {
             name: col.name.into(),
             flags: col.flags,
             width: col.width,
+            indent: col.indent,
             user_id: col.user_id,
         });
         self
@@ -847,8 +887,13 @@ impl<'ui> TableBuilder<'ui> {
 
         if !self.columns.is_empty() {
             for col in &self.columns {
-                self.ui
-                    .table_setup_column(col.name.as_ref(), col.flags, col.width, col.user_id);
+                self.ui.table_setup_column_with_indent(
+                    col.name.as_ref(),
+                    col.flags,
+                    col.width,
+                    col.indent,
+                    col.user_id,
+                );
             }
             if self.use_headers {
                 self.ui.table_headers_row();
@@ -869,6 +914,7 @@ pub struct ColumnBuilder<'ui> {
     name: Cow<'ui, str>,
     flags: TableColumnFlags,
     width: Option<TableColumnWidth>,
+    indent: Option<TableColumnIndent>,
     user_id: u32,
 }
 
@@ -879,6 +925,7 @@ impl<'ui> ColumnBuilder<'ui> {
             name: name.into(),
             flags: TableColumnFlags::NONE,
             width: None,
+            indent: None,
             user_id: 0,
         }
     }
@@ -898,6 +945,22 @@ impl<'ui> ColumnBuilder<'ui> {
     /// Alias of `width()` to express stretch weights.
     pub fn weight(mut self, weight: f32) -> Self {
         self.width = Some(TableColumnWidth::Stretch(weight));
+        self
+    }
+
+    /// Set this column's indentation policy.
+    pub fn indent(mut self, indent: TableColumnIndent) -> Self {
+        self.indent = Some(indent);
+        self
+    }
+
+    /// Enable or disable indentation for this column.
+    pub fn indent_enabled(mut self, enabled: bool) -> Self {
+        self.indent = Some(if enabled {
+            TableColumnIndent::Enable
+        } else {
+            TableColumnIndent::Disable
+        });
         self
     }
 
@@ -923,6 +986,7 @@ impl<'ui> ColumnBuilder<'ui> {
             name: self.name,
             flags: self.flags,
             width: self.width,
+            indent: self.indent,
             user_id: self.user_id,
         });
         self.parent

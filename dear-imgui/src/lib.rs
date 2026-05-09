@@ -366,8 +366,8 @@ pub mod logging;
 pub use colors::*;
 pub use dock_builder::*;
 pub use dock_space::*;
-// Export DrawListMut for extensions
-pub use draw::DrawListMut;
+// Export draw-list helpers for extensions and downstream custom drawing.
+pub use draw::{DrawCornerFlags, DrawListFlags, DrawListMut, PolylineFlags};
 pub use error::*;
 // Note: draw types are now in render module, no need to export draw::*
 pub use render::*;

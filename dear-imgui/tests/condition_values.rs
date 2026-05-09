@@ -115,14 +115,17 @@ fn table_options_keep_single_choice_masks_out_of_flags() {
         | imgui::sys::ImGuiTableFlags_SizingStretchSame;
     let column_width_bits = imgui::sys::ImGuiTableColumnFlags_WidthFixed
         | imgui::sys::ImGuiTableColumnFlags_WidthStretch;
+    let column_indent_bits = imgui::sys::ImGuiTableColumnFlags_IndentEnable
+        | imgui::sys::ImGuiTableColumnFlags_IndentDisable;
 
     assert!(
         !imgui::TableFlags::all()
             .intersects(imgui::TableFlags::from_bits_retain(table_sizing_bits))
     );
     assert!(
-        !imgui::TableColumnFlags::all()
-            .intersects(imgui::TableColumnFlags::from_bits_retain(column_width_bits))
+        !imgui::TableColumnFlags::all().intersects(imgui::TableColumnFlags::from_bits_retain(
+            column_width_bits | column_indent_bits
+        ))
     );
 
     assert_eq!(
@@ -130,6 +133,10 @@ fn table_options_keep_single_choice_masks_out_of_flags() {
             .sizing_policy(imgui::TableSizingPolicy::StretchProp)
             .bits(),
         imgui::sys::ImGuiTableFlags_SizingStretchProp
+    );
+    assert_eq!(
+        imgui::TableColumnIndent::Disable.bits(),
+        imgui::sys::ImGuiTableColumnFlags_IndentDisable
     );
 }
 
@@ -222,15 +229,31 @@ fn multi_select_options_keep_click_policy_out_of_flags() {
     let click_policy_bits = imgui::sys::ImGuiMultiSelectFlags_SelectOnAuto
         | imgui::sys::ImGuiMultiSelectFlags_SelectOnClickAlways
         | imgui::sys::ImGuiMultiSelectFlags_SelectOnClickRelease;
+    let box_select_bits = imgui::sys::ImGuiMultiSelectFlags_BoxSelect1d
+        | imgui::sys::ImGuiMultiSelectFlags_BoxSelect2d;
+    let scope_bits =
+        imgui::sys::ImGuiMultiSelectFlags_ScopeWindow | imgui::sys::ImGuiMultiSelectFlags_ScopeRect;
+    let nav_wrap_bits = imgui::sys::ImGuiMultiSelectFlags_NavWrapX;
 
     assert!(
-        !imgui::MultiSelectFlags::all()
-            .intersects(imgui::MultiSelectFlags::from_bits_retain(click_policy_bits))
+        !imgui::MultiSelectFlags::all().intersects(imgui::MultiSelectFlags::from_bits_retain(
+            click_policy_bits | box_select_bits | scope_bits | nav_wrap_bits
+        ))
     );
     assert_eq!(
         imgui::MultiSelectOptions::new()
             .click_policy(imgui::MultiSelectClickPolicy::ClickRelease)
+            .box_select(imgui::MultiSelectBoxSelect::TwoDimensional)
+            .scope(imgui::MultiSelectScopeKind::Rect)
             .bits(),
         imgui::sys::ImGuiMultiSelectFlags_SelectOnClickRelease
+            | imgui::sys::ImGuiMultiSelectFlags_BoxSelect2d
+            | imgui::sys::ImGuiMultiSelectFlags_ScopeRect
+    );
+    assert_eq!(
+        imgui::MultiSelectOptions::new()
+            .scope(imgui::MultiSelectScopeKind::WindowWithNavWrapX)
+            .bits(),
+        imgui::sys::ImGuiMultiSelectFlags_ScopeWindow | imgui::sys::ImGuiMultiSelectFlags_NavWrapX
     );
 }

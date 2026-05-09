@@ -416,8 +416,8 @@ impl<'de> Deserialize<'de> for TableFlags {
 bitflags::bitflags! {
     /// Independent flags accepted by `TableSetupColumn()`.
     ///
-    /// The fixed/stretch width mode is a single-choice setting represented by
-    /// [`TableColumnWidth`].
+    /// The fixed/stretch width mode and indent mode are single-choice settings
+    /// represented by [`TableColumnWidth`] and [`TableColumnIndent`].
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct TableColumnFlags: i32 {
@@ -445,10 +445,6 @@ bitflags::bitflags! {
         const PREFER_SORT_ASCENDING = sys::ImGuiTableColumnFlags_PreferSortAscending as i32;
         /// Make the initial sort direction Descending when first sorting on this column
         const PREFER_SORT_DESCENDING = sys::ImGuiTableColumnFlags_PreferSortDescending as i32;
-        /// Use current Indent value when entering cell
-        const INDENT_ENABLE = sys::ImGuiTableColumnFlags_IndentEnable as i32;
-        /// Disable indenting for this column
-        const INDENT_DISABLE = sys::ImGuiTableColumnFlags_IndentDisable as i32;
         /// Display an angled header for this column (when angled headers feature is enabled)
         const ANGLED_HEADER = sys::ImGuiTableColumnFlags_AngledHeader as i32;
     }
@@ -484,6 +480,30 @@ impl TableColumnWidth {
     pub(crate) const fn value(self) -> f32 {
         match self {
             Self::Fixed(value) | Self::Stretch(value) => value,
+        }
+    }
+}
+
+/// Single-choice indentation policy for a table column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TableColumnIndent {
+    /// Use the current indent value when entering the column.
+    Enable,
+    /// Disable indentation for the column.
+    Disable,
+}
+
+impl TableColumnIndent {
+    #[inline]
+    pub const fn bits(self) -> i32 {
+        self.raw_flags()
+    }
+
+    #[inline]
+    pub(crate) const fn raw_flags(self) -> i32 {
+        match self {
+            Self::Enable => sys::ImGuiTableColumnFlags_IndentEnable as i32,
+            Self::Disable => sys::ImGuiTableColumnFlags_IndentDisable as i32,
         }
     }
 }

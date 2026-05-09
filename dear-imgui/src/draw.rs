@@ -134,22 +134,46 @@ bitflags! {
 }
 
 bitflags! {
-    /// Options for some DrawList operations
-    /// Values mirror ImGui's `ImDrawFlags_*` (v1.92+).
+    /// Flags accepted by `AddPolyline()` and `PathStroke()`.
     #[repr(transparent)]
-    pub struct DrawFlags: u32 {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct PolylineFlags: u32 {
         const NONE = sys::ImDrawFlags_None as u32;
         const CLOSED = sys::ImDrawFlags_Closed as u32;
-        const ROUND_CORNERS_TOP_LEFT = sys::ImDrawFlags_RoundCornersTopLeft as u32;
-        const ROUND_CORNERS_TOP_RIGHT = sys::ImDrawFlags_RoundCornersTopRight as u32;
-        const ROUND_CORNERS_BOT_LEFT = sys::ImDrawFlags_RoundCornersBottomLeft as u32;
-        const ROUND_CORNERS_BOT_RIGHT = sys::ImDrawFlags_RoundCornersBottomRight as u32;
-        const ROUND_CORNERS_TOP = sys::ImDrawFlags_RoundCornersTop as u32;
-        const ROUND_CORNERS_BOT = sys::ImDrawFlags_RoundCornersBottom as u32;
-        const ROUND_CORNERS_LEFT = sys::ImDrawFlags_RoundCornersLeft as u32;
-        const ROUND_CORNERS_RIGHT = sys::ImDrawFlags_RoundCornersRight as u32;
-        const ROUND_CORNERS_ALL = sys::ImDrawFlags_RoundCornersAll as u32;
-        const ROUND_CORNERS_NONE = sys::ImDrawFlags_RoundCornersNone as u32;
+    }
+}
+
+impl Default for PolylineFlags {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+bitflags! {
+    /// Corner rounding flags accepted by rectangle and rounded-image drawing APIs.
+    ///
+    /// Dear ImGui uses zero as "default to all corners" when `rounding > 0`.
+    /// Use [`DrawCornerFlags::NO_ROUNDING`] to explicitly disable rounding.
+    #[repr(transparent)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct DrawCornerFlags: u32 {
+        const DEFAULT = sys::ImDrawFlags_None as u32;
+        const TOP_LEFT = sys::ImDrawFlags_RoundCornersTopLeft as u32;
+        const TOP_RIGHT = sys::ImDrawFlags_RoundCornersTopRight as u32;
+        const BOTTOM_LEFT = sys::ImDrawFlags_RoundCornersBottomLeft as u32;
+        const BOTTOM_RIGHT = sys::ImDrawFlags_RoundCornersBottomRight as u32;
+        const TOP = sys::ImDrawFlags_RoundCornersTop as u32;
+        const BOTTOM = sys::ImDrawFlags_RoundCornersBottom as u32;
+        const LEFT = sys::ImDrawFlags_RoundCornersLeft as u32;
+        const RIGHT = sys::ImDrawFlags_RoundCornersRight as u32;
+        const ALL = sys::ImDrawFlags_RoundCornersAll as u32;
+        const NO_ROUNDING = sys::ImDrawFlags_RoundCornersNone as u32;
+    }
+}
+
+impl Default for DrawCornerFlags {
+    fn default() -> Self {
+        Self::DEFAULT
     }
 }
 
@@ -617,7 +641,7 @@ impl<'ui> DrawListMut<'ui> {
         rect_min: impl Into<sys::ImVec2>,
         rect_max: impl Into<sys::ImVec2>,
         rounding: f32,
-        flags: DrawFlags,
+        flags: DrawCornerFlags,
     ) {
         unsafe {
             let min_vec: sys::ImVec2 = rect_min.into();
@@ -696,7 +720,7 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Stroke the current path with the specified color and thickness.
     #[doc(alias = "PathStroke")]
-    pub fn path_stroke(&self, color: impl Into<ImColor32>, flags: DrawFlags, thickness: f32) {
+    pub fn path_stroke(&self, color: impl Into<ImColor32>, flags: PolylineFlags, thickness: f32) {
         unsafe {
             // PathStroke is inline: AddPolyline(_Path.Data, _Path.Size, col, flags, thickness); _Path.Size = 0;
             let draw_list = self.draw_list;
@@ -977,7 +1001,7 @@ impl<'ui> DrawListMut<'ui> {
         uv_max: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
         rounding: f32,
-        flags: DrawFlags,
+        flags: DrawCornerFlags,
     ) {
         // Example:
         // let tex = texture::TextureId::new(5);
@@ -987,7 +1011,7 @@ impl<'ui> DrawListMut<'ui> {
         //     [0.0,0.0], [1.0,1.0],
         //     Color::WHITE,
         //     8.0,
-        //     DrawFlags::ROUND_CORNERS_ALL,
+        //     DrawCornerFlags::ALL,
         // );
         let p_min: sys::ImVec2 = p_min.into();
         let p_max: sys::ImVec2 = p_max.into();
@@ -1623,7 +1647,7 @@ pub struct Rect<'ui> {
     p2: [f32; 2],
     color: ImColor32,
     rounding: f32,
-    flags: DrawFlags,
+    flags: DrawCornerFlags,
     thickness: f32,
     filled: bool,
     draw_list: &'ui DrawListMut<'ui>,
@@ -1650,7 +1674,7 @@ impl<'ui> Rect<'ui> {
             },
             color: c.into(),
             rounding: 0.0,
-            flags: DrawFlags::ROUND_CORNERS_ALL,
+            flags: DrawCornerFlags::ALL,
             thickness: 1.0,
             filled: false,
             draw_list,
@@ -1675,8 +1699,8 @@ impl<'ui> Rect<'ui> {
         self
     }
 
-    /// Set rectangle's corner flags
-    pub fn flags(mut self, flags: DrawFlags) -> Self {
+    /// Set rectangle's corner rounding flags
+    pub fn flags(mut self, flags: DrawCornerFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -1896,6 +1920,7 @@ impl<'ui> BezierCurve<'ui> {
 pub struct Polyline<'ui> {
     points: Vec<sys::ImVec2>,
     thickness: f32,
+    flags: PolylineFlags,
     filled: bool,
     color: ImColor32,
     draw_list: &'ui DrawListMut<'ui>,
@@ -1911,6 +1936,7 @@ impl<'ui> Polyline<'ui> {
             points: points.into_iter().map(Into::into).collect(),
             color: c.into(),
             thickness: 1.0,
+            flags: PolylineFlags::NONE,
             filled: false,
             draw_list,
         }
@@ -1920,6 +1946,18 @@ impl<'ui> Polyline<'ui> {
     /// shape is filled
     pub fn thickness(mut self, thickness: f32) -> Self {
         self.thickness = thickness;
+        self
+    }
+
+    /// Set polyline flags. Has no effect if shape is filled.
+    pub fn flags(mut self, flags: PolylineFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Draw the polyline as a closed shape. Has no effect if shape is filled.
+    pub fn closed(mut self, closed: bool) -> Self {
+        self.flags.set(PolylineFlags::CLOSED, closed);
         self
     }
 
@@ -1951,7 +1989,7 @@ impl<'ui> Polyline<'ui> {
                     self.points.as_ptr(),
                     count,
                     self.color.into(),
-                    sys::ImDrawFlags::default(),
+                    self.flags.bits() as sys::ImDrawFlags,
                     self.thickness,
                 )
             }
