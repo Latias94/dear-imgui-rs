@@ -20,6 +20,9 @@ Usage:
   # Dry run (show what would be published)
   python3 tools/publish.py --dry-run
 
+  # Cargo dry run (run cargo publish --dry-run for selected crates)
+  python3 tools/publish.py --cargo-dry-run --crates dear-imgui-build-support
+
   # Publish all crates
   python3 tools/publish.py
 
@@ -217,6 +220,7 @@ def publish_crate(
     crate_path: Path,
     repo_root: Path,
     dry_run: bool = False,
+    cargo_dry_run: bool = False,
     no_verify: bool = False,
     wait_time: int = 30
 ) -> bool:
@@ -248,6 +252,8 @@ def publish_crate(
 
     # Build publish command
     cmd = ["cargo", "publish", "-p", crate_name]
+    if cargo_dry_run:
+        cmd.append("--dry-run")
     if no_verify:
         cmd.append("--no-verify")
 
@@ -255,13 +261,19 @@ def publish_crate(
     result = run_command(cmd, cwd=repo_root, dry_run=dry_run, capture=False)
 
     if result != 0:
-        print_error(f"Failed to publish {crate_name}")
+        action = "cargo dry-run publish" if cargo_dry_run else "publish"
+        print_error(f"Failed to {action} {crate_name}")
         return False
 
-    print_success(f"Successfully published {crate_name} v{version}")
+    if dry_run:
+        print_success(f"Dry run: would publish {crate_name} v{version}")
+    elif cargo_dry_run:
+        print_success(f"Cargo dry-run publish succeeded for {crate_name} v{version}")
+    else:
+        print_success(f"Successfully published {crate_name} v{version}")
 
     # Wait for crates.io to index the crate
-    if not dry_run and wait_time > 0:
+    if not dry_run and not cargo_dry_run and wait_time > 0:
         print_info(f"Waiting {wait_time} seconds for crates.io to index...")
         time.sleep(wait_time)
 
@@ -281,7 +293,12 @@ def main() -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show what would be published without actually publishing"
+        help="Show publish order and cargo commands without executing them"
+    )
+    parser.add_argument(
+        "--cargo-dry-run",
+        action="store_true",
+        help="Run cargo publish --dry-run for every selected crate without uploading"
     )
     parser.add_argument(
         "--no-verify",
@@ -300,6 +317,10 @@ def main() -> int:
     )
     
     args = parser.parse_args()
+
+    if args.dry_run and args.cargo_dry_run:
+        print_error("--dry-run and --cargo-dry-run are mutually exclusive")
+        return 1
     
     # Get repository root
     repo_root = Path(__file__).resolve().parents[1]
@@ -340,6 +361,7 @@ def main() -> int:
     print_info(f"Repository: {repo_root}")
     print_info(f"Crates to publish: {len(crates_to_publish)}")
     print_info(f"Dry run: {args.dry_run}")
+    print_info(f"Cargo dry run: {args.cargo_dry_run}")
     print_info(f"No verify: {args.no_verify}")
     print_info(f"Wait time: {args.wait}s")
     print()
@@ -348,7 +370,7 @@ def main() -> int:
         print(f"  {i}. {name} ({path})")
     print()
     
-    if not args.dry_run:
+    if not args.dry_run and not args.cargo_dry_run:
         response = input("Continue with publishing? [y/N]: ").strip().lower()
         if response not in ('y', 'yes'):
             print_info("Publishing cancelled")
@@ -362,6 +384,7 @@ def main() -> int:
             Path(path),
             repo_root,
             dry_run=args.dry_run,
+            cargo_dry_run=args.cargo_dry_run,
             no_verify=args.no_verify,
             wait_time=args.wait
         )
@@ -369,6 +392,8 @@ def main() -> int:
         if not success:
             failed_crates.append(name)
             print_error(f"Failed to publish {name}")
+            if args.dry_run or args.cargo_dry_run:
+                break
             response = input("Continue with remaining crates? [y/N]: ").strip().lower()
             if response not in ('y', 'yes'):
                 break
