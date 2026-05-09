@@ -2,8 +2,8 @@
 //!
 //! This test verifies that our improvements maintain compatibility with the C++ implementation
 
+use dear_imgui_wgpu::wgpu::*;
 use dear_imgui_wgpu::{Uniforms, WgpuRenderer};
-use wgpu::*;
 
 /// Test that gamma correction values match the C++ implementation
 #[test]

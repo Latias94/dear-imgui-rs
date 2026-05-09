@@ -44,6 +44,16 @@ aligns the unified release train to `0.12.0` across the workspace.
 - Extensions
   - `dear-imgui-reflect`: numeric `wrap_around` now applies to drag widgets only.
 
+### Changed
+
+- Backends
+  - Update the default WGPU 29 dependency family to `29.0.3`, SDL3 bindings to
+    `sdl3` `0.18.3` / `sdl3-sys` `0.6.5+SDL-3.4.8`, and the WASM binding stack
+    to `wasm-bindgen` `0.2.121` / `web-sys` and `js-sys` `0.3.98`.
+  - Re-export the selected WGPU crate as `dear_imgui_wgpu::wgpu` so tests and
+    downstream integrations can name the exact WGPU major chosen by
+    `dear-imgui-wgpu`'s feature flags.
+
 ### Fixed
 
 - Core (`dear-imgui-rs`)

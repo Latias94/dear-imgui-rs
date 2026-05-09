@@ -129,11 +129,11 @@ compile_error!(
 );
 
 #[cfg(feature = "wgpu-27")]
-extern crate wgpu27 as wgpu;
+pub extern crate wgpu27 as wgpu;
 #[cfg(feature = "wgpu-28")]
-extern crate wgpu28 as wgpu;
+pub extern crate wgpu28 as wgpu;
 #[cfg(feature = "wgpu-29")]
-extern crate wgpu29 as wgpu;
+pub extern crate wgpu29 as wgpu;
 
 // Module declarations
 mod data;

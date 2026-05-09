@@ -21,21 +21,21 @@ thiserror.workspace = true
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 # On Linux/Windows, prefer building SDL3 from source so CI and users don't need
 # a pre-installed system SDL3. sdl3-sys will download and build SDL3 via CMake.
-sdl3 = { version = "0.17", features = ["build-from-source"] }
+sdl3 = { version = "0.18", features = ["build-from-source"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 # On Apple targets, keep SDL3 acquisition owned by the consuming application.
 # On macOS that usually means a Homebrew/system install. On iOS that usually
 # means an app-provided SDL3.xcframework or an app-owned build-from-source
 # setup via a direct `sdl3` dependency.
-sdl3 = { version = "0.17" }
+sdl3 = { version = "0.18" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 # On Android, keep SDL3 acquisition owned by the consuming application.
 # Apps may either provide SDL3 headers/libs themselves, or add their own direct
 # `sdl3 = { features = ["build-from-source"] }` dependency and rely on Cargo
 # feature unification to make sdl3-sys export headers via DEP_SDL3_OUT_DIR.
-sdl3 = { version = "0.17" }
+sdl3 = { version = "0.18" }
 
 [build-dependencies]
 cc.workspace = true
