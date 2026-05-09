@@ -44,6 +44,23 @@ aligns the unified release train to `0.12.0` across the workspace.
 - Extensions
   - `dear-imgui-reflect`: numeric `wrap_around` now applies to drag widgets only.
 
+### Migration Guide
+
+- Replace `Condition::Never` with the nearest valid intent, usually `Condition::Always`,
+  `Condition::Once`, or `Condition::FirstUseEver`.
+- Update code that passed mixed flag domains to the new typed options instead of OR-ing
+  everything into one flag value. The main new types are `ShortcutOptions`,
+  `ShortcutRoute`, `TableColumnIndent`, `MultiSelectClickPolicy`,
+  `MultiSelectBoxSelect`, `MultiSelectScopeKind`, `DrawCornerFlags`, and
+  `PolylineFlags`.
+- For rounded rectangles and image corners, use `DrawCornerFlags`. For closed paths,
+  set `PolylineBuilder::closed(true)` or pass `PolylineFlags` only to polyline/path APIs.
+- Replace `TableColumnSetup::init_width_or_weight()` with `fixed_width()` or
+  `stretch_weight()`, and move indentation to `TableColumnSetup::indent(...)` or
+  `indent_enabled(...)`.
+- When touching shortcut routing or multi-select, split the former combined flags into
+  the dedicated option types before passing them into the API.
+
 ### Changed
 
 - Backends
