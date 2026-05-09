@@ -18,8 +18,9 @@ aligns the unified release train to `0.12.0` across the workspace.
 
 - Remove `Condition::Never` and make APIs that previously accepted invalid or
   overloaded condition/flag values use explicit option types instead.
-- Split the combo, table, color, tab, popup, multi-select, shortcut, drag/drop, and drag/slider
-  APIs so mutually exclusive Dear ImGui choices cannot be combined accidentally.
+- Split the combo, table, color, tab, popup, multi-select, shortcut routing,
+  drag/drop, and drag/slider APIs so mutually exclusive Dear ImGui choices
+  cannot be combined accidentally.
 - Update `dear-imgui-reflect` so numeric widget helpers route slider and drag
   flags through the correct safe wrapper types.
 
@@ -29,7 +30,8 @@ aligns the unified release train to `0.12.0` across the workspace.
   - Remove `Condition::Never`.
   - Change `Window::content_size(...)` to accept only the size vector.
   - Replace several public flag arguments with explicit option types or narrower flag sets:
-    `DragDropPayloadCond`, `ShortcutFlags`, `NextItemShortcutFlags`,
+    `DragDropPayloadCond`, `ShortcutFlags`, `ShortcutOptions`,
+    `ShortcutRoute`, `NextItemShortcutFlags`, `NextItemShortcutOptions`,
     `ItemKeyOwnerFlags`, `DragFlags`, `ComboBoxOptions`, `TableOptions`,
     `TableColumnWidth`, `TableColumnStateFlags`, `ColorEditOptions`,
     `ColorPickerOptions`, `ColorButtonOptions`, `TabBarOptions`,
@@ -50,6 +52,9 @@ aligns the unified release train to `0.12.0` across the workspace.
   - Split tab bar fitting policy, context popup mouse button, and multi-select click policy
     out of their corresponding public flag sets so normal Rust code cannot combine invalid
     single-choice flag values.
+  - Split shortcut routing policy out of `ShortcutFlags` and
+    `NextItemShortcutFlags`, and type global-only routing modifiers separately,
+    so normal Rust code cannot combine route modes that Dear ImGui rejects.
 - Extensions
   - `dear-imgui-reflect`: route slider and drag numeric flags through distinct helper methods
     so the derived widgets no longer emit invalid flag combinations for Dear ImGui.

@@ -396,23 +396,15 @@ impl From<Key> for KeyChord {
 }
 
 bitflags! {
-    /// Input flags accepted by `Shortcut()`.
+    /// Independent input flags accepted by `Shortcut()`.
     ///
-    /// This intentionally excludes flags that are only supported by other input APIs.
+    /// The route policy is a single-choice setting represented by
+    /// [`ShortcutRoute`].
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct ShortcutFlags: i32 {
         const NONE = sys::ImGuiInputFlags_None as i32;
         const REPEAT = sys::ImGuiInputFlags_Repeat as i32;
-
-        const ROUTE_ACTIVE = sys::ImGuiInputFlags_RouteActive as i32;
-        const ROUTE_FOCUSED = sys::ImGuiInputFlags_RouteFocused as i32;
-        const ROUTE_GLOBAL = sys::ImGuiInputFlags_RouteGlobal as i32;
-        const ROUTE_ALWAYS = sys::ImGuiInputFlags_RouteAlways as i32;
-
-        const ROUTE_OVER_FOCUSED = sys::ImGuiInputFlags_RouteOverFocused as i32;
-        const ROUTE_OVER_ACTIVE = sys::ImGuiInputFlags_RouteOverActive as i32;
-        const ROUTE_UNLESS_BG_FOCUSED = sys::ImGuiInputFlags_RouteUnlessBgFocused as i32;
         const ROUTE_FROM_ROOT_WINDOW = sys::ImGuiInputFlags_RouteFromRootWindow as i32;
     }
 }
@@ -423,38 +415,203 @@ impl Default for ShortcutFlags {
     }
 }
 
-impl ShortcutFlags {
-    #[inline]
-    pub(crate) fn raw(self) -> sys::ImGuiInputFlags {
-        self.bits() as sys::ImGuiInputFlags
+bitflags! {
+    /// Options accepted only by the global shortcut route.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct ShortcutGlobalRouteFlags: i32 {
+        const NONE = sys::ImGuiInputFlags_None as i32;
+        const OVER_FOCUSED = sys::ImGuiInputFlags_RouteOverFocused as i32;
+        const OVER_ACTIVE = sys::ImGuiInputFlags_RouteOverActive as i32;
+        const UNLESS_BG_FOCUSED = sys::ImGuiInputFlags_RouteUnlessBgFocused as i32;
     }
 }
 
-/// Backwards-compatible name for `ShortcutFlags`.
-///
-/// New code should prefer `ShortcutFlags` for `Shortcut()` APIs and
-/// `NextItemShortcutFlags` for `SetNextItemShortcut()`.
-pub type InputFlags = ShortcutFlags;
+/// Single route policy for `Shortcut()` and `SetNextItemShortcut()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShortcutRoute {
+    /// Route to the active item only.
+    Active,
+    /// Route to windows in the focus stack. This is Dear ImGui's `Shortcut()`
+    /// default when no explicit route is provided.
+    Focused,
+    /// Focused route with higher priority than the active item.
+    FocusedOverActive,
+    /// Global route with optional global-only priority modifiers.
+    Global(ShortcutGlobalRouteFlags),
+    /// Poll keys directly without route registration.
+    Always,
+}
+
+impl ShortcutRoute {
+    #[inline]
+    const fn raw(self) -> sys::ImGuiInputFlags {
+        match self {
+            Self::Active => sys::ImGuiInputFlags_RouteActive as sys::ImGuiInputFlags,
+            Self::Focused => sys::ImGuiInputFlags_RouteFocused as sys::ImGuiInputFlags,
+            Self::FocusedOverActive => {
+                sys::ImGuiInputFlags_RouteFocused as sys::ImGuiInputFlags
+                    | sys::ImGuiInputFlags_RouteOverActive as sys::ImGuiInputFlags
+            }
+            Self::Global(flags) => {
+                sys::ImGuiInputFlags_RouteGlobal as sys::ImGuiInputFlags | flags.bits()
+            }
+            Self::Always => sys::ImGuiInputFlags_RouteAlways as sys::ImGuiInputFlags,
+        }
+    }
+
+    /// Returns the underlying Dear ImGui bits for this route policy.
+    pub const fn bits(self) -> i32 {
+        self.raw()
+    }
+}
+
+/// Complete shortcut options assembled from independent flags and an optional
+/// single route policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ShortcutOptions {
+    pub flags: ShortcutFlags,
+    pub route: Option<ShortcutRoute>,
+}
+
+impl ShortcutOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: ShortcutFlags::NONE,
+            route: None,
+        }
+    }
+
+    pub fn flags(mut self, flags: ShortcutFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn route(mut self, route: ShortcutRoute) -> Self {
+        self.route = Some(route);
+        self
+    }
+
+    /// Returns the underlying Dear ImGui bits for these options.
+    pub fn bits(self) -> i32 {
+        self.raw()
+    }
+
+    #[inline]
+    pub(crate) fn raw(self) -> sys::ImGuiInputFlags {
+        self.flags.bits() | self.route.map_or(0, ShortcutRoute::raw)
+    }
+}
+
+impl Default for ShortcutOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<ShortcutFlags> for ShortcutOptions {
+    fn from(flags: ShortcutFlags) -> Self {
+        Self::new().flags(flags)
+    }
+}
+
+impl From<ShortcutRoute> for ShortcutOptions {
+    fn from(route: ShortcutRoute) -> Self {
+        Self::new().route(route)
+    }
+}
+
+/// Backwards-compatible name for shortcut options.
+pub type InputFlags = ShortcutOptions;
 
 bitflags! {
-    /// Input flags accepted by `SetNextItemShortcut()`.
+    /// Flags specific to `SetNextItemShortcut()`.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct NextItemShortcutFlags: i32 {
         const NONE = sys::ImGuiInputFlags_None as i32;
-        const REPEAT = sys::ImGuiInputFlags_Repeat as i32;
-
-        const ROUTE_ACTIVE = sys::ImGuiInputFlags_RouteActive as i32;
-        const ROUTE_FOCUSED = sys::ImGuiInputFlags_RouteFocused as i32;
-        const ROUTE_GLOBAL = sys::ImGuiInputFlags_RouteGlobal as i32;
-        const ROUTE_ALWAYS = sys::ImGuiInputFlags_RouteAlways as i32;
-
-        const ROUTE_OVER_FOCUSED = sys::ImGuiInputFlags_RouteOverFocused as i32;
-        const ROUTE_OVER_ACTIVE = sys::ImGuiInputFlags_RouteOverActive as i32;
-        const ROUTE_UNLESS_BG_FOCUSED = sys::ImGuiInputFlags_RouteUnlessBgFocused as i32;
-        const ROUTE_FROM_ROOT_WINDOW = sys::ImGuiInputFlags_RouteFromRootWindow as i32;
-
         const TOOLTIP = sys::ImGuiInputFlags_Tooltip as i32;
+    }
+}
+
+/// Complete options accepted by `SetNextItemShortcut()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NextItemShortcutOptions {
+    pub shortcut: ShortcutOptions,
+    pub flags: NextItemShortcutFlags,
+}
+
+impl NextItemShortcutOptions {
+    pub const fn new() -> Self {
+        Self {
+            shortcut: ShortcutOptions::new(),
+            flags: NextItemShortcutFlags::NONE,
+        }
+    }
+
+    pub fn shortcut(mut self, options: impl Into<ShortcutOptions>) -> Self {
+        self.shortcut = options.into();
+        self
+    }
+
+    pub fn flags(mut self, flags: ShortcutFlags) -> Self {
+        self.shortcut.flags = flags;
+        self
+    }
+
+    pub fn route(mut self, route: ShortcutRoute) -> Self {
+        self.shortcut.route = Some(route);
+        self
+    }
+
+    pub fn next_item_flags(mut self, flags: NextItemShortcutFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn tooltip(mut self, value: bool) -> Self {
+        self.flags.set(NextItemShortcutFlags::TOOLTIP, value);
+        self
+    }
+
+    /// Returns the underlying Dear ImGui bits for these options.
+    pub fn bits(self) -> i32 {
+        self.raw()
+    }
+
+    #[inline]
+    pub(crate) fn raw(self) -> sys::ImGuiInputFlags {
+        self.shortcut.raw() | self.flags.bits()
+    }
+}
+
+impl Default for NextItemShortcutOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<ShortcutOptions> for NextItemShortcutOptions {
+    fn from(shortcut: ShortcutOptions) -> Self {
+        Self::new().shortcut(shortcut)
+    }
+}
+
+impl From<ShortcutFlags> for NextItemShortcutOptions {
+    fn from(flags: ShortcutFlags) -> Self {
+        Self::new().flags(flags)
+    }
+}
+
+impl From<ShortcutRoute> for NextItemShortcutOptions {
+    fn from(route: ShortcutRoute) -> Self {
+        Self::new().route(route)
+    }
+}
+
+impl From<NextItemShortcutFlags> for NextItemShortcutOptions {
+    fn from(flags: NextItemShortcutFlags) -> Self {
+        Self::new().next_item_flags(flags)
     }
 }
 
@@ -489,19 +646,6 @@ impl ItemKeyOwnerFlags {
 impl Default for NextItemShortcutFlags {
     fn default() -> Self {
         NextItemShortcutFlags::NONE
-    }
-}
-
-impl NextItemShortcutFlags {
-    #[inline]
-    pub(crate) fn raw(self) -> sys::ImGuiInputFlags {
-        self.bits() as sys::ImGuiInputFlags
-    }
-}
-
-impl From<ShortcutFlags> for NextItemShortcutFlags {
-    fn from(flags: ShortcutFlags) -> Self {
-        Self::from_bits_truncate(flags.bits())
     }
 }
 
@@ -619,27 +763,31 @@ impl crate::Ui {
     /// Call ImGui shortcut routing with default flags.
     #[doc(alias = "Shortcut")]
     pub fn shortcut(&self, key_chord: KeyChord) -> bool {
-        self.shortcut_with_flags(key_chord, ShortcutFlags::NONE)
+        self.shortcut_with_flags(key_chord, ShortcutOptions::new())
     }
 
-    /// Call ImGui shortcut routing with explicit input flags.
+    /// Call ImGui shortcut routing with explicit input options.
     #[doc(alias = "Shortcut")]
-    pub fn shortcut_with_flags(&self, key_chord: KeyChord, flags: ShortcutFlags) -> bool {
-        unsafe { sys::igShortcut_Nil(key_chord.raw(), flags.raw()) }
+    pub fn shortcut_with_flags(
+        &self,
+        key_chord: KeyChord,
+        flags: impl Into<ShortcutOptions>,
+    ) -> bool {
+        unsafe { sys::igShortcut_Nil(key_chord.raw(), flags.into().raw()) }
     }
 
     /// Set the next item's shortcut with default flags.
     #[doc(alias = "SetNextItemShortcut")]
     pub fn set_next_item_shortcut(&self, key_chord: KeyChord) {
-        self.set_next_item_shortcut_with_flags(key_chord, NextItemShortcutFlags::NONE);
+        self.set_next_item_shortcut_with_flags(key_chord, NextItemShortcutOptions::new());
     }
 
-    /// Set the next item's shortcut with explicit input flags.
+    /// Set the next item's shortcut with explicit options.
     #[doc(alias = "SetNextItemShortcut")]
     pub fn set_next_item_shortcut_with_flags(
         &self,
         key_chord: KeyChord,
-        flags: impl Into<NextItemShortcutFlags>,
+        flags: impl Into<NextItemShortcutOptions>,
     ) {
         let flags = flags.into();
         unsafe { sys::igSetNextItemShortcut(key_chord.raw(), flags.raw()) }

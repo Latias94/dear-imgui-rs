@@ -24,10 +24,20 @@ fn shortcut_routing_apis_no_panic() {
     let chord = imgui::KeyChord::new(imgui::Key::S).with_mods(imgui::KeyMods::CTRL);
     let _ = ui.is_key_chord_pressed(chord);
     let _ = ui.shortcut(chord);
-    let _ = ui.shortcut_with_flags(chord, imgui::InputFlags::ROUTE_GLOBAL);
+    let _ = ui.shortcut_with_flags(
+        chord,
+        imgui::ShortcutRoute::Global(imgui::ShortcutGlobalRouteFlags::NONE),
+    );
 
     ui.set_next_item_shortcut(chord);
-    ui.set_next_item_shortcut_with_flags(chord, imgui::NextItemShortcutFlags::TOOLTIP);
+    ui.set_next_item_shortcut_with_flags(
+        chord,
+        imgui::NextItemShortcutOptions::new()
+            .route(imgui::ShortcutRoute::Global(
+                imgui::ShortcutGlobalRouteFlags::OVER_ACTIVE,
+            ))
+            .tooltip(true),
+    );
     let _ = ui.button("Save");
 }
 
@@ -38,13 +48,38 @@ fn input_flag_types_match_supported_imgui_subsets() {
         imgui::sys::ImGuiInputFlags_Repeat
     );
     assert_eq!(
-        imgui::ShortcutFlags::ROUTE_GLOBAL.bits(),
+        imgui::ShortcutRoute::Global(imgui::ShortcutGlobalRouteFlags::NONE).bits(),
         imgui::sys::ImGuiInputFlags_RouteGlobal
+    );
+    assert_eq!(
+        imgui::ShortcutRoute::FocusedOverActive.bits(),
+        imgui::sys::ImGuiInputFlags_RouteFocused | imgui::sys::ImGuiInputFlags_RouteOverActive
+    );
+    assert_eq!(
+        imgui::ShortcutOptions::new()
+            .flags(imgui::ShortcutFlags::REPEAT | imgui::ShortcutFlags::ROUTE_FROM_ROOT_WINDOW)
+            .route(imgui::ShortcutRoute::Global(
+                imgui::ShortcutGlobalRouteFlags::OVER_FOCUSED
+                    | imgui::ShortcutGlobalRouteFlags::UNLESS_BG_FOCUSED,
+            ))
+            .bits(),
+        imgui::sys::ImGuiInputFlags_Repeat
+            | imgui::sys::ImGuiInputFlags_RouteFromRootWindow
+            | imgui::sys::ImGuiInputFlags_RouteGlobal
+            | imgui::sys::ImGuiInputFlags_RouteOverFocused
+            | imgui::sys::ImGuiInputFlags_RouteUnlessBgFocused
     );
 
     assert_eq!(
         imgui::NextItemShortcutFlags::TOOLTIP.bits(),
         imgui::sys::ImGuiInputFlags_Tooltip
+    );
+    assert_eq!(
+        imgui::NextItemShortcutOptions::new()
+            .route(imgui::ShortcutRoute::Always)
+            .tooltip(true)
+            .bits(),
+        imgui::sys::ImGuiInputFlags_RouteAlways | imgui::sys::ImGuiInputFlags_Tooltip
     );
 
     assert_eq!(
