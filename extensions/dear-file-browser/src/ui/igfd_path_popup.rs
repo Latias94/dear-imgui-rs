@@ -74,20 +74,21 @@ fn draw_igfd_path_table_popup(
         SortMode::Lexicographic => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
 
-    let flags = dear_imgui_rs::TableFlags::SIZING_FIXED_FIT
-        | dear_imgui_rs::TableFlags::HIDEABLE
+    let flags = dear_imgui_rs::TableFlags::HIDEABLE
         | dear_imgui_rs::TableFlags::ROW_BG
         | dear_imgui_rs::TableFlags::SCROLL_Y
         | dear_imgui_rs::TableFlags::NO_HOST_EXTEND_Y;
+    let options = dear_imgui_rs::TableOptions::from(flags)
+        .sizing_policy(dear_imgui_rs::TableSizingPolicy::FixedFit);
     let table_size = ui.content_region_avail();
     if let Some(_t) =
-        ui.begin_table_with_sizing("##FileDialog_pathTable", 1, flags, table_size, 0.0)
+        ui.begin_table_with_sizing("##FileDialog_pathTable", 1, options, table_size, 0.0)
     {
         ui.table_setup_scroll_freeze(0, 1);
-        ui.table_setup_column(
+        ui.table_setup_column_stretch_weight(
             "File name",
-            dear_imgui_rs::TableColumnFlags::WIDTH_STRETCH,
-            -1.0,
+            dear_imgui_rs::TableColumnFlags::NONE,
+            1.0,
             0,
         );
         ui.table_headers_row();

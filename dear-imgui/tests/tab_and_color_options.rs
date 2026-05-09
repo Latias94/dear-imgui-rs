@@ -22,15 +22,19 @@ fn tab_and_color_options_helpers_no_panic() {
     let ui = ctx.frame();
 
     ui.set_color_edit_options(
-        imgui::ColorEditFlags::UINT8
-            | imgui::ColorEditFlags::DISPLAY_HSV
-            | imgui::ColorEditFlags::PICKER_HUE_BAR,
+        imgui::ColorEditOptions::new()
+            .data_type(imgui::ColorDataType::Uint8)
+            .display_mode(imgui::ColorDisplayMode::Hsv)
+            .picker_mode(imgui::ColorPickerMode::HueBar),
     );
 
     let _ = ui.tab_bar("Tabs").map(|_tab| {
         let _ = ui.tab_item("A");
         let _ = ui.tab_item_button("+");
-        let _ = ui.tab_item_button_with_flags("+##fit", imgui::TabItemFlags::TRAILING);
+        let _ = ui.tab_item_button_with_flags(
+            "+##fit",
+            imgui::TabItemOptions::new().placement(imgui::TabItemPlacement::Trailing),
+        );
         ui.set_tab_item_closed("A");
     });
 }

@@ -148,7 +148,6 @@ pub struct Window<'ui> {
     pos: Option<[f32; 2]>,
     pos_condition: Condition,
     content_size: Option<[f32; 2]>,
-    content_size_condition: Condition,
     collapsed: Option<bool>,
     collapsed_condition: Condition,
     focused: Option<bool>,
@@ -170,7 +169,6 @@ impl<'ui> Window<'ui> {
             pos: None,
             pos_condition: Condition::Always,
             content_size: None,
-            content_size_condition: Condition::Always,
             collapsed: None,
             collapsed_condition: Condition::Always,
             focused: None,
@@ -223,9 +221,8 @@ impl<'ui> Window<'ui> {
     }
 
     /// Sets window content size
-    pub fn content_size(mut self, size: [f32; 2], condition: Condition) -> Self {
+    pub fn content_size(mut self, size: [f32; 2]) -> Self {
         self.content_size = Some(size);
-        self.content_size_condition = condition;
         self
     }
 

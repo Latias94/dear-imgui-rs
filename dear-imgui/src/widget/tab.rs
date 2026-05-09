@@ -47,7 +47,9 @@ bitflags::bitflags! {
 }
 
 bitflags::bitflags! {
-    /// Flags for tab item widgets
+    /// Independent flags for tab item widgets.
+    ///
+    /// Leading/trailing placement is represented by [`TabItemPlacement`].
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct TabItemFlags: i32 {
@@ -65,10 +67,73 @@ bitflags::bitflags! {
         const NO_TOOLTIP = sys::ImGuiTabItemFlags_NoTooltip as i32;
         /// Disable reordering this tab or having another tab cross over this tab
         const NO_REORDER = sys::ImGuiTabItemFlags_NoReorder as i32;
-        /// Enforce the tab position to the left of the tab bar (after the tab list popup button)
-        const LEADING = sys::ImGuiTabItemFlags_Leading as i32;
-        /// Enforce the tab position to the right of the tab bar (before the scrolling buttons)
-        const TRAILING = sys::ImGuiTabItemFlags_Trailing as i32;
+    }
+}
+
+/// Single placement option for a tab item or tab item button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TabItemPlacement {
+    /// Position the tab on the leading side of the tab bar.
+    Leading,
+    /// Position the tab on the trailing side of the tab bar.
+    Trailing,
+}
+
+impl TabItemPlacement {
+    #[inline]
+    const fn raw(self) -> i32 {
+        match self {
+            Self::Leading => sys::ImGuiTabItemFlags_Leading as i32,
+            Self::Trailing => sys::ImGuiTabItemFlags_Trailing as i32,
+        }
+    }
+}
+
+/// Complete tab item options assembled from independent flags and optional
+/// single placement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TabItemOptions {
+    pub flags: TabItemFlags,
+    pub placement: Option<TabItemPlacement>,
+}
+
+impl TabItemOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: TabItemFlags::NONE,
+            placement: None,
+        }
+    }
+
+    pub fn flags(mut self, flags: TabItemFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn placement(mut self, placement: TabItemPlacement) -> Self {
+        self.placement = Some(placement);
+        self
+    }
+
+    pub fn bits(self) -> i32 {
+        self.raw()
+    }
+
+    #[inline]
+    pub(crate) fn raw(self) -> i32 {
+        self.flags.bits() | self.placement.map_or(0, TabItemPlacement::raw)
+    }
+}
+
+impl Default for TabItemOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<TabItemFlags> for TabItemOptions {
+    fn from(flags: TabItemFlags) -> Self {
+        Self::new().flags(flags)
     }
 }
 
@@ -157,7 +222,7 @@ impl<'ui> Drop for TabBarToken<'ui> {
 pub struct TabItem<'a, T> {
     label: T,
     opened: Option<&'a mut bool>,
-    flags: TabItemFlags,
+    options: TabItemOptions,
 }
 
 impl<'a, T: AsRef<str>> TabItem<'a, T> {
@@ -167,7 +232,7 @@ impl<'a, T: AsRef<str>> TabItem<'a, T> {
         Self {
             label,
             opened: None,
-            flags: TabItemFlags::NONE,
+            options: TabItemOptions::new(),
         }
     }
 
@@ -182,14 +247,20 @@ impl<'a, T: AsRef<str>> TabItem<'a, T> {
     /// Set the flags of the tab item.
     ///
     /// Flags are empty by default
-    pub fn flags(mut self, flags: TabItemFlags) -> Self {
-        self.flags = flags;
+    pub fn flags(mut self, flags: impl Into<TabItemOptions>) -> Self {
+        self.options = flags.into();
+        self
+    }
+
+    /// Set the tab placement.
+    pub fn placement(mut self, placement: TabItemPlacement) -> Self {
+        self.options.placement = Some(placement);
         self
     }
 
     /// Begins the tab item and returns a token if successful
     pub fn begin(self, ui: &Ui) -> Option<TabItemToken<'_>> {
-        ui.tab_item_with_flags(self.label, self.opened, self.flags)
+        ui.tab_item_with_flags(self.label, self.opened, self.options)
     }
 
     /// Creates a tab item and runs a closure to construct the contents.
@@ -265,7 +336,7 @@ impl Ui {
     /// [tab_item_with_flags]: Self::tab_item_with_flags
     #[doc(alias = "BeginTabItem")]
     pub fn tab_item(&self, label: impl AsRef<str>) -> Option<TabItemToken<'_>> {
-        self.tab_item_with_flags(label, None, TabItemFlags::NONE)
+        self.tab_item_with_flags(label, None, TabItemOptions::new())
     }
 
     /// Creates a new tab item and returns a token if its contents are visible.
@@ -277,7 +348,7 @@ impl Ui {
         label: impl AsRef<str>,
         opened: &mut bool,
     ) -> Option<TabItemToken<'_>> {
-        self.tab_item_with_flags(label, Some(opened), TabItemFlags::NONE)
+        self.tab_item_with_flags(label, Some(opened), TabItemOptions::new())
     }
 
     /// Creates a new tab item and returns a token if its contents are visible.
@@ -286,12 +357,13 @@ impl Ui {
         &self,
         label: impl AsRef<str>,
         opened: Option<&mut bool>,
-        flags: TabItemFlags,
+        flags: impl Into<TabItemOptions>,
     ) -> Option<TabItemToken<'_>> {
+        let options = flags.into();
         let label_ptr = self.scratch_txt(label);
         let opened_ptr = opened.map(|x| x as *mut bool).unwrap_or(ptr::null_mut());
 
-        let should_render = unsafe { sys::igBeginTabItem(label_ptr, opened_ptr, flags.bits()) };
+        let should_render = unsafe { sys::igBeginTabItem(label_ptr, opened_ptr, options.raw()) };
 
         if should_render {
             Some(TabItemToken::new(self))
@@ -303,13 +375,17 @@ impl Ui {
     /// Creates a button on the current tab bar (e.g. to append a `+` new-tab button).
     #[doc(alias = "TabItemButton")]
     pub fn tab_item_button(&self, label: impl AsRef<str>) -> bool {
-        self.tab_item_button_with_flags(label, TabItemFlags::NONE)
+        self.tab_item_button_with_flags(label, TabItemOptions::new())
     }
 
     /// Creates a button on the current tab bar with explicit flags.
     #[doc(alias = "TabItemButton")]
-    pub fn tab_item_button_with_flags(&self, label: impl AsRef<str>, flags: TabItemFlags) -> bool {
-        unsafe { sys::igTabItemButton(self.scratch_txt(label), flags.bits()) }
+    pub fn tab_item_button_with_flags(
+        &self,
+        label: impl AsRef<str>,
+        flags: impl Into<TabItemOptions>,
+    ) -> bool {
+        unsafe { sys::igTabItemButton(self.scratch_txt(label), flags.into().raw()) }
     }
 
     /// Notifies Dear ImGui that a tab (or docked window) has been closed.

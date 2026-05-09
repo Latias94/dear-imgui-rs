@@ -118,7 +118,10 @@ bitflags::bitflags! {
 }
 
 bitflags::bitflags! {
-    /// Flags for combo box widgets
+    /// Independent flags for combo box widgets.
+    ///
+    /// Mutually exclusive preview and height choices are represented by
+    /// [`ComboBoxPreviewMode`] and [`ComboBoxHeight`].
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct ComboBoxFlags: i32 {
@@ -126,25 +129,126 @@ bitflags::bitflags! {
         const NONE = 0;
         /// Align the popup toward the left by default
         const POPUP_ALIGN_LEFT = sys::ImGuiComboFlags_PopupAlignLeft as i32;
-        /// Max ~4 items visible. Tip: If you want your combo popup to be a specific size you can use SetNextWindowSizeConstraints() prior to calling BeginCombo()
-        const HEIGHT_SMALL = sys::ImGuiComboFlags_HeightSmall as i32;
-        /// Max ~8 items visible (default)
-        const HEIGHT_REGULAR = sys::ImGuiComboFlags_HeightRegular as i32;
-        /// Max ~20 items visible
-        const HEIGHT_LARGE = sys::ImGuiComboFlags_HeightLarge as i32;
-        /// As many fitting items as possible
-        const HEIGHT_LARGEST = sys::ImGuiComboFlags_HeightLargest as i32;
-        /// Display on the preview box without the square arrow button
-        const NO_ARROW_BUTTON = sys::ImGuiComboFlags_NoArrowButton as i32;
-        /// Display only a square arrow button
-        const NO_PREVIEW = sys::ImGuiComboFlags_NoPreview as i32;
-        /// Width dynamically calculated from preview contents
-        const WIDTH_FIT_PREVIEW = sys::ImGuiComboFlags_WidthFitPreview as i32;
+    }
+}
+
+/// Height policy for combo box popups.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ComboBoxHeight {
+    /// Max roughly 4 items visible.
+    Small,
+    /// Max roughly 8 items visible.
+    Regular,
+    /// Max roughly 20 items visible.
+    Large,
+    /// As many fitting items as possible.
+    Largest,
+}
+
+impl ComboBoxHeight {
+    #[inline]
+    const fn raw(self) -> i32 {
+        match self {
+            Self::Small => sys::ImGuiComboFlags_HeightSmall as i32,
+            Self::Regular => sys::ImGuiComboFlags_HeightRegular as i32,
+            Self::Large => sys::ImGuiComboFlags_HeightLarge as i32,
+            Self::Largest => sys::ImGuiComboFlags_HeightLargest as i32,
+        }
+    }
+}
+
+/// Preview/arrow layout for a combo box.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ComboBoxPreviewMode {
+    /// Standard preview box with arrow button.
+    #[default]
+    Preview,
+    /// Standard preview box without the square arrow button.
+    PreviewNoArrowButton,
+    /// Width dynamically calculated from preview contents.
+    PreviewFit,
+    /// Fit preview width without the square arrow button.
+    PreviewFitNoArrowButton,
+    /// Display only a square arrow button.
+    NoPreview,
+}
+
+impl ComboBoxPreviewMode {
+    #[inline]
+    const fn raw(self) -> i32 {
+        match self {
+            Self::Preview => 0,
+            Self::PreviewNoArrowButton => sys::ImGuiComboFlags_NoArrowButton as i32,
+            Self::PreviewFit => sys::ImGuiComboFlags_WidthFitPreview as i32,
+            Self::PreviewFitNoArrowButton => {
+                sys::ImGuiComboFlags_WidthFitPreview as i32
+                    | sys::ImGuiComboFlags_NoArrowButton as i32
+            }
+            Self::NoPreview => sys::ImGuiComboFlags_NoPreview as i32,
+        }
+    }
+}
+
+/// Complete combo box options assembled from independent flags and exclusive
+/// mode selections.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ComboBoxOptions {
+    pub flags: ComboBoxFlags,
+    pub height: Option<ComboBoxHeight>,
+    pub preview_mode: ComboBoxPreviewMode,
+}
+
+impl Default for ComboBoxOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ComboBoxOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: ComboBoxFlags::NONE,
+            height: None,
+            preview_mode: ComboBoxPreviewMode::Preview,
+        }
+    }
+
+    pub fn flags(mut self, flags: ComboBoxFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn height(mut self, height: ComboBoxHeight) -> Self {
+        self.height = Some(height);
+        self
+    }
+
+    pub fn preview_mode(mut self, mode: ComboBoxPreviewMode) -> Self {
+        self.preview_mode = mode;
+        self
+    }
+
+    pub fn bits(self) -> i32 {
+        self.raw()
+    }
+
+    #[inline]
+    pub(crate) fn raw(self) -> i32 {
+        self.flags.bits() | self.height.map_or(0, ComboBoxHeight::raw) | self.preview_mode.raw()
+    }
+}
+
+impl From<ComboBoxFlags> for ComboBoxOptions {
+    fn from(flags: ComboBoxFlags) -> Self {
+        Self::new().flags(flags)
     }
 }
 
 bitflags::bitflags! {
-    /// Flags for table widgets
+    /// Independent flags for table widgets.
+    ///
+    /// The table sizing policy is a single-choice setting represented by
+    /// [`TableSizingPolicy`].
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct TableFlags: i32 {
@@ -186,14 +290,6 @@ bitflags::bitflags! {
         const NO_BORDERS_IN_BODY = sys::ImGuiTableFlags_NoBordersInBody as i32;
         /// [ALPHA] Disable vertical borders in columns Body until hovered for resize (borders will always appears in Headers). -> May move to style
         const NO_BORDERS_IN_BODY_UNTIL_RESIZE = sys::ImGuiTableFlags_NoBordersInBodyUntilResize as i32;
-        /// Columns default to _WidthFixed or _WidthAuto (if resizable or not resizable), matching contents width
-        const SIZING_FIXED_FIT = sys::ImGuiTableFlags_SizingFixedFit as i32;
-        /// Columns default to _WidthFixed or _WidthAuto (if resizable or not resizable), matching the maximum contents width of all columns. Implicitly enable ImGuiTableFlags_NoKeepColumnsVisible.
-        const SIZING_FIXED_SAME = sys::ImGuiTableFlags_SizingFixedSame as i32;
-        /// Columns default to _WidthStretch with default weights proportional to each columns contents widths.
-        const SIZING_STRETCH_PROP = sys::ImGuiTableFlags_SizingStretchProp as i32;
-        /// Columns default to _WidthStretch with default weights all equal, unless overridden by TableSetupColumn().
-        const SIZING_STRETCH_SAME = sys::ImGuiTableFlags_SizingStretchSame as i32;
         /// Make outer width auto-fit to columns, overriding outer_size.x value. Only available when ScrollX/ScrollY are disabled and Stretch columns are not used.
         const NO_HOST_EXTEND_X = sys::ImGuiTableFlags_NoHostExtendX as i32;
         /// Make outer height stop exactly at outer_size.y (prevent auto-extending table past the limit). Only available when ScrollX/ScrollY are disabled. Data below the limit will be clipped and not visible.
@@ -223,6 +319,79 @@ bitflags::bitflags! {
     }
 }
 
+/// Single-choice table sizing policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TableSizingPolicy {
+    /// Columns default to fixed/auto widths matching contents width.
+    FixedFit,
+    /// Fixed/auto widths matching the maximum contents width of all columns.
+    FixedSame,
+    /// Stretch columns with weights proportional to contents widths.
+    StretchProp,
+    /// Stretch columns with equal weights unless overridden per column.
+    StretchSame,
+}
+
+impl TableSizingPolicy {
+    #[inline]
+    const fn raw(self) -> i32 {
+        match self {
+            Self::FixedFit => sys::ImGuiTableFlags_SizingFixedFit as i32,
+            Self::FixedSame => sys::ImGuiTableFlags_SizingFixedSame as i32,
+            Self::StretchProp => sys::ImGuiTableFlags_SizingStretchProp as i32,
+            Self::StretchSame => sys::ImGuiTableFlags_SizingStretchSame as i32,
+        }
+    }
+}
+
+/// Complete table options assembled from independent flags and an optional
+/// single sizing policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TableOptions {
+    pub flags: TableFlags,
+    pub sizing_policy: Option<TableSizingPolicy>,
+}
+
+impl Default for TableOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TableOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: TableFlags::NONE,
+            sizing_policy: None,
+        }
+    }
+
+    pub fn flags(mut self, flags: TableFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn sizing_policy(mut self, policy: TableSizingPolicy) -> Self {
+        self.sizing_policy = Some(policy);
+        self
+    }
+
+    pub fn bits(self) -> i32 {
+        self.raw()
+    }
+
+    #[inline]
+    pub(crate) fn raw(self) -> i32 {
+        self.flags.bits() | self.sizing_policy.map_or(0, TableSizingPolicy::raw)
+    }
+}
+
+impl From<TableFlags> for TableOptions {
+    fn from(flags: TableFlags) -> Self {
+        Self::new().flags(flags)
+    }
+}
+
 #[cfg(feature = "serde")]
 impl Serialize for TableFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -245,10 +414,85 @@ impl<'de> Deserialize<'de> for TableFlags {
 }
 
 bitflags::bitflags! {
-    /// Flags for table columns
+    /// Independent flags accepted by `TableSetupColumn()`.
+    ///
+    /// The fixed/stretch width mode is a single-choice setting represented by
+    /// [`TableColumnWidth`].
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct TableColumnFlags: i32 {
+        /// No flags
+        const NONE = 0;
+        /// Disable manual resizing
+        const NO_RESIZE = sys::ImGuiTableColumnFlags_NoResize as i32;
+        /// Disable manual reordering this column
+        const NO_REORDER = sys::ImGuiTableColumnFlags_NoReorder as i32;
+        /// Disable ability to hide/disable this column
+        const NO_HIDE = sys::ImGuiTableColumnFlags_NoHide as i32;
+        /// Disable clipping for this column
+        const NO_CLIP = sys::ImGuiTableColumnFlags_NoClip as i32;
+        /// Disable ability to sort on this field
+        const NO_SORT = sys::ImGuiTableColumnFlags_NoSort as i32;
+        /// Disable ability to sort in the ascending direction
+        const NO_SORT_ASCENDING = sys::ImGuiTableColumnFlags_NoSortAscending as i32;
+        /// Disable ability to sort in the descending direction
+        const NO_SORT_DESCENDING = sys::ImGuiTableColumnFlags_NoSortDescending as i32;
+        /// TableHeadersRow() will not submit label for this column
+        const NO_HEADER_LABEL = sys::ImGuiTableColumnFlags_NoHeaderLabel as i32;
+        /// Disable header text width contribution to automatic column width
+        const NO_HEADER_WIDTH = sys::ImGuiTableColumnFlags_NoHeaderWidth as i32;
+        /// Make the initial sort direction Ascending when first sorting on this column
+        const PREFER_SORT_ASCENDING = sys::ImGuiTableColumnFlags_PreferSortAscending as i32;
+        /// Make the initial sort direction Descending when first sorting on this column
+        const PREFER_SORT_DESCENDING = sys::ImGuiTableColumnFlags_PreferSortDescending as i32;
+        /// Use current Indent value when entering cell
+        const INDENT_ENABLE = sys::ImGuiTableColumnFlags_IndentEnable as i32;
+        /// Disable indenting for this column
+        const INDENT_DISABLE = sys::ImGuiTableColumnFlags_IndentDisable as i32;
+        /// Display an angled header for this column (when angled headers feature is enabled)
+        const ANGLED_HEADER = sys::ImGuiTableColumnFlags_AngledHeader as i32;
+    }
+}
+
+/// Single-choice width mode for a table column.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TableColumnWidth {
+    /// Initial value is interpreted as a fixed width in pixels.
+    Fixed(f32),
+    /// Initial value is interpreted as a stretch weight.
+    Stretch(f32),
+}
+
+impl TableColumnWidth {
+    pub const fn fixed(width: f32) -> Self {
+        Self::Fixed(width)
+    }
+
+    pub const fn stretch(weight: f32) -> Self {
+        Self::Stretch(weight)
+    }
+
+    #[inline]
+    pub(crate) const fn raw_flags(self) -> i32 {
+        match self {
+            Self::Fixed(_) => sys::ImGuiTableColumnFlags_WidthFixed as i32,
+            Self::Stretch(_) => sys::ImGuiTableColumnFlags_WidthStretch as i32,
+        }
+    }
+
+    #[inline]
+    pub(crate) const fn value(self) -> f32 {
+        match self {
+            Self::Fixed(value) | Self::Stretch(value) => value,
+        }
+    }
+}
+
+bitflags::bitflags! {
+    /// Flags returned by `TableGetColumnFlags()`.
+    #[repr(transparent)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct TableColumnStateFlags: i32 {
         /// No flags
         const NONE = 0;
         /// Overriding width becomes fixed width
@@ -294,6 +538,12 @@ bitflags::bitflags! {
     }
 }
 
+impl From<TableColumnFlags> for TableColumnStateFlags {
+    fn from(flags: TableColumnFlags) -> Self {
+        Self::from_bits_retain(flags.bits())
+    }
+}
+
 #[cfg(feature = "serde")]
 impl Serialize for TableColumnFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -312,5 +562,26 @@ impl<'de> Deserialize<'de> for TableColumnFlags {
     {
         let bits = i32::deserialize(deserializer)?;
         Ok(TableColumnFlags::from_bits_truncate(bits))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for TableColumnStateFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for TableColumnStateFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(TableColumnStateFlags::from_bits_truncate(bits))
     }
 }

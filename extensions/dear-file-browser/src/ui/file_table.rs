@@ -314,14 +314,13 @@ fn draw_file_table_view(
     }
 
     // Table
-    use dear_imgui_rs::{SortDirection, TableColumnFlags, TableFlags};
+    use dear_imgui_rs::{SortDirection, TableColumnFlags, TableFlags, TableSizingPolicy};
     let flags = TableFlags::RESIZABLE
         | TableFlags::REORDERABLE
         | TableFlags::ROW_BG
         | TableFlags::BORDERS_V
         | TableFlags::BORDERS_OUTER
         | TableFlags::SCROLL_Y
-        | TableFlags::SIZING_STRETCH_PROP
         | TableFlags::SORTABLE; // enable built-in header sorting
     let columns_config = &state.ui.file_list_columns;
     let show_preview =
@@ -336,7 +335,11 @@ fn draw_file_table_view(
         1
     };
 
-    let mut table = ui.table("file_table").flags(flags).outer_size(size);
+    let mut table = ui
+        .table("file_table")
+        .flags(flags)
+        .sizing_policy(TableSizingPolicy::StretchProp)
+        .outer_size(size);
     if show_preview {
         table = table
             .column("Preview")
@@ -662,7 +665,9 @@ fn draw_file_grid_view(
         state.ui.thumbnails.advance_frame();
     }
 
-    use dear_imgui_rs::{StyleColor, TableColumnFlags, TableColumnSetup, TableFlags};
+    use dear_imgui_rs::{
+        StyleColor, TableColumnFlags, TableColumnSetup, TableFlags, TableSizingPolicy,
+    };
 
     let entries: Vec<DirEntry> = state.core.entries().to_vec();
     if entries.is_empty() {
@@ -689,21 +694,19 @@ fn draw_file_grid_view(
     let cols = ((size[0].max(1.0)) / cell_w).floor() as usize;
     let cols = cols.clamp(1, 16);
 
-    let flags = TableFlags::SCROLL_Y
-        | TableFlags::SIZING_FIXED_FIT
-        | TableFlags::NO_PAD_OUTER_X
-        | TableFlags::NO_PAD_INNER_X;
+    let flags = TableFlags::SCROLL_Y | TableFlags::NO_PAD_OUTER_X | TableFlags::NO_PAD_INNER_X;
     let mut col_setups = Vec::with_capacity(cols);
     for i in 0..cols {
         col_setups.push(
             TableColumnSetup::new(format!("##grid_col_{i}"))
                 .flags(TableColumnFlags::NO_SORT | TableColumnFlags::NO_RESIZE)
-                .init_width_or_weight(cell_w),
+                .fixed_width(cell_w),
         );
     }
 
     ui.table("file_grid")
         .flags(flags)
+        .sizing_policy(TableSizingPolicy::FixedFit)
         .outer_size(size)
         .columns(col_setups)
         .headers(false)

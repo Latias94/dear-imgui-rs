@@ -375,16 +375,12 @@ where
 }
 
 bitflags::bitflags! {
-    /// Flags for slider widgets
+    /// Flags for slider widgets.
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct SliderFlags: i32 {
         /// No flags
         const NONE = 0;
-        /// Wrap the value around when exceeding the current range.
-        ///
-        /// Corresponds to `ImGuiSliderFlags_WrapAround`.
-        const WRAP_AROUND = sys::ImGuiSliderFlags_WrapAround as i32;
         /// Clamp on input when editing via CTRL+Click or direct text input.
         ///
         /// This is one of the two bits combined by `ALWAYS_CLAMP`.

@@ -40,7 +40,10 @@
 use crate::draw::ImColor32;
 use crate::sys;
 use crate::ui::Ui;
-use crate::widget::{TableColumnFlags, TableFlags};
+use crate::widget::{
+    TableColumnFlags, TableColumnStateFlags, TableColumnWidth, TableFlags, TableOptions,
+    TableSizingPolicy,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -51,7 +54,7 @@ use std::ffi::CStr;
 pub struct TableColumnSetup<Name> {
     pub name: Name,
     pub flags: TableColumnFlags,
-    pub init_width_or_weight: f32,
+    pub width: Option<TableColumnWidth>,
     pub user_id: u32,
 }
 
@@ -61,7 +64,7 @@ impl<Name> TableColumnSetup<Name> {
         Self {
             name,
             flags: TableColumnFlags::NONE,
-            init_width_or_weight: 0.0,
+            width: None,
             user_id: 0,
         }
     }
@@ -72,9 +75,15 @@ impl<Name> TableColumnSetup<Name> {
         self
     }
 
-    /// Sets the initial width or weight
-    pub fn init_width_or_weight(mut self, width: f32) -> Self {
-        self.init_width_or_weight = width;
+    /// Sets a fixed initial column width in pixels.
+    pub fn fixed_width(mut self, width: f32) -> Self {
+        self.width = Some(TableColumnWidth::Fixed(width));
+        self
+    }
+
+    /// Sets an initial stretch weight for this column.
+    pub fn stretch_weight(mut self, weight: f32) -> Self {
+        self.width = Some(TableColumnWidth::Stretch(weight));
         self
     }
 
@@ -130,7 +139,7 @@ impl Ui {
         &self,
         str_id: impl AsRef<str>,
         column_count: usize,
-        flags: TableFlags,
+        flags: impl Into<TableOptions>,
     ) -> Option<TableToken<'_>> {
         self.begin_table_with_sizing(str_id, column_count, flags, [0.0, 0.0], 0.0)
     }
@@ -142,10 +151,11 @@ impl Ui {
         &self,
         str_id: impl AsRef<str>,
         column_count: usize,
-        flags: TableFlags,
+        flags: impl Into<TableOptions>,
         outer_size: impl Into<[f32; 2]>,
         inner_width: f32,
     ) -> Option<TableToken<'_>> {
+        let options = flags.into();
         let str_id_ptr = self.scratch_txt(str_id);
         let outer_size_vec: sys::ImVec2 = outer_size.into().into();
 
@@ -153,7 +163,7 @@ impl Ui {
             sys::igBeginTable(
                 str_id_ptr,
                 column_count as i32,
-                flags.bits(),
+                options.raw(),
                 outer_size_vec,
                 inner_width,
             )
@@ -188,17 +198,12 @@ impl Ui {
         &self,
         str_id: impl AsRef<str>,
         column_data: [TableColumnSetup<Name>; N],
-        flags: TableFlags,
+        flags: impl Into<TableOptions>,
     ) -> Option<TableToken<'_>> {
         if let Some(token) = self.begin_table_with_flags(str_id, N, flags) {
             // Setup columns
             for column in &column_data {
-                self.table_setup_column(
-                    &column.name,
-                    column.flags,
-                    column.init_width_or_weight,
-                    column.user_id,
-                );
+                self.table_setup_column(&column.name, column.flags, column.width, column.user_id);
             }
             self.table_headers_row();
             Some(token)
@@ -212,13 +217,42 @@ impl Ui {
         &self,
         label: impl AsRef<str>,
         flags: TableColumnFlags,
-        init_width_or_weight: f32,
+        width: Option<TableColumnWidth>,
         user_id: u32,
     ) {
         let label_ptr = self.scratch_txt(label);
+        let raw_flags = flags.bits() | width.map_or(0, TableColumnWidth::raw_flags);
+        let init_width_or_weight = width.map_or(0.0, TableColumnWidth::value);
         unsafe {
-            sys::igTableSetupColumn(label_ptr, flags.bits(), init_width_or_weight, user_id);
+            sys::igTableSetupColumn(label_ptr, raw_flags, init_width_or_weight, user_id);
         }
+    }
+
+    /// Setup a column with a fixed initial width.
+    pub fn table_setup_column_fixed_width(
+        &self,
+        label: impl AsRef<str>,
+        flags: TableColumnFlags,
+        width: f32,
+        user_id: u32,
+    ) {
+        self.table_setup_column(label, flags, Some(TableColumnWidth::Fixed(width)), user_id);
+    }
+
+    /// Setup a column with a stretch weight.
+    pub fn table_setup_column_stretch_weight(
+        &self,
+        label: impl AsRef<str>,
+        flags: TableColumnFlags,
+        weight: f32,
+        user_id: u32,
+    ) {
+        self.table_setup_column(
+            label,
+            flags,
+            Some(TableColumnWidth::Stretch(weight)),
+            user_id,
+        );
     }
 
     /// Submit all headers cells based on data provided to TableSetupColumn() + submit context menu
@@ -296,8 +330,8 @@ impl Ui {
 
     /// Return the flags of a column by index.
     #[doc(alias = "TableGetColumnFlags")]
-    pub fn table_get_column_flags(&self, column_n: i32) -> TableColumnFlags {
-        unsafe { TableColumnFlags::from_bits_truncate(sys::igTableGetColumnFlags(column_n)) }
+    pub fn table_get_column_flags(&self, column_n: i32) -> TableColumnStateFlags {
+        unsafe { TableColumnStateFlags::from_bits_truncate(sys::igTableGetColumnFlags(column_n)) }
     }
 
     /// Enable/disable a column by index.
@@ -697,6 +731,7 @@ pub struct TableBuilder<'ui> {
     ui: &'ui Ui,
     id: Cow<'ui, str>,
     flags: TableFlags,
+    sizing_policy: Option<TableSizingPolicy>,
     outer_size: [f32; 2],
     inner_width: f32,
     columns: Vec<TableColumnSetup<Cow<'ui, str>>>,
@@ -711,6 +746,7 @@ impl<'ui> TableBuilder<'ui> {
             ui,
             id: str_id.into(),
             flags: TableFlags::NONE,
+            sizing_policy: None,
             outer_size: [0.0, 0.0],
             inner_width: 0.0,
             columns: Vec::new(),
@@ -722,6 +758,12 @@ impl<'ui> TableBuilder<'ui> {
     /// Set table flags
     pub fn flags(mut self, flags: TableFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Set the table sizing policy.
+    pub fn sizing_policy(mut self, policy: TableSizingPolicy) -> Self {
+        self.sizing_policy = Some(policy);
         self
     }
 
@@ -759,7 +801,7 @@ impl<'ui> TableBuilder<'ui> {
             self.columns.push(TableColumnSetup {
                 name: c.name.into(),
                 flags: c.flags,
-                init_width_or_weight: c.init_width_or_weight,
+                width: c.width,
                 user_id: c.user_id,
             });
         }
@@ -771,7 +813,7 @@ impl<'ui> TableBuilder<'ui> {
         self.columns.push(TableColumnSetup {
             name: col.name.into(),
             flags: col.flags,
-            init_width_or_weight: col.init_width_or_weight,
+            width: col.width,
             user_id: col.user_id,
         });
         self
@@ -785,10 +827,14 @@ impl<'ui> TableBuilder<'ui> {
 
     /// Build the table and run a closure to emit rows/cells
     pub fn build(self, f: impl FnOnce(&Ui)) {
+        let mut options = TableOptions::from(self.flags);
+        if let Some(policy) = self.sizing_policy {
+            options = options.sizing_policy(policy);
+        }
         let Some(token) = self.ui.begin_table_with_sizing(
             self.id.as_ref(),
             self.columns.len(),
-            self.flags,
+            options,
             self.outer_size,
             self.inner_width,
         ) else {
@@ -801,12 +847,8 @@ impl<'ui> TableBuilder<'ui> {
 
         if !self.columns.is_empty() {
             for col in &self.columns {
-                self.ui.table_setup_column(
-                    col.name.as_ref(),
-                    col.flags,
-                    col.init_width_or_weight,
-                    col.user_id,
-                );
+                self.ui
+                    .table_setup_column(col.name.as_ref(), col.flags, col.width, col.user_id);
             }
             if self.use_headers {
                 self.ui.table_headers_row();
@@ -826,7 +868,7 @@ pub struct ColumnBuilder<'ui> {
     parent: TableBuilder<'ui>,
     name: Cow<'ui, str>,
     flags: TableColumnFlags,
-    init_width_or_weight: f32,
+    width: Option<TableColumnWidth>,
     user_id: u32,
 }
 
@@ -836,7 +878,7 @@ impl<'ui> ColumnBuilder<'ui> {
             parent,
             name: name.into(),
             flags: TableColumnFlags::NONE,
-            init_width_or_weight: 0.0,
+            width: None,
             user_id: 0,
         }
     }
@@ -849,13 +891,14 @@ impl<'ui> ColumnBuilder<'ui> {
 
     /// Set fixed width or stretch weight (ImGui uses same field for both).
     pub fn width(mut self, width: f32) -> Self {
-        self.init_width_or_weight = width;
+        self.width = Some(TableColumnWidth::Fixed(width));
         self
     }
 
     /// Alias of `width()` to express stretch weights.
-    pub fn weight(self, weight: f32) -> Self {
-        self.width(weight)
+    pub fn weight(mut self, weight: f32) -> Self {
+        self.width = Some(TableColumnWidth::Stretch(weight));
+        self
     }
 
     /// Toggle angled header flag.
@@ -879,7 +922,7 @@ impl<'ui> ColumnBuilder<'ui> {
         self.parent.columns.push(TableColumnSetup {
             name: self.name,
             flags: self.flags,
-            init_width_or_weight: self.init_width_or_weight,
+            width: self.width,
             user_id: self.user_id,
         });
         self.parent

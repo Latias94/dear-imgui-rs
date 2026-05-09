@@ -11,6 +11,41 @@ use crate::internal::DataTypeKind;
 use crate::sys;
 use crate::widget::slider::SliderFlags;
 
+bitflags::bitflags! {
+    /// Flags for drag widgets.
+    ///
+    /// Dear ImGui shares the underlying `ImGuiSliderFlags` enum between drag
+    /// and slider widgets, but `WRAP_AROUND` is supported by DragXXX only.
+    #[repr(transparent)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct DragFlags: i32 {
+        /// No flags.
+        const NONE = 0;
+        /// Wrap the value around when exceeding the current range.
+        const WRAP_AROUND = sys::ImGuiSliderFlags_WrapAround as i32;
+        /// Clamp on input when editing via CTRL+Click or direct text input.
+        const CLAMP_ON_INPUT = sys::ImGuiSliderFlags_ClampOnInput as i32;
+        /// Clamp zero-range drags to avoid a zero-sized range.
+        const CLAMP_ZERO_RANGE = sys::ImGuiSliderFlags_ClampZeroRange as i32;
+        /// Disable small "smart" speed tweaks for very small/large ranges.
+        const NO_SPEED_TWEAKS = sys::ImGuiSliderFlags_NoSpeedTweaks as i32;
+        /// Clamp value to min/max bounds when input manually with CTRL+Click.
+        const ALWAYS_CLAMP = sys::ImGuiSliderFlags_AlwaysClamp as i32;
+        /// Make the widget logarithmic.
+        const LOGARITHMIC = sys::ImGuiSliderFlags_Logarithmic as i32;
+        /// Disable rounding underlying value to match the display format.
+        const NO_ROUND_TO_FORMAT = sys::ImGuiSliderFlags_NoRoundToFormat as i32;
+        /// Disable CTRL+Click or Enter key allowing direct text input.
+        const NO_INPUT = sys::ImGuiSliderFlags_NoInput as i32;
+    }
+}
+
+impl From<SliderFlags> for DragFlags {
+    fn from(flags: SliderFlags) -> Self {
+        Self::from_bits_retain(flags.bits())
+    }
+}
+
 impl Ui {
     /// Creates a new drag slider widget. Returns true if the value has been edited.
     pub fn drag<T: AsRef<str>, K: DataTypeKind>(&self, label: T, value: &mut K) -> bool {
@@ -110,7 +145,7 @@ pub struct Drag<T, L, F = &'static str> {
     min: Option<T>,
     max: Option<T>,
     display_format: Option<F>,
-    flags: SliderFlags,
+    flags: DragFlags,
 }
 
 impl<L: AsRef<str>, T: DataTypeKind> Drag<T, L> {
@@ -123,7 +158,7 @@ impl<L: AsRef<str>, T: DataTypeKind> Drag<T, L> {
             min: None,
             max: None,
             display_format: None,
-            flags: SliderFlags::empty(),
+            flags: DragFlags::empty(),
         }
     }
 }
@@ -157,8 +192,8 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
     }
 
     /// Replaces all current settings with the given flags
-    pub fn flags(mut self, flags: SliderFlags) -> Self {
-        self.flags = flags;
+    pub fn flags(mut self, flags: impl Into<DragFlags>) -> Self {
+        self.flags = flags.into();
         self
     }
 
@@ -230,7 +265,7 @@ pub struct DragRange<T, L, F = &'static str, M = &'static str> {
     max: Option<T>,
     display_format: Option<F>,
     max_display_format: Option<M>,
-    flags: SliderFlags,
+    flags: DragFlags,
 }
 
 impl<T: DataTypeKind, L: AsRef<str>> DragRange<T, L> {
@@ -244,7 +279,7 @@ impl<T: DataTypeKind, L: AsRef<str>> DragRange<T, L> {
             max: None,
             display_format: None,
             max_display_format: None,
-            flags: SliderFlags::NONE,
+            flags: DragFlags::NONE,
         }
     }
 }
@@ -301,8 +336,8 @@ where
     }
 
     /// Replaces all current settings with the given flags
-    pub fn flags(mut self, flags: SliderFlags) -> Self {
-        self.flags = flags;
+    pub fn flags(mut self, flags: impl Into<DragFlags>) -> Self {
+        self.flags = flags.into();
         self
     }
 }

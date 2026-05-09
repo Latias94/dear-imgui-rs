@@ -164,16 +164,12 @@ impl AppWindow {
         ui.window("Property Grid")
             .size([760.0, 520.0], Condition::FirstUseEver)
             .build(|| {
-                use dear_imgui_rs::{TableColumnFlags, TableFlags};
+                use dear_imgui_rs::{TableFlags, TableSizingPolicy};
 
                 // Two columns: Label | Editor
                 let cols = [
-                    TableColumnSetup::new("Property")
-                        .flags(TableColumnFlags::WIDTH_FIXED)
-                        .init_width_or_weight(180.0),
-                    TableColumnSetup::new("Value")
-                        .flags(TableColumnFlags::WIDTH_STRETCH)
-                        .init_width_or_weight(1.0),
+                    TableColumnSetup::new("Property").fixed_width(180.0),
+                    TableColumnSetup::new("Value").stretch_weight(1.0),
                 ];
 
                 ui.table("props")
@@ -181,9 +177,9 @@ impl AppWindow {
                         TableFlags::RESIZABLE
                             | TableFlags::BORDERS_OUTER
                             | TableFlags::BORDERS_V
-                            | TableFlags::ROW_BG
-                            | TableFlags::SIZING_STRETCH_PROP,
+                            | TableFlags::ROW_BG,
                     )
+                    .sizing_policy(TableSizingPolicy::StretchProp)
                     .columns(cols)
                     .freeze(1, 0)
                     .headers(true)

@@ -8,7 +8,8 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current train: unified `v0.11.0` (use `version = "0.11"`).
+- Current train: unified `v0.12.0` (use `version = "0.12"`).
+- Previous train: unified `v0.11.0` (use `version = "0.11"`).
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
@@ -20,56 +21,64 @@ Core
 
 | Crate           | Version | Upstream        | Notes                                     |
 |-----------------|---------|-----------------|-------------------------------------------|
-| dear-imgui-rs   | 0.11.0  | —               | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.11.0  | ImGui v1.92.7   | Docking branch via cimgui                 |
+| dear-imgui-rs   | 0.12.0  | —               | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.12.0  | ImGui v1.92.7   | Docking branch via cimgui                 |
 
 Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.11.0  | wgpu = 29/28/27        | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features; experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
-| dear-imgui-glow   | 0.11.0  | glow = 0.17            | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash    | 0.11.0  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
-| dear-imgui-winit  | 0.11.0  | winit = 0.30.13        | Winit platform backend |
-| dear-imgui-sdl3   | 0.11.0  | sdl3 = 0.17, sdl3-sys  | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
+| dear-imgui-wgpu   | 0.12.0  | wgpu = 29/28/27        | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features; experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
+| dear-imgui-glow   | 0.12.0  | glow = 0.17            | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash    | 0.12.0  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
+| dear-imgui-winit  | 0.12.0  | winit = 0.30.13        | Winit platform backend |
+| dear-imgui-sdl3   | 0.12.0  | sdl3 = 0.17, sdl3-sys  | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
 
 Utilities
 
 | Crate     | Version | External deps | Notes |
 |-----------|---------|---------------|-------|
-| dear-app  | 0.11.0  | winit, wgpu   | App runner (docking, themes, add-ons) |
+| dear-app  | 0.12.0  | winit, wgpu   | App runner (docking, themes, add-ons) |
 
 Tooling
 
 | Crate                    | Version | External deps | Notes |
 |--------------------------|---------|---------------|-------|
-| dear-imgui-build-support | 0.11.0  | ureq = 3.3    | Shared build/publish helpers for `*-sys` crates and prebuilt archives |
+| dear-imgui-build-support | 0.12.0  | ureq = 3.3    | Shared build/publish helpers for `*-sys` crates and prebuilt archives |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
 |---------------------|---------|------------------------|------------------------------|----------------------------------------|
-| dear-implot         | 0.11.0  | 0.11.0                 | dear-implot-sys 0.11.0       | 2D plotting                            |
-| dear-imnodes        | 0.11.0  | 0.11.0                 | dear-imnodes-sys 0.11.0      | Node editor                            |
-| dear-imguizmo       | 0.11.0  | 0.11.0                 | dear-imguizmo-sys 0.11.0     | 3D gizmo                               |
-| dear-file-browser   | 0.11.0  | 0.11.0                 | —                            | ImGui UI + native (rfd) backends       |
-| dear-implot3d       | 0.11.0  | 0.11.0                 | dear-implot3d-sys 0.11.0     | 3D plotting                            |
-| dear-imguizmo-quat  | 0.11.0  | 0.11.0                 | dear-imguizmo-quat-sys 0.11.0 | Quaternion gizmo                      |
-| dear-imgui-reflect  | 0.11.0  | 0.11.0                 | —                            | Reflection-based UI helpers (pure Rust)|
+| dear-implot         | 0.12.0  | 0.12.0                 | dear-implot-sys 0.12.0       | 2D plotting                            |
+| dear-imnodes        | 0.12.0  | 0.12.0                 | dear-imnodes-sys 0.12.0      | Node editor                            |
+| dear-imguizmo       | 0.12.0  | 0.12.0                 | dear-imguizmo-sys 0.12.0     | 3D gizmo                               |
+| dear-file-browser   | 0.12.0  | 0.12.0                 | —                            | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.12.0  | 0.12.0                 | dear-implot3d-sys 0.12.0     | 3D plotting                            |
+| dear-imguizmo-quat  | 0.12.0  | 0.12.0                 | dear-imguizmo-quat-sys 0.12.0 | Quaternion gizmo                      |
+| dear-imgui-reflect  | 0.12.0  | 0.12.0                 | —                            | Reflection-based UI helpers (pure Rust)|
 
 ## Trunk (Unreleased)
 
 - Next release train: TBD.
-- Main branch currently reflects post-`0.11.0` development and may move independently until the next planned release is cut.
-- Current baselines after the `0.11.0` release: Dear ImGui v1.92.7 (docking) via cimgui, unified `dear-*` crate minor `0.11`, MSRV 1.92, and the external dependency baseline described above.
+- Main branch currently reflects post-`0.12.0` development and may move independently until the next planned release is cut.
+- Current baselines after the `0.12.0` release: Dear ImGui v1.92.7 (docking) via cimgui, unified `dear-*` crate minor `0.12`, MSRV 1.92, and the external dependency baseline described above.
 
 ## History
 
-Release Train 0.11 (current)
+Release Train 0.12 (current)
+
+- All crates unified to 0.12.0 across the workspace (use `version = "0.12"`).
+- Core + backends aligned with Dear ImGui v1.92.7 (docking) via cimgui.
+- `dear-imgui-build-support` ships on the same `0.12.x` train as the published workspace crates.
+- External dependencies baseline: wgpu 29, winit 0.30.13, glow 0.17, sdl3 0.17.
+- Minimum supported Rust: 1.92 (workspace baseline).
+
+Release Train 0.11 (previous)
 
 - All crates unified to 0.11.0 across the workspace (use `version = "0.11"`).
 - Core + backends aligned with Dear ImGui v1.92.7 (docking) via cimgui.
-- `dear-imgui-build-support` now ships on the same `0.11.x` train as the published workspace crates.
+- `dear-imgui-build-support` moved into the unified release train.
 - External dependencies baseline: wgpu 29, winit 0.30.13, glow 0.17, sdl3 0.17.
 - Minimum supported Rust: 1.92 (workspace baseline).
 

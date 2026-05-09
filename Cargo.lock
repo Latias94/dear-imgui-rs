@@ -788,7 +788,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "dear-app"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "dear-imgui-rs",
  "dear-imgui-wgpu",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "dear-file-browser"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "chrono",
  "dear-imgui-rs",
@@ -820,7 +820,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-ash"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ash",
  "ash-window",
@@ -834,7 +834,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-build-support"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "flate2",
  "tar",
@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-glow"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "dear-imgui-rs",
  "env_logger",
@@ -895,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-reflect"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "dear-imgui-reflect-derive",
  "dear-imgui-rs",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-reflect-derive"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -914,7 +914,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-rs"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "approx",
  "bitflags 2.11.0",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sdl3"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "cc",
  "dear-imgui-rs",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sys"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -965,7 +965,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-test-engine"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bitflags 2.11.0",
  "dear-imgui-rs",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-test-engine-sys"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-wgpu"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bytemuck",
  "dear-imgui-rs",
@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-winit"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "dear-imgui-rs",
  "web-sys",
@@ -1036,7 +1036,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bitflags 2.11.0",
  "dear-imgui-rs",
@@ -1049,7 +1049,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-quat"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bitflags 2.11.0",
  "dear-imgui-rs",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-quat-sys"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -1077,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-sys"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -1093,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imnodes"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bitflags 2.11.0",
  "dear-imgui-rs",
@@ -1104,7 +1104,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imnodes-sys"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -1119,7 +1119,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "approx",
  "bitflags 2.11.0",
@@ -1132,7 +1132,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot-sys"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -1147,7 +1147,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot3d"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bitflags 2.11.0",
  "dear-imgui-rs",
@@ -1158,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot3d-sys"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bindgen",
  "cc",

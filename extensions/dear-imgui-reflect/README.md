@@ -23,8 +23,8 @@ It is designed to integrate directly with `dear-imgui-rs` and the rest of this w
 
 | Item                | Version |
 |---------------------|---------|
-| Crate               | 0.11.0   |
-| dear-imgui-rs       | 0.11.0   |
+| Crate               | 0.12.0   |
+| dear-imgui-rs       | 0.12.0   |
 
 The optional `glam` and `mint` features track the same workspace versions as other crates in this repository.
 
@@ -36,16 +36,16 @@ Add the crate alongside `dear-imgui-rs`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.11.0"
-dear-imgui-reflect = "0.11.0"
+dear-imgui-rs = "0.12.0"
+dear-imgui-reflect = "0.12.0"
 ```
 
 Optional math interop:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.11.0"
-dear-imgui-reflect = { version = "0.11.0", features = ["glam", "mint"] }
+dear-imgui-rs = "0.12.0"
+dear-imgui-reflect = { version = "0.12.0", features = ["glam", "mint"] }
 glam = "0.32" # or workspace version
 mint = "0.5"
 ```
@@ -117,7 +117,7 @@ enum RenderMode {
 - **Numeric widgets (input / drag / slider)**
   - Per-field attributes: `as_input`, `as_drag`, `slider`, `slider_default_range`.
   - Range and steps: `min`, `max`, `step`, `step_fast`, `speed`.
-  - Slider/drag flags: `log`, `wrap_around`, `clamp`, `always_clamp`, `no_input`, `no_round_to_format`, `clamp_on_input`, `clamp_zero_range`, `no_speed_tweaks`.
+  - Slider/drag flags: `log`, `clamp`, `always_clamp`, `no_input`, `no_round_to_format`, `clamp_on_input`, `clamp_zero_range`, `no_speed_tweaks`; `wrap_around` is drag-only.
   - Formatting helpers: `format = "..."`, `hex`, `percentage`, `scientific`, `prefix = "..."`, `suffix = "..."`.
   - Type-level defaults via `ReflectSettings::numerics_*`.
   - Numeric presets via `NumericTypeSettings` helpers such as `with_float`, `with_hex`, `slider_0_to_1`, `slider_minus1_to_1`, `drag_with_speed`, and `percentage_slider_0_to_1`.
@@ -440,7 +440,7 @@ Enable the `glam` and/or `mint` features to get out-of-the-box `ImGuiValue` impl
 
 ```toml
 [dependencies]
-dear-imgui-reflect = { version = "0.11.0", features = ["glam", "mint"] }
+dear-imgui-reflect = { version = "0.12.0", features = ["glam", "mint"] }
 glam = "0.32"
 mint = "0.5"
 ```
@@ -507,7 +507,7 @@ cargo run -p dear-imgui-examples --bin reflect_demo --features reflect
 A detailed checklist is maintained in `docs/dear-imgui-reflect-compat.md`. High-level status:
 
 - **Matched ([x])**
-  - Primitive numerics: input/drag/slider selection, `as_input` / `as_drag` / `slider`, `min`/`max`, `step`/`step_fast`, `speed`, log/clamp/wrap_around/flags, default half-range sliders.
+  - Primitive numerics: input/drag/slider selection, `as_input` / `as_drag` / `slider`, `min`/`max`, `step`/`step_fast`, `speed`, log/clamp/flags, drag-only `wrap_around`, default half-range sliders.
   - Bool widgets: checkbox/button/radio/dropdown (including text labels).
   - Text: single-line, multiline, hints, `read_only`, display-only text.
   - Containers: `Option<T>`, `Vec<T>`, small fixed arrays, string-keyed maps (`HashMap<String, V>` / `BTreeMap<String, V>`), including insertable/removable/reorderable and const-map configurations.

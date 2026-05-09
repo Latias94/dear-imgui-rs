@@ -396,12 +396,51 @@ impl From<Key> for KeyChord {
 }
 
 bitflags! {
-    /// Input flags for shortcut routing APIs.
+    /// Input flags accepted by `Shortcut()`.
     ///
-    /// This corresponds to public `ImGuiInputFlags_*` values (not the private/internal ones).
+    /// This intentionally excludes flags that are only supported by other input APIs.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct InputFlags: i32 {
+    pub struct ShortcutFlags: i32 {
+        const NONE = sys::ImGuiInputFlags_None as i32;
+        const REPEAT = sys::ImGuiInputFlags_Repeat as i32;
+
+        const ROUTE_ACTIVE = sys::ImGuiInputFlags_RouteActive as i32;
+        const ROUTE_FOCUSED = sys::ImGuiInputFlags_RouteFocused as i32;
+        const ROUTE_GLOBAL = sys::ImGuiInputFlags_RouteGlobal as i32;
+        const ROUTE_ALWAYS = sys::ImGuiInputFlags_RouteAlways as i32;
+
+        const ROUTE_OVER_FOCUSED = sys::ImGuiInputFlags_RouteOverFocused as i32;
+        const ROUTE_OVER_ACTIVE = sys::ImGuiInputFlags_RouteOverActive as i32;
+        const ROUTE_UNLESS_BG_FOCUSED = sys::ImGuiInputFlags_RouteUnlessBgFocused as i32;
+        const ROUTE_FROM_ROOT_WINDOW = sys::ImGuiInputFlags_RouteFromRootWindow as i32;
+    }
+}
+
+impl Default for ShortcutFlags {
+    fn default() -> Self {
+        ShortcutFlags::NONE
+    }
+}
+
+impl ShortcutFlags {
+    #[inline]
+    pub(crate) fn raw(self) -> sys::ImGuiInputFlags {
+        self.bits() as sys::ImGuiInputFlags
+    }
+}
+
+/// Backwards-compatible name for `ShortcutFlags`.
+///
+/// New code should prefer `ShortcutFlags` for `Shortcut()` APIs and
+/// `NextItemShortcutFlags` for `SetNextItemShortcut()`.
+pub type InputFlags = ShortcutFlags;
+
+bitflags! {
+    /// Input flags accepted by `SetNextItemShortcut()`.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct NextItemShortcutFlags: i32 {
         const NONE = sys::ImGuiInputFlags_None as i32;
         const REPEAT = sys::ImGuiInputFlags_Repeat as i32;
 
@@ -419,16 +458,50 @@ bitflags! {
     }
 }
 
-impl Default for InputFlags {
-    fn default() -> Self {
-        InputFlags::NONE
+bitflags! {
+    /// Input flags accepted by `SetItemKeyOwner()`.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct ItemKeyOwnerFlags: i32 {
+        const NONE = sys::ImGuiInputFlags_None as i32;
+
+        const LOCK_THIS_FRAME = sys::ImGuiInputFlags_LockThisFrame as i32;
+        const LOCK_UNTIL_RELEASE = sys::ImGuiInputFlags_LockUntilRelease as i32;
+
+        const COND_HOVERED = sys::ImGuiInputFlags_CondHovered as i32;
+        const COND_ACTIVE = sys::ImGuiInputFlags_CondActive as i32;
     }
 }
 
-impl InputFlags {
+impl Default for ItemKeyOwnerFlags {
+    fn default() -> Self {
+        ItemKeyOwnerFlags::NONE
+    }
+}
+
+impl ItemKeyOwnerFlags {
     #[inline]
     pub(crate) fn raw(self) -> sys::ImGuiInputFlags {
         self.bits() as sys::ImGuiInputFlags
+    }
+}
+
+impl Default for NextItemShortcutFlags {
+    fn default() -> Self {
+        NextItemShortcutFlags::NONE
+    }
+}
+
+impl NextItemShortcutFlags {
+    #[inline]
+    pub(crate) fn raw(self) -> sys::ImGuiInputFlags {
+        self.bits() as sys::ImGuiInputFlags
+    }
+}
+
+impl From<ShortcutFlags> for NextItemShortcutFlags {
+    fn from(flags: ShortcutFlags) -> Self {
+        Self::from_bits_truncate(flags.bits())
     }
 }
 
@@ -546,24 +619,29 @@ impl crate::Ui {
     /// Call ImGui shortcut routing with default flags.
     #[doc(alias = "Shortcut")]
     pub fn shortcut(&self, key_chord: KeyChord) -> bool {
-        self.shortcut_with_flags(key_chord, InputFlags::NONE)
+        self.shortcut_with_flags(key_chord, ShortcutFlags::NONE)
     }
 
     /// Call ImGui shortcut routing with explicit input flags.
     #[doc(alias = "Shortcut")]
-    pub fn shortcut_with_flags(&self, key_chord: KeyChord, flags: InputFlags) -> bool {
+    pub fn shortcut_with_flags(&self, key_chord: KeyChord, flags: ShortcutFlags) -> bool {
         unsafe { sys::igShortcut_Nil(key_chord.raw(), flags.raw()) }
     }
 
     /// Set the next item's shortcut with default flags.
     #[doc(alias = "SetNextItemShortcut")]
     pub fn set_next_item_shortcut(&self, key_chord: KeyChord) {
-        self.set_next_item_shortcut_with_flags(key_chord, InputFlags::NONE);
+        self.set_next_item_shortcut_with_flags(key_chord, NextItemShortcutFlags::NONE);
     }
 
     /// Set the next item's shortcut with explicit input flags.
     #[doc(alias = "SetNextItemShortcut")]
-    pub fn set_next_item_shortcut_with_flags(&self, key_chord: KeyChord, flags: InputFlags) {
+    pub fn set_next_item_shortcut_with_flags(
+        &self,
+        key_chord: KeyChord,
+        flags: impl Into<NextItemShortcutFlags>,
+    ) {
+        let flags = flags.into();
         unsafe { sys::igSetNextItemShortcut(key_chord.raw(), flags.raw()) }
     }
 

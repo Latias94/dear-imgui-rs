@@ -4,7 +4,7 @@ This guide explains how to publish new versions of the dear-imgui-rs workspace c
 
 ## Overview
 
-The workspace uses a **unified release train** model where all published crates share the same version number (e.g., 0.11.0). This simplifies dependency management and ensures compatibility across the ecosystem.
+The workspace uses a **unified release train** model where all published crates share the same version number (e.g., 0.12.0). This simplifies dependency management and ensures compatibility across the ecosystem.
 
 ## Prerequisites
 

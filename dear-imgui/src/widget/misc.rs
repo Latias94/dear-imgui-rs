@@ -170,14 +170,13 @@ impl Ui {
     }
 
     /// Set the key owner for the last item with input flags.
-    /// Pass a combination of `ImGuiInputFlags_*` from `dear_imgui_sys`.
     #[doc(alias = "SetItemKeyOwner")]
     pub fn set_item_key_owner_with_flags(
         &self,
         key: crate::input::Key,
-        flags: sys::ImGuiInputFlags,
+        flags: crate::input::ItemKeyOwnerFlags,
     ) {
         let k: sys::ImGuiKey = key as sys::ImGuiKey;
-        unsafe { sys::igSetItemKeyOwner_InputFlags(k, flags) }
+        unsafe { sys::igSetItemKeyOwner_InputFlags(k, flags.raw()) }
     }
 }

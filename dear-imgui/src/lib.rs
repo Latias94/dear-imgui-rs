@@ -262,8 +262,6 @@ impl From<Id> for sys::ImGuiID {
 #[repr(i32)]
 #[allow(clippy::unnecessary_cast)]
 pub enum Condition {
-    /// Never apply the setting
-    Never = -1,
     /// Set the variable always
     Always = sys::ImGuiCond_Always as i32,
     /// Set the variable once per runtime session (only the first call will succeed)

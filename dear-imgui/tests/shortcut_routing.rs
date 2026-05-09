@@ -27,5 +27,40 @@ fn shortcut_routing_apis_no_panic() {
     let _ = ui.shortcut_with_flags(chord, imgui::InputFlags::ROUTE_GLOBAL);
 
     ui.set_next_item_shortcut(chord);
+    ui.set_next_item_shortcut_with_flags(chord, imgui::NextItemShortcutFlags::TOOLTIP);
     let _ = ui.button("Save");
+}
+
+#[test]
+fn input_flag_types_match_supported_imgui_subsets() {
+    assert_eq!(
+        imgui::ShortcutFlags::REPEAT.bits(),
+        imgui::sys::ImGuiInputFlags_Repeat
+    );
+    assert_eq!(
+        imgui::ShortcutFlags::ROUTE_GLOBAL.bits(),
+        imgui::sys::ImGuiInputFlags_RouteGlobal
+    );
+
+    assert_eq!(
+        imgui::NextItemShortcutFlags::TOOLTIP.bits(),
+        imgui::sys::ImGuiInputFlags_Tooltip
+    );
+
+    assert_eq!(
+        imgui::ItemKeyOwnerFlags::LOCK_THIS_FRAME.bits(),
+        imgui::sys::ImGuiInputFlags_LockThisFrame
+    );
+    assert_eq!(
+        imgui::ItemKeyOwnerFlags::LOCK_UNTIL_RELEASE.bits(),
+        imgui::sys::ImGuiInputFlags_LockUntilRelease
+    );
+    assert_eq!(
+        imgui::ItemKeyOwnerFlags::COND_HOVERED.bits(),
+        imgui::sys::ImGuiInputFlags_CondHovered
+    );
+    assert_eq!(
+        imgui::ItemKeyOwnerFlags::COND_ACTIVE.bits(),
+        imgui::sys::ImGuiInputFlags_CondActive
+    );
 }

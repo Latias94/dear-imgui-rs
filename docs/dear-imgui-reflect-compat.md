@@ -144,8 +144,9 @@ validated to be used only on numeric fields and with slider/drag widgets.
     drags and forwarded directly to Dear ImGui, matching ImReflect
     `slider_flags<T>::logarithmic()`.
 - [x] Wrap-around behavior
-  - Attribute: `wrap_around` → `SliderFlags::WRAP_AROUND`. Applied to sliders
-    and drags, mirroring ImReflect `slider_flags<T>::wrap_around()`.
+  - Attribute: `wrap_around` → `DragFlags::WRAP_AROUND`. Applied to drags
+    only because Dear ImGui asserts if `ImGuiSliderFlags_WrapAround` is passed
+    to SliderXXX functions.
 - [x] Always clamp
   - Attribute: `always_clamp` → `SliderFlags::ALWAYS_CLAMP`. This controls
     ImGui's `CTRL+Click`/text input clamping behavior for sliders and drags and

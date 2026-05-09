@@ -44,24 +44,6 @@ impl ColorEditFlags {
     pub const ALPHA_PREVIEW_HALF: Self = Self(sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32);
     /// (WIP) ColorEdit: Currently only disable 0.0f..1.0f limits in RGBA edition (note: you probably want to use ImGuiColorEditFlags_Float flag as well).
     pub const HDR: Self = Self(sys::ImGuiColorEditFlags_HDR as u32);
-    /// ColorEdit: override _display_ type among RGB/HSV/Hex. ColorPicker: select any combination using one or more of RGB/HSV/Hex.
-    pub const DISPLAY_RGB: Self = Self(sys::ImGuiColorEditFlags_DisplayRGB as u32);
-    /// ColorEdit: override _display_ type among RGB/HSV/Hex. ColorPicker: select any combination using one or more of RGB/HSV/Hex.
-    pub const DISPLAY_HSV: Self = Self(sys::ImGuiColorEditFlags_DisplayHSV as u32);
-    /// ColorEdit: override _display_ type among RGB/HSV/Hex. ColorPicker: select any combination using one or more of RGB/HSV/Hex.
-    pub const DISPLAY_HEX: Self = Self(sys::ImGuiColorEditFlags_DisplayHex as u32);
-    /// ColorEdit, ColorPicker, ColorButton: _display_ values formatted as 0..255.
-    pub const UINT8: Self = Self(sys::ImGuiColorEditFlags_Uint8 as u32);
-    /// ColorEdit, ColorPicker, ColorButton: _display_ values formatted as 0.0f..1.0f floats instead of 0..255 integers. No round-trip of value via integers.
-    pub const FLOAT: Self = Self(sys::ImGuiColorEditFlags_Float as u32);
-    /// ColorPicker: bar for Hue, rectangle for Sat/Value.
-    pub const PICKER_HUE_BAR: Self = Self(sys::ImGuiColorEditFlags_PickerHueBar as u32);
-    /// ColorPicker: wheel for Hue, triangle for Sat/Value.
-    pub const PICKER_HUE_WHEEL: Self = Self(sys::ImGuiColorEditFlags_PickerHueWheel as u32);
-    /// ColorEdit, ColorPicker: input and output data in RGB format.
-    pub const INPUT_RGB: Self = Self(sys::ImGuiColorEditFlags_InputRGB as u32);
-    /// ColorEdit, ColorPicker: input and output data in HSV format.
-    pub const INPUT_HSV: Self = Self(sys::ImGuiColorEditFlags_InputHSV as u32);
 
     /// Returns the underlying bits
     pub const fn bits(self) -> u32 {
@@ -71,6 +53,286 @@ impl ColorEditFlags {
     /// Returns true if all flags are set
     pub const fn contains(self, other: Self) -> bool {
         (self.0 & other.0) == other.0
+    }
+
+    /// Returns all independently composable public color flags.
+    pub const fn all() -> Self {
+        Self(
+            Self::NO_ALPHA.0
+                | Self::NO_PICKER.0
+                | Self::NO_OPTIONS.0
+                | Self::NO_SMALL_PREVIEW.0
+                | Self::NO_INPUTS.0
+                | Self::NO_TOOLTIP.0
+                | Self::NO_LABEL.0
+                | Self::NO_SIDE_PREVIEW.0
+                | Self::NO_DRAG_DROP.0
+                | Self::NO_BORDER.0
+                | Self::ALPHA_BAR.0
+                | Self::ALPHA_PREVIEW.0
+                | Self::ALPHA_PREVIEW_HALF.0
+                | Self::HDR.0,
+        )
+    }
+}
+
+impl Default for ColorEditFlags {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+/// Single display mode for color edit widgets.
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub enum ColorDisplayMode {
+    Rgb,
+    Hsv,
+    Hex,
+}
+
+impl ColorDisplayMode {
+    const fn raw(self) -> u32 {
+        match self {
+            Self::Rgb => sys::ImGuiColorEditFlags_DisplayRGB as u32,
+            Self::Hsv => sys::ImGuiColorEditFlags_DisplayHSV as u32,
+            Self::Hex => sys::ImGuiColorEditFlags_DisplayHex as u32,
+        }
+    }
+}
+
+/// Single numeric representation for color edit widgets and defaults.
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub enum ColorDataType {
+    Uint8,
+    Float,
+}
+
+impl ColorDataType {
+    const fn raw(self) -> u32 {
+        match self {
+            Self::Uint8 => sys::ImGuiColorEditFlags_Uint8 as u32,
+            Self::Float => sys::ImGuiColorEditFlags_Float as u32,
+        }
+    }
+}
+
+/// Single picker implementation for color picker widgets and defaults.
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub enum ColorPickerMode {
+    HueBar,
+    HueWheel,
+}
+
+impl ColorPickerMode {
+    const fn raw(self) -> u32 {
+        match self {
+            Self::HueBar => sys::ImGuiColorEditFlags_PickerHueBar as u32,
+            Self::HueWheel => sys::ImGuiColorEditFlags_PickerHueWheel as u32,
+        }
+    }
+}
+
+/// Single input/output color space for color edit and picker widgets.
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub enum ColorInputMode {
+    Rgb,
+    Hsv,
+}
+
+impl ColorInputMode {
+    const fn raw(self) -> u32 {
+        match self {
+            Self::Rgb => sys::ImGuiColorEditFlags_InputRGB as u32,
+            Self::Hsv => sys::ImGuiColorEditFlags_InputHSV as u32,
+        }
+    }
+}
+
+bitflags::bitflags! {
+    /// Display sub-editors visible inside `ColorPicker*()`.
+    #[repr(transparent)]
+    #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+    pub struct ColorPickerDisplayFlags: u32 {
+        const RGB = sys::ImGuiColorEditFlags_DisplayRGB as u32;
+        const HSV = sys::ImGuiColorEditFlags_DisplayHSV as u32;
+        const HEX = sys::ImGuiColorEditFlags_DisplayHex as u32;
+    }
+}
+
+/// Options accepted by `ColorEdit3()`, `ColorEdit4()`, and
+/// `SetColorEditOptions()`.
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub struct ColorEditOptions {
+    pub flags: ColorEditFlags,
+    pub display_mode: Option<ColorDisplayMode>,
+    pub data_type: Option<ColorDataType>,
+    pub picker_mode: Option<ColorPickerMode>,
+    pub input_mode: Option<ColorInputMode>,
+}
+
+impl ColorEditOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: ColorEditFlags::NONE,
+            display_mode: None,
+            data_type: None,
+            picker_mode: None,
+            input_mode: None,
+        }
+    }
+
+    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn display_mode(mut self, mode: ColorDisplayMode) -> Self {
+        self.display_mode = Some(mode);
+        self
+    }
+
+    pub fn data_type(mut self, data_type: ColorDataType) -> Self {
+        self.data_type = Some(data_type);
+        self
+    }
+
+    pub fn picker_mode(mut self, mode: ColorPickerMode) -> Self {
+        self.picker_mode = Some(mode);
+        self
+    }
+
+    pub fn input_mode(mut self, mode: ColorInputMode) -> Self {
+        self.input_mode = Some(mode);
+        self
+    }
+
+    pub fn bits(self) -> u32 {
+        self.flags.bits()
+            | self.display_mode.map_or(0, ColorDisplayMode::raw)
+            | self.data_type.map_or(0, ColorDataType::raw)
+            | self.picker_mode.map_or(0, ColorPickerMode::raw)
+            | self.input_mode.map_or(0, ColorInputMode::raw)
+    }
+}
+
+impl Default for ColorEditOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<ColorEditFlags> for ColorEditOptions {
+    fn from(flags: ColorEditFlags) -> Self {
+        Self::new().flags(flags)
+    }
+}
+
+/// Options accepted by `ColorPicker3()` and `ColorPicker4()`.
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub struct ColorPickerOptions {
+    pub flags: ColorEditFlags,
+    pub display_flags: ColorPickerDisplayFlags,
+    pub data_type: Option<ColorDataType>,
+    pub picker_mode: Option<ColorPickerMode>,
+    pub input_mode: Option<ColorInputMode>,
+}
+
+impl ColorPickerOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: ColorEditFlags::NONE,
+            display_flags: ColorPickerDisplayFlags::empty(),
+            data_type: None,
+            picker_mode: None,
+            input_mode: None,
+        }
+    }
+
+    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn display_flags(mut self, flags: ColorPickerDisplayFlags) -> Self {
+        self.display_flags = flags;
+        self
+    }
+
+    pub fn data_type(mut self, data_type: ColorDataType) -> Self {
+        self.data_type = Some(data_type);
+        self
+    }
+
+    pub fn picker_mode(mut self, mode: ColorPickerMode) -> Self {
+        self.picker_mode = Some(mode);
+        self
+    }
+
+    pub fn input_mode(mut self, mode: ColorInputMode) -> Self {
+        self.input_mode = Some(mode);
+        self
+    }
+
+    pub fn bits(self) -> u32 {
+        self.flags.bits()
+            | self.display_flags.bits()
+            | self.data_type.map_or(0, ColorDataType::raw)
+            | self.picker_mode.map_or(0, ColorPickerMode::raw)
+            | self.input_mode.map_or(0, ColorInputMode::raw)
+    }
+}
+
+impl Default for ColorPickerOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<ColorEditFlags> for ColorPickerOptions {
+    fn from(flags: ColorEditFlags) -> Self {
+        Self::new().flags(flags)
+    }
+}
+
+/// Options accepted by `ColorButton()`.
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub struct ColorButtonOptions {
+    pub flags: ColorEditFlags,
+    pub input_mode: Option<ColorInputMode>,
+}
+
+impl ColorButtonOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: ColorEditFlags::NONE,
+            input_mode: None,
+        }
+    }
+
+    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn input_mode(mut self, mode: ColorInputMode) -> Self {
+        self.input_mode = Some(mode);
+        self
+    }
+
+    pub fn bits(self) -> u32 {
+        self.flags.bits() | self.input_mode.map_or(0, ColorInputMode::raw)
+    }
+}
+
+impl Default for ColorButtonOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<ColorEditFlags> for ColorButtonOptions {
+    fn from(flags: ColorEditFlags) -> Self {
+        Self::new().flags(flags)
     }
 }
 
@@ -128,8 +390,8 @@ impl Ui {
     /// overridden per-call via flags). Users can still change many options via
     /// the right-click context menu unless `_NO_OPTIONS` is passed.
     #[doc(alias = "SetColorEditOptions")]
-    pub fn set_color_edit_options(&self, flags: ColorEditFlags) {
-        unsafe { sys::igSetColorEditOptions(flags.bits() as i32) }
+    pub fn set_color_edit_options(&self, options: impl Into<ColorEditOptions>) {
+        unsafe { sys::igSetColorEditOptions(options.into().bits() as i32) }
     }
 
     /// Creates a color edit widget for 3 components (RGB)
@@ -215,7 +477,7 @@ pub struct ColorEdit3<'ui, 'p> {
     ui: &'ui Ui,
     label: Cow<'ui, str>,
     color: &'p mut [f32; 3],
-    flags: ColorEditFlags,
+    flags: ColorEditOptions,
 }
 
 impl<'ui, 'p> ColorEdit3<'ui, 'p> {
@@ -225,13 +487,37 @@ impl<'ui, 'p> ColorEdit3<'ui, 'p> {
             ui,
             label: label.into(),
             color,
-            flags: ColorEditFlags::NONE,
+            flags: ColorEditOptions::new(),
         }
     }
 
     /// Sets the flags for the color edit
-    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
-        self.flags = flags;
+    pub fn flags(mut self, flags: impl Into<ColorEditOptions>) -> Self {
+        self.flags = flags.into();
+        self
+    }
+
+    /// Sets the display mode.
+    pub fn display_mode(mut self, mode: ColorDisplayMode) -> Self {
+        self.flags.display_mode = Some(mode);
+        self
+    }
+
+    /// Sets the numeric data type.
+    pub fn data_type(mut self, data_type: ColorDataType) -> Self {
+        self.flags.data_type = Some(data_type);
+        self
+    }
+
+    /// Sets the picker mode used by the popup picker.
+    pub fn picker_mode(mut self, mode: ColorPickerMode) -> Self {
+        self.flags.picker_mode = Some(mode);
+        self
+    }
+
+    /// Sets the input/output color space.
+    pub fn input_mode(mut self, mode: ColorInputMode) -> Self {
+        self.flags.input_mode = Some(mode);
         self
     }
 
@@ -249,7 +535,7 @@ pub struct ColorEdit4<'ui, 'p> {
     ui: &'ui Ui,
     label: Cow<'ui, str>,
     color: &'p mut [f32; 4],
-    flags: ColorEditFlags,
+    flags: ColorEditOptions,
 }
 
 impl<'ui, 'p> ColorEdit4<'ui, 'p> {
@@ -259,13 +545,37 @@ impl<'ui, 'p> ColorEdit4<'ui, 'p> {
             ui,
             label: label.into(),
             color,
-            flags: ColorEditFlags::NONE,
+            flags: ColorEditOptions::new(),
         }
     }
 
     /// Sets the flags for the color edit
-    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
-        self.flags = flags;
+    pub fn flags(mut self, flags: impl Into<ColorEditOptions>) -> Self {
+        self.flags = flags.into();
+        self
+    }
+
+    /// Sets the display mode.
+    pub fn display_mode(mut self, mode: ColorDisplayMode) -> Self {
+        self.flags.display_mode = Some(mode);
+        self
+    }
+
+    /// Sets the numeric data type.
+    pub fn data_type(mut self, data_type: ColorDataType) -> Self {
+        self.flags.data_type = Some(data_type);
+        self
+    }
+
+    /// Sets the picker mode used by the popup picker.
+    pub fn picker_mode(mut self, mode: ColorPickerMode) -> Self {
+        self.flags.picker_mode = Some(mode);
+        self
+    }
+
+    /// Sets the input/output color space.
+    pub fn input_mode(mut self, mode: ColorInputMode) -> Self {
+        self.flags.input_mode = Some(mode);
         self
     }
 
@@ -283,7 +593,7 @@ pub struct ColorPicker3<'ui, 'p> {
     ui: &'ui Ui,
     label: Cow<'ui, str>,
     color: &'p mut [f32; 3],
-    flags: ColorEditFlags,
+    flags: ColorPickerOptions,
 }
 
 impl<'ui, 'p> ColorPicker3<'ui, 'p> {
@@ -293,13 +603,37 @@ impl<'ui, 'p> ColorPicker3<'ui, 'p> {
             ui,
             label: label.into(),
             color,
-            flags: ColorEditFlags::NONE,
+            flags: ColorPickerOptions::new(),
         }
     }
 
     /// Sets the flags for the color picker
-    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
-        self.flags = flags;
+    pub fn flags(mut self, flags: impl Into<ColorPickerOptions>) -> Self {
+        self.flags = flags.into();
+        self
+    }
+
+    /// Sets the display sub-editors shown inside the picker.
+    pub fn display_flags(mut self, flags: ColorPickerDisplayFlags) -> Self {
+        self.flags.display_flags = flags;
+        self
+    }
+
+    /// Sets the numeric data type.
+    pub fn data_type(mut self, data_type: ColorDataType) -> Self {
+        self.flags.data_type = Some(data_type);
+        self
+    }
+
+    /// Sets the picker mode.
+    pub fn picker_mode(mut self, mode: ColorPickerMode) -> Self {
+        self.flags.picker_mode = Some(mode);
+        self
+    }
+
+    /// Sets the input/output color space.
+    pub fn input_mode(mut self, mode: ColorInputMode) -> Self {
+        self.flags.input_mode = Some(mode);
         self
     }
 
@@ -317,7 +651,7 @@ pub struct ColorPicker4<'ui, 'p> {
     ui: &'ui Ui,
     label: Cow<'ui, str>,
     color: &'p mut [f32; 4],
-    flags: ColorEditFlags,
+    flags: ColorPickerOptions,
     ref_color: Option<[f32; 4]>,
 }
 
@@ -328,14 +662,38 @@ impl<'ui, 'p> ColorPicker4<'ui, 'p> {
             ui,
             label: label.into(),
             color,
-            flags: ColorEditFlags::NONE,
+            flags: ColorPickerOptions::new(),
             ref_color: None,
         }
     }
 
     /// Sets the flags for the color picker
-    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
-        self.flags = flags;
+    pub fn flags(mut self, flags: impl Into<ColorPickerOptions>) -> Self {
+        self.flags = flags.into();
+        self
+    }
+
+    /// Sets the display sub-editors shown inside the picker.
+    pub fn display_flags(mut self, flags: ColorPickerDisplayFlags) -> Self {
+        self.flags.display_flags = flags;
+        self
+    }
+
+    /// Sets the numeric data type.
+    pub fn data_type(mut self, data_type: ColorDataType) -> Self {
+        self.flags.data_type = Some(data_type);
+        self
+    }
+
+    /// Sets the picker mode.
+    pub fn picker_mode(mut self, mode: ColorPickerMode) -> Self {
+        self.flags.picker_mode = Some(mode);
+        self
+    }
+
+    /// Sets the input/output color space.
+    pub fn input_mode(mut self, mode: ColorInputMode) -> Self {
+        self.flags.input_mode = Some(mode);
         self
     }
 
@@ -371,7 +729,7 @@ pub struct ColorButton<'ui> {
     ui: &'ui Ui,
     desc_id: Cow<'ui, str>,
     color: [f32; 4],
-    flags: ColorEditFlags,
+    flags: ColorButtonOptions,
     size: [f32; 2],
 }
 
@@ -382,14 +740,20 @@ impl<'ui> ColorButton<'ui> {
             ui,
             desc_id: desc_id.into(),
             color,
-            flags: ColorEditFlags::NONE,
+            flags: ColorButtonOptions::new(),
             size: [0.0, 0.0],
         }
     }
 
     /// Sets the flags for the color button
-    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
-        self.flags = flags;
+    pub fn flags(mut self, flags: impl Into<ColorButtonOptions>) -> Self {
+        self.flags = flags.into();
+        self
+    }
+
+    /// Sets the input color space.
+    pub fn input_mode(mut self, mode: ColorInputMode) -> Self {
+        self.flags.input_mode = Some(mode);
         self
     }
 

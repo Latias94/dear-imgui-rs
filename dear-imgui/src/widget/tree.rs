@@ -72,7 +72,7 @@ impl Ui {
             id: id.into(),
             label: None,
             opened: false,
-            opened_cond: Condition::Never,
+            opened_cond: None,
             flags: TreeNodeFlags::NONE,
             ui: self,
         }
@@ -121,7 +121,7 @@ pub struct TreeNode<'a, T, L = &'static str> {
     id: TreeNodeId<T>,
     label: Option<L>,
     opened: bool,
-    opened_cond: Condition,
+    opened_cond: Option<Condition>,
     flags: TreeNodeFlags,
     ui: &'a Ui,
 }
@@ -144,7 +144,7 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
     /// Sets the opened state
     pub fn opened(mut self, opened: bool, cond: Condition) -> Self {
         self.opened = opened;
-        self.opened_cond = cond;
+        self.opened_cond = Some(cond);
         self
     }
 
@@ -241,8 +241,8 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
     /// Returns `None` if the tree node is not open and no content should be rendered.
     pub fn push(self) -> Option<TreeNodeToken<'a>> {
         let open = unsafe {
-            if self.opened_cond != Condition::Never {
-                sys::igSetNextItemOpen(self.opened, self.opened_cond as i32);
+            if let Some(opened_cond) = self.opened_cond {
+                sys::igSetNextItemOpen(self.opened, opened_cond as i32);
             }
 
             match &self.id {

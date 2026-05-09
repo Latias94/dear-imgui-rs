@@ -7,7 +7,8 @@ use crate::fs::FileSystem;
 use crate::places::{Place, PlaceOrigin, Places};
 use dear_imgui_rs::input::{Key, MouseButton};
 use dear_imgui_rs::{
-    SelectableFlags, StyleColor, TableColumnFlags, TableColumnSetup, TableFlags, TreeNodeFlags, Ui,
+    SelectableFlags, StyleColor, TableColumnFlags, TableColumnSetup, TableFlags, TableSizingPolicy,
+    TreeNodeFlags, Ui,
 };
 
 fn subtle_separator(ui: &Ui) {
@@ -144,13 +145,14 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
         let col_setups = vec![
             TableColumnSetup::new("##places_group_label")
                 .flags(TableColumnFlags::NO_SORT | TableColumnFlags::NO_RESIZE)
-                .init_width_or_weight(1.0),
+                .stretch_weight(1.0),
             TableColumnSetup::new("##places_group_actions")
                 .flags(TableColumnFlags::NO_SORT | TableColumnFlags::NO_RESIZE)
-                .init_width_or_weight(actions_w),
+                .fixed_width(actions_w),
         ];
         ui.table("##places_group_header")
-            .flags(TableFlags::SIZING_STRETCH_PROP | TableFlags::NO_PAD_OUTER_X)
+            .flags(TableFlags::NO_PAD_OUTER_X)
+            .sizing_policy(TableSizingPolicy::StretchProp)
             .columns(col_setups)
             .headers(false)
             .build(|ui| {

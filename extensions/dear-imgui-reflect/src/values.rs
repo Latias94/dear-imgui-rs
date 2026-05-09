@@ -276,9 +276,9 @@ where
             if let Some(_table) = ui.begin_table(&table_id, columns) {
                 if let Some(min_width) = settings.min_width {
                     for _ in 0..columns {
-                        ui.table_setup_column(
+                        ui.table_setup_column_fixed_width(
                             "",
-                            imgui::TableColumnFlags::WIDTH_FIXED,
+                            imgui::TableColumnFlags::NONE,
                             min_width,
                             0,
                         );

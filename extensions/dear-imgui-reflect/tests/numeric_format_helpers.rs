@@ -88,3 +88,34 @@ fn numeric_type_settings_presets_apply_expected_defaults() {
     assert!(matches!(pct_slider.widget, NumericWidgetKind::Slider));
     assert_eq!(pct_slider.format.as_deref(), Some("%.1f%%"));
 }
+
+#[test]
+fn numeric_type_settings_flags_match_slider_and_drag_support() {
+    use reflect::NumericTypeSettings;
+
+    let settings = NumericTypeSettings {
+        log: true,
+        always_clamp: true,
+        wrap_around: true,
+        no_round_to_format: true,
+        no_input: true,
+        clamp_on_input: true,
+        clamp_zero_range: true,
+        no_speed_tweaks: true,
+        ..NumericTypeSettings::default()
+    };
+
+    let slider_flags = settings.slider_flags();
+    assert!(
+        !slider_flags.intersects(reflect::imgui::SliderFlags::from_bits_retain(
+            reflect::imgui::sys::ImGuiSliderFlags_WrapAround
+        ))
+    );
+    assert!(slider_flags.contains(reflect::imgui::SliderFlags::LOGARITHMIC));
+    assert!(slider_flags.contains(reflect::imgui::SliderFlags::ALWAYS_CLAMP));
+
+    let drag_flags = settings.drag_flags();
+    assert!(drag_flags.contains(reflect::imgui::DragFlags::WRAP_AROUND));
+    assert!(drag_flags.contains(reflect::imgui::DragFlags::LOGARITHMIC));
+    assert!(drag_flags.contains(reflect::imgui::DragFlags::ALWAYS_CLAMP));
+}

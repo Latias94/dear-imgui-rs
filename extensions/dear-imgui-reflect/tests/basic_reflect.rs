@@ -136,9 +136,9 @@ struct AdvancedNumericAndBool {
     #[imgui(slider, min = 0, max = 100, clamp, always_clamp, no_input)]
     slider_value: i32,
 
-    /// Float slider with wrap-around behavior.
-    #[imgui(slider, min = -1.0, max = 1.0, wrap_around, no_round_to_format)]
-    wrap_slider: f32,
+    /// Float drag with wrap-around behavior.
+    #[imgui(as_drag, min = -1.0, max = 1.0, wrap_around, no_round_to_format)]
+    wrap_drag: f32,
 
     /// Drag with clamp-on-input and no-speed-tweaks flags.
     #[imgui(

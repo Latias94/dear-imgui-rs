@@ -542,6 +542,15 @@ fn derive_for_struct(
                     }
                 }
 
+                if wrap_around_flag && matches!(widget_kind, NumericWidgetKind::Slider) {
+                    return syn::Error::new(
+                        field_ident.span(),
+                        "imgui(wrap_around) is only supported for drag widgets; use imgui(as_drag, wrap_around) instead of slider",
+                    )
+                    .to_compile_error()
+                    .into();
+                }
+
                 // Slider widgets always require a range: either explicit min/max
                 // or a default numeric range.
                 if matches!(widget_kind, NumericWidgetKind::Slider)
@@ -660,7 +669,6 @@ fn derive_for_struct(
 
                         let flags_stmt = if log_scale
                             || always_clamp_flag
-                            || wrap_around_flag
                             || no_round_to_format
                             || no_input
                             || clamp_on_input
@@ -677,13 +685,6 @@ fn derive_for_struct(
                             let clamp_stmt = if always_clamp_flag {
                                 quote! {
                                     flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                }
-                            } else {
-                                quote! {}
-                            };
-                            let wrap_stmt = if wrap_around_flag {
-                                quote! {
-                                    flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
                                 }
                             } else {
                                 quote! {}
@@ -728,7 +729,6 @@ fn derive_for_struct(
                                 let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
                                 #log_stmt
                                 #clamp_stmt
-                                #wrap_stmt
                                 #no_round_stmt
                                 #no_input_stmt
                                 #clamp_on_input_stmt
@@ -823,63 +823,63 @@ fn derive_for_struct(
                         {
                             let log_stmt = if log_scale {
                                 quote! {
-                                    flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
+                                    flags |= ::dear_imgui_reflect::imgui::DragFlags::LOGARITHMIC;
                                 }
                             } else {
                                 quote! {}
                             };
                             let clamp_stmt = if always_clamp_flag {
                                 quote! {
-                                    flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
+                                    flags |= ::dear_imgui_reflect::imgui::DragFlags::ALWAYS_CLAMP;
                                 }
                             } else {
                                 quote! {}
                             };
                             let wrap_stmt = if wrap_around_flag {
                                 quote! {
-                                    flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
+                                    flags |= ::dear_imgui_reflect::imgui::DragFlags::WRAP_AROUND;
                                 }
                             } else {
                                 quote! {}
                             };
                             let no_round_stmt = if no_round_to_format {
                                 quote! {
-                                    flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
+                                    flags |= ::dear_imgui_reflect::imgui::DragFlags::NO_ROUND_TO_FORMAT;
                                 }
                             } else {
                                 quote! {}
                             };
                             let no_input_stmt = if no_input {
                                 quote! {
-                                    flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
+                                    flags |= ::dear_imgui_reflect::imgui::DragFlags::NO_INPUT;
                                 }
                             } else {
                                 quote! {}
                             };
                             let clamp_on_input_stmt = if clamp_on_input {
                                 quote! {
-                                    flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
+                                    flags |= ::dear_imgui_reflect::imgui::DragFlags::CLAMP_ON_INPUT;
                                 }
                             } else {
                                 quote! {}
                             };
                             let clamp_zero_range_stmt = if clamp_zero_range {
                                 quote! {
-                                    flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
+                                    flags |= ::dear_imgui_reflect::imgui::DragFlags::CLAMP_ZERO_RANGE;
                                 }
                             } else {
                                 quote! {}
                             };
                             let no_speed_tweaks_stmt = if no_speed_tweaks {
                                 quote! {
-                                    flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
+                                    flags |= ::dear_imgui_reflect::imgui::DragFlags::NO_SPEED_TWEAKS;
                                 }
                             } else {
                                 quote! {}
                             };
 
                             quote! {
-                                let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
+                                let mut flags = ::dear_imgui_reflect::imgui::DragFlags::NONE;
                                 #log_stmt
                                 #clamp_stmt
                                 #wrap_stmt
@@ -954,42 +954,7 @@ fn derive_for_struct(
                                                 if let Some(ref fmt) = numeric.format {
                                                     slider = slider.display_format(fmt);
                                                 }
-                                                if numeric.log
-                                                    || numeric.always_clamp
-                                                    || numeric.wrap_around
-                                                    || numeric.no_round_to_format
-                                                    || numeric.no_input
-                                                    || numeric.clamp_on_input
-                                                    || numeric.clamp_zero_range
-                                                    || numeric.no_speed_tweaks
-                                                {
-                                                    let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                    if numeric.log {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                    }
-                                                    if numeric.always_clamp {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                    }
-                                                    if numeric.wrap_around {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                    }
-                                                    if numeric.no_round_to_format {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                    }
-                                                    if numeric.no_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                    }
-                                                    if numeric.clamp_on_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                    }
-                                                    if numeric.clamp_zero_range {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                    }
-                                                    if numeric.no_speed_tweaks {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                    }
-                                                    slider = slider.flags(flags);
-                                                }
+                                                slider = slider.flags(numeric.slider_flags());
                                                 let mut local_changed = slider.build(__field);
                                                 if numeric.clamp {
                                                     if *__field < min {
@@ -1018,42 +983,7 @@ fn derive_for_struct(
                                                 if let Some(ref fmt) = numeric.format {
                                                     drag = drag.display_format(fmt);
                                                 }
-                                                if numeric.log
-                                                    || numeric.always_clamp
-                                                    || numeric.wrap_around
-                                                    || numeric.no_round_to_format
-                                                    || numeric.no_input
-                                                    || numeric.clamp_on_input
-                                                    || numeric.clamp_zero_range
-                                                    || numeric.no_speed_tweaks
-                                                {
-                                                    let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                    if numeric.log {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                    }
-                                                    if numeric.always_clamp {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                    }
-                                                    if numeric.wrap_around {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                    }
-                                                    if numeric.no_round_to_format {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                    }
-                                                    if numeric.no_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                    }
-                                                    if numeric.clamp_on_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                    }
-                                                    if numeric.clamp_zero_range {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                    }
-                                                    if numeric.no_speed_tweaks {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                    }
-                                                    drag = drag.flags(flags);
-                                                }
+                                                drag = drag.flags(numeric.drag_flags());
                                                 let local_changed = drag.build(ui, __field);
                                                 __changed |= local_changed;
                                             }
@@ -1107,42 +1037,7 @@ fn derive_for_struct(
                                                 if let Some(ref fmt) = numeric.format {
                                                     slider = slider.display_format(fmt);
                                                 }
-                                                if numeric.log
-                                                    || numeric.always_clamp
-                                                    || numeric.wrap_around
-                                                    || numeric.no_round_to_format
-                                                    || numeric.no_input
-                                                    || numeric.clamp_on_input
-                                                    || numeric.clamp_zero_range
-                                                    || numeric.no_speed_tweaks
-                                                {
-                                                    let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                    if numeric.log {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                    }
-                                                    if numeric.always_clamp {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                    }
-                                                    if numeric.wrap_around {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                    }
-                                                    if numeric.no_round_to_format {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                    }
-                                                    if numeric.no_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                    }
-                                                    if numeric.clamp_on_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                    }
-                                                    if numeric.clamp_zero_range {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                    }
-                                                    if numeric.no_speed_tweaks {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                    }
-                                                    slider = slider.flags(flags);
-                                                }
+                                                slider = slider.flags(numeric.slider_flags());
                                                 let mut local_changed = slider.build(__field);
                                                 if numeric.clamp {
                                                     if *__field < min {
@@ -1170,42 +1065,7 @@ fn derive_for_struct(
                                                 if let Some(ref fmt) = numeric.format {
                                                     drag = drag.display_format(fmt);
                                                 }
-                                                if numeric.log
-                                                    || numeric.always_clamp
-                                                    || numeric.wrap_around
-                                                    || numeric.no_round_to_format
-                                                    || numeric.no_input
-                                                    || numeric.clamp_on_input
-                                                    || numeric.clamp_zero_range
-                                                    || numeric.no_speed_tweaks
-                                                {
-                                                    let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                    if numeric.log {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                    }
-                                                    if numeric.always_clamp {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                    }
-                                                    if numeric.wrap_around {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                    }
-                                                    if numeric.no_round_to_format {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                    }
-                                                    if numeric.no_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                    }
-                                                    if numeric.clamp_on_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                    }
-                                                    if numeric.clamp_zero_range {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                    }
-                                                    if numeric.no_speed_tweaks {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                    }
-                                                    drag = drag.flags(flags);
-                                                }
+                                                drag = drag.flags(numeric.drag_flags());
                                                 let local_changed = drag.build(ui, __field);
                                                 __changed |= local_changed;
                                             }
@@ -1259,42 +1119,7 @@ fn derive_for_struct(
                                                 if let Some(ref fmt) = numeric.format {
                                                     slider = slider.display_format(fmt);
                                                 }
-                                                if numeric.log
-                                                    || numeric.always_clamp
-                                                    || numeric.wrap_around
-                                                    || numeric.no_round_to_format
-                                                    || numeric.no_input
-                                                    || numeric.clamp_on_input
-                                                    || numeric.clamp_zero_range
-                                                    || numeric.no_speed_tweaks
-                                                {
-                                                    let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                    if numeric.log {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                    }
-                                                    if numeric.always_clamp {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                    }
-                                                    if numeric.wrap_around {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                    }
-                                                    if numeric.no_round_to_format {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                    }
-                                                    if numeric.no_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                    }
-                                                    if numeric.clamp_on_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                    }
-                                                    if numeric.clamp_zero_range {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                    }
-                                                    if numeric.no_speed_tweaks {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                    }
-                                                    slider = slider.flags(flags);
-                                                }
+                                                slider = slider.flags(numeric.slider_flags());
                                                 let mut local_changed = slider.build(__field);
                                                 if numeric.clamp {
                                                     if *__field < min {
@@ -1322,42 +1147,7 @@ fn derive_for_struct(
                                                 if let Some(ref fmt) = numeric.format {
                                                     drag = drag.display_format(fmt);
                                                 }
-                                                if numeric.log
-                                                    || numeric.always_clamp
-                                                    || numeric.wrap_around
-                                                    || numeric.no_round_to_format
-                                                    || numeric.no_input
-                                                    || numeric.clamp_on_input
-                                                    || numeric.clamp_zero_range
-                                                    || numeric.no_speed_tweaks
-                                                {
-                                                    let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                    if numeric.log {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                    }
-                                                    if numeric.always_clamp {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                    }
-                                                    if numeric.wrap_around {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                    }
-                                                    if numeric.no_round_to_format {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                    }
-                                                    if numeric.no_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                    }
-                                                    if numeric.clamp_on_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                    }
-                                                    if numeric.clamp_zero_range {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                    }
-                                                    if numeric.no_speed_tweaks {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                    }
-                                                    drag = drag.flags(flags);
-                                                }
+                                                drag = drag.flags(numeric.drag_flags());
                                                 let local_changed = drag.build(ui, __field);
                                                 __changed |= local_changed;
                                             }
@@ -1411,42 +1201,7 @@ fn derive_for_struct(
                                                 if let Some(ref fmt) = numeric.format {
                                                     slider = slider.display_format(fmt);
                                                 }
-                                                if numeric.log
-                                                    || numeric.always_clamp
-                                                    || numeric.wrap_around
-                                                    || numeric.no_round_to_format
-                                                    || numeric.no_input
-                                                    || numeric.clamp_on_input
-                                                    || numeric.clamp_zero_range
-                                                    || numeric.no_speed_tweaks
-                                                {
-                                                    let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                    if numeric.log {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                    }
-                                                    if numeric.always_clamp {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                    }
-                                                    if numeric.wrap_around {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                    }
-                                                    if numeric.no_round_to_format {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                    }
-                                                    if numeric.no_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                    }
-                                                    if numeric.clamp_on_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                    }
-                                                    if numeric.clamp_zero_range {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                    }
-                                                    if numeric.no_speed_tweaks {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                    }
-                                                    slider = slider.flags(flags);
-                                                }
+                                                slider = slider.flags(numeric.slider_flags());
                                                 let mut local_changed = slider.build(__field);
                                                 if numeric.clamp {
                                                     if *__field < min {
@@ -1474,42 +1229,7 @@ fn derive_for_struct(
                                                 if let Some(ref fmt) = numeric.format {
                                                     drag = drag.display_format(fmt);
                                                 }
-                                                if numeric.log
-                                                    || numeric.always_clamp
-                                                    || numeric.wrap_around
-                                                    || numeric.no_round_to_format
-                                                    || numeric.no_input
-                                                    || numeric.clamp_on_input
-                                                    || numeric.clamp_zero_range
-                                                    || numeric.no_speed_tweaks
-                                                {
-                                                    let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                    if numeric.log {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                    }
-                                                    if numeric.always_clamp {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                    }
-                                                    if numeric.wrap_around {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                    }
-                                                    if numeric.no_round_to_format {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                    }
-                                                    if numeric.no_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                    }
-                                                    if numeric.clamp_on_input {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                    }
-                                                    if numeric.clamp_zero_range {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                    }
-                                                    if numeric.no_speed_tweaks {
-                                                        flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                    }
-                                                    drag = drag.flags(flags);
-                                                }
+                                                drag = drag.flags(numeric.drag_flags());
                                                 let local_changed = drag.build(ui, __field);
                                                 __changed |= local_changed;
                                             }
@@ -1659,42 +1379,7 @@ fn derive_for_struct(
                                                     if let Some(ref fmt) = numeric.format {
                                                         slider = slider.display_format(fmt);
                                                     }
-                                                    if numeric.log
-                                                        || numeric.always_clamp
-                                                        || numeric.wrap_around
-                                                        || numeric.no_round_to_format
-                                                        || numeric.no_input
-                                                        || numeric.clamp_on_input
-                                                        || numeric.clamp_zero_range
-                                                        || numeric.no_speed_tweaks
-                                                    {
-                                                        let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                        if numeric.log {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                        }
-                                                        if numeric.always_clamp {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                        }
-                                                        if numeric.wrap_around {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                        }
-                                                        if numeric.no_round_to_format {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                        }
-                                                        if numeric.no_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                        }
-                                                        if numeric.clamp_on_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                        }
-                                                        if numeric.clamp_zero_range {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                        }
-                                                        if numeric.no_speed_tweaks {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                        }
-                                                        slider = slider.flags(flags);
-                                                    }
+                                                    slider = slider.flags(numeric.slider_flags());
                                                     let mut local_changed =
                                                         slider.build(&mut __field.#idx);
                                                     if numeric.clamp {
@@ -1723,42 +1408,7 @@ fn derive_for_struct(
                                                     if let Some(ref fmt) = numeric.format {
                                                         drag = drag.display_format(fmt);
                                                     }
-                                                    if numeric.log
-                                                        || numeric.always_clamp
-                                                        || numeric.wrap_around
-                                                        || numeric.no_round_to_format
-                                                        || numeric.no_input
-                                                        || numeric.clamp_on_input
-                                                        || numeric.clamp_zero_range
-                                                        || numeric.no_speed_tweaks
-                                                    {
-                                                        let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                        if numeric.log {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                        }
-                                                        if numeric.always_clamp {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                        }
-                                                        if numeric.wrap_around {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                        }
-                                                        if numeric.no_round_to_format {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                        }
-                                                        if numeric.no_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                        }
-                                                        if numeric.clamp_on_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                        }
-                                                        if numeric.clamp_zero_range {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                        }
-                                                        if numeric.no_speed_tweaks {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                        }
-                                                        drag = drag.flags(flags);
-                                                    }
+                                                    drag = drag.flags(numeric.drag_flags());
                                                     drag.build(ui, &mut __field.#idx)
                                                 }
                                             }
@@ -1812,42 +1462,7 @@ fn derive_for_struct(
                                                     if let Some(ref fmt) = numeric.format {
                                                         slider = slider.display_format(fmt);
                                                     }
-                                                    if numeric.log
-                                                        || numeric.always_clamp
-                                                        || numeric.wrap_around
-                                                        || numeric.no_round_to_format
-                                                        || numeric.no_input
-                                                        || numeric.clamp_on_input
-                                                        || numeric.clamp_zero_range
-                                                        || numeric.no_speed_tweaks
-                                                    {
-                                                        let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                        if numeric.log {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                        }
-                                                        if numeric.always_clamp {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                        }
-                                                        if numeric.wrap_around {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                        }
-                                                        if numeric.no_round_to_format {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                        }
-                                                        if numeric.no_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                        }
-                                                        if numeric.clamp_on_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                        }
-                                                        if numeric.clamp_zero_range {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                        }
-                                                        if numeric.no_speed_tweaks {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                        }
-                                                        slider = slider.flags(flags);
-                                                    }
+                                                    slider = slider.flags(numeric.slider_flags());
                                                     let mut local_changed =
                                                         slider.build(&mut __field.#idx);
                                                     if numeric.clamp {
@@ -1876,42 +1491,7 @@ fn derive_for_struct(
                                                     if let Some(ref fmt) = numeric.format {
                                                         drag = drag.display_format(fmt);
                                                     }
-                                                    if numeric.log
-                                                        || numeric.always_clamp
-                                                        || numeric.wrap_around
-                                                        || numeric.no_round_to_format
-                                                        || numeric.no_input
-                                                        || numeric.clamp_on_input
-                                                        || numeric.clamp_zero_range
-                                                        || numeric.no_speed_tweaks
-                                                    {
-                                                        let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                        if numeric.log {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                        }
-                                                        if numeric.always_clamp {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                        }
-                                                        if numeric.wrap_around {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                        }
-                                                        if numeric.no_round_to_format {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                        }
-                                                        if numeric.no_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                        }
-                                                        if numeric.clamp_on_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                        }
-                                                        if numeric.clamp_zero_range {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                        }
-                                                        if numeric.no_speed_tweaks {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                        }
-                                                        drag = drag.flags(flags);
-                                                    }
+                                                    drag = drag.flags(numeric.drag_flags());
                                                     drag.build(ui, &mut __field.#idx)
                                                 }
                                             }
@@ -1965,42 +1545,7 @@ fn derive_for_struct(
                                                     if let Some(ref fmt) = numeric.format {
                                                         slider = slider.display_format(fmt);
                                                     }
-                                                    if numeric.log
-                                                        || numeric.always_clamp
-                                                        || numeric.wrap_around
-                                                        || numeric.no_round_to_format
-                                                        || numeric.no_input
-                                                        || numeric.clamp_on_input
-                                                        || numeric.clamp_zero_range
-                                                        || numeric.no_speed_tweaks
-                                                    {
-                                                        let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                        if numeric.log {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                        }
-                                                        if numeric.always_clamp {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                        }
-                                                        if numeric.wrap_around {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                        }
-                                                        if numeric.no_round_to_format {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                        }
-                                                        if numeric.no_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                        }
-                                                        if numeric.clamp_on_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                        }
-                                                        if numeric.clamp_zero_range {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                        }
-                                                        if numeric.no_speed_tweaks {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                        }
-                                                        slider = slider.flags(flags);
-                                                    }
+                                                    slider = slider.flags(numeric.slider_flags());
                                                     let mut local_changed =
                                                         slider.build(&mut __field.#idx);
                                                     if numeric.clamp {
@@ -2029,42 +1574,7 @@ fn derive_for_struct(
                                                     if let Some(ref fmt) = numeric.format {
                                                         drag = drag.display_format(fmt);
                                                     }
-                                                    if numeric.log
-                                                        || numeric.always_clamp
-                                                        || numeric.wrap_around
-                                                        || numeric.no_round_to_format
-                                                        || numeric.no_input
-                                                        || numeric.clamp_on_input
-                                                        || numeric.clamp_zero_range
-                                                        || numeric.no_speed_tweaks
-                                                    {
-                                                        let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                        if numeric.log {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                        }
-                                                        if numeric.always_clamp {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                        }
-                                                        if numeric.wrap_around {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                        }
-                                                        if numeric.no_round_to_format {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                        }
-                                                        if numeric.no_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                        }
-                                                        if numeric.clamp_on_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                        }
-                                                        if numeric.clamp_zero_range {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                        }
-                                                        if numeric.no_speed_tweaks {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                        }
-                                                        drag = drag.flags(flags);
-                                                    }
+                                                    drag = drag.flags(numeric.drag_flags());
                                                     drag.build(ui, &mut __field.#idx)
                                                 }
                                             }
@@ -2118,42 +1628,7 @@ fn derive_for_struct(
                                                     if let Some(ref fmt) = numeric.format {
                                                         slider = slider.display_format(fmt);
                                                     }
-                                                    if numeric.log
-                                                        || numeric.always_clamp
-                                                        || numeric.wrap_around
-                                                        || numeric.no_round_to_format
-                                                        || numeric.no_input
-                                                        || numeric.clamp_on_input
-                                                        || numeric.clamp_zero_range
-                                                        || numeric.no_speed_tweaks
-                                                    {
-                                                        let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                        if numeric.log {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                        }
-                                                        if numeric.always_clamp {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                        }
-                                                        if numeric.wrap_around {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                        }
-                                                        if numeric.no_round_to_format {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                        }
-                                                        if numeric.no_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                        }
-                                                        if numeric.clamp_on_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                        }
-                                                        if numeric.clamp_zero_range {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                        }
-                                                        if numeric.no_speed_tweaks {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                        }
-                                                        slider = slider.flags(flags);
-                                                    }
+                                                    slider = slider.flags(numeric.slider_flags());
                                                     let mut local_changed =
                                                         slider.build(&mut __field.#idx);
                                                     if numeric.clamp {
@@ -2182,42 +1657,7 @@ fn derive_for_struct(
                                                     if let Some(ref fmt) = numeric.format {
                                                         drag = drag.display_format(fmt);
                                                     }
-                                                    if numeric.log
-                                                        || numeric.always_clamp
-                                                        || numeric.wrap_around
-                                                        || numeric.no_round_to_format
-                                                        || numeric.no_input
-                                                        || numeric.clamp_on_input
-                                                        || numeric.clamp_zero_range
-                                                        || numeric.no_speed_tweaks
-                                                    {
-                                                        let mut flags = ::dear_imgui_reflect::imgui::SliderFlags::NONE;
-                                                        if numeric.log {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::LOGARITHMIC;
-                                                        }
-                                                        if numeric.always_clamp {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::ALWAYS_CLAMP;
-                                                        }
-                                                        if numeric.wrap_around {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::WRAP_AROUND;
-                                                        }
-                                                        if numeric.no_round_to_format {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_ROUND_TO_FORMAT;
-                                                        }
-                                                        if numeric.no_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_INPUT;
-                                                        }
-                                                        if numeric.clamp_on_input {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ON_INPUT;
-                                                        }
-                                                        if numeric.clamp_zero_range {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::CLAMP_ZERO_RANGE;
-                                                        }
-                                                        if numeric.no_speed_tweaks {
-                                                            flags |= ::dear_imgui_reflect::imgui::SliderFlags::NO_SPEED_TWEAKS;
-                                                        }
-                                                        drag = drag.flags(flags);
-                                                    }
+                                                    drag = drag.flags(numeric.drag_flags());
                                                     drag.build(ui, &mut __field.#idx)
                                                 }
                                             }

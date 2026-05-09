@@ -34,7 +34,20 @@
 //! }
 //! ```
 
-use crate::{Condition, Ui, sys};
+use crate::{Ui, sys};
+
+/// Condition for updating a drag and drop payload.
+///
+/// Dear ImGui only accepts `Always` and `Once` for `SetDragDropPayload`.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(i32)]
+#[allow(clippy::unnecessary_cast)]
+pub enum DragDropPayloadCond {
+    /// Update the payload every frame while dragging.
+    Always = sys::ImGuiCond_Always as i32,
+    /// Update the payload once when the drag starts.
+    Once = sys::ImGuiCond_Once as i32,
+}
 use std::{any, ffi};
 
 bitflags::bitflags! {
@@ -96,7 +109,7 @@ impl Ui {
         DragDropSource {
             name,
             flags: DragDropFlags::NONE,
-            cond: Condition::Always,
+            cond: DragDropPayloadCond::Always,
             ui: self,
         }
     }
@@ -166,7 +179,7 @@ impl Ui {
 pub struct DragDropSource<'ui, T> {
     name: T,
     flags: DragDropFlags,
-    cond: Condition,
+    cond: DragDropPayloadCond,
     ui: &'ui Ui,
 }
 
@@ -186,7 +199,7 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
     /// # Arguments
     /// * `cond` - When to update the payload data
     #[inline]
-    pub fn condition(mut self, cond: Condition) -> Self {
+    pub fn condition(mut self, cond: DragDropPayloadCond) -> Self {
         self.cond = cond;
         self
     }

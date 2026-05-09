@@ -756,6 +756,70 @@ impl Default for NumericTypeSettings {
 }
 
 impl NumericTypeSettings {
+    /// Build the Dear ImGui flags supported by slider widgets.
+    ///
+    /// `wrap_around` is intentionally excluded because Dear ImGui only
+    /// supports it for drag widgets and asserts if it is passed to SliderXXX.
+    pub fn slider_flags(&self) -> dear_imgui_rs::SliderFlags {
+        let mut flags = dear_imgui_rs::SliderFlags::NONE;
+
+        if self.log {
+            flags |= dear_imgui_rs::SliderFlags::LOGARITHMIC;
+        }
+        if self.always_clamp {
+            flags |= dear_imgui_rs::SliderFlags::ALWAYS_CLAMP;
+        }
+        if self.no_round_to_format {
+            flags |= dear_imgui_rs::SliderFlags::NO_ROUND_TO_FORMAT;
+        }
+        if self.no_input {
+            flags |= dear_imgui_rs::SliderFlags::NO_INPUT;
+        }
+        if self.clamp_on_input {
+            flags |= dear_imgui_rs::SliderFlags::CLAMP_ON_INPUT;
+        }
+        if self.clamp_zero_range {
+            flags |= dear_imgui_rs::SliderFlags::CLAMP_ZERO_RANGE;
+        }
+        if self.no_speed_tweaks {
+            flags |= dear_imgui_rs::SliderFlags::NO_SPEED_TWEAKS;
+        }
+
+        flags
+    }
+
+    /// Build the Dear ImGui flags supported by drag widgets.
+    pub fn drag_flags(&self) -> dear_imgui_rs::DragFlags {
+        let mut flags = dear_imgui_rs::DragFlags::NONE;
+
+        if self.log {
+            flags |= dear_imgui_rs::DragFlags::LOGARITHMIC;
+        }
+        if self.always_clamp {
+            flags |= dear_imgui_rs::DragFlags::ALWAYS_CLAMP;
+        }
+        if self.wrap_around {
+            flags |= dear_imgui_rs::DragFlags::WRAP_AROUND;
+        }
+        if self.no_round_to_format {
+            flags |= dear_imgui_rs::DragFlags::NO_ROUND_TO_FORMAT;
+        }
+        if self.no_input {
+            flags |= dear_imgui_rs::DragFlags::NO_INPUT;
+        }
+        if self.clamp_on_input {
+            flags |= dear_imgui_rs::DragFlags::CLAMP_ON_INPUT;
+        }
+        if self.clamp_zero_range {
+            flags |= dear_imgui_rs::DragFlags::CLAMP_ZERO_RANGE;
+        }
+        if self.no_speed_tweaks {
+            flags |= dear_imgui_rs::DragFlags::NO_SPEED_TWEAKS;
+        }
+
+        flags
+    }
+
     /// Set an explicit printf-style format string for this numeric type.
     ///
     /// This is a convenience helper for configuring the underlying ImGui

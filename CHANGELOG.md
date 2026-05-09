@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-09
+
+This release removes the last invalid `Condition` value from the safe API and
+splits several overly broad flag sets into type-safe options so Dear ImGui's
+runtime assertions can no longer be triggered from normal Rust code. It also
+aligns the unified release train to `0.12.0` across the workspace.
+
+### Highlights
+
+- Remove `Condition::Never` and make APIs that previously accepted invalid or
+  overloaded condition/flag values use explicit option types instead.
+- Split the combo, table, color, tab, shortcut, drag/drop, and drag/slider
+  APIs so mutually exclusive Dear ImGui choices cannot be combined accidentally.
+- Update `dear-imgui-reflect` so numeric widget helpers route slider and drag
+  flags through the correct safe wrapper types.
+
+### Breaking Changes
+
+- Core (`dear-imgui-rs`)
+  - Remove `Condition::Never`.
+  - Change `Window::content_size(...)` to accept only the size vector.
+  - Replace several public flag arguments with explicit option types or narrower flag sets:
+    `DragDropPayloadCond`, `ShortcutFlags`, `NextItemShortcutFlags`,
+    `ItemKeyOwnerFlags`, `DragFlags`, `ComboBoxOptions`, `TableOptions`,
+    `TableColumnWidth`, `TableColumnStateFlags`, `ColorEditOptions`,
+    `ColorPickerOptions`, `ColorButtonOptions`, and `TabItemOptions`.
+  - Update builder/setup structs to store typed options directly, including
+    `ComboBox::options` and `TableColumnSetup::width`.
+  - Remove the ambiguous `TableColumnSetup::init_width_or_weight()` helper in favor of
+    `fixed_width()` and `stretch_weight()`.
+- Extensions
+  - `dear-imgui-reflect`: numeric `wrap_around` now applies to drag widgets only.
+
+### Fixed
+
+- Core (`dear-imgui-rs`)
+  - Fixes #27, thanks @belst. Remove the invalid `Condition::Never` value that could reach
+    Dear ImGui's assertion paths, and tighten the APIs that previously exposed unsupported
+    condition values in helper builders.
+- Extensions
+  - `dear-imgui-reflect`: route slider and drag numeric flags through distinct helper methods
+    so the derived widgets no longer emit invalid flag combinations for Dear ImGui.
+
 ## [0.11.0] - 2026-04-07
 
 Upgrade to Dear ImGui v1.92.7 (docking branch) via cimgui `docking_inter`, refresh

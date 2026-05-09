@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 use crate::sys;
 use crate::ui::Ui;
-use crate::widget::ComboBoxFlags;
+use crate::widget::{ComboBoxFlags, ComboBoxHeight, ComboBoxOptions, ComboBoxPreviewMode};
 
 /// # Combo Box Widgets
 impl Ui {
@@ -39,11 +39,12 @@ impl Ui {
         &self,
         label: impl AsRef<str>,
         preview_value: impl AsRef<str>,
-        flags: ComboBoxFlags,
+        flags: impl Into<ComboBoxOptions>,
     ) -> Option<ComboBoxToken<'_>> {
+        let options = flags.into();
         let (label_ptr, preview_ptr) = self.scratch_txt_two(label, preview_value);
 
-        let should_render = unsafe { sys::igBeginCombo(label_ptr, preview_ptr, flags.bits()) };
+        let should_render = unsafe { sys::igBeginCombo(label_ptr, preview_ptr, options.raw()) };
 
         if should_render {
             Some(ComboBoxToken::new(self))
@@ -75,11 +76,14 @@ impl Ui {
     pub fn begin_combo_no_preview_with_flags(
         &self,
         label: impl AsRef<str>,
-        flags: ComboBoxFlags,
+        flags: impl Into<ComboBoxOptions>,
     ) -> Option<ComboBoxToken<'_>> {
+        let mut options = flags.into();
+        options.preview_mode = ComboBoxPreviewMode::NoPreview;
         let label_ptr = self.scratch_txt(label);
 
-        let should_render = unsafe { sys::igBeginCombo(label_ptr, std::ptr::null(), flags.bits()) };
+        let should_render =
+            unsafe { sys::igBeginCombo(label_ptr, std::ptr::null(), options.raw()) };
 
         if should_render {
             Some(ComboBoxToken::new(self))
@@ -213,7 +217,7 @@ impl Ui {
 pub struct ComboBox<'ui, Label, Preview = &'static str> {
     pub label: Label,
     pub preview_value: Option<Preview>,
-    pub flags: ComboBoxFlags,
+    pub options: ComboBoxOptions,
     pub ui: &'ui Ui,
 }
 
@@ -223,14 +227,26 @@ impl<'ui, Label: AsRef<str>> ComboBox<'ui, Label> {
         ComboBox {
             label: self.label,
             preview_value: Some(preview),
-            flags: self.flags,
+            options: self.options,
             ui: self.ui,
         }
     }
 
     /// Sets the flags
     pub fn flags(mut self, flags: ComboBoxFlags) -> Self {
-        self.flags = flags;
+        self.options.flags = flags;
+        self
+    }
+
+    /// Sets the popup height policy.
+    pub fn height(mut self, height: ComboBoxHeight) -> Self {
+        self.options.height = Some(height);
+        self
+    }
+
+    /// Sets the preview/arrow layout.
+    pub fn preview_mode(mut self, mode: ComboBoxPreviewMode) -> Self {
+        self.options.preview_mode = mode;
         self
     }
 
@@ -246,7 +262,8 @@ impl<'ui, Label: AsRef<str>> ComboBox<'ui, Label> {
             .ui
             .scratch_txt_with_opt(self.label.as_ref(), self.preview_value.as_deref());
 
-        let should_render = unsafe { sys::igBeginCombo(label_ptr, preview_ptr, self.flags.bits()) };
+        let should_render =
+            unsafe { sys::igBeginCombo(label_ptr, preview_ptr, self.options.raw()) };
 
         if should_render {
             Some(ComboBoxToken::new(self.ui))
