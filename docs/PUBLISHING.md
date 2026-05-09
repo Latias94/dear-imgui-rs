@@ -24,7 +24,7 @@ Before publishing, ensure:
 
 - [ ] All tests pass on all platforms (Linux, Windows, macOS)
   ```bash
-  cargo test --workspace
+  cargo nextest run --workspace
   ```
 
 - [ ] All examples build successfully

@@ -133,6 +133,16 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None, capture: bool = True
         return 1, "", str(e)
 
 
+def cargo_nextest_available(repo_root: Path) -> bool:
+    """Return True if cargo-nextest is installed."""
+    code, _stdout, _stderr = run_command(
+        ["cargo", "nextest", "--version"],
+        cwd=repo_root,
+        capture=True,
+    )
+    return code == 0
+
+
 def get_crate_version(crate_path: Path) -> Optional[str]:
     """Extract version from Cargo.toml."""
     cargo_toml = crate_path / "Cargo.toml"
@@ -317,9 +327,30 @@ def check_tests(repo_root: Path) -> Tuple[bool, List[str]]:
     # We run tests in two passes:
     # 1) All crates except the test-engine crates (no test-engine hooks enabled).
     # 2) The safe test-engine crate itself (ensures the feature-gated path builds/links).
+    #
+    # Prefer nextest when available. Several core tests create Dear ImGui contexts,
+    # and the C++ context is a process-global resource. nextest isolates tests more
+    # effectively than a single cargo test binary. The cargo-test fallback runs
+    # with one test thread for the same reason.
 
-    base_cmd = ["cargo", "test", "--workspace", "--lib"]
+    use_nextest = cargo_nextest_available(repo_root)
+    if use_nextest:
+        print("  Using cargo nextest")
+        base_cmd = ["cargo", "nextest", "run", "--no-tests", "pass", "--workspace", "--lib"]
+        test_engine_cmd = [
+            "cargo", "nextest", "run", "--no-tests", "pass",
+            "-p", "dear-imgui-test-engine", "--lib",
+        ]
+        cargo_test_serial_args: List[str] = []
+    else:
+        print_warning("cargo-nextest not found; falling back to serial cargo test")
+        base_cmd = ["cargo", "test", "--workspace", "--lib"]
+        test_engine_cmd = ["cargo", "test", "-p", "dear-imgui-test-engine", "--lib"]
+        cargo_test_serial_args = ["--", "--test-threads=1"]
+
     base_cmd += ["--exclude", "dear-imgui-test-engine", "--exclude", "dear-imgui-test-engine-sys"]
+    base_cmd += cargo_test_serial_args
+    test_engine_cmd += cargo_test_serial_args
 
     # Pass 1: core/backends/extensions (excluding test-engine crates)
     code, _stdout, _stderr = run_command(
@@ -333,7 +364,7 @@ def check_tests(repo_root: Path) -> Tuple[bool, List[str]]:
 
     # Pass 2: test-engine crate
     code, _stdout, _stderr = run_command(
-        ["cargo", "test", "-p", "dear-imgui-test-engine", "--lib"],
+        test_engine_cmd,
         cwd=repo_root,
         capture=False,  # Stream output in real-time
     )

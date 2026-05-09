@@ -50,6 +50,21 @@ def run_command(cmd: List[str], cwd=None, quiet: bool = False) -> int:
         return 1
 
 
+def cargo_nextest_available(cwd=None) -> bool:
+    """Return True if cargo-nextest is installed."""
+    try:
+        result = subprocess.run(
+            ["cargo", "nextest", "--version"],
+            cwd=cwd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def task_check(args, repo_root: Path) -> int:
     """Run pre-publish validation checks."""
     cmd = [sys.executable, "tools/pre_publish_check.py"]
@@ -127,30 +142,40 @@ def task_test(args, repo_root: Path) -> int:
     # ImGui test engine hooks in `dear-imgui-sys`, and a full workspace test run may try to link crates
     # that don't depend on the test engine library.
     #
+    # Prefer nextest when available. It better isolates tests that create Dear ImGui contexts; the
+    # cargo-test fallback uses one test thread to avoid racing the process-global C++ context.
+    #
     # Default behaviour: run tests in two passes.
     # - Pass 1: all workspace crates excluding test-engine crates.
     # - Pass 2: test-engine crate itself.
     #
     # If `--package` is provided, run a normal single-package test.
+    use_nextest = cargo_nextest_available(repo_root)
+    runner = ["cargo", "nextest", "run", "--no-tests", "pass"] if use_nextest else ["cargo", "test"]
+    serial_args = [] if use_nextest else ["--", "--test-threads=1"]
+
     if getattr(args, "package", None):
-        cmd = ["cargo", "test", "--workspace", "-p", args.package]
+        cmd = runner + ["--workspace", "-p", args.package]
         if getattr(args, "lib_only", False):
             cmd.append("--lib")
+        cmd += serial_args
         return run_command(cmd, cwd=repo_root)
 
-    cmd = ["cargo", "test", "--workspace"]
+    cmd = runner + ["--workspace"]
     
     if getattr(args, "lib_only", False):
         cmd.append("--lib")
 
     pass1 = cmd + ["--exclude", "dear-imgui-test-engine", "--exclude", "dear-imgui-test-engine-sys"]
+    pass1 += serial_args
     rc = run_command(pass1, cwd=repo_root)
     if rc != 0:
         return rc
 
-    pass2 = ["cargo", "test", "-p", "dear-imgui-test-engine"]
+    pass2 = runner + ["-p", "dear-imgui-test-engine"]
     if getattr(args, "lib_only", False):
         pass2.append("--lib")
+    pass2 += serial_args
     return run_command(pass2, cwd=repo_root)
 
 
