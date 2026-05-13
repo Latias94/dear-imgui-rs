@@ -108,6 +108,52 @@ const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
 
 // cimgui C API avoids C++ ABI pitfalls; no MSVC-specific conversions are required.
 
+unsafe extern "C" {
+    fn dear_imgui_rs_platform_io_set_platform_get_window_pos(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_pos: *mut ImVec2)>,
+    );
+
+    fn dear_imgui_rs_platform_io_set_platform_get_window_size(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_size: *mut ImVec2)>,
+    );
+}
+
+/// Install a C-compatible out-parameter callback for `ImGuiPlatformIO::Platform_GetWindowPos`.
+///
+/// This avoids exposing Rust callbacks through the small-aggregate `ImVec2` return ABI used by
+/// Dear ImGui's C++ callback slot. The shim keeps its own per-`ImGuiPlatformIO` storage and does
+/// not occupy `ImGuiIO::BackendLanguageUserData`.
+///
+/// # Safety
+///
+/// `platform_io` must be null or point to a live `ImGuiPlatformIO`. `user_callback`, when present,
+/// must obey Dear ImGui's platform callback contract and must not unwind.
+#[inline]
+pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_pos: *mut ImVec2)>,
+) {
+    unsafe { dear_imgui_rs_platform_io_set_platform_get_window_pos(platform_io, user_callback) }
+}
+
+/// Install a C-compatible out-parameter callback for `ImGuiPlatformIO::Platform_GetWindowSize`.
+///
+/// See [`ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam`] for the ABI rationale.
+///
+/// # Safety
+///
+/// `platform_io` must be null or point to a live `ImGuiPlatformIO`. `user_callback`, when present,
+/// must obey Dear ImGui's platform callback contract and must not unwind.
+#[inline]
+pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_size: *mut ImVec2)>,
+) {
+    unsafe { dear_imgui_rs_platform_io_set_platform_get_window_size(platform_io, user_callback) }
+}
+
 // Re-export commonly used types for convenience
 pub use ImColor as Color;
 pub use ImVec2 as Vector2;

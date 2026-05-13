@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     out-of-range glyph ranges.
   - Validate `TextCallbackData` buffers and byte positions before exposing Rust slices or
     converting positions into Dear ImGui's `int` callback APIs.
+- Core (`dear-imgui-sys`)
+  - Route Rust-owned `Platform_GetWindowPos` / `Platform_GetWindowSize` out-parameter
+    shims through `dear-imgui-sys` storage instead of cimgui's `BackendLanguageUserData`
+    helper, avoiding collisions with language/backend userdata.
 
 ## [0.12.0] - 2026-05-09
 

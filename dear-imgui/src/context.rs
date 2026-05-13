@@ -1000,6 +1000,9 @@ impl Drop for Context {
             if !self.raw.is_null() {
                 unregister_user_textures_for_context(self.raw);
                 crate::platform_io::clear_typed_callbacks_for_context(self.raw);
+                with_bound_context(self.raw, || {
+                    crate::platform_io::clear_cimgui_out_param_callbacks_for_current_context();
+                });
                 if sys::igGetCurrentContext() == self.raw {
                     clear_current_context();
                 }
@@ -1044,6 +1047,10 @@ mod tests {
         let raw = unsafe { &*pio.as_raw() };
         assert!(raw.Platform_GetWindowPos.is_some());
         assert!(raw.Platform_GetWindowSize.is_some());
+        assert!(
+            ctx.io().backend_language_user_data().is_null(),
+            "cimgui Platform_GetWindowPos/Size helpers must not occupy BackendLanguageUserData"
+        );
 
         pio.set_platform_get_window_pos_raw(None);
         pio.set_platform_get_window_size_raw(None);

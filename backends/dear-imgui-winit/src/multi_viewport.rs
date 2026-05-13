@@ -133,11 +133,11 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
         // Also register framebuffer/DPI scale and work area insets callbacks
         let pio_sys = dear_imgui_rs::sys::igGetPlatformIO_Nil();
         // Install out-parameter getters via cimgui helpers (avoid struct-return ABI)
-        dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowPos(
+        dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
             pio_sys,
             Some(winit_get_window_pos_out_v2),
         );
-        dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowSize(
+        dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
             pio_sys,
             Some(winit_get_window_size_out_v2),
         );

@@ -75,6 +75,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/imgui_test_engine_hooks.cpp");
+    println!("cargo:rerun-if-changed=src/platform_io_hooks.cpp");
     println!("cargo:rerun-if-changed=backend-shims/opengl3.cpp");
     println!("cargo:rerun-if-changed=backend-shims/sdlrenderer3.cpp");
     println!("cargo:rerun-if-changed=backend-shims/android.cpp");
@@ -125,6 +126,9 @@ fn main() {
     // static link order remains backend-shim first, core dear_imgui second.
     if env::var("IMGUI_SYS_SKIP_CC").is_err() {
         build_backend_shims(&cfg);
+        if cfg.target_arch != "wasm32" {
+            build_platform_io_hooks(&cfg);
+        }
     }
 
     // Build strategy selection via features + env var override
@@ -446,6 +450,13 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     }
 
     build.compile("dear_imgui");
+}
+
+fn build_platform_io_hooks(cfg: &BuildConfig) {
+    let mut build = new_native_cpp_build(cfg);
+    build.include(cfg.cimgui_root());
+    build.file(cfg.manifest_dir.join("src/platform_io_hooks.cpp"));
+    build.compile("dear_imgui_sys_platform_io_hooks");
 }
 
 fn any_backend_shim_enabled() -> bool {
@@ -788,6 +799,7 @@ fn build_with_cc_wasm(cfg: &BuildConfig) {
     build.file(imgui_src.join("imgui_tables.cpp"));
     build.file(imgui_src.join("imgui_demo.cpp"));
     build.file(cimgui_root.join("cimgui.cpp"));
+    build.file(cfg.manifest_dir.join("src/platform_io_hooks.cpp"));
 
     // If EMSDK is available, prefer its upstream clang++ for wasm32-unknown-unknown objects
     if let Ok(emsdk) = std::env::var("EMSDK") {
