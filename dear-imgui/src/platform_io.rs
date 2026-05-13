@@ -47,7 +47,7 @@ pub(crate) fn clear_typed_callbacks_for_context(ctx: *mut sys::ImGuiContext) {
 pub(crate) fn clear_typed_callbacks_for_context(_ctx: *mut sys::ImGuiContext) {}
 
 #[cfg(feature = "multi-viewport")]
-pub(crate) unsafe fn clear_cimgui_out_param_callbacks_for_current_context() {
+pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {
     let pio = unsafe { sys::igGetPlatformIO_Nil() };
     if pio.is_null() {
         return;
@@ -59,7 +59,7 @@ pub(crate) unsafe fn clear_cimgui_out_param_callbacks_for_current_context() {
 }
 
 #[cfg(not(feature = "multi-viewport"))]
-pub(crate) unsafe fn clear_cimgui_out_param_callbacks_for_current_context() {}
+pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {}
 
 impl PlatformIo {
     #[inline]
@@ -111,20 +111,47 @@ impl PlatformIo {
         self.raw.get()
     }
 
+    #[cfg(feature = "multi-viewport")]
+    fn is_current_context_platform_io(&self) -> bool {
+        unsafe {
+            if sys::igGetCurrentContext().is_null() {
+                return false;
+            }
+
+            let current = sys::igGetPlatformIO_Nil();
+            !current.is_null() && std::ptr::addr_eq(current.cast_const(), self.as_raw())
+        }
+    }
+
     /// Clear all platform backend handlers.
     ///
     /// This resets the `Platform_*` callback table stored in `ImGuiPlatformIO`.
+    /// When called for the active context's `PlatformIo`, it also clears Rust typed callback
+    /// storage and the out-parameter callback shim used by `Platform_GetWindowPos/Size`.
     #[cfg(feature = "multi-viewport")]
     pub fn clear_platform_handlers(&mut self) {
         unsafe { sys::ImGuiPlatformIO_ClearPlatformHandlers(self.as_raw_mut()) }
+
+        if self.is_current_context_platform_io() {
+            trampolines::clear_platform_callbacks_for_current_context();
+            unsafe {
+                clear_out_param_callbacks_for_current_context();
+            }
+        }
     }
 
     /// Clear all renderer backend handlers.
     ///
     /// This resets the `Renderer_*` callback table stored in `ImGuiPlatformIO`.
+    /// When called for the active context's `PlatformIo`, it also clears Rust typed renderer
+    /// callback storage.
     #[cfg(feature = "multi-viewport")]
     pub fn clear_renderer_handlers(&mut self) {
         unsafe { sys::ImGuiPlatformIO_ClearRendererHandlers(self.as_raw_mut()) }
+
+        if self.is_current_context_platform_io() {
+            trampolines::clear_renderer_callbacks_for_current_context();
+        }
     }
 
     /// Set platform create window callback (raw sys pointer)
@@ -239,9 +266,9 @@ impl PlatformIo {
 
     /// Set platform get window position callback (raw)
     ///
-    /// This uses cimgui's out-parameter helper internally instead of writing
-    /// `ImGuiPlatformIO::Platform_GetWindowPos` directly. The helper stores a C-compatible
-    /// out-parameter callback in cimgui-owned storage and installs a C++ thunk that returns
+    /// This uses this crate's out-parameter shim internally instead of writing
+    /// `ImGuiPlatformIO::Platform_GetWindowPos` directly. The shim stores a C-compatible
+    /// out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk that returns
     /// `ImVec2` by value, which avoids the fragile direct small-aggregate callback ABI on MSVC.
     #[cfg(feature = "multi-viewport")]
     pub fn set_platform_get_window_pos_raw(
@@ -250,8 +277,16 @@ impl PlatformIo {
     ) {
         use trampolines::*;
 
-        store_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, callback);
-        store_cb(&PLATFORM_GET_WINDOW_POS_CB, None);
+        match callback {
+            Some(cb) => {
+                store_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, Some(cb));
+                store_cb(&PLATFORM_GET_WINDOW_POS_CB, None);
+            }
+            None => {
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_POS_RAW_CB);
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_POS_CB);
+            }
+        }
 
         unsafe {
             match callback {
@@ -275,16 +310,24 @@ impl PlatformIo {
     ///
     /// See [`Self::set_platform_create_window`].
     ///
-    /// See [`Self::set_platform_get_window_pos_raw`] for why this path must go through cimgui's
-    /// out-parameter helper.
+    /// See [`Self::set_platform_get_window_pos_raw`] for why this path must go through the
+    /// out-parameter shim.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_pos(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
     ) {
         use trampolines::*;
-        store_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, None);
-        store_cb(&PLATFORM_GET_WINDOW_POS_CB, callback);
+        match callback {
+            Some(cb) => {
+                store_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, None);
+                store_cb(&PLATFORM_GET_WINDOW_POS_CB, Some(cb));
+            }
+            None => {
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_POS_RAW_CB);
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_POS_CB);
+            }
+        }
 
         unsafe {
             match callback {
@@ -331,9 +374,9 @@ impl PlatformIo {
 
     /// Set platform get window size callback (raw)
     ///
-    /// This uses cimgui's out-parameter helper internally instead of writing
-    /// `ImGuiPlatformIO::Platform_GetWindowSize` directly. The helper stores a C-compatible
-    /// out-parameter callback in cimgui-owned storage and installs a C++ thunk that returns
+    /// This uses this crate's out-parameter shim internally instead of writing
+    /// `ImGuiPlatformIO::Platform_GetWindowSize` directly. The shim stores a C-compatible
+    /// out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk that returns
     /// `ImVec2` by value, which avoids the fragile direct small-aggregate callback ABI on MSVC.
     #[cfg(feature = "multi-viewport")]
     pub fn set_platform_get_window_size_raw(
@@ -342,8 +385,16 @@ impl PlatformIo {
     ) {
         use trampolines::*;
 
-        store_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, callback);
-        store_cb(&PLATFORM_GET_WINDOW_SIZE_CB, None);
+        match callback {
+            Some(cb) => {
+                store_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, Some(cb));
+                store_cb(&PLATFORM_GET_WINDOW_SIZE_CB, None);
+            }
+            None => {
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_SIZE_RAW_CB);
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_SIZE_CB);
+            }
+        }
 
         unsafe {
             match callback {
@@ -368,16 +419,24 @@ impl PlatformIo {
     ///
     /// See [`Self::set_platform_create_window`].
     ///
-    /// See [`Self::set_platform_get_window_size_raw`] for why this path must go through cimgui's
-    /// out-parameter helper.
+    /// See [`Self::set_platform_get_window_size_raw`] for why this path must go through the
+    /// out-parameter shim.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_size(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
     ) {
         use trampolines::*;
-        store_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, None);
-        store_cb(&PLATFORM_GET_WINDOW_SIZE_CB, callback);
+        match callback {
+            Some(cb) => {
+                store_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, None);
+                store_cb(&PLATFORM_GET_WINDOW_SIZE_CB, Some(cb));
+            }
+            None => {
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_SIZE_RAW_CB);
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_SIZE_CB);
+            }
+        }
 
         unsafe {
             match callback {
@@ -1134,6 +1193,38 @@ mod tests {
         assert!(raw.Platform_OnChangedViewport.is_none());
         assert!(raw.Renderer_CreateWindow.is_none());
         assert!(raw.Renderer_DestroyWindow.is_none());
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn clear_platform_handlers_clears_typed_get_window_callbacks() {
+        unsafe extern "C" fn get_pos(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
+            sys::ImVec2 { x: 41.0, y: 42.0 }
+        }
+        unsafe extern "C" fn get_size(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
+            sys::ImVec2 { x: 43.0, y: 44.0 }
+        }
+
+        let mut ctx = crate::Context::create();
+        let pio = ctx.platform_io_mut();
+        pio.set_platform_get_window_pos_raw(Some(get_pos));
+        pio.set_platform_get_window_size_raw(Some(get_size));
+        pio.clear_platform_handlers();
+
+        let raw = unsafe { &*pio.as_raw() };
+        assert!(raw.Platform_GetWindowPos.is_none());
+        assert!(raw.Platform_GetWindowSize.is_none());
+
+        let viewport = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
+        let mut pos = sys::ImVec2 { x: 1.0, y: 1.0 };
+        let mut size = sys::ImVec2 { x: 1.0, y: 1.0 };
+        unsafe {
+            trampolines::platform_get_window_pos_out(viewport, &mut pos);
+            trampolines::platform_get_window_size_out(viewport, &mut size);
+        }
+
+        assert_eq!((pos.x, pos.y), (0.0, 0.0));
+        assert_eq!((size.x, size.y), (0.0, 0.0));
     }
 
     #[cfg(feature = "multi-viewport")]

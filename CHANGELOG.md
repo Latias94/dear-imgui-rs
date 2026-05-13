@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Core (`dear-imgui-rs`)
   - Store typed `PlatformIo` callbacks per active `ImGuiContext` instead of in process-wide
-    Rust slots, while preserving cimgui's out-parameter hook path for `Platform_GetWindowPos`
-    and `Platform_GetWindowSize`.
+    Rust slots, while preserving the `dear-imgui-sys` out-parameter shim path for
+    `Platform_GetWindowPos` and `Platform_GetWindowSize`.
   - Track `DrawListMut` borrows per raw `ImDrawList*` on the current thread instead of using
     process-wide locks, and resolve background/foreground draw lists against the main viewport.
   - Make `DrawListMut::clone_output()` return `render::OwnedDrawList`.
@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevent safe Rust from producing dangling FFI calls when `RegisteredUserTexture`,
     `Context`, or `OwnedTextureData` are dropped in different orders.
   - Keep `PlatformIo` typed callback dispatch isolated between multiple ImGui contexts.
+  - Clear Rust typed `PlatformIo` callback storage and `Platform_GetWindowPos/Size` out-parameter
+    shim state when clearing platform or renderer handlers.
   - Generate correctly terminated glyph exclude range arrays and reject reversed or
     out-of-range glyph ranges.
   - Validate `TextCallbackData` buffers and byte positions before exposing Rust slices or

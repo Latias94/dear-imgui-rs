@@ -43,6 +43,65 @@ struct CallbackSet {
     renderer_swap_buffers: Option<ViewportRenderCb>,
 }
 
+impl CallbackSet {
+    fn clear_platform(&mut self) {
+        self.platform_create_window = None;
+        self.platform_destroy_window = None;
+        self.platform_show_window = None;
+        self.platform_set_window_pos = None;
+        self.platform_get_window_pos_raw = None;
+        self.platform_get_window_pos = None;
+        self.platform_set_window_size = None;
+        self.platform_get_window_size_raw = None;
+        self.platform_get_window_size = None;
+        self.platform_set_window_focus = None;
+        self.platform_get_window_dpi_scale = None;
+        self.platform_get_window_focus = None;
+        self.platform_get_window_minimized = None;
+        self.platform_on_changed_viewport = None;
+        self.platform_set_window_title = None;
+        self.platform_set_window_alpha = None;
+        self.platform_update_window = None;
+        self.platform_render_window = None;
+        self.platform_swap_buffers = None;
+    }
+
+    fn clear_renderer(&mut self) {
+        self.renderer_create_window = None;
+        self.renderer_destroy_window = None;
+        self.renderer_set_window_size = None;
+        self.renderer_render_window = None;
+        self.renderer_swap_buffers = None;
+    }
+
+    fn is_empty(&self) -> bool {
+        self.platform_create_window.is_none()
+            && self.platform_destroy_window.is_none()
+            && self.platform_show_window.is_none()
+            && self.platform_set_window_pos.is_none()
+            && self.platform_get_window_pos_raw.is_none()
+            && self.platform_get_window_pos.is_none()
+            && self.platform_set_window_size.is_none()
+            && self.platform_get_window_size_raw.is_none()
+            && self.platform_get_window_size.is_none()
+            && self.platform_set_window_focus.is_none()
+            && self.platform_get_window_dpi_scale.is_none()
+            && self.platform_get_window_focus.is_none()
+            && self.platform_get_window_minimized.is_none()
+            && self.platform_on_changed_viewport.is_none()
+            && self.platform_set_window_title.is_none()
+            && self.platform_set_window_alpha.is_none()
+            && self.platform_update_window.is_none()
+            && self.platform_render_window.is_none()
+            && self.platform_swap_buffers.is_none()
+            && self.renderer_create_window.is_none()
+            && self.renderer_destroy_window.is_none()
+            && self.renderer_set_window_size.is_none()
+            && self.renderer_render_window.is_none()
+            && self.renderer_swap_buffers.is_none()
+    }
+}
+
 struct ContextCallbacks {
     ctx: *mut sys::ImGuiContext,
     callbacks: CallbackSet,
@@ -273,14 +332,72 @@ pub(super) fn store_cb<T: Copy>(slot: &CallbackSlot<T>, cb: Option<T>) {
 
     CONTEXT_CALLBACKS.with(|contexts| {
         let mut contexts = contexts.borrow_mut();
-        if let Some(entry) = contexts.iter_mut().find(|entry| entry.ctx == ctx) {
-            (slot.set)(&mut entry.callbacks, cb);
+        if let Some(index) = contexts.iter().position(|entry| entry.ctx == ctx) {
+            (slot.set)(&mut contexts[index].callbacks, cb);
+            if contexts[index].callbacks.is_empty() {
+                contexts.remove(index);
+            }
+            return;
+        }
+
+        if cb.is_none() {
             return;
         }
 
         let mut callbacks = CallbackSet::default();
         (slot.set)(&mut callbacks, cb);
         contexts.push(ContextCallbacks { ctx, callbacks });
+    });
+}
+
+pub(super) fn clear_cb_for_current_context<T: Copy>(slot: &CallbackSlot<T>) {
+    let ctx = current_context();
+    if ctx.is_null() {
+        return;
+    }
+
+    CONTEXT_CALLBACKS.with(|contexts| {
+        let mut contexts = contexts.borrow_mut();
+        if let Some(index) = contexts.iter().position(|entry| entry.ctx == ctx) {
+            (slot.set)(&mut contexts[index].callbacks, None);
+            if contexts[index].callbacks.is_empty() {
+                contexts.remove(index);
+            }
+        }
+    });
+}
+
+pub(crate) fn clear_platform_callbacks_for_current_context() {
+    let ctx = current_context();
+    if ctx.is_null() {
+        return;
+    }
+
+    CONTEXT_CALLBACKS.with(|contexts| {
+        let mut contexts = contexts.borrow_mut();
+        if let Some(index) = contexts.iter().position(|entry| entry.ctx == ctx) {
+            contexts[index].callbacks.clear_platform();
+            if contexts[index].callbacks.is_empty() {
+                contexts.remove(index);
+            }
+        }
+    });
+}
+
+pub(crate) fn clear_renderer_callbacks_for_current_context() {
+    let ctx = current_context();
+    if ctx.is_null() {
+        return;
+    }
+
+    CONTEXT_CALLBACKS.with(|contexts| {
+        let mut contexts = contexts.borrow_mut();
+        if let Some(index) = contexts.iter().position(|entry| entry.ctx == ctx) {
+            contexts[index].callbacks.clear_renderer();
+            if contexts[index].callbacks.is_empty() {
+                contexts.remove(index);
+            }
+        }
     });
 }
 
