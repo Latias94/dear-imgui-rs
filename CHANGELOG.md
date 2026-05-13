@@ -61,6 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Platform_GetWindowPos/Size` consistently use the out-parameter shim.
   - Clear winit multi-viewport platform callbacks and out-parameter getter shims during
     shutdown so a backend teardown does not leave stale `ImGuiPlatformIO` handlers.
+  - Make winit multi-viewport main viewport initialization idempotent and guard
+    `PlatformUserData` access so the backend does not overwrite or read another backend's data.
 
 ## [0.12.0] - 2026-05-09
 

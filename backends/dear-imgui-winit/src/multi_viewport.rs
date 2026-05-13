@@ -18,6 +18,7 @@ use winit::window::{Window, WindowAttributes, WindowLevel};
 // Thread-local storage for winit multi-viewport support
 thread_local! {
     static EVENT_LOOP: RefCell<Option<*const ActiveEventLoop>> = const { RefCell::new(None) };
+    static VIEWPORT_DATA: RefCell<Vec<(*mut dear_imgui_rs::sys::ImGuiContext, *mut ViewportData)>> = const { RefCell::new(Vec::new()) };
 }
 
 // Debug logging helper (off by default). Enable by building this crate with
@@ -299,11 +300,7 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                         if vp.is_null() {
                             continue;
                         }
-                        let vd_ptr = (*vp).PlatformUserData as *mut ViewportData;
-                        if vd_ptr.is_null() {
-                            continue;
-                        }
-                        if let Some(vd) = vd_ptr.as_ref() {
+                        if let Some(vd) = viewport_data_ref(vp) {
                             // Skip main viewport: its events are handled by the primary platform path
                             if !vd.window_owned {
                                 continue;
@@ -466,9 +463,21 @@ pub fn handle_event_with_multi_viewport<T>(
 fn init_main_viewport(main_window: &Window) {
     unsafe {
         let main_viewport = dear_imgui_rs::sys::igGetMainViewport();
+        if main_viewport.is_null() {
+            return;
+        }
 
-        // Create ViewportData for main window
-        let vd = Box::into_raw(Box::new(ViewportData::new()));
+        let existing = (*main_viewport).PlatformUserData as *mut ViewportData;
+        let vd = if existing.is_null() {
+            let vd = Box::into_raw(Box::new(ViewportData::new()));
+            register_viewport_data(vd);
+            vd
+        } else if is_winit_viewport_data(existing) {
+            existing
+        } else {
+            panic!("main viewport PlatformUserData is already owned by another platform backend");
+        };
+
         (*vd).window = main_window as *const Window as *mut Window;
         (*vd).window_owned = false; // Main window is owned by the application
 
@@ -487,14 +496,17 @@ pub fn shutdown_multi_viewport_support() {
         if !main_viewport.is_null() {
             let vp = &mut *main_viewport;
             let vd_ptr = vp.PlatformUserData as *mut ViewportData;
-            if !vd_ptr.is_null() {
+            let owned_by_winit = is_winit_viewport_data(vd_ptr);
+            if owned_by_winit {
                 // Main window not owned by us: do not free the window itself
                 (*vd_ptr).window = std::ptr::null_mut();
-                let _ = Box::from_raw(vd_ptr);
+                drop_viewport_data(vd_ptr);
                 vp.PlatformUserData = std::ptr::null_mut();
             }
             // Clear handle to avoid dangling pointer
-            vp.PlatformHandle = std::ptr::null_mut();
+            if vd_ptr.is_null() || owned_by_winit {
+                vp.PlatformHandle = std::ptr::null_mut();
+            }
         }
 
         let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
@@ -503,6 +515,84 @@ pub fn shutdown_multi_viewport_support() {
             dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
             dear_imgui_rs::sys::ImGuiPlatformIO_ClearPlatformHandlers(pio);
         }
+    }
+}
+
+fn register_viewport_data(ptr: *mut ViewportData) {
+    if ptr.is_null() {
+        return;
+    }
+    let ctx = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+    VIEWPORT_DATA.with(|items| {
+        let mut items = items.borrow_mut();
+        if !items
+            .iter()
+            .any(|(entry_ctx, entry_ptr)| *entry_ctx == ctx && *entry_ptr == ptr)
+        {
+            items.push((ctx, ptr));
+        }
+    });
+}
+
+fn unregister_viewport_data(ptr: *mut ViewportData) {
+    if ptr.is_null() {
+        return;
+    }
+    VIEWPORT_DATA.with(|items| {
+        items
+            .borrow_mut()
+            .retain(|(_, entry_ptr)| *entry_ptr != ptr);
+    });
+}
+
+fn is_winit_viewport_data(ptr: *mut ViewportData) -> bool {
+    if ptr.is_null() {
+        return false;
+    }
+    let ctx = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+    VIEWPORT_DATA.with(|items| {
+        items
+            .borrow()
+            .iter()
+            .any(|(entry_ctx, entry_ptr)| *entry_ctx == ctx && *entry_ptr == ptr)
+    })
+}
+
+unsafe fn viewport_data_ref<'a>(
+    vp: *const dear_imgui_rs::sys::ImGuiViewport,
+) -> Option<&'a ViewportData> {
+    if vp.is_null() {
+        return None;
+    }
+    let ptr = unsafe { (*vp).PlatformUserData as *mut ViewportData };
+    if is_winit_viewport_data(ptr) {
+        unsafe { ptr.as_ref() }
+    } else {
+        None
+    }
+}
+
+unsafe fn viewport_data_mut<'a>(
+    vp: *mut dear_imgui_rs::sys::ImGuiViewport,
+) -> Option<&'a mut ViewportData> {
+    if vp.is_null() {
+        return None;
+    }
+    let ptr = unsafe { (*vp).PlatformUserData as *mut ViewportData };
+    if is_winit_viewport_data(ptr) {
+        unsafe { ptr.as_mut() }
+    } else {
+        None
+    }
+}
+
+unsafe fn drop_viewport_data(ptr: *mut ViewportData) {
+    if !is_winit_viewport_data(ptr) {
+        return;
+    }
+    unregister_viewport_data(ptr);
+    unsafe {
+        let _ = Box::from_raw(ptr);
     }
 }
 
@@ -572,9 +662,18 @@ unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys::ImGuiViewp
             None => return,
         };
 
+        let vp_ref = unsafe { &mut *vp };
+        let existing = vp_ref.PlatformUserData as *mut ViewportData;
+        if is_winit_viewport_data(existing) {
+            return;
+        }
+        if !existing.is_null() {
+            panic!("viewport PlatformUserData is already owned by another platform backend");
+        }
+
         // Create ViewportData
         let vd = Box::into_raw(Box::new(ViewportData::new()));
-        let vp_ref = unsafe { &mut *vp };
+        register_viewport_data(vd);
         vp_ref.PlatformUserData = vd as *mut c_void;
 
         // Handle viewport flags
@@ -661,7 +760,7 @@ unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys::ImGuiViewp
             Err(_) => {
                 // Clean up ViewportData on failure
                 unsafe {
-                    let _ = Box::from_raw(vd);
+                    drop_viewport_data(vd);
                 }
                 vp_ref.PlatformUserData = std::ptr::null_mut();
             }
@@ -683,6 +782,9 @@ unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui_rs::sys::ImGuiView
             vp_ref.PlatformHandle = std::ptr::null_mut();
             return;
         }
+        if !is_winit_viewport_data(vd_ptr) {
+            return;
+        }
 
         unsafe {
             if (*vd_ptr).window_owned && !(*vd_ptr).window.is_null() {
@@ -693,7 +795,7 @@ unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui_rs::sys::ImGuiView
 
             // Drop the allocation backing `ViewportData`. Avoid creating an `&mut ViewportData`
             // reference and then freeing it while that reference is still live.
-            let _ = Box::from_raw(vd_ptr);
+            drop_viewport_data(vd_ptr);
         }
         vp_ref.PlatformUserData = std::ptr::null_mut();
         vp_ref.PlatformHandle = std::ptr::null_mut();
@@ -708,8 +810,7 @@ unsafe extern "C" fn winit_show_window(vp: *mut dear_imgui_rs::sys::ImGuiViewpor
         }
 
         let vp_ref = unsafe { &*vp };
-        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-        if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(vd) = unsafe { viewport_data_ref(vp_ref) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 window.set_visible(true);
             }
@@ -726,8 +827,7 @@ unsafe extern "C" fn winit_get_window_pos_out(
         let mut r = dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 };
         if !vp.is_null() {
             let vp_ref = &*vp;
-            let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-            if let Some(vd) = vd_ptr.as_ref() {
+            if let Some(vd) = viewport_data_ref(vp) {
                 if let Some(window) = vd.window.as_ref() {
                     let scale = window.scale_factor();
                     if let Ok(pos_phys) = window.inner_position() {
@@ -767,9 +867,7 @@ unsafe extern "C" fn winit_set_window_pos(
             return;
         }
 
-        let vp_ref = unsafe { &*vp };
-        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-        if let Some(vd) = unsafe { vd_ptr.as_mut() } {
+        if let Some(vd) = unsafe { viewport_data_mut(vp) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 // ImGui provides screen-space logical coordinates relative to client origin.
                 // Convert to outer coordinates for winit by subtracting decoration offset.
@@ -795,8 +893,7 @@ unsafe extern "C" fn winit_get_window_size_out(
         let mut r = dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 };
         if !vp.is_null() {
             let vp_ref = &*vp;
-            let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-            if let Some(vd) = vd_ptr.as_ref() {
+            if let Some(vd) = viewport_data_ref(vp) {
                 if let Some(window) = vd.window.as_ref() {
                     let size_phys = window.inner_size();
                     let size_logical: LogicalSize<f64> =
@@ -828,9 +925,7 @@ unsafe extern "C" fn winit_set_window_size(
             return;
         }
 
-        let vp_ref = unsafe { &*vp };
-        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-        if let Some(vd) = unsafe { vd_ptr.as_mut() } {
+        if let Some(vd) = unsafe { viewport_data_mut(vp) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 // ImGui provides inner size in logical pixels; pass through directly.
                 let logical: LogicalSize<f64> = LogicalSize::new(size.x as f64, size.y as f64);
@@ -850,8 +945,7 @@ unsafe extern "C" fn winit_set_window_focus(vp: *mut dear_imgui_rs::sys::ImGuiVi
         }
 
         let vp_ref = unsafe { &*vp };
-        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-        if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(vd) = unsafe { viewport_data_ref(vp_ref) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 window.focus_window();
             }
@@ -868,8 +962,7 @@ unsafe extern "C" fn winit_get_window_focus(vp: *mut dear_imgui_rs::sys::ImGuiVi
 
         let vp_ref = unsafe { &*vp };
         // Query from actual OS window if available (main or secondary)
-        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-        if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(vd) = unsafe { viewport_data_ref(vp_ref) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 return window.has_focus();
             }
@@ -889,8 +982,7 @@ unsafe extern "C" fn winit_get_window_minimized(
 
         let vp_ref = unsafe { &*vp };
         // Query from actual OS window if available (main or secondary)
-        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-        if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(vd) = unsafe { viewport_data_ref(vp_ref) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 return window.is_minimized().unwrap_or(false);
             }
@@ -910,8 +1002,7 @@ unsafe extern "C" fn winit_set_window_title(
         }
 
         let vp_ref = unsafe { &*vp };
-        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-        if let Some(vd) = unsafe { vd_ptr.as_ref() } {
+        if let Some(vd) = unsafe { viewport_data_ref(vp_ref) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 let title = unsafe { CStr::from_ptr(title) }.to_string_lossy();
                 window.set_title(title.as_ref());
@@ -931,11 +1022,7 @@ unsafe extern "C" fn winit_get_window_framebuffer_scale(
         }
 
         let vp_ref = unsafe { &*vp };
-        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
-        if vd_ptr.is_null() {
-            return dear_imgui_rs::sys::ImVec2 { x: 1.0, y: 1.0 };
-        }
-        if let Some(vd) = unsafe { vd_ptr.as_mut() } {
+        if let Some(vd) = unsafe { viewport_data_mut(vp) } {
             // Always report actual framebuffer scale for this viewport, including the main one.
             // Dear ImGui relies on this to compute correct scaling when windows move between
             // viewports. Upstream backends (GLFW/SDL) do the same.
@@ -966,9 +1053,8 @@ unsafe extern "C" fn winit_get_window_dpi_scale(vp: *mut dear_imgui_rs::sys::ImG
             return 1.0;
         }
         let vp_ref = &mut *vp;
-        let vd_ptr = vp_ref.PlatformUserData as *mut ViewportData;
         let mut scale = 1.0f32;
-        if let Some(vd) = vd_ptr.as_ref() {
+        if let Some(vd) = viewport_data_ref(vp_ref) {
             if let Some(window) = vd.window.as_ref() {
                 scale = window.scale_factor() as f32;
             }
