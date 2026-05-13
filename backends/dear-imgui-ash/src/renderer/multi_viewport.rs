@@ -649,15 +649,13 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
             Err(_) => return,
         };
 
-        let surface = match unsafe {
-            ash_window::create_surface(
-                &global.entry,
-                &global.instance,
-                display.as_raw(),
-                wh.as_raw(),
-                None,
-            )
-        } {
+        let surface = match ash_window::create_surface(
+            &global.entry,
+            &global.instance,
+            display.as_raw(),
+            wh.as_raw(),
+            None,
+        ) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[ash-mv] create_surface error: {e:?}");
@@ -667,34 +665,34 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
 
         let swapchain_loader = khr_swapchain::Device::new(&global.instance, &renderer.device);
 
-        let caps = match unsafe {
+        let caps = match {
             surface_loader.get_physical_device_surface_capabilities(global.physical_device, surface)
         } {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("[ash-mv] get_surface_capabilities error: {e:?}");
-                unsafe { surface_loader.destroy_surface(surface, None) };
+                surface_loader.destroy_surface(surface, None);
                 return;
             }
         };
-        let formats = match unsafe {
+        let formats = match {
             surface_loader.get_physical_device_surface_formats(global.physical_device, surface)
         } {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("[ash-mv] get_surface_formats error: {e:?}");
-                unsafe { surface_loader.destroy_surface(surface, None) };
+                surface_loader.destroy_surface(surface, None);
                 return;
             }
         };
-        let present_modes = match unsafe {
+        let present_modes = match {
             surface_loader
                 .get_physical_device_surface_present_modes(global.physical_device, surface)
         } {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("[ash-mv] get_present_modes error: {e:?}");
-                unsafe { surface_loader.destroy_surface(surface, None) };
+                surface_loader.destroy_surface(surface, None);
                 return;
             }
         };
@@ -751,22 +749,20 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
             sci = sci.image_sharing_mode(vk::SharingMode::EXCLUSIVE);
         }
 
-        let swapchain = match unsafe { swapchain_loader.create_swapchain(&sci, None) } {
+        let swapchain = match swapchain_loader.create_swapchain(&sci, None) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[ash-mv] create_swapchain error: {e:?}");
-                unsafe { surface_loader.destroy_surface(surface, None) };
+                surface_loader.destroy_surface(surface, None);
                 return;
             }
         };
-        let images = match unsafe { swapchain_loader.get_swapchain_images(swapchain) } {
+        let images = match swapchain_loader.get_swapchain_images(swapchain) {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("[ash-mv] get_swapchain_images error: {e:?}");
-                unsafe {
-                    swapchain_loader.destroy_swapchain(swapchain, None);
-                    surface_loader.destroy_surface(surface, None);
-                }
+                swapchain_loader.destroy_swapchain(swapchain, None);
+                surface_loader.destroy_surface(surface, None);
                 return;
             }
         };
@@ -786,17 +782,15 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
                     base_array_layer: 0,
                     layer_count: 1,
                 });
-            let view = match unsafe { renderer.device.create_image_view(&create_info, None) } {
+            let view = match renderer.device.create_image_view(&create_info, None) {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!("[ash-mv] create_image_view error: {e:?}");
-                    unsafe {
-                        for v in image_views.drain(..) {
-                            renderer.device.destroy_image_view(v, None);
-                        }
-                        swapchain_loader.destroy_swapchain(swapchain, None);
-                        surface_loader.destroy_surface(surface, None);
+                    for v in image_views.drain(..) {
+                        renderer.device.destroy_image_view(v, None);
                     }
+                    swapchain_loader.destroy_swapchain(swapchain, None);
+                    surface_loader.destroy_surface(surface, None);
                     return;
                 }
             };
@@ -809,43 +803,37 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
                 Ok(vp) => vp.render_pass,
                 Err(e) => {
                     eprintln!("[ash-mv] create viewport pipeline error: {e:?}");
-                    unsafe {
-                        for v in image_views.drain(..) {
-                            renderer.device.destroy_image_view(v, None);
-                        }
-                        swapchain_loader.destroy_swapchain(swapchain, None);
-                        surface_loader.destroy_surface(surface, None);
+                    for v in image_views.drain(..) {
+                        renderer.device.destroy_image_view(v, None);
                     }
+                    swapchain_loader.destroy_swapchain(swapchain, None);
+                    surface_loader.destroy_surface(surface, None);
                     return;
                 }
             };
             let mut framebuffers = Vec::with_capacity(image_views.len());
             for &view in &image_views {
-                let fb = unsafe {
-                    renderer.device.create_framebuffer(
-                        &vk::FramebufferCreateInfo::default()
-                            .render_pass(rp)
-                            .attachments(std::slice::from_ref(&view))
-                            .width(extent.width)
-                            .height(extent.height)
-                            .layers(1),
-                        None,
-                    )
-                };
+                let fb = renderer.device.create_framebuffer(
+                    &vk::FramebufferCreateInfo::default()
+                        .render_pass(rp)
+                        .attachments(std::slice::from_ref(&view))
+                        .width(extent.width)
+                        .height(extent.height)
+                        .layers(1),
+                    None,
+                );
                 match fb {
                     Ok(fb) => framebuffers.push(fb),
                     Err(e) => {
                         eprintln!("[ash-mv] create_framebuffer error: {e:?}");
-                        unsafe {
-                            for fb in framebuffers.drain(..) {
-                                renderer.device.destroy_framebuffer(fb, None);
-                            }
-                            for v in image_views.drain(..) {
-                                renderer.device.destroy_image_view(v, None);
-                            }
-                            swapchain_loader.destroy_swapchain(swapchain, None);
-                            surface_loader.destroy_surface(surface, None);
+                        for fb in framebuffers.drain(..) {
+                            renderer.device.destroy_framebuffer(fb, None);
                         }
+                        for v in image_views.drain(..) {
+                            renderer.device.destroy_image_view(v, None);
+                        }
+                        swapchain_loader.destroy_swapchain(swapchain, None);
+                        surface_loader.destroy_surface(surface, None);
                         return;
                     }
                 }
@@ -858,17 +846,15 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("[ash-mv] create_command_pool error: {e:?}");
-                    unsafe {
-                        #[cfg(not(feature = "dynamic-rendering"))]
-                        for fb in framebuffers.iter().copied() {
-                            renderer.device.destroy_framebuffer(fb, None);
-                        }
-                        for v in image_views.drain(..) {
-                            renderer.device.destroy_image_view(v, None);
-                        }
-                        swapchain_loader.destroy_swapchain(swapchain, None);
-                        surface_loader.destroy_surface(surface, None);
+                    #[cfg(not(feature = "dynamic-rendering"))]
+                    for fb in framebuffers.iter().copied() {
+                        renderer.device.destroy_framebuffer(fb, None);
                     }
+                    for v in image_views.drain(..) {
+                        renderer.device.destroy_image_view(v, None);
+                    }
+                    swapchain_loader.destroy_swapchain(swapchain, None);
+                    surface_loader.destroy_surface(surface, None);
                     return;
                 }
             };
@@ -879,18 +865,16 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("[ash-mv] create frame sync error: {e:?}");
-                unsafe {
-                    #[cfg(not(feature = "dynamic-rendering"))]
-                    for fb in framebuffers.iter().copied() {
-                        renderer.device.destroy_framebuffer(fb, None);
-                    }
-                    for v in image_views.drain(..) {
-                        renderer.device.destroy_image_view(v, None);
-                    }
-                    renderer.device.destroy_command_pool(command_pool, None);
-                    swapchain_loader.destroy_swapchain(swapchain, None);
-                    surface_loader.destroy_surface(surface, None);
+                #[cfg(not(feature = "dynamic-rendering"))]
+                for fb in framebuffers.iter().copied() {
+                    renderer.device.destroy_framebuffer(fb, None);
                 }
+                for v in image_views.drain(..) {
+                    renderer.device.destroy_image_view(v, None);
+                }
+                renderer.device.destroy_command_pool(command_pool, None);
+                swapchain_loader.destroy_swapchain(swapchain, None);
+                surface_loader.destroy_surface(surface, None);
                 return;
             }
         };
@@ -1092,24 +1076,20 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         data.frame_index = (data.frame_index + 1) % data.frames.len();
         let frame = &data.frames[frame_i];
 
-        if unsafe {
-            renderer
-                .device
-                .wait_for_fences(&[frame.fence], true, u64::MAX)
-        }
-        .is_err()
+        if renderer
+            .device
+            .wait_for_fences(&[frame.fence], true, u64::MAX)
+            .is_err()
         {
             return;
         }
 
-        let acquire = unsafe {
-            data.swapchain_loader.acquire_next_image(
-                data.swapchain,
-                u64::MAX,
-                frame.image_available,
-                vk::Fence::null(),
-            )
-        };
+        let acquire = data.swapchain_loader.acquire_next_image(
+            data.swapchain,
+            u64::MAX,
+            frame.image_available,
+            vk::Fence::null(),
+        );
 
         let (image_index, _suboptimal) = match acquire {
             Ok(v) => v,
@@ -1124,29 +1104,27 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         };
 
         if data.images_in_flight[image_index as usize] != vk::Fence::null() {
-            if unsafe {
-                renderer.device.wait_for_fences(
+            if renderer
+                .device
+                .wait_for_fences(
                     &[data.images_in_flight[image_index as usize]],
                     true,
                     u64::MAX,
                 )
-            }
-            .is_err()
+                .is_err()
             {
                 return;
             }
         }
         data.images_in_flight[image_index as usize] = frame.fence;
 
-        if unsafe { renderer.device.reset_fences(&[frame.fence]) }.is_err() {
+        if renderer.device.reset_fences(&[frame.fence]).is_err() {
             return;
         }
-        if unsafe {
-            renderer
-                .device
-                .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())
-        }
-        .is_err()
+        if renderer
+            .device
+            .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())
+            .is_err()
         {
             return;
         }
@@ -1165,20 +1143,20 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         };
         let gamma = renderer.gamma_for_format(data.format);
 
-        if unsafe {
-            renderer.device.begin_command_buffer(
+        if renderer
+            .device
+            .begin_command_buffer(
                 frame.command_buffer,
                 &vk::CommandBufferBeginInfo::default()
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
             )
-        }
-        .is_err()
+            .is_err()
         {
             return;
         }
 
         #[cfg(not(feature = "dynamic-rendering"))]
-        unsafe {
+        {
             let clear_values = [vk::ClearValue {
                 color: vk::ClearColorValue {
                     float32: renderer.viewport_clear_color(),
@@ -1216,7 +1194,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         }
 
         #[cfg(feature = "dynamic-rendering")]
-        unsafe {
+        {
             let img_i = image_index as usize;
             let old_layout = data
                 .image_layouts
@@ -1278,7 +1256,11 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
             }
         }
 
-        if unsafe { renderer.device.end_command_buffer(frame.command_buffer) }.is_err() {
+        if renderer
+            .device
+            .end_command_buffer(frame.command_buffer)
+            .is_err()
+        {
             return;
         }
 
@@ -1289,14 +1271,14 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
             .command_buffers(std::slice::from_ref(&frame.command_buffer))
             .signal_semaphores(std::slice::from_ref(&frame.render_finished));
 
-        if unsafe {
-            renderer.device.queue_submit(
+        if renderer
+            .device
+            .queue_submit(
                 renderer.queue,
                 std::slice::from_ref(&submit_info),
                 frame.fence,
             )
-        }
-        .is_err()
+            .is_err()
         {
             return;
         }
@@ -1348,10 +1330,9 @@ pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *
             .swapchains(std::slice::from_ref(&data.swapchain))
             .image_indices(std::slice::from_ref(&image_index));
 
-        let present = unsafe {
-            data.swapchain_loader
-                .queue_present(global.present_queue, &present_info)
-        };
+        let present = data
+            .swapchain_loader
+            .queue_present(global.present_queue, &present_info);
         match present {
             Ok(_) => {}
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Err(vk::Result::SUBOPTIMAL_KHR) => {
