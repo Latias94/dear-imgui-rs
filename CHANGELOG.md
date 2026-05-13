@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     accessors from the receiver's `ImGuiContext*` instead of whichever context is current.
   - Bind context-scoped style, main viewport, platform-window, font-stack, and ini settings
     operations to the receiver context while restoring the previous current context afterward.
+  - Reject frame lifecycle calls on a non-current `Context`, preventing `frame`, `render`, or
+    `draw_data` from accidentally operating on a different active context.
   - Resolve clipboard callbacks through the `ImGuiContext*` passed by Dear ImGui instead of
     whichever context is currently bound, preventing cross-context clipboard backend mixups.
   - Clear Rust typed `PlatformIo` callback storage and `Platform_GetWindowPos/Size` out-parameter

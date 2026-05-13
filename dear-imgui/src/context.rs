@@ -288,6 +288,13 @@ impl Context {
         pio
     }
 
+    fn assert_current_context(&self, caller: &str) {
+        assert!(
+            self.is_current_context(),
+            "{caller} requires this context to be current"
+        );
+    }
+
     fn try_create_internal(
         mut shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Context> {
@@ -380,6 +387,7 @@ impl Context {
     /// unless you are using a platform backend that does it for you (e.g. `dear-imgui-winit`).
     pub fn frame(&mut self) -> &mut crate::ui::Ui {
         let _guard = CTX_MUTEX.lock();
+        self.assert_current_context("Context::frame()");
 
         unsafe {
             // Dear ImGui initializes DisplaySize to (-1, -1). Calling NewFrame() without a
@@ -417,6 +425,8 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     /// The returned draw data contains all the information needed to render the frame.
     pub fn render(&mut self) -> &crate::render::DrawData {
         let _guard = CTX_MUTEX.lock();
+        self.assert_current_context("Context::render()");
+
         unsafe {
             sys::igRender();
             let dd = sys::igGetDrawData();
@@ -433,6 +443,8 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     /// `render()` has been called and before the next `new_frame()`.
     pub fn draw_data(&self) -> Option<&crate::render::DrawData> {
         let _guard = CTX_MUTEX.lock();
+        self.assert_current_context("Context::draw_data()");
+
         unsafe {
             let draw_data = sys::igGetDrawData();
             if draw_data.is_null() {
@@ -473,10 +485,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
 
     fn register_user_texture_ptr(&mut self, texture: *mut sys::ImTextureData) {
         let _guard = CTX_MUTEX.lock();
-        assert!(
-            self.is_current_context(),
-            "Context::register_user_texture() requires the context to be current"
-        );
+        self.assert_current_context("Context::register_user_texture()");
         assert!(
             !texture.is_null(),
             "Context::register_user_texture() received a null texture"
@@ -527,10 +536,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
 
     fn unregister_user_texture_ptr(&mut self, texture: *mut sys::ImTextureData) {
         let _guard = CTX_MUTEX.lock();
-        assert!(
-            self.is_current_context(),
-            "Context::unregister_user_texture() requires the context to be current"
-        );
+        self.assert_current_context("Context::unregister_user_texture()");
         assert!(
             !texture.is_null(),
             "Context::unregister_user_texture() received a null texture"
@@ -1140,6 +1146,23 @@ mod tests {
 
         drop(ctx_b);
         drop(ctx_a);
+    }
+
+    #[test]
+    fn frame_lifecycle_requires_receiver_to_be_current_context() {
+        let ctx_a = Context::create();
+        let suspended_a = ctx_a.suspend();
+        let ctx_b = Context::create();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = suspended_a.0.draw_data();
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, ctx_b.raw);
+
+        drop(ctx_b);
+        drop(suspended_a);
     }
 
     #[cfg(feature = "multi-viewport")]
