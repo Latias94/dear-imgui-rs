@@ -941,11 +941,13 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn clipboard_text(&self) -> Option<String> {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let ptr = sys::igGetClipboardText();
-            if ptr.is_null() {
-                return None;
-            }
-            Some(std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned())
+            with_bound_context(self.raw, || {
+                let ptr = sys::igGetClipboardText();
+                if ptr.is_null() {
+                    return None;
+                }
+                Some(std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned())
+            })
         }
     }
 
@@ -959,7 +961,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn set_clipboard_text(&self, text: impl AsRef<str>) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::igSetClipboardText(self.ui.scratch_txt(text.as_ref()));
+            with_bound_context(self.raw, || {
+                sys::igSetClipboardText(self.ui.scratch_txt(text.as_ref()));
+            });
         }
     }
 
@@ -980,9 +984,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         // design using JS bindings.
         #[cfg(not(target_arch = "wasm32"))]
         unsafe {
-            let platform_io = sys::igGetPlatformIO_Nil();
+            let platform_io = sys::igGetPlatformIO_ContextPtr(self.raw);
             if platform_io.is_null() {
-                panic!("Context::set_clipboard_backend() requires an active ImGui context");
+                panic!("Context::set_clipboard_backend() requires a valid ImGui context");
             }
             (*platform_io).Platform_SetClipboardTextFn = Some(crate::clipboard::set_clipboard_text);
             (*platform_io).Platform_GetClipboardTextFn = Some(crate::clipboard::get_clipboard_text);

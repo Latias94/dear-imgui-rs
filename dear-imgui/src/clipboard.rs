@@ -79,11 +79,21 @@ impl ClipboardBackend for DummyClipboardBackend {
 }
 
 /// C callback functions for Dear ImGui clipboard integration
+unsafe fn platform_io_for_context(
+    ctx: *mut crate::sys::ImGuiContext,
+) -> *mut crate::sys::ImGuiPlatformIO {
+    if ctx.is_null() {
+        unsafe { crate::sys::igGetPlatformIO_Nil() }
+    } else {
+        unsafe { crate::sys::igGetPlatformIO_ContextPtr(ctx) }
+    }
+}
+
 pub(crate) unsafe extern "C" fn get_clipboard_text(
-    _user_data: *mut crate::sys::ImGuiContext,
+    ctx: *mut crate::sys::ImGuiContext,
 ) -> *const c_char {
     let result = std::panic::catch_unwind(|| {
-        let platform_io = unsafe { crate::sys::igGetPlatformIO_Nil() };
+        let platform_io = unsafe { platform_io_for_context(ctx) };
         if platform_io.is_null() {
             return ptr::null();
         }
@@ -122,11 +132,11 @@ pub(crate) unsafe extern "C" fn get_clipboard_text(
 }
 
 pub(crate) unsafe extern "C" fn set_clipboard_text(
-    _user_data: *mut crate::sys::ImGuiContext,
+    ctx: *mut crate::sys::ImGuiContext,
     text: *const c_char,
 ) {
     let result = std::panic::catch_unwind(|| {
-        let platform_io = unsafe { crate::sys::igGetPlatformIO_Nil() };
+        let platform_io = unsafe { platform_io_for_context(ctx) };
         if platform_io.is_null() {
             return;
         }

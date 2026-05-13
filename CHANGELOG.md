@@ -55,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevent safe Rust from producing dangling FFI calls when `RegisteredUserTexture`,
     `Context`, or `OwnedTextureData` are dropped in different orders.
   - Keep `PlatformIo` typed callback dispatch isolated between multiple ImGui contexts.
+  - Resolve clipboard callbacks through the `ImGuiContext*` passed by Dear ImGui instead of
+    whichever context is currently bound, preventing cross-context clipboard backend mixups.
   - Clear Rust typed `PlatformIo` callback storage and `Platform_GetWindowPos/Size` out-parameter
     shim state when clearing platform handlers, and clear typed renderer callback storage when
     clearing renderer handlers.
