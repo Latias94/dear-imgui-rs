@@ -31,6 +31,29 @@ static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
 static RENDERER_BORROWED: AtomicBool = AtomicBool::new(false);
 static GLOBAL: Mutex<Option<GlobalHandles>> = Mutex::new(None);
 
+struct CurrentContextGuard {
+    previous: *mut dear_imgui_rs::sys::ImGuiContext,
+    target: *mut dear_imgui_rs::sys::ImGuiContext,
+}
+
+impl CurrentContextGuard {
+    unsafe fn bind(target: *mut dear_imgui_rs::sys::ImGuiContext) -> Self {
+        let previous = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+        if previous != target {
+            unsafe { dear_imgui_rs::sys::igSetCurrentContext(target) };
+        }
+        Self { previous, target }
+    }
+}
+
+impl Drop for CurrentContextGuard {
+    fn drop(&mut self) {
+        if self.previous != self.target {
+            unsafe { dear_imgui_rs::sys::igSetCurrentContext(self.previous) };
+        }
+    }
+}
+
 #[derive(Clone)]
 struct GlobalHandles {
     instance: Option<wgpu::Instance>,
@@ -41,6 +64,8 @@ struct GlobalHandles {
 
 /// Enable WGPU multi-viewport: set per-viewport callbacks and capture renderer pointer.
 pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
+    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
+
     unsafe {
         let platform_io = imgui_context.platform_io_mut();
         platform_io.set_renderer_create_window(Some(
@@ -82,6 +107,8 @@ pub(crate) fn clear_for_drop(renderer: *mut WgpuRenderer) {
 
 /// Disable WGPU multi-viewport callbacks and clear stored globals (SDL3 platform).
 pub fn disable(imgui_context: &mut Context) {
+    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
+
     unsafe {
         let platform_io = imgui_context.platform_io_mut();
         platform_io.set_renderer_create_window(None);
@@ -99,6 +126,65 @@ pub fn disable(imgui_context: &mut Context) {
 pub fn shutdown_multi_viewport_support(context: &mut Context) {
     disable(context);
     context.destroy_platform_windows();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enable_targets_passed_context() {
+        let mut ctx_a = Context::create();
+        let raw_a = ctx_a.as_raw();
+        let pio_a = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_a) };
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut());
+        }
+
+        let ctx_b = Context::create();
+        let raw_b = ctx_b.as_raw();
+        let pio_b = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_b) };
+
+        let mut renderer = WgpuRenderer::empty();
+        enable(&mut renderer, &mut ctx_a);
+
+        unsafe {
+            assert_eq!(dear_imgui_rs::sys::igGetCurrentContext(), raw_b);
+            assert!((*pio_a).Renderer_CreateWindow.is_some());
+            assert!((*pio_a).Renderer_DestroyWindow.is_some());
+            assert!((*pio_a).Renderer_SetWindowSize.is_some());
+            assert!((*pio_a).Platform_RenderWindow.is_some());
+            assert!((*pio_a).Platform_SwapBuffers.is_some());
+
+            assert!((*pio_b).Renderer_CreateWindow.is_none());
+            assert!((*pio_b).Renderer_DestroyWindow.is_none());
+            assert!((*pio_b).Renderer_SetWindowSize.is_none());
+            assert!((*pio_b).Platform_RenderWindow.is_none());
+            assert!((*pio_b).Platform_SwapBuffers.is_none());
+        }
+
+        disable(&mut ctx_a);
+
+        unsafe {
+            assert_eq!(dear_imgui_rs::sys::igGetCurrentContext(), raw_b);
+            assert!((*pio_a).Renderer_CreateWindow.is_none());
+            assert!((*pio_a).Renderer_DestroyWindow.is_none());
+            assert!((*pio_a).Renderer_SetWindowSize.is_none());
+            assert!((*pio_a).Platform_RenderWindow.is_none());
+            assert!((*pio_a).Platform_SwapBuffers.is_none());
+        }
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw_a);
+        }
+        drop(ctx_a);
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw_b);
+        }
+        drop(ctx_b);
+        drop(renderer);
+    }
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]

@@ -112,6 +112,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Bind winit multi-viewport callback installation, monitor setup, main viewport setup, and
     event routing to the provided `Context`, preventing multi-context apps from writing or reading
     another active context's platform state.
+  - Bind WGPU multi-viewport renderer callback installation and teardown to the provided
+    `Context` in both the winit and SDL3 backends, preventing typed renderer callback storage
+    from being installed on or cleared from the wrong active context.
 
 ## [0.12.0] - 2026-05-09
 
