@@ -133,7 +133,7 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
             winit_get_window_framebuffer_scale_out,
         ));
         (*pio_sys).Platform_GetWindowDpiScale = Some(winit_get_window_dpi_scale);
-        (*pio_sys).Platform_GetWindowWorkAreaInsets = None;
+        pio.set_platform_get_window_work_area_insets_raw(None);
         (*pio_sys).Platform_OnChangedViewport = Some(winit_on_changed_viewport);
         // Provide no-op implementations to avoid null-calls
         (*pio_sys).Platform_SetWindowAlpha = Some(winit_set_window_alpha);

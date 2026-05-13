@@ -127,6 +127,13 @@ unsafe extern "C" {
         platform_io: *mut ImGuiPlatformIO,
         user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_scale: *mut ImVec2)>,
     );
+
+    fn dear_imgui_rs_platform_io_set_platform_get_window_work_area_insets(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: Option<
+            unsafe extern "C" fn(vp: *mut ImGuiViewport, out_insets: *mut ImVec4),
+        >,
+    );
 }
 
 /// Install a C-compatible out-parameter callback for `ImGuiPlatformIO::Platform_GetWindowPos`.
@@ -221,6 +228,41 @@ pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
                 "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
                  rebuild without IMGUI_SYS_SKIP_CC to install \
                  Platform_GetWindowFramebufferScale callbacks"
+            );
+        }
+    }
+}
+
+/// Install a C-compatible out-parameter callback for
+/// `ImGuiPlatformIO::Platform_GetWindowWorkAreaInsets`.
+///
+/// See [`ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam`] for the ABI rationale.
+///
+/// # Safety
+///
+/// `platform_io` must be null or point to a live `ImGuiPlatformIO`. `user_callback`, when present,
+/// must obey Dear ImGui's platform callback contract and must not unwind.
+#[inline]
+pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_insets: *mut ImVec4)>,
+) {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        dear_imgui_rs_platform_io_set_platform_get_window_work_area_insets(
+            platform_io,
+            user_callback,
+        )
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        if user_callback.is_some() {
+            panic!(
+                "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+                 rebuild without IMGUI_SYS_SKIP_CC to install Platform_GetWindowWorkAreaInsets \
+                 callbacks"
             );
         }
     }

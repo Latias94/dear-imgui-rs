@@ -56,6 +56,7 @@ pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {
         sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(pio, None);
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(pio, None);
     }
 }
 
@@ -709,6 +710,98 @@ impl PlatformIo {
         }));
     }
 
+    /// Set platform get window work area insets callback (raw)
+    ///
+    /// This uses this crate's out-parameter shim internally instead of writing
+    /// `ImGuiPlatformIO::Platform_GetWindowWorkAreaInsets` directly. The shim stores a
+    /// C-compatible out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk
+    /// that returns `ImVec4` by value, which avoids exposing the fragile direct aggregate callback
+    /// ABI.
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_get_window_work_area_insets_raw(
+        &mut self,
+        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4)>,
+    ) {
+        use trampolines::*;
+
+        if callback.is_some() {
+            assert_platform_io_out_param_hooks_available("Platform_GetWindowWorkAreaInsets");
+        }
+
+        match callback {
+            Some(cb) => {
+                store_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB, Some(cb));
+                store_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB, None);
+            }
+            None => {
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB);
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB);
+            }
+        }
+
+        unsafe {
+            match callback {
+                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
+                    self.as_raw_mut(),
+                    Some(
+                        trampolines::platform_get_window_work_area_insets_out
+                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4),
+                    ),
+                ),
+                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
+                    self.as_raw_mut(),
+                    None,
+                ),
+            }
+        }
+    }
+
+    /// Set platform get window work area insets callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
+    ///
+    /// See [`Self::set_platform_get_window_work_area_insets_raw`] for why this path must go
+    /// through the out-parameter shim.
+    #[cfg(feature = "multi-viewport")]
+    pub unsafe fn set_platform_get_window_work_area_insets(
+        &mut self,
+        callback: Option<unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec4)>,
+    ) {
+        use trampolines::*;
+        if callback.is_some() {
+            assert_platform_io_out_param_hooks_available("Platform_GetWindowWorkAreaInsets");
+        }
+
+        match callback {
+            Some(cb) => {
+                store_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB, None);
+                store_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB, Some(cb));
+            }
+            None => {
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB);
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB);
+            }
+        }
+
+        unsafe {
+            match callback {
+                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
+                    self.as_raw_mut(),
+                    Some(
+                        trampolines::platform_get_window_work_area_insets_out
+                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4),
+                    ),
+                ),
+                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
+                    self.as_raw_mut(),
+                    None,
+                ),
+            }
+        }
+    }
+
     /// Set platform set window title callback (raw)
     #[cfg(feature = "multi-viewport")]
     pub fn set_platform_set_window_title_raw(
@@ -1333,32 +1426,45 @@ mod tests {
                 *out = sys::ImVec2 { x: 45.0, y: 46.0 };
             }
         }
+        unsafe extern "C" fn get_insets(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec4) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec4::new(1.0, 2.0, 3.0, 4.0);
+            }
+        }
 
         let mut ctx = crate::Context::create();
         let pio = ctx.platform_io_mut();
         pio.set_platform_get_window_pos_raw(Some(get_pos));
         pio.set_platform_get_window_size_raw(Some(get_size));
         pio.set_platform_get_window_framebuffer_scale_raw(Some(get_scale));
+        pio.set_platform_get_window_work_area_insets_raw(Some(get_insets));
         pio.clear_platform_handlers();
 
         let raw = unsafe { &*pio.as_raw() };
         assert!(raw.Platform_GetWindowPos.is_none());
         assert!(raw.Platform_GetWindowSize.is_none());
         assert!(raw.Platform_GetWindowFramebufferScale.is_none());
+        assert!(raw.Platform_GetWindowWorkAreaInsets.is_none());
 
         let viewport = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
         let mut pos = sys::ImVec2 { x: 1.0, y: 1.0 };
         let mut size = sys::ImVec2 { x: 1.0, y: 1.0 };
         let mut scale = sys::ImVec2 { x: 2.0, y: 2.0 };
+        let mut insets = sys::ImVec4::new(9.0, 9.0, 9.0, 9.0);
         unsafe {
             trampolines::platform_get_window_pos_out(viewport, &mut pos);
             trampolines::platform_get_window_size_out(viewport, &mut size);
             trampolines::platform_get_window_framebuffer_scale_out(viewport, &mut scale);
+            trampolines::platform_get_window_work_area_insets_out(viewport, &mut insets);
         }
 
         assert_eq!((pos.x, pos.y), (0.0, 0.0));
         assert_eq!((size.x, size.y), (0.0, 0.0));
         assert_eq!((scale.x, scale.y), (1.0, 1.0));
+        assert_eq!(
+            (insets.x, insets.y, insets.z, insets.w),
+            (0.0, 0.0, 0.0, 0.0)
+        );
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -1400,6 +1506,22 @@ mod tests {
                 *out = sys::ImVec2 { x: 3.0, y: 4.0 };
             }
         }
+        unsafe extern "C" fn get_insets_a(
+            _viewport: *mut sys::ImGuiViewport,
+            out: *mut sys::ImVec4,
+        ) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec4::new(1.0, 2.0, 3.0, 4.0);
+            }
+        }
+        unsafe extern "C" fn get_insets_b(
+            _viewport: *mut sys::ImGuiViewport,
+            out: *mut sys::ImVec4,
+        ) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec4::new(5.0, 6.0, 7.0, 8.0);
+            }
+        }
 
         let mut ctx_a = crate::Context::create();
         let language_user_data_a = std::ptr::NonNull::<u8>::dangling().as_ptr().cast();
@@ -1415,6 +1537,9 @@ mod tests {
         ctx_a
             .platform_io_mut()
             .set_platform_get_window_framebuffer_scale_raw(Some(get_scale_a));
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_work_area_insets_raw(Some(get_insets_a));
         assert_eq!(
             ctx_a.io().backend_language_user_data(),
             language_user_data_a
@@ -1436,6 +1561,9 @@ mod tests {
         ctx_b
             .platform_io_mut()
             .set_platform_get_window_framebuffer_scale_raw(Some(get_scale_b));
+        ctx_b
+            .platform_io_mut()
+            .set_platform_get_window_work_area_insets_raw(Some(get_insets_b));
         assert_eq!(
             ctx_b.io().backend_language_user_data(),
             language_user_data_b
@@ -1444,6 +1572,7 @@ mod tests {
         let mut b_pos = sys::ImVec2 { x: 0.0, y: 0.0 };
         let mut b_size = sys::ImVec2 { x: 0.0, y: 0.0 };
         let mut b_scale = sys::ImVec2 { x: 0.0, y: 0.0 };
+        let mut b_insets = sys::ImVec4::new(9.0, 9.0, 9.0, 9.0);
         unsafe {
             trampolines::platform_get_window_pos_out(std::ptr::null_mut(), &mut b_pos);
             trampolines::platform_get_window_size_out(std::ptr::null_mut(), &mut b_size);
@@ -1451,20 +1580,33 @@ mod tests {
                 std::ptr::null_mut(),
                 &mut b_scale,
             );
+            trampolines::platform_get_window_work_area_insets_out(
+                std::ptr::null_mut(),
+                &mut b_insets,
+            );
         }
         assert_eq!((b_pos.x, b_pos.y), (0.0, 0.0));
         assert_eq!((b_size.x, b_size.y), (0.0, 0.0));
         assert_eq!((b_scale.x, b_scale.y), (1.0, 1.0));
+        assert_eq!(
+            (b_insets.x, b_insets.y, b_insets.z, b_insets.w),
+            (0.0, 0.0, 0.0, 0.0)
+        );
 
         let viewport_b = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
         unsafe {
             trampolines::platform_get_window_pos_out(viewport_b, &mut b_pos);
             trampolines::platform_get_window_size_out(viewport_b, &mut b_size);
             trampolines::platform_get_window_framebuffer_scale_out(viewport_b, &mut b_scale);
+            trampolines::platform_get_window_work_area_insets_out(viewport_b, &mut b_insets);
         }
         assert_eq!((b_pos.x, b_pos.y), (21.0, 22.0));
         assert_eq!((b_size.x, b_size.y), (23.0, 24.0));
         assert_eq!((b_scale.x, b_scale.y), (3.0, 4.0));
+        assert_eq!(
+            (b_insets.x, b_insets.y, b_insets.z, b_insets.w),
+            (5.0, 6.0, 7.0, 8.0)
+        );
 
         let suspended_b = ctx_b.suspend();
         let ctx_a = suspended_a.activate().expect("ctx_a should activate");
@@ -1472,15 +1614,21 @@ mod tests {
         let mut a_pos = sys::ImVec2 { x: 0.0, y: 0.0 };
         let mut a_size = sys::ImVec2 { x: 0.0, y: 0.0 };
         let mut a_scale = sys::ImVec2 { x: 0.0, y: 0.0 };
+        let mut a_insets = sys::ImVec4::zero();
         let viewport_a = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
         unsafe {
             trampolines::platform_get_window_pos_out(viewport_a, &mut a_pos);
             trampolines::platform_get_window_size_out(viewport_a, &mut a_size);
             trampolines::platform_get_window_framebuffer_scale_out(viewport_a, &mut a_scale);
+            trampolines::platform_get_window_work_area_insets_out(viewport_a, &mut a_insets);
         }
         assert_eq!((a_pos.x, a_pos.y), (11.0, 12.0));
         assert_eq!((a_size.x, a_size.y), (13.0, 14.0));
         assert_eq!((a_scale.x, a_scale.y), (1.0, 2.0));
+        assert_eq!(
+            (a_insets.x, a_insets.y, a_insets.z, a_insets.w),
+            (1.0, 2.0, 3.0, 4.0)
+        );
 
         drop(ctx_a);
         drop(suspended_b);

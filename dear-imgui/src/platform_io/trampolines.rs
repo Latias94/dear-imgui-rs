@@ -9,6 +9,8 @@ type ViewportCb = unsafe extern "C" fn(*mut Viewport);
 type ViewportVec2Cb = unsafe extern "C" fn(*mut Viewport, sys::ImVec2);
 type RawViewportVec2OutCb = unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2);
 type ViewportVec2OutCb = unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec2);
+type RawViewportVec4OutCb = unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4);
+type ViewportVec4OutCb = unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec4);
 type ViewportF32RetCb = unsafe extern "C" fn(*mut Viewport) -> f32;
 type ViewportBoolRetCb = unsafe extern "C" fn(*mut Viewport) -> bool;
 type ViewportTitleCb = unsafe extern "C" fn(*mut Viewport, *const c_char);
@@ -33,6 +35,8 @@ struct CallbackSet {
     platform_get_window_focus: Option<ViewportBoolRetCb>,
     platform_get_window_minimized: Option<ViewportBoolRetCb>,
     platform_on_changed_viewport: Option<ViewportCb>,
+    platform_get_window_work_area_insets_raw: Option<RawViewportVec4OutCb>,
+    platform_get_window_work_area_insets: Option<ViewportVec4OutCb>,
     platform_set_window_title: Option<ViewportTitleCb>,
     platform_set_window_alpha: Option<ViewportF32Cb>,
     platform_update_window: Option<ViewportCb>,
@@ -63,6 +67,8 @@ impl CallbackSet {
         self.platform_get_window_focus = None;
         self.platform_get_window_minimized = None;
         self.platform_on_changed_viewport = None;
+        self.platform_get_window_work_area_insets_raw = None;
+        self.platform_get_window_work_area_insets = None;
         self.platform_set_window_title = None;
         self.platform_set_window_alpha = None;
         self.platform_update_window = None;
@@ -95,6 +101,8 @@ impl CallbackSet {
             && self.platform_get_window_focus.is_none()
             && self.platform_get_window_minimized.is_none()
             && self.platform_on_changed_viewport.is_none()
+            && self.platform_get_window_work_area_insets_raw.is_none()
+            && self.platform_get_window_work_area_insets.is_none()
             && self.platform_set_window_title.is_none()
             && self.platform_set_window_alpha.is_none()
             && self.platform_update_window.is_none()
@@ -246,6 +254,20 @@ callback_slot!(
     ViewportCb,
     get_platform_on_changed_viewport,
     set_platform_on_changed_viewport
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB,
+    platform_get_window_work_area_insets_raw,
+    RawViewportVec4OutCb,
+    get_platform_get_window_work_area_insets_raw,
+    set_platform_get_window_work_area_insets_raw
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB,
+    platform_get_window_work_area_insets,
+    ViewportVec4OutCb,
+    get_platform_get_window_work_area_insets,
+    set_platform_get_window_work_area_insets
 );
 callback_slot!(
     PLATFORM_SET_WINDOW_TITLE_CB,
@@ -621,6 +643,32 @@ pub unsafe extern "C" fn platform_get_window_minimized(vp: *mut sys::ImGuiViewpo
         );
     }
     false
+}
+pub unsafe extern "C" fn platform_get_window_work_area_insets_out(
+    vp: *mut sys::ImGuiViewport,
+    out_insets: *mut sys::ImVec4,
+) {
+    if out_insets.is_null() {
+        return;
+    }
+
+    let mut insets = sys::ImVec4::zero();
+    if vp.is_null() {
+    } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB) {
+        abort_if_panicked(
+            "Platform_GetWindowWorkAreaInsets",
+            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp, &mut insets) })),
+        );
+    } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB) {
+        abort_if_panicked(
+            "Platform_GetWindowWorkAreaInsets",
+            catch_unwind(AssertUnwindSafe(|| unsafe {
+                cb(vp as *mut Viewport, &mut insets)
+            })),
+        );
+    }
+
+    unsafe { *out_insets = insets };
 }
 pub unsafe extern "C" fn platform_on_changed_viewport(vp: *mut sys::ImGuiViewport) {
     if vp.is_null() {

@@ -1051,6 +1051,14 @@ mod tests {
                 *out_scale = crate::sys::ImVec2 { x: 1.0, y: 2.0 };
             }
         }
+        unsafe extern "C" fn get_insets(
+            _viewport: *mut crate::sys::ImGuiViewport,
+            out_insets: *mut crate::sys::ImVec4,
+        ) {
+            if let Some(out_insets) = unsafe { out_insets.as_mut() } {
+                *out_insets = crate::sys::ImVec4::new(1.0, 2.0, 3.0, 4.0);
+            }
+        }
 
         let mut ctx = Context::create();
 
@@ -1059,11 +1067,13 @@ mod tests {
             pio.set_platform_get_window_pos_raw(Some(get_pos));
             pio.set_platform_get_window_size_raw(Some(get_size));
             pio.set_platform_get_window_framebuffer_scale_raw(Some(get_scale));
+            pio.set_platform_get_window_work_area_insets_raw(Some(get_insets));
 
             let raw = unsafe { &*pio.as_raw() };
             assert!(raw.Platform_GetWindowPos.is_some());
             assert!(raw.Platform_GetWindowSize.is_some());
             assert!(raw.Platform_GetWindowFramebufferScale.is_some());
+            assert!(raw.Platform_GetWindowWorkAreaInsets.is_some());
         }
         assert!(
             ctx.io().backend_language_user_data().is_null(),
@@ -1074,11 +1084,13 @@ mod tests {
         pio.set_platform_get_window_pos_raw(None);
         pio.set_platform_get_window_size_raw(None);
         pio.set_platform_get_window_framebuffer_scale_raw(None);
+        pio.set_platform_get_window_work_area_insets_raw(None);
 
         let raw = unsafe { &*pio.as_raw() };
         assert!(raw.Platform_GetWindowPos.is_none());
         assert!(raw.Platform_GetWindowSize.is_none());
         assert!(raw.Platform_GetWindowFramebufferScale.is_none());
+        assert!(raw.Platform_GetWindowWorkAreaInsets.is_none());
     }
 
     #[test]

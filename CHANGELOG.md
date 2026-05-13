@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     out-parameter shim used to cross the C++ `ImGuiPlatformIO` callback ABI safely.
   - Add out-parameter `PlatformIo` setters for `Platform_GetWindowFramebufferScale`, matching
     the ABI-safe shape used by the other `ImVec2` platform getters.
+  - Add out-parameter `PlatformIo` setters for `Platform_GetWindowWorkAreaInsets`, avoiding
+    direct exposure of the `ImVec4` return-by-value platform callback ABI.
   - Track `DrawListMut` borrows per raw `ImDrawList*` on the current thread instead of using
     process-wide locks, and resolve background/foreground draw lists against the main viewport.
   - Make `DrawListMut::clone_output()` return `render::OwnedDrawList`.
@@ -67,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backends
   - Route winit multi-viewport `Platform_GetWindowFramebufferScale` through the same
     out-parameter shim as the window position and size getters, including on Windows.
+  - Clear winit multi-viewport work-area inset handlers through the out-parameter shim path,
+    keeping backend shutdown consistent with other aggregate-return platform callbacks.
   - Remove obsolete winit multi-viewport `ImVec2` return-by-value getter code paths so
     `Platform_GetWindowPos/Size` consistently use the out-parameter shim.
   - Clear winit multi-viewport platform callbacks and out-parameter getter shims during
