@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `render` draw data types instead.
   - Bind `TextCallbackData` to the input-text callback frame lifetime so safe callback
     handlers cannot retain it after Dear ImGui returns.
+  - Change `PlatformIo::set_platform_get_window_pos{,_raw}` and
+    `set_platform_get_window_size{,_raw}` callbacks to write `ImVec2` through out-parameters
+    instead of returning it by value, matching the internal ABI-safe shim.
 
 ### Changed
 
@@ -30,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Store typed `PlatformIo` callbacks per active `ImGuiContext` instead of in process-wide
     Rust slots, while preserving the `dear-imgui-sys` out-parameter shim path for
     `Platform_GetWindowPos` and `Platform_GetWindowSize`.
+  - Align the public `PlatformIo` get-window pos/size callback shape with the
+    out-parameter shim used to cross the C++ `ImGuiPlatformIO` callback ABI safely.
   - Track `DrawListMut` borrows per raw `ImDrawList*` on the current thread instead of using
     process-wide locks, and resolve background/foreground draw lists against the main viewport.
   - Make `DrawListMut::clone_output()` return `render::OwnedDrawList`.

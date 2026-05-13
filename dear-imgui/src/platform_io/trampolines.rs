@@ -7,8 +7,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 type ViewportCb = unsafe extern "C" fn(*mut Viewport);
 type ViewportVec2Cb = unsafe extern "C" fn(*mut Viewport, sys::ImVec2);
-type RawViewportVec2RetCb = unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2;
-type ViewportVec2RetCb = unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2;
+type RawViewportVec2OutCb = unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2);
+type ViewportVec2OutCb = unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec2);
 type ViewportF32RetCb = unsafe extern "C" fn(*mut Viewport) -> f32;
 type ViewportBoolRetCb = unsafe extern "C" fn(*mut Viewport) -> bool;
 type ViewportTitleCb = unsafe extern "C" fn(*mut Viewport, *const c_char);
@@ -21,11 +21,11 @@ struct CallbackSet {
     platform_destroy_window: Option<ViewportCb>,
     platform_show_window: Option<ViewportCb>,
     platform_set_window_pos: Option<ViewportVec2Cb>,
-    platform_get_window_pos_raw: Option<RawViewportVec2RetCb>,
-    platform_get_window_pos: Option<ViewportVec2RetCb>,
+    platform_get_window_pos_raw: Option<RawViewportVec2OutCb>,
+    platform_get_window_pos: Option<ViewportVec2OutCb>,
     platform_set_window_size: Option<ViewportVec2Cb>,
-    platform_get_window_size_raw: Option<RawViewportVec2RetCb>,
-    platform_get_window_size: Option<ViewportVec2RetCb>,
+    platform_get_window_size_raw: Option<RawViewportVec2OutCb>,
+    platform_get_window_size: Option<ViewportVec2OutCb>,
     platform_set_window_focus: Option<ViewportCb>,
     platform_get_window_dpi_scale: Option<ViewportF32RetCb>,
     platform_get_window_focus: Option<ViewportBoolRetCb>,
@@ -160,14 +160,14 @@ callback_slot!(
 callback_slot!(
     PLATFORM_GET_WINDOW_POS_RAW_CB,
     platform_get_window_pos_raw,
-    RawViewportVec2RetCb,
+    RawViewportVec2OutCb,
     get_platform_get_window_pos_raw,
     set_platform_get_window_pos_raw
 );
 callback_slot!(
     PLATFORM_GET_WINDOW_POS_CB,
     platform_get_window_pos,
-    ViewportVec2RetCb,
+    ViewportVec2OutCb,
     get_platform_get_window_pos,
     set_platform_get_window_pos
 );
@@ -181,14 +181,14 @@ callback_slot!(
 callback_slot!(
     PLATFORM_GET_WINDOW_SIZE_RAW_CB,
     platform_get_window_size_raw,
-    RawViewportVec2RetCb,
+    RawViewportVec2OutCb,
     get_platform_get_window_size_raw,
     set_platform_get_window_size_raw
 );
 callback_slot!(
     PLATFORM_GET_WINDOW_SIZE_CB,
     platform_get_window_size,
-    ViewportVec2RetCb,
+    ViewportVec2OutCb,
     get_platform_get_window_size,
     set_platform_get_window_size
 );
@@ -485,21 +485,21 @@ pub unsafe extern "C" fn platform_get_window_pos_out(
         return;
     }
 
-    let pos = if vp.is_null() {
-        sys::ImVec2 { x: 0.0, y: 0.0 }
+    let mut pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+    if vp.is_null() {
     } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB) {
         abort_if_panicked(
             "Platform_GetWindowPos",
-            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp) })),
-        )
+            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp, &mut pos) })),
+        );
     } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_POS_CB) {
         abort_if_panicked(
             "Platform_GetWindowPos",
-            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp as *mut Viewport) })),
-        )
-    } else {
-        sys::ImVec2 { x: 0.0, y: 0.0 }
-    };
+            catch_unwind(AssertUnwindSafe(|| unsafe {
+                cb(vp as *mut Viewport, &mut pos)
+            })),
+        );
+    }
 
     unsafe { *out_pos = pos };
 }
@@ -511,21 +511,21 @@ pub unsafe extern "C" fn platform_get_window_size_out(
         return;
     }
 
-    let size = if vp.is_null() {
-        sys::ImVec2 { x: 0.0, y: 0.0 }
+    let mut size = sys::ImVec2 { x: 0.0, y: 0.0 };
+    if vp.is_null() {
     } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB) {
         abort_if_panicked(
             "Platform_GetWindowSize",
-            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp) })),
-        )
+            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp, &mut size) })),
+        );
     } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_SIZE_CB) {
         abort_if_panicked(
             "Platform_GetWindowSize",
-            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp as *mut Viewport) })),
-        )
-    } else {
-        sys::ImVec2 { x: 0.0, y: 0.0 }
-    };
+            catch_unwind(AssertUnwindSafe(|| unsafe {
+                cb(vp as *mut Viewport, &mut size)
+            })),
+        );
+    }
 
     unsafe { *out_size = size };
 }

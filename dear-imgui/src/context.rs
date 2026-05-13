@@ -1029,13 +1029,19 @@ mod tests {
     fn platform_io_get_window_pos_and_size_setters_install_handlers() {
         unsafe extern "C" fn get_pos(
             _viewport: *mut crate::sys::ImGuiViewport,
-        ) -> crate::sys::ImVec2 {
-            crate::sys::ImVec2 { x: 10.0, y: 20.0 }
+            out_pos: *mut crate::sys::ImVec2,
+        ) {
+            if let Some(out_pos) = unsafe { out_pos.as_mut() } {
+                *out_pos = crate::sys::ImVec2 { x: 10.0, y: 20.0 };
+            }
         }
         unsafe extern "C" fn get_size(
             _viewport: *mut crate::sys::ImGuiViewport,
-        ) -> crate::sys::ImVec2 {
-            crate::sys::ImVec2 { x: 30.0, y: 40.0 }
+            out_size: *mut crate::sys::ImVec2,
+        ) {
+            if let Some(out_size) = unsafe { out_size.as_mut() } {
+                *out_size = crate::sys::ImVec2 { x: 30.0, y: 40.0 };
+            }
         }
 
         let mut ctx = Context::create();

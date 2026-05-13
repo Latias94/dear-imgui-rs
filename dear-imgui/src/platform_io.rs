@@ -278,11 +278,12 @@ impl PlatformIo {
     /// This uses this crate's out-parameter shim internally instead of writing
     /// `ImGuiPlatformIO::Platform_GetWindowPos` directly. The shim stores a C-compatible
     /// out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk that returns
-    /// `ImVec2` by value, which avoids the fragile direct small-aggregate callback ABI on MSVC.
+    /// `ImVec2` by value, which avoids exposing the fragile direct small-aggregate callback ABI
+    /// on MSVC.
     #[cfg(feature = "multi-viewport")]
     pub fn set_platform_get_window_pos_raw(
         &mut self,
-        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
+        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)>,
     ) {
         use trampolines::*;
 
@@ -328,7 +329,7 @@ impl PlatformIo {
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_pos(
         &mut self,
-        callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
+        callback: Option<unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec2)>,
     ) {
         use trampolines::*;
         if callback.is_some() {
@@ -394,11 +395,12 @@ impl PlatformIo {
     /// This uses this crate's out-parameter shim internally instead of writing
     /// `ImGuiPlatformIO::Platform_GetWindowSize` directly. The shim stores a C-compatible
     /// out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk that returns
-    /// `ImVec2` by value, which avoids the fragile direct small-aggregate callback ABI on MSVC.
+    /// `ImVec2` by value, which avoids exposing the fragile direct small-aggregate callback ABI
+    /// on MSVC.
     #[cfg(feature = "multi-viewport")]
     pub fn set_platform_get_window_size_raw(
         &mut self,
-        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
+        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)>,
     ) {
         use trampolines::*;
 
@@ -445,7 +447,7 @@ impl PlatformIo {
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_size(
         &mut self,
-        callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
+        callback: Option<unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec2)>,
     ) {
         use trampolines::*;
         if callback.is_some() {
@@ -1223,11 +1225,15 @@ mod tests {
     #[cfg(feature = "multi-viewport")]
     #[test]
     fn clear_platform_handlers_clears_typed_get_window_callbacks() {
-        unsafe extern "C" fn get_pos(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
-            sys::ImVec2 { x: 41.0, y: 42.0 }
+        unsafe extern "C" fn get_pos(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 41.0, y: 42.0 };
+            }
         }
-        unsafe extern "C" fn get_size(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
-            sys::ImVec2 { x: 43.0, y: 44.0 }
+        unsafe extern "C" fn get_size(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 43.0, y: 44.0 };
+            }
         }
 
         let mut ctx = crate::Context::create();
@@ -1255,17 +1261,25 @@ mod tests {
     #[cfg(feature = "multi-viewport")]
     #[test]
     fn get_window_pos_and_size_callbacks_are_context_local() {
-        unsafe extern "C" fn get_pos_a(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
-            sys::ImVec2 { x: 11.0, y: 12.0 }
+        unsafe extern "C" fn get_pos_a(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 11.0, y: 12.0 };
+            }
         }
-        unsafe extern "C" fn get_size_a(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
-            sys::ImVec2 { x: 13.0, y: 14.0 }
+        unsafe extern "C" fn get_size_a(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 13.0, y: 14.0 };
+            }
         }
-        unsafe extern "C" fn get_pos_b(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
-            sys::ImVec2 { x: 21.0, y: 22.0 }
+        unsafe extern "C" fn get_pos_b(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 21.0, y: 22.0 };
+            }
         }
-        unsafe extern "C" fn get_size_b(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
-            sys::ImVec2 { x: 23.0, y: 24.0 }
+        unsafe extern "C" fn get_size_b(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 23.0, y: 24.0 };
+            }
         }
 
         let mut ctx_a = crate::Context::create();
