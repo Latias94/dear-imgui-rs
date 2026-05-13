@@ -188,6 +188,31 @@ pub struct Io(UnsafeCell<sys::ImGuiIO>);
 const _: [(); std::mem::size_of::<sys::ImGuiIO>()] = [(); std::mem::size_of::<Io>()];
 const _: [(); std::mem::align_of::<sys::ImGuiIO>()] = [(); std::mem::align_of::<Io>()];
 
+struct BoundContextGuard {
+    previous: *mut sys::ImGuiContext,
+    target: *mut sys::ImGuiContext,
+}
+
+impl BoundContextGuard {
+    unsafe fn bind(target: *mut sys::ImGuiContext) -> Self {
+        let previous = unsafe { sys::igGetCurrentContext() };
+        if previous != target {
+            unsafe { sys::igSetCurrentContext(target) };
+        }
+        Self { previous, target }
+    }
+}
+
+impl Drop for BoundContextGuard {
+    fn drop(&mut self) {
+        if self.previous != self.target {
+            unsafe {
+                sys::igSetCurrentContext(self.previous);
+            }
+        }
+    }
+}
+
 impl Io {
     #[inline]
     fn inner(&self) -> &sys::ImGuiIO {
@@ -201,6 +226,12 @@ impl Io {
     fn inner_mut(&mut self) -> &mut sys::ImGuiIO {
         // Safety: caller has `&mut Io`, so this is a unique Rust borrow for this wrapper.
         unsafe { &mut *self.0.get() }
+    }
+
+    fn context_ptr(&self, caller: &str) -> *mut sys::ImGuiContext {
+        let ctx = self.inner().Ctx;
+        assert!(!ctx.is_null(), "{caller} requires a valid ImGui context");
+        ctx
     }
 
     /// Main display size in pixels
@@ -1090,14 +1121,28 @@ impl Io {
     /// Get the global font scale (not available in current Dear ImGui version)
     /// Compatibility shim: maps to style.FontScaleMain (Dear ImGui 1.92+)
     pub fn font_global_scale(&self) -> f32 {
-        unsafe { (*sys::igGetStyle()).FontScaleMain }
+        unsafe {
+            let _guard = BoundContextGuard::bind(self.context_ptr("Io::font_global_scale()"));
+            let style = sys::igGetStyle();
+            assert!(
+                !style.is_null(),
+                "Io::font_global_scale() requires a valid ImGui context"
+            );
+            (*style).FontScaleMain
+        }
     }
 
     /// Set the global font scale (not available in current Dear ImGui version)
     /// Compatibility shim: maps to style.FontScaleMain (Dear ImGui 1.92+)
-    pub fn set_font_global_scale(&mut self, _scale: f32) {
+    pub fn set_font_global_scale(&mut self, scale: f32) {
         unsafe {
-            (*sys::igGetStyle()).FontScaleMain = _scale;
+            let _guard = BoundContextGuard::bind(self.context_ptr("Io::set_font_global_scale()"));
+            let style = sys::igGetStyle();
+            assert!(
+                !style.is_null(),
+                "Io::set_font_global_scale() requires a valid ImGui context"
+            );
+            (*style).FontScaleMain = scale;
         }
     }
 

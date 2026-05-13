@@ -1149,6 +1149,28 @@ mod tests {
     }
 
     #[test]
+    fn io_font_global_scale_uses_owner_context_not_current_context() {
+        let mut ctx_a = Context::create();
+        ctx_a.style_mut().set_font_scale_main(1.25);
+        let suspended_a = ctx_a.suspend();
+
+        let mut ctx_b = Context::create();
+        ctx_b.style_mut().set_font_scale_main(2.0);
+
+        let mut ctx_a = suspended_a.activate().expect_err("ctx_b is still active");
+        assert_eq!(ctx_a.0.io().font_global_scale(), 1.25);
+
+        ctx_a.0.io_mut().set_font_global_scale(1.5);
+
+        assert_eq!(ctx_a.0.style().font_scale_main(), 1.5);
+        assert_eq!(ctx_b.style().font_scale_main(), 2.0);
+        assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, ctx_b.raw);
+
+        drop(ctx_b);
+        drop(ctx_a);
+    }
+
+    #[test]
     fn frame_lifecycle_requires_receiver_to_be_current_context() {
         let ctx_a = Context::create();
         let suspended_a = ctx_a.suspend();
