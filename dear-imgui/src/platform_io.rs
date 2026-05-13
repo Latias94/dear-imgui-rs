@@ -38,6 +38,14 @@ mod viewport;
 
 pub use viewport::Viewport;
 
+#[cfg(feature = "multi-viewport")]
+pub(crate) fn clear_typed_callbacks_for_context(ctx: *mut sys::ImGuiContext) {
+    trampolines::clear_callbacks_for_context(ctx);
+}
+
+#[cfg(not(feature = "multi-viewport"))]
+pub(crate) fn clear_typed_callbacks_for_context(_ctx: *mut sys::ImGuiContext) {}
+
 impl PlatformIo {
     #[inline]
     fn inner(&self) -> &sys::ImGuiPlatformIO {
@@ -122,7 +130,7 @@ impl PlatformIo {
     /// - The `Viewport` pointer is only valid for the duration of the call and must not be stored.
     /// - The callback must uphold Dear ImGui's `Platform_CreateWindow` contract.
     ///
-    /// Note: the typed callback is stored in a global slot shared by all ImGui contexts.
+    /// Note: the typed callback is stored for the current ImGui context.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_create_window(
         &mut self,
@@ -215,6 +223,11 @@ impl PlatformIo {
     }
 
     /// Set platform get window position callback (raw)
+    ///
+    /// This uses cimgui's out-parameter helper internally instead of writing
+    /// `ImGuiPlatformIO::Platform_GetWindowPos` directly. The helper stores the Rust callback in
+    /// the current context's `BackendLanguageUserData` and installs a C++ thunk that returns
+    /// `ImVec2` by value, which avoids the fragile direct small-aggregate callback ABI on MSVC.
     #[cfg(feature = "multi-viewport")]
     pub fn set_platform_get_window_pos_raw(
         &mut self,
@@ -244,6 +257,9 @@ impl PlatformIo {
     /// # Safety
     ///
     /// See [`Self::set_platform_create_window`].
+    ///
+    /// See [`Self::set_platform_get_window_pos_raw`] for why this path must go through cimgui's
+    /// out-parameter helper.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_pos(
         &mut self,
@@ -295,6 +311,11 @@ impl PlatformIo {
     }
 
     /// Set platform get window size callback (raw)
+    ///
+    /// This uses cimgui's out-parameter helper internally instead of writing
+    /// `ImGuiPlatformIO::Platform_GetWindowSize` directly. The helper stores the Rust callback in
+    /// the current context's `BackendLanguageUserData` and installs a C++ thunk that returns
+    /// `ImVec2` by value, which avoids the fragile direct small-aggregate callback ABI on MSVC.
     #[cfg(feature = "multi-viewport")]
     pub fn set_platform_get_window_size_raw(
         &mut self,
@@ -324,6 +345,9 @@ impl PlatformIo {
     /// # Safety
     ///
     /// See [`Self::set_platform_create_window`].
+    ///
+    /// See [`Self::set_platform_get_window_size_raw`] for why this path must go through cimgui's
+    /// out-parameter helper.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_size(
         &mut self,
@@ -1085,6 +1109,79 @@ mod tests {
         assert!(raw.Platform_OnChangedViewport.is_none());
         assert!(raw.Renderer_CreateWindow.is_none());
         assert!(raw.Renderer_DestroyWindow.is_none());
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn get_window_pos_and_size_callbacks_are_context_local() {
+        unsafe extern "C" fn get_pos_a(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
+            sys::ImVec2 { x: 11.0, y: 12.0 }
+        }
+        unsafe extern "C" fn get_size_a(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
+            sys::ImVec2 { x: 13.0, y: 14.0 }
+        }
+        unsafe extern "C" fn get_pos_b(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
+            sys::ImVec2 { x: 21.0, y: 22.0 }
+        }
+        unsafe extern "C" fn get_size_b(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
+            sys::ImVec2 { x: 23.0, y: 24.0 }
+        }
+
+        let mut ctx_a = crate::Context::create();
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_pos_raw(Some(get_pos_a));
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_size_raw(Some(get_size_a));
+        let language_user_data_a = ctx_a.io().backend_language_user_data();
+        assert!(!language_user_data_a.is_null());
+
+        let suspended_a = ctx_a.suspend();
+
+        let mut ctx_b = crate::Context::create();
+        ctx_b
+            .platform_io_mut()
+            .set_platform_get_window_pos_raw(Some(get_pos_b));
+        ctx_b
+            .platform_io_mut()
+            .set_platform_get_window_size_raw(Some(get_size_b));
+        let language_user_data_b = ctx_b.io().backend_language_user_data();
+        assert!(!language_user_data_b.is_null());
+        assert_ne!(language_user_data_a, language_user_data_b);
+
+        let mut b_pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+        let mut b_size = sys::ImVec2 { x: 0.0, y: 0.0 };
+        unsafe {
+            trampolines::platform_get_window_pos_out(std::ptr::null_mut(), &mut b_pos);
+            trampolines::platform_get_window_size_out(std::ptr::null_mut(), &mut b_size);
+        }
+        assert_eq!((b_pos.x, b_pos.y), (0.0, 0.0));
+        assert_eq!((b_size.x, b_size.y), (0.0, 0.0));
+
+        let viewport_b = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
+        unsafe {
+            trampolines::platform_get_window_pos_out(viewport_b, &mut b_pos);
+            trampolines::platform_get_window_size_out(viewport_b, &mut b_size);
+        }
+        assert_eq!((b_pos.x, b_pos.y), (21.0, 22.0));
+        assert_eq!((b_size.x, b_size.y), (23.0, 24.0));
+
+        let suspended_b = ctx_b.suspend();
+        let ctx_a = suspended_a.activate().expect("ctx_a should activate");
+
+        let mut a_pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+        let mut a_size = sys::ImVec2 { x: 0.0, y: 0.0 };
+        let viewport_a = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
+        unsafe {
+            trampolines::platform_get_window_pos_out(viewport_a, &mut a_pos);
+            trampolines::platform_get_window_size_out(viewport_a, &mut a_size);
+        }
+        assert_eq!((a_pos.x, a_pos.y), (11.0, 12.0));
+        assert_eq!((a_size.x, a_size.y), (13.0, 14.0));
+
+        drop(ctx_a);
+        drop(suspended_b);
     }
 }
 

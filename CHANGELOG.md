@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Core (`dear-imgui-rs`)
+  - Change user texture registration to track `OwnedTextureData` lifetimes from the safe API.
+    Raw `TextureData` registration is now available through explicit `unsafe` raw helpers.
+  - Require `&'static FontLoader` for font atlas/config loader setters so Dear ImGui never
+    stores a dangling loader pointer.
+  - Change `FontConfig::glyph_exclude_ranges(...)` to accept inclusive `(start, end)` ranges
+    matching Dear ImGui's upstream `GlyphExcludeRanges` contract.
+  - Remove infallible `TextureId` conversions into `usize` and raw pointers. Use
+    `try_as_usize()`, `try_as_ptr()`, or `try_as_mut_ptr()` when converting back from
+    Dear ImGui's 64-bit texture id representation.
+  - Remove the duplicate read-only draw-list snapshot types from `draw`; use the unified
+    `render` draw data types instead.
+
+### Changed
+
+- Core (`dear-imgui-rs`)
+  - Store typed `PlatformIo` callbacks per active `ImGuiContext` instead of in process-wide
+    Rust slots, while preserving cimgui's out-parameter hook path for `Platform_GetWindowPos`
+    and `Platform_GetWindowSize`.
+  - Track `DrawListMut` borrows per raw `ImDrawList*` on the current thread instead of using
+    process-wide locks, and resolve background/foreground draw lists against the main viewport.
+  - Make `DrawListMut::clone_output()` return `render::OwnedDrawList`.
+
+### Fixed
+
+- Core (`dear-imgui-rs`)
+  - Prevent safe Rust from producing dangling FFI calls when `RegisteredUserTexture`,
+    `Context`, or `OwnedTextureData` are dropped in different orders.
+  - Keep `PlatformIo` typed callback dispatch isolated between multiple ImGui contexts.
+  - Generate correctly terminated glyph exclude range arrays and reject reversed or
+    out-of-range glyph ranges.
+
 ## [0.12.0] - 2026-05-09
 
 This release removes the last invalid `Condition` value from the safe API and

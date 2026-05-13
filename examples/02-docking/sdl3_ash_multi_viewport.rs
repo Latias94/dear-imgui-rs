@@ -901,7 +901,7 @@ impl App {
         // Register user-created textures so renderer backends can see them via DrawData::textures().
         // This avoids TexID==0 assertions and lets the backend handle Create/Update/Destroy.
         let mut registered_user_textures = Vec::new();
-        registered_user_textures.push(context.register_user_texture_token(&mut *img_tex));
+        registered_user_textures.push(context.register_user_texture_token(&mut img_tex));
 
         // Renderer.
         let framebuffer_srgb = is_srgb_format(swapchain.surface_format.format);

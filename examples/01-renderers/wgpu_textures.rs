@@ -138,9 +138,9 @@ impl AppWindow {
         // Register user-created textures so renderer backends can see them via DrawData::textures().
         // This avoids TexID==0 assertions and lets the backend handle Create/Update/Destroy.
         let mut registered_user_textures = Vec::new();
-        registered_user_textures.push(context.register_user_texture_token(&mut *img_tex));
+        registered_user_textures.push(context.register_user_texture_token(&mut img_tex));
         if let Some(photo) = photo_tex.as_mut() {
-            registered_user_textures.push(context.register_user_texture_token(&mut **photo));
+            registered_user_textures.push(context.register_user_texture_token(photo));
         }
 
         let imgui = ImguiState {

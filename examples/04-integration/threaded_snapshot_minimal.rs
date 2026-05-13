@@ -38,7 +38,7 @@ fn main() {
         0, 0, 255, 255, 255, 255, 255, 255,
     ]);
     managed_tex.set_status(TextureStatus::WantCreate);
-    ctx.register_user_texture(&mut *managed_tex);
+    ctx.register_user_texture(&mut managed_tex);
 
     let (snapshot_tx, snapshot_rx) = mpsc::channel::<FrameSnapshot>();
     let (feedback_tx, feedback_rx) = mpsc::channel::<Vec<TextureFeedback>>();

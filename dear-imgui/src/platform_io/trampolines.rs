@@ -1,92 +1,296 @@
 use super::Viewport;
 use crate::sys;
 use core::ffi::c_char;
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Mutex;
 
-// Platform callbacks
-pub static PLATFORM_CREATE_WINDOW_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
-    Mutex::new(None);
-pub static PLATFORM_DESTROY_WINDOW_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
-    Mutex::new(None);
-pub static PLATFORM_SHOW_WINDOW_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
-    Mutex::new(None);
-pub static PLATFORM_SET_WINDOW_POS_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>,
-> = Mutex::new(None);
-pub static PLATFORM_GET_WINDOW_POS_RAW_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
-> = Mutex::new(None);
-pub static PLATFORM_GET_WINDOW_POS_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
-> = Mutex::new(None);
-pub static PLATFORM_SET_WINDOW_SIZE_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>,
-> = Mutex::new(None);
-pub static PLATFORM_GET_WINDOW_SIZE_RAW_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2>,
-> = Mutex::new(None);
-pub static PLATFORM_GET_WINDOW_SIZE_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
-> = Mutex::new(None);
-pub static PLATFORM_SET_WINDOW_FOCUS_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
-    Mutex::new(None);
-pub static PLATFORM_GET_WINDOW_DPI_SCALE_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport) -> f32>,
-> = Mutex::new(None);
-pub static PLATFORM_GET_WINDOW_FOCUS_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport) -> bool>,
-> = Mutex::new(None);
-pub static PLATFORM_GET_WINDOW_MINIMIZED_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport) -> bool>,
-> = Mutex::new(None);
-pub static PLATFORM_ON_CHANGED_VIEWPORT_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
-    Mutex::new(None);
-pub static PLATFORM_SET_WINDOW_TITLE_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport, *const c_char)>,
-> = Mutex::new(None);
-pub static PLATFORM_SET_WINDOW_ALPHA_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport, f32)>> =
-    Mutex::new(None);
-pub static PLATFORM_UPDATE_WINDOW_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
-    Mutex::new(None);
-pub static PLATFORM_RENDER_WINDOW_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
-> = Mutex::new(None);
-pub static PLATFORM_SWAP_BUFFERS_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
-> = Mutex::new(None);
+type ViewportCb = unsafe extern "C" fn(*mut Viewport);
+type ViewportVec2Cb = unsafe extern "C" fn(*mut Viewport, sys::ImVec2);
+type RawViewportVec2RetCb = unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2;
+type ViewportVec2RetCb = unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2;
+type ViewportF32RetCb = unsafe extern "C" fn(*mut Viewport) -> f32;
+type ViewportBoolRetCb = unsafe extern "C" fn(*mut Viewport) -> bool;
+type ViewportTitleCb = unsafe extern "C" fn(*mut Viewport, *const c_char);
+type ViewportF32Cb = unsafe extern "C" fn(*mut Viewport, f32);
+type ViewportRenderCb = unsafe extern "C" fn(*mut Viewport, *mut c_void);
 
-// Renderer callbacks
-pub static RENDERER_CREATE_WINDOW_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
-    Mutex::new(None);
-pub static RENDERER_DESTROY_WINDOW_CB: Mutex<Option<unsafe extern "C" fn(*mut Viewport)>> =
-    Mutex::new(None);
-pub static RENDERER_SET_WINDOW_SIZE_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>,
-> = Mutex::new(None);
-pub static RENDERER_RENDER_WINDOW_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
-> = Mutex::new(None);
-pub static RENDERER_SWAP_BUFFERS_CB: Mutex<
-    Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
-> = Mutex::new(None);
+#[derive(Clone, Copy, Default)]
+struct CallbackSet {
+    platform_create_window: Option<ViewportCb>,
+    platform_destroy_window: Option<ViewportCb>,
+    platform_show_window: Option<ViewportCb>,
+    platform_set_window_pos: Option<ViewportVec2Cb>,
+    platform_get_window_pos_raw: Option<RawViewportVec2RetCb>,
+    platform_get_window_pos: Option<ViewportVec2RetCb>,
+    platform_set_window_size: Option<ViewportVec2Cb>,
+    platform_get_window_size_raw: Option<RawViewportVec2RetCb>,
+    platform_get_window_size: Option<ViewportVec2RetCb>,
+    platform_set_window_focus: Option<ViewportCb>,
+    platform_get_window_dpi_scale: Option<ViewportF32RetCb>,
+    platform_get_window_focus: Option<ViewportBoolRetCb>,
+    platform_get_window_minimized: Option<ViewportBoolRetCb>,
+    platform_on_changed_viewport: Option<ViewportCb>,
+    platform_set_window_title: Option<ViewportTitleCb>,
+    platform_set_window_alpha: Option<ViewportF32Cb>,
+    platform_update_window: Option<ViewportCb>,
+    platform_render_window: Option<ViewportRenderCb>,
+    platform_swap_buffers: Option<ViewportRenderCb>,
+    renderer_create_window: Option<ViewportCb>,
+    renderer_destroy_window: Option<ViewportCb>,
+    renderer_set_window_size: Option<ViewportVec2Cb>,
+    renderer_render_window: Option<ViewportRenderCb>,
+    renderer_swap_buffers: Option<ViewportRenderCb>,
+}
 
-#[inline]
-fn load_cb<T: Copy>(m: &Mutex<T>) -> T {
-    match m.lock() {
-        Ok(g) => *g,
-        Err(poison) => *poison.into_inner(),
-    }
+struct ContextCallbacks {
+    ctx: *mut sys::ImGuiContext,
+    callbacks: CallbackSet,
+}
+
+pub(super) struct CallbackSlot<T: Copy> {
+    get: fn(&CallbackSet) -> Option<T>,
+    set: fn(&mut CallbackSet, Option<T>),
+}
+
+macro_rules! callback_slot {
+    ($name:ident, $field:ident, $ty:ty, $getter:ident, $setter:ident) => {
+        fn $getter(callbacks: &CallbackSet) -> Option<$ty> {
+            callbacks.$field
+        }
+
+        fn $setter(callbacks: &mut CallbackSet, callback: Option<$ty>) {
+            callbacks.$field = callback;
+        }
+
+        pub(super) const $name: CallbackSlot<$ty> = CallbackSlot {
+            get: $getter,
+            set: $setter,
+        };
+    };
+}
+
+callback_slot!(
+    PLATFORM_CREATE_WINDOW_CB,
+    platform_create_window,
+    ViewportCb,
+    get_platform_create_window,
+    set_platform_create_window
+);
+callback_slot!(
+    PLATFORM_DESTROY_WINDOW_CB,
+    platform_destroy_window,
+    ViewportCb,
+    get_platform_destroy_window,
+    set_platform_destroy_window
+);
+callback_slot!(
+    PLATFORM_SHOW_WINDOW_CB,
+    platform_show_window,
+    ViewportCb,
+    get_platform_show_window,
+    set_platform_show_window
+);
+callback_slot!(
+    PLATFORM_SET_WINDOW_POS_CB,
+    platform_set_window_pos,
+    ViewportVec2Cb,
+    get_platform_set_window_pos,
+    set_platform_set_window_pos
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_POS_RAW_CB,
+    platform_get_window_pos_raw,
+    RawViewportVec2RetCb,
+    get_platform_get_window_pos_raw,
+    set_platform_get_window_pos_raw
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_POS_CB,
+    platform_get_window_pos,
+    ViewportVec2RetCb,
+    get_platform_get_window_pos,
+    set_platform_get_window_pos
+);
+callback_slot!(
+    PLATFORM_SET_WINDOW_SIZE_CB,
+    platform_set_window_size,
+    ViewportVec2Cb,
+    get_platform_set_window_size,
+    set_platform_set_window_size
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_SIZE_RAW_CB,
+    platform_get_window_size_raw,
+    RawViewportVec2RetCb,
+    get_platform_get_window_size_raw,
+    set_platform_get_window_size_raw
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_SIZE_CB,
+    platform_get_window_size,
+    ViewportVec2RetCb,
+    get_platform_get_window_size,
+    set_platform_get_window_size
+);
+callback_slot!(
+    PLATFORM_SET_WINDOW_FOCUS_CB,
+    platform_set_window_focus,
+    ViewportCb,
+    get_platform_set_window_focus,
+    set_platform_set_window_focus
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_DPI_SCALE_CB,
+    platform_get_window_dpi_scale,
+    ViewportF32RetCb,
+    get_platform_get_window_dpi_scale,
+    set_platform_get_window_dpi_scale
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_FOCUS_CB,
+    platform_get_window_focus,
+    ViewportBoolRetCb,
+    get_platform_get_window_focus,
+    set_platform_get_window_focus
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_MINIMIZED_CB,
+    platform_get_window_minimized,
+    ViewportBoolRetCb,
+    get_platform_get_window_minimized,
+    set_platform_get_window_minimized
+);
+callback_slot!(
+    PLATFORM_ON_CHANGED_VIEWPORT_CB,
+    platform_on_changed_viewport,
+    ViewportCb,
+    get_platform_on_changed_viewport,
+    set_platform_on_changed_viewport
+);
+callback_slot!(
+    PLATFORM_SET_WINDOW_TITLE_CB,
+    platform_set_window_title,
+    ViewportTitleCb,
+    get_platform_set_window_title,
+    set_platform_set_window_title
+);
+callback_slot!(
+    PLATFORM_SET_WINDOW_ALPHA_CB,
+    platform_set_window_alpha,
+    ViewportF32Cb,
+    get_platform_set_window_alpha,
+    set_platform_set_window_alpha
+);
+callback_slot!(
+    PLATFORM_UPDATE_WINDOW_CB,
+    platform_update_window,
+    ViewportCb,
+    get_platform_update_window,
+    set_platform_update_window
+);
+callback_slot!(
+    PLATFORM_RENDER_WINDOW_CB,
+    platform_render_window,
+    ViewportRenderCb,
+    get_platform_render_window,
+    set_platform_render_window
+);
+callback_slot!(
+    PLATFORM_SWAP_BUFFERS_CB,
+    platform_swap_buffers,
+    ViewportRenderCb,
+    get_platform_swap_buffers,
+    set_platform_swap_buffers
+);
+callback_slot!(
+    RENDERER_CREATE_WINDOW_CB,
+    renderer_create_window,
+    ViewportCb,
+    get_renderer_create_window,
+    set_renderer_create_window
+);
+callback_slot!(
+    RENDERER_DESTROY_WINDOW_CB,
+    renderer_destroy_window,
+    ViewportCb,
+    get_renderer_destroy_window,
+    set_renderer_destroy_window
+);
+callback_slot!(
+    RENDERER_SET_WINDOW_SIZE_CB,
+    renderer_set_window_size,
+    ViewportVec2Cb,
+    get_renderer_set_window_size,
+    set_renderer_set_window_size
+);
+callback_slot!(
+    RENDERER_RENDER_WINDOW_CB,
+    renderer_render_window,
+    ViewportRenderCb,
+    get_renderer_render_window,
+    set_renderer_render_window
+);
+callback_slot!(
+    RENDERER_SWAP_BUFFERS_CB,
+    renderer_swap_buffers,
+    ViewportRenderCb,
+    get_renderer_swap_buffers,
+    set_renderer_swap_buffers
+);
+
+thread_local! {
+    static CONTEXT_CALLBACKS: RefCell<Vec<ContextCallbacks>> = RefCell::new(Vec::new());
 }
 
 #[inline]
-pub(super) fn store_cb<T: Copy>(m: &Mutex<Option<T>>, cb: Option<T>) {
-    let mut g = match m.lock() {
-        Ok(g) => g,
-        Err(poison) => poison.into_inner(),
-    };
-    *g = cb;
+fn current_context() -> *mut sys::ImGuiContext {
+    unsafe { sys::igGetCurrentContext() }
+}
+
+#[inline]
+fn load_cb<T: Copy>(slot: &CallbackSlot<T>) -> Option<T> {
+    let ctx = current_context();
+    if ctx.is_null() {
+        return None;
+    }
+    CONTEXT_CALLBACKS.with(|contexts| {
+        contexts
+            .borrow()
+            .iter()
+            .find(|entry| entry.ctx == ctx)
+            .and_then(|entry| (slot.get)(&entry.callbacks))
+    })
+}
+
+#[inline]
+pub(super) fn store_cb<T: Copy>(slot: &CallbackSlot<T>, cb: Option<T>) {
+    let ctx = current_context();
+    assert!(
+        !ctx.is_null(),
+        "PlatformIo typed callbacks require an active ImGui context"
+    );
+
+    CONTEXT_CALLBACKS.with(|contexts| {
+        let mut contexts = contexts.borrow_mut();
+        if let Some(entry) = contexts.iter_mut().find(|entry| entry.ctx == ctx) {
+            (slot.set)(&mut entry.callbacks, cb);
+            return;
+        }
+
+        let mut callbacks = CallbackSet::default();
+        (slot.set)(&mut callbacks, cb);
+        contexts.push(ContextCallbacks { ctx, callbacks });
+    });
+}
+
+pub(crate) fn clear_callbacks_for_context(ctx: *mut sys::ImGuiContext) {
+    if ctx.is_null() {
+        return;
+    }
+    CONTEXT_CALLBACKS.with(|contexts| {
+        contexts.borrow_mut().retain(|entry| entry.ctx != ctx);
+    });
 }
 
 #[inline]

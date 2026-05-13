@@ -190,8 +190,10 @@ impl FontAtlas {
         }
     }
 
-    /// Creates a new font atlas with a custom font loader
-    pub fn with_font_loader(loader: &FontLoader) -> Self {
+    /// Creates a new font atlas with a custom font loader.
+    ///
+    /// The loader must be static because Dear ImGui stores the raw `ImFontLoader*`.
+    pub fn with_font_loader(loader: &'static FontLoader) -> Self {
         let mut atlas = Self::new();
         atlas.set_font_loader(loader);
         atlas
@@ -214,11 +216,12 @@ impl FontAtlas {
         self.raw
     }
 
-    /// Sets the font loader for this atlas
+    /// Sets the font loader for this atlas.
     ///
     /// This allows using custom font backends like FreeType with additional features.
     /// Must be called before adding any fonts.
-    pub fn set_font_loader(&mut self, loader: &FontLoader) {
+    /// The loader must be static because Dear ImGui stores the raw `ImFontLoader*`.
+    pub fn set_font_loader(&mut self, loader: &'static FontLoader) {
         unsafe {
             sys::ImFontAtlas_SetFontLoader(self.raw, loader.as_ptr());
         }
@@ -897,10 +900,11 @@ impl FontConfig {
         self
     }
 
-    /// Set glyph ranges to exclude from this font
+    /// Set inclusive glyph ranges to exclude from this font.
     ///
-    /// Useful when merging fonts to avoid overlapping glyphs.
-    pub fn glyph_exclude_ranges(mut self, ranges: &[u32]) -> Self {
+    /// The input is a slice of `(start, end)` pairs. It is converted to Dear ImGui's
+    /// `[start, end, ..., 0]` format.
+    pub fn glyph_exclude_ranges(mut self, ranges: &[(u32, u32)]) -> Self {
         if ranges.is_empty() {
             self.raw.GlyphExcludeRanges = ptr::null();
             self.glyph_exclude_ranges = None;
@@ -912,16 +916,28 @@ impl FontConfig {
         } else {
             0x10FFFF
         };
-        let mut converted: Vec<sys::ImWchar> = Vec::with_capacity(ranges.len() + 1);
-        for &v in ranges {
+        let mut converted: Vec<sys::ImWchar> = Vec::with_capacity(ranges.len() * 2 + 1);
+        for &(start, end) in ranges {
             assert!(
-                v <= IMWCHAR_MAX,
-                "glyph_exclude_ranges value out of range for ImWchar (max {IMWCHAR_MAX:#x}): {v:#x}"
+                start <= end,
+                "glyph_exclude_ranges range start must be <= end: {start:#x}..={end:#x}"
             );
-            let v = sys::ImWchar::try_from(v).unwrap_or_else(|_| {
-                panic!("glyph_exclude_ranges value {v:#x} was not representable as ImWchar")
+            assert!(
+                start <= IMWCHAR_MAX,
+                "glyph_exclude_ranges value out of range for ImWchar (max {IMWCHAR_MAX:#x}): {start:#x}"
+            );
+            assert!(
+                end <= IMWCHAR_MAX,
+                "glyph_exclude_ranges value out of range for ImWchar (max {IMWCHAR_MAX:#x}): {end:#x}"
+            );
+            let start = sys::ImWchar::try_from(start).unwrap_or_else(|_| {
+                panic!("glyph_exclude_ranges value {start:#x} was not representable as ImWchar")
             });
-            converted.push(v);
+            let end = sys::ImWchar::try_from(end).unwrap_or_else(|_| {
+                panic!("glyph_exclude_ranges value {end:#x} was not representable as ImWchar")
+            });
+            converted.push(start);
+            converted.push(end);
         }
         if converted.last().copied() != Some(0) {
             converted.push(0);
@@ -932,8 +948,11 @@ impl FontConfig {
         self
     }
 
-    /// Set a custom font loader for this font
-    pub fn font_loader(mut self, loader: &FontLoader) -> Self {
+    /// Set a custom font loader for this font.
+    ///
+    /// The loader must be static because Dear ImGui stores the raw `ImFontLoader*` in the
+    /// atlas font source.
+    pub fn font_loader(mut self, loader: &'static FontLoader) -> Self {
         self.raw.FontLoader = loader.as_ptr();
         self
     }
@@ -1024,11 +1043,12 @@ mod tests {
 
     #[test]
     fn font_config_glyph_exclude_ranges_converts_and_terminates() {
-        let cfg = FontConfig::new().glyph_exclude_ranges(&[0x41]);
+        let cfg = FontConfig::new().glyph_exclude_ranges(&[(0x41, 0x5a)]);
         assert!(!cfg.raw.GlyphExcludeRanges.is_null());
         unsafe {
             assert_eq!(*cfg.raw.GlyphExcludeRanges.add(0), 0x41 as sys::ImWchar);
-            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(1), 0);
+            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(1), 0x5a as sys::ImWchar);
+            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(2), 0);
         }
     }
 
@@ -1037,11 +1057,12 @@ mod tests {
         if std::mem::size_of::<sys::ImWchar>() != 4 {
             return;
         }
-        let cfg = FontConfig::new().glyph_exclude_ranges(&[0x1_0000]);
+        let cfg = FontConfig::new().glyph_exclude_ranges(&[(0x1_0000, 0x1_0001)]);
         assert!(!cfg.raw.GlyphExcludeRanges.is_null());
         unsafe {
             assert_eq!(*cfg.raw.GlyphExcludeRanges.add(0), 0x1_0000 as sys::ImWchar);
-            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(1), 0);
+            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(1), 0x1_0001 as sys::ImWchar);
+            assert_eq!(*cfg.raw.GlyphExcludeRanges.add(2), 0);
         }
     }
 
@@ -1053,7 +1074,15 @@ mod tests {
             0x11_0000
         };
         let res = std::panic::catch_unwind(|| {
-            let _ = FontConfig::new().glyph_exclude_ranges(&[out_of_range]);
+            let _ = FontConfig::new().glyph_exclude_ranges(&[(out_of_range, out_of_range)]);
+        });
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn font_config_glyph_exclude_ranges_rejects_reversed_ranges() {
+        let res = std::panic::catch_unwind(|| {
+            let _ = FontConfig::new().glyph_exclude_ranges(&[(0x42, 0x41)]);
         });
         assert!(res.is_err());
     }

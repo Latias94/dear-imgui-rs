@@ -44,6 +44,27 @@ impl TextureId {
     pub const fn is_null(self) -> bool {
         self.0 == 0
     }
+
+    /// Try to view this texture id as a `usize`.
+    ///
+    /// Returns `None` if the id does not fit on this target.
+    pub fn try_as_usize(self) -> Option<usize> {
+        usize::try_from(self.0).ok()
+    }
+
+    /// Try to view this texture id as a raw pointer.
+    ///
+    /// Returns `None` if the id does not fit on this target.
+    pub fn try_as_ptr<T>(self) -> Option<*const T> {
+        self.try_as_usize().map(|value| value as *const T)
+    }
+
+    /// Try to view this texture id as a mutable raw pointer.
+    ///
+    /// Returns `None` if the id does not fit on this target.
+    pub fn try_as_mut_ptr<T>(self) -> Option<*mut T> {
+        self.try_as_usize().map(|value| value as *mut T)
+    }
 }
 
 impl From<u64> for TextureId {
@@ -67,48 +88,11 @@ impl<T> From<*mut T> for TextureId {
     }
 }
 
-impl From<TextureId> for *const c_void {
-    #[inline]
-    fn from(id: TextureId) -> Self {
-        debug_assert!(
-            id.0 <= (usize::MAX as u64),
-            "TextureId value {} exceeds pointer width on this target",
-            id.0
-        );
-        id.0 as usize as *const c_void
-    }
-}
-
-impl From<TextureId> for *mut c_void {
-    #[inline]
-    fn from(id: TextureId) -> Self {
-        debug_assert!(
-            id.0 <= (usize::MAX as u64),
-            "TextureId value {} exceeds pointer width on this target",
-            id.0
-        );
-        id.0 as usize as *mut c_void
-    }
-}
-
 // Backward compatibility: allow conversion from usize for legacy code
 impl From<usize> for TextureId {
     #[inline]
     fn from(id: usize) -> Self {
         TextureId(id as u64)
-    }
-}
-
-// Allow conversion to usize for legacy code
-impl From<TextureId> for usize {
-    #[inline]
-    fn from(id: TextureId) -> Self {
-        debug_assert!(
-            id.0 <= (usize::MAX as u64),
-            "TextureId value {} exceeds usize width on this target",
-            id.0
-        );
-        id.0 as usize
     }
 }
 
@@ -353,6 +337,7 @@ impl OwnedTextureData {
 
 impl Drop for OwnedTextureData {
     fn drop(&mut self) {
+        crate::context::unregister_user_texture_from_all_contexts(self.raw.as_ptr());
         unsafe { sys::ImTextureData_destroy(self.raw.as_ptr()) }
     }
 }
@@ -393,7 +378,7 @@ impl AsMut<TextureData> for OwnedTextureData {
 /// - Create an instance (e.g. via `OwnedTextureData::new()` + `create()`)
 /// - Mutate pixels, set flags/rects (e.g. call `set_data()` or directly write `Pixels` then
 ///   set `UpdateRect`), and set status to `WantCreate`/`WantUpdates`.
-/// - Register user-created textures once via `Context::register_user_texture(&mut tex)`. Dear
+/// - Register user-created owned textures once via `Context::register_user_texture(&mut tex)`. Dear
 ///   ImGui builds `DrawData::textures()` from its internal `PlatformIO.Textures[]` list (font atlas
 ///   textures are registered by ImGui itself).
 /// - Your renderer backend iterates `DrawData::textures()` and performs the requested
@@ -760,6 +745,20 @@ pub fn get_format_name(format: TextureFormat) -> &'static str {
             "Unknown"
         } else {
             std::ffi::CStr::from_ptr(ptr).to_str().unwrap_or("Invalid")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn texture_id_try_as_usize_reports_overflow() {
+        assert_eq!(TextureId::new(42).try_as_usize(), Some(42));
+
+        if std::mem::size_of::<usize>() < std::mem::size_of::<u64>() {
+            assert_eq!(TextureId::new(u64::MAX).try_as_usize(), None);
         }
     }
 }

@@ -6,7 +6,7 @@
 //! active context at a time.
 //!
 use parking_lot::ReentrantMutex;
-use std::cell::UnsafeCell;
+use std::cell::{RefCell, UnsafeCell};
 use std::ffi::CString;
 use std::ops::Drop;
 use std::path::PathBuf;
@@ -65,6 +65,17 @@ pub struct Context {
 // Dear ImGui active context
 static CTX_MUTEX: ReentrantMutex<()> = parking_lot::const_reentrant_mutex(());
 
+#[derive(Clone)]
+struct UserTextureRegistration {
+    ctx: *mut sys::ImGuiContext,
+    tex: *mut sys::ImTextureData,
+    alive: Weak<()>,
+}
+
+thread_local! {
+    static USER_TEXTURE_REGISTRATIONS: RefCell<Vec<UserTextureRegistration>> = RefCell::new(Vec::new());
+}
+
 fn clear_current_context() {
     unsafe {
         sys::igSetCurrentContext(ptr::null_mut());
@@ -74,6 +85,129 @@ fn clear_current_context() {
 fn no_current_context() -> bool {
     let ctx = unsafe { sys::igGetCurrentContext() };
     ctx.is_null()
+}
+
+fn with_bound_context<R>(ctx: *mut sys::ImGuiContext, f: impl FnOnce() -> R) -> R {
+    unsafe {
+        let prev = sys::igGetCurrentContext();
+        if prev != ctx {
+            sys::igSetCurrentContext(ctx);
+        }
+        let result = f();
+        if prev != ctx {
+            sys::igSetCurrentContext(prev);
+        }
+        result
+    }
+}
+
+fn prune_dead_user_texture_registrations(registrations: &mut Vec<UserTextureRegistration>) {
+    registrations.retain(|registration| registration.alive.upgrade().is_some());
+}
+
+fn is_user_texture_registered(ctx: *mut sys::ImGuiContext, tex: *mut sys::ImTextureData) -> bool {
+    USER_TEXTURE_REGISTRATIONS.with(|registrations| {
+        let mut registrations = registrations.borrow_mut();
+        prune_dead_user_texture_registrations(&mut registrations);
+        registrations
+            .iter()
+            .any(|registration| registration.ctx == ctx && registration.tex == tex)
+    })
+}
+
+fn track_user_texture_registration(
+    ctx: *mut sys::ImGuiContext,
+    tex: *mut sys::ImTextureData,
+    alive: Weak<()>,
+) {
+    USER_TEXTURE_REGISTRATIONS.with(|registrations| {
+        let mut registrations = registrations.borrow_mut();
+        prune_dead_user_texture_registrations(&mut registrations);
+        registrations.push(UserTextureRegistration { ctx, tex, alive });
+    });
+}
+
+fn take_user_texture_registration(
+    ctx: *mut sys::ImGuiContext,
+    tex: *mut sys::ImTextureData,
+) -> Option<UserTextureRegistration> {
+    USER_TEXTURE_REGISTRATIONS.with(|registrations| {
+        let mut registrations = registrations.borrow_mut();
+        prune_dead_user_texture_registrations(&mut registrations);
+        registrations
+            .iter()
+            .position(|registration| registration.ctx == ctx && registration.tex == tex)
+            .map(|index| registrations.remove(index))
+    })
+}
+
+fn unregister_user_texture_registration(registration: UserTextureRegistration) {
+    if registration.ctx.is_null()
+        || registration.tex.is_null()
+        || registration.alive.upgrade().is_none()
+    {
+        return;
+    }
+
+    unsafe {
+        with_bound_context(registration.ctx, || {
+            sys::igUnregisterUserTexture(registration.tex);
+        });
+    }
+}
+
+pub(crate) fn unregister_user_texture_from_all_contexts(tex: *mut sys::ImTextureData) {
+    if tex.is_null() {
+        return;
+    }
+
+    let registrations = USER_TEXTURE_REGISTRATIONS.with(|registrations| {
+        let mut registrations = registrations.borrow_mut();
+        let mut taken = Vec::new();
+        let mut index = 0;
+        while index < registrations.len() {
+            if registrations[index].alive.upgrade().is_none() {
+                registrations.remove(index);
+            } else if registrations[index].tex == tex {
+                taken.push(registrations.remove(index));
+            } else {
+                index += 1;
+            }
+        }
+        taken
+    });
+
+    let _guard = CTX_MUTEX.lock();
+    for registration in registrations {
+        unregister_user_texture_registration(registration);
+    }
+}
+
+fn unregister_user_textures_for_context(ctx: *mut sys::ImGuiContext) {
+    if ctx.is_null() {
+        return;
+    }
+
+    let registrations = USER_TEXTURE_REGISTRATIONS.with(|registrations| {
+        let mut registrations = registrations.borrow_mut();
+        let mut taken = Vec::new();
+        let mut index = 0;
+        while index < registrations.len() {
+            if registrations[index].alive.upgrade().is_none() || registrations[index].ctx == ctx {
+                let registration = registrations.remove(index);
+                if registration.ctx == ctx {
+                    taken.push(registration);
+                }
+            } else {
+                index += 1;
+            }
+        }
+        taken
+    });
+
+    for registration in registrations {
+        unregister_user_texture_registration(registration);
+    }
 }
 
 impl Context {
@@ -282,56 +416,96 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     /// Register a user-created texture in ImGui's global texture list (ImGui 1.92+).
     ///
     /// Dear ImGui builds `DrawData::textures()` from its internal `PlatformIO.Textures[]` list.
-    /// If you create a `TextureData` yourself (e.g. `OwnedTextureData::new()`), you must register
+    /// If you create an `OwnedTextureData` yourself, you must register
     /// it for renderer backends (with `BackendFlags::RENDERER_HAS_TEXTURES`) to receive
     /// Create/Update/Destroy requests automatically.
     ///
     /// Note: `RegisterUserTexture()` is currently an experimental ImGui API.
     ///
-    /// # Safety & Lifetime
-    /// The underlying `ImTextureData` must remain alive and registered until you call
-    /// `unregister_user_texture()`. Unregister before dropping the texture to avoid leaving a
-    /// dangling pointer inside ImGui.
-    pub fn register_user_texture(&mut self, texture: &mut crate::texture::TextureData) {
+    /// The registration is tracked by this crate and will be removed automatically when the
+    /// `Context` or the `OwnedTextureData` is dropped.
+    pub fn register_user_texture(&mut self, texture: &mut crate::texture::OwnedTextureData) {
+        self.register_user_texture_ptr(texture.as_mut().as_raw_mut());
+    }
+
+    /// Register a borrowed/raw texture data pointer in ImGui's global texture list.
+    ///
+    /// Prefer [`Context::register_user_texture`] for `OwnedTextureData`.
+    ///
+    /// # Safety
+    /// The caller must guarantee that `texture` remains alive until it is unregistered, the
+    /// owning `Context` is dropped, or the texture owner unregisters it from all contexts before
+    /// destruction.
+    pub unsafe fn register_user_texture_raw(&mut self, texture: &mut crate::texture::TextureData) {
+        self.register_user_texture_ptr(texture.as_raw_mut());
+    }
+
+    fn register_user_texture_ptr(&mut self, texture: *mut sys::ImTextureData) {
         let _guard = CTX_MUTEX.lock();
         assert!(
             self.is_current_context(),
             "Context::register_user_texture() requires the context to be current"
         );
-        unsafe {
-            sys::igRegisterUserTexture(texture.as_raw_mut());
+        assert!(
+            !texture.is_null(),
+            "Context::register_user_texture() received a null texture"
+        );
+        if is_user_texture_registered(self.raw, texture) {
+            return;
         }
+        unsafe {
+            sys::igRegisterUserTexture(texture);
+        }
+        track_user_texture_registration(self.raw, texture, Rc::downgrade(&self.alive));
     }
 
     /// Register a user-created texture and return an RAII token which unregisters on drop.
     ///
     /// This is a convenience wrapper around `register_user_texture()`.
-    ///
-    /// # Safety & Drop Ordering
-    /// The returned token must be dropped before the underlying `ImGuiContext` is destroyed.
-    /// If you store it in a struct alongside `Context`, ensure the token is dropped first.
     pub fn register_user_texture_token(
         &mut self,
-        texture: &mut crate::texture::TextureData,
+        texture: &mut crate::texture::OwnedTextureData,
     ) -> RegisteredUserTexture {
         self.register_user_texture(texture);
         RegisteredUserTexture {
             ctx: self.raw,
-            tex: texture.as_raw_mut(),
+            tex: texture.as_mut().as_raw_mut(),
+            alive: Rc::downgrade(&self.alive),
         }
     }
 
     /// Unregister a user texture previously registered with `register_user_texture()`.
     ///
     /// This removes the `ImTextureData*` from ImGui's internal texture list.
-    pub fn unregister_user_texture(&mut self, texture: &mut crate::texture::TextureData) {
+    pub fn unregister_user_texture(&mut self, texture: &mut crate::texture::OwnedTextureData) {
+        self.unregister_user_texture_ptr(texture.as_mut().as_raw_mut());
+    }
+
+    /// Unregister a borrowed/raw user texture previously registered with
+    /// [`Context::register_user_texture_raw`].
+    ///
+    /// # Safety
+    /// The pointer must refer to the same live `TextureData` object that was previously
+    /// registered for this context.
+    pub unsafe fn unregister_user_texture_raw(
+        &mut self,
+        texture: &mut crate::texture::TextureData,
+    ) {
+        self.unregister_user_texture_ptr(texture.as_raw_mut());
+    }
+
+    fn unregister_user_texture_ptr(&mut self, texture: *mut sys::ImTextureData) {
         let _guard = CTX_MUTEX.lock();
         assert!(
             self.is_current_context(),
             "Context::unregister_user_texture() requires the context to be current"
         );
-        unsafe {
-            sys::igUnregisterUserTexture(texture.as_raw_mut());
+        assert!(
+            !texture.is_null(),
+            "Context::unregister_user_texture() received a null texture"
+        );
+        if let Some(registration) = take_user_texture_registration(self.raw, texture) {
+            unregister_user_texture_registration(registration);
         }
     }
 
@@ -824,6 +998,8 @@ impl Drop for Context {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             if !self.raw.is_null() {
+                unregister_user_textures_for_context(self.raw);
+                crate::platform_io::clear_typed_callbacks_for_context(self.raw);
                 if sys::igGetCurrentContext() == self.raw {
                     clear_current_context();
                 }
@@ -875,6 +1051,40 @@ mod tests {
         let raw = unsafe { &*pio.as_raw() };
         assert!(raw.Platform_GetWindowPos.is_none());
         assert!(raw.Platform_GetWindowSize.is_none());
+    }
+
+    #[test]
+    fn registered_user_texture_token_survives_context_drop() {
+        let mut ctx = Context::create();
+        let mut texture = crate::texture::OwnedTextureData::new();
+
+        let token = ctx.register_user_texture_token(&mut texture);
+        drop(ctx);
+        drop(token);
+        drop(texture);
+    }
+
+    #[test]
+    fn registered_user_texture_token_survives_texture_drop() {
+        let mut ctx = Context::create();
+        let token = {
+            let mut texture = crate::texture::OwnedTextureData::new();
+            ctx.register_user_texture_token(&mut texture)
+        };
+
+        drop(token);
+        drop(ctx);
+    }
+
+    #[test]
+    fn user_texture_registration_is_idempotent_and_unregister_is_noop_when_missing() {
+        let mut ctx = Context::create();
+        let mut texture = crate::texture::OwnedTextureData::new();
+
+        ctx.register_user_texture(&mut texture);
+        ctx.register_user_texture(&mut texture);
+        ctx.unregister_user_texture(&mut texture);
+        ctx.unregister_user_texture(&mut texture);
     }
 }
 
@@ -979,34 +1189,22 @@ impl SuspendedContext {
 ///
 /// On drop, this unregisters the corresponding `ImTextureData*` from ImGui's internal user texture
 /// list.
-///
-/// # Safety
-/// - The referenced `ImTextureData` must remain alive while the token exists.
-/// - The token must be dropped before the `ImGuiContext` is destroyed.
 #[derive(Debug)]
 pub struct RegisteredUserTexture {
     ctx: *mut sys::ImGuiContext,
     tex: *mut sys::ImTextureData,
+    alive: Weak<()>,
 }
 
 impl Drop for RegisteredUserTexture {
     fn drop(&mut self) {
-        if self.ctx.is_null() || self.tex.is_null() {
+        if self.ctx.is_null() || self.tex.is_null() || self.alive.upgrade().is_none() {
             return;
         }
 
         let _guard = CTX_MUTEX.lock();
-        unsafe {
-            // Best-effort: temporarily bind the context so we can call Unregister in cases where
-            // multiple contexts are used via activate/suspend.
-            let prev = sys::igGetCurrentContext();
-            if prev != self.ctx {
-                sys::igSetCurrentContext(self.ctx);
-            }
-            sys::igUnregisterUserTexture(self.tex);
-            if prev != self.ctx {
-                sys::igSetCurrentContext(prev);
-            }
+        if let Some(registration) = take_user_texture_registration(self.ctx, self.tex) {
+            unregister_user_texture_registration(registration);
         }
     }
 }

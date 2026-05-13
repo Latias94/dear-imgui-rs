@@ -22,12 +22,16 @@
     clippy::as_conversions,
     clippy::unnecessary_cast
 )]
-use crate::texture::TextureId;
 use bitflags::bitflags;
+use std::cell::RefCell;
 use std::marker::PhantomData;
 
 use crate::colors::Color;
 use crate::sys;
+
+thread_local! {
+    static BORROWED_DRAW_LISTS: RefCell<Vec<usize>> = RefCell::new(Vec::new());
+}
 
 // (MintVec2 legacy alias removed; draw APIs now accept Into<sys::ImVec2>)
 
@@ -177,264 +181,64 @@ impl Default for DrawCornerFlags {
     }
 }
 
-// All draw types have been moved to crate::render module
-// Use crate::render::{DrawVert, DrawIdx, DrawData, DrawListIterator} instead
-
-/// Draw list wrapper
-#[repr(transparent)]
-pub struct DrawList(*mut sys::ImDrawList);
-
-impl DrawList {
-    /// Get command buffer as slice
-    unsafe fn cmd_buffer(&self) -> &[sys::ImDrawCmd] {
-        unsafe {
-            if (*self.0).CmdBuffer.Size <= 0 || (*self.0).CmdBuffer.Data.is_null() {
-                return &[];
-            }
-            let len = match usize::try_from((*self.0).CmdBuffer.Size) {
-                Ok(len) => len,
-                Err(_) => return &[],
-            };
-            std::slice::from_raw_parts((*self.0).CmdBuffer.Data as *const sys::ImDrawCmd, len)
-        }
-    }
-
-    /// Get vertex buffer
-    pub fn vtx_buffer(&self) -> &[crate::render::DrawVert] {
-        unsafe {
-            if (*self.0).VtxBuffer.Size <= 0 || (*self.0).VtxBuffer.Data.is_null() {
-                return &[];
-            }
-            let len = match usize::try_from((*self.0).VtxBuffer.Size) {
-                Ok(len) => len,
-                Err(_) => return &[],
-            };
-            std::slice::from_raw_parts(
-                (*self.0).VtxBuffer.Data as *const crate::render::DrawVert,
-                len,
-            )
-        }
-    }
-
-    /// Get index buffer
-    pub fn idx_buffer(&self) -> &[crate::render::DrawIdx] {
-        unsafe {
-            if (*self.0).IdxBuffer.Size <= 0 || (*self.0).IdxBuffer.Data.is_null() {
-                return &[];
-            }
-            let len = match usize::try_from((*self.0).IdxBuffer.Size) {
-                Ok(len) => len,
-                Err(_) => return &[],
-            };
-            std::slice::from_raw_parts((*self.0).IdxBuffer.Data, len)
-        }
-    }
-
-    /// Get draw commands iterator
-    pub fn commands(&self) -> DrawCmdIterator<'_> {
-        unsafe {
-            DrawCmdIterator {
-                iter: self.cmd_buffer().iter(),
-            }
-        }
-    }
-}
-
-/// Owned draw list returned by `CloneOutput`.
-///
-/// This owns an independent copy of a draw list and will free it on drop.
-pub struct OwnedDrawList(*mut sys::ImDrawList);
-
-impl Drop for OwnedDrawList {
-    fn drop(&mut self) {
-        unsafe { sys::ImDrawList_destroy(self.0) }
-    }
-}
-
-impl OwnedDrawList {
-    /// Create from raw pointer.
-    ///
-    /// Safety: `ptr` must be a valid pointer returned by `ImDrawList_CloneOutput` or `ImDrawList_ImDrawList`.
-    pub(crate) unsafe fn from_raw(ptr: *mut sys::ImDrawList) -> Self {
-        Self(ptr)
-    }
-
-    /// Borrow as a read-only draw list view.
-    pub fn as_view(&self) -> DrawList {
-        DrawList(self.0)
-    }
-
-    /// Clear free memory held by the draw list (release heap allocations).
-    pub fn clear_free_memory(&mut self) {
-        unsafe { sys::ImDrawList__ClearFreeMemory(self.0) }
-    }
-
-    /// Reset for new frame (not commonly needed for cloned lists).
-    pub fn reset_for_new_frame(&mut self) {
-        unsafe { sys::ImDrawList__ResetForNewFrame(self.0) }
-    }
-}
-
-/// Iterator over draw commands
-pub struct DrawCmdIterator<'a> {
-    iter: std::slice::Iter<'a, sys::ImDrawCmd>,
-}
-
-impl Iterator for DrawCmdIterator<'_> {
-    type Item = DrawCmd;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|cmd| {
-            let cmd_params = DrawCmdParams {
-                clip_rect: [
-                    cmd.ClipRect.x,
-                    cmd.ClipRect.y,
-                    cmd.ClipRect.z,
-                    cmd.ClipRect.w,
-                ],
-                texture_id: TextureId::from(unsafe {
-                    let mut cmd_copy = *cmd;
-                    sys::ImDrawCmd_GetTexID(&mut cmd_copy)
-                }),
-                vtx_offset: cmd.VtxOffset as usize,
-                idx_offset: cmd.IdxOffset as usize,
-            };
-
-            match cmd.UserCallback {
-                Some(raw_callback) if raw_callback as usize == usize::MAX => {
-                    DrawCmd::ResetRenderState
-                }
-                Some(raw_callback) => DrawCmd::RawCallback {
-                    callback: raw_callback,
-                    raw_cmd: cmd,
-                },
-                None => DrawCmd::Elements {
-                    count: cmd.ElemCount as usize,
-                    cmd_params,
-                },
-            }
-        })
-    }
-}
-
-/// Draw command parameters
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct DrawCmdParams {
-    /// Clipping rectangle (left, top, right, bottom)
-    pub clip_rect: [f32; 4],
-    /// Texture ID
-    pub texture_id: TextureId,
-    /// Vertex offset
-    pub vtx_offset: usize,
-    /// Index offset
-    pub idx_offset: usize,
-}
-
-/// Draw command
-#[derive(Debug, Clone)]
-pub enum DrawCmd {
-    /// Elements to draw
-    Elements {
-        /// Number of indices
-        count: usize,
-        /// Command parameters
-        cmd_params: DrawCmdParams,
-    },
-    /// Reset render state
-    ResetRenderState,
-    /// Raw callback
-    RawCallback {
-        /// Callback function
-        callback: unsafe extern "C" fn(*const sys::ImDrawList, cmd: *const sys::ImDrawCmd),
-        /// Raw command
-        raw_cmd: *const sys::ImDrawCmd,
-    },
-}
-
-enum DrawListType {
-    Window,
-    Background,
-    Foreground,
-}
-
 /// Object implementing the custom draw API.
 ///
 /// Called from [`Ui::get_window_draw_list`], [`Ui::get_background_draw_list`] or [`Ui::get_foreground_draw_list`].
-/// No more than one instance of this structure can live in a program at the same time.
-/// The program will panic on creating a second instance.
+/// Only one mutable wrapper can exist for the same raw draw list on the same thread at a time.
+/// The program will panic when attempting to wrap the same draw list twice.
 pub struct DrawListMut<'ui> {
-    draw_list_type: DrawListType,
     draw_list: *mut sys::ImDrawList,
-    _phantom: PhantomData<&'ui ()>,
+    _phantom: PhantomData<&'ui crate::Ui>,
 }
-
-// Lock for each variant of draw list
-static DRAW_LIST_LOADED_WINDOW: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-static DRAW_LIST_LOADED_BACKGROUND: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-static DRAW_LIST_LOADED_FOREGROUND: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
 
 impl Drop for DrawListMut<'_> {
     fn drop(&mut self) {
-        match self.draw_list_type {
-            DrawListType::Window => &DRAW_LIST_LOADED_WINDOW,
-            DrawListType::Background => &DRAW_LIST_LOADED_BACKGROUND,
-            DrawListType::Foreground => &DRAW_LIST_LOADED_FOREGROUND,
-        }
-        .store(false, std::sync::atomic::Ordering::Release);
+        let ptr = self.draw_list as usize;
+        BORROWED_DRAW_LISTS.with(|borrowed| {
+            let mut borrowed = borrowed.borrow_mut();
+            if let Some(index) = borrowed.iter().position(|&value| value == ptr) {
+                borrowed.swap_remove(index);
+            }
+        });
     }
 }
 
-impl DrawListMut<'_> {
-    fn lock_draw_list(t: DrawListType) {
-        let lock = match t {
-            DrawListType::Window => &DRAW_LIST_LOADED_WINDOW,
-            DrawListType::Background => &DRAW_LIST_LOADED_BACKGROUND,
-            DrawListType::Foreground => &DRAW_LIST_LOADED_FOREGROUND,
-        };
-
-        if lock
-            .compare_exchange(
-                false,
-                true,
-                std::sync::atomic::Ordering::Acquire,
-                std::sync::atomic::Ordering::Relaxed,
-            )
-            .is_err()
-        {
-            panic!(
-                "A DrawListMut is already in use! You can only have one DrawListMut in use at a time."
-            );
-        }
+impl<'ui> DrawListMut<'ui> {
+    fn borrow_draw_list(draw_list: *mut sys::ImDrawList) {
+        assert!(
+            !draw_list.is_null(),
+            "DrawListMut::borrow_draw_list() received a null draw list"
+        );
+        let ptr = draw_list as usize;
+        BORROWED_DRAW_LISTS.with(|borrowed| {
+            let mut borrowed = borrowed.borrow_mut();
+            if borrowed.contains(&ptr) {
+                panic!("A DrawListMut is already in use for this draw list");
+            }
+            borrowed.push(ptr);
+        });
     }
 
-    pub(crate) fn window(_ui: &crate::Ui) -> Self {
-        Self::lock_draw_list(DrawListType::Window);
+    fn from_raw(draw_list: *mut sys::ImDrawList) -> Self {
+        Self::borrow_draw_list(draw_list);
         Self {
-            draw_list: unsafe { sys::igGetWindowDrawList() },
-            draw_list_type: DrawListType::Window,
+            draw_list,
             _phantom: PhantomData,
         }
     }
 
-    pub(crate) fn background(_ui: &crate::Ui) -> Self {
-        Self::lock_draw_list(DrawListType::Background);
-        Self {
-            draw_list: unsafe { sys::igGetBackgroundDrawList(std::ptr::null_mut()) },
-            draw_list_type: DrawListType::Background,
-            _phantom: PhantomData,
-        }
+    pub(crate) fn window(_ui: &'ui crate::Ui) -> Self {
+        Self::from_raw(unsafe { sys::igGetWindowDrawList() })
     }
 
-    pub(crate) fn foreground(_ui: &crate::Ui) -> Self {
-        Self::lock_draw_list(DrawListType::Foreground);
-        Self {
-            draw_list: unsafe { sys::igGetForegroundDrawList_ViewportPtr(std::ptr::null_mut()) },
-            draw_list_type: DrawListType::Foreground,
-            _phantom: PhantomData,
-        }
+    pub(crate) fn background(_ui: &'ui crate::Ui) -> Self {
+        let viewport = unsafe { sys::igGetMainViewport() };
+        Self::from_raw(unsafe { sys::igGetBackgroundDrawList(viewport) })
+    }
+
+    pub(crate) fn foreground(_ui: &'ui crate::Ui) -> Self {
+        let viewport = unsafe { sys::igGetMainViewport() };
+        Self::from_raw(unsafe { sys::igGetForegroundDrawList_ViewportPtr(viewport) })
     }
 }
 
@@ -1267,8 +1071,10 @@ impl<'ui> DrawListMut<'ui> {
     ///
     /// The returned draw list is heap-allocated by Dear ImGui and will be destroyed on drop.
     #[doc(alias = "CloneOutput")]
-    pub fn clone_output(&self) -> OwnedDrawList {
-        unsafe { OwnedDrawList::from_raw(sys::ImDrawList_CloneOutput(self.draw_list)) }
+    pub fn clone_output(&self) -> crate::render::OwnedDrawList {
+        unsafe {
+            crate::render::OwnedDrawList::from_raw(sys::ImDrawList_CloneOutput(self.draw_list))
+        }
     }
 }
 
@@ -1387,7 +1193,6 @@ mod callback_tests {
         unsafe { sys::ImDrawList_AddDrawCmd(raw_draw_list) };
 
         let draw_list = DrawListMut {
-            draw_list_type: DrawListType::Window,
             draw_list: raw_draw_list,
             _phantom: PhantomData,
         };

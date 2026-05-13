@@ -152,7 +152,7 @@ impl AppWindow {
         managed_texture.set_status(TextureStatus::WantCreate);
 
         let registered_user_textures =
-            vec![imgui_context.register_user_texture_token(&mut *managed_texture)];
+            vec![imgui_context.register_user_texture_token(&mut managed_texture)];
 
         let imgui = ImguiState {
             _registered_user_textures: registered_user_textures,

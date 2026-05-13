@@ -355,6 +355,41 @@ impl DrawList {
     }
 }
 
+/// Owned draw list returned by `CloneOutput`.
+///
+/// This owns an independent copy of a draw list and will free it on drop.
+pub struct OwnedDrawList(*mut sys::ImDrawList);
+
+impl Drop for OwnedDrawList {
+    fn drop(&mut self) {
+        unsafe { sys::ImDrawList_destroy(self.0) }
+    }
+}
+
+impl OwnedDrawList {
+    /// Create from raw pointer.
+    ///
+    /// Safety: `ptr` must be a valid pointer returned by `ImDrawList_CloneOutput` or `ImDrawList_ImDrawList`.
+    pub(crate) unsafe fn from_raw(ptr: *mut sys::ImDrawList) -> Self {
+        Self(ptr)
+    }
+
+    /// Borrow as a read-only draw list view.
+    pub fn as_view(&self) -> &DrawList {
+        unsafe { DrawList::from_raw(self.0) }
+    }
+
+    /// Clear free memory held by the draw list (release heap allocations).
+    pub fn clear_free_memory(&mut self) {
+        unsafe { sys::ImDrawList__ClearFreeMemory(self.0) }
+    }
+
+    /// Reset for new frame (not commonly needed for cloned lists).
+    pub fn reset_for_new_frame(&mut self) {
+        unsafe { sys::ImDrawList__ResetForNewFrame(self.0) }
+    }
+}
+
 /// Iterator over draw commands
 pub struct DrawCmdIterator<'a> {
     iter: slice::Iter<'a, sys::ImDrawCmd>,
