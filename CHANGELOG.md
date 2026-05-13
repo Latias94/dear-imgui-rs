@@ -59,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backends
   - Remove obsolete winit multi-viewport `ImVec2` return-by-value getter code paths so
     `Platform_GetWindowPos/Size` consistently use the out-parameter shim.
+  - Clear winit multi-viewport platform callbacks and out-parameter getter shims during
+    shutdown so a backend teardown does not leave stale `ImGuiPlatformIO` handlers.
 
 ## [0.12.0] - 2026-05-09
 

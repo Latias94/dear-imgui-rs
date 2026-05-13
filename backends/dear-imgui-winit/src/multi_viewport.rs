@@ -496,6 +496,13 @@ pub fn shutdown_multi_viewport_support() {
             // Clear handle to avoid dangling pointer
             vp.PlatformHandle = std::ptr::null_mut();
         }
+
+        let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+        if !pio.is_null() {
+            dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(pio, None);
+            dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
+            dear_imgui_rs::sys::ImGuiPlatformIO_ClearPlatformHandlers(pio);
+        }
     }
 }
 
