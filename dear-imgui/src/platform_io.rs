@@ -61,6 +61,15 @@ pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {
 #[cfg(not(feature = "multi-viewport"))]
 pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {}
 
+#[cfg(feature = "multi-viewport")]
+fn assert_platform_io_out_param_hooks_available(callback_name: &str) {
+    assert!(
+        sys::HAS_PLATFORM_IO_OUT_PARAM_HOOKS,
+        "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+         rebuild without IMGUI_SYS_SKIP_CC to install {callback_name} callbacks"
+    );
+}
+
 impl PlatformIo {
     #[inline]
     fn inner(&self) -> &sys::ImGuiPlatformIO {
@@ -277,6 +286,10 @@ impl PlatformIo {
     ) {
         use trampolines::*;
 
+        if callback.is_some() {
+            assert_platform_io_out_param_hooks_available("Platform_GetWindowPos");
+        }
+
         match callback {
             Some(cb) => {
                 store_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, Some(cb));
@@ -318,6 +331,10 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
     ) {
         use trampolines::*;
+        if callback.is_some() {
+            assert_platform_io_out_param_hooks_available("Platform_GetWindowPos");
+        }
+
         match callback {
             Some(cb) => {
                 store_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, None);
@@ -385,6 +402,10 @@ impl PlatformIo {
     ) {
         use trampolines::*;
 
+        if callback.is_some() {
+            assert_platform_io_out_param_hooks_available("Platform_GetWindowSize");
+        }
+
         match callback {
             Some(cb) => {
                 store_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, Some(cb));
@@ -427,6 +448,10 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut Viewport) -> sys::ImVec2>,
     ) {
         use trampolines::*;
+        if callback.is_some() {
+            assert_platform_io_out_param_hooks_available("Platform_GetWindowSize");
+        }
+
         match callback {
             Some(cb) => {
                 store_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, None);

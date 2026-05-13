@@ -41,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Context`, or `OwnedTextureData` are dropped in different orders.
   - Keep `PlatformIo` typed callback dispatch isolated between multiple ImGui contexts.
   - Clear Rust typed `PlatformIo` callback storage and `Platform_GetWindowPos/Size` out-parameter
-    shim state when clearing platform or renderer handlers.
+    shim state when clearing platform handlers, and clear typed renderer callback storage when
+    clearing renderer handlers.
   - Generate correctly terminated glyph exclude range arrays and reject reversed or
     out-of-range glyph ranges.
   - Validate `TextCallbackData` buffers and byte positions before exposing Rust slices or
@@ -50,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Route Rust-owned `Platform_GetWindowPos` / `Platform_GetWindowSize` out-parameter
     shims through `dear-imgui-sys` storage instead of cimgui's `BackendLanguageUserData`
     helper, avoiding collisions with language/backend userdata.
+  - Avoid unresolved `PlatformIO` out-parameter shim symbols in builds that intentionally
+    skip native C++ hook compilation, while keeping callback installation available for
+    normal native builds.
+  - Report unavailable `PlatformIO` out-parameter hooks through a capability flag and explicit
+    callback-installation panic instead of leaving raw external symbols unresolved.
 - Backends
   - Remove obsolete winit multi-viewport `ImVec2` return-by-value getter code paths so
     `Platform_GetWindowPos/Size` consistently use the out-parameter shim.

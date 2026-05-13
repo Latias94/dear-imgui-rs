@@ -108,6 +108,10 @@ const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
 
 // cimgui C API avoids C++ ABI pitfalls; no MSVC-specific conversions are required.
 
+/// Whether this build linked the repository-owned PlatformIO out-parameter hook shim.
+pub const HAS_PLATFORM_IO_OUT_PARAM_HOOKS: bool = cfg!(dear_imgui_rs_platform_io_hooks);
+
+#[cfg(dear_imgui_rs_platform_io_hooks)]
 unsafe extern "C" {
     fn dear_imgui_rs_platform_io_set_platform_get_window_pos(
         platform_io: *mut ImGuiPlatformIO,
@@ -135,7 +139,21 @@ pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
     platform_io: *mut ImGuiPlatformIO,
     user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_pos: *mut ImVec2)>,
 ) {
-    unsafe { dear_imgui_rs_platform_io_set_platform_get_window_pos(platform_io, user_callback) }
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        dear_imgui_rs_platform_io_set_platform_get_window_pos(platform_io, user_callback)
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        if user_callback.is_some() {
+            panic!(
+                "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+                 rebuild without IMGUI_SYS_SKIP_CC to install Platform_GetWindowPos callbacks"
+            );
+        }
+    }
 }
 
 /// Install a C-compatible out-parameter callback for `ImGuiPlatformIO::Platform_GetWindowSize`.
@@ -151,7 +169,21 @@ pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
     platform_io: *mut ImGuiPlatformIO,
     user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_size: *mut ImVec2)>,
 ) {
-    unsafe { dear_imgui_rs_platform_io_set_platform_get_window_size(platform_io, user_callback) }
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        dear_imgui_rs_platform_io_set_platform_get_window_size(platform_io, user_callback)
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        if user_callback.is_some() {
+            panic!(
+                "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+                 rebuild without IMGUI_SYS_SKIP_CC to install Platform_GetWindowSize callbacks"
+            );
+        }
+    }
 }
 
 // Re-export commonly used types for convenience

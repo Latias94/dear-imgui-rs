@@ -67,9 +67,12 @@ fn is_archive_urlish(s: &str) -> bool {
 
 fn main() {
     let cfg = BuildConfig::new();
+    let skip_cc = env::var("IMGUI_SYS_SKIP_CC").is_ok();
+    let mut has_platform_io_hooks = false;
 
     // Re-run triggers
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rustc-check-cfg=cfg(dear_imgui_rs_platform_io_hooks)");
     // Pregenerated bindings are copied into OUT_DIR when native toolchains are disabled.
     // Track them so `cargo check` picks up refreshed bindings immediately.
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
@@ -104,7 +107,7 @@ fn main() {
 
     // Bindings: default to generating via bindgen, but allow skipping all native
     // toolchain usage (cc + bindgen) via IMGUI_SYS_SKIP_CC.
-    if env::var("IMGUI_SYS_SKIP_CC").is_ok() {
+    if skip_cc {
         if any_backend_shim_enabled() {
             panic!(
                 "IMGUI_SYS_SKIP_CC is incompatible with backend-shim-* features. \
@@ -124,10 +127,11 @@ fn main() {
 
     // Build optional backend shim libraries before linking the core library so
     // static link order remains backend-shim first, core dear_imgui second.
-    if env::var("IMGUI_SYS_SKIP_CC").is_err() {
+    if !skip_cc {
         build_backend_shims(&cfg);
         if cfg.target_arch != "wasm32" {
             build_platform_io_hooks(&cfg);
+            has_platform_io_hooks = true;
         }
     }
 
@@ -146,7 +150,7 @@ fn main() {
     };
 
     // Build from sources when needed
-    if !linked_prebuilt && env::var("IMGUI_SYS_SKIP_CC").is_err() {
+    if !linked_prebuilt && !skip_cc {
         if cfg.target_arch == "wasm32" {
             // If targeting Emscripten, attempt to compile C/C++ (requires emsdk toolchain)
             if cfg.target_env == "emscripten" {
@@ -172,9 +176,18 @@ fn main() {
                 build_with_cc_cfg(&cfg);
             }
         }
-    } else if !linked_prebuilt && env::var("IMGUI_SYS_SKIP_CC").is_ok() {
+    } else if !linked_prebuilt && skip_cc {
         println!(
             "cargo:warning=IMGUI_SYS_SKIP_CC is set but no prebuilt dear_imgui library was linked; the Rust build will likely fail at link time."
+        );
+    }
+
+    if has_platform_io_hooks {
+        println!("cargo:rustc-cfg=dear_imgui_rs_platform_io_hooks");
+    } else if cfg.target_arch != "wasm32" {
+        println!(
+            "cargo:warning=dear-imgui-sys: PlatformIO out-parameter hooks are unavailable; \
+             Platform_GetWindowPos/Size callback installation will panic if used."
         );
     }
 
