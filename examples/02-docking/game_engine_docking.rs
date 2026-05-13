@@ -207,7 +207,7 @@ impl Drop for ImguiState {
         // context is dropped.
         #[cfg(feature = "multi-viewport")]
         if self.enable_viewports {
-            winit_mvp::shutdown_multi_viewport_support();
+            winit_mvp::shutdown_multi_viewport_support(&mut self.context);
         }
     }
 }

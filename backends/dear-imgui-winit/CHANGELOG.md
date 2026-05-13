@@ -6,6 +6,11 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `multi_viewport::shutdown_multi_viewport_support` now takes `&mut Context`, matching the
+  renderer backend shutdown helpers and making the target ImGui context explicit.
+
 ### Added
 
 - IME integration:
@@ -28,5 +33,7 @@ The format follows Keep a Changelog and Semantic Versioning.
 ### Fixed
 
 - `WinitPlatform::attach_window` no longer overwrites `Platform_ImeUserData` when another backend owns `Platform_SetImeDataFn`; it only updates the IME userdata for winit-owned callbacks.
+- Multi-viewport shutdown now binds the provided `Context` before destroying platform windows and
+  clearing platform callbacks, avoiding cleanup against a different current context.
 
 

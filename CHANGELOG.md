@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ImGuiPlatformIO_Set_Platform_GetWindowSize` helpers from generated bindings. Use the
     repository-owned `*_OutParam` wrappers instead; they do not consume
     `BackendLanguageUserData`.
+- Backends
+  - Change `dear-imgui-winit::multi_viewport::shutdown_multi_viewport_support` to take
+    `&mut Context`, matching the renderer backends and making shutdown target an explicit
+    ImGui context.
 
 ### Changed
 
@@ -76,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backends
   - Route winit multi-viewport `Platform_GetWindowFramebufferScale` through the same
     out-parameter shim as the window position and size getters, including on Windows.
+  - Bind winit multi-viewport shutdown to the provided `Context` before destroying platform
+    windows and clearing platform callbacks, avoiding accidental cleanup of a different current
+    context.
   - Clear winit multi-viewport work-area inset handlers through the out-parameter shim path,
     keeping backend shutdown consistent with other aggregate-return platform callbacks.
   - Remove obsolete winit multi-viewport `ImVec2` return-by-value getter code paths so

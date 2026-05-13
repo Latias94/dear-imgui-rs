@@ -467,12 +467,31 @@ fn init_main_viewport(main_window: &Window) {
     }
 }
 
-/// Shutdown multi-viewport support
-pub fn shutdown_multi_viewport_support() {
-    // Clean up any remaining viewports
+struct CurrentContextGuard {
+    previous: *mut dear_imgui_rs::sys::ImGuiContext,
+    target: *mut dear_imgui_rs::sys::ImGuiContext,
+}
+
+impl CurrentContextGuard {
+    unsafe fn bind(target: *mut dear_imgui_rs::sys::ImGuiContext) -> Self {
+        let previous = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+        if previous != target {
+            unsafe { dear_imgui_rs::sys::igSetCurrentContext(target) };
+        }
+        Self { previous, target }
+    }
+}
+
+impl Drop for CurrentContextGuard {
+    fn drop(&mut self) {
+        if self.previous != self.target {
+            unsafe { dear_imgui_rs::sys::igSetCurrentContext(self.previous) };
+        }
+    }
+}
+
+unsafe fn clear_main_viewport_data_for_current_context() {
     unsafe {
-        dear_imgui_rs::sys::igDestroyPlatformWindows();
-        // Also clean up main viewport's PlatformUserData allocated by us
         let main_viewport = dear_imgui_rs::sys::igGetMainViewport();
         if !main_viewport.is_null() {
             let vp = &mut *main_viewport;
@@ -489,11 +508,23 @@ pub fn shutdown_multi_viewport_support() {
                 vp.PlatformHandle = std::ptr::null_mut();
             }
         }
+    }
+}
 
-        let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
-        if !pio.is_null() {
-            dear_imgui_rs::platform_io::PlatformIo::from_raw_mut(pio).clear_platform_handlers();
-        }
+/// Shutdown multi-viewport support for `ctx`.
+pub fn shutdown_multi_viewport_support(ctx: &mut Context) {
+    // Clean up any remaining viewports
+    unsafe {
+        let _context_guard = CurrentContextGuard::bind(ctx.as_raw());
+
+        // The main viewport is owned by the application, not by winit. Clear its winit-owned
+        // sidecar data before asking Dear ImGui to destroy platform windows so upstream shutdown
+        // assertions don't depend on Platform_DestroyWindow being installed for the main viewport.
+        clear_main_viewport_data_for_current_context();
+        ctx.destroy_platform_windows();
+        clear_main_viewport_data_for_current_context();
+
+        ctx.platform_io_mut().clear_platform_handlers();
     }
 }
 
@@ -1141,4 +1172,65 @@ unsafe extern "C" fn winit_update_window(vp: *mut dear_imgui_rs::sys::ImGuiViewp
         // - Platform-specific optimizations
         // - Event processing
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::test_sync::lock_context;
+
+    #[test]
+    fn shutdown_multi_viewport_support_targets_passed_context() {
+        let _guard = lock_context();
+
+        let mut ctx_a = Context::create();
+        let raw_a = ctx_a.as_raw();
+        let main_viewport_a = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+        let vd_a = unsafe {
+            let vd = Box::into_raw(Box::new(ViewportData::new()));
+            register_viewport_data(vd);
+            (*main_viewport_a).PlatformUserData = vd.cast();
+            vd
+        };
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut());
+        }
+
+        let mut ctx_b = Context::create();
+        let raw_b = ctx_b.as_raw();
+        let main_viewport_b = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+        let vd_b = unsafe {
+            let vd = Box::into_raw(Box::new(ViewportData::new()));
+            register_viewport_data(vd);
+            (*main_viewport_b).PlatformUserData = vd.cast();
+            vd
+        };
+
+        shutdown_multi_viewport_support(&mut ctx_a);
+
+        unsafe {
+            assert_eq!(dear_imgui_rs::sys::igGetCurrentContext(), raw_b);
+            assert!((*main_viewport_a).PlatformUserData.is_null());
+            assert!(!(*main_viewport_b).PlatformUserData.is_null());
+            assert!(is_winit_viewport_data(vd_b));
+            assert!(!std::ptr::eq(
+                (*main_viewport_b).PlatformUserData.cast::<ViewportData>(),
+                vd_a
+            ));
+        }
+
+        shutdown_multi_viewport_support(&mut ctx_b);
+        unsafe {
+            assert_eq!(dear_imgui_rs::sys::igGetCurrentContext(), raw_b);
+            assert!((*main_viewport_b).PlatformUserData.is_null());
+            assert!(!is_winit_viewport_data(vd_b));
+            dear_imgui_rs::sys::igSetCurrentContext(raw_a);
+        }
+        drop(ctx_a);
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw_b);
+        }
+        drop(ctx_b);
+    }
 }
