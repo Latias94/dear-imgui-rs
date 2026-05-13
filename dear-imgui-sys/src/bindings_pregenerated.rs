@@ -14760,19 +14760,3 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn ImVector_ImWchar_UnInit(p: *mut ImVector_ImWchar);
 }
-unsafe extern "C" {
-    pub fn ImGuiPlatformIO_Set_Platform_GetWindowPos(
-        platform_io: *mut ImGuiPlatformIO,
-        user_callback: ::std::option::Option<
-            unsafe extern "C" fn(vp: *mut ImGuiViewport, out_pos: *mut ImVec2),
-        >,
-    );
-}
-unsafe extern "C" {
-    pub fn ImGuiPlatformIO_Set_Platform_GetWindowSize(
-        platform_io: *mut ImGuiPlatformIO,
-        user_callback: ::std::option::Option<
-            unsafe extern "C" fn(vp: *mut ImGuiViewport, out_size: *mut ImVec2),
-        >,
-    );
-}

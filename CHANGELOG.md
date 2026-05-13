@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Change `PlatformIo::set_platform_get_window_pos{,_raw}` and
     `set_platform_get_window_size{,_raw}` callbacks to write `ImVec2` through out-parameters
     instead of returning it by value, matching the internal ABI-safe shim.
+- Core (`dear-imgui-sys`)
+  - Stop exposing cimgui's `ImGuiPlatformIO_Set_Platform_GetWindowPos` and
+    `ImGuiPlatformIO_Set_Platform_GetWindowSize` helpers from generated bindings. Use the
+    repository-owned `*_OutParam` wrappers instead; they do not consume
+    `BackendLanguageUserData`.
 
 ### Changed
 
