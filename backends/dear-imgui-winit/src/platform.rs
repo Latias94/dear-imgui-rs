@@ -18,6 +18,12 @@ use web_time::Instant;
 use crate::cursor::CursorSettings;
 use crate::events;
 
+type SetImeDataCallback = unsafe extern "C" fn(
+    *mut dear_imgui_rs::sys::ImGuiContext,
+    *mut dear_imgui_rs::sys::ImGuiViewport,
+    *mut dear_imgui_rs::sys::ImGuiPlatformImeData,
+);
+
 /// IME hook: Dear ImGui calls this when the text input caret moves. We forward
 /// the position to winit so platforms that support it can position the IME
 /// candidate/composition window near the caret.
@@ -77,6 +83,12 @@ unsafe extern "C" fn imgui_winit_set_ime_data(
         eprintln!("dear-imgui-winit: panic in Platform_SetImeDataFn");
         std::process::abort();
     }
+}
+
+fn is_winit_set_ime_data(callback: Option<SetImeDataCallback>) -> bool {
+    callback.is_some_and(|callback| {
+        std::ptr::fn_addr_eq(callback, imgui_winit_set_ime_data as SetImeDataCallback)
+    })
 }
 
 /// DPI scaling mode for the platform
@@ -225,15 +237,37 @@ impl WinitPlatform {
         // Register Dear ImGui -> winit IME bridge so text input widgets can
         // move the platform IME candidate/composition window near the caret.
         unsafe {
-            let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+            let pio = imgui_ctx.platform_io_mut().as_raw_mut();
             if !pio.is_null() {
-                // Store a pointer to the main window; backend assumes a single
-                // primary window for IME purposes.
-                (*pio).Platform_ImeUserData = window as *const Window as *mut c_void;
-                // Install our callback (once per context).
                 if (*pio).Platform_SetImeDataFn.is_none() {
                     (*pio).Platform_SetImeDataFn = Some(imgui_winit_set_ime_data);
+                    (*pio).Platform_ImeUserData = window as *const Window as *mut c_void;
+                } else if is_winit_set_ime_data((*pio).Platform_SetImeDataFn) {
+                    (*pio).Platform_ImeUserData = window as *const Window as *mut c_void;
                 }
+            }
+        }
+    }
+
+    /// Detach the platform from a window and clear winit-owned IME hooks.
+    ///
+    /// Call this before destroying a window when the Dear ImGui context will outlive it. The
+    /// method only clears the IME callback/userdata pair if it is still owned by this backend and
+    /// still points at `window`.
+    pub fn detach_window(&mut self, window: &Window, imgui_ctx: &mut Context) {
+        window.set_ime_allowed(false);
+        self.ime_enabled = false;
+
+        unsafe {
+            let pio = imgui_ctx.platform_io_mut().as_raw_mut();
+            if pio.is_null() || !is_winit_set_ime_data((*pio).Platform_SetImeDataFn) {
+                return;
+            }
+
+            let window_ptr = window as *const Window as *mut c_void;
+            if (*pio).Platform_ImeUserData == window_ptr {
+                (*pio).Platform_ImeUserData = std::ptr::null_mut();
+                (*pio).Platform_SetImeDataFn = None;
             }
         }
     }
@@ -575,6 +609,20 @@ mod tests {
 
         platform.set_hidpi_mode(HiDpiMode::Rounded);
         assert_eq!(platform.hidpi_mode, HiDpiMode::Rounded);
+    }
+
+    #[test]
+    fn test_ime_callback_ownership_detection() {
+        unsafe extern "C" fn other_ime_callback(
+            _ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+            _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+            _data: *mut dear_imgui_rs::sys::ImGuiPlatformImeData,
+        ) {
+        }
+
+        assert!(is_winit_set_ime_data(Some(imgui_winit_set_ime_data)));
+        assert!(!is_winit_set_ime_data(Some(other_ime_callback)));
+        assert!(!is_winit_set_ime_data(None));
     }
 
     #[test]

@@ -66,6 +66,7 @@ APIs of interest:
 - `WinitPlatform::handle_event(&mut Context, &Window, &Event<T>)` — for closure-style `EventLoop::run`
 - `WinitPlatform::prepare_frame(&Window, &mut Context)`
 - `WinitPlatform::prepare_render_with_ui(&Ui, &Window)` — updates OS cursor from ImGui
+- `WinitPlatform::detach_window(&Window, &mut Context)` — clears winit-owned IME hooks before a window is destroyed while the context remains alive
 
 ## DPI / HiDPI
 
@@ -114,6 +115,9 @@ Basic touch-to-mouse translation is provided:
   `WinitPlatform::set_ime_auto_management(false)`.
 - The backend tracks IME enabled/disabled state internally and exposes it
   through `WinitPlatform::ime_enabled()`.
+- If the window is destroyed before the ImGui context, call
+  `WinitPlatform::detach_window(&window, &mut context)` first so Dear ImGui no
+  longer holds a raw pointer to that window for IME cursor placement.
 
 ## Cursor Handling
 
