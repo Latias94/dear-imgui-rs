@@ -87,18 +87,37 @@ fn no_current_context() -> bool {
     ctx.is_null()
 }
 
-fn with_bound_context<R>(ctx: *mut sys::ImGuiContext, f: impl FnOnce() -> R) -> R {
-    unsafe {
-        let prev = sys::igGetCurrentContext();
-        if prev != ctx {
-            sys::igSetCurrentContext(ctx);
+struct BoundContextGuard {
+    prev: *mut sys::ImGuiContext,
+    restore: bool,
+}
+
+impl BoundContextGuard {
+    fn bind(ctx: *mut sys::ImGuiContext) -> Self {
+        unsafe {
+            let prev = sys::igGetCurrentContext();
+            let restore = prev != ctx;
+            if restore {
+                sys::igSetCurrentContext(ctx);
+            }
+            Self { prev, restore }
         }
-        let result = f();
-        if prev != ctx {
-            sys::igSetCurrentContext(prev);
-        }
-        result
     }
+}
+
+impl Drop for BoundContextGuard {
+    fn drop(&mut self) {
+        if self.restore {
+            unsafe {
+                sys::igSetCurrentContext(self.prev);
+            }
+        }
+    }
+}
+
+fn with_bound_context<R>(ctx: *mut sys::ImGuiContext, f: impl FnOnce() -> R) -> R {
+    let _guard = BoundContextGuard::bind(ctx);
+    f()
 }
 
 fn prune_dead_user_texture_registrations(registrations: &mut Vec<UserTextureRegistration>) {
@@ -1018,7 +1037,7 @@ impl Drop for Context {
 
 #[cfg(test)]
 mod tests {
-    use super::Context;
+    use super::{Context, with_bound_context};
 
     #[test]
     fn platform_io_shared_and_mut_views_match() {
@@ -1026,6 +1045,25 @@ mod tests {
         let shared = ctx.platform_io().as_raw();
         let mutable = ctx.platform_io_mut().as_raw();
         assert_eq!(shared, mutable);
+    }
+
+    #[test]
+    fn with_bound_context_restores_previous_context_after_panic() {
+        let ctx_a = Context::create();
+        let raw_a = ctx_a.raw;
+        let suspended_a = ctx_a.suspend();
+        let ctx_b = Context::create();
+        let raw_b = ctx_b.raw;
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_bound_context(raw_a, || panic!("forced panic while context is rebound"));
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
+
+        drop(ctx_b);
+        drop(suspended_a);
     }
 
     #[cfg(feature = "multi-viewport")]
