@@ -47,117 +47,191 @@ pub trait InputTextCallbackHandler {
     /// Called when the user presses the completion key (TAB by default).
     ///
     /// To make ImGui run this callback, use [InputTextCallback::COMPLETION].
-    fn on_completion(&mut self, _data: TextCallbackData) {}
+    fn on_completion(&mut self, _data: TextCallbackData<'_>) {}
 
     /// Called when the user presses Up/Down arrow keys for history navigation.
     ///
     /// To make ImGui run this callback, use [InputTextCallback::HISTORY].
-    fn on_history(&mut self, _direction: HistoryDirection, _data: TextCallbackData) {}
+    fn on_history(&mut self, _direction: HistoryDirection, _data: TextCallbackData<'_>) {}
 
     /// Called every frame when the input text is active.
     ///
     /// To make ImGui run this callback, use [InputTextCallback::ALWAYS].
-    fn on_always(&mut self, _data: TextCallbackData) {}
+    fn on_always(&mut self, _data: TextCallbackData<'_>) {}
 
     /// Called when the text buffer is edited.
     ///
     /// To make ImGui run this callback, use [InputTextCallback::EDIT].
-    fn on_edit(&mut self, _data: TextCallbackData) {}
+    fn on_edit(&mut self, _data: TextCallbackData<'_>) {}
 }
 
 /// This struct provides methods to edit the underlying text buffer that
 /// Dear ImGui manipulates. Primarily, it gives [remove_chars](Self::remove_chars),
 /// [insert_chars](Self::insert_chars), and mutable access to what text is selected.
-pub struct TextCallbackData(*mut sys::ImGuiInputTextCallbackData);
+pub struct TextCallbackData<'cb>(
+    *mut sys::ImGuiInputTextCallbackData,
+    std::marker::PhantomData<&'cb mut sys::ImGuiInputTextCallbackData>,
+);
 
-impl TextCallbackData {
+impl<'cb> TextCallbackData<'cb> {
     /// Creates the buffer.
     pub(super) unsafe fn new(data: *mut sys::ImGuiInputTextCallbackData) -> Self {
-        Self(data)
+        Self(data, std::marker::PhantomData)
+    }
+
+    fn data(&self) -> &sys::ImGuiInputTextCallbackData {
+        unsafe {
+            self.0
+                .as_ref()
+                .expect("internal imgui error: InputText callback data was null")
+        }
+    }
+
+    fn data_mut(&mut self) -> &mut sys::ImGuiInputTextCallbackData {
+        unsafe {
+            self.0
+                .as_mut()
+                .expect("internal imgui error: InputText callback data was null")
+        }
+    }
+
+    fn valid_text_len(&self) -> usize {
+        let data = self.data();
+        assert!(!data.Buf.is_null(), "internal imgui error: Buf was null");
+        assert!(
+            data.BufTextLen >= 0,
+            "internal imgui error: BufTextLen was negative"
+        );
+        assert!(
+            data.BufSize >= 0,
+            "internal imgui error: BufSize was negative"
+        );
+        assert!(
+            data.BufTextLen <= data.BufSize,
+            "internal imgui error: BufTextLen exceeded BufSize"
+        );
+        data.BufTextLen as usize
+    }
+
+    fn valid_text_len_i32(&self) -> i32 {
+        self.valid_text_len() as i32
+    }
+
+    fn position(name: &str, pos: i32) -> usize {
+        usize::try_from(pos).unwrap_or_else(|_| {
+            panic!("internal imgui error: {name} was negative");
+        })
+    }
+
+    fn position_to_i32(name: &str, pos: usize) -> i32 {
+        i32::try_from(pos).unwrap_or_else(|_| {
+            panic!("{name} exceeded ImGui's i32 position range");
+        })
+    }
+
+    fn assert_byte_boundary(text: &str, name: &str, pos: usize) {
+        assert!(
+            text.is_char_boundary(pos),
+            "{name} must lie on a UTF-8 character boundary"
+        );
     }
 
     /// Get a reference to the text callback buffer's str.
     pub fn str(&self) -> &str {
+        let len = self.valid_text_len();
         unsafe {
-            std::str::from_utf8(std::slice::from_raw_parts(
-                (*(self.0)).Buf as *const _,
-                (*(self.0)).BufTextLen as usize,
-            ))
-            .expect("internal imgui error -- it boofed a utf8")
+            std::str::from_utf8(std::slice::from_raw_parts(self.data().Buf as *const _, len))
+                .expect("internal imgui error -- it boofed a utf8")
         }
     }
 
     /// Get the current cursor position
     pub fn cursor_pos(&self) -> usize {
-        unsafe { (*(self.0)).CursorPos as usize }
+        Self::position("CursorPos", self.data().CursorPos)
     }
 
     /// Set the cursor position
     pub fn set_cursor_pos(&mut self, pos: usize) {
-        unsafe {
-            (*(self.0)).CursorPos = pos as i32;
-        }
+        let text = self.str();
+        assert!(pos <= text.len(), "cursor position out of bounds");
+        Self::assert_byte_boundary(text, "cursor position", pos);
+        self.data_mut().CursorPos = Self::position_to_i32("cursor position", pos);
     }
 
     /// Get the selection start position
     pub fn selection_start(&self) -> usize {
-        unsafe { (*(self.0)).SelectionStart as usize }
+        Self::position("SelectionStart", self.data().SelectionStart)
     }
 
     /// Set the selection start position
     pub fn set_selection_start(&mut self, pos: usize) {
-        unsafe {
-            (*(self.0)).SelectionStart = pos as i32;
-        }
+        let text = self.str();
+        assert!(pos <= text.len(), "selection start out of bounds");
+        Self::assert_byte_boundary(text, "selection start", pos);
+        self.data_mut().SelectionStart = Self::position_to_i32("selection start", pos);
     }
 
     /// Get the selection end position
     pub fn selection_end(&self) -> usize {
-        unsafe { (*(self.0)).SelectionEnd as usize }
+        Self::position("SelectionEnd", self.data().SelectionEnd)
     }
 
     /// Set the selection end position
     pub fn set_selection_end(&mut self, pos: usize) {
-        unsafe {
-            (*(self.0)).SelectionEnd = pos as i32;
-        }
+        let text = self.str();
+        assert!(pos <= text.len(), "selection end out of bounds");
+        Self::assert_byte_boundary(text, "selection end", pos);
+        self.data_mut().SelectionEnd = Self::position_to_i32("selection end", pos);
     }
 
     /// Select all text
     pub fn select_all(&mut self) {
-        unsafe {
-            (*(self.0)).SelectionStart = 0;
-            (*(self.0)).SelectionEnd = (*(self.0)).BufTextLen;
-        }
+        let len = self.valid_text_len_i32();
+        let data = self.data_mut();
+        data.SelectionStart = 0;
+        data.SelectionEnd = len;
     }
 
     /// Clear selection
     pub fn clear_selection(&mut self) {
-        unsafe {
-            (*(self.0)).SelectionStart = (*(self.0)).CursorPos;
-            (*(self.0)).SelectionEnd = (*(self.0)).CursorPos;
-        }
+        let cursor_pos = self.data().CursorPos;
+        let data = self.data_mut();
+        data.SelectionStart = cursor_pos;
+        data.SelectionEnd = cursor_pos;
     }
 
     /// Returns true if there is a selection
     pub fn has_selection(&self) -> bool {
-        unsafe { (*(self.0)).SelectionStart != (*(self.0)).SelectionEnd }
+        self.data().SelectionStart != self.data().SelectionEnd
     }
 
     /// Delete characters in the range [pos, pos+bytes_count)
     pub fn remove_chars(&mut self, pos: usize, bytes_count: usize) {
+        let text = self.str();
+        let end = pos
+            .checked_add(bytes_count)
+            .expect("delete range overflowed usize");
+        assert!(end <= text.len(), "delete range out of bounds");
+        Self::assert_byte_boundary(text, "delete start", pos);
+        Self::assert_byte_boundary(text, "delete end", end);
+        let pos = Self::position_to_i32("delete start", pos);
+        let bytes_count = Self::position_to_i32("delete byte count", bytes_count);
         unsafe {
-            sys::ImGuiInputTextCallbackData_DeleteChars(self.0, pos as i32, bytes_count as i32);
+            sys::ImGuiInputTextCallbackData_DeleteChars(self.0, pos, bytes_count);
         }
     }
 
     /// Insert text at the given position
     pub fn insert_chars(&mut self, pos: usize, text: &str) {
+        let current = self.str();
+        assert!(pos <= current.len(), "insert position out of bounds");
+        Self::assert_byte_boundary(current, "insert position", pos);
+        let pos = Self::position_to_i32("insert position", pos);
         let text_ptr = text.as_ptr() as *const std::os::raw::c_char;
         unsafe {
             sys::ImGuiInputTextCallbackData_InsertChars(
                 self.0,
-                pos as i32,
+                pos,
                 text_ptr,
                 text_ptr.add(text.len()),
             );
@@ -184,27 +258,11 @@ impl TextCallbackData {
     /// [insert_chars]: Self::insert_chars
     /// [push_str]: Self::push_str
     pub unsafe fn str_as_bytes_mut(&mut self) -> &mut [u8] {
+        let len = self.valid_text_len();
         unsafe {
-            assert!(
-                !(*(self.0)).Buf.is_null(),
-                "internal imgui error: Buf was null"
-            );
-            assert!(
-                (*(self.0)).BufTextLen >= 0,
-                "internal imgui error: BufTextLen was negative"
-            );
-            assert!(
-                (*(self.0)).BufSize >= 0,
-                "internal imgui error: BufSize was negative"
-            );
-            assert!(
-                (*(self.0)).BufTextLen <= (*(self.0)).BufSize,
-                "internal imgui error: BufTextLen exceeded BufSize"
-            );
-
             let str = std::str::from_utf8_mut(std::slice::from_raw_parts_mut(
-                (*(self.0)).Buf as *mut u8,
-                (*(self.0)).BufTextLen as usize,
+                self.data_mut().Buf as *mut u8,
+                len,
             ))
             .expect("internal imgui error -- it boofed a utf8");
 
@@ -224,24 +282,26 @@ impl TextCallbackData {
     /// [remove_chars]: Self::remove_chars
     /// [insert_chars]: Self::insert_chars
     pub fn set_dirty(&mut self) {
-        unsafe {
-            (*(self.0)).BufDirty = true;
-        }
+        self.data_mut().BufDirty = true;
     }
 
     /// Returns the selected text directly. Note that if no text is selected,
     /// an empty str slice will be returned.
     pub fn selected(&self) -> &str {
+        let text = self.str();
         let start = self.selection_start().min(self.selection_end());
         let end = self.selection_start().max(self.selection_end());
-        &self.str()[start..end]
+        assert!(end <= text.len(), "selection range out of bounds");
+        Self::assert_byte_boundary(text, "selection start", start);
+        Self::assert_byte_boundary(text, "selection end", end);
+        &text[start..end]
     }
 
     /// Pushes the given str to the end of this buffer. If this
     /// would require the String to resize, it will be resized.
     /// This is automatically handled.
     pub fn push_str(&mut self, text: &str) {
-        let current_len = unsafe { (*(self.0)).BufTextLen as usize };
+        let current_len = self.valid_text_len();
         self.insert_chars(current_len, text);
     }
 }

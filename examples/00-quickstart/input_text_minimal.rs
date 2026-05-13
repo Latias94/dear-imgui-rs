@@ -180,21 +180,21 @@ impl AppWindow {
                         // Filter out 'x' or 'X'
                         if c == 'x' || c == 'X' { None } else { Some(c) }
                     }
-                    fn on_completion(&mut self, mut data: dear_imgui_rs::TextCallbackData) {
+                    fn on_completion(&mut self, mut data: dear_imgui_rs::TextCallbackData<'_>) {
                         data.push_str(" [Tab]");
                     }
                     fn on_history(
                         &mut self,
                         dir: dear_imgui_rs::HistoryDirection,
-                        mut data: dear_imgui_rs::TextCallbackData,
+                        mut data: dear_imgui_rs::TextCallbackData<'_>,
                     ) {
                         match dir {
                             dear_imgui_rs::HistoryDirection::Up => data.push_str(" [Up]"),
                             dear_imgui_rs::HistoryDirection::Down => data.push_str(" [Down]"),
                         }
                     }
-                    fn on_edit(&mut self, _data: dear_imgui_rs::TextCallbackData) {}
-                    fn on_always(&mut self, _data: dear_imgui_rs::TextCallbackData) {}
+                    fn on_edit(&mut self, _data: dear_imgui_rs::TextCallbackData<'_>) {}
+                    fn on_always(&mut self, _data: dear_imgui_rs::TextCallbackData<'_>) {}
                 }
 
                 // For multiline, ImGui forbids HISTORY/COMPLETION callbacks.

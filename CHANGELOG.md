@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Dear ImGui's 64-bit texture id representation.
   - Remove the duplicate read-only draw-list snapshot types from `draw`; use the unified
     `render` draw data types instead.
+  - Bind `TextCallbackData` to the input-text callback frame lifetime so safe callback
+    handlers cannot retain it after Dear ImGui returns.
 
 ### Changed
 
@@ -40,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Keep `PlatformIo` typed callback dispatch isolated between multiple ImGui contexts.
   - Generate correctly terminated glyph exclude range arrays and reject reversed or
     out-of-range glyph ranges.
+  - Validate `TextCallbackData` buffers and byte positions before exposing Rust slices or
+    converting positions into Dear ImGui's `int` callback APIs.
 
 ## [0.12.0] - 2026-05-09
 
