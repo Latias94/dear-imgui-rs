@@ -64,6 +64,19 @@ pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {
 pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {}
 
 #[cfg(feature = "multi-viewport")]
+unsafe fn clear_out_param_callbacks_for_platform_io(pio: *mut sys::ImGuiPlatformIO) {
+    if pio.is_null() {
+        return;
+    }
+    unsafe {
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(pio, None);
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(pio, None);
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(pio, None);
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
 fn assert_platform_io_out_param_hooks_available(callback_name: &str) {
     assert!(
         sys::HAS_PLATFORM_IO_OUT_PARAM_HOOKS,
@@ -161,32 +174,27 @@ impl PlatformIo {
     /// Clear all platform backend handlers.
     ///
     /// This resets the `Platform_*` callback table stored in `ImGuiPlatformIO`.
-    /// When called for the active context's `PlatformIo`, it also clears Rust typed callback
-    /// storage and the out-parameter callback shim used by the `ImVec2` platform getters.
+    /// This also clears Rust typed callback storage for this `PlatformIo`'s context and the
+    /// out-parameter callback shim used by aggregate-return platform getters.
     #[cfg(feature = "multi-viewport")]
     pub fn clear_platform_handlers(&mut self) {
         unsafe { sys::ImGuiPlatformIO_ClearPlatformHandlers(self.as_raw_mut()) }
 
-        if self.is_current_context_platform_io() {
-            trampolines::clear_platform_callbacks_for_current_context();
-            unsafe {
-                clear_out_param_callbacks_for_current_context();
-            }
+        trampolines::clear_platform_callbacks_for_platform_io(self.as_raw());
+        unsafe {
+            clear_out_param_callbacks_for_platform_io(self.as_raw_mut());
         }
     }
 
     /// Clear all renderer backend handlers.
     ///
     /// This resets the `Renderer_*` callback table stored in `ImGuiPlatformIO`.
-    /// When called for the active context's `PlatformIo`, it also clears Rust typed renderer
-    /// callback storage.
+    /// This also clears Rust typed renderer callback storage for this `PlatformIo`'s context.
     #[cfg(feature = "multi-viewport")]
     pub fn clear_renderer_handlers(&mut self) {
         unsafe { sys::ImGuiPlatformIO_ClearRendererHandlers(self.as_raw_mut()) }
 
-        if self.is_current_context_platform_io() {
-            trampolines::clear_renderer_callbacks_for_current_context();
-        }
+        trampolines::clear_renderer_callbacks_for_platform_io(self.as_raw());
     }
 
     /// Set platform create window callback (raw sys pointer)
@@ -1713,6 +1721,69 @@ mod tests {
 
         assert!(result.is_err());
 
+        drop(ctx_b);
+        drop(suspended_a);
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn clear_handlers_target_receiver_platform_io_not_current_context() {
+        unsafe extern "C" fn get_pos(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 41.0, y: 42.0 };
+            }
+        }
+        unsafe extern "C" fn create_window(_viewport: *mut Viewport) {}
+        unsafe extern "C" fn renderer_window(_viewport: *mut Viewport) {}
+
+        let mut ctx_a = crate::Context::create();
+        let raw_a = ctx_a.as_raw();
+        let pio_a = ctx_a.platform_io_mut().as_raw_mut();
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_pos_raw(Some(get_pos));
+        unsafe {
+            ctx_a
+                .platform_io_mut()
+                .set_platform_create_window(Some(create_window));
+            ctx_a
+                .platform_io_mut()
+                .set_renderer_create_window(Some(renderer_window));
+        }
+        let suspended_a = ctx_a.suspend();
+
+        let ctx_b = crate::Context::create();
+        let raw_b = ctx_b.as_raw();
+
+        unsafe {
+            PlatformIo::from_raw_mut(pio_a).clear_platform_handlers();
+            PlatformIo::from_raw_mut(pio_a).clear_renderer_handlers();
+        }
+
+        unsafe {
+            assert_eq!(sys::igGetCurrentContext(), raw_b);
+
+            let raw = &*pio_a;
+            assert!(raw.Platform_GetWindowPos.is_none());
+            assert!(raw.Platform_CreateWindow.is_none());
+            assert!(raw.Renderer_CreateWindow.is_none());
+
+            sys::igSetCurrentContext(raw_a);
+        }
+
+        let viewport = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
+        let mut pos = sys::ImVec2 { x: 1.0, y: 1.0 };
+        unsafe {
+            trampolines::platform_get_window_pos_out(viewport, &mut pos);
+            trampolines::platform_create_window(viewport);
+            trampolines::renderer_create_window(viewport);
+        }
+
+        assert_eq!((pos.x, pos.y), (0.0, 0.0));
+
+        unsafe {
+            sys::igSetCurrentContext(raw_b);
+        }
         drop(ctx_b);
         drop(suspended_a);
     }

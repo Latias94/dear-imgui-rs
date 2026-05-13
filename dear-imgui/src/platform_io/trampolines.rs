@@ -409,15 +409,18 @@ pub(super) fn clear_cb_for_current_context<T: Copy>(slot: &CallbackSlot<T>) {
     });
 }
 
-pub(crate) fn clear_platform_callbacks_for_current_context() {
-    let ctx = current_context();
-    if ctx.is_null() {
+pub(crate) fn clear_platform_callbacks_for_platform_io(platform_io: *const sys::ImGuiPlatformIO) {
+    if platform_io.is_null() {
         return;
     }
 
     CONTEXT_CALLBACKS.with(|contexts| {
         let mut contexts = contexts.borrow_mut();
-        if let Some(index) = contexts.iter().position(|entry| entry.ctx == ctx) {
+        if let Some(index) = contexts.iter().position(|entry| unsafe {
+            let entry_platform_io = sys::igGetPlatformIO_ContextPtr(entry.ctx);
+            !entry_platform_io.is_null()
+                && std::ptr::addr_eq(entry_platform_io.cast_const(), platform_io)
+        }) {
             contexts[index].callbacks.clear_platform();
             if contexts[index].callbacks.is_empty() {
                 contexts.remove(index);
@@ -426,15 +429,18 @@ pub(crate) fn clear_platform_callbacks_for_current_context() {
     });
 }
 
-pub(crate) fn clear_renderer_callbacks_for_current_context() {
-    let ctx = current_context();
-    if ctx.is_null() {
+pub(crate) fn clear_renderer_callbacks_for_platform_io(platform_io: *const sys::ImGuiPlatformIO) {
+    if platform_io.is_null() {
         return;
     }
 
     CONTEXT_CALLBACKS.with(|contexts| {
         let mut contexts = contexts.borrow_mut();
-        if let Some(index) = contexts.iter().position(|entry| entry.ctx == ctx) {
+        if let Some(index) = contexts.iter().position(|entry| unsafe {
+            let entry_platform_io = sys::igGetPlatformIO_ContextPtr(entry.ctx);
+            !entry_platform_io.is_null()
+                && std::ptr::addr_eq(entry_platform_io.cast_const(), platform_io)
+        }) {
             contexts[index].callbacks.clear_renderer();
             if contexts[index].callbacks.is_empty() {
                 contexts.remove(index);

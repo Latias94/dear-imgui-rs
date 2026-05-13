@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Clear Rust typed `PlatformIo` callback storage and `Platform_GetWindowPos/Size` out-parameter
     shim state when clearing platform handlers, and clear typed renderer callback storage when
     clearing renderer handlers.
+  - Clear `PlatformIo` typed callback and out-parameter shim storage by the receiver
+    `PlatformIo` instead of whichever context is current, preventing stale callback dispatch after
+    clearing handlers on a non-current context.
   - Generate correctly terminated glyph exclude range arrays and reject reversed or
     out-of-range glyph ranges.
   - Validate `TextCallbackData` buffers and byte positions before exposing Rust slices or
