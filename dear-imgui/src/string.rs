@@ -393,34 +393,13 @@ impl ImString {
     ///
     /// # Safety
     ///
-    /// This function is unsafe because it assumes the buffer contains valid UTF-8
-    /// and has a null terminator somewhere within the allocated capacity.
-    ///
-    /// If the terminator is not within the current Vec length, this will scan up to the full
-    /// allocation capacity. In that case, the caller must ensure that bytes up to the first
-    /// terminator (or the full capacity, if no terminator exists) are initialized.
+    /// This function is unsafe because it assumes the initialized bytes before the null terminator
+    /// contain valid UTF-8.
     pub unsafe fn refresh_len(&mut self) {
         if let Some(pos) = self.0.iter().position(|&b| b == 0) {
             self.0.truncate(pos + 1);
-            return;
-        }
-
-        let cap = self.0.capacity();
-        if cap == 0 {
+        } else {
             self.0.push(0);
-            return;
-        }
-
-        let ptr = self.0.as_ptr();
-        let bytes = unsafe { std::slice::from_raw_parts(ptr, cap) };
-        let pos = bytes.iter().position(|&b| b == 0).unwrap_or(cap - 1);
-        if pos == cap - 1 && bytes[pos] != 0 {
-            unsafe {
-                *self.0.as_mut_ptr().add(cap - 1) = 0;
-            }
-        }
-        unsafe {
-            self.0.set_len(pos + 1);
         }
     }
 
@@ -515,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn im_string_refresh_len_scans_capacity_when_len_has_no_nul() {
+    fn im_string_refresh_len_does_not_scan_spare_capacity() {
         let mut v = vec![b'x'; 16];
         v[..4].copy_from_slice(b"abcd");
         v[10] = 0;
@@ -523,7 +502,7 @@ mod tests {
 
         let mut s = ImString(v);
         unsafe { s.refresh_len() };
-        assert_eq!(s.to_str(), "abcdxxxxxx");
+        assert_eq!(s.to_str(), "abcd");
         assert_eq!(s.0.last().copied(), Some(0));
     }
 

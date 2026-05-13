@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ImGuiPlatformIO` callback table and Rust per-context callback storage cannot diverge.
   - Keep `String`-backed `InputText` buffers valid by round-tripping through an owned byte
     buffer and repairing invalid UTF-8 after Dear ImGui mutates the text.
+  - Stop `ImString::refresh_len()` from scanning uninitialized spare capacity when restoring
+    the logical length after C-side buffer writes.
   - Restore the previous Dear ImGui current context after panic in internal temporary context
     binding paths, avoiding cross-context state leaks during unwinding.
   - Resolve `Context` IO, font atlas, backend-name, settings-filename, and `PlatformIo`
