@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Change `PlatformIo::set_platform_get_window_pos{,_raw}` and
     `set_platform_get_window_size{,_raw}` callbacks to write `ImVec2` through out-parameters
     instead of returning it by value, matching the internal ABI-safe shim.
+  - Require typed and out-parameter-shim `PlatformIo` callback setters to be called on the
+    active context's `PlatformIo`; cross-context installation now panics instead of silently
+    splitting the C callback table and Rust callback storage across different contexts.
 - Core (`dear-imgui-sys`)
   - Stop exposing cimgui's `ImGuiPlatformIO_Set_Platform_GetWindowPos` and
     `ImGuiPlatformIO_Set_Platform_GetWindowSize` helpers from generated bindings. Use the
@@ -59,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevent safe Rust from producing dangling FFI calls when `RegisteredUserTexture`,
     `Context`, or `OwnedTextureData` are dropped in different orders.
   - Keep `PlatformIo` typed callback dispatch isolated between multiple ImGui contexts.
+  - Reject cross-context `PlatformIo` typed/out-parameter callback installation so the
+    `ImGuiPlatformIO` callback table and Rust per-context callback storage cannot diverge.
   - Resolve clipboard callbacks through the `ImGuiContext*` passed by Dear ImGui instead of
     whichever context is currently bound, preventing cross-context clipboard backend mixups.
   - Clear Rust typed `PlatformIo` callback storage and `Platform_GetWindowPos/Size` out-parameter
