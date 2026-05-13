@@ -1043,6 +1043,14 @@ mod tests {
                 *out_size = crate::sys::ImVec2 { x: 30.0, y: 40.0 };
             }
         }
+        unsafe extern "C" fn get_scale(
+            _viewport: *mut crate::sys::ImGuiViewport,
+            out_scale: *mut crate::sys::ImVec2,
+        ) {
+            if let Some(out_scale) = unsafe { out_scale.as_mut() } {
+                *out_scale = crate::sys::ImVec2 { x: 1.0, y: 2.0 };
+            }
+        }
 
         let mut ctx = Context::create();
 
@@ -1050,23 +1058,27 @@ mod tests {
             let pio = ctx.platform_io_mut();
             pio.set_platform_get_window_pos_raw(Some(get_pos));
             pio.set_platform_get_window_size_raw(Some(get_size));
+            pio.set_platform_get_window_framebuffer_scale_raw(Some(get_scale));
 
             let raw = unsafe { &*pio.as_raw() };
             assert!(raw.Platform_GetWindowPos.is_some());
             assert!(raw.Platform_GetWindowSize.is_some());
+            assert!(raw.Platform_GetWindowFramebufferScale.is_some());
         }
         assert!(
             ctx.io().backend_language_user_data().is_null(),
-            "cimgui Platform_GetWindowPos/Size helpers must not occupy BackendLanguageUserData"
+            "PlatformIO out-param helpers must not occupy BackendLanguageUserData"
         );
 
         let pio = ctx.platform_io_mut();
         pio.set_platform_get_window_pos_raw(None);
         pio.set_platform_get_window_size_raw(None);
+        pio.set_platform_get_window_framebuffer_scale_raw(None);
 
         let raw = unsafe { &*pio.as_raw() };
         assert!(raw.Platform_GetWindowPos.is_none());
         assert!(raw.Platform_GetWindowSize.is_none());
+        assert!(raw.Platform_GetWindowFramebufferScale.is_none());
     }
 
     #[test]

@@ -55,6 +55,7 @@ pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {
     unsafe {
         sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(pio, None);
     }
 }
 
@@ -136,7 +137,7 @@ impl PlatformIo {
     ///
     /// This resets the `Platform_*` callback table stored in `ImGuiPlatformIO`.
     /// When called for the active context's `PlatformIo`, it also clears Rust typed callback
-    /// storage and the out-parameter callback shim used by `Platform_GetWindowPos/Size`.
+    /// storage and the out-parameter callback shim used by the `ImVec2` platform getters.
     #[cfg(feature = "multi-viewport")]
     pub fn clear_platform_handlers(&mut self) {
         unsafe { sys::ImGuiPlatformIO_ClearPlatformHandlers(self.as_raw_mut()) }
@@ -475,6 +476,98 @@ impl PlatformIo {
                     ),
                 ),
                 None => sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
+                    self.as_raw_mut(),
+                    None,
+                ),
+            }
+        }
+    }
+
+    /// Set platform get window framebuffer scale callback (raw)
+    ///
+    /// This uses this crate's out-parameter shim internally instead of writing
+    /// `ImGuiPlatformIO::Platform_GetWindowFramebufferScale` directly. The shim stores a
+    /// C-compatible out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk
+    /// that returns `ImVec2` by value, which avoids exposing the fragile direct small-aggregate
+    /// callback ABI on MSVC.
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_platform_get_window_framebuffer_scale_raw(
+        &mut self,
+        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)>,
+    ) {
+        use trampolines::*;
+
+        if callback.is_some() {
+            assert_platform_io_out_param_hooks_available("Platform_GetWindowFramebufferScale");
+        }
+
+        match callback {
+            Some(cb) => {
+                store_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB, Some(cb));
+                store_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB, None);
+            }
+            None => {
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB);
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB);
+            }
+        }
+
+        unsafe {
+            match callback {
+                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
+                    self.as_raw_mut(),
+                    Some(
+                        trampolines::platform_get_window_framebuffer_scale_out
+                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+                    ),
+                ),
+                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
+                    self.as_raw_mut(),
+                    None,
+                ),
+            }
+        }
+    }
+
+    /// Set platform get window framebuffer scale callback (typed Viewport).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window`].
+    ///
+    /// See [`Self::set_platform_get_window_framebuffer_scale_raw`] for why this path must go
+    /// through the out-parameter shim.
+    #[cfg(feature = "multi-viewport")]
+    pub unsafe fn set_platform_get_window_framebuffer_scale(
+        &mut self,
+        callback: Option<unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec2)>,
+    ) {
+        use trampolines::*;
+        if callback.is_some() {
+            assert_platform_io_out_param_hooks_available("Platform_GetWindowFramebufferScale");
+        }
+
+        match callback {
+            Some(cb) => {
+                store_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB, None);
+                store_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB, Some(cb));
+            }
+            None => {
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB);
+                clear_cb_for_current_context(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB);
+            }
+        }
+
+        unsafe {
+            match callback {
+                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
+                    self.as_raw_mut(),
+                    Some(
+                        trampolines::platform_get_window_framebuffer_scale_out
+                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+                    ),
+                ),
+                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
                     self.as_raw_mut(),
                     None,
                 ),
@@ -1235,27 +1328,37 @@ mod tests {
                 *out = sys::ImVec2 { x: 43.0, y: 44.0 };
             }
         }
+        unsafe extern "C" fn get_scale(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 45.0, y: 46.0 };
+            }
+        }
 
         let mut ctx = crate::Context::create();
         let pio = ctx.platform_io_mut();
         pio.set_platform_get_window_pos_raw(Some(get_pos));
         pio.set_platform_get_window_size_raw(Some(get_size));
+        pio.set_platform_get_window_framebuffer_scale_raw(Some(get_scale));
         pio.clear_platform_handlers();
 
         let raw = unsafe { &*pio.as_raw() };
         assert!(raw.Platform_GetWindowPos.is_none());
         assert!(raw.Platform_GetWindowSize.is_none());
+        assert!(raw.Platform_GetWindowFramebufferScale.is_none());
 
         let viewport = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
         let mut pos = sys::ImVec2 { x: 1.0, y: 1.0 };
         let mut size = sys::ImVec2 { x: 1.0, y: 1.0 };
+        let mut scale = sys::ImVec2 { x: 2.0, y: 2.0 };
         unsafe {
             trampolines::platform_get_window_pos_out(viewport, &mut pos);
             trampolines::platform_get_window_size_out(viewport, &mut size);
+            trampolines::platform_get_window_framebuffer_scale_out(viewport, &mut scale);
         }
 
         assert_eq!((pos.x, pos.y), (0.0, 0.0));
         assert_eq!((size.x, size.y), (0.0, 0.0));
+        assert_eq!((scale.x, scale.y), (1.0, 1.0));
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -1281,6 +1384,22 @@ mod tests {
                 *out = sys::ImVec2 { x: 23.0, y: 24.0 };
             }
         }
+        unsafe extern "C" fn get_scale_a(
+            _viewport: *mut sys::ImGuiViewport,
+            out: *mut sys::ImVec2,
+        ) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 1.0, y: 2.0 };
+            }
+        }
+        unsafe extern "C" fn get_scale_b(
+            _viewport: *mut sys::ImGuiViewport,
+            out: *mut sys::ImVec2,
+        ) {
+            if let Some(out) = unsafe { out.as_mut() } {
+                *out = sys::ImVec2 { x: 3.0, y: 4.0 };
+            }
+        }
 
         let mut ctx_a = crate::Context::create();
         let language_user_data_a = std::ptr::NonNull::<u8>::dangling().as_ptr().cast();
@@ -1293,6 +1412,9 @@ mod tests {
         ctx_a
             .platform_io_mut()
             .set_platform_get_window_size_raw(Some(get_size_a));
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_framebuffer_scale_raw(Some(get_scale_a));
         assert_eq!(
             ctx_a.io().backend_language_user_data(),
             language_user_data_a
@@ -1311,6 +1433,9 @@ mod tests {
         ctx_b
             .platform_io_mut()
             .set_platform_get_window_size_raw(Some(get_size_b));
+        ctx_b
+            .platform_io_mut()
+            .set_platform_get_window_framebuffer_scale_raw(Some(get_scale_b));
         assert_eq!(
             ctx_b.io().backend_language_user_data(),
             language_user_data_b
@@ -1318,33 +1443,44 @@ mod tests {
 
         let mut b_pos = sys::ImVec2 { x: 0.0, y: 0.0 };
         let mut b_size = sys::ImVec2 { x: 0.0, y: 0.0 };
+        let mut b_scale = sys::ImVec2 { x: 0.0, y: 0.0 };
         unsafe {
             trampolines::platform_get_window_pos_out(std::ptr::null_mut(), &mut b_pos);
             trampolines::platform_get_window_size_out(std::ptr::null_mut(), &mut b_size);
+            trampolines::platform_get_window_framebuffer_scale_out(
+                std::ptr::null_mut(),
+                &mut b_scale,
+            );
         }
         assert_eq!((b_pos.x, b_pos.y), (0.0, 0.0));
         assert_eq!((b_size.x, b_size.y), (0.0, 0.0));
+        assert_eq!((b_scale.x, b_scale.y), (1.0, 1.0));
 
         let viewport_b = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
         unsafe {
             trampolines::platform_get_window_pos_out(viewport_b, &mut b_pos);
             trampolines::platform_get_window_size_out(viewport_b, &mut b_size);
+            trampolines::platform_get_window_framebuffer_scale_out(viewport_b, &mut b_scale);
         }
         assert_eq!((b_pos.x, b_pos.y), (21.0, 22.0));
         assert_eq!((b_size.x, b_size.y), (23.0, 24.0));
+        assert_eq!((b_scale.x, b_scale.y), (3.0, 4.0));
 
         let suspended_b = ctx_b.suspend();
         let ctx_a = suspended_a.activate().expect("ctx_a should activate");
 
         let mut a_pos = sys::ImVec2 { x: 0.0, y: 0.0 };
         let mut a_size = sys::ImVec2 { x: 0.0, y: 0.0 };
+        let mut a_scale = sys::ImVec2 { x: 0.0, y: 0.0 };
         let viewport_a = std::ptr::NonNull::<sys::ImGuiViewport>::dangling().as_ptr();
         unsafe {
             trampolines::platform_get_window_pos_out(viewport_a, &mut a_pos);
             trampolines::platform_get_window_size_out(viewport_a, &mut a_size);
+            trampolines::platform_get_window_framebuffer_scale_out(viewport_a, &mut a_scale);
         }
         assert_eq!((a_pos.x, a_pos.y), (11.0, 12.0));
         assert_eq!((a_size.x, a_size.y), (13.0, 14.0));
+        assert_eq!((a_scale.x, a_scale.y), (1.0, 2.0));
 
         drop(ctx_a);
         drop(suspended_b);

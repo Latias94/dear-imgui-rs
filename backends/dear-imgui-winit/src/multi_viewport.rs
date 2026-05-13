@@ -114,43 +114,24 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
         pio.set_platform_destroy_window_raw(Some(winit_destroy_window));
         pio.set_platform_show_window_raw(Some(winit_show_window));
         pio.set_platform_set_window_pos_raw(Some(winit_set_window_pos));
-        // Avoid direct ImVec2 return on MSVC; use dear-imgui-sys out-param shims below.
-        pio.set_platform_get_window_pos_raw(None);
+        // Avoid direct ImVec2 return; use out-parameter shims for all ImVec2 getters.
+        pio.set_platform_get_window_pos_raw(Some(winit_get_window_pos_out));
         pio.set_platform_set_window_size_raw(Some(winit_set_window_size));
-        pio.set_platform_get_window_size_raw(None);
+        pio.set_platform_get_window_size_raw(Some(winit_get_window_size_out));
         pio.set_platform_set_window_focus_raw(Some(winit_set_window_focus));
         pio.set_platform_get_window_focus_raw(Some(winit_get_window_focus));
         pio.set_platform_get_window_minimized_raw(Some(winit_get_window_minimized));
         pio.set_platform_set_window_title_raw(Some(winit_set_window_title));
         pio.set_platform_update_window_raw(Some(winit_update_window));
 
-        // Also register framebuffer/DPI scale and work area insets callbacks
+        // Also register framebuffer/DPI scale and work area insets callbacks.
         let pio_sys = dear_imgui_rs::sys::igGetPlatformIO_Nil();
-        // Install out-parameter getters via dear-imgui-sys shims (avoid struct-return ABI).
-        dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
-            pio_sys,
-            Some(winit_get_window_pos_out),
-        );
-        dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
-            pio_sys,
-            Some(winit_get_window_size_out),
-        );
-        // Framebuffer scale callback.
-        //
-        // On MSVC, returning ImVec2 by value from a foreign callback can be ABI-fragile, so we
-        // keep this disabled on Windows for now and rely on Viewport::FramebufferScale and
-        // io.DisplayFramebufferScale instead.
-        #[cfg(not(target_os = "windows"))]
-        {
-            // ImGui will use FramebufferScale when available, falling back to
-            // DisplayFramebufferScale otherwise.
-            (*pio_sys).Platform_GetWindowFramebufferScale =
-                Some(winit_get_window_framebuffer_scale);
-        }
-        #[cfg(target_os = "windows")]
-        {
-            (*pio_sys).Platform_GetWindowFramebufferScale = None;
-        }
+        // ImGui will use FramebufferScale when available, falling back to
+        // DisplayFramebufferScale otherwise. Install through the out-parameter shim to avoid the
+        // struct-return callback ABI.
+        pio.set_platform_get_window_framebuffer_scale_raw(Some(
+            winit_get_window_framebuffer_scale_out,
+        ));
         (*pio_sys).Platform_GetWindowDpiScale = Some(winit_get_window_dpi_scale);
         (*pio_sys).Platform_GetWindowWorkAreaInsets = None;
         (*pio_sys).Platform_OnChangedViewport = Some(winit_on_changed_viewport);
@@ -511,9 +492,7 @@ pub fn shutdown_multi_viewport_support() {
 
         let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
         if !pio.is_null() {
-            dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(pio, None);
-            dear_imgui_rs::sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
-            dear_imgui_rs::sys::ImGuiPlatformIO_ClearPlatformHandlers(pio);
+            dear_imgui_rs::platform_io::PlatformIo::from_raw_mut(pio).clear_platform_handlers();
         }
     }
 }
@@ -1012,13 +991,19 @@ unsafe extern "C" fn winit_set_window_title(
 }
 
 /// Get window framebuffer scale
-#[cfg(not(target_os = "windows"))]
-unsafe extern "C" fn winit_get_window_framebuffer_scale(
+unsafe extern "C" fn winit_get_window_framebuffer_scale_out(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
-) -> dear_imgui_rs::sys::ImVec2 {
+    out_scale: *mut dear_imgui_rs::sys::ImVec2,
+) {
     abort_on_panic("Platform_GetWindowFramebufferScale", || {
+        if out_scale.is_null() {
+            return;
+        }
+
+        let mut result = dear_imgui_rs::sys::ImVec2 { x: 1.0, y: 1.0 };
         if vp.is_null() {
-            return dear_imgui_rs::sys::ImVec2 { x: 1.0, y: 1.0 };
+            unsafe { *out_scale = result };
+            return;
         }
 
         let vp_ref = unsafe { &*vp };
@@ -1027,7 +1012,8 @@ unsafe extern "C" fn winit_get_window_framebuffer_scale(
             // Dear ImGui relies on this to compute correct scaling when windows move between
             // viewports. Upstream backends (GLFW/SDL) do the same.
             if vd.window.is_null() {
-                return dear_imgui_rs::sys::ImVec2 { x: 1.0, y: 1.0 };
+                unsafe { *out_scale = result };
+                return;
             }
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 let scale = window.scale_factor() as f32;
@@ -1039,10 +1025,10 @@ unsafe extern "C" fn winit_get_window_framebuffer_scale(
                     );
                     vd.last_log_fb_scale = scale;
                 }
-                return dear_imgui_rs::sys::ImVec2 { x: scale, y: scale };
+                result = dear_imgui_rs::sys::ImVec2 { x: scale, y: scale };
             }
         }
-        dear_imgui_rs::sys::ImVec2 { x: 1.0, y: 1.0 }
+        unsafe { *out_scale = result };
     })
 }
 
@@ -1061,13 +1047,6 @@ unsafe extern "C" fn winit_get_window_dpi_scale(vp: *mut dear_imgui_rs::sys::ImG
         }
         if !scale.is_finite() || scale <= 0.0 {
             scale = 1.0;
-        }
-        // On Windows we keep Platform_GetWindowFramebufferScale disabled (ABI concerns).
-        // Keep the per-viewport cached framebuffer scale in sync via this callback.
-        #[cfg(target_os = "windows")]
-        {
-            vp_ref.FramebufferScale.x = scale;
-            vp_ref.FramebufferScale.y = scale;
         }
         scale
     })

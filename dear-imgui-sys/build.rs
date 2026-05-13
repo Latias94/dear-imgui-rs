@@ -187,7 +187,7 @@ fn main() {
     } else if cfg.target_arch != "wasm32" {
         println!(
             "cargo:warning=dear-imgui-sys: PlatformIO out-parameter hooks are unavailable; \
-             Platform_GetWindowPos/Size callback installation will panic if used."
+             Platform_GetWindowPos/Size/FramebufferScale callback installation will panic if used."
         );
     }
 

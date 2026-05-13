@@ -26,6 +26,8 @@ struct CallbackSet {
     platform_set_window_size: Option<ViewportVec2Cb>,
     platform_get_window_size_raw: Option<RawViewportVec2OutCb>,
     platform_get_window_size: Option<ViewportVec2OutCb>,
+    platform_get_window_framebuffer_scale_raw: Option<RawViewportVec2OutCb>,
+    platform_get_window_framebuffer_scale: Option<ViewportVec2OutCb>,
     platform_set_window_focus: Option<ViewportCb>,
     platform_get_window_dpi_scale: Option<ViewportF32RetCb>,
     platform_get_window_focus: Option<ViewportBoolRetCb>,
@@ -54,6 +56,8 @@ impl CallbackSet {
         self.platform_set_window_size = None;
         self.platform_get_window_size_raw = None;
         self.platform_get_window_size = None;
+        self.platform_get_window_framebuffer_scale_raw = None;
+        self.platform_get_window_framebuffer_scale = None;
         self.platform_set_window_focus = None;
         self.platform_get_window_dpi_scale = None;
         self.platform_get_window_focus = None;
@@ -84,6 +88,8 @@ impl CallbackSet {
             && self.platform_set_window_size.is_none()
             && self.platform_get_window_size_raw.is_none()
             && self.platform_get_window_size.is_none()
+            && self.platform_get_window_framebuffer_scale_raw.is_none()
+            && self.platform_get_window_framebuffer_scale.is_none()
             && self.platform_set_window_focus.is_none()
             && self.platform_get_window_dpi_scale.is_none()
             && self.platform_get_window_focus.is_none()
@@ -191,6 +197,20 @@ callback_slot!(
     ViewportVec2OutCb,
     get_platform_get_window_size,
     set_platform_get_window_size
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB,
+    platform_get_window_framebuffer_scale_raw,
+    RawViewportVec2OutCb,
+    get_platform_get_window_framebuffer_scale_raw,
+    set_platform_get_window_framebuffer_scale_raw
+);
+callback_slot!(
+    PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB,
+    platform_get_window_framebuffer_scale,
+    ViewportVec2OutCb,
+    get_platform_get_window_framebuffer_scale,
+    set_platform_get_window_framebuffer_scale
 );
 callback_slot!(
     PLATFORM_SET_WINDOW_FOCUS_CB,
@@ -528,6 +548,32 @@ pub unsafe extern "C" fn platform_get_window_size_out(
     }
 
     unsafe { *out_size = size };
+}
+pub unsafe extern "C" fn platform_get_window_framebuffer_scale_out(
+    vp: *mut sys::ImGuiViewport,
+    out_scale: *mut sys::ImVec2,
+) {
+    if out_scale.is_null() {
+        return;
+    }
+
+    let mut scale = sys::ImVec2 { x: 1.0, y: 1.0 };
+    if vp.is_null() {
+    } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB) {
+        abort_if_panicked(
+            "Platform_GetWindowFramebufferScale",
+            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp, &mut scale) })),
+        );
+    } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB) {
+        abort_if_panicked(
+            "Platform_GetWindowFramebufferScale",
+            catch_unwind(AssertUnwindSafe(|| unsafe {
+                cb(vp as *mut Viewport, &mut scale)
+            })),
+        );
+    }
+
+    unsafe { *out_scale = scale };
 }
 pub unsafe extern "C" fn platform_set_window_focus(vp: *mut sys::ImGuiViewport) {
     if vp.is_null() {

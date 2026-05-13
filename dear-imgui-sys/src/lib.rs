@@ -122,6 +122,11 @@ unsafe extern "C" {
         platform_io: *mut ImGuiPlatformIO,
         user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_size: *mut ImVec2)>,
     );
+
+    fn dear_imgui_rs_platform_io_set_platform_get_window_framebuffer_scale(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_scale: *mut ImVec2)>,
+    );
 }
 
 /// Install a C-compatible out-parameter callback for `ImGuiPlatformIO::Platform_GetWindowPos`.
@@ -181,6 +186,41 @@ pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
             panic!(
                 "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
                  rebuild without IMGUI_SYS_SKIP_CC to install Platform_GetWindowSize callbacks"
+            );
+        }
+    }
+}
+
+/// Install a C-compatible out-parameter callback for
+/// `ImGuiPlatformIO::Platform_GetWindowFramebufferScale`.
+///
+/// See [`ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam`] for the ABI rationale.
+///
+/// # Safety
+///
+/// `platform_io` must be null or point to a live `ImGuiPlatformIO`. `user_callback`, when present,
+/// must obey Dear ImGui's platform callback contract and must not unwind.
+#[inline]
+pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_scale: *mut ImVec2)>,
+) {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        dear_imgui_rs_platform_io_set_platform_get_window_framebuffer_scale(
+            platform_io,
+            user_callback,
+        )
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        if user_callback.is_some() {
+            panic!(
+                "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+                 rebuild without IMGUI_SYS_SKIP_CC to install \
+                 Platform_GetWindowFramebufferScale callbacks"
             );
         }
     }

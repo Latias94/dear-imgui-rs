@@ -32,9 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core (`dear-imgui-rs`)
   - Store typed `PlatformIo` callbacks per active `ImGuiContext` instead of in process-wide
     Rust slots, while preserving the `dear-imgui-sys` out-parameter shim path for
-    `Platform_GetWindowPos` and `Platform_GetWindowSize`.
+    `Platform_GetWindowPos`, `Platform_GetWindowSize`, and
+    `Platform_GetWindowFramebufferScale`.
   - Align the public `PlatformIo` get-window pos/size callback shape with the
     out-parameter shim used to cross the C++ `ImGuiPlatformIO` callback ABI safely.
+  - Add out-parameter `PlatformIo` setters for `Platform_GetWindowFramebufferScale`, matching
+    the ABI-safe shape used by the other `ImVec2` platform getters.
   - Track `DrawListMut` borrows per raw `ImDrawList*` on the current thread instead of using
     process-wide locks, and resolve background/foreground draw lists against the main viewport.
   - Make `DrawListMut::clone_output()` return `render::OwnedDrawList`.
@@ -62,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Report unavailable `PlatformIO` out-parameter hooks through a capability flag and explicit
     callback-installation panic instead of leaving raw external symbols unresolved.
 - Backends
+  - Route winit multi-viewport `Platform_GetWindowFramebufferScale` through the same
+    out-parameter shim as the window position and size getters, including on Windows.
   - Remove obsolete winit multi-viewport `ImVec2` return-by-value getter code paths so
     `Platform_GetWindowPos/Size` consistently use the out-parameter shim.
   - Clear winit multi-viewport platform callbacks and out-parameter getter shims during
