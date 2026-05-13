@@ -9,10 +9,9 @@ use ash::{
 use dear_imgui_rs::Context;
 use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::Viewport;
+use dear_imgui_rs::sys;
 use std::ffi::c_void;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
@@ -88,10 +87,6 @@ impl ViewportAshData {
     }
 }
 
-static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
-static RENDERER_BORROWED: AtomicBool = AtomicBool::new(false);
-static GLOBAL: Mutex<Option<GlobalHandles>> = Mutex::new(None);
-
 #[derive(Clone)]
 struct GlobalHandles {
     entry: ash::Entry,
@@ -101,6 +96,100 @@ struct GlobalHandles {
     graphics_queue_family_index: u32,
     present_queue_family_index: u32,
     in_flight_frames: usize,
+}
+
+static RENDERERS: Mutex<Vec<ContextRendererState>> = Mutex::new(Vec::new());
+
+struct ContextRendererState {
+    ctx: usize,
+    renderer: usize,
+    borrowed: bool,
+    global: Option<GlobalHandles>,
+}
+
+struct CurrentContextGuard {
+    previous: *mut sys::ImGuiContext,
+    target: *mut sys::ImGuiContext,
+}
+
+impl CurrentContextGuard {
+    unsafe fn bind(target: *mut sys::ImGuiContext) -> Self {
+        let previous = unsafe { sys::igGetCurrentContext() };
+        if previous != target {
+            unsafe { sys::igSetCurrentContext(target) };
+        }
+        Self { previous, target }
+    }
+}
+
+impl Drop for CurrentContextGuard {
+    fn drop(&mut self) {
+        if self.previous != self.target {
+            unsafe { sys::igSetCurrentContext(self.previous) };
+        }
+    }
+}
+
+fn upsert_renderer_state(
+    ctx: *mut sys::ImGuiContext,
+    renderer: *mut AshRenderer,
+    global: Option<GlobalHandles>,
+) {
+    if ctx.is_null() {
+        return;
+    }
+
+    let ctx = ctx as usize;
+    let renderer = renderer as usize;
+    let mut renderers = RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if let Some(entry) = renderers.iter_mut().find(|entry| entry.ctx == ctx) {
+        entry.renderer = renderer;
+        entry.global = global;
+        return;
+    }
+
+    renderers.push(ContextRendererState {
+        ctx,
+        renderer,
+        borrowed: false,
+        global,
+    });
+}
+
+fn remove_renderer_state_for_context(ctx: *mut sys::ImGuiContext) {
+    if ctx.is_null() {
+        return;
+    }
+
+    let ctx = ctx as usize;
+    RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .retain(|entry| entry.ctx != ctx);
+}
+
+fn remove_renderer_state_for_renderer(renderer: *mut AshRenderer) {
+    let renderer = renderer as usize;
+    RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .retain(|entry| entry.renderer != renderer);
+}
+
+fn global_handles() -> Option<GlobalHandles> {
+    let ctx = unsafe { sys::igGetCurrentContext() } as usize;
+    if ctx == 0 {
+        return None;
+    }
+
+    RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .iter()
+        .find(|entry| entry.ctx == ctx)
+        .and_then(|entry| entry.global.clone())
 }
 
 /// Enable Vulkan multi-viewport (winit): installs renderer callbacks.
@@ -114,6 +203,8 @@ pub fn enable(
     graphics_queue_family_index: u32,
     present_queue_family_index: u32,
 ) {
+    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
+
     unsafe {
         let platform_io = imgui_context.platform_io_mut();
         platform_io.set_renderer_create_window(Some(
@@ -130,31 +221,29 @@ pub fn enable(
         platform_io.set_platform_swap_buffers_raw(Some(platform_swap_buffers_sys));
     }
 
-    RENDERER_PTR.store(renderer as *mut _ as usize, Ordering::SeqCst);
-    let mut g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
-    *g = Some(GlobalHandles {
-        entry,
-        instance,
-        physical_device,
-        present_queue,
-        graphics_queue_family_index,
-        present_queue_family_index,
-        in_flight_frames: renderer.options.in_flight_frames.max(1),
-    });
+    upsert_renderer_state(
+        imgui_context.as_raw(),
+        renderer as *mut _,
+        Some(GlobalHandles {
+            entry,
+            instance,
+            physical_device,
+            present_queue,
+            graphics_queue_family_index,
+            present_queue_family_index,
+            in_flight_frames: renderer.options.in_flight_frames.max(1),
+        }),
+    );
 }
 
 pub(crate) fn clear_for_drop(renderer: *mut AshRenderer) {
-    if RENDERER_PTR
-        .compare_exchange(renderer as usize, 0, Ordering::SeqCst, Ordering::SeqCst)
-        .is_ok()
-    {
-        let mut g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
-        *g = None;
-    }
+    remove_renderer_state_for_renderer(renderer);
 }
 
 /// Disable multi-viewport callbacks and clear stored globals.
 pub fn disable(imgui_context: &mut Context) {
+    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
+
     unsafe {
         let platform_io = imgui_context.platform_io_mut();
         platform_io.set_renderer_create_window(None);
@@ -163,9 +252,7 @@ pub fn disable(imgui_context: &mut Context) {
         platform_io.set_platform_render_window_raw(None);
         platform_io.set_platform_swap_buffers_raw(None);
     }
-    RENDERER_PTR.store(0, Ordering::SeqCst);
-    let mut g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
-    *g = None;
+    remove_renderer_state_for_context(imgui_context.as_raw());
 }
 
 /// Convenience helper that disables callbacks and destroys all platform windows.
@@ -174,34 +261,108 @@ pub fn shutdown_multi_viewport_support(context: &mut Context) {
     context.destroy_platform_windows();
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::MaybeUninit;
+
+    #[test]
+    fn renderer_state_is_context_local() {
+        let ctx_a = Context::create();
+        let raw_a = ctx_a.as_raw();
+        let mut renderer_a = MaybeUninit::<AshRenderer>::uninit();
+        let renderer_a_ptr = renderer_a.as_mut_ptr();
+        upsert_renderer_state(raw_a, renderer_a_ptr, None);
+
+        unsafe {
+            sys::igSetCurrentContext(std::ptr::null_mut());
+        }
+
+        let ctx_b = Context::create();
+        let raw_b = ctx_b.as_raw();
+        let mut renderer_b = MaybeUninit::<AshRenderer>::uninit();
+        let renderer_b_ptr = renderer_b.as_mut_ptr();
+        upsert_renderer_state(raw_b, renderer_b_ptr, None);
+
+        unsafe {
+            sys::igSetCurrentContext(raw_a);
+            {
+                let borrowed = borrow_renderer().expect("renderer for context A");
+                assert_eq!(borrowed.renderer, renderer_a_ptr);
+            }
+
+            sys::igSetCurrentContext(raw_b);
+            {
+                let borrowed = borrow_renderer().expect("renderer for context B");
+                assert_eq!(borrowed.renderer, renderer_b_ptr);
+            }
+        }
+
+        remove_renderer_state_for_context(raw_b);
+        unsafe {
+            sys::igSetCurrentContext(raw_b);
+            assert!(borrow_renderer().is_none());
+
+            sys::igSetCurrentContext(raw_a);
+            assert!(borrow_renderer().is_some());
+        }
+
+        remove_renderer_state_for_context(raw_a);
+        unsafe {
+            sys::igSetCurrentContext(raw_a);
+        }
+        drop(ctx_a);
+        unsafe {
+            sys::igSetCurrentContext(raw_b);
+        }
+        drop(ctx_b);
+    }
+}
+
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn borrow_renderer() -> Option<RendererBorrowGuard> {
-    let ptr = RENDERER_PTR.load(Ordering::SeqCst) as *mut AshRenderer;
-    if ptr.is_null() {
+    let ctx = unsafe { sys::igGetCurrentContext() } as usize;
+    if ctx == 0 {
         return None;
     }
-    if RENDERER_BORROWED
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
+
+    let mut renderers = RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let Some(entry) = renderers.iter_mut().find(|entry| entry.ctx == ctx) else {
+        return None;
+    };
+    if entry.renderer == 0 {
+        return None;
+    }
+    if entry.borrowed {
         eprintln!("[ash-mv] renderer already mutably borrowed; skipping callback");
         return None;
     }
-    Some(RendererBorrowGuard { renderer: ptr })
-}
 
-fn global_handles() -> Option<GlobalHandles> {
-    let g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
-    g.as_ref().cloned()
+    entry.borrowed = true;
+    Some(RendererBorrowGuard {
+        ctx,
+        renderer: entry.renderer as *mut AshRenderer,
+    })
 }
 
 struct RendererBorrowGuard {
+    ctx: usize,
     renderer: *mut AshRenderer,
 }
 
 impl Drop for RendererBorrowGuard {
     fn drop(&mut self) {
-        RENDERER_BORROWED.store(false, Ordering::SeqCst);
+        let mut renderers = RENDERERS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(entry) = renderers
+            .iter_mut()
+            .find(|entry| entry.ctx == self.ctx && entry.renderer == self.renderer as usize)
+        {
+            entry.borrowed = false;
+        }
     }
 }
 

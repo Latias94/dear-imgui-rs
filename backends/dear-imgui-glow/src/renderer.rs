@@ -1528,23 +1528,97 @@ pub mod multi_viewport {
     use glow::HasContext;
     use std::ffi::c_void;
     use std::ops::{Deref, DerefMut};
-    use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
-    // Global pointer to the active GlowRenderer used for multi-viewport rendering.
-    //
-    // This mirrors the pattern used by the WGPU backend and the official C++ backends,
-    // where the renderer backend installs callbacks in ImGuiPlatformIO.
-    static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
-    static RENDERER_BORROWED: AtomicBool = AtomicBool::new(false);
+    static RENDERERS: Mutex<Vec<ContextRendererState>> = Mutex::new(Vec::new());
+
+    struct ContextRendererState {
+        ctx: usize,
+        renderer: usize,
+        borrowed: bool,
+    }
+
+    struct CurrentContextGuard {
+        previous: *mut sys::ImGuiContext,
+        target: *mut sys::ImGuiContext,
+    }
+
+    impl CurrentContextGuard {
+        unsafe fn bind(target: *mut sys::ImGuiContext) -> Self {
+            let previous = unsafe { sys::igGetCurrentContext() };
+            if previous != target {
+                unsafe { sys::igSetCurrentContext(target) };
+            }
+            Self { previous, target }
+        }
+    }
+
+    impl Drop for CurrentContextGuard {
+        fn drop(&mut self) {
+            if self.previous != self.target {
+                unsafe { sys::igSetCurrentContext(self.previous) };
+            }
+        }
+    }
+
+    fn upsert_renderer_state(ctx: *mut sys::ImGuiContext, renderer: *mut GlowRenderer) {
+        if ctx.is_null() {
+            return;
+        }
+
+        let ctx = ctx as usize;
+        let renderer = renderer as usize;
+        let mut renderers = RENDERERS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(entry) = renderers.iter_mut().find(|entry| entry.ctx == ctx) {
+            entry.renderer = renderer;
+            return;
+        }
+
+        renderers.push(ContextRendererState {
+            ctx,
+            renderer,
+            borrowed: false,
+        });
+    }
+
+    fn remove_renderer_state_for_context(ctx: *mut sys::ImGuiContext) {
+        if ctx.is_null() {
+            return;
+        }
+
+        let ctx = ctx as usize;
+        RENDERERS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .retain(|entry| entry.ctx != ctx);
+    }
+
+    fn remove_renderer_state_for_renderer(renderer: *mut GlowRenderer) {
+        let renderer = renderer as usize;
+        RENDERERS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .retain(|entry| entry.renderer != renderer);
+    }
 
     struct RendererBorrowGuard {
+        ctx: usize,
         renderer: *mut GlowRenderer,
     }
 
     impl Drop for RendererBorrowGuard {
         fn drop(&mut self) {
-            RENDERER_BORROWED.store(false, Ordering::SeqCst);
+            let mut renderers = RENDERERS
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            if let Some(entry) = renderers
+                .iter_mut()
+                .find(|entry| entry.ctx == self.ctx && entry.renderer == self.renderer as usize)
+            {
+                entry.borrowed = false;
+            }
         }
     }
 
@@ -1552,46 +1626,54 @@ pub mod multi_viewport {
         type Target = GlowRenderer;
 
         fn deref(&self) -> &Self::Target {
-            // Safety: guarded by `RENDERER_BORROWED` and pointer validity contract of `enable`.
+            // Safety: guarded by the context-local borrow flag and pointer validity contract of `enable`.
             unsafe { &*self.renderer }
         }
     }
 
     impl DerefMut for RendererBorrowGuard {
         fn deref_mut(&mut self) -> &mut Self::Target {
-            // Safety: guarded by `RENDERER_BORROWED` and pointer validity contract of `enable`.
+            // Safety: guarded by the context-local borrow flag and pointer validity contract of `enable`.
             unsafe { &mut *self.renderer }
         }
     }
 
     #[inline]
     fn borrow_renderer() -> Option<RendererBorrowGuard> {
-        let ptr = RENDERER_PTR.load(Ordering::SeqCst);
-        if ptr == 0 {
-            None
-        } else {
-            if RENDERER_BORROWED
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_err()
-            {
-                eprintln!(
-                    "dear-imgui-glow: GlowRenderer is already mutably borrowed (multi-viewport reentrancy?); skipping callback"
-                );
-                return None;
-            }
-            Some(RendererBorrowGuard {
-                renderer: ptr as *mut GlowRenderer,
-            })
+        let ctx = unsafe { sys::igGetCurrentContext() } as usize;
+        if ctx == 0 {
+            return None;
         }
+
+        let mut renderers = RENDERERS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let Some(entry) = renderers.iter_mut().find(|entry| entry.ctx == ctx) else {
+            return None;
+        };
+        if entry.renderer == 0 {
+            return None;
+        }
+        if entry.borrowed {
+            eprintln!(
+                "dear-imgui-glow: GlowRenderer is already mutably borrowed (multi-viewport reentrancy?); skipping callback"
+            );
+            return None;
+        }
+
+        entry.borrowed = true;
+        Some(RendererBorrowGuard {
+            ctx,
+            renderer: entry.renderer as *mut GlowRenderer,
+        })
     }
 
-    /// Clear the global renderer pointer if it matches `renderer`.
+    /// Clear stored renderer state for `renderer`.
     ///
     /// This is used to make multi-viewport callbacks become a no-op when the
     /// renderer is dropped without an explicit call to [`disable`].
-    pub(crate) fn clear_renderer_ptr_for_drop(renderer: *mut GlowRenderer) {
-        let _ =
-            RENDERER_PTR.compare_exchange(renderer as usize, 0, Ordering::SeqCst, Ordering::SeqCst);
+    pub(crate) fn clear_for_drop(renderer: *mut GlowRenderer) {
+        remove_renderer_state_for_renderer(renderer);
     }
 
     /// Enable Glow multi-viewport rendering for the given ImGui context and renderer.
@@ -1609,20 +1691,22 @@ pub mod multi_viewport {
     /// if `GlowRenderer` was created with an external context (`gl_context()` returns
     /// `None`), the multi-viewport callback will early-return and do nothing.
     pub fn enable(renderer: &mut GlowRenderer, imgui_context: &mut Context) {
-        // Store renderer pointer for callbacks
-        RENDERER_PTR.store(renderer as *mut _ as usize, Ordering::SeqCst);
+        let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
 
         // Install raw Renderer_RenderWindow callback. We don't need the typed
         // trampolines here, as we never expose Viewport typed wrappers.
         let platform_io = imgui_context.platform_io_mut();
         platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
+        upsert_renderer_state(imgui_context.as_raw(), renderer as *mut _);
     }
 
     /// Disable Glow multi-viewport rendering and clear the renderer callback.
     pub fn disable(imgui_context: &mut Context) {
+        let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
+
         let platform_io = imgui_context.platform_io_mut();
         platform_io.set_renderer_render_window_raw(None);
-        RENDERER_PTR.store(0, Ordering::SeqCst);
+        remove_renderer_state_for_context(imgui_context.as_raw());
     }
 
     /// Backwards-compatible helper mirroring older naming.
@@ -1642,6 +1726,133 @@ pub mod multi_viewport {
     pub fn shutdown_multi_viewport_support(context: &mut Context) {
         disable(context);
         context.destroy_platform_windows();
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::{
+            shaders::Shaders, state::GlStateBackup, texture::SimpleTextureMap, versions::GlVersion,
+        };
+
+        fn make_test_renderer() -> GlowRenderer {
+            GlowRenderer {
+                shaders: Shaders {
+                    program: None,
+                    attrib_location_tex: None,
+                    attrib_location_proj_mtx: None,
+                    attrib_location_color_gamma: None,
+                    attrib_location_vtx_pos: 0,
+                    attrib_location_vtx_uv: 0,
+                    attrib_location_vtx_color: 0,
+                },
+                state_backup: GlStateBackup::default(),
+                vbo_handle: None,
+                ebo_handle: None,
+                font_atlas_texture: None,
+                font_atlas_texture_data: std::ptr::null_mut(),
+                #[cfg(feature = "bind_vertex_array_support")]
+                vertex_array_object: None,
+                gl_version: GlVersion {
+                    major: 3,
+                    minor: 3,
+                    is_es: false,
+                },
+                has_clip_origin_support: false,
+                is_destroyed: false,
+                gl_context: None,
+                texture_map: Some(Box::new(SimpleTextureMap::default())),
+                framebuffer_srgb: false,
+                color_gamma_override: None,
+                viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
+            }
+        }
+
+        #[test]
+        fn enable_targets_passed_context() {
+            let mut ctx_a = Context::create();
+            let raw_a = ctx_a.as_raw();
+            let pio_a = unsafe { sys::igGetPlatformIO_ContextPtr(raw_a) };
+
+            unsafe {
+                sys::igSetCurrentContext(std::ptr::null_mut());
+            }
+
+            let ctx_b = Context::create();
+            let raw_b = ctx_b.as_raw();
+            let pio_b = unsafe { sys::igGetPlatformIO_ContextPtr(raw_b) };
+
+            let mut renderer = make_test_renderer();
+            enable(&mut renderer, &mut ctx_a);
+
+            unsafe {
+                assert_eq!(sys::igGetCurrentContext(), raw_b);
+                assert!((*pio_a).Renderer_RenderWindow.is_some());
+                assert!((*pio_b).Renderer_RenderWindow.is_none());
+            }
+
+            disable(&mut ctx_a);
+
+            unsafe {
+                assert_eq!(sys::igGetCurrentContext(), raw_b);
+                assert!((*pio_a).Renderer_RenderWindow.is_none());
+            }
+
+            unsafe {
+                sys::igSetCurrentContext(raw_a);
+            }
+            drop(ctx_a);
+            unsafe {
+                sys::igSetCurrentContext(raw_b);
+            }
+            drop(ctx_b);
+            drop(renderer);
+        }
+
+        #[test]
+        fn renderer_state_is_context_local() {
+            let mut ctx_a = Context::create();
+            let raw_a = ctx_a.as_raw();
+            let mut renderer_a = make_test_renderer();
+            enable(&mut renderer_a, &mut ctx_a);
+
+            unsafe {
+                sys::igSetCurrentContext(std::ptr::null_mut());
+            }
+
+            let mut ctx_b = Context::create();
+            let raw_b = ctx_b.as_raw();
+            let mut renderer_b = make_test_renderer();
+            enable(&mut renderer_b, &mut ctx_b);
+
+            unsafe {
+                sys::igSetCurrentContext(raw_a);
+                {
+                    let borrowed = borrow_renderer().expect("renderer for context A");
+                    assert_eq!((&*borrowed.renderer) as *const _, &renderer_a as *const _);
+                }
+
+                sys::igSetCurrentContext(raw_b);
+                {
+                    let borrowed = borrow_renderer().expect("renderer for context B");
+                    assert_eq!((&*borrowed.renderer) as *const _, &renderer_b as *const _);
+                }
+            }
+
+            unsafe {
+                sys::igSetCurrentContext(raw_b);
+            }
+            disable(&mut ctx_b);
+            drop(ctx_b);
+            drop(renderer_b);
+
+            unsafe {
+                sys::igSetCurrentContext(raw_a);
+            }
+            disable(&mut ctx_a);
+            drop(ctx_a);
+            drop(renderer_a);
+        }
     }
 
     /// Renderer callback used by Dear ImGui for each secondary viewport.
@@ -1714,7 +1925,7 @@ impl Drop for GlowRenderer {
             // dropped renderer. We intentionally do not uninstall the callback
             // from PlatformIO here (we don't have a Context), but making it a
             // no-op is sufficient to avoid UAF.
-            multi_viewport::clear_renderer_ptr_for_drop(self as *mut GlowRenderer);
+            multi_viewport::clear_for_drop(self as *mut GlowRenderer);
         }
         if let Some(gl) = self.gl_context.take() {
             self.destroy_device_objects(&gl);

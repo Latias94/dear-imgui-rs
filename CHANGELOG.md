@@ -123,6 +123,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     state after early render errors.
   - Keep WGPU multi-viewport renderer state per ImGui context instead of in a process-wide slot,
     preventing one context's viewport callbacks from using another context's renderer.
+  - Keep Glow and Ash multi-viewport renderer/global state per ImGui context instead of in
+    process-wide slots, preventing one context's viewport callbacks from using another context's
+    renderer or Vulkan handles.
 
 ## [0.12.0] - 2026-05-09
 
