@@ -322,8 +322,6 @@ impl AppWindow {
                 label: Some("Render Encoder"),
             });
 
-        let draw_data = self.imgui.context.render();
-
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -350,7 +348,7 @@ impl AppWindow {
 
             self.imgui
                 .renderer
-                .render_draw_data(draw_data, &mut rpass)?;
+                .render_context(&mut self.imgui.context, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

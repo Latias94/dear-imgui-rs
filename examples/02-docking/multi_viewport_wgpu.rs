@@ -286,7 +286,6 @@ impl AppWindow {
         // Optionally show demo to validate interaction
         // let mut show_demo = true; ui.show_demo_window(&mut show_demo);
 
-        let draw_data = self.imgui.render();
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -317,8 +316,8 @@ impl AppWindow {
             });
 
             self.renderer.new_frame()?;
-            self.renderer.render_draw_data_with_fb_size(
-                draw_data,
+            self.renderer.render_context_with_fb_size(
+                &mut self.imgui,
                 &mut rpass,
                 self.surface_config.width,
                 self.surface_config.height,

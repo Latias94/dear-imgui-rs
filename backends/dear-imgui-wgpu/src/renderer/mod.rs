@@ -31,6 +31,38 @@ macro_rules! mvlog {
         if cfg!(feature = "mv-log") { eprintln!($($arg)*); }
     }
 }
+
+struct RendererRenderStateGuard {
+    platform_io: *mut sys::ImGuiPlatformIO,
+}
+
+impl RendererRenderStateGuard {
+    unsafe fn set(
+        platform_io: *mut sys::ImGuiPlatformIO,
+        render_state: *mut std::ffi::c_void,
+    ) -> RendererResult<Self> {
+        if platform_io.is_null() {
+            return Err(RendererError::InvalidRenderState(
+                "PlatformIO not available for renderer render state".to_string(),
+            ));
+        }
+
+        unsafe {
+            (*platform_io).Renderer_RenderState = render_state;
+        }
+        Ok(Self { platform_io })
+    }
+}
+
+impl Drop for RendererRenderStateGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.platform_io.is_null() {
+                (*self.platform_io).Renderer_RenderState = std::ptr::null_mut();
+            }
+        }
+    }
+}
 /// Main WGPU renderer for Dear ImGui
 
 ///
@@ -464,6 +496,31 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
+        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+        self.render_draw_data_ex(draw_data, render_pass, platform_io)
+    }
+
+    /// Finalize and render the frame for an explicit ImGui context.
+    ///
+    /// This is the preferred entry point for multi-context applications because the temporary
+    /// `PlatformIO.Renderer_RenderState` pointer used by draw callbacks is written to the
+    /// provided context instead of whichever Dear ImGui context is current.
+    pub fn render_context(
+        &mut self,
+        ctx: &mut Context,
+        render_pass: &mut RenderPass,
+    ) -> RendererResult<()> {
+        let platform_io = ctx.platform_io_mut().as_raw_mut();
+        let draw_data = ctx.render();
+        self.render_draw_data_ex(draw_data, render_pass, platform_io)
+    }
+
+    fn render_draw_data_ex(
+        &mut self,
+        draw_data: &DrawData,
+        render_pass: &mut RenderPass,
+        platform_io: *mut sys::ImGuiPlatformIO,
+    ) -> RendererResult<()> {
         // Early out if nothing to draw (avoid binding/drawing without buffers)
         let mut total_vtx_count = 0usize;
         let mut total_idx_count = 0usize;
@@ -515,15 +572,12 @@ impl WgpuRenderer {
         // Note: We need to be careful with lifetimes here, so we'll set it just before rendering
         // and clear it immediately after
         unsafe {
-            // Use _Nil variant as our bindings export it
-            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
-
             // Create a temporary render state structure
             let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
-
-            // Set the render state pointer
-            (*platform_io).Renderer_RenderState =
-                &mut render_state as *mut _ as *mut std::ffi::c_void;
+            let _render_state_guard = RendererRenderStateGuard::set(
+                platform_io,
+                &mut render_state as *mut _ as *mut std::ffi::c_void,
+            )?;
 
             // Render draw lists with the render state exposed
             let result = Self::render_draw_lists_static(
@@ -534,9 +588,6 @@ impl WgpuRenderer {
                 backend_data,
                 gamma,
             );
-
-            // Clear the render state pointer
-            (*platform_io).Renderer_RenderState = std::ptr::null_mut();
 
             if let Err(e) = result {
                 eprintln!("[wgpu-mv] render_draw_lists_static error: {:?}", e);
@@ -554,8 +605,39 @@ impl WgpuRenderer {
         fb_width: u32,
         fb_height: u32,
     ) -> RendererResult<()> {
+        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         // Public helper used by the main window: advance frame resources as usual.
-        self.render_draw_data_with_fb_size_ex(draw_data, render_pass, fb_width, fb_height, true)
+        self.render_draw_data_with_fb_size_ex(
+            draw_data,
+            render_pass,
+            fb_width,
+            fb_height,
+            true,
+            platform_io,
+        )
+    }
+
+    /// Finalize and render the frame for an explicit ImGui context and framebuffer size.
+    ///
+    /// Use this variant in multi-context applications when overriding framebuffer dimensions.
+    /// Draw callbacks read the render state through the matching context's `PlatformIO`.
+    pub fn render_context_with_fb_size(
+        &mut self,
+        ctx: &mut Context,
+        render_pass: &mut RenderPass,
+        fb_width: u32,
+        fb_height: u32,
+    ) -> RendererResult<()> {
+        let platform_io = ctx.platform_io_mut().as_raw_mut();
+        let draw_data = ctx.render();
+        self.render_draw_data_with_fb_size_ex(
+            draw_data,
+            render_pass,
+            fb_width,
+            fb_height,
+            true,
+            platform_io,
+        )
     }
 
     /// Internal variant that optionally skips advancing the frame index.
@@ -568,6 +650,7 @@ impl WgpuRenderer {
         fb_width: u32,
         fb_height: u32,
         advance_frame: bool,
+        platform_io: *mut sys::ImGuiPlatformIO,
     ) -> RendererResult<()> {
         // Log only when the override framebuffer size doesn't match the draw data scale.
         // This helps diagnose HiDPI/viewport scaling issues without spamming per-frame traces.
@@ -637,10 +720,11 @@ impl WgpuRenderer {
         Self::setup_render_state_static(draw_data, render_pass, backend_data, gamma)?;
 
         unsafe {
-            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
             let mut render_state = crate::WgpuRenderState::new(&backend_data.device, render_pass);
-            (*platform_io).Renderer_RenderState =
-                &mut render_state as *mut _ as *mut std::ffi::c_void;
+            let _render_state_guard = RendererRenderStateGuard::set(
+                platform_io,
+                &mut render_state as *mut _ as *mut std::ffi::c_void,
+            )?;
 
             // Reuse core routine but clamp scissor by overriding framebuffer bounds.
             // Extract common bind group handles up front to avoid borrowing conflicts with render_resources.
@@ -828,8 +912,6 @@ impl WgpuRenderer {
                         RendererError::Generic("vertex buffer offset overflow".to_string())
                     })?;
             }
-
-            (*platform_io).Renderer_RenderState = std::ptr::null_mut();
         }
 
         Ok(())
@@ -906,6 +988,35 @@ impl Drop for WgpuRenderer {
         #[cfg(feature = "multi-viewport-sdl3")]
         {
             multi_viewport_sdl3::clear_for_drop(self as *mut WgpuRenderer);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renderer_render_state_guard_clears_on_drop() {
+        unsafe {
+            let platform_io = sys::ImGuiPlatformIO_ImGuiPlatformIO();
+            assert!(!platform_io.is_null());
+
+            let mut render_state = 7u8;
+            {
+                let _guard = RendererRenderStateGuard::set(
+                    platform_io,
+                    (&mut render_state as *mut u8).cast(),
+                )
+                .expect("render state guard should set a valid PlatformIO");
+                assert_eq!(
+                    (*platform_io).Renderer_RenderState,
+                    (&mut render_state as *mut u8).cast()
+                );
+            }
+
+            assert!((*platform_io).Renderer_RenderState.is_null());
+            sys::ImGuiPlatformIO_destroy(platform_io);
         }
     }
 }

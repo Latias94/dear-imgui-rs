@@ -118,6 +118,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Bind WGPU multi-viewport renderer callback installation and teardown to the provided
     `Context` in both the winit and SDL3 backends, preventing typed renderer callback storage
     from being installed on or cleared from the wrong active context.
+  - Add explicit-context WGPU render entry points and clear temporary
+    `PlatformIO.Renderer_RenderState` through RAII so draw callbacks do not see stale renderer
+    state after early render errors.
 
 ## [0.12.0] - 2026-05-09
 

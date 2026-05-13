@@ -18,6 +18,9 @@ renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
 renderer.render_draw_data(&imgui.render(), &mut render_pass)?;
 ```
 
+For multi-context applications, use `render_context()` or `render_context_with_fb_size()` so
+draw callbacks read `Renderer_RenderState` from the matching ImGui context's `PlatformIO`.
+
 ## Selecting wgpu version
 
 By default this crate uses `wgpu` v29.

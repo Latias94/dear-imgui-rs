@@ -636,6 +636,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                         fb_w,
                         fb_h,
                         false,
+                        dear_imgui_rs::sys::igGetPlatformIO_Nil(),
                     ) {
                         eprintln!("[wgpu-mv] render_draw_data(with_fb) error: {:?}", e);
                     }
