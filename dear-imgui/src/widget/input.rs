@@ -41,7 +41,6 @@ use crate::ui::Ui;
 use std::borrow::Cow;
 use std::ffi::{c_int, c_void};
 use std::marker::PhantomData;
-use std::ptr;
 
 mod callbacks;
 mod numeric;
@@ -49,25 +48,64 @@ mod numeric;
 pub use callbacks::*;
 pub use numeric::*;
 
-pub(super) fn zero_string_spare_capacity(buf: &mut String) {
-    let len = buf.len();
-    let cap = buf.capacity();
-    if cap > len {
-        unsafe {
-            let dst = buf.as_mut_ptr().add(len);
-            ptr::write_bytes(dst, 0, cap - len);
-        }
-    }
+fn make_string_input_buffer(buf: &String, capacity_hint: Option<usize>) -> Vec<u8> {
+    let spare_hint = capacity_hint.unwrap_or(0);
+    let desired = buf
+        .capacity()
+        .saturating_add(1)
+        .max(buf.len().saturating_add(spare_hint).saturating_add(1))
+        .max(1);
+    assert!(
+        desired <= i32::MAX as usize,
+        "InputText buffer exceeds Dear ImGui's i32 callback range"
+    );
+
+    let mut buffer = Vec::with_capacity(desired);
+    buffer.extend_from_slice(buf.as_bytes());
+    buffer.push(0);
+    buffer.resize(desired, 0);
+    buffer
 }
 
-pub(super) fn zero_string_new_capacity(buf: &mut String, old_cap: usize) {
-    let new_cap = buf.capacity();
-    if new_cap > old_cap {
+unsafe fn resize_string_input_buffer(
+    buffer: &mut Vec<u8>,
+    requested_i32: i32,
+    data: *mut sys::ImGuiInputTextCallbackData,
+) -> c_int {
+    if requested_i32 < 0 {
+        return 0;
+    }
+
+    let requested = requested_i32 as usize;
+    if requested > buffer.len() {
+        buffer.resize(requested, 0);
         unsafe {
-            let dst = buf.as_mut_ptr().add(old_cap);
-            ptr::write_bytes(dst, 0, new_cap - old_cap);
+            (*data).Buf = buffer.as_mut_ptr() as *mut _;
+            (*data).BufDirty = true;
         }
     }
+    0
+}
+
+fn finish_string_input_buffer(target: &mut String, mut buffer: Vec<u8>) {
+    let len = buffer
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(buffer.len());
+    buffer.truncate(len);
+
+    let preserved_capacity = target.capacity().max(buffer.capacity());
+    let mut text = match String::from_utf8(buffer) {
+        Ok(text) => text,
+        Err(err) => {
+            let bytes = err.into_bytes();
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+    };
+    if text.capacity() < preserved_capacity {
+        text.reserve(preserved_capacity.saturating_sub(text.len()));
+    }
+    *target = text;
 }
 
 /// # Input Widgets
@@ -529,23 +567,13 @@ where
             self.hint.as_ref().map(|hint| hint.as_ref()),
         );
 
-        if let Some(extra) = self.capacity_hint {
-            let needed = extra.saturating_sub(self.buf.capacity().saturating_sub(self.buf.len()));
-            if needed > 0 {
-                self.buf.reserve(needed);
-            }
-        }
-
-        // Ensure temporary NUL terminator
-        self.buf.push('\0');
-        // Ensure any uninitialized bytes are set to NUL so trimming does not read UB.
-        zero_string_spare_capacity(self.buf);
-        let capacity = self.buf.capacity();
-        let buf_ptr = self.buf.as_mut_ptr() as *mut std::os::raw::c_char;
+        let mut input_buffer = make_string_input_buffer(self.buf, self.capacity_hint);
+        let capacity = input_buffer.len();
+        let buf_ptr = input_buffer.as_mut_ptr() as *mut std::os::raw::c_char;
 
         #[repr(C)]
         struct UserData<T> {
-            container: *mut String,
+            buffer: *mut Vec<u8>,
             handler: T,
         }
 
@@ -562,7 +590,7 @@ where
                     return 0;
                 }
                 let user = unsafe { &mut *user_ptr };
-                if user.container.is_null() {
+                if user.buffer.is_null() {
                     return 0;
                 }
 
@@ -570,22 +598,9 @@ where
                     unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag as i32) };
                 match event_flag {
                     InputTextFlags::CALLBACK_RESIZE => unsafe {
-                        let requested_i32 = (*data).BufSize;
-                        if requested_i32 < 0 {
-                            return 0;
-                        }
-                        let requested = requested_i32 as usize;
-                        let s = &mut *user.container;
-                        debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
-                        if requested > s.capacity() {
-                            let old_cap = s.capacity();
-                            let additional = requested.saturating_sub(s.len());
-                            s.reserve(additional);
-                            zero_string_new_capacity(s, old_cap);
-                            (*data).Buf = s.as_mut_ptr() as *mut _;
-                            (*data).BufDirty = true;
-                        }
-                        0
+                        let buffer = &mut *user.buffer;
+                        debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
+                        resize_string_input_buffer(buffer, (*data).BufSize, data)
                     },
                     InputTextFlags::CALLBACK_COMPLETION => {
                         let info = unsafe { TextCallbackData::new(data) };
@@ -638,7 +653,7 @@ where
         }
 
         let mut user_data = UserData {
-            container: self.buf as *mut String,
+            buffer: &mut input_buffer as *mut Vec<u8>,
             handler: self.callback_handler,
         };
         let user_ptr = &mut user_data as *mut _ as *mut c_void;
@@ -667,12 +682,7 @@ where
             }
         };
 
-        // Trim to first NUL (remove pushed terminator)
-        let cap = unsafe { (&*user_data.container).capacity() };
-        let slice = unsafe { std::slice::from_raw_parts((&*user_data.container).as_ptr(), cap) };
-        if let Some(len) = slice.iter().position(|&b| b == 0) {
-            unsafe { (&mut *user_data.container).as_mut_vec().set_len(len) };
-        }
+        finish_string_input_buffer(self.buf, input_buffer);
         result
     }
 }
@@ -817,24 +827,13 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
     pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
 
-        // Optional pre-reserve
-        if let Some(extra) = self.capacity_hint {
-            let needed = extra.saturating_sub(self.buf.capacity().saturating_sub(self.buf.len()));
-            if needed > 0 {
-                self.buf.reserve(needed);
-            }
-        }
-
-        // Ensure a NUL terminator and use String's capacity directly
-        self.buf.push('\0');
-        // Ensure any uninitialized bytes are set to NUL so trimming does not read UB.
-        zero_string_spare_capacity(self.buf);
-        let capacity = self.buf.capacity();
-        let buf_ptr = self.buf.as_mut_ptr() as *mut std::os::raw::c_char;
+        let mut input_buffer = make_string_input_buffer(self.buf, self.capacity_hint);
+        let capacity = input_buffer.len();
+        let buf_ptr = input_buffer.as_mut_ptr() as *mut std::os::raw::c_char;
 
         #[repr(C)]
         struct UserData {
-            container: *mut String,
+            buffer: *mut Vec<u8>,
         }
 
         extern "C" fn callback_router(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
@@ -850,27 +849,14 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
                         if user_ptr.is_null() {
                             return 0;
                         }
-                        let requested_i32 = (*data).BufSize;
-                        if requested_i32 < 0 {
-                            return 0;
-                        }
-                        let requested = requested_i32 as usize;
 
                         let user = &mut *user_ptr;
-                        if user.container.is_null() {
+                        if user.buffer.is_null() {
                             return 0;
                         }
-                        let s = &mut *user.container;
-                        debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
-                        if requested > s.capacity() {
-                            let old_cap = s.capacity();
-                            let additional = requested.saturating_sub(s.len());
-                            s.reserve(additional);
-                            zero_string_new_capacity(s, old_cap);
-                            (*data).Buf = s.as_mut_ptr() as *mut _;
-                            (*data).BufDirty = true;
-                        }
-                        0
+                        let buffer = &mut *user.buffer;
+                        debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
+                        resize_string_input_buffer(buffer, (*data).BufSize, data)
                     }
                     _ => 0,
                 }
@@ -886,7 +872,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
         }
 
         let mut user_data = UserData {
-            container: self.buf as *mut String,
+            buffer: &mut input_buffer as *mut Vec<u8>,
         };
         let user_ptr = &mut user_data as *mut _ as *mut c_void;
 
@@ -904,12 +890,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
             )
         };
 
-        // Trim at NUL to restore real length
-        let cap = unsafe { (&*user_data.container).capacity() };
-        let slice = unsafe { std::slice::from_raw_parts((&*user_data.container).as_ptr(), cap) };
-        if let Some(len) = slice.iter().position(|&b| b == 0) {
-            unsafe { (&mut *user_data.container).as_mut_vec().set_len(len) };
-        }
+        finish_string_input_buffer(self.buf, input_buffer);
         result
     }
 
@@ -958,23 +939,13 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
     pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
 
-        if let Some(extra) = self.capacity_hint {
-            let needed = extra.saturating_sub(self.buf.capacity().saturating_sub(self.buf.len()));
-            if needed > 0 {
-                self.buf.reserve(needed);
-            }
-        }
-
-        // Ensure NUL terminator
-        self.buf.push('\0');
-        // Ensure any uninitialized bytes are set to NUL so trimming does not read UB.
-        zero_string_spare_capacity(self.buf);
-        let capacity = self.buf.capacity();
-        let buf_ptr = self.buf.as_mut_ptr() as *mut std::os::raw::c_char;
+        let mut input_buffer = make_string_input_buffer(self.buf, self.capacity_hint);
+        let capacity = input_buffer.len();
+        let buf_ptr = input_buffer.as_mut_ptr() as *mut std::os::raw::c_char;
 
         #[repr(C)]
         struct UserData<T> {
-            container: *mut String,
+            buffer: *mut Vec<u8>,
             handler: T,
         }
 
@@ -991,7 +962,7 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                     return 0;
                 }
                 let user = unsafe { &mut *user_ptr };
-                if user.container.is_null() {
+                if user.buffer.is_null() {
                     return 0;
                 }
 
@@ -999,22 +970,9 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                     unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag as i32) };
                 match event_flag {
                     InputTextFlags::CALLBACK_RESIZE => unsafe {
-                        let requested_i32 = (*data).BufSize;
-                        if requested_i32 < 0 {
-                            return 0;
-                        }
-                        let requested = requested_i32 as usize;
-                        let s = &mut *user.container;
-                        debug_assert_eq!(s.as_ptr() as *const _, (*data).Buf);
-                        if requested > s.capacity() {
-                            let old_cap = s.capacity();
-                            let additional = requested.saturating_sub(s.len());
-                            s.reserve(additional);
-                            zero_string_new_capacity(s, old_cap);
-                            (*data).Buf = s.as_mut_ptr() as *mut _;
-                            (*data).BufDirty = true;
-                        }
-                        0
+                        let buffer = &mut *user.buffer;
+                        debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
+                        resize_string_input_buffer(buffer, (*data).BufSize, data)
                     },
                     InputTextFlags::CALLBACK_COMPLETION => {
                         let info = unsafe { TextCallbackData::new(data) };
@@ -1067,7 +1025,7 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
         }
 
         let mut user_data = UserData {
-            container: self.buf as *mut String,
+            buffer: &mut input_buffer as *mut Vec<u8>,
             handler: self.handler,
         };
         let user_ptr = &mut user_data as *mut _ as *mut c_void;
@@ -1086,12 +1044,66 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
             )
         };
 
-        // Trim at NUL
-        let cap = unsafe { (&*user_data.container).capacity() };
-        let slice = unsafe { std::slice::from_raw_parts((&*user_data.container).as_ptr(), cap) };
-        if let Some(len) = slice.iter().position(|&b| b == 0) {
-            unsafe { (&mut *user_data.container).as_mut_vec().set_len(len) };
-        }
+        finish_string_input_buffer(self.buf, input_buffer);
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn string_input_buffer_finish_truncates_at_nul() {
+        let mut out = String::from("old");
+        finish_string_input_buffer(&mut out, b"new\0ignored".to_vec());
+        assert_eq!(out, "new");
+    }
+
+    #[test]
+    fn string_input_buffer_finish_replaces_invalid_utf8() {
+        let mut out = String::new();
+        finish_string_input_buffer(&mut out, vec![b'a', 0xff, b'b', 0]);
+        assert_eq!(out, "a\u{fffd}b");
+    }
+
+    #[test]
+    fn string_input_buffer_finish_reuses_target_capacity() {
+        let mut out = String::with_capacity(16);
+        out.push_str("old");
+        let cap = out.capacity();
+
+        finish_string_input_buffer(&mut out, b"new\0ignored".to_vec());
+
+        assert_eq!(out, "new");
+        assert!(out.capacity() >= cap);
+    }
+
+    #[test]
+    fn string_input_buffer_finish_keeps_input_capacity() {
+        let mut out = String::new();
+        let mut buffer = Vec::with_capacity(64);
+        buffer.extend_from_slice(b"new\0");
+        let cap = buffer.capacity();
+
+        finish_string_input_buffer(&mut out, buffer);
+
+        assert_eq!(out, "new");
+        assert!(out.capacity() >= cap);
+    }
+
+    #[test]
+    fn string_input_buffer_resize_updates_imgui_buffer_pointer() {
+        let mut buffer = b"abc\0".to_vec();
+        let mut data = sys::ImGuiInputTextCallbackData::default();
+        data.Buf = buffer.as_mut_ptr().cast();
+        data.BufSize = 32;
+
+        let result = unsafe { resize_string_input_buffer(&mut buffer, data.BufSize, &mut data) };
+
+        assert_eq!(result, 0);
+        assert!(buffer.len() >= 32);
+        assert_eq!(data.Buf, buffer.as_mut_ptr().cast());
+        assert!(data.BufDirty);
     }
 }
