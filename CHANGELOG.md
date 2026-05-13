@@ -68,6 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     binding paths, avoiding cross-context state leaks during unwinding.
   - Resolve `Context` IO, font atlas, backend-name, settings-filename, and `PlatformIo`
     accessors from the receiver's `ImGuiContext*` instead of whichever context is current.
+  - Bind context-scoped style, main viewport, platform-window, font-stack, and ini settings
+    operations to the receiver context while restoring the previous current context afterward.
   - Resolve clipboard callbacks through the `ImGuiContext*` passed by Dear ImGui instead of
     whichever context is currently bound, preventing cross-context clipboard backend mixups.
   - Clear Rust typed `PlatformIo` callback storage and `Platform_GetWindowPos/Size` out-parameter

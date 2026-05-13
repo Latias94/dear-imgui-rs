@@ -350,11 +350,13 @@ impl Context {
     pub fn style(&self) -> &crate::style::Style {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let style_ptr = sys::igGetStyle();
-            if style_ptr.is_null() {
-                panic!("Context::style() requires an active ImGui context");
-            }
-            &*(style_ptr as *const crate::style::Style)
+            with_bound_context(self.raw, || {
+                let style_ptr = sys::igGetStyle();
+                if style_ptr.is_null() {
+                    panic!("Context::style() requires a valid ImGui context");
+                }
+                &*(style_ptr as *const crate::style::Style)
+            })
         }
     }
 
@@ -362,11 +364,13 @@ impl Context {
     pub fn style_mut(&mut self) -> &mut crate::style::Style {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let style_ptr = sys::igGetStyle();
-            if style_ptr.is_null() {
-                panic!("Context::style_mut() requires an active ImGui context");
-            }
-            &mut *(style_ptr as *mut crate::style::Style)
+            with_bound_context(self.raw, || {
+                let style_ptr = sys::igGetStyle();
+                if style_ptr.is_null() {
+                    panic!("Context::style_mut() requires a valid ImGui context");
+                }
+                &mut *(style_ptr as *mut crate::style::Style)
+            })
         }
     }
 
@@ -686,17 +690,19 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
 
     /// Returns a reference to the main Dear ImGui viewport.
     ///
-    /// The returned reference is owned by the currently active ImGui context and
+    /// The returned reference is owned by this ImGui context and
     /// must not be used after the context is destroyed.
     #[doc(alias = "GetMainViewport")]
     pub fn main_viewport(&mut self) -> &crate::platform_io::Viewport {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let ptr = sys::igGetMainViewport();
-            if ptr.is_null() {
-                panic!("Context::main_viewport() requires an active ImGui context");
-            }
-            crate::platform_io::Viewport::from_raw(ptr as *const sys::ImGuiViewport)
+            with_bound_context(self.raw, || {
+                let ptr = sys::igGetMainViewport();
+                if ptr.is_null() {
+                    panic!("Context::main_viewport() requires a valid ImGui context");
+                }
+                crate::platform_io::Viewport::from_raw(ptr as *const sys::ImGuiViewport)
+            })
         }
     }
 
@@ -715,15 +721,19 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn update_platform_windows(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            // Ensure main viewport is properly set up before updating platform windows
-            let main_viewport = sys::igGetMainViewport();
-            if !main_viewport.is_null() && (*main_viewport).PlatformHandle.is_null() {
-                eprintln!("update_platform_windows: main viewport not set up, setting it up now");
-                // The main viewport needs to be set up - this should be done by the backend
-                // For now, we'll just log this and continue
-            }
+            with_bound_context(self.raw, || {
+                // Ensure main viewport is properly set up before updating platform windows
+                let main_viewport = sys::igGetMainViewport();
+                if !main_viewport.is_null() && (*main_viewport).PlatformHandle.is_null() {
+                    eprintln!(
+                        "update_platform_windows: main viewport not set up, setting it up now"
+                    );
+                    // The main viewport needs to be set up - this should be done by the backend
+                    // For now, we'll just log this and continue
+                }
 
-            sys::igUpdatePlatformWindows();
+                sys::igUpdatePlatformWindows();
+            });
         }
     }
 
@@ -735,7 +745,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn render_platform_windows_default(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::igRenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
+            with_bound_context(self.raw, || {
+                sys::igRenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
+            });
         }
     }
 
@@ -747,7 +759,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn destroy_platform_windows(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::igDestroyPlatformWindows();
+            with_bound_context(self.raw, || {
+                sys::igDestroyPlatformWindows();
+            });
         }
     }
 
@@ -771,7 +785,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn push_font(&mut self, font: &Font) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::igPushFont(font.raw(), 0.0);
+            with_bound_context(self.raw, || {
+                sys::igPushFont(font.raw(), 0.0);
+            });
         }
     }
 
@@ -782,7 +798,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn pop_font(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::igPopFont();
+            with_bound_context(self.raw, || {
+                sys::igPopFont();
+            });
         }
     }
 
@@ -790,14 +808,14 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     #[doc(alias = "GetFont")]
     pub fn current_font(&self) -> &Font {
         let _guard = CTX_MUTEX.lock();
-        unsafe { Font::from_raw(sys::igGetFont() as *const _) }
+        unsafe { with_bound_context(self.raw, || Font::from_raw(sys::igGetFont() as *const _)) }
     }
 
     /// Get the current font size
     #[doc(alias = "GetFontSize")]
     pub fn current_font_size(&self) -> f32 {
         let _guard = CTX_MUTEX.lock();
-        unsafe { sys::igGetFontSize() }
+        unsafe { with_bound_context(self.raw, || sys::igGetFontSize()) }
     }
 
     /// Get the font atlas from the IO structure
@@ -890,7 +908,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn load_ini_settings(&mut self, data: &str) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            sys::igLoadIniSettingsFromMemory(data.as_ptr() as *const _, data.len());
+            with_bound_context(self.raw, || {
+                sys::igLoadIniSettingsFromMemory(data.as_ptr() as *const _, data.len());
+            });
         }
     }
 
@@ -899,17 +919,19 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn save_ini_settings(&mut self, buf: &mut String) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let mut out_ini_size: usize = 0;
-            let data_ptr = sys::igSaveIniSettingsToMemory(&mut out_ini_size as *mut usize);
-            if data_ptr.is_null() || out_ini_size == 0 {
-                return;
-            }
+            with_bound_context(self.raw, || {
+                let mut out_ini_size: usize = 0;
+                let data_ptr = sys::igSaveIniSettingsToMemory(&mut out_ini_size as *mut usize);
+                if data_ptr.is_null() || out_ini_size == 0 {
+                    return;
+                }
 
-            let mut bytes = std::slice::from_raw_parts(data_ptr as *const u8, out_ini_size);
-            if bytes.last() == Some(&0) {
-                bytes = &bytes[..bytes.len().saturating_sub(1)];
-            }
-            buf.push_str(&String::from_utf8_lossy(bytes));
+                let mut bytes = std::slice::from_raw_parts(data_ptr as *const u8, out_ini_size);
+                if bytes.last() == Some(&0) {
+                    bytes = &bytes[..bytes.len().saturating_sub(1)];
+                }
+                buf.push_str(&String::from_utf8_lossy(bytes));
+            });
         }
     }
 
@@ -927,7 +949,11 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
         let cstr = filename.into().to_string_lossy().to_cstring_safe()?;
-        unsafe { sys::igLoadIniSettingsFromDisk(cstr.as_ptr()) }
+        unsafe {
+            with_bound_context(self.raw, || {
+                sys::igLoadIniSettingsFromDisk(cstr.as_ptr());
+            });
+        }
         Ok(())
     }
 
@@ -945,7 +971,11 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         use crate::error::SafeStringConversion;
         let _guard = CTX_MUTEX.lock();
         let cstr = filename.into().to_string_lossy().to_cstring_safe()?;
-        unsafe { sys::igSaveIniSettingsToDisk(cstr.as_ptr()) }
+        unsafe {
+            with_bound_context(self.raw, || {
+                sys::igSaveIniSettingsToDisk(cstr.as_ptr());
+            });
+        }
         Ok(())
     }
 
@@ -1084,6 +1114,28 @@ mod tests {
         let ctx_a = suspended_a.activate().expect_err("ctx_b is still active");
         assert_eq!(ctx_a.0.io().backend_language_user_data(), marker_a);
         assert_eq!(ctx_a.0.platform_io().as_raw(), pio_a);
+        assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, ctx_b.raw);
+
+        drop(ctx_b);
+        drop(ctx_a);
+    }
+
+    #[test]
+    fn style_and_main_viewport_accessors_use_self_context_not_current_context() {
+        let mut ctx_a = Context::create();
+        ctx_a.style_mut().set_alpha(0.25);
+        let viewport_a = ctx_a.main_viewport().as_raw();
+        let suspended_a = ctx_a.suspend();
+
+        let mut ctx_b = Context::create();
+        ctx_b.style_mut().set_alpha(0.75);
+        let viewport_b = ctx_b.main_viewport().as_raw();
+
+        assert_ne!(viewport_a, viewport_b);
+
+        let mut ctx_a = suspended_a.activate().expect_err("ctx_b is still active");
+        assert_eq!(ctx_a.0.style().alpha(), 0.25);
+        assert_eq!(ctx_a.0.main_viewport().as_raw(), viewport_a);
         assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, ctx_b.raw);
 
         drop(ctx_b);
