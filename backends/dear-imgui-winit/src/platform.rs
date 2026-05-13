@@ -28,7 +28,7 @@ type SetImeDataCallback = unsafe extern "C" fn(
 /// the position to winit so platforms that support it can position the IME
 /// candidate/composition window near the caret.
 unsafe extern "C" fn imgui_winit_set_ime_data(
-    _ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+    ctx: *mut dear_imgui_rs::sys::ImGuiContext,
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
     data: *mut dear_imgui_rs::sys::ImGuiPlatformImeData,
 ) {
@@ -40,7 +40,7 @@ unsafe extern "C" fn imgui_winit_set_ime_data(
         }
 
         // Retrieve the window pointer we stored in Platform_ImeUserData.
-        let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+        let pio = platform_io_for_ime_context(ctx);
         if pio.is_null() {
             return;
         }
@@ -89,6 +89,16 @@ fn is_winit_set_ime_data(callback: Option<SetImeDataCallback>) -> bool {
     callback.is_some_and(|callback| {
         std::ptr::fn_addr_eq(callback, imgui_winit_set_ime_data as SetImeDataCallback)
     })
+}
+
+unsafe fn platform_io_for_ime_context(
+    ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+) -> *mut dear_imgui_rs::sys::ImGuiPlatformIO {
+    if ctx.is_null() {
+        unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() }
+    } else {
+        unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(ctx) }
+    }
 }
 
 /// DPI scaling mode for the platform
@@ -623,6 +633,39 @@ mod tests {
         assert!(is_winit_set_ime_data(Some(imgui_winit_set_ime_data)));
         assert!(!is_winit_set_ime_data(Some(other_ime_callback)));
         assert!(!is_winit_set_ime_data(None));
+    }
+
+    #[test]
+    fn ime_platform_io_lookup_uses_passed_context() {
+        let _guard = lock_context();
+
+        let ctx_a = Context::create();
+        let raw_a = ctx_a.as_raw();
+        let marker_a = std::ptr::NonNull::<Window>::dangling().as_ptr();
+        unsafe {
+            let platform_io_a = dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_a);
+            (*platform_io_a).Platform_ImeUserData = marker_a.cast();
+            dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut());
+        }
+
+        let ctx_b = Context::create();
+        let raw_b = ctx_b.as_raw();
+        let marker_b = std::ptr::NonNull::<u8>::dangling().as_ptr();
+        unsafe {
+            let platform_io_b = dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_b);
+            (*platform_io_b).Platform_ImeUserData = marker_b.cast();
+
+            let selected = platform_io_for_ime_context(raw_a);
+            assert_eq!((*selected).Platform_ImeUserData, marker_a.cast());
+            assert_ne!((*selected).Platform_ImeUserData, marker_b.cast());
+
+            dear_imgui_rs::sys::igSetCurrentContext(raw_a);
+        }
+        drop(ctx_a);
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw_b);
+        }
+        drop(ctx_b);
     }
 
     #[test]

@@ -33,6 +33,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 ### Fixed
 
 - `WinitPlatform::attach_window` no longer overwrites `Platform_ImeUserData` when another backend owns `Platform_SetImeDataFn`; it only updates the IME userdata for winit-owned callbacks.
+- `Platform_SetImeDataFn` now resolves `Platform_ImeUserData` from the `ImGuiContext*` passed by
+  Dear ImGui instead of whichever context is currently bound.
 - Multi-viewport shutdown now binds the provided `Context` before destroying platform windows and
   clearing platform callbacks, avoiding cleanup against a different current context.
 
