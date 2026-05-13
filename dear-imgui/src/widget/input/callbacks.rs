@@ -40,8 +40,8 @@ pub trait InputTextCallbackHandler {
     /// and returning another char substitutes it out.
     ///
     /// To make ImGui run this callback, use [InputTextCallback::CHAR_FILTER].
-    fn char_filter(&mut self, _c: char) -> Option<char> {
-        None
+    fn char_filter(&mut self, c: char) -> Option<char> {
+        Some(c)
     }
 
     /// Called when the user presses the completion key (TAB by default).
@@ -312,3 +312,23 @@ impl<'cb> TextCallbackData<'cb> {
 /// actually run, since you will not have passed imgui any flags).
 pub struct PassthroughCallback;
 impl InputTextCallbackHandler for PassthroughCallback {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct DefaultHandler;
+    impl InputTextCallbackHandler for DefaultHandler {}
+
+    #[test]
+    fn default_char_filter_keeps_character() {
+        let mut handler = DefaultHandler;
+        assert_eq!(handler.char_filter('x'), Some('x'));
+    }
+
+    #[test]
+    fn passthrough_char_filter_keeps_character() {
+        let mut handler = PassthroughCallback;
+        assert_eq!(handler.char_filter('x'), Some('x'));
+    }
+}
