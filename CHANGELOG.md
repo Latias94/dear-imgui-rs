@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Route Rust-owned `Platform_GetWindowPos` / `Platform_GetWindowSize` out-parameter
     shims through `dear-imgui-sys` storage instead of cimgui's `BackendLanguageUserData`
     helper, avoiding collisions with language/backend userdata.
+- Backends
+  - Remove obsolete winit multi-viewport `ImVec2` return-by-value getter code paths so
+    `Platform_GetWindowPos/Size` consistently use the out-parameter shim.
 
 ## [0.12.0] - 2026-05-09
 
