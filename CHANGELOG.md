@@ -121,6 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Add explicit-context WGPU render entry points and clear temporary
     `PlatformIO.Renderer_RenderState` through RAII so draw callbacks do not see stale renderer
     state after early render errors.
+  - Keep WGPU multi-viewport renderer state per ImGui context instead of in a process-wide slot,
+    preventing one context's viewport callbacks from using another context's renderer.
 
 ## [0.12.0] - 2026-05-09
 

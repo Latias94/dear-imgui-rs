@@ -10,8 +10,6 @@ use dear_imgui_rs::platform_io::Viewport;
 use std::ffi::c_void;
 use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::sdl3_raw_window_handle::Sdl3SurfaceTarget;
 
@@ -27,9 +25,14 @@ struct ViewportWgpuData {
     pub pending_reconfigure: bool,
 }
 
-static RENDERER_PTR: AtomicUsize = AtomicUsize::new(0);
-static RENDERER_BORROWED: AtomicBool = AtomicBool::new(false);
-static GLOBAL: Mutex<Option<GlobalHandles>> = Mutex::new(None);
+static RENDERERS: Mutex<Vec<ContextRendererState>> = Mutex::new(Vec::new());
+
+struct ContextRendererState {
+    ctx: usize,
+    renderer: usize,
+    borrowed: bool,
+    global: Option<GlobalHandles>,
+}
 
 struct CurrentContextGuard {
     previous: *mut dear_imgui_rs::sys::ImGuiContext,
@@ -62,6 +65,68 @@ struct GlobalHandles {
     render_target_format: wgpu::TextureFormat,
 }
 
+fn upsert_renderer_state(
+    ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+    renderer: *mut WgpuRenderer,
+    global: Option<GlobalHandles>,
+) {
+    if ctx.is_null() {
+        return;
+    }
+
+    let ctx = ctx as usize;
+    let renderer = renderer as usize;
+    let mut renderers = RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if let Some(entry) = renderers.iter_mut().find(|entry| entry.ctx == ctx) {
+        entry.renderer = renderer;
+        entry.global = global;
+        return;
+    }
+
+    renderers.push(ContextRendererState {
+        ctx,
+        renderer,
+        borrowed: false,
+        global,
+    });
+}
+
+fn remove_renderer_state_for_context(ctx: *mut dear_imgui_rs::sys::ImGuiContext) {
+    if ctx.is_null() {
+        return;
+    }
+
+    let ctx = ctx as usize;
+    RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .retain(|entry| entry.ctx != ctx);
+}
+
+fn remove_renderer_state_for_renderer(renderer: *mut WgpuRenderer) {
+    let renderer = renderer as usize;
+    RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .retain(|entry| entry.renderer != renderer);
+}
+
+fn global_handles() -> Option<GlobalHandles> {
+    let ctx = unsafe { dear_imgui_rs::sys::igGetCurrentContext() } as usize;
+    if ctx == 0 {
+        return None;
+    }
+
+    RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .iter()
+        .find(|entry| entry.ctx == ctx)
+        .and_then(|entry| entry.global.clone())
+}
+
 /// Enable WGPU multi-viewport: set per-viewport callbacks and capture renderer pointer.
 pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
     let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
@@ -82,27 +147,17 @@ pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
         platform_io.set_platform_swap_buffers_raw(Some(platform_swap_buffers_sys));
     }
 
-    RENDERER_PTR.store(renderer as *mut _ as usize, Ordering::SeqCst);
-
-    if let Some(backend) = renderer.backend_data.as_ref() {
-        let mut g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
-        *g = Some(GlobalHandles {
-            instance: backend.instance.clone(),
-            adapter: backend.adapter.clone(),
-            device: backend.device.clone(),
-            render_target_format: backend.render_target_format,
-        });
-    }
+    let global = renderer.backend_data.as_ref().map(|backend| GlobalHandles {
+        instance: backend.instance.clone(),
+        adapter: backend.adapter.clone(),
+        device: backend.device.clone(),
+        render_target_format: backend.render_target_format,
+    });
+    upsert_renderer_state(imgui_context.as_raw(), renderer as *mut _, global);
 }
 
 pub(crate) fn clear_for_drop(renderer: *mut WgpuRenderer) {
-    if RENDERER_PTR
-        .compare_exchange(renderer as usize, 0, Ordering::SeqCst, Ordering::SeqCst)
-        .is_ok()
-    {
-        let mut g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
-        *g = None;
-    }
+    remove_renderer_state_for_renderer(renderer);
 }
 
 /// Disable WGPU multi-viewport callbacks and clear stored globals (SDL3 platform).
@@ -117,9 +172,7 @@ pub fn disable(imgui_context: &mut Context) {
         platform_io.set_platform_render_window_raw(None);
         platform_io.set_platform_swap_buffers_raw(None);
     }
-    RENDERER_PTR.store(0, Ordering::SeqCst);
-    let mut g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
-    *g = None;
+    remove_renderer_state_for_context(imgui_context.as_raw());
 }
 
 /// Convenience helper that disables callbacks and destroys all platform windows.
@@ -185,22 +238,79 @@ mod tests {
         drop(ctx_b);
         drop(renderer);
     }
+
+    #[test]
+    fn renderer_state_is_context_local() {
+        let mut ctx_a = Context::create();
+        let raw_a = ctx_a.as_raw();
+        let mut renderer_a = WgpuRenderer::empty();
+        enable(&mut renderer_a, &mut ctx_a);
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut());
+        }
+
+        let mut ctx_b = Context::create();
+        let raw_b = ctx_b.as_raw();
+        let mut renderer_b = WgpuRenderer::empty();
+        enable(&mut renderer_b, &mut ctx_b);
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw_a);
+            {
+                let borrowed = borrow_renderer().expect("renderer for context A");
+                assert_eq!((&*borrowed.renderer) as *const _, &renderer_a as *const _);
+            }
+
+            dear_imgui_rs::sys::igSetCurrentContext(raw_b);
+            {
+                let borrowed = borrow_renderer().expect("renderer for context B");
+                assert_eq!((&*borrowed.renderer) as *const _, &renderer_b as *const _);
+            }
+        }
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw_b);
+        }
+        disable(&mut ctx_b);
+        drop(ctx_b);
+        drop(renderer_b);
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw_a);
+        }
+        disable(&mut ctx_a);
+        drop(ctx_a);
+        drop(renderer_a);
+    }
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn borrow_renderer() -> Option<RendererBorrowGuard> {
-    let ptr = RENDERER_PTR.load(Ordering::SeqCst) as *mut WgpuRenderer;
-    if ptr.is_null() {
+    let ctx = unsafe { dear_imgui_rs::sys::igGetCurrentContext() } as usize;
+    if ctx == 0 {
         return None;
     }
-    if RENDERER_BORROWED
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
+
+    let mut renderers = RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let Some(entry) = renderers.iter_mut().find(|entry| entry.ctx == ctx) else {
+        return None;
+    };
+    if entry.renderer == 0 {
+        return None;
+    }
+    if entry.borrowed {
         eprintln!("[wgpu-mv-sdl3] renderer already mutably borrowed; skipping callback");
         return None;
     }
-    Some(RendererBorrowGuard { renderer: ptr })
+
+    entry.borrowed = true;
+    Some(RendererBorrowGuard {
+        ctx,
+        renderer: entry.renderer as *mut WgpuRenderer,
+    })
 }
 
 unsafe fn viewport_user_data_mut<'a>(vpm: &'a mut Viewport) -> Option<&'a mut ViewportWgpuData> {
@@ -213,12 +323,21 @@ unsafe fn viewport_user_data_mut<'a>(vpm: &'a mut Viewport) -> Option<&'a mut Vi
 }
 
 struct RendererBorrowGuard {
+    ctx: usize,
     renderer: *mut WgpuRenderer,
 }
 
 impl Drop for RendererBorrowGuard {
     fn drop(&mut self) {
-        RENDERER_BORROWED.store(false, Ordering::SeqCst);
+        let mut renderers = RENDERERS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(entry) = renderers
+            .iter_mut()
+            .find(|entry| entry.ctx == self.ctx && entry.renderer == self.renderer as usize)
+        {
+            entry.borrowed = false;
+        }
     }
 }
 
@@ -262,12 +381,8 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         mvlog!("[wgpu-mv-sdl3] Renderer_CreateWindow");
 
-        let global = {
-            let g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
-            match g.as_ref() {
-                Some(g) => g.clone(),
-                None => return,
-            }
+        let Some(global) = global_handles() else {
+            return;
         };
 
         let vpm = &mut *vp;
@@ -431,12 +546,8 @@ pub unsafe extern "C" fn renderer_set_window_size(
             size.x,
             size.y
         );
-        let global = {
-            let g = GLOBAL.lock().unwrap_or_else(|poison| poison.into_inner());
-            match g.as_ref() {
-                Some(g) => g.clone(),
-                None => return,
-            }
+        let Some(global) = global_handles() else {
+            return;
         };
         let vpm = &mut *vp;
         let scale = vpm.framebuffer_scale();
