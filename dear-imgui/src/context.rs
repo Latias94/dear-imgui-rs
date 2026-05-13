@@ -272,6 +272,22 @@ impl Context {
 
     // removed legacy create_or_panic variants (use create()/try_create())
 
+    fn io_ptr(&self, caller: &str) -> *mut sys::ImGuiIO {
+        let io = unsafe { sys::igGetIO_ContextPtr(self.raw) };
+        if io.is_null() {
+            panic!("{caller} requires a valid ImGui context");
+        }
+        io
+    }
+
+    fn platform_io_ptr(&self, caller: &str) -> *mut sys::ImGuiPlatformIO {
+        let pio = unsafe { sys::igGetPlatformIO_ContextPtr(self.raw) };
+        if pio.is_null() {
+            panic!("{caller} requires a valid ImGui context");
+        }
+        pio
+    }
+
     fn try_create_internal(
         mut shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Context> {
@@ -312,28 +328,20 @@ impl Context {
         })
     }
 
-    /// Returns a mutable reference to the active context's IO object
+    /// Returns a mutable reference to this context's IO object.
     pub fn io_mut(&mut self) -> &mut Io {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            // Bindings provide igGetIO_Nil; use it to access current IO
-            let io_ptr = sys::igGetIO_Nil();
-            if io_ptr.is_null() {
-                panic!("Context::io_mut() requires an active ImGui context");
-            }
+            let io_ptr = self.io_ptr("Context::io_mut()");
             &mut *(io_ptr as *mut Io)
         }
     }
 
-    /// Get access to the IO structure
+    /// Get shared access to this context's IO object.
     pub fn io(&self) -> &crate::io::Io {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            // Bindings provide igGetIO_Nil; use it to access current IO
-            let io_ptr = sys::igGetIO_Nil();
-            if io_ptr.is_null() {
-                panic!("Context::io() requires an active ImGui context");
-            }
+            let io_ptr = self.io_ptr("Context::io()");
             &*(io_ptr as *const crate::io::Io)
         }
     }
@@ -546,7 +554,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         };
 
         unsafe {
-            let io = sys::igGetIO_Nil();
+            let io = self.io_ptr("Context::set_ini_filename()");
             let ptr = self
                 .ini_filename
                 .as_ref()
@@ -577,7 +585,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         };
 
         unsafe {
-            let io = sys::igGetIO_Nil();
+            let io = self.io_ptr("Context::set_log_filename()");
             let ptr = self
                 .log_filename
                 .as_ref()
@@ -608,7 +616,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         };
 
         unsafe {
-            let io = sys::igGetIO_Nil();
+            let io = self.io_ptr("Context::set_platform_name()");
             let ptr = self
                 .platform_name
                 .as_ref()
@@ -639,10 +647,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         };
 
         unsafe {
-            let io = sys::igGetIO_Nil();
-            if io.is_null() {
-                panic!("igGetIO_Nil() returned null");
-            }
+            let io = self.io_ptr("Context::set_renderer_name()");
             let ptr = self
                 .renderer_name
                 .as_ref()
@@ -662,10 +667,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn platform_io(&self) -> &crate::platform_io::PlatformIo {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let pio = sys::igGetPlatformIO_Nil();
-            if pio.is_null() {
-                panic!("Context::platform_io() requires an active ImGui context");
-            }
+            let pio = self.platform_io_ptr("Context::platform_io()");
             crate::platform_io::PlatformIo::from_raw(pio)
         }
     }
@@ -677,10 +679,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn platform_io_mut(&mut self) -> &mut crate::platform_io::PlatformIo {
         let _guard = CTX_MUTEX.lock();
         unsafe {
-            let pio = sys::igGetPlatformIO_Nil();
-            if pio.is_null() {
-                panic!("igGetPlatformIO_Nil() returned null");
-            }
+            let pio = self.platform_io_ptr("Context::platform_io_mut()");
             crate::platform_io::PlatformIo::from_raw_mut(pio)
         }
     }
@@ -811,7 +810,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         // provider has been correctly configured via xtask.
         #[cfg(all(target_arch = "wasm32", feature = "wasm-font-atlas-experimental"))]
         unsafe {
-            let io = sys::igGetIO_Nil();
+            let io = self.io_ptr("Context::font_atlas()");
             let atlas_ptr = (*io).Fonts;
             assert!(
                 !atlas_ptr.is_null(),
@@ -832,7 +831,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
 
         #[cfg(not(target_arch = "wasm32"))]
         unsafe {
-            let io = sys::igGetIO_Nil();
+            let io = self.io_ptr("Context::font_atlas()");
             let atlas_ptr = (*io).Fonts;
             FontAtlas::from_raw(atlas_ptr)
         }
@@ -848,7 +847,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         // provider has been correctly configured via xtask.
         #[cfg(all(target_arch = "wasm32", feature = "wasm-font-atlas-experimental"))]
         unsafe {
-            let io = sys::igGetIO_Nil();
+            let io = self.io_ptr("Context::font_atlas_mut()");
             let atlas_ptr = (*io).Fonts;
             assert!(
                 !atlas_ptr.is_null(),
@@ -868,7 +867,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
 
         #[cfg(not(target_arch = "wasm32"))]
         unsafe {
-            let io = sys::igGetIO_Nil();
+            let io = self.io_ptr("Context::font_atlas_mut()");
             let atlas_ptr = (*io).Fonts;
             FontAtlas::from_raw(atlas_ptr)
         }
@@ -1064,6 +1063,31 @@ mod tests {
 
         drop(ctx_b);
         drop(suspended_a);
+    }
+
+    #[test]
+    fn io_and_platform_io_accessors_use_self_context_not_current_context() {
+        let mut ctx_a = Context::create();
+        let marker_a = std::ptr::NonNull::<u8>::dangling().as_ptr().cast();
+        ctx_a.io_mut().set_backend_language_user_data(marker_a);
+        let pio_a = ctx_a.platform_io().as_raw();
+        let suspended_a = ctx_a.suspend();
+
+        let mut ctx_b = Context::create();
+        let marker_b = std::ptr::NonNull::<u16>::dangling().as_ptr().cast();
+        ctx_b.io_mut().set_backend_language_user_data(marker_b);
+        let pio_b = ctx_b.platform_io().as_raw();
+
+        assert_ne!(marker_a, marker_b);
+        assert_ne!(pio_a, pio_b);
+
+        let ctx_a = suspended_a.activate().expect_err("ctx_b is still active");
+        assert_eq!(ctx_a.0.io().backend_language_user_data(), marker_a);
+        assert_eq!(ctx_a.0.platform_io().as_raw(), pio_a);
+        assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, ctx_b.raw);
+
+        drop(ctx_b);
+        drop(ctx_a);
     }
 
     #[cfg(feature = "multi-viewport")]
