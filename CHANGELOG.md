@@ -106,6 +106,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `PlatformUserData` access so the backend does not overwrite or read another backend's data.
   - Resolve winit IME userdata through the `ImGuiContext*` passed to `Platform_SetImeDataFn`,
     preventing cross-context IME userdata lookups.
+  - Bind winit multi-viewport callback installation, monitor setup, main viewport setup, and
+    event routing to the provided `Context`, preventing multi-context apps from writing or reading
+    another active context's platform state.
 
 ## [0.12.0] - 2026-05-09
 

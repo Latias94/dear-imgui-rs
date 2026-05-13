@@ -106,9 +106,27 @@ fn decoration_offset_logical(window: &Window) -> Option<(f64, f64)> {
 
 /// Initialize multi-viewport support following official ImGui backend pattern
 pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
+    let _context_guard = unsafe { CurrentContextGuard::bind(ctx.as_raw()) };
+
+    install_platform_callbacks(ctx);
+
+    // Set up the main viewport
+    init_main_viewport(ctx, main_window);
+
+    // Set up monitors - required for multi-viewport (after main viewport exists)
+    unsafe {
+        setup_monitors_with_window(main_window, ctx);
+    }
+}
+
+fn install_platform_callbacks(ctx: &mut Context) {
+    let _context_guard = unsafe { CurrentContextGuard::bind(ctx.as_raw()) };
+
     // Set up platform callbacks using direct C API
     unsafe {
         let pio = ctx.platform_io_mut();
+        let pio_sys = pio.as_raw_mut();
+
         // Install platform callbacks using raw function pointers
         pio.set_platform_create_window_raw(Some(winit_create_window));
         pio.set_platform_destroy_window_raw(Some(winit_destroy_window));
@@ -125,7 +143,6 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
         pio.set_platform_update_window_raw(Some(winit_update_window));
 
         // Also register framebuffer/DPI scale and work area insets callbacks.
-        let pio_sys = dear_imgui_rs::sys::igGetPlatformIO_Nil();
         // ImGui will use FramebufferScale when available, falling back to
         // DisplayFramebufferScale otherwise. Install through the out-parameter shim to avoid the
         // struct-return callback ABI.
@@ -172,18 +189,10 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
         );
         chk!("CreateVkSurface", (*pio_sys).Platform_CreateVkSurface);
     }
-
-    // Set up the main viewport
-    init_main_viewport(main_window);
-
-    // Set up monitors - required for multi-viewport (after main viewport exists)
-    unsafe {
-        setup_monitors_with_window(main_window, ctx);
-    }
 }
 
 /// Set up monitors list for multi-viewport support using a reference window
-unsafe fn setup_monitors_with_window(window: &Window, _ctx: &mut Context) {
+unsafe fn setup_monitors_with_window(window: &Window, ctx: &mut Context) {
     // Build monitor list from winit and feed into ImGuiPlatformIO.Monitors.
     // We allocate storage using ImGui's allocator to keep ownership consistent.
     let monitors: Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor> = {
@@ -233,7 +242,7 @@ unsafe fn setup_monitors_with_window(window: &Window, _ctx: &mut Context) {
         out
     };
 
-    let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+    let pio = ctx.platform_io_mut().as_raw_mut();
     let vec = unsafe { &mut (*pio).Monitors };
 
     // Free existing storage if any (owned by ImGui allocator)
@@ -265,13 +274,15 @@ unsafe fn setup_monitors_with_window(window: &Window, _ctx: &mut Context) {
 /// Try to route a winit event to the correct ImGui viewport window
 /// Returns true if the event was consumed by Dear ImGui
 pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) -> bool {
+    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_ctx.as_raw()) };
+
     match event {
         Event::WindowEvent { window_id, event } => {
             // Iterate ImGui viewports and find the window that matches this event's WindowId
             #[cfg(feature = "multi-viewport")]
             {
                 unsafe {
-                    let pio = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+                    let pio = dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(imgui_ctx.as_raw());
                     let viewports = &(*pio).Viewports;
                     if viewports.Data.is_null() || viewports.Size <= 0 {
                         return false;
@@ -441,7 +452,9 @@ pub fn handle_event_with_multi_viewport<T>(
 }
 
 /// Initialize the main viewport with proper ViewportData
-fn init_main_viewport(main_window: &Window) {
+fn init_main_viewport(ctx: &mut Context, main_window: &Window) {
+    let _context_guard = unsafe { CurrentContextGuard::bind(ctx.as_raw()) };
+
     unsafe {
         let main_viewport = dear_imgui_rs::sys::igGetMainViewport();
         if main_viewport.is_null() {
@@ -1178,6 +1191,50 @@ unsafe extern "C" fn winit_update_window(vp: *mut dear_imgui_rs::sys::ImGuiViewp
 mod tests {
     use super::*;
     use crate::test_util::test_sync::lock_context;
+
+    #[test]
+    fn install_platform_callbacks_targets_passed_context() {
+        let _guard = lock_context();
+
+        let mut ctx_a = Context::create();
+        let raw_a = ctx_a.as_raw();
+        let pio_a = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_a) };
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut());
+        }
+
+        let ctx_b = Context::create();
+        let raw_b = ctx_b.as_raw();
+        let pio_b = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_b) };
+
+        install_platform_callbacks(&mut ctx_a);
+
+        unsafe {
+            assert_eq!(dear_imgui_rs::sys::igGetCurrentContext(), raw_b);
+
+            assert!((*pio_a).Platform_CreateWindow.is_some());
+            assert!((*pio_a).Platform_GetWindowPos.is_some());
+            assert!((*pio_a).Platform_GetWindowSize.is_some());
+            assert!((*pio_a).Platform_GetWindowFramebufferScale.is_some());
+            assert!((*pio_a).Platform_GetWindowDpiScale.is_some());
+            assert!((*pio_a).Platform_OnChangedViewport.is_some());
+
+            assert!((*pio_b).Platform_CreateWindow.is_none());
+            assert!((*pio_b).Platform_GetWindowPos.is_none());
+            assert!((*pio_b).Platform_GetWindowSize.is_none());
+            assert!((*pio_b).Platform_GetWindowFramebufferScale.is_none());
+            assert!((*pio_b).Platform_GetWindowDpiScale.is_none());
+            assert!((*pio_b).Platform_OnChangedViewport.is_none());
+
+            dear_imgui_rs::sys::igSetCurrentContext(raw_a);
+        }
+        drop(ctx_a);
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw_b);
+        }
+        drop(ctx_b);
+    }
 
     #[test]
     fn shutdown_multi_viewport_support_targets_passed_context() {
