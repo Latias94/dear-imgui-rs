@@ -327,6 +327,7 @@ def check_tests(repo_root: Path) -> Tuple[bool, List[str]]:
     # We run tests in two passes:
     # 1) All crates except the test-engine crates (no test-engine hooks enabled).
     # 2) The safe test-engine crate itself (ensures the feature-gated path builds/links).
+    # 3) dear-imgui-rs with multi-viewport enabled, covering feature-gated PlatformIO callbacks.
     #
     # Prefer nextest when available. Several core tests create Dear ImGui contexts,
     # and the C++ context is a process-global resource. nextest isolates tests more
@@ -341,16 +342,22 @@ def check_tests(repo_root: Path) -> Tuple[bool, List[str]]:
             "cargo", "nextest", "run", "--no-tests", "pass",
             "-p", "dear-imgui-test-engine", "--lib",
         ]
+        multi_viewport_cmd = [
+            "cargo", "nextest", "run", "--no-tests", "pass",
+            "-p", "dear-imgui-rs", "--features", "multi-viewport",
+        ]
         cargo_test_serial_args: List[str] = []
     else:
         print_warning("cargo-nextest not found; falling back to serial cargo test")
         base_cmd = ["cargo", "test", "--workspace", "--lib"]
         test_engine_cmd = ["cargo", "test", "-p", "dear-imgui-test-engine", "--lib"]
+        multi_viewport_cmd = ["cargo", "test", "-p", "dear-imgui-rs", "--features", "multi-viewport"]
         cargo_test_serial_args = ["--", "--test-threads=1"]
 
     base_cmd += ["--exclude", "dear-imgui-test-engine", "--exclude", "dear-imgui-test-engine-sys"]
     base_cmd += cargo_test_serial_args
     test_engine_cmd += cargo_test_serial_args
+    multi_viewport_cmd += cargo_test_serial_args
 
     # Pass 1: core/backends/extensions (excluding test-engine crates)
     code, _stdout, _stderr = run_command(
@@ -372,9 +379,20 @@ def check_tests(repo_root: Path) -> Tuple[bool, List[str]]:
     if code != 0:
         print_error("Tests failed (dear-imgui-test-engine)")
         return False, ["Tests failed (dear-imgui-test-engine)"]
-    else:
-        print_success("All tests passed")
-        return True, []
+
+    # Pass 3: core multi-viewport feature path
+    code, _stdout, _stderr = run_command(
+        multi_viewport_cmd,
+        cwd=repo_root,
+        capture=False,
+    )
+
+    if code != 0:
+        print_error("Tests failed (dear-imgui-rs multi-viewport)")
+        return False, ["Tests failed (dear-imgui-rs multi-viewport)"]
+
+    print_success("All tests passed")
+    return True, []
 
 
 def main() -> int:

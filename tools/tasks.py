@@ -148,6 +148,7 @@ def task_test(args, repo_root: Path) -> int:
     # Default behaviour: run tests in two passes.
     # - Pass 1: all workspace crates excluding test-engine crates.
     # - Pass 2: test-engine crate itself.
+    # - Pass 3: dear-imgui-rs with multi-viewport enabled for PlatformIO callbacks.
     #
     # If `--package` is provided, run a normal single-package test.
     use_nextest = cargo_nextest_available(repo_root)
@@ -176,7 +177,15 @@ def task_test(args, repo_root: Path) -> int:
     if getattr(args, "lib_only", False):
         pass2.append("--lib")
     pass2 += serial_args
-    return run_command(pass2, cwd=repo_root)
+    rc = run_command(pass2, cwd=repo_root)
+    if rc != 0:
+        return rc
+
+    pass3 = runner + ["-p", "dear-imgui-rs", "--features", "multi-viewport"]
+    if getattr(args, "lib_only", False):
+        pass3.append("--lib")
+    pass3 += serial_args
+    return run_command(pass3, cwd=repo_root)
 
 
 def task_doc(args, repo_root: Path) -> int:

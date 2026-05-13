@@ -84,6 +84,9 @@ jobs:
           cargo check -p dear-imgui-ash --lib --features "multi-viewport-winit,dynamic-rendering"
           cargo check -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering"
 
+      - name: Check dear-imgui-rs multi-viewport tests compile
+        run: cargo test -p dear-imgui-rs --features multi-viewport --no-run
+
       - name: Build dear-app with all add-ons
         run: cargo build -p dear-app --features "implot imnodes implot3d"
 
