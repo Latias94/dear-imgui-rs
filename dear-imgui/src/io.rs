@@ -209,6 +209,51 @@ pub(crate) fn validate_viewport_flags(caller: &str, flags: ViewportFlags) {
     );
 }
 
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
+fn assert_positive_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value > 0.0, "{caller} {name} must be positive");
+}
+
+fn assert_display_size(caller: &str, size: [f32; 2]) {
+    assert_finite_vec2(caller, "size", size);
+    assert!(
+        size[0] >= 0.0 && size[1] >= 0.0,
+        "{caller} size must contain non-negative values"
+    );
+}
+
+fn assert_display_framebuffer_scale(caller: &str, scale: [f32; 2]) {
+    assert_finite_vec2(caller, "scale", scale);
+    assert!(
+        scale[0] >= 0.0 && scale[1] >= 0.0,
+        "{caller} scale must contain non-negative values"
+    );
+}
+
+fn assert_memory_compact_timer(caller: &str, seconds: f32) {
+    assert_finite_f32(caller, "seconds", seconds);
+    assert!(
+        seconds >= 0.0 || seconds == -1.0,
+        "{caller} seconds must be non-negative, or -1.0 to disable"
+    );
+}
+
 /// Settings and inputs/outputs for imgui-rs
 /// This is a transparent wrapper around ImGuiIO
 #[repr(transparent)]
@@ -264,6 +309,30 @@ impl Io {
         ctx
     }
 
+    fn frame_count(&self) -> i32 {
+        let ctx = self.inner().Ctx;
+        if ctx.is_null() {
+            0
+        } else {
+            unsafe { (*ctx).FrameCount }
+        }
+    }
+
+    fn assert_delta_time(&self, caller: &str, delta_time: f32) {
+        assert_finite_f32(caller, "delta_time", delta_time);
+        if self.frame_count() == 0 {
+            assert!(
+                delta_time >= 0.0,
+                "{caller} delta_time must be non-negative before the first frame"
+            );
+        } else {
+            assert!(
+                delta_time > 0.0,
+                "{caller} delta_time must be positive after the first frame"
+            );
+        }
+    }
+
     /// Main display size in pixels
     pub fn display_size(&self) -> [f32; 2] {
         [self.inner().DisplaySize.x, self.inner().DisplaySize.y]
@@ -271,6 +340,7 @@ impl Io {
 
     /// Set main display size in pixels
     pub fn set_display_size(&mut self, size: [f32; 2]) {
+        assert_display_size("Io::set_display_size()", size);
         self.inner_mut().DisplaySize.x = size[0];
         self.inner_mut().DisplaySize.y = size[1];
     }
@@ -282,6 +352,7 @@ impl Io {
 
     /// Set time elapsed since last frame, in seconds
     pub fn set_delta_time(&mut self, delta_time: f32) {
+        self.assert_delta_time("Io::set_delta_time()", delta_time);
         self.inner_mut().DeltaTime = delta_time;
     }
 
@@ -294,6 +365,7 @@ impl Io {
     /// Set auto-save interval for `.ini` settings, in seconds.
     #[doc(alias = "IniSavingRate")]
     pub fn set_ini_saving_rate(&mut self, seconds: f32) {
+        assert_non_negative_f32("Io::set_ini_saving_rate()", "seconds", seconds);
         self.inner_mut().IniSavingRate = seconds;
     }
 
@@ -346,6 +418,7 @@ impl Io {
 
     /// Set mouse position, in pixels
     pub fn set_mouse_pos(&mut self, pos: [f32; 2]) {
+        assert_finite_vec2("Io::set_mouse_pos()", "pos", pos);
         self.inner_mut().MousePos.x = pos[0];
         self.inner_mut().MousePos.y = pos[1];
     }
@@ -357,6 +430,7 @@ impl Io {
 
     /// Set mouse wheel vertical scrolling
     pub fn set_mouse_wheel(&mut self, wheel: f32) {
+        assert_finite_f32("Io::set_mouse_wheel()", "wheel", wheel);
         self.inner_mut().MouseWheel = wheel;
     }
 
@@ -367,6 +441,7 @@ impl Io {
 
     /// Set mouse wheel horizontal scrolling
     pub fn set_mouse_wheel_h(&mut self, wheel_h: f32) {
+        assert_finite_f32("Io::set_mouse_wheel_h()", "wheel_h", wheel_h);
         self.inner_mut().MouseWheelH = wheel_h;
     }
 
@@ -823,6 +898,7 @@ impl Io {
     /// Set the memory compact timer (seconds).
     #[doc(alias = "ConfigMemoryCompactTimer")]
     pub fn set_config_memory_compact_timer(&mut self, seconds: f32) {
+        assert_memory_compact_timer("Io::set_config_memory_compact_timer()", seconds);
         self.inner_mut().ConfigMemoryCompactTimer = seconds;
     }
 
@@ -835,6 +911,7 @@ impl Io {
     /// Set the time for a double-click (seconds).
     #[doc(alias = "MouseDoubleClickTime")]
     pub fn set_mouse_double_click_time(&mut self, seconds: f32) {
+        assert_non_negative_f32("Io::set_mouse_double_click_time()", "seconds", seconds);
         self.inner_mut().MouseDoubleClickTime = seconds;
     }
 
@@ -847,6 +924,7 @@ impl Io {
     /// Set the maximum distance to qualify as a double-click (pixels).
     #[doc(alias = "MouseDoubleClickMaxDist")]
     pub fn set_mouse_double_click_max_dist(&mut self, pixels: f32) {
+        assert_non_negative_f32("Io::set_mouse_double_click_max_dist()", "pixels", pixels);
         self.inner_mut().MouseDoubleClickMaxDist = pixels;
     }
 
@@ -859,6 +937,7 @@ impl Io {
     /// Set the distance threshold for starting a drag (pixels).
     #[doc(alias = "MouseDragThreshold")]
     pub fn set_mouse_drag_threshold(&mut self, pixels: f32) {
+        assert_non_negative_f32("Io::set_mouse_drag_threshold()", "pixels", pixels);
         self.inner_mut().MouseDragThreshold = pixels;
     }
 
@@ -871,6 +950,7 @@ impl Io {
     /// Set the key repeat delay (seconds).
     #[doc(alias = "KeyRepeatDelay")]
     pub fn set_key_repeat_delay(&mut self, seconds: f32) {
+        assert_non_negative_f32("Io::set_key_repeat_delay()", "seconds", seconds);
         self.inner_mut().KeyRepeatDelay = seconds;
     }
 
@@ -883,6 +963,7 @@ impl Io {
     /// Set the key repeat rate (seconds).
     #[doc(alias = "KeyRepeatRate")]
     pub fn set_key_repeat_rate(&mut self, seconds: f32) {
+        assert_non_negative_f32("Io::set_key_repeat_rate()", "seconds", seconds);
         self.inner_mut().KeyRepeatRate = seconds;
     }
 
@@ -1100,6 +1181,7 @@ impl Io {
 
     /// Add a mouse position event to the input queue
     pub fn add_mouse_pos_event(&mut self, pos: [f32; 2]) {
+        assert_finite_vec2("Io::add_mouse_pos_event()", "pos", pos);
         unsafe {
             sys::ImGuiIO_AddMousePosEvent(self.inner_mut() as *mut _, pos[0], pos[1]);
         }
@@ -1114,6 +1196,7 @@ impl Io {
 
     /// Add a mouse wheel event to the input queue
     pub fn add_mouse_wheel_event(&mut self, wheel: [f32; 2]) {
+        assert_finite_vec2("Io::add_mouse_wheel_event()", "wheel", wheel);
         unsafe {
             sys::ImGuiIO_AddMouseWheelEvent(self.inner_mut() as *mut _, wheel[0], wheel[1]);
         }
@@ -1167,6 +1250,7 @@ impl Io {
     /// Set the global font scale (not available in current Dear ImGui version)
     /// Compatibility shim: maps to style.FontScaleMain (Dear ImGui 1.92+)
     pub fn set_font_global_scale(&mut self, scale: f32) {
+        assert_positive_f32("Io::set_font_global_scale()", "scale", scale);
         unsafe {
             let _guard = BoundContextGuard::bind(self.context_ptr("Io::set_font_global_scale()"));
             let style = sys::igGetStyle();
@@ -1247,6 +1331,7 @@ impl Io {
     /// Set the display framebuffer scale
     /// This is important for HiDPI displays to ensure proper rendering
     pub fn set_display_framebuffer_scale(&mut self, scale: [f32; 2]) {
+        assert_display_framebuffer_scale("Io::set_display_framebuffer_scale()", scale);
         self.inner_mut().DisplayFramebufferScale.x = scale[0];
         self.inner_mut().DisplayFramebufferScale.y = scale[1];
     }

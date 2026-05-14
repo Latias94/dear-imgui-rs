@@ -132,6 +132,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     inputs before crossing FFI.
   - Reject non-finite runtime window geometry, layout, clip-rect, and scroll values, and validate
     scroll centering ratios before they reach Dear ImGui state.
+  - Reject invalid `ImGuiIO` display, delta-time, mouse, timing, and framebuffer-scale floats
+    before they reach Dear ImGui state or input event queues.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts
