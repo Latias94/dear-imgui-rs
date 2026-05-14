@@ -265,8 +265,22 @@ impl Ui {
         inner_width: f32,
     ) -> Option<TableToken<'_>> {
         let options = flags.into();
+        options.validate("Ui::begin_table_with_sizing()");
+        assert!(
+            inner_width.is_finite(),
+            "Ui::begin_table_with_sizing() inner_width must be finite"
+        );
+        assert!(
+            !options.flags.contains(TableFlags::SCROLL_X) || inner_width >= 0.0,
+            "Ui::begin_table_with_sizing() inner_width must be non-negative when SCROLL_X is enabled"
+        );
+        let outer_size = outer_size.into();
+        assert!(
+            outer_size[0].is_finite() && outer_size[1].is_finite(),
+            "Ui::begin_table_with_sizing() outer_size must contain finite values"
+        );
         let str_id_ptr = self.scratch_txt(str_id);
-        let outer_size_vec: sys::ImVec2 = outer_size.into().into();
+        let outer_size_vec: sys::ImVec2 = outer_size.into();
         let column_count = table_column_count_to_i32(column_count);
 
         let should_render = unsafe {
@@ -354,11 +368,16 @@ impl Ui {
             "Ui::table_setup_column_with_indent() called more times than the table column count"
         );
         assert_table_setup_phase("Ui::table_setup_column_with_indent()");
+        flags.validate_for_setup("Ui::table_setup_column_with_indent()", width, indent);
+        let init_width_or_weight = width.map_or(0.0, TableColumnWidth::value);
+        assert!(
+            init_width_or_weight.is_finite(),
+            "Ui::table_setup_column_with_indent() width or weight must be finite"
+        );
         let label_ptr = self.scratch_txt(label);
         let raw_flags = flags.bits()
             | width.map_or(0, TableColumnWidth::raw_flags)
             | indent.map_or(0, TableColumnIndent::raw_flags);
-        let init_width_or_weight = width.map_or(0.0, TableColumnWidth::value);
         unsafe {
             sys::igTableSetupColumn(label_ptr, raw_flags, init_width_or_weight, user_id);
         }

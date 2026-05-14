@@ -86,6 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     table column counts and channel preconditions before crossing FFI.
   - Validate table setup phase, column indices, background-color targets, and required table
     flags before calling Dear ImGui table APIs that otherwise assert or index unchecked.
+  - Reject non-independent table and table-column option bits before crossing FFI, preventing
+    raw flag operations from bypassing typed table option builders.
   - Keep font and draw-list clip-rect stacks balanced when `with_font_and_size` or
     `DrawListMut::with_clip_rect` callbacks panic.
   - Add scoped draw-list texture APIs that keep Dear ImGui's draw-list texture stack balanced

@@ -422,6 +422,36 @@ impl TableOptions {
     pub(crate) fn raw(self) -> i32 {
         self.flags.bits() | self.sizing_policy.map_or(0, TableSizingPolicy::raw)
     }
+
+    #[inline]
+    pub(crate) fn validate(self, caller: &str) {
+        let unsupported_flags = self.flags.bits() & !TableFlags::all().bits();
+        assert!(
+            unsupported_flags == 0,
+            "{caller} received non-independent ImGuiTableFlags bits: 0x{unsupported_flags:X}"
+        );
+        let bits = self.raw();
+        let supported = TableFlags::all().bits() | sys::ImGuiTableFlags_SizingMask_;
+        let unsupported = bits & !supported;
+        assert!(
+            unsupported == 0,
+            "{caller} received unsupported ImGuiTableFlags bits: 0x{unsupported:X}"
+        );
+        let sizing_policy = bits & sys::ImGuiTableFlags_SizingMask_;
+        assert!(
+            is_valid_table_sizing_policy(sizing_policy),
+            "{caller} received invalid table sizing policy bits: 0x{sizing_policy:X}"
+        );
+    }
+}
+
+#[inline]
+const fn is_valid_table_sizing_policy(bits: i32) -> bool {
+    bits == 0
+        || bits == TableSizingPolicy::FixedFit.raw()
+        || bits == TableSizingPolicy::FixedSame.raw()
+        || bits == TableSizingPolicy::StretchProp.raw()
+        || bits == TableSizingPolicy::StretchSame.raw()
 }
 
 impl From<TableFlags> for TableOptions {
@@ -461,6 +491,12 @@ bitflags::bitflags! {
     pub struct TableColumnFlags: i32 {
         /// No flags
         const NONE = 0;
+        /// Hide column and omit it from the context menu.
+        const DISABLED = sys::ImGuiTableColumnFlags_Disabled as i32;
+        /// Default to a hidden/disabled column.
+        const DEFAULT_HIDE = sys::ImGuiTableColumnFlags_DefaultHide as i32;
+        /// Default to a sorting column.
+        const DEFAULT_SORT = sys::ImGuiTableColumnFlags_DefaultSort as i32;
         /// Disable manual resizing
         const NO_RESIZE = sys::ImGuiTableColumnFlags_NoResize as i32;
         /// Disable manual reordering this column
@@ -553,6 +589,12 @@ bitflags::bitflags! {
     pub struct TableColumnStateFlags: i32 {
         /// No flags
         const NONE = 0;
+        /// Overriding/master disable flag: hide column and omit it from the context menu.
+        const DISABLED = sys::ImGuiTableColumnFlags_Disabled as i32;
+        /// Default to a hidden/disabled column.
+        const DEFAULT_HIDE = sys::ImGuiTableColumnFlags_DefaultHide as i32;
+        /// Default to a sorting column.
+        const DEFAULT_SORT = sys::ImGuiTableColumnFlags_DefaultSort as i32;
         /// Overriding width becomes fixed width
         const WIDTH_FIXED = sys::ImGuiTableColumnFlags_WidthFixed as i32;
         /// Overriding width becomes weight
@@ -599,6 +641,41 @@ bitflags::bitflags! {
 impl From<TableColumnFlags> for TableColumnStateFlags {
     fn from(flags: TableColumnFlags) -> Self {
         Self::from_bits_retain(flags.bits())
+    }
+}
+
+impl TableColumnFlags {
+    #[inline]
+    pub(crate) fn validate_for_setup(
+        self,
+        caller: &str,
+        width: Option<TableColumnWidth>,
+        indent: Option<TableColumnIndent>,
+    ) {
+        let unsupported_flags = self.bits() & !TableColumnFlags::all().bits();
+        assert!(
+            unsupported_flags == 0,
+            "{caller} received non-independent ImGuiTableColumnFlags bits: 0x{unsupported_flags:X}"
+        );
+        let bits = self.bits()
+            | width.map_or(0, TableColumnWidth::raw_flags)
+            | indent.map_or(0, TableColumnIndent::raw_flags);
+        let supported = TableColumnFlags::all().bits()
+            | sys::ImGuiTableColumnFlags_WidthMask_
+            | sys::ImGuiTableColumnFlags_IndentMask_;
+        let unsupported = bits & !supported;
+        assert!(
+            unsupported == 0,
+            "{caller} received unsupported ImGuiTableColumnFlags bits: 0x{unsupported:X}"
+        );
+        assert!(
+            (bits & sys::ImGuiTableColumnFlags_WidthMask_).count_ones() <= 1,
+            "{caller} accepts at most one table column width policy"
+        );
+        assert!(
+            (bits & sys::ImGuiTableColumnFlags_IndentMask_).count_ones() <= 1,
+            "{caller} accepts at most one table column indent policy"
+        );
     }
 }
 
