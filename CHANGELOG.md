@@ -100,6 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     bits and combinations that Dear ImGui asserts on.
   - Reject non-independent combo, tab, and popup option bits before crossing FFI, preventing
     `from_bits_retain` from bypassing typed option builders.
+  - Reject non-independent color edit, picker, and button option bits before crossing FFI, preventing
+    raw flag operations from bypassing typed color option builders.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts

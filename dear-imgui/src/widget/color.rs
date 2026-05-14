@@ -35,11 +35,17 @@ impl ColorEditFlags {
     pub const NO_DRAG_DROP: Self = Self(sys::ImGuiColorEditFlags_NoDragDrop as u32);
     /// ColorButton: disable border (which is enforced by default)
     pub const NO_BORDER: Self = Self(sys::ImGuiColorEditFlags_NoBorder as u32);
+    /// ColorEdit: disable rendering R/G/B/A color markers.
+    pub const NO_COLOR_MARKERS: Self = Self(sys::ImGuiColorEditFlags_NoColorMarkers as u32);
 
     /// ColorEdit, ColorPicker: show vertical alpha bar/gradient in picker.
     pub const ALPHA_BAR: Self = Self(sys::ImGuiColorEditFlags_AlphaBar as u32);
-    /// ColorEdit, ColorPicker, ColorButton: display preview as a transparent color over a checkerboard, instead of opaque.
-    pub const ALPHA_PREVIEW: Self = Self(sys::ImGuiColorEditFlags_AlphaNoBg as u32);
+    /// ColorEdit, ColorPicker, ColorButton: disable alpha in the preview.
+    pub const ALPHA_OPAQUE: Self = Self(sys::ImGuiColorEditFlags_AlphaOpaque as u32);
+    /// ColorEdit, ColorPicker, ColorButton: disable the checkerboard background behind transparent colors.
+    pub const ALPHA_NO_BG: Self = Self(sys::ImGuiColorEditFlags_AlphaNoBg as u32);
+    /// Compatibility alias for [`Self::ALPHA_NO_BG`].
+    pub const ALPHA_PREVIEW: Self = Self::ALPHA_NO_BG;
     /// ColorEdit, ColorPicker, ColorButton: display half opaque / half checkerboard, instead of opaque.
     pub const ALPHA_PREVIEW_HALF: Self = Self(sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32);
     /// (WIP) ColorEdit: Currently only disable 0.0f..1.0f limits in RGBA edition (note: you probably want to use ImGuiColorEditFlags_Float flag as well).
@@ -68,8 +74,10 @@ impl ColorEditFlags {
                 | Self::NO_SIDE_PREVIEW.0
                 | Self::NO_DRAG_DROP.0
                 | Self::NO_BORDER.0
+                | Self::NO_COLOR_MARKERS.0
                 | Self::ALPHA_BAR.0
-                | Self::ALPHA_PREVIEW.0
+                | Self::ALPHA_OPAQUE.0
+                | Self::ALPHA_NO_BG.0
                 | Self::ALPHA_PREVIEW_HALF.0
                 | Self::HDR.0,
         )
@@ -213,6 +221,15 @@ impl ColorEditOptions {
             | self.picker_mode.map_or(0, ColorPickerMode::raw)
             | self.input_mode.map_or(0, ColorInputMode::raw)
     }
+
+    pub(crate) fn validate(self, caller: &str) {
+        validate_color_independent_flags(caller, self.flags);
+        validate_color_supported_bits(caller, self.bits(), color_edit_supported_mask());
+        assert_color_single_choice_mask(caller, self.bits(), color_display_mask(), "display mode");
+        assert_color_single_choice_mask(caller, self.bits(), color_data_type_mask(), "data type");
+        assert_color_single_choice_mask(caller, self.bits(), color_picker_mask(), "picker mode");
+        assert_color_single_choice_mask(caller, self.bits(), color_input_mask(), "input mode");
+    }
 }
 
 impl Default for ColorEditOptions {
@@ -280,6 +297,20 @@ impl ColorPickerOptions {
             | self.picker_mode.map_or(0, ColorPickerMode::raw)
             | self.input_mode.map_or(0, ColorInputMode::raw)
     }
+
+    pub(crate) fn validate(self, caller: &str) {
+        validate_color_independent_flags(caller, self.flags);
+        let unsupported_display =
+            self.display_flags.bits() & !ColorPickerDisplayFlags::all().bits();
+        assert!(
+            unsupported_display == 0,
+            "{caller} received unsupported ColorPickerDisplayFlags bits: 0x{unsupported_display:X}"
+        );
+        validate_color_supported_bits(caller, self.bits(), color_picker_supported_mask());
+        assert_color_single_choice_mask(caller, self.bits(), color_data_type_mask(), "data type");
+        assert_color_single_choice_mask(caller, self.bits(), color_picker_mask(), "picker mode");
+        assert_color_single_choice_mask(caller, self.bits(), color_input_mask(), "input mode");
+    }
 }
 
 impl Default for ColorPickerOptions {
@@ -322,6 +353,12 @@ impl ColorButtonOptions {
     pub fn bits(self) -> u32 {
         self.flags.bits() | self.input_mode.map_or(0, ColorInputMode::raw)
     }
+
+    pub(crate) fn validate(self, caller: &str) {
+        validate_color_independent_flags(caller, self.flags);
+        validate_color_supported_bits(caller, self.bits(), color_button_supported_mask());
+        assert_color_single_choice_mask(caller, self.bits(), color_input_mask(), "input mode");
+    }
 }
 
 impl Default for ColorButtonOptions {
@@ -334,6 +371,73 @@ impl From<ColorEditFlags> for ColorButtonOptions {
     fn from(flags: ColorEditFlags) -> Self {
         Self::new().flags(flags)
     }
+}
+
+#[inline]
+const fn color_display_mask() -> u32 {
+    sys::ImGuiColorEditFlags_DisplayMask_ as u32
+}
+
+#[inline]
+const fn color_data_type_mask() -> u32 {
+    sys::ImGuiColorEditFlags_DataTypeMask_ as u32
+}
+
+#[inline]
+const fn color_picker_mask() -> u32 {
+    sys::ImGuiColorEditFlags_PickerMask_ as u32
+}
+
+#[inline]
+const fn color_input_mask() -> u32 {
+    sys::ImGuiColorEditFlags_InputMask_ as u32
+}
+
+#[inline]
+const fn color_choice_mask() -> u32 {
+    color_display_mask() | color_data_type_mask() | color_picker_mask() | color_input_mask()
+}
+
+#[inline]
+const fn color_edit_supported_mask() -> u32 {
+    ColorEditFlags::all().bits() | color_choice_mask()
+}
+
+#[inline]
+const fn color_picker_supported_mask() -> u32 {
+    ColorEditFlags::all().bits()
+        | color_display_mask()
+        | color_data_type_mask()
+        | color_picker_mask()
+        | color_input_mask()
+}
+
+#[inline]
+const fn color_button_supported_mask() -> u32 {
+    ColorEditFlags::all().bits() | color_input_mask()
+}
+
+fn validate_color_independent_flags(caller: &str, flags: ColorEditFlags) {
+    let unsupported = flags.bits() & !ColorEditFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received non-independent ImGuiColorEditFlags bits: 0x{unsupported:X}"
+    );
+}
+
+fn validate_color_supported_bits(caller: &str, bits: u32, supported: u32) {
+    let unsupported = bits & !supported;
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiColorEditFlags bits: 0x{unsupported:X}"
+    );
+}
+
+fn assert_color_single_choice_mask(caller: &str, bits: u32, mask: u32, name: &str) {
+    assert!(
+        (bits & mask).count_ones() <= 1,
+        "{caller} accepts at most one color {name}"
+    );
 }
 
 impl std::ops::BitOr for ColorEditFlags {
@@ -391,7 +495,9 @@ impl Ui {
     /// the right-click context menu unless `_NO_OPTIONS` is passed.
     #[doc(alias = "SetColorEditOptions")]
     pub fn set_color_edit_options(&self, options: impl Into<ColorEditOptions>) {
-        unsafe { sys::igSetColorEditOptions(options.into().bits() as i32) }
+        let options = options.into();
+        options.validate("Ui::set_color_edit_options()");
+        unsafe { sys::igSetColorEditOptions(options.bits() as i32) }
     }
 
     /// Creates a color edit widget for 3 components (RGB)
@@ -523,6 +629,7 @@ impl<'ui, 'p> ColorEdit3<'ui, 'p> {
 
     /// Builds the color edit widget
     pub fn build(self) -> bool {
+        self.flags.validate("ColorEdit3::build()");
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe { sys::igColorEdit3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
@@ -581,6 +688,7 @@ impl<'ui, 'p> ColorEdit4<'ui, 'p> {
 
     /// Builds the color edit widget
     pub fn build(self) -> bool {
+        self.flags.validate("ColorEdit4::build()");
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe { sys::igColorEdit4(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
@@ -639,6 +747,7 @@ impl<'ui, 'p> ColorPicker3<'ui, 'p> {
 
     /// Builds the color picker widget
     pub fn build(self) -> bool {
+        self.flags.validate("ColorPicker3::build()");
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe { sys::igColorPicker3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
@@ -705,6 +814,7 @@ impl<'ui, 'p> ColorPicker4<'ui, 'p> {
 
     /// Builds the color picker widget
     pub fn build(self) -> bool {
+        self.flags.validate("ColorPicker4::build()");
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let ref_color_ptr = self
             .ref_color
@@ -765,6 +875,7 @@ impl<'ui> ColorButton<'ui> {
 
     /// Builds the color button widget
     pub fn build(self) -> bool {
+        self.flags.validate("ColorButton::build()");
         let desc_id_ptr = self.ui.scratch_txt(self.desc_id.as_ref());
         let size_vec: sys::ImVec2 = self.size.into();
 
