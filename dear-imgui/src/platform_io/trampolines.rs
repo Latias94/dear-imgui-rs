@@ -409,6 +409,29 @@ pub(super) fn clear_cb_for_current_context<T: Copy>(slot: &CallbackSlot<T>) {
     });
 }
 
+pub(super) fn clear_cb_for_platform_io<T: Copy>(
+    platform_io: *const sys::ImGuiPlatformIO,
+    slot: &CallbackSlot<T>,
+) {
+    if platform_io.is_null() {
+        return;
+    }
+
+    CONTEXT_CALLBACKS.with(|contexts| {
+        let mut contexts = contexts.borrow_mut();
+        if let Some(index) = contexts.iter().position(|entry| unsafe {
+            let entry_platform_io = sys::igGetPlatformIO_ContextPtr(entry.ctx);
+            !entry_platform_io.is_null()
+                && std::ptr::addr_eq(entry_platform_io.cast_const(), platform_io)
+        }) {
+            (slot.set)(&mut contexts[index].callbacks, None);
+            if contexts[index].callbacks.is_empty() {
+                contexts.remove(index);
+            }
+        }
+    });
+}
+
 pub(crate) fn clear_platform_callbacks_for_platform_io(platform_io: *const sys::ImGuiPlatformIO) {
     if platform_io.is_null() {
         return;

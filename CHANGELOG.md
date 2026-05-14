@@ -95,6 +95,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Clear `PlatformIo` typed callback and out-parameter shim storage by the receiver
     `PlatformIo` instead of whichever context is current, preventing stale callback dispatch after
     clearing handlers on a non-current context.
+  - Clear receiver-owned typed `PlatformIo` callback slots when raw callback setters replace the
+    corresponding C callback, preventing stale typed trampoline dispatch after raw/typed setter
+    mixing.
   - Generate correctly terminated glyph exclude range arrays and reject reversed or
     out-of-range glyph ranges.
   - Validate `TextCallbackData` buffers and byte positions before exposing Rust slices or
