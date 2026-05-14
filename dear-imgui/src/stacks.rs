@@ -11,7 +11,7 @@
 )]
 use crate::Ui;
 use crate::fonts::FontId;
-use crate::style::{StyleColor, StyleVar};
+use crate::style::{StyleColor, StyleVar, validate_style_color, validate_style_var};
 use crate::sys;
 
 /// # Parameter stacks (shared)
@@ -69,6 +69,7 @@ impl Ui {
         color: impl Into<[f32; 4]>,
     ) -> ColorStackToken<'_> {
         let color_array = color.into();
+        validate_style_color("Ui::push_style_color()", "color", color_array);
         unsafe {
             sys::igPushStyleColor_Vec4(
                 style_color as i32,
@@ -100,6 +101,7 @@ impl Ui {
     /// ```
     #[doc(alias = "PushStyleVar")]
     pub fn push_style_var(&self, style_var: StyleVar) -> StyleStackToken<'_> {
+        validate_style_var("Ui::push_style_var()", style_var);
         unsafe { push_style_var(style_var) };
         StyleStackToken::new(self)
     }
@@ -202,9 +204,6 @@ unsafe fn push_style_var(style_var: StyleVar) {
         FrameRounding(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameRounding as i32, v)
         },
-        ImageRounding(v) => unsafe {
-            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ImageRounding as i32, v)
-        },
         FrameBorderSize(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_FrameBorderSize as i32, v)
         },
@@ -232,14 +231,54 @@ unsafe fn push_style_var(style_var: StyleVar) {
         ScrollbarRounding(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarRounding as i32, v)
         },
+        ScrollbarPadding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ScrollbarPadding as i32, v)
+        },
         GrabMinSize(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabMinSize as i32, v)
         },
         GrabRounding(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_GrabRounding as i32, v)
         },
+        ImageRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ImageRounding as i32, v)
+        },
+        ImageBorderSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_ImageBorderSize as i32, v)
+        },
         TabRounding(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabRounding as i32, v)
+        },
+        TabBorderSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabBorderSize as i32, v)
+        },
+        TabMinWidthBase(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabMinWidthBase as i32, v)
+        },
+        TabMinWidthShrink(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabMinWidthShrink as i32, v)
+        },
+        TabBarBorderSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabBarBorderSize as i32, v)
+        },
+        TabBarOverlineSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TabBarOverlineSize as i32, v)
+        },
+        TableAngledHeadersAngle(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TableAngledHeadersAngle as i32, v)
+        },
+        TableAngledHeadersTextAlign(v) => {
+            let p: [f32; 2] = v;
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            unsafe {
+                sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_TableAngledHeadersTextAlign as i32, vec)
+            }
+        }
+        TreeLinesSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TreeLinesSize as i32, v)
+        },
+        TreeLinesRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TreeLinesRounding as i32, v)
         },
         ButtonTextAlign(v) => {
             let p: [f32; 2] = v;
@@ -253,6 +292,22 @@ unsafe fn push_style_var(style_var: StyleVar) {
         }
         SeparatorSize(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_SeparatorSize as i32, v)
+        },
+        SeparatorTextBorderSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_SeparatorTextBorderSize as i32, v)
+        },
+        SeparatorTextAlign(v) => {
+            let p: [f32; 2] = v;
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_SeparatorTextAlign as i32, vec) }
+        }
+        SeparatorTextPadding(v) => {
+            let p: [f32; 2] = v;
+            let vec = sys::ImVec2 { x: p[0], y: p[1] };
+            unsafe { sys::igPushStyleVar_Vec2(sys::ImGuiStyleVar_SeparatorTextPadding as i32, vec) }
+        }
+        DockingSeparatorSize(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DockingSeparatorSize as i32, v)
         },
     }
 }

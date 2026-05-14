@@ -57,6 +57,170 @@ pub struct Style(pub(crate) UnsafeCell<sys::ImGuiStyle>);
 const _: [(); std::mem::size_of::<sys::ImGuiStyle>()] = [(); std::mem::size_of::<Style>()];
 const _: [(); std::mem::align_of::<sys::ImGuiStyle>()] = [(); std::mem::align_of::<Style>()];
 
+const TABLE_ANGLED_HEADERS_MAX_ANGLE: f32 = 50.0 * std::f32::consts::PI / 180.0;
+
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+pub(crate) fn validate_style_color(caller: &str, name: &str, value: [f32; 4]) {
+    assert!(
+        value.iter().all(|component| component.is_finite()),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn assert_positive_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value > 0.0, "{caller} {name} must be positive");
+}
+
+fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
+fn assert_non_negative_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert_finite_vec2(caller, name, value);
+    assert!(
+        value[0] >= 0.0 && value[1] >= 0.0,
+        "{caller} {name} must contain non-negative values"
+    );
+}
+
+fn assert_unit_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(
+        (0.0..=1.0).contains(&value),
+        "{caller} {name} must be between 0.0 and 1.0"
+    );
+}
+
+fn assert_unit_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert_finite_vec2(caller, name, value);
+    assert!(
+        (0.0..=1.0).contains(&value[0]) && (0.0..=1.0).contains(&value[1]),
+        "{caller} {name} must contain values between 0.0 and 1.0"
+    );
+}
+
+fn assert_window_min_size(caller: &str, value: [f32; 2]) {
+    assert_finite_vec2(caller, "value", value);
+    assert!(
+        value[0] >= 1.0 && value[1] >= 1.0,
+        "{caller} value must contain values greater than or equal to 1.0"
+    );
+}
+
+fn assert_tab_close_button_min_width(caller: &str, value: f32) {
+    assert_finite_f32(caller, "value", value);
+    assert!(
+        value >= 0.0 || value == -1.0,
+        "{caller} value must be non-negative, or -1.0 to always show the close button"
+    );
+}
+
+fn assert_table_angled_headers_angle(caller: &str, value: f32) {
+    assert_finite_f32(caller, "value", value);
+    assert!(
+        (-TABLE_ANGLED_HEADERS_MAX_ANGLE..=TABLE_ANGLED_HEADERS_MAX_ANGLE).contains(&value),
+        "{caller} value must be between -50 and 50 degrees in radians"
+    );
+}
+
+fn validate_window_menu_button_position(caller: &str, direction: Direction) {
+    assert!(
+        matches!(
+            direction,
+            Direction::None | Direction::Left | Direction::Right
+        ),
+        "{caller} accepts only Direction::None, Direction::Left, or Direction::Right"
+    );
+}
+
+fn validate_color_button_position(caller: &str, direction: Direction) {
+    assert!(
+        matches!(direction, Direction::Left | Direction::Right),
+        "{caller} accepts only Direction::Left or Direction::Right"
+    );
+}
+
+fn validate_tree_lines_flags(caller: &str, flags: TreeNodeFlags) {
+    assert!(
+        matches!(
+            flags,
+            TreeNodeFlags::DRAW_LINES_NONE
+                | TreeNodeFlags::DRAW_LINES_FULL
+                | TreeNodeFlags::DRAW_LINES_TO_NODES
+        ),
+        "{caller} accepts only TreeNodeFlags::DRAW_LINES_NONE, DRAW_LINES_FULL, or DRAW_LINES_TO_NODES"
+    );
+}
+
+pub(crate) fn validate_style_var(caller: &str, style_var: StyleVar) {
+    use StyleVar::*;
+
+    match style_var {
+        Alpha(value) => assert_unit_f32(caller, "Alpha", value),
+        DisabledAlpha(value) => assert_unit_f32(caller, "DisabledAlpha", value),
+        WindowPadding(value) => assert_non_negative_vec2(caller, "WindowPadding", value),
+        WindowRounding(value) => assert_non_negative_f32(caller, "WindowRounding", value),
+        WindowBorderSize(value) => assert_non_negative_f32(caller, "WindowBorderSize", value),
+        WindowMinSize(value) => assert_non_negative_vec2(caller, "WindowMinSize", value),
+        WindowTitleAlign(value) => assert_unit_vec2(caller, "WindowTitleAlign", value),
+        ChildRounding(value) => assert_non_negative_f32(caller, "ChildRounding", value),
+        ChildBorderSize(value) => assert_non_negative_f32(caller, "ChildBorderSize", value),
+        PopupRounding(value) => assert_non_negative_f32(caller, "PopupRounding", value),
+        PopupBorderSize(value) => assert_non_negative_f32(caller, "PopupBorderSize", value),
+        FramePadding(value) => assert_non_negative_vec2(caller, "FramePadding", value),
+        FrameRounding(value) => assert_non_negative_f32(caller, "FrameRounding", value),
+        ImageRounding(value) => assert_non_negative_f32(caller, "ImageRounding", value),
+        ImageBorderSize(value) => assert_non_negative_f32(caller, "ImageBorderSize", value),
+        FrameBorderSize(value) => assert_non_negative_f32(caller, "FrameBorderSize", value),
+        ItemSpacing(value) => assert_non_negative_vec2(caller, "ItemSpacing", value),
+        ItemInnerSpacing(value) => assert_non_negative_vec2(caller, "ItemInnerSpacing", value),
+        IndentSpacing(value) => assert_non_negative_f32(caller, "IndentSpacing", value),
+        CellPadding(value) => assert_non_negative_vec2(caller, "CellPadding", value),
+        ScrollbarSize(value) => assert_non_negative_f32(caller, "ScrollbarSize", value),
+        ScrollbarRounding(value) => assert_non_negative_f32(caller, "ScrollbarRounding", value),
+        ScrollbarPadding(value) => assert_non_negative_f32(caller, "ScrollbarPadding", value),
+        GrabMinSize(value) => assert_non_negative_f32(caller, "GrabMinSize", value),
+        GrabRounding(value) => assert_non_negative_f32(caller, "GrabRounding", value),
+        TabRounding(value) => assert_non_negative_f32(caller, "TabRounding", value),
+        TabBorderSize(value) => assert_non_negative_f32(caller, "TabBorderSize", value),
+        TabMinWidthBase(value) => assert_non_negative_f32(caller, "TabMinWidthBase", value),
+        TabMinWidthShrink(value) => assert_non_negative_f32(caller, "TabMinWidthShrink", value),
+        TabBarBorderSize(value) => assert_non_negative_f32(caller, "TabBarBorderSize", value),
+        TabBarOverlineSize(value) => assert_non_negative_f32(caller, "TabBarOverlineSize", value),
+        TableAngledHeadersAngle(value) => assert_table_angled_headers_angle(caller, value),
+        TableAngledHeadersTextAlign(value) => {
+            assert_unit_vec2(caller, "TableAngledHeadersTextAlign", value);
+        }
+        TreeLinesSize(value) => assert_non_negative_f32(caller, "TreeLinesSize", value),
+        TreeLinesRounding(value) => assert_non_negative_f32(caller, "TreeLinesRounding", value),
+        ButtonTextAlign(value) => assert_unit_vec2(caller, "ButtonTextAlign", value),
+        SelectableTextAlign(value) => assert_unit_vec2(caller, "SelectableTextAlign", value),
+        SeparatorSize(value) => assert_non_negative_f32(caller, "SeparatorSize", value),
+        SeparatorTextBorderSize(value) => {
+            assert_non_negative_f32(caller, "SeparatorTextBorderSize", value);
+        }
+        SeparatorTextAlign(value) => assert_unit_vec2(caller, "SeparatorTextAlign", value),
+        SeparatorTextPadding(value) => {
+            assert_non_negative_vec2(caller, "SeparatorTextPadding", value);
+        }
+        DockingSeparatorSize(value) => {
+            assert_non_negative_f32(caller, "DockingSeparatorSize", value);
+        }
+    }
+}
+
 impl Style {
     #[inline]
     fn inner(&self) -> &sys::ImGuiStyle {
@@ -80,6 +244,7 @@ impl Style {
 
     /// Set a color by style color identifier
     pub fn set_color(&mut self, color: StyleColor, value: [f32; 4]) {
+        validate_style_color("Style::set_color()", "value", value);
         self.inner_mut().Colors[color as usize] = sys::ImVec4 {
             x: value[0],
             y: value[1],
@@ -95,6 +260,7 @@ impl Style {
 
     /// Set main font scale (formerly io.FontGlobalScale)
     pub fn set_font_scale_main(&mut self, scale: f32) {
+        assert_positive_f32("Style::set_font_scale_main()", "scale", scale);
         self.inner_mut().FontScaleMain = scale;
     }
 
@@ -105,6 +271,7 @@ impl Style {
 
     /// Set DPI font scale
     pub fn set_font_scale_dpi(&mut self, scale: f32) {
+        assert_positive_f32("Style::set_font_scale_dpi()", "scale", scale);
         self.inner_mut().FontScaleDpi = scale;
     }
 
@@ -114,6 +281,7 @@ impl Style {
     }
 
     pub fn set_font_size_base(&mut self, sz: f32) {
+        assert_non_negative_f32("Style::set_font_size_base()", "sz", sz);
         self.inner_mut().FontSizeBase = sz;
     }
 
@@ -123,6 +291,7 @@ impl Style {
         self.inner().Alpha
     }
     pub fn set_alpha(&mut self, v: f32) {
+        assert_unit_f32("Style::set_alpha()", "v", v);
         self.inner_mut().Alpha = v;
     }
 
@@ -130,6 +299,7 @@ impl Style {
         self.inner().DisabledAlpha
     }
     pub fn set_disabled_alpha(&mut self, v: f32) {
+        assert_unit_f32("Style::set_disabled_alpha()", "v", v);
         self.inner_mut().DisabledAlpha = v;
     }
 
@@ -137,6 +307,7 @@ impl Style {
         [self.inner().WindowPadding.x, self.inner().WindowPadding.y]
     }
     pub fn set_window_padding(&mut self, v: [f32; 2]) {
+        assert_non_negative_vec2("Style::set_window_padding()", "v", v);
         self.inner_mut().WindowPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -144,6 +315,7 @@ impl Style {
         self.inner().WindowRounding
     }
     pub fn set_window_rounding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_window_rounding()", "v", v);
         self.inner_mut().WindowRounding = v;
     }
 
@@ -151,6 +323,7 @@ impl Style {
         self.inner().WindowBorderSize
     }
     pub fn set_window_border_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_window_border_size()", "v", v);
         self.inner_mut().WindowBorderSize = v;
     }
 
@@ -158,6 +331,7 @@ impl Style {
         [self.inner().WindowMinSize.x, self.inner().WindowMinSize.y]
     }
     pub fn set_window_min_size(&mut self, v: [f32; 2]) {
+        assert_window_min_size("Style::set_window_min_size()", v);
         self.inner_mut().WindowMinSize = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -168,6 +342,7 @@ impl Style {
         ]
     }
     pub fn set_window_title_align(&mut self, v: [f32; 2]) {
+        assert_unit_vec2("Style::set_window_title_align()", "v", v);
         self.inner_mut().WindowTitleAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -175,6 +350,7 @@ impl Style {
         Direction::from(self.inner().WindowMenuButtonPosition)
     }
     pub fn set_window_menu_button_position(&mut self, d: Direction) {
+        validate_window_menu_button_position("Style::set_window_menu_button_position()", d);
         self.inner_mut().WindowMenuButtonPosition = d.into();
     }
 
@@ -182,6 +358,7 @@ impl Style {
         self.inner().ChildRounding
     }
     pub fn set_child_rounding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_child_rounding()", "v", v);
         self.inner_mut().ChildRounding = v;
     }
 
@@ -189,6 +366,7 @@ impl Style {
         self.inner().ChildBorderSize
     }
     pub fn set_child_border_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_child_border_size()", "v", v);
         self.inner_mut().ChildBorderSize = v;
     }
 
@@ -196,6 +374,7 @@ impl Style {
         self.inner().PopupRounding
     }
     pub fn set_popup_rounding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_popup_rounding()", "v", v);
         self.inner_mut().PopupRounding = v;
     }
 
@@ -203,6 +382,7 @@ impl Style {
         self.inner().PopupBorderSize
     }
     pub fn set_popup_border_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_popup_border_size()", "v", v);
         self.inner_mut().PopupBorderSize = v;
     }
 
@@ -210,6 +390,7 @@ impl Style {
         [self.inner().FramePadding.x, self.inner().FramePadding.y]
     }
     pub fn set_frame_padding(&mut self, v: [f32; 2]) {
+        assert_non_negative_vec2("Style::set_frame_padding()", "v", v);
         self.inner_mut().FramePadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -217,6 +398,7 @@ impl Style {
         self.inner().FrameRounding
     }
     pub fn set_frame_rounding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_frame_rounding()", "v", v);
         self.inner_mut().FrameRounding = v;
     }
 
@@ -224,6 +406,7 @@ impl Style {
         self.inner().ImageRounding
     }
     pub fn set_image_rounding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_image_rounding()", "v", v);
         self.inner_mut().ImageRounding = v;
     }
 
@@ -231,6 +414,7 @@ impl Style {
         self.inner().FrameBorderSize
     }
     pub fn set_frame_border_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_frame_border_size()", "v", v);
         self.inner_mut().FrameBorderSize = v;
     }
 
@@ -238,6 +422,7 @@ impl Style {
         [self.inner().ItemSpacing.x, self.inner().ItemSpacing.y]
     }
     pub fn set_item_spacing(&mut self, v: [f32; 2]) {
+        assert_non_negative_vec2("Style::set_item_spacing()", "v", v);
         self.inner_mut().ItemSpacing = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -248,6 +433,7 @@ impl Style {
         ]
     }
     pub fn set_item_inner_spacing(&mut self, v: [f32; 2]) {
+        assert_non_negative_vec2("Style::set_item_inner_spacing()", "v", v);
         self.inner_mut().ItemInnerSpacing = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -255,6 +441,7 @@ impl Style {
         [self.inner().CellPadding.x, self.inner().CellPadding.y]
     }
     pub fn set_cell_padding(&mut self, v: [f32; 2]) {
+        assert_non_negative_vec2("Style::set_cell_padding()", "v", v);
         self.inner_mut().CellPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -265,6 +452,7 @@ impl Style {
         ]
     }
     pub fn set_touch_extra_padding(&mut self, v: [f32; 2]) {
+        assert_non_negative_vec2("Style::set_touch_extra_padding()", "v", v);
         self.inner_mut().TouchExtraPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -272,6 +460,7 @@ impl Style {
         self.inner().IndentSpacing
     }
     pub fn set_indent_spacing(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_indent_spacing()", "v", v);
         self.inner_mut().IndentSpacing = v;
     }
 
@@ -279,6 +468,7 @@ impl Style {
         self.inner().ColumnsMinSpacing
     }
     pub fn set_columns_min_spacing(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_columns_min_spacing()", "v", v);
         self.inner_mut().ColumnsMinSpacing = v;
     }
 
@@ -286,6 +476,7 @@ impl Style {
         self.inner().ScrollbarSize
     }
     pub fn set_scrollbar_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_scrollbar_size()", "v", v);
         self.inner_mut().ScrollbarSize = v;
     }
 
@@ -293,6 +484,7 @@ impl Style {
         self.inner().ScrollbarRounding
     }
     pub fn set_scrollbar_rounding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_scrollbar_rounding()", "v", v);
         self.inner_mut().ScrollbarRounding = v;
     }
 
@@ -300,6 +492,7 @@ impl Style {
         self.inner().GrabMinSize
     }
     pub fn set_grab_min_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_grab_min_size()", "v", v);
         self.inner_mut().GrabMinSize = v;
     }
 
@@ -307,6 +500,7 @@ impl Style {
         self.inner().GrabRounding
     }
     pub fn set_grab_rounding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_grab_rounding()", "v", v);
         self.inner_mut().GrabRounding = v;
     }
 
@@ -314,6 +508,7 @@ impl Style {
         self.inner().LogSliderDeadzone
     }
     pub fn set_log_slider_deadzone(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_log_slider_deadzone()", "v", v);
         self.inner_mut().LogSliderDeadzone = v;
     }
 
@@ -321,6 +516,7 @@ impl Style {
         self.inner().TabRounding
     }
     pub fn set_tab_rounding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_tab_rounding()", "v", v);
         self.inner_mut().TabRounding = v;
     }
 
@@ -328,6 +524,7 @@ impl Style {
         self.inner().TabBorderSize
     }
     pub fn set_tab_border_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_tab_border_size()", "v", v);
         self.inner_mut().TabBorderSize = v;
     }
 
@@ -335,6 +532,7 @@ impl Style {
         Direction::from(self.inner().ColorButtonPosition)
     }
     pub fn set_color_button_position(&mut self, d: Direction) {
+        validate_color_button_position("Style::set_color_button_position()", d);
         self.inner_mut().ColorButtonPosition = d.into();
     }
 
@@ -345,6 +543,7 @@ impl Style {
         ]
     }
     pub fn set_button_text_align(&mut self, v: [f32; 2]) {
+        assert_unit_vec2("Style::set_button_text_align()", "v", v);
         self.inner_mut().ButtonTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -355,6 +554,7 @@ impl Style {
         ]
     }
     pub fn set_selectable_text_align(&mut self, v: [f32; 2]) {
+        assert_unit_vec2("Style::set_selectable_text_align()", "v", v);
         self.inner_mut().SelectableTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -365,6 +565,7 @@ impl Style {
         ]
     }
     pub fn set_display_window_padding(&mut self, v: [f32; 2]) {
+        assert_non_negative_vec2("Style::set_display_window_padding()", "v", v);
         self.inner_mut().DisplayWindowPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -375,6 +576,7 @@ impl Style {
         ]
     }
     pub fn set_display_safe_area_padding(&mut self, v: [f32; 2]) {
+        assert_non_negative_vec2("Style::set_display_safe_area_padding()", "v", v);
         self.inner_mut().DisplaySafeAreaPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -382,6 +584,7 @@ impl Style {
         self.inner().MouseCursorScale
     }
     pub fn set_mouse_cursor_scale(&mut self, v: f32) {
+        assert_positive_f32("Style::set_mouse_cursor_scale()", "v", v);
         self.inner_mut().MouseCursorScale = v;
     }
 
@@ -410,6 +613,7 @@ impl Style {
         self.inner().CurveTessellationTol
     }
     pub fn set_curve_tessellation_tol(&mut self, v: f32) {
+        assert_positive_f32("Style::set_curve_tessellation_tol()", "v", v);
         self.inner_mut().CurveTessellationTol = v;
     }
 
@@ -417,6 +621,7 @@ impl Style {
         self.inner().CircleTessellationMaxError
     }
     pub fn set_circle_tessellation_max_error(&mut self, v: f32) {
+        assert_positive_f32("Style::set_circle_tessellation_max_error()", "v", v);
         self.inner_mut().CircleTessellationMaxError = v;
     }
 
@@ -426,6 +631,7 @@ impl Style {
         self.inner().WindowBorderHoverPadding
     }
     pub fn set_window_border_hover_padding(&mut self, v: f32) {
+        assert_positive_f32("Style::set_window_border_hover_padding()", "v", v);
         self.inner_mut().WindowBorderHoverPadding = v;
     }
 
@@ -433,6 +639,7 @@ impl Style {
         self.inner().ScrollbarPadding
     }
     pub fn set_scrollbar_padding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_scrollbar_padding()", "v", v);
         self.inner_mut().ScrollbarPadding = v;
     }
 
@@ -440,6 +647,7 @@ impl Style {
         self.inner().ImageBorderSize
     }
     pub fn set_image_border_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_image_border_size()", "v", v);
         self.inner_mut().ImageBorderSize = v;
     }
 
@@ -447,6 +655,7 @@ impl Style {
         self.inner().TabMinWidthBase
     }
     pub fn set_tab_min_width_base(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_tab_min_width_base()", "v", v);
         self.inner_mut().TabMinWidthBase = v;
     }
 
@@ -454,6 +663,7 @@ impl Style {
         self.inner().TabMinWidthShrink
     }
     pub fn set_tab_min_width_shrink(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_tab_min_width_shrink()", "v", v);
         self.inner_mut().TabMinWidthShrink = v;
     }
 
@@ -461,6 +671,7 @@ impl Style {
         self.inner().TabCloseButtonMinWidthSelected
     }
     pub fn set_tab_close_button_min_width_selected(&mut self, v: f32) {
+        assert_tab_close_button_min_width("Style::set_tab_close_button_min_width_selected()", v);
         self.inner_mut().TabCloseButtonMinWidthSelected = v;
     }
 
@@ -468,6 +679,7 @@ impl Style {
         self.inner().TabCloseButtonMinWidthUnselected
     }
     pub fn set_tab_close_button_min_width_unselected(&mut self, v: f32) {
+        assert_tab_close_button_min_width("Style::set_tab_close_button_min_width_unselected()", v);
         self.inner_mut().TabCloseButtonMinWidthUnselected = v;
     }
 
@@ -475,6 +687,7 @@ impl Style {
         self.inner().TabBarBorderSize
     }
     pub fn set_tab_bar_border_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_tab_bar_border_size()", "v", v);
         self.inner_mut().TabBarBorderSize = v;
     }
 
@@ -482,6 +695,7 @@ impl Style {
         self.inner().TabBarOverlineSize
     }
     pub fn set_tab_bar_overline_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_tab_bar_overline_size()", "v", v);
         self.inner_mut().TabBarOverlineSize = v;
     }
 
@@ -489,6 +703,7 @@ impl Style {
         self.inner().TableAngledHeadersAngle
     }
     pub fn set_table_angled_headers_angle(&mut self, v: f32) {
+        assert_table_angled_headers_angle("Style::set_table_angled_headers_angle()", v);
         self.inner_mut().TableAngledHeadersAngle = v;
     }
 
@@ -499,6 +714,7 @@ impl Style {
         ]
     }
     pub fn set_table_angled_headers_text_align(&mut self, v: [f32; 2]) {
+        assert_unit_vec2("Style::set_table_angled_headers_text_align()", "v", v);
         self.inner_mut().TableAngledHeadersTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -506,6 +722,7 @@ impl Style {
         TreeNodeFlags::from_bits_truncate(self.inner().TreeLinesFlags as i32)
     }
     pub fn set_tree_lines_flags(&mut self, flags: TreeNodeFlags) {
+        validate_tree_lines_flags("Style::set_tree_lines_flags()", flags);
         self.inner_mut().TreeLinesFlags = flags.bits() as sys::ImGuiTreeNodeFlags;
     }
 
@@ -513,6 +730,7 @@ impl Style {
         self.inner().TreeLinesSize
     }
     pub fn set_tree_lines_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_tree_lines_size()", "v", v);
         self.inner_mut().TreeLinesSize = v;
     }
 
@@ -520,6 +738,7 @@ impl Style {
         self.inner().TreeLinesRounding
     }
     pub fn set_tree_lines_rounding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_tree_lines_rounding()", "v", v);
         self.inner_mut().TreeLinesRounding = v;
     }
 
@@ -527,6 +746,7 @@ impl Style {
         self.inner().SeparatorSize
     }
     pub fn set_separator_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_separator_size()", "v", v);
         self.inner_mut().SeparatorSize = v;
     }
 
@@ -534,6 +754,7 @@ impl Style {
         self.inner().SeparatorTextBorderSize
     }
     pub fn set_separator_text_border_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_separator_text_border_size()", "v", v);
         self.inner_mut().SeparatorTextBorderSize = v;
     }
 
@@ -544,6 +765,7 @@ impl Style {
         ]
     }
     pub fn set_separator_text_align(&mut self, v: [f32; 2]) {
+        assert_unit_vec2("Style::set_separator_text_align()", "v", v);
         self.inner_mut().SeparatorTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -554,6 +776,7 @@ impl Style {
         ]
     }
     pub fn set_separator_text_padding(&mut self, v: [f32; 2]) {
+        assert_non_negative_vec2("Style::set_separator_text_padding()", "v", v);
         self.inner_mut().SeparatorTextPadding = sys::ImVec2 { x: v[0], y: v[1] };
     }
 
@@ -568,6 +791,7 @@ impl Style {
         self.inner().DockingSeparatorSize
     }
     pub fn set_docking_separator_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_docking_separator_size()", "v", v);
         self.inner_mut().DockingSeparatorSize = v;
     }
 
@@ -575,6 +799,7 @@ impl Style {
         self.inner().HoverStationaryDelay
     }
     pub fn set_hover_stationary_delay(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_hover_stationary_delay()", "v", v);
         self.inner_mut().HoverStationaryDelay = v;
     }
 
@@ -582,6 +807,7 @@ impl Style {
         self.inner().HoverDelayShort
     }
     pub fn set_hover_delay_short(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_hover_delay_short()", "v", v);
         self.inner_mut().HoverDelayShort = v;
     }
 
@@ -589,6 +815,7 @@ impl Style {
         self.inner().HoverDelayNormal
     }
     pub fn set_hover_delay_normal(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_hover_delay_normal()", "v", v);
         self.inner_mut().HoverDelayNormal = v;
     }
 
@@ -776,6 +1003,8 @@ pub enum StyleVar {
     FrameRounding(f32),
     /// Rounding radius of image corners (used by Image() and ImageButton() widgets)
     ImageRounding(f32),
+    /// Thickness of border around images
+    ImageBorderSize(f32),
     /// Thickness of border around frames
     FrameBorderSize(f32),
     /// Horizontal and vertical spacing between widgets/lines
@@ -790,18 +1019,46 @@ pub enum StyleVar {
     ScrollbarSize(f32),
     /// Rounding radius of scrollbar corners
     ScrollbarRounding(f32),
+    /// Padding of scrollbar grab within its frame
+    ScrollbarPadding(f32),
     /// Minimum width/height of a grab box for slider/scrollbar
     GrabMinSize(f32),
     /// Rounding radius of grabs corners
     GrabRounding(f32),
     /// Rounding radius of upper corners of tabs
     TabRounding(f32),
+    /// Thickness of border around tabs
+    TabBorderSize(f32),
+    /// Minimum tab width before fitting policy shrink is applied
+    TabMinWidthBase(f32),
+    /// Minimum tab width after shrinking with the mixed fitting policy
+    TabMinWidthShrink(f32),
+    /// Thickness of the tab-bar separator
+    TabBarBorderSize(f32),
+    /// Thickness of the selected tab-bar overline
+    TabBarOverlineSize(f32),
+    /// Angle of angled table headers, in radians
+    TableAngledHeadersAngle(f32),
+    /// Alignment of angled table headers within the cell
+    TableAngledHeadersTextAlign([f32; 2]),
+    /// Thickness of tree hierarchy outlines
+    TreeLinesSize(f32),
+    /// Rounding radius of tree hierarchy outlines
+    TreeLinesRounding(f32),
     /// Alignment of button text when button is larger than text
     ButtonTextAlign([f32; 2]),
     /// Alignment of selectable text when selectable is larger than text
     SelectableTextAlign([f32; 2]),
     /// Thickness of border in `Separator()`
     SeparatorSize(f32),
+    /// Thickness of border in `SeparatorText()`
+    SeparatorTextBorderSize(f32),
+    /// Alignment of text within the separator
+    SeparatorTextAlign([f32; 2]),
+    /// Padding around text in `SeparatorText()`
+    SeparatorTextPadding([f32; 2]),
+    /// Thickness of resizing border between docked windows
+    DockingSeparatorSize(f32),
 }
 
 /// Which base preset to start from when applying a [`Theme`].

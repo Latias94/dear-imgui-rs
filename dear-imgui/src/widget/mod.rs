@@ -90,6 +90,8 @@ bitflags::bitflags! {
         const FRAMED = sys::ImGuiTreeNodeFlags_Framed as i32;
         /// Hit testing to allow subsequent widgets to overlap this one
         const ALLOW_ITEM_OVERLAP = sys::ImGuiTreeNodeFlags_AllowOverlap as i32;
+        /// Hit testing to allow subsequent widgets to overlap this one
+        const ALLOW_OVERLAP = sys::ImGuiTreeNodeFlags_AllowOverlap as i32;
         /// Don't do a TreePush() when open (e.g. for CollapsingHeader) = no extra indent nor pushing on ID stack
         const NO_TREE_PUSH_ON_OPEN = sys::ImGuiTreeNodeFlags_NoTreePushOnOpen as i32;
         /// Don't automatically and temporarily open node when Logging is active (by default logging will automatically open tree nodes)
@@ -110,10 +112,21 @@ bitflags::bitflags! {
         const SPAN_AVAIL_WIDTH = sys::ImGuiTreeNodeFlags_SpanAvailWidth as i32;
         /// Extend hit box to the left-most and right-most edges (bypass the indented area).
         const SPAN_FULL_WIDTH = sys::ImGuiTreeNodeFlags_SpanFullWidth as i32;
+        /// Narrow hit box and hover highlight to the label text width.
+        const SPAN_LABEL_WIDTH = sys::ImGuiTreeNodeFlags_SpanLabelWidth as i32;
+        /// Label will span all columns of its container table.
+        const LABEL_SPAN_ALL_COLUMNS = sys::ImGuiTreeNodeFlags_LabelSpanAllColumns as i32;
         /// (WIP) Nav: left direction goes to parent. Only for the tree node, not the tree push.
         const NAV_LEFT_JUMPS_BACK_HERE = sys::ImGuiTreeNodeFlags_NavLeftJumpsToParent as i32;
         /// Combination of Leaf and NoTreePushOnOpen
-        const COLLAPSING_HEADER = Self::FRAMED.bits() | Self::NO_TREE_PUSH_ON_OPEN.bits();
+        const COLLAPSING_HEADER =
+            Self::FRAMED.bits() | Self::NO_TREE_PUSH_ON_OPEN.bits() | Self::NO_AUTO_OPEN_ON_LOG.bits();
+        /// No tree hierarchy guide lines are drawn.
+        const DRAW_LINES_NONE = sys::ImGuiTreeNodeFlags_DrawLinesNone as i32;
+        /// Draw full tree hierarchy guide lines.
+        const DRAW_LINES_FULL = sys::ImGuiTreeNodeFlags_DrawLinesFull as i32;
+        /// Draw tree hierarchy guide lines only to nodes.
+        const DRAW_LINES_TO_NODES = sys::ImGuiTreeNodeFlags_DrawLinesToNodes as i32;
     }
 }
 
