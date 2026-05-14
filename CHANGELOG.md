@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the logical length after C-side buffer writes.
   - Make the default input text character filter pass characters through instead of removing
     every character when `InputTextCallback::CHAR_FILTER` is enabled without an override.
+  - Validate input text callback cursor and selection positions before exposing them through
+    safe `TextCallbackData` accessors.
   - Restore the previous Dear ImGui current context after panic in internal temporary context
     binding paths, avoiding cross-context state leaks during unwinding.
   - Resolve `Context` IO, font atlas, backend-name, settings-filename, and `PlatformIo`

@@ -117,10 +117,15 @@ impl<'cb> TextCallbackData<'cb> {
         self.valid_text_len() as i32
     }
 
-    fn position(name: &str, pos: i32) -> usize {
-        usize::try_from(pos).unwrap_or_else(|_| {
+    fn position(name: &str, pos: i32, len: usize) -> usize {
+        let pos = usize::try_from(pos).unwrap_or_else(|_| {
             panic!("internal imgui error: {name} was negative");
-        })
+        });
+        assert!(
+            pos <= len,
+            "internal imgui error: {name} exceeded BufTextLen"
+        );
+        pos
     }
 
     fn position_to_i32(name: &str, pos: usize) -> i32 {
@@ -147,7 +152,8 @@ impl<'cb> TextCallbackData<'cb> {
 
     /// Get the current cursor position
     pub fn cursor_pos(&self) -> usize {
-        Self::position("CursorPos", self.data().CursorPos)
+        let len = self.valid_text_len();
+        Self::position("CursorPos", self.data().CursorPos, len)
     }
 
     /// Set the cursor position
@@ -160,7 +166,8 @@ impl<'cb> TextCallbackData<'cb> {
 
     /// Get the selection start position
     pub fn selection_start(&self) -> usize {
-        Self::position("SelectionStart", self.data().SelectionStart)
+        let len = self.valid_text_len();
+        Self::position("SelectionStart", self.data().SelectionStart, len)
     }
 
     /// Set the selection start position
@@ -173,7 +180,8 @@ impl<'cb> TextCallbackData<'cb> {
 
     /// Get the selection end position
     pub fn selection_end(&self) -> usize {
-        Self::position("SelectionEnd", self.data().SelectionEnd)
+        let len = self.valid_text_len();
+        Self::position("SelectionEnd", self.data().SelectionEnd, len)
     }
 
     /// Set the selection end position
@@ -194,7 +202,7 @@ impl<'cb> TextCallbackData<'cb> {
 
     /// Clear selection
     pub fn clear_selection(&mut self) {
-        let cursor_pos = self.data().CursorPos;
+        let cursor_pos = Self::position_to_i32("cursor position", self.cursor_pos());
         let data = self.data_mut();
         data.SelectionStart = cursor_pos;
         data.SelectionEnd = cursor_pos;
@@ -320,6 +328,18 @@ mod tests {
     struct DefaultHandler;
     impl InputTextCallbackHandler for DefaultHandler {}
 
+    fn callback_data_for_text(text: &mut [u8]) -> sys::ImGuiInputTextCallbackData {
+        let len = text.len().saturating_sub(1);
+        let mut data = sys::ImGuiInputTextCallbackData::default();
+        data.Buf = text.as_mut_ptr().cast();
+        data.BufTextLen = len as i32;
+        data.BufSize = text.len() as i32;
+        data.CursorPos = len as i32;
+        data.SelectionStart = 0;
+        data.SelectionEnd = len as i32;
+        data
+    }
+
     #[test]
     fn default_char_filter_keeps_character() {
         let mut handler = DefaultHandler;
@@ -330,5 +350,43 @@ mod tests {
     fn passthrough_char_filter_keeps_character() {
         let mut handler = PassthroughCallback;
         assert_eq!(handler.char_filter('x'), Some('x'));
+    }
+
+    #[test]
+    fn text_callback_positions_accept_bounds() {
+        let mut text = *b"abcd\0";
+        let mut data = callback_data_for_text(&mut text);
+        data.CursorPos = 4;
+        data.SelectionStart = 1;
+        data.SelectionEnd = 3;
+
+        let info = unsafe { TextCallbackData::new(&mut data) };
+
+        assert_eq!(info.cursor_pos(), 4);
+        assert_eq!(info.selection_start(), 1);
+        assert_eq!(info.selection_end(), 3);
+        assert_eq!(info.selected(), "bc");
+    }
+
+    #[test]
+    #[should_panic(expected = "CursorPos exceeded BufTextLen")]
+    fn text_callback_cursor_pos_rejects_out_of_bounds() {
+        let mut text = *b"abcd\0";
+        let mut data = callback_data_for_text(&mut text);
+        data.CursorPos = 5;
+
+        let info = unsafe { TextCallbackData::new(&mut data) };
+        let _ = info.cursor_pos();
+    }
+
+    #[test]
+    #[should_panic(expected = "CursorPos exceeded BufTextLen")]
+    fn text_callback_clear_selection_rejects_out_of_bounds_cursor() {
+        let mut text = *b"abcd\0";
+        let mut data = callback_data_for_text(&mut text);
+        data.CursorPos = 5;
+
+        let mut info = unsafe { TextCallbackData::new(&mut data) };
+        info.clear_selection();
     }
 }
