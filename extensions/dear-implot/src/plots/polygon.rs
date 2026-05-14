@@ -141,6 +141,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = PolygonPlot::new(label, x_data, y_data);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }

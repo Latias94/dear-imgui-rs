@@ -341,6 +341,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = PieChartPlot::new(label_ids, values, center_x, center_y, radius);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -356,6 +357,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = PieChartPlotF32::new(label_ids, values, center_x, center_y, radius);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -368,6 +370,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = PieChartPlot::new(label_ids, values, 0.5, 0.5, 0.4);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }

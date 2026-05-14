@@ -361,6 +361,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = HeatmapPlot::new(label, values, rows, cols);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -375,6 +376,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = HeatmapPlotF32::new(label, values, rows, cols);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -395,6 +397,7 @@ impl<'ui> crate::PlotUi<'ui> {
             .with_scale(scale_min, scale_max)
             .with_bounds_points(bounds_min, bounds_max);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }

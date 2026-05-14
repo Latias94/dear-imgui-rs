@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Change `dear-imgui-winit::multi_viewport::shutdown_multi_viewport_support` to take
     `&mut Context`, matching the renderer backends and making shutdown target an explicit
     ImGui context.
+- Extensions
+  - Change `dear-implot::PlotContext::current()` to an explicit `unsafe` non-owning wrapper.
+    Code that owns an ImPlot context should use `PlotContext::create(...)`; callers that borrow
+    a raw current context must now acknowledge the raw lifetime and ownership contract.
 
 ### Changed
 
@@ -135,6 +139,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     process-wide slots, preventing one context's viewport callbacks from using another context's
     renderer or Vulkan handles.
 - Extensions
+  - Bind `dear-implot` `PlotUi` and `PlotToken` operations to the `PlotContext` and ImGui context
+    that created them, preventing multi-context applications from accidentally plotting through
+    whichever ImPlot context is current.
+  - Treat `dear-implot::PlotContext::current()` as non-owning so dropping the wrapper cannot
+    destroy the process current ImPlot context.
   - Bind `dear-implot3d` per-frame plotting APIs to the `Plot3DContext` and ImGui context that
     created them, preventing multi-context applications from accidentally plotting through
     whichever ImPlot3D context is current.

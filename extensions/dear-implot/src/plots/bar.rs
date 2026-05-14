@@ -221,6 +221,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn bar_plot(&self, label: &str, values: &[f64]) -> Result<(), PlotError> {
         let plot = BarPlot::new(label, values);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -234,6 +235,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = BarPlot::new(label, values).with_bar_size(width);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -247,6 +249,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = PositionalBarPlot::new(label, x_data, y_data);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }

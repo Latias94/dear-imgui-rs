@@ -299,6 +299,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn histogram_plot(&self, label: &str, values: &[f64]) -> Result<(), PlotError> {
         let plot = HistogramPlot::new(label, values);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -312,6 +313,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = HistogramPlot::new(label, values).with_bins(bins);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -325,6 +327,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = Histogram2DPlot::new(label, x_values, y_values);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -340,6 +343,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = Histogram2DPlot::new(label, x_values, y_values).with_bins(x_bins, y_bins);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }

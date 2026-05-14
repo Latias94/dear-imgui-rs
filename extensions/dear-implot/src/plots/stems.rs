@@ -213,6 +213,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn stem_plot(&self, label: &str, x_data: &[f64], y_data: &[f64]) -> Result<(), PlotError> {
         let plot = StemPlot::new(label, x_data, y_data);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -227,6 +228,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = StemPlot::new(label, x_data, y_data).with_y_ref(y_ref);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -237,6 +239,7 @@ impl<'ui> crate::PlotUi<'ui> {
             return Err(PlotError::EmptyData);
         }
         let plot = SimpleStemPlot::new(label, values);
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -252,6 +255,7 @@ impl<'ui> crate::PlotUi<'ui> {
             return Err(PlotError::EmptyData);
         }
         let plot = SimpleStemPlot::new(label, values).with_y_ref(y_ref);
+        self.bind();
         plot.plot();
         Ok(())
     }

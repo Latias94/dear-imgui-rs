@@ -379,6 +379,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = ErrorBarsPlot::new(label, x_data, y_data, err_data);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -394,6 +395,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = AsymmetricErrorBarsPlot::new(label, x_data, y_data, err_neg, err_pos);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -407,6 +409,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = SimpleErrorBarsPlot::new(label, values, errors);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }

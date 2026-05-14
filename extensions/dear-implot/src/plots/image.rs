@@ -129,6 +129,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = ImagePlot::new(label, tex_id, bounds_min, bounds_max);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }

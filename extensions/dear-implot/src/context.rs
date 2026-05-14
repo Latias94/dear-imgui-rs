@@ -14,6 +14,35 @@ pub struct PlotContext {
     raw: *mut sys::ImPlotContext,
     imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
     imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
+    owns_context: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PlotContextBinding {
+    plot_ctx_raw: *mut sys::ImPlotContext,
+    imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+}
+
+impl PlotContextBinding {
+    pub(crate) fn bind(self, caller: &str) {
+        assert!(
+            !self.imgui_ctx_raw.is_null(),
+            "{caller} requires an active ImGui context"
+        );
+        assert!(
+            !self.plot_ctx_raw.is_null(),
+            "{caller} requires an active ImPlot context"
+        );
+        assert_eq!(
+            unsafe { imgui_sys::igGetCurrentContext() },
+            self.imgui_ctx_raw,
+            "{caller} must be used with the currently-active ImGui context"
+        );
+        unsafe {
+            sys::ImPlot_SetImGuiContext(self.imgui_ctx_raw);
+            sys::ImPlot_SetCurrentContext(self.plot_ctx_raw);
+        }
+    }
 }
 
 impl PlotContext {
@@ -49,6 +78,7 @@ impl PlotContext {
             raw,
             imgui_ctx_raw,
             imgui_alive,
+            owns_context: true,
         })
     }
 
@@ -57,10 +87,16 @@ impl PlotContext {
         Self::try_create(imgui_ctx).expect("Failed to create ImPlot context")
     }
 
-    /// Get the current ImPlot context
+    /// Get the current ImPlot context as a non-owning raw-context wrapper.
     ///
     /// Returns None if no context is current
-    pub fn current() -> Option<Self> {
+    ///
+    /// # Safety
+    ///
+    /// The returned value does not own the current ImPlot context and cannot prove that the
+    /// associated ImGui context remains alive. The caller must ensure the raw ImPlot and ImGui
+    /// contexts outlive the returned wrapper and are used on the same thread/context stack.
+    pub unsafe fn current() -> Option<Self> {
         let raw = unsafe { sys::ImPlot_GetCurrentContext() };
         if raw.is_null() {
             None
@@ -69,21 +105,30 @@ impl PlotContext {
                 raw,
                 imgui_ctx_raw: unsafe { imgui_sys::igGetCurrentContext() },
                 imgui_alive: None,
+                owns_context: false,
             })
         }
     }
 
     /// Set this context as the current ImPlot context
     pub fn set_as_current(&self) {
+        self.assert_imgui_alive();
+        self.binding().bind("dear-implot: PlotContext");
+    }
+
+    fn assert_imgui_alive(&self) {
         if let Some(alive) = &self.imgui_alive {
             assert!(
                 alive.is_alive(),
                 "dear-implot: ImGui context has been dropped"
             );
-            unsafe { sys::ImPlot_SetImGuiContext(self.imgui_ctx_raw) };
         }
-        unsafe {
-            sys::ImPlot_SetCurrentContext(self.raw);
+    }
+
+    fn binding(&self) -> PlotContextBinding {
+        PlotContextBinding {
+            plot_ctx_raw: self.raw,
+            imgui_ctx_raw: self.imgui_ctx_raw,
         }
     }
 
@@ -92,17 +137,6 @@ impl PlotContext {
     /// This borrows both the ImPlot context and the Dear ImGui Ui,
     /// ensuring that plots can only be created when both are available.
     pub fn get_plot_ui<'ui>(&'ui self, ui: &'ui Ui) -> PlotUi<'ui> {
-        if let Some(alive) = &self.imgui_alive {
-            assert!(
-                alive.is_alive(),
-                "dear-implot: ImGui context has been dropped"
-            );
-            assert_eq!(
-                unsafe { imgui_sys::igGetCurrentContext() },
-                self.imgui_ctx_raw,
-                "dear-implot: PlotUi must be used with the currently-active ImGui context"
-            );
-        }
         self.set_as_current();
         PlotUi { context: self, ui }
     }
@@ -120,21 +154,29 @@ impl PlotContext {
 
 impl Drop for PlotContext {
     fn drop(&mut self) {
-        if !self.raw.is_null() {
-            if let Some(alive) = &self.imgui_alive {
-                if !alive.is_alive() {
-                    // Avoid calling into ImGui allocators after the context has been dropped.
-                    // Best-effort: leak the ImPlot context instead of risking UB.
-                    return;
-                }
-                unsafe { sys::ImPlot_SetImGuiContext(self.imgui_ctx_raw) };
+        if !self.owns_context || self.raw.is_null() {
+            return;
+        }
+
+        if let Some(alive) = &self.imgui_alive {
+            if !alive.is_alive() {
+                // Avoid calling into ImGui allocators after the context has been dropped.
+                // Best-effort: leak the ImPlot context instead of risking UB.
+                return;
             }
-            unsafe {
-                if sys::ImPlot_GetCurrentContext() == self.raw {
-                    sys::ImPlot_SetCurrentContext(std::ptr::null_mut());
-                }
-                sys::ImPlot_DestroyContext(self.raw);
+        }
+
+        unsafe {
+            let prev_imgui = imgui_sys::igGetCurrentContext();
+            imgui_sys::igSetCurrentContext(self.imgui_ctx_raw);
+            sys::ImPlot_SetImGuiContext(self.imgui_ctx_raw);
+
+            if sys::ImPlot_GetCurrentContext() == self.raw {
+                sys::ImPlot_SetCurrentContext(std::ptr::null_mut());
             }
+            sys::ImPlot_DestroyContext(self.raw);
+
+            imgui_sys::igSetCurrentContext(prev_imgui);
         }
     }
 }
@@ -153,6 +195,12 @@ pub struct PlotUi<'ui> {
 }
 
 impl<'ui> PlotUi<'ui> {
+    #[inline]
+    pub(crate) fn bind(&self) {
+        self.context.assert_imgui_alive();
+        self.context.binding().bind("dear-implot: PlotUi");
+    }
+
     /// Begin a new plot with the given title
     ///
     /// Returns a PlotToken if the plot was successfully started.
@@ -162,10 +210,14 @@ impl<'ui> PlotUi<'ui> {
         if title.contains('\0') {
             return None;
         }
+        self.bind();
         let started = with_scratch_txt(title, |ptr| unsafe { sys::ImPlot_BeginPlot(ptr, size, 0) });
 
         if started {
-            Some(PlotToken::new())
+            Some(PlotToken::new(
+                self.context.binding(),
+                self.context.imgui_alive.clone(),
+            ))
         } else {
             None
         }
@@ -180,12 +232,16 @@ impl<'ui> PlotUi<'ui> {
         if title.contains('\0') {
             return None;
         }
+        self.bind();
         let started = with_scratch_txt(title, |ptr| unsafe {
             sys::ImPlot_BeginPlot(ptr, plot_size, 0)
         });
 
         if started {
-            Some(PlotToken::new())
+            Some(PlotToken::new(
+                self.context.binding(),
+                self.context.imgui_alive.clone(),
+            ))
         } else {
             None
         }
@@ -204,6 +260,7 @@ impl<'ui> PlotUi<'ui> {
         };
 
         let label = if label.contains('\0') { "" } else { label };
+        self.bind();
         with_scratch_txt(label, |ptr| unsafe {
             let spec = crate::plots::plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotLine_doublePtrdoublePtr(
@@ -227,6 +284,7 @@ impl<'ui> PlotUi<'ui> {
         };
 
         let label = if label.contains('\0') { "" } else { label };
+        self.bind();
         with_scratch_txt(label, |ptr| unsafe {
             let spec = crate::plots::plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotScatter_doublePtrdoublePtr(
@@ -250,6 +308,7 @@ impl<'ui> PlotUi<'ui> {
         };
 
         let label = if label.contains('\0') { "" } else { label };
+        self.bind();
         with_scratch_txt(label, |ptr| unsafe {
             let spec = crate::plots::plot_spec_from(0, 0, std::mem::size_of::<f64>() as i32);
             sys::ImPlot_PlotPolygon_doublePtr(ptr, x_data.as_ptr(), y_data.as_ptr(), count, spec);
@@ -258,6 +317,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Check if the plot area is hovered
     pub fn is_plot_hovered(&self) -> bool {
+        self.bind();
         unsafe { sys::ImPlot_IsPlotHovered() }
     }
 
@@ -270,21 +330,25 @@ impl<'ui> PlotUi<'ui> {
             2 => 5,
             _ => 3,
         };
+        self.bind();
         unsafe { sys::ImPlot_GetPlotMousePos(0, y_axis) }
     }
 
     /// Get the mouse position in plot coordinates for specific axes
     pub fn get_plot_mouse_pos_axes(&self, x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotPoint {
+        self.bind();
         unsafe { sys::ImPlot_GetPlotMousePos(x_axis as i32, y_axis as i32) }
     }
 
     /// Set current axes for subsequent plot submissions
     pub fn set_axes(&self, x_axis: XAxis, y_axis: YAxis) {
+        self.bind();
         unsafe { sys::ImPlot_SetAxes(x_axis as i32, y_axis as i32) }
     }
 
     /// Setup a specific X axis
     pub fn setup_x_axis(&self, axis: XAxis, label: Option<&str>, flags: AxisFlags) {
+        self.bind();
         let label = label.filter(|s| !s.contains('\0'));
         match label {
             Some(label) => with_scratch_txt(label, |ptr| unsafe {
@@ -306,6 +370,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup a specific Y axis
     pub fn setup_y_axis(&self, axis: YAxis, label: Option<&str>, flags: AxisFlags) {
+        self.bind();
         let label = label.filter(|s| !s.contains('\0'));
         match label {
             Some(label) => with_scratch_txt(label, |ptr| unsafe {
@@ -327,6 +392,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup axis limits for a specific X axis
     pub fn setup_x_axis_limits(&self, axis: XAxis, min: f64, max: f64, cond: PlotCond) {
+        self.bind();
         unsafe {
             sys::ImPlot_SetupAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
         }
@@ -334,6 +400,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup axis limits for a specific Y axis
     pub fn setup_y_axis_limits(&self, axis: YAxis, min: f64, max: f64, cond: PlotCond) {
+        self.bind();
         unsafe {
             sys::ImPlot_SetupAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
         }
@@ -348,6 +415,7 @@ impl<'ui> PlotUi<'ui> {
     ) {
         let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
         let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
+        self.bind();
         unsafe { sys::ImPlot_SetupAxisLinks(axis, pmin, pmax) }
     }
 
@@ -359,6 +427,7 @@ impl<'ui> PlotUi<'ui> {
         x_flags: AxisFlags,
         y_flags: AxisFlags,
     ) {
+        self.bind();
         let x_label = x_label.filter(|s| !s.contains('\0'));
         let y_label = y_label.filter(|s| !s.contains('\0'));
 
@@ -409,16 +478,19 @@ impl<'ui> PlotUi<'ui> {
         y_max: f64,
         cond: PlotCond,
     ) {
+        self.bind();
         unsafe { sys::ImPlot_SetupAxesLimits(x_min, x_max, y_min, y_max, cond as sys::ImPlotCond) }
     }
 
     /// Call after axis setup to finalize configuration
     pub fn setup_finish(&self) {
+        self.bind();
         unsafe { sys::ImPlot_SetupFinish() }
     }
 
     /// Set next frame limits for a specific axis
     pub fn set_next_x_axis_limits(&self, axis: XAxis, min: f64, max: f64, cond: PlotCond) {
+        self.bind();
         unsafe {
             sys::ImPlot_SetNextAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
         }
@@ -426,6 +498,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Set next frame limits for a specific axis
     pub fn set_next_y_axis_limits(&self, axis: YAxis, min: f64, max: f64, cond: PlotCond) {
+        self.bind();
         unsafe {
             sys::ImPlot_SetNextAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
         }
@@ -440,6 +513,7 @@ impl<'ui> PlotUi<'ui> {
     ) {
         let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
         let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
+        self.bind();
         unsafe { sys::ImPlot_SetNextAxisLinks(axis, pmin, pmax) }
     }
 
@@ -452,6 +526,7 @@ impl<'ui> PlotUi<'ui> {
         y_max: f64,
         cond: PlotCond,
     ) {
+        self.bind();
         unsafe {
             sys::ImPlot_SetNextAxesLimits(x_min, x_max, y_min, y_max, cond as sys::ImPlotCond)
         }
@@ -459,21 +534,25 @@ impl<'ui> PlotUi<'ui> {
 
     /// Fit next frame both axes
     pub fn set_next_axes_to_fit(&self) {
+        self.bind();
         unsafe { sys::ImPlot_SetNextAxesToFit() }
     }
 
     /// Fit next frame a specific axis (raw)
     pub fn set_next_axis_to_fit(&self, axis: i32) {
+        self.bind();
         unsafe { sys::ImPlot_SetNextAxisToFit(axis as sys::ImAxis) }
     }
 
     /// Fit next frame a specific X axis
     pub fn set_next_x_axis_to_fit(&self, axis: XAxis) {
+        self.bind();
         unsafe { sys::ImPlot_SetNextAxisToFit(axis as sys::ImAxis) }
     }
 
     /// Fit next frame a specific Y axis
     pub fn set_next_y_axis_to_fit(&self, axis: YAxis) {
+        self.bind();
         unsafe { sys::ImPlot_SetNextAxisToFit(axis as sys::ImAxis) }
     }
 
@@ -487,6 +566,7 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        self.bind();
         let count = match i32::try_from(values.len()) {
             Ok(v) => v,
             Err(_) => return,
@@ -531,6 +611,7 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        self.bind();
         let count = match i32::try_from(values.len()) {
             Ok(v) => v,
             Err(_) => return,
@@ -577,6 +658,7 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        self.bind();
         if n_ticks <= 0 {
             return;
         }
@@ -627,6 +709,7 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        self.bind();
         if n_ticks <= 0 {
             return;
         }
@@ -670,6 +753,7 @@ impl<'ui> PlotUi<'ui> {
         if fmt.contains('\0') {
             return;
         }
+        self.bind();
         with_scratch_txt(fmt, |ptr| unsafe {
             sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, ptr)
         })
@@ -680,6 +764,7 @@ impl<'ui> PlotUi<'ui> {
         if fmt.contains('\0') {
             return;
         }
+        self.bind();
         with_scratch_txt(fmt, |ptr| unsafe {
             sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, ptr)
         })
@@ -687,21 +772,25 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup scale for a specific X axis (pass sys::ImPlotScale variant)
     pub fn setup_x_axis_scale(&self, axis: XAxis, scale: sys::ImPlotScale) {
+        self.bind();
         unsafe { sys::ImPlot_SetupAxisScale_PlotScale(axis as sys::ImAxis, scale) }
     }
 
     /// Setup scale for a specific Y axis (pass sys::ImPlotScale variant)
     pub fn setup_y_axis_scale(&self, axis: YAxis, scale: sys::ImPlotScale) {
+        self.bind();
         unsafe { sys::ImPlot_SetupAxisScale_PlotScale(axis as sys::ImAxis, scale) }
     }
 
     /// Setup axis limits constraints
     pub fn setup_axis_limits_constraints(&self, axis: i32, v_min: f64, v_max: f64) {
+        self.bind();
         unsafe { sys::ImPlot_SetupAxisLimitsConstraints(axis as sys::ImAxis, v_min, v_max) }
     }
 
     /// Setup axis zoom constraints
     pub fn setup_axis_zoom_constraints(&self, axis: i32, z_min: f64, z_max: f64) {
+        self.bind();
         unsafe { sys::ImPlot_SetupAxisZoomConstraints(axis as sys::ImAxis, z_min, z_max) }
     }
 
@@ -713,6 +802,7 @@ impl<'ui> PlotUi<'ui> {
     where
         F: Fn(f64) -> String + Send + Sync + 'static,
     {
+        self.bind();
         AxisFormatterToken::new(axis as sys::ImAxis, f)
     }
 
@@ -723,6 +813,7 @@ impl<'ui> PlotUi<'ui> {
     where
         F: Fn(f64) -> String + Send + Sync + 'static,
     {
+        self.bind();
         AxisFormatterToken::new(axis as sys::ImAxis, f)
     }
 
@@ -740,6 +831,7 @@ impl<'ui> PlotUi<'ui> {
         FW: Fn(f64) -> f64 + Send + Sync + 'static,
         INV: Fn(f64) -> f64 + Send + Sync + 'static,
     {
+        self.bind();
         AxisTransformToken::new(axis as sys::ImAxis, forward, inverse)
     }
 
@@ -754,6 +846,7 @@ impl<'ui> PlotUi<'ui> {
         FW: Fn(f64) -> f64 + Send + Sync + 'static,
         INV: Fn(f64) -> f64 + Send + Sync + 'static,
     {
+        self.bind();
         AxisTransformToken::new(axis as sys::ImAxis, forward, inverse)
     }
 }
@@ -975,14 +1068,21 @@ unsafe extern "C" fn transform_inverse_thunk(
 ///
 /// The plot will be automatically ended when this token is dropped.
 pub struct PlotToken<'ui> {
+    binding: PlotContextBinding,
+    imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
     _scope: PlotScopeGuard,
     _lifetime: std::marker::PhantomData<&'ui ()>,
 }
 
 impl<'ui> PlotToken<'ui> {
     /// Create a new PlotToken (internal use only)
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(
+        binding: PlotContextBinding,
+        imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
+    ) -> Self {
         Self {
+            binding,
+            imgui_alive,
             _scope: PlotScopeGuard::new(),
             _lifetime: std::marker::PhantomData,
         }
@@ -999,8 +1099,101 @@ impl<'ui> PlotToken<'ui> {
 
 impl<'ui> Drop for PlotToken<'ui> {
     fn drop(&mut self) {
+        if let Some(alive) = &self.imgui_alive {
+            assert!(
+                alive.is_alive(),
+                "dear-implot: ImGui context has been dropped"
+            );
+        }
+        self.binding.bind("dear-implot: PlotToken");
         unsafe {
             sys::ImPlot_EndPlot();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PlotContext, sys};
+    use dear_imgui_rs::{BackendFlags, Context};
+    use std::sync::{Mutex, OnceLock};
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn prepare_imgui(imgui: &mut Context) {
+        let io = imgui.io_mut();
+        io.set_display_size([800.0, 600.0]);
+        io.set_delta_time(1.0 / 60.0);
+        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+    }
+
+    #[test]
+    fn plot_ui_binds_own_context_before_calls() {
+        let _guard = test_guard();
+        let mut imgui = Context::create();
+        prepare_imgui(&mut imgui);
+        let plot_a = PlotContext::create(&imgui);
+        let raw_a = plot_a.raw;
+        let plot_b = PlotContext::create(&imgui);
+        let raw_b = plot_b.raw;
+
+        {
+            let ui = imgui.frame();
+            let plot_ui = plot_a.get_plot_ui(&ui);
+            unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
+
+            plot_ui.set_next_axes_to_fit();
+
+            assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_a);
+        }
+        let _ = imgui.render();
+
+        drop(plot_b);
+        drop(plot_a);
+    }
+
+    #[test]
+    fn plot_token_binds_own_context_before_drop() {
+        let _guard = test_guard();
+        let mut imgui = Context::create();
+        prepare_imgui(&mut imgui);
+        let plot_a = PlotContext::create(&imgui);
+        let raw_a = plot_a.raw;
+        let plot_b = PlotContext::create(&imgui);
+        let raw_b = plot_b.raw;
+
+        {
+            let ui = imgui.frame();
+            let plot_ui = plot_a.get_plot_ui(&ui);
+            let token = plot_ui.begin_plot("token").expect("failed to begin plot");
+
+            unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
+            drop(token);
+
+            assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_a);
+        }
+        let _ = imgui.render();
+
+        drop(plot_b);
+        drop(plot_a);
+    }
+
+    #[test]
+    fn current_context_wrapper_is_non_owning() {
+        let _guard = test_guard();
+        let imgui = Context::create();
+        let plot = PlotContext::create(&imgui);
+        let raw = plot.raw;
+
+        let borrowed = unsafe { PlotContext::current() }.expect("expected current ImPlot context");
+        drop(borrowed);
+
+        assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw);
+        plot.set_as_current();
+
+        drop(plot);
     }
 }

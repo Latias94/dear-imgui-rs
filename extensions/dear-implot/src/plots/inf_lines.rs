@@ -97,6 +97,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn inf_lines_vertical(&self, label: &str, xs: &[f64]) -> Result<(), PlotError> {
         let plot = InfLinesPlot::new(label, xs);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -105,6 +106,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn inf_lines_horizontal(&self, label: &str, ys: &[f64]) -> Result<(), PlotError> {
         let plot = InfLinesPlot::new(label, ys).horizontal();
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }

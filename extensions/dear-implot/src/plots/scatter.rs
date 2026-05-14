@@ -283,6 +283,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = ScatterPlot::new(label, x_data, y_data);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -293,6 +294,7 @@ impl<'ui> crate::PlotUi<'ui> {
             return Err(PlotError::EmptyData);
         }
         let plot = SimpleScatterPlot::new(label, values);
+        self.bind();
         plot.plot();
         Ok(())
     }

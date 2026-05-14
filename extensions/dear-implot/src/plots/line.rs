@@ -302,6 +302,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn line_plot(&self, label: &str, x_data: &[f64], y_data: &[f64]) -> Result<(), PlotError> {
         let plot = LinePlot::new(label, x_data, y_data);
         plot.validate()?;
+        self.bind();
         plot.plot();
         Ok(())
     }
@@ -312,6 +313,7 @@ impl<'ui> crate::PlotUi<'ui> {
             return Err(PlotError::EmptyData);
         }
         let plot = SimpleLinePlot::new(label, values);
+        self.bind();
         plot.plot();
         Ok(())
     }
