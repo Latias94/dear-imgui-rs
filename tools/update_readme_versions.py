@@ -35,6 +35,7 @@ README_FILES = [
     "dear-app/README.md",
     "extensions/dear-implot/README.md",
     "extensions/dear-imnodes/README.md",
+    "extensions/dear-node-editor/README.md",
     "extensions/dear-imguizmo/README.md",
     "extensions/dear-implot3d/README.md",
     "extensions/dear-imguizmo-quat/README.md",

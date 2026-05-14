@@ -22,6 +22,8 @@ members = [
     "extensions/dear-imgui-test-engine",
     "extensions/dear-imnodes-sys",
     "extensions/dear-imnodes",
+    "extensions/dear-node-editor-sys",
+    "extensions/dear-node-editor",
     "extensions/dear-imgui-reflect",
     "extensions/dear-imgui-reflect-derive",
     "examples",

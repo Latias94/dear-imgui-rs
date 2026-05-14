@@ -10,6 +10,7 @@ Use this file for the repository-specific parts of an ImGui-stack upgrade.
 | `dear-implot-sys` | `cimplot` + ImPlot | `master` | Re-audit safe ImPlot wrappers when `ImPlotSpec` or item APIs change. |
 | `dear-implot3d-sys` | `cimplot3d` + ImPlot3D | `main` | Re-audit spec/item styling, mesh/image entry points, color enums. |
 | `dear-imnodes-sys` | `cimnodes` + ImNodes | `master` | Usually independent, but scan for compatibility if core types changed. |
+| `dear-node-editor-sys` | `cimnodes_editor` + imgui-node-editor | `main` | Native only. Keep the local `dne_*` uintptr ID shim in sync with upstream ID and callback APIs. |
 | `dear-imguizmo-sys` | `cimguizmo` + ImGuizmo | `master` | Usually independent, but scan if cimgui/imgui integration changed. |
 | `dear-imguizmo-quat-sys` | `cimguizmo_quat` + ImGuIZMO.quat | script currently shares `cimguizmo` branch arg | Verify upstream default branch before changing tooling. |
 | `dear-imgui-test-engine-sys` | `imgui_test_engine` | `main` | Re-audit whenever Dear ImGui internals or hooks changed. Native only, no wasm support. |
@@ -37,6 +38,7 @@ python tools/update_submodule_and_bindings.py `
   --cimplot-branch master `
   --cimplot3d-branch main `
   --cimnodes-branch master `
+  --cimnodes-editor-branch main `
   --cimguizmo-branch master `
   --imgui-test-engine-branch main `
   --wasm `
@@ -70,6 +72,7 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
 
 1. Safe API completeness
    - Compare new sys symbols against `dear-imgui-rs`, `dear-implot`, `dear-implot3d`, `dear-imnodes`, and `dear-imgui-test-engine`.
+   - For `dear-node-editor`, audit the local `dne_*` C ABI shim first; do not expose upstream `NodeId*` / `PinId*` / `LinkId*` helper-pointer APIs directly.
    - Audit new enums, flags, struct fields, style/spec arrays, callback setters, and renamed upstream items.
    - If the new sys surface makes the old safe shape awkward, refactor the safe layer instead of layering compatibility hacks.
 

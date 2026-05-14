@@ -87,8 +87,8 @@ python3 tools/publish.py --wait 60
 **Publishing Order:**
 1. Core: `dear-imgui-sys` → `dear-imgui-rs`
 2. Backends: `dear-imgui-winit`, `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-sdl3`
-3. Extension sys: `dear-implot-sys`, `dear-imnodes-sys`, etc.
-4. Extension high-level: `dear-implot`, `dear-imnodes`, etc.
+3. Extension sys: `dear-implot-sys`, `dear-imnodes-sys`, `dear-node-editor-sys`, etc.
+4. Extension high-level: `dear-implot`, `dear-imnodes`, `dear-node-editor`, etc.
 5. Application: `dear-app`
 
 ### 3. `bump_version.py` - Version Bumping
@@ -280,6 +280,7 @@ python3 tools/update_submodule_and_bindings.py \
   --cimgui-branch docking_inter \
   --cimplot-branch master \
   --cimnodes-branch master \
+  --cimnodes-editor-branch main \
   --cimguizmo-branch master
 ```
 
@@ -291,6 +292,7 @@ $env:DOCS_RS = '1'
 cargo check -p dear-imgui-sys
 cargo check -p dear-implot-sys
 cargo check -p dear-imnodes-sys
+cargo check -p dear-node-editor-sys
 cargo check -p dear-imguizmo-sys
 cargo check -p dear-implot3d-sys
 cargo check -p dear-imguizmo-quat-sys
@@ -299,6 +301,7 @@ cargo check -p dear-imguizmo-quat-sys
 DOCS_RS=1 cargo check -p dear-imgui-sys
 DOCS_RS=1 cargo check -p dear-implot-sys
 DOCS_RS=1 cargo check -p dear-imnodes-sys
+DOCS_RS=1 cargo check -p dear-node-editor-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-sys
 DOCS_RS=1 cargo check -p dear-implot3d-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-quat-sys

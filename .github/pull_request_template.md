@@ -15,6 +15,7 @@
   - [ ] extensions/dear-implot(-sys)
   - [ ] extensions/dear-implot3d(-sys)
   - [ ] extensions/dear-imnodes(-sys)
+  - [ ] extensions/dear-node-editor(-sys)
   - [ ] extensions/dear-imguizmo(-sys)
   - [ ] extensions/dear-imguizmo-quat(-sys)
   - [ ] extensions/dear-file-browser

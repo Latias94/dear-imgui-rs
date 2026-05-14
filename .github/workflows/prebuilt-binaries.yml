@@ -6,6 +6,7 @@ on:
       - 'dear-imgui-sys-v*'
       - 'dear-implot-sys-v*'
       - 'dear-imnodes-sys-v*'
+      - 'dear-node-editor-sys-v*'
       - 'dear-imguizmo-sys-v*'
       - 'dear-imguizmo-quat-sys-v*'
       - 'dear-implot3d-sys-v*'
@@ -21,7 +22,7 @@ on:
         type: string
         default: main
       crates:
-        description: 'Comma-separated sys crates: all, dear-imgui-sys, dear-implot-sys, dear-imnodes-sys, dear-imguizmo-sys, dear-imguizmo-quat-sys, dear-implot3d-sys'
+        description: 'Comma-separated sys crates: all, dear-imgui-sys, dear-implot-sys, dear-imnodes-sys, dear-node-editor-sys, dear-imguizmo-sys, dear-imguizmo-quat-sys, dear-implot3d-sys'
         required: false
         type: string
         default: all
@@ -203,6 +204,26 @@ jobs:
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           IMNODES_SYS_PKG_CRT: ${{ matrix.crt }}
+          TARGET: ${{ matrix.target }}
+
+      - name: Build dear-node-editor-sys (Release)
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-node-editor-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-node-editor-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-node-editor-sys-v'))
+        run: cargo build -p dear-node-editor-sys --release --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - name: Package dear-node-editor-sys static library + headers
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-node-editor-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-node-editor-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-node-editor-sys-v'))
+        run: cargo run -p dear-node-editor-sys --features package-bin --bin package --release --target ${{ matrix.target }}
+        env:
+          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          NODE_EDITOR_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-imguizmo-sys (Release)

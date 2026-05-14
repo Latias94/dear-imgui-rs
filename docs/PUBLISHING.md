@@ -59,6 +59,7 @@ Before publishing, ensure:
   $env:DOCS_RS = '1'; cargo check -p dear-imgui-sys
   $env:DOCS_RS = '1'; cargo check -p dear-implot-sys
   $env:DOCS_RS = '1'; cargo check -p dear-imnodes-sys
+  $env:DOCS_RS = '1'; cargo check -p dear-node-editor-sys
   $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-sys
   $env:DOCS_RS = '1'; cargo check -p dear-implot3d-sys
   $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-quat-sys
@@ -67,6 +68,7 @@ Before publishing, ensure:
   DOCS_RS=1 cargo check -p dear-imgui-sys
   DOCS_RS=1 cargo check -p dear-implot-sys
   DOCS_RS=1 cargo check -p dear-imnodes-sys
+  DOCS_RS=1 cargo check -p dear-node-editor-sys
   DOCS_RS=1 cargo check -p dear-imguizmo-sys
   DOCS_RS=1 cargo check -p dear-implot3d-sys
   DOCS_RS=1 cargo check -p dear-imguizmo-quat-sys
@@ -168,6 +170,7 @@ If you prefer to publish manually or need to publish individual crates:
    ```bash
    cargo publish -p dear-implot-sys
    cargo publish -p dear-imnodes-sys
+   cargo publish -p dear-node-editor-sys
    cargo publish -p dear-imguizmo-sys
    cargo publish -p dear-implot3d-sys
    cargo publish -p dear-imguizmo-quat-sys
@@ -177,6 +180,7 @@ If you prefer to publish manually or need to publish individual crates:
    ```bash
    cargo publish -p dear-implot
    cargo publish -p dear-imnodes
+   cargo publish -p dear-node-editor
    cargo publish -p dear-imguizmo
    cargo publish -p dear-implot3d
    cargo publish -p dear-imguizmo-quat

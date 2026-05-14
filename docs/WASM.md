@@ -26,6 +26,8 @@ This project supports compiling Dear ImGui + backends to WebAssembly using an im
        - `cargo run -p xtask -- wasm-bindgen-imguizmo imgui-sys-v0`
      - ImGuIZMO.quat (optional; enables ImGuIZMO.quat for wasm targets):
        - `cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0`
+     - `dear-node-editor` is not part of the WASM provider in its first integration phase; use
+       `dear-imnodes` for the current wasm-capable node editor path.
   2) Build the main WASM + JS and patch for shared memory
      - `cargo run -p xtask -- web-demo`
        - By default, the `dear-imgui-web-demo` crate enables:

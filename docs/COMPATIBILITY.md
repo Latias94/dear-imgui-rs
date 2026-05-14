@@ -52,6 +52,7 @@ Extensions
 |---------------------|---------|------------------------|------------------------------|----------------------------------------|
 | dear-implot         | 0.12.0  | 0.12.0                 | dear-implot-sys 0.12.0       | 2D plotting                            |
 | dear-imnodes        | 0.12.0  | 0.12.0                 | dear-imnodes-sys 0.12.0      | Node editor                            |
+| dear-node-editor    | 0.12.0  | 0.12.0                 | dear-node-editor-sys 0.12.0  | Native-only imgui-node-editor integration |
 | dear-imguizmo       | 0.12.0  | 0.12.0                 | dear-imguizmo-sys 0.12.0     | 3D gizmo                               |
 | dear-file-browser   | 0.12.0  | 0.12.0                 | —                            | ImGui UI + native (rfd) backends       |
 | dear-implot3d       | 0.12.0  | 0.12.0                 | dear-implot3d-sys 0.12.0     | 3D plotting                            |
@@ -63,6 +64,8 @@ Extensions
 - Next release train: TBD.
 - Main branch currently reflects post-`0.12.0` development and may move independently until the next planned release is cut.
 - Current baselines after the `0.12.0` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.12`, MSRV 1.92, and the external dependency baseline described above.
+- `dear-node-editor` / `dear-node-editor-sys` are native-only in the first integration phase and
+  coexist with the existing `dear-imnodes` wasm-capable node editor.
 
 ## History
 

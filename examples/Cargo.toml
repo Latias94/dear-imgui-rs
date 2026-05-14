@@ -9,6 +9,7 @@ publish = false
 implot = ["dep:dear-implot", "dear-app/implot"]
 imguizmo = ["dep:dear-imguizmo"]
 imnodes = ["dep:dear-imnodes", "dear-app/imnodes"]
+node-editor = ["dep:dear-node-editor"]
 imguizmo-quat = ["dep:dear-imguizmo-quat"]
 implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
@@ -199,6 +200,11 @@ path = "imnodes_basic.rs"
 required-features = ["imnodes"]
 
 [[bin]]
+name = "node_editor_basic"
+path = "node_editor_basic.rs"
+required-features = ["node-editor"]
+
+[[bin]]
 name = "imguizmo_quat_basic"
 path = "imguizmo_quat_basic.rs"
 required-features = ["imguizmo-quat"]
@@ -264,6 +270,7 @@ arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
 dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
+dear-node-editor = { path = "../extensions/dear-node-editor", optional = true }
 dear-imguizmo-quat = { path = "../extensions/dear-imguizmo-quat", optional = true }
 dear-implot3d = { path = "../extensions/dear-implot3d", optional = true }
 dear-file-browser = { path = "../extensions/dear-file-browser", optional = true }

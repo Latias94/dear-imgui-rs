@@ -42,6 +42,8 @@ WORKSPACE_CRATES = [
     "extensions/dear-implot",
     "extensions/dear-imnodes-sys",
     "extensions/dear-imnodes",
+    "extensions/dear-node-editor-sys",
+    "extensions/dear-node-editor",
     "extensions/dear-imguizmo-sys",
     "extensions/dear-imguizmo",
     "extensions/dear-implot3d-sys",

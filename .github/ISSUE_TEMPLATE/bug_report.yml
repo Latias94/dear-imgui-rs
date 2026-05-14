@@ -21,6 +21,8 @@ body:
         - label: extensions/dear-implot3d-sys
         - label: extensions/dear-imnodes
         - label: extensions/dear-imnodes-sys
+        - label: extensions/dear-node-editor
+        - label: extensions/dear-node-editor-sys
         - label: extensions/dear-imguizmo
         - label: extensions/dear-imguizmo-sys
         - label: extensions/dear-imguizmo-quat

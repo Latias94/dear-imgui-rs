@@ -12,7 +12,7 @@ body:
         - label: dear-imgui-sys
         - label: backends (wgpu/glow/winit/sdl3)
         - label: dear-app
-        - label: extensions (implot/implot3d/imnodes/imguizmo/imguizmo-quat/file-browser/reflect)
+        - label: extensions (implot/implot3d/imnodes/node-editor/imguizmo/imguizmo-quat/file-browser/reflect)
         - label: CI / packaging / prebuilt
         - label: Docs
         - label: Other / Unsure

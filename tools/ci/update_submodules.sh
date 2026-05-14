@@ -54,5 +54,8 @@ retry git -C extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat/imGuIZ
 # cimnodes -> imnodes (required for dear-imnodes-sys). Do NOT recurse further (imnodes includes a large vcpkg submodule).
 retry git -C extensions/dear-imnodes-sys/third-party/cimnodes submodule update --init --depth=1 imnodes
 
+# cimnodes_editor -> imgui-node-editor (required for dear-node-editor-sys).
+retry git -C extensions/dear-node-editor-sys/third-party/cimnodes_editor submodule update --init --depth=1 imgui-node-editor
+
 echo "::endgroup::"
 

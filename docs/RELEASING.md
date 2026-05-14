@@ -9,6 +9,7 @@ Supported crates:
 - `dear-imgui-sys` (third-party: cimgui)
 - `extensions/dear-implot-sys` (third-party: cimplot)
 - `extensions/dear-imnodes-sys` (third-party: cimnodes)
+- `extensions/dear-node-editor-sys` (third-party: cimnodes_editor / imgui-node-editor; native only)
 - `extensions/dear-imguizmo-sys` (third-party: cimguizmo)
 - `extensions/dear-implot3d-sys` (third-party: cimplot3d)
 - `extensions/dear-imguizmo-quat-sys` (third-party: cimguizmo_quat)
@@ -30,6 +31,7 @@ Key flags:
   - `--cimgui-branch` (default `docking_inter`)
   - `--cimplot-branch` (default `master`)
   - `--cimnodes-branch` (default `master`)
+  - `--cimnodes-editor-branch` (default `main`)
   - `--cimguizmo-branch` (default `master`)
 
 Examples
@@ -42,13 +44,14 @@ python3 tools/update_submodule_and_bindings.py \
   --profile release
 ```
 
-- All 4 -sys crates (update all submodules + pregenerate, Release):
+- All known -sys crates (update all submodules + pregenerate, Release):
 ```
 python3 tools/update_submodule_and_bindings.py \
   --crates all --submodules update --profile release \
   --cimgui-branch docking_inter \
   --cimplot-branch master \
   --cimnodes-branch master \
+  --cimnodes-editor-branch main \
   --cimguizmo-branch master
 ```
 
@@ -74,6 +77,7 @@ Windows (PowerShell):
 $env:DOCS_RS = '1'; cargo check -p dear-imgui-sys
 $env:DOCS_RS = '1'; cargo check -p dear-implot-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imnodes-sys
+$env:DOCS_RS = '1'; cargo check -p dear-node-editor-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-sys
 ```
 
@@ -82,6 +86,7 @@ Linux/macOS:
 DOCS_RS=1 cargo check -p dear-imgui-sys
 DOCS_RS=1 cargo check -p dear-implot-sys
 DOCS_RS=1 cargo check -p dear-imnodes-sys
+DOCS_RS=1 cargo check -p dear-node-editor-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-sys
 ```
 
@@ -110,6 +115,7 @@ cargo publish -p dear-imgui-build-support
 cargo publish -p dear-imgui-sys
 cargo publish -p dear-implot-sys
 cargo publish -p dear-imnodes-sys
+cargo publish -p dear-node-editor-sys
 cargo publish -p dear-imguizmo-sys
 cargo publish -p dear-implot3d-sys
 cargo publish -p dear-imguizmo-quat-sys

@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL/Vulkan backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, ImGui Test Engine, file browser, reflection-based UI).
+`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL/Vulkan backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, imgui-node-editor, ImGui Test Engine, file browser, reflection-based UI).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
@@ -35,6 +35,7 @@
 - Extensions
   - `dear-imguizmo` — 3D gizmo (cimguizmo C API) + a pure‑Rust GraphEditor
   - `dear-imnodes` — node editor (cimnodes C API)
+  - `dear-node-editor` — richer native node editor (cimnodes_editor / imgui-node-editor)
   - `dear-implot` — plotting (cimplot C API)
   - `dear-implot3d` — 3D plotting (cimplot3d C API)
   - `dear-imguizmo-quat` — quaternion + 3D gizmo (cimguizmo_quat C API)
@@ -87,6 +88,7 @@ cargo run --bin dear_app_docking
 # Extension examples (using wgpu + winit directly)
 cargo run --bin imguizmo_basic --features imguizmo
 cargo run --bin imnodes_basic --features imnodes
+cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
 cargo run --bin implot_basic --features implot
 cargo run --bin imguizmo_quat_basic --features imguizmo-quat
 cargo run --bin reflect_demo --features reflect
@@ -250,6 +252,7 @@ dear-imguizmo-quat = "0.12.0"    # Quaternion-based gizmo
 
 # Node Editor
 dear-imnodes = "0.12.0"
+dear-node-editor = "0.12.0"  # native-only imgui-node-editor integration
 
 # Test automation
 dear-imgui-test-engine = "0.12.0"
@@ -307,7 +310,7 @@ Env vars per -sys crate:
 - `IMGUI_SYS_USE_CMAKE` / `IMPLOT_SYS_USE_CMAKE` — prefer CMake when available; otherwise cc
 - `CARGO_NET_OFFLINE=true` — forbid network; use only local packages or repo prebuilt
 
-Freetype: enable once anywhere. Turning on `freetype` in any extension (imnodes/imguizmo/implot) propagates to `dear-imgui-sys`. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).
+Freetype: enable once anywhere. Turning on `freetype` in any extension (imnodes/node-editor/imguizmo/implot) propagates to `dear-imgui-sys`. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).
 
 Quick examples (enable auto prebuilt download):
 
@@ -348,6 +351,7 @@ Extensions
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
 | dear-implot         | 0.12.0   | 0.12.0                 | dear-implot-sys 0.12.0      | 2D plotting                            |
 | dear-imnodes        | 0.12.0   | 0.12.0                 | dear-imnodes-sys 0.12.0     | Node editor                            |
+| dear-node-editor    | 0.12.0   | 0.12.0                 | dear-node-editor-sys 0.12.0 | Native imgui-node-editor integration   |
 | dear-imguizmo       | 0.12.0   | 0.12.0                 | dear-imguizmo-sys 0.12.0    | 3D gizmo + GraphEditor                 |
 | dear-file-browser   | 0.12.0   | 0.12.0                 | —                           | ImGui UI + native (rfd) backends       |
 | dear-implot3d       | 0.12.0   | 0.12.0                 | dear-implot3d-sys 0.12.0    | 3D plotting                            |
@@ -371,7 +375,7 @@ Maintenance rules
 - Workflow: `.github/workflows/prebuilt-binaries.yml`
   - Inputs:
     - `tag` (release) or `branch` (manual; default `main`)
-    - `crates`: comma-separated list (`all`, `dear-imgui-sys`, `dear-implot-sys`, `dear-imnodes-sys`, `dear-imguizmo-sys`)
+    - `crates`: comma-separated list (`all`, `dear-imgui-sys`, `dear-implot-sys`, `dear-imnodes-sys`, `dear-node-editor-sys`, `dear-imguizmo-sys`)
   - Artifacts (branch builds) or Release assets (tag builds) include `.tar.gz` packages named:
     `dear-<name>-prebuilt-<version>-<target>-static[-mt|-md].tar.gz`
   - Release download URLs default to owner/repo configured in `tools/build-support/src/lib.rs`.
@@ -395,6 +399,7 @@ dear-app/              # Application runner (Winit + WGPU + docking + themes)
 extensions/
   dear-imguizmo/       # ImGuizmo + pure‑Rust GraphEditor
   dear-imnodes/        # ImNodes (node editor)
+  dear-node-editor/    # imgui-node-editor (native-only node editor)
   dear-implot/         # ImPlot (2D plotting)
   dear-implot3d/       # ImPlot3D (3D plotting)
   dear-imguizmo-quat/  # ImGuIZMO.quat (quaternion gizmo)
@@ -486,6 +491,8 @@ For more details and troubleshooting, see `docs/WASM.md`.
     - Example (single window): `cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform`
 - **WebAssembly (WASM)**: Supported via the import-style build described above; some features
   (clipboard, raw draw callbacks, multi-viewport) remain disabled on wasm.
+- **dear-node-editor**: First integration phase is native-only. Use `dear-imnodes` for the current
+  wasm node-editor path.
 
 ## Related Projects
 
