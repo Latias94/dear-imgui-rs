@@ -9,9 +9,98 @@
     clippy::as_conversions
 )]
 use crate::Ui;
-use crate::internal::{DataTypeKind, component_count_i32};
+use crate::internal::{DataType, DataTypeKind, component_count_i32};
 use crate::sys;
 use std::ffi::c_void;
+
+fn validate_slider_flags(caller: &str, flags: SliderFlags) {
+    let bits = flags.bits();
+    assert!(
+        bits & sys::ImGuiSliderFlags_WrapAround == 0,
+        "{caller} does not support ImGuiSliderFlags_WrapAround; use DragFlags::WRAP_AROUND with drag widgets"
+    );
+    let unsupported = bits & !SliderFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiSliderFlags bits: 0x{unsupported:X}"
+    );
+}
+
+fn validate_slider_range<Data: DataTypeKind>(caller: &str, min: &Data, max: &Data) {
+    match Data::KIND {
+        DataType::I8 | DataType::U8 | DataType::I16 | DataType::U16 => {}
+        DataType::I32 => {
+            let min = unsafe { *(min as *const Data as *const i32) };
+            let max = unsafe { *(max as *const Data as *const i32) };
+            let lower = i32::MIN / 2;
+            let upper = i32::MAX / 2;
+            assert!(
+                (lower..=upper).contains(&min) && (lower..=upper).contains(&max),
+                "{caller} i32/isize range endpoints must stay within i32::MIN/2..=i32::MAX/2"
+            );
+        }
+        DataType::U32 => {
+            let min = unsafe { *(min as *const Data as *const u32) };
+            let max = unsafe { *(max as *const Data as *const u32) };
+            let upper = u32::MAX / 2;
+            assert!(
+                min <= upper && max <= upper,
+                "{caller} u32/usize range endpoints must be <= u32::MAX/2"
+            );
+        }
+        DataType::I64 => {
+            let min = unsafe { *(min as *const Data as *const i64) };
+            let max = unsafe { *(max as *const Data as *const i64) };
+            let lower = i64::MIN / 2;
+            let upper = i64::MAX / 2;
+            assert!(
+                (lower..=upper).contains(&min) && (lower..=upper).contains(&max),
+                "{caller} i64/isize range endpoints must stay within i64::MIN/2..=i64::MAX/2"
+            );
+        }
+        DataType::U64 => {
+            let min = unsafe { *(min as *const Data as *const u64) };
+            let max = unsafe { *(max as *const Data as *const u64) };
+            let upper = u64::MAX / 2;
+            assert!(
+                min <= upper && max <= upper,
+                "{caller} u64/usize range endpoints must be <= u64::MAX/2"
+            );
+        }
+        DataType::F32 => {
+            let min = unsafe { *(min as *const Data as *const f32) };
+            let max = unsafe { *(max as *const Data as *const f32) };
+            assert!(
+                min.is_finite()
+                    && max.is_finite()
+                    && (-f32::MAX / 2.0..=f32::MAX / 2.0).contains(&min)
+                    && (-f32::MAX / 2.0..=f32::MAX / 2.0).contains(&max),
+                "{caller} f32 range endpoints must be finite and stay within -f32::MAX/2..=f32::MAX/2"
+            );
+        }
+        DataType::F64 => {
+            let min = unsafe { *(min as *const Data as *const f64) };
+            let max = unsafe { *(max as *const Data as *const f64) };
+            assert!(
+                min.is_finite()
+                    && max.is_finite()
+                    && (-f64::MAX / 2.0..=f64::MAX / 2.0).contains(&min)
+                    && (-f64::MAX / 2.0..=f64::MAX / 2.0).contains(&max),
+                "{caller} f64 range endpoints must be finite and stay within -f64::MAX/2..=f64::MAX/2"
+            );
+        }
+    }
+}
+
+fn validate_slider_preconditions<Data: DataTypeKind>(
+    caller: &str,
+    min: &Data,
+    max: &Data,
+    flags: SliderFlags,
+) {
+    validate_slider_flags(caller, flags);
+    validate_slider_range(caller, min, max);
+}
 
 /// Builder for slider widgets
 #[derive(Clone, Debug)]
@@ -67,9 +156,10 @@ where
     /// It is safe, though up to C++ Dear ImGui, on how to handle when
     /// `min > max`.
     ///
-    /// Note for f32 and f64 sliders, Dear ImGui limits the available
-    /// range to half their full range (e.g `f32::MIN/2.0 .. f32::MAX/2.0`)
-    /// Specifying a value above this will cause an abort.
+    /// Note for f32 and f64 sliders, Dear ImGui limits each range endpoint to
+    /// finite values within half their full range (e.g.
+    /// `-f32::MAX/2.0..=f32::MAX/2.0`). Specifying a value outside this range
+    /// will panic before calling into Dear ImGui.
     /// For large ranged values, consider using input widgets instead
     #[inline]
     pub fn range(mut self, min: Data, max: Data) -> Self {
@@ -105,6 +195,7 @@ where
     ///
     /// Returns true if the slider value was changed.
     pub fn build(self, value: &mut Data) -> bool {
+        validate_slider_preconditions("Slider::build()", &self.min, &self.max, self.flags);
         unsafe {
             let (label, display_format) = self
                 .ui
@@ -126,6 +217,7 @@ where
     ///
     /// Returns true if any slider value was changed.
     pub fn build_array(self, values: &mut [Data]) -> bool {
+        validate_slider_preconditions("Slider::build_array()", &self.min, &self.max, self.flags);
         let count = component_count_i32("Slider::build_array()", values.len());
         if self.flags.contains(SliderFlags::COLOR_MARKERS) {
             assert!(
@@ -250,6 +342,7 @@ where
     ///
     /// Returns true if the slider value was changed.
     pub fn build(self, ui: &Ui, value: &mut Data) -> bool {
+        validate_slider_preconditions("VerticalSlider::build()", &self.min, &self.max, self.flags);
         unsafe {
             let (label, display_format) = ui.scratch_txt_with_opt(self.label, self.display_format);
             let size = sys::ImVec2::new(self.size[0], self.size[1]);
@@ -362,6 +455,8 @@ where
     ///
     /// Returns true if the slider value was changed.
     pub fn build(self, ui: &Ui, value_rad: &mut f32) -> bool {
+        validate_slider_flags("AngleSlider::build()", self.flags);
+        validate_slider_range("AngleSlider::build()", &self.min_degrees, &self.max_degrees);
         unsafe {
             let (label, display_format) = ui.scratch_txt_two(self.label, self.display_format);
 

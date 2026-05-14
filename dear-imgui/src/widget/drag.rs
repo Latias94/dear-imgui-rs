@@ -11,6 +11,14 @@ use crate::internal::{DataTypeKind, component_count_i32};
 use crate::sys;
 use crate::widget::slider::SliderFlags;
 
+fn validate_drag_flags(caller: &str, flags: DragFlags) {
+    let unsupported = flags.bits() & !DragFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiSliderFlags bits: 0x{unsupported:X}"
+    );
+}
+
 bitflags::bitflags! {
     /// Flags for drag widgets.
     ///
@@ -205,6 +213,7 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
     ///
     /// Returns true if the slider value was changed
     pub fn build(self, ui: &Ui, value: &mut T) -> bool {
+        validate_drag_flags("Drag::build()", self.flags);
         unsafe {
             let (one, two) = ui.scratch_txt_with_opt(self.label, self.display_format);
 
@@ -231,6 +240,7 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
     ///
     /// Returns true if any slider value was changed
     pub fn build_array(self, ui: &Ui, values: &mut [T]) -> bool {
+        validate_drag_flags("Drag::build_array()", self.flags);
         let count = component_count_i32("Drag::build_array()", values.len());
         if self.flags.contains(DragFlags::COLOR_MARKERS) {
             assert!(
@@ -360,6 +370,7 @@ where
     /// Returns true if the slider value was changed
     #[doc(alias = "DragFloatRange2")]
     pub fn build(self, ui: &Ui, min: &mut f32, max: &mut f32) -> bool {
+        validate_drag_flags("DragRange::build()", self.flags);
         unsafe {
             let buffer = &mut *ui.scratch_buffer().get();
             buffer.refresh_buffer();
@@ -402,6 +413,7 @@ where
     /// Returns true if the slider value was changed
     #[doc(alias = "DragIntRange2")]
     pub fn build(self, ui: &Ui, min: &mut i32, max: &mut i32) -> bool {
+        validate_drag_flags("DragRange::build()", self.flags);
         unsafe {
             let buffer = &mut *ui.scratch_buffer().get();
             buffer.refresh_buffer();
