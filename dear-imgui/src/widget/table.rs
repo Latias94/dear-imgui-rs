@@ -67,6 +67,11 @@ fn current_table() -> *mut sys::ImGuiTable {
     unsafe { sys::igGetCurrentTable() }
 }
 
+fn current_table_if_any() -> Option<*mut sys::ImGuiTable> {
+    let table = current_table();
+    (!table.is_null()).then_some(table)
+}
+
 fn assert_current_table(caller: &str) -> *mut sys::ImGuiTable {
     let table = current_table();
     assert!(
@@ -76,12 +81,44 @@ fn assert_current_table(caller: &str) -> *mut sys::ImGuiTable {
     table
 }
 
-fn assert_valid_table_column(column_n: i32, caller: &str) {
-    let table = assert_current_table(caller);
+fn assert_valid_table_column_in(table: *mut sys::ImGuiTable, column_n: i32, caller: &str) {
     let column_count = unsafe { (*table).ColumnsCount };
     assert!(
         (0..column_count).contains(&column_n),
         "{caller} column index {column_n} is outside the current table column range 0..{column_count}"
+    );
+}
+
+fn assert_valid_table_column(column_n: i32, caller: &str) {
+    let table = assert_current_table(caller);
+    assert_valid_table_column_in(table, column_n, caller);
+}
+
+fn resolve_table_column(column_n: i32, caller: &str) -> i32 {
+    let table = assert_current_table(caller);
+    let column_n = if column_n < 0 {
+        unsafe { (*table).CurrentColumn }
+    } else {
+        column_n
+    };
+    assert_valid_table_column_in(table, column_n, caller);
+    column_n
+}
+
+fn assert_current_table_has_flags(flags: TableFlags, caller: &str) {
+    let table = assert_current_table(caller);
+    let table_flags = TableFlags::from_bits_truncate(unsafe { (*table).Flags });
+    assert!(
+        table_flags.contains(flags),
+        "{caller} requires the current table to have {flags:?}"
+    );
+}
+
+fn assert_table_setup_phase(caller: &str) {
+    let table = assert_current_table(caller);
+    assert!(
+        !unsafe { (*table).IsLayoutLocked },
+        "{caller} must be called before the first table row or column"
     );
 }
 
@@ -91,6 +128,14 @@ fn assert_current_table_cell(caller: &str) {
     assert!(
         (0..column_count).contains(&current_column),
         "{caller} must be called while a table cell is current"
+    );
+}
+
+fn assert_current_table_row(caller: &str) {
+    let table = assert_current_table(caller);
+    assert!(
+        unsafe { (*table).CurrentRow } >= 0,
+        "{caller} must be called while a table row is current"
     );
 }
 
@@ -302,6 +347,12 @@ impl Ui {
         indent: Option<TableColumnIndent>,
         user_id: u32,
     ) {
+        let table = assert_current_table("Ui::table_setup_column_with_indent()");
+        assert!(
+            unsafe { i32::from((*table).DeclColumnsCount) < (*table).ColumnsCount },
+            "Ui::table_setup_column_with_indent() called more times than the table column count"
+        );
+        assert_table_setup_phase("Ui::table_setup_column_with_indent()");
         let label_ptr = self.scratch_txt(label);
         let raw_flags = flags.bits()
             | width.map_or(0, TableColumnWidth::raw_flags)
@@ -341,6 +392,7 @@ impl Ui {
 
     /// Submit all headers cells based on data provided to TableSetupColumn() + submit context menu
     pub fn table_headers_row(&self) {
+        assert_current_table("Ui::table_headers_row()");
         unsafe {
             sys::igTableHeadersRow();
         }
@@ -353,6 +405,9 @@ impl Ui {
 
     /// Append into the specified column
     pub fn table_set_column_index(&self, column_n: i32) -> bool {
+        if let Some(table) = current_table_if_any() {
+            assert_valid_table_column_in(table, column_n, "Ui::table_set_column_index()");
+        }
         unsafe { sys::igTableSetColumnIndex(column_n) }
     }
 
@@ -371,12 +426,22 @@ impl Ui {
     /// Freeze columns/rows so they stay visible when scrolling.
     #[doc(alias = "TableSetupScrollFreeze")]
     pub fn table_setup_scroll_freeze(&self, frozen_cols: i32, frozen_rows: i32) {
+        assert_table_setup_phase("Ui::table_setup_scroll_freeze()");
+        assert!(
+            (0..TABLE_MAX_COLUMNS as i32).contains(&frozen_cols),
+            "Ui::table_setup_scroll_freeze() frozen_cols must be in 0..{TABLE_MAX_COLUMNS}"
+        );
+        assert!(
+            (0..128).contains(&frozen_rows),
+            "Ui::table_setup_scroll_freeze() frozen_rows must be in 0..128"
+        );
         unsafe { sys::igTableSetupScrollFreeze(frozen_cols, frozen_rows) }
     }
 
     /// Submit one header cell at current column position.
     #[doc(alias = "TableHeader")]
     pub fn table_header(&self, label: impl AsRef<str>) {
+        assert_current_table_cell("Ui::table_header()");
         let label_ptr = self.scratch_txt(label);
         unsafe { sys::igTableHeader(label_ptr) }
     }
@@ -402,6 +467,9 @@ impl Ui {
     /// Return the name of a column by index.
     #[doc(alias = "TableGetColumnName")]
     pub fn table_get_column_name(&self, column_n: i32) -> &str {
+        if current_table_if_any().is_some() {
+            resolve_table_column(column_n, "Ui::table_get_column_name()");
+        }
         unsafe {
             let ptr = sys::igTableGetColumnName_Int(column_n);
             if ptr.is_null() {
@@ -415,12 +483,26 @@ impl Ui {
     /// Return the flags of a column by index.
     #[doc(alias = "TableGetColumnFlags")]
     pub fn table_get_column_flags(&self, column_n: i32) -> TableColumnStateFlags {
+        if let Some(table) = current_table_if_any() {
+            let column_count = unsafe { (*table).ColumnsCount };
+            let resolved_column = if column_n < 0 {
+                unsafe { (*table).CurrentColumn }
+            } else {
+                column_n
+            };
+            assert!(
+                (0..=column_count).contains(&resolved_column),
+                "Ui::table_get_column_flags() column index {column_n} is outside the allowed range -1/current or 0..={column_count}"
+            );
+        }
         unsafe { TableColumnStateFlags::from_bits_truncate(sys::igTableGetColumnFlags(column_n)) }
     }
 
     /// Enable/disable a column by index.
     #[doc(alias = "TableSetColumnEnabled")]
     pub fn table_set_column_enabled(&self, column_n: i32, enabled: bool) {
+        assert_current_table_has_flags(TableFlags::HIDEABLE, "Ui::table_set_column_enabled()");
+        resolve_table_column(column_n, "Ui::table_set_column_enabled()");
         unsafe { sys::igTableSetColumnEnabled(column_n, enabled) }
     }
 
@@ -433,6 +515,8 @@ impl Ui {
     /// Set column width (for fixed-width columns).
     #[doc(alias = "TableSetColumnWidth")]
     pub fn table_set_column_width(&self, column_n: i32, width: f32) {
+        assert_table_setup_phase("Ui::table_set_column_width()");
+        assert_valid_table_column(column_n, "Ui::table_set_column_width()");
         unsafe { sys::igTableSetColumnWidth(column_n, width) }
     }
 
@@ -442,6 +526,19 @@ impl Ui {
     /// Use `crate::colors::Color::to_imgui_u32()` to convert RGBA floats.
     #[doc(alias = "TableSetBgColor")]
     pub fn table_set_bg_color_u32(&self, target: TableBgTarget, color: u32, column_n: i32) {
+        assert_current_table_row("Ui::table_set_bg_color_u32()");
+        match target {
+            TableBgTarget::None => panic!("Ui::table_set_bg_color_u32() target cannot be None"),
+            TableBgTarget::CellBg => {
+                resolve_table_column(column_n, "Ui::table_set_bg_color_u32()");
+            }
+            TableBgTarget::RowBg0 | TableBgTarget::RowBg1 => {
+                assert!(
+                    column_n == -1,
+                    "Ui::table_set_bg_color_u32() row background targets require column_n == -1"
+                );
+            }
+        }
         unsafe { sys::igTableSetBgColor(target as i32, color, column_n) }
     }
 
@@ -449,7 +546,7 @@ impl Ui {
     pub fn table_set_bg_color(&self, target: TableBgTarget, rgba: [f32; 4], column_n: i32) {
         // Pack to ImGui's ABGR layout.
         let col = crate::colors::Color::from_array(rgba).to_imgui_u32();
-        unsafe { sys::igTableSetBgColor(target as i32, col, column_n) }
+        self.table_set_bg_color_u32(target, col, column_n);
     }
 
     /// Return hovered row index, or -1 when none.
@@ -472,6 +569,7 @@ impl Ui {
         dir: SortDirection,
         append_to_sort_specs: bool,
     ) {
+        assert_valid_table_column(column_n, "Ui::table_set_column_sort_direction()");
         unsafe { sys::igTableSetColumnSortDirection(column_n, dir.into(), append_to_sort_specs) }
     }
 
@@ -988,6 +1086,106 @@ mod tests {
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     ui.table_pop_column_channel();
+                }))
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn table_accessors_reject_invalid_columns_before_ffi() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        let _ = ui.window("table_accessors_oob").build(|| {
+            let _table = ui.begin_table("table", 2).unwrap();
+            ui.table_next_row();
+            assert!(ui.table_set_column_index(0));
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_set_column_index(2);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = ui.table_get_column_name(2);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_set_column_enabled(2, true);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_set_column_sort_direction(2, SortDirection::Ascending, false);
+                }))
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn table_setup_methods_reject_late_or_excess_calls_before_ffi() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        let _ = ui.window("table_setup_preconditions").build(|| {
+            let _table = ui.begin_table("table", 1).unwrap();
+            ui.table_setup_column("one", TableColumnFlags::NONE, None, 0);
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_setup_column("two", TableColumnFlags::NONE, None, 0);
+                }))
+                .is_err()
+            );
+
+            ui.table_next_row();
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_setup_scroll_freeze(1, 0);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_set_column_width(0, 32.0);
+                }))
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn table_bg_color_validates_target_and_column_before_ffi() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        let _ = ui.window("table_bg_preconditions").build(|| {
+            let _table = ui.begin_table("table", 2).unwrap();
+            ui.table_next_row();
+            assert!(ui.table_set_column_index(0));
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_set_bg_color_u32(TableBgTarget::None, 0, -1);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_set_bg_color_u32(TableBgTarget::CellBg, 0, 2);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_set_bg_color_u32(TableBgTarget::RowBg0, 0, 0);
                 }))
                 .is_err()
             );
