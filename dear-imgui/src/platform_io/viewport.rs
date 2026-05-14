@@ -2,6 +2,30 @@ use crate::sys;
 use std::cell::UnsafeCell;
 use std::ffi::{CStr, c_void};
 
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn assert_non_negative_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert_finite_vec2(caller, name, value);
+    assert!(
+        value[0] >= 0.0 && value[1] >= 0.0,
+        "{caller} {name} must contain non-negative values"
+    );
+}
+
+#[cfg(feature = "multi-viewport")]
+fn assert_dpi_scale(caller: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} scale must be finite");
+    assert!(
+        value > 0.0 && value < 99.0,
+        "{caller} scale must be greater than 0.0 and less than 99.0"
+    );
+}
+
 // - Viewport management
 // - Platform backend callbacks
 // - Renderer backend callbacks
@@ -76,6 +100,7 @@ impl Viewport {
 
     /// Set the viewport position
     pub fn set_pos(&mut self, pos: [f32; 2]) {
+        assert_finite_vec2("Viewport::set_pos()", "pos", pos);
         self.inner_mut().Pos.x = pos[0];
         self.inner_mut().Pos.y = pos[1];
     }
@@ -87,6 +112,7 @@ impl Viewport {
 
     /// Set the viewport size
     pub fn set_size(&mut self, size: [f32; 2]) {
+        assert_non_negative_finite_vec2("Viewport::set_size()", "size", size);
         self.inner_mut().Size.x = size[0];
         self.inner_mut().Size.y = size[1];
     }
@@ -301,6 +327,7 @@ impl Viewport {
     /// Set the DPI scale factor
     #[cfg(feature = "multi-viewport")]
     pub fn set_dpi_scale(&mut self, scale: f32) {
+        assert_dpi_scale("Viewport::set_dpi_scale()", scale);
         self.inner_mut().DpiScale = scale;
     }
 
@@ -344,6 +371,7 @@ impl Viewport {
     /// Set the framebuffer scale
     #[cfg(feature = "multi-viewport")]
     pub fn set_framebuffer_scale(&mut self, scale: [f32; 2]) {
+        assert_non_negative_finite_vec2("Viewport::set_framebuffer_scale()", "scale", scale);
         self.inner_mut().FramebufferScale.x = scale[0];
         self.inner_mut().FramebufferScale.y = scale[1];
     }
@@ -423,6 +451,61 @@ mod tests {
 
             viewport.set_raw_flags_unchecked(unsupported.bits());
             assert_eq!(viewport.raw_flags(), unsupported.bits());
+
+            sys::ImGuiViewport_destroy(raw);
+        }
+    }
+
+    #[test]
+    fn viewport_geometry_and_scale_setters_validate_before_storage() {
+        let raw = new_viewport();
+        unsafe {
+            let viewport = Viewport::from_raw_mut(raw);
+
+            viewport.set_pos([10.0, 20.0]);
+            viewport.set_size([100.0, 40.0]);
+            assert_eq!(viewport.pos(), [10.0, 20.0]);
+            assert_eq!(viewport.size(), [100.0, 40.0]);
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    viewport.set_pos([f32::NAN, 20.0]);
+                }))
+                .is_err()
+            );
+            assert_eq!(viewport.pos(), [10.0, 20.0]);
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    viewport.set_size([-1.0, 40.0]);
+                }))
+                .is_err()
+            );
+            assert_eq!(viewport.size(), [100.0, 40.0]);
+
+            #[cfg(feature = "multi-viewport")]
+            {
+                viewport.set_dpi_scale(1.5);
+                viewport.set_framebuffer_scale([2.0, 2.0]);
+                assert_eq!(viewport.dpi_scale(), 1.5);
+                assert_eq!(viewport.framebuffer_scale(), [2.0, 2.0]);
+
+                assert!(
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        viewport.set_dpi_scale(99.0);
+                    }))
+                    .is_err()
+                );
+                assert_eq!(viewport.dpi_scale(), 1.5);
+
+                assert!(
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        viewport.set_framebuffer_scale([1.0, f32::INFINITY]);
+                    }))
+                    .is_err()
+                );
+                assert_eq!(viewport.framebuffer_scale(), [2.0, 2.0]);
+            }
 
             sys::ImGuiViewport_destroy(raw);
         }

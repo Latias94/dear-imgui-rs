@@ -144,6 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     style path.
   - Validate basic widget geometry, progress fractions, invisible-button flags, selectable flags,
     and arrow-button directions before crossing FFI.
+  - Validate legacy columns flags, widths, offsets, and percentage setters before crossing FFI,
+    and reject invalid viewport geometry/DPI/framebuffer scale values before storing them.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts

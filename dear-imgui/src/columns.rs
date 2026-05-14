@@ -45,6 +45,23 @@ fn assert_columns_count(count: i32, caller: &str) {
     assert!(count >= 1, "{caller} count must be at least 1");
 }
 
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
+fn validate_old_column_flags(caller: &str, flags: OldColumnFlags) {
+    let unsupported = flags.bits() & !OldColumnFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiOldColumnFlags bits: 0x{unsupported:X}"
+    );
+}
+
 fn resolve_column_index(column_index: i32, allow_trailing_offset: bool, caller: &str) -> i32 {
     let columns = assert_current_columns(caller);
     let column_index = if column_index < 0 {
@@ -115,6 +132,7 @@ impl Ui {
     #[doc(alias = "BeginColumns")]
     pub fn begin_columns(&self, id: impl AsRef<str>, count: i32, flags: OldColumnFlags) {
         assert_columns_count(count, "Ui::begin_columns()");
+        validate_old_column_flags("Ui::begin_columns()", flags);
         assert_no_current_columns("Ui::begin_columns()");
         unsafe { sys::igBeginColumns(self.scratch_txt(id), count, flags.bits()) }
     }
@@ -172,6 +190,7 @@ impl Ui {
     /// Sets the width of the current column (in pixels)
     #[doc(alias = "SetColumnWidth")]
     pub fn set_current_column_width(&self, width: f32) {
+        assert_non_negative_f32("Ui::set_current_column_width()", "width", width);
         unsafe { sys::igSetColumnWidth(-1, width) };
     }
 
@@ -179,6 +198,7 @@ impl Ui {
     #[doc(alias = "SetColumnWidth")]
     pub fn set_column_width(&self, column_index: i32, width: f32) {
         let column_index = resolve_column_index(column_index, false, "Ui::set_column_width()");
+        assert_non_negative_f32("Ui::set_column_width()", "width", width);
         unsafe { sys::igSetColumnWidth(column_index, width) };
     }
 
@@ -202,6 +222,7 @@ impl Ui {
     /// Sets the offset of the current column (in pixels from the left side of the content region)
     #[doc(alias = "SetColumnOffset")]
     pub fn set_current_column_offset(&self, offset_x: f32) {
+        assert_non_negative_f32("Ui::set_current_column_offset()", "offset_x", offset_x);
         unsafe { sys::igSetColumnOffset(-1, offset_x) };
     }
 
@@ -209,6 +230,7 @@ impl Ui {
     #[doc(alias = "SetColumnOffset")]
     pub fn set_column_offset(&self, column_index: i32, offset_x: f32) {
         let column_index = resolve_column_index(column_index, true, "Ui::set_column_offset()");
+        assert_non_negative_f32("Ui::set_column_offset()", "offset_x", offset_x);
         unsafe { sys::igSetColumnOffset(column_index, offset_x) };
     }
 
@@ -316,6 +338,11 @@ impl Ui {
 
     /// Set column width as a percentage of total width.
     pub fn set_column_width_percentage(&self, column_index: i32, percentage: f32) {
+        assert_non_negative_f32(
+            "Ui::set_column_width_percentage()",
+            "percentage",
+            percentage,
+        );
         let total_width = self.get_columns_total_width();
         if total_width <= 0.0 {
             return;
@@ -432,6 +459,58 @@ mod tests {
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     ui.push_column_clip_rect(2);
+                }))
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn columns_reject_invalid_flags_and_numeric_inputs_before_ffi() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("columns_numeric_bounds").build(|| {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _columns = ui.begin_columns_token(
+                        "bad_flags",
+                        2,
+                        OldColumnFlags::from_bits_retain(1 << 16),
+                    );
+                }))
+                .is_err()
+            );
+
+            let _columns = ui.begin_columns_token("legacy_columns", 2, OldColumnFlags::NONE);
+            ui.set_current_column_width(32.0);
+            ui.set_current_column_offset(0.0);
+            ui.set_column_width(1, 16.0);
+            ui.set_column_offset(1, 8.0);
+            ui.set_column_width_percentage(1, 25.0);
+
+            ui.set_current_column_width(0.0);
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.set_column_width(1, f32::NAN);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.set_current_column_offset(-1.0);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.set_column_offset(1, f32::INFINITY);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.set_column_width_percentage(1, -1.0);
                 }))
                 .is_err()
             );
