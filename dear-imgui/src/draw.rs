@@ -1070,9 +1070,18 @@ impl<'ui> DrawListMut<'ui> {
     /// Clone the current draw list output into an owned, independent copy.
     ///
     /// The returned draw list is heap-allocated by Dear ImGui and will be destroyed on drop.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the draw list contains user callbacks. Dear ImGui's clone operation copies
+    /// callback userdata as an opaque pointer, which cannot be duplicated safely by this safe API.
     #[doc(alias = "CloneOutput")]
     pub fn clone_output(&self) -> crate::render::OwnedDrawList {
         unsafe {
+            crate::render::draw_data::assert_draw_list_cloneable(
+                self.draw_list.cast_const(),
+                "DrawListMut::clone_output",
+            );
             crate::render::OwnedDrawList::from_raw(sys::ImDrawList_CloneOutput(self.draw_list))
         }
     }
@@ -1228,6 +1237,52 @@ mod callback_tests {
 
         let cmd_after = unsafe { *cmd_ptr };
         assert!(cmd_after.UserCallbackData.is_null());
+
+        unsafe {
+            sys::ImDrawList_destroy(raw_draw_list);
+            sys::ImDrawListSharedData_destroy(shared);
+        }
+    }
+
+    #[test]
+    fn clone_output_rejects_user_callbacks() {
+        fn noop() {}
+
+        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
+        assert!(!shared.is_null());
+        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
+        assert!(!raw_draw_list.is_null());
+
+        unsafe { sys::ImDrawList_AddDrawCmd(raw_draw_list) };
+
+        let draw_list = DrawListMut {
+            draw_list: raw_draw_list,
+            _phantom: PhantomData,
+        };
+        draw_list.add_callback_safe(noop).build();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = draw_list.clone_output();
+        }));
+        assert!(result.is_err());
+
+        let cmd_buffer = unsafe { &(*draw_list.draw_list).CmdBuffer };
+        let cmd_ptr = {
+            let cmds = unsafe {
+                let len = usize::try_from(cmd_buffer.Size)
+                    .expect("expected non-negative CmdBuffer.Size in test");
+                std::slice::from_raw_parts(cmd_buffer.Data, len)
+            };
+            let (i, _) = cmds
+                .iter()
+                .enumerate()
+                .find(|(_, cmd)| cmd.UserCallback.is_some() && !cmd.UserCallbackData.is_null())
+                .expect("expected callback command to be present");
+
+            unsafe { cmd_buffer.Data.add(i) as *const sys::ImDrawCmd }
+        };
+        let cmd_copy = unsafe { *cmd_ptr };
+        unsafe { cmd_copy.UserCallback.unwrap()(draw_list.draw_list as *const _, cmd_ptr) }
 
         unsafe {
             sys::ImDrawList_destroy(raw_draw_list);

@@ -76,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     every character when `InputTextCallback::CHAR_FILTER` is enabled without an override.
   - Validate input text callback cursor and selection positions before exposing them through
     safe `TextCallbackData` accessors.
+  - Reject safe draw-list and draw-data cloning when command buffers contain user callbacks,
+    preventing duplicated opaque callback userdata pointers and possible double-free or UAF.
   - Restore the previous Dear ImGui current context after panic in internal temporary context
     binding paths, avoiding cross-context state leaks during unwinding.
   - Resolve `Context` IO, font atlas, backend-name, settings-filename, and `PlatformIo`

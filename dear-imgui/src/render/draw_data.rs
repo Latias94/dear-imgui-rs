@@ -282,6 +282,44 @@ pub struct DrawList(sys::ImDrawList);
 const _: [(); std::mem::size_of::<sys::ImDrawList>()] = [(); std::mem::size_of::<DrawList>()];
 const _: [(); std::mem::align_of::<sys::ImDrawList>()] = [(); std::mem::align_of::<DrawList>()];
 
+type RawDrawCallback = unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd);
+
+#[inline]
+fn is_reset_render_state_callback(callback: RawDrawCallback) -> bool {
+    callback as usize == usize::MAX
+}
+
+pub(crate) unsafe fn draw_list_has_uncloneable_callbacks(raw: *const sys::ImDrawList) -> bool {
+    if raw.is_null() {
+        return false;
+    }
+
+    let cmd_buffer = unsafe { &(*raw).CmdBuffer };
+    if cmd_buffer.Size <= 0 || cmd_buffer.Data.is_null() {
+        return false;
+    }
+
+    let len = match usize::try_from(cmd_buffer.Size) {
+        Ok(len) => len,
+        Err(_) => return true,
+    };
+
+    unsafe { slice::from_raw_parts(cmd_buffer.Data, len) }
+        .iter()
+        .any(|cmd| {
+            cmd.UserCallback
+                .is_some_and(|callback| !is_reset_render_state_callback(callback))
+        })
+}
+
+pub(crate) unsafe fn assert_draw_list_cloneable(raw: *const sys::ImDrawList, caller: &str) {
+    assert!(
+        !unsafe { draw_list_has_uncloneable_callbacks(raw) },
+        "{caller} cannot clone draw lists containing user callbacks; \
+         callback userdata is opaque and cannot be duplicated safely"
+    );
+}
+
 impl RawWrapper for DrawList {
     type Raw = sys::ImDrawList;
     #[inline]
@@ -415,7 +453,7 @@ impl<'a> Iterator for DrawCmdIterator<'a> {
 
             // Check for special callback values
             match cmd.UserCallback {
-                Some(raw_callback) if raw_callback as usize == (-1isize) as usize => {
+                Some(raw_callback) if is_reset_render_state_callback(raw_callback) => {
                     DrawCmd::ResetRenderState
                 }
                 Some(raw_callback) => DrawCmd::RawCallback {
@@ -569,6 +607,14 @@ impl From<&DrawData> for OwnedDrawData {
     /// Construct `OwnedDrawData` from `DrawData` by creating a heap-allocated deep copy of the given `DrawData`
     fn from(value: &DrawData) -> Self {
         unsafe {
+            let source_ptr = RawWrapper::raw(value);
+            if source_ptr.CmdListsCount > 0 && !source_ptr.CmdLists.Data.is_null() {
+                for i in 0..(source_ptr.CmdListsCount as usize) {
+                    let src_list = *source_ptr.CmdLists.Data.add(i);
+                    assert_draw_list_cloneable(src_list.cast_const(), "OwnedDrawData::from");
+                }
+            }
+
             // Allocate a new ImDrawData using the constructor
             let result = sys::ImDrawData_ImDrawData();
             if result.is_null() {
@@ -576,7 +622,6 @@ impl From<&DrawData> for OwnedDrawData {
             }
 
             // Copy basic fields from the source
-            let source_ptr = RawWrapper::raw(value);
             (*result).Valid = source_ptr.Valid;
             (*result).TotalIdxCount = source_ptr.TotalIdxCount;
             (*result).TotalVtxCount = source_ptr.TotalVtxCount;
@@ -769,5 +814,52 @@ mod tests {
         assert_eq!(draw_data.textures().count(), 0);
         assert_eq!(draw_data.textures_count(), 0);
         assert!(draw_data.texture(0).is_none());
+    }
+
+    #[test]
+    fn owned_draw_data_rejects_user_callbacks() {
+        unsafe extern "C" fn raw_callback(
+            _parent_list: *const sys::ImDrawList,
+            _cmd: *const sys::ImDrawCmd,
+        ) {
+        }
+
+        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
+        assert!(!shared.is_null());
+        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
+        assert!(!raw_draw_list.is_null());
+
+        unsafe {
+            sys::ImDrawList_AddDrawCmd(raw_draw_list);
+            sys::ImDrawList_AddCallback(raw_draw_list, Some(raw_callback), std::ptr::null_mut(), 0);
+        }
+
+        let mut draw_lists = [raw_draw_list];
+        let draw_data = DrawData {
+            valid: true,
+            cmd_lists_count: 1,
+            total_idx_count: 0,
+            total_vtx_count: 0,
+            cmd_lists: crate::internal::ImVector {
+                size: 1,
+                capacity: 1,
+                data: draw_lists.as_mut_ptr(),
+            },
+            display_pos: [0.0, 0.0],
+            display_size: [1.0, 1.0],
+            framebuffer_scale: [1.0, 1.0],
+            owner_viewport: std::ptr::null_mut(),
+            textures: std::ptr::null_mut(),
+        };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _owned = OwnedDrawData::from(&draw_data);
+        }));
+        assert!(result.is_err());
+
+        unsafe {
+            sys::ImDrawList_destroy(raw_draw_list);
+            sys::ImDrawListSharedData_destroy(shared);
+        }
     }
 }
