@@ -73,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core (`dear-imgui-rs`)
   - Prevent safe Rust from producing dangling FFI calls when `RegisteredUserTexture`,
     `Context`, or `OwnedTextureData` are dropped in different orders.
+  - Validate `TextureData` creation sizes/status and prevent safe metadata setters from
+    desynchronizing texture dimensions, format, and allocated pixel storage.
   - Keep `PlatformIo` typed callback dispatch isolated between multiple ImGui contexts.
   - Reject cross-context `PlatformIo` typed/out-parameter callback installation so the
     `ImGuiPlatformIO` callback table and Rust per-context callback storage cannot diverge.

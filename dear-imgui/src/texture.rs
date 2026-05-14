@@ -9,6 +9,54 @@ use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
+fn texture_format_bytes_per_pixel(format: TextureFormat) -> i32 {
+    match format {
+        TextureFormat::RGBA32 => 4,
+        TextureFormat::Alpha8 => 1,
+    }
+}
+
+fn checked_texture_byte_len(caller: &str, width: i32, height: i32, bytes_per_pixel: i32) -> usize {
+    assert!(width > 0, "{caller} width must be positive");
+    assert!(height > 0, "{caller} height must be positive");
+    assert!(
+        bytes_per_pixel > 0,
+        "{caller} bytes_per_pixel must be positive"
+    );
+
+    let width = usize::try_from(width).expect("positive width must fit usize");
+    let height = usize::try_from(height).expect("positive height must fit usize");
+    let bytes_per_pixel =
+        usize::try_from(bytes_per_pixel).expect("positive bytes_per_pixel must fit usize");
+
+    let size = width
+        .checked_mul(height)
+        .and_then(|size| size.checked_mul(bytes_per_pixel))
+        .expect("texture byte size overflowed usize");
+    assert!(
+        size <= i32::MAX as usize,
+        "{caller} texture byte size must fit Dear ImGui's signed int allocation path"
+    );
+    size
+}
+
+fn checked_texture_byte_len_if_valid(
+    caller: &str,
+    width: i32,
+    height: i32,
+    bytes_per_pixel: i32,
+) -> Option<usize> {
+    if width <= 0 || height <= 0 || bytes_per_pixel <= 0 {
+        return None;
+    }
+    Some(checked_texture_byte_len(
+        caller,
+        width,
+        height,
+        bytes_per_pixel,
+    ))
+}
+
 /// Simple texture ID for backward compatibility
 ///
 /// This is a simple wrapper around u64 that can be used to identify textures.
@@ -415,6 +463,18 @@ impl TextureData {
         unsafe { &mut *self.raw.get() }
     }
 
+    fn assert_metadata_mutation_allowed(&self, caller: &str) {
+        let raw = self.inner();
+        assert!(
+            raw.Pixels.is_null(),
+            "{caller} cannot change texture metadata while pixel storage is allocated"
+        );
+        assert!(
+            raw.Status == sys::ImTextureStatus_Destroyed,
+            "{caller} requires Destroyed texture status"
+        );
+    }
+
     /// Create a new owned texture data object.
     ///
     /// This is kept for convenience. Prefer [`OwnedTextureData::new()`] for clarity.
@@ -627,13 +687,27 @@ impl TextureData {
 
     /// Get the pitch (bytes per row)
     pub fn pitch(&self) -> i32 {
-        self.width() * self.bytes_per_pixel()
+        let width = self.width();
+        let bytes_per_pixel = self.bytes_per_pixel();
+        if width <= 0 || bytes_per_pixel <= 0 {
+            return 0;
+        }
+        width
+            .checked_mul(bytes_per_pixel)
+            .expect("TextureData::pitch() byte pitch overflowed i32")
     }
 
     /// Create a new texture with the specified format and dimensions
     ///
     /// This allocates pixel data and sets the status to WantCreate.
     pub fn create(&mut self, format: TextureFormat, width: i32, height: i32) {
+        assert!(
+            self.status() == TextureStatus::Destroyed,
+            "TextureData::create() requires Destroyed texture status"
+        );
+        let bytes_per_pixel = texture_format_bytes_per_pixel(format);
+        let _ = checked_texture_byte_len("TextureData::create()", width, height, bytes_per_pixel);
+
         unsafe {
             sys::ImTextureData_Create(self.as_raw_mut(), format.into(), width, height);
         }
@@ -654,17 +728,22 @@ impl TextureData {
     pub fn set_data(&mut self, data: &[u8]) {
         unsafe {
             let raw = self.as_raw_mut();
-            let needed = (*raw)
-                .Width
-                .saturating_mul((*raw).Height)
-                .saturating_mul((*raw).BytesPerPixel);
-            if needed <= 0 {
+            let Some(needed) = checked_texture_byte_len_if_valid(
+                "TextureData::set_data()",
+                (*raw).Width,
+                (*raw).Height,
+                (*raw).BytesPerPixel,
+            ) else {
                 // Nothing to do without valid dimensions/format.
                 return;
-            }
+            };
 
             // Ensure pixel buffer exists and has correct size
             if (*raw).Pixels.is_null() {
+                assert!(
+                    (*raw).Status == sys::ImTextureStatus_Destroyed,
+                    "TextureData::set_data() requires Destroyed texture status when allocating missing pixel storage"
+                );
                 sys::ImTextureData_Create(
                     self.as_raw_mut(),
                     (*raw).Format,
@@ -673,7 +752,7 @@ impl TextureData {
                 );
             }
 
-            let copy_bytes = std::cmp::min(needed as usize, data.len());
+            let copy_bytes = std::cmp::min(needed, data.len());
             if copy_bytes == 0 {
                 return;
             }
@@ -693,19 +772,31 @@ impl TextureData {
 
     /// Set the width of the texture
     pub fn set_width(&mut self, width: u32) {
-        let width = width.min(i32::MAX as u32) as i32;
+        self.assert_metadata_mutation_allowed("TextureData::set_width()");
+        assert!(width > 0, "TextureData::set_width() width must be positive");
+        let width =
+            i32::try_from(width).expect("TextureData::set_width() width exceeded i32 range");
         self.inner_mut().Width = width;
     }
 
     /// Set the height of the texture
     pub fn set_height(&mut self, height: u32) {
-        let height = height.min(i32::MAX as u32) as i32;
+        self.assert_metadata_mutation_allowed("TextureData::set_height()");
+        assert!(
+            height > 0,
+            "TextureData::set_height() height must be positive"
+        );
+        let height =
+            i32::try_from(height).expect("TextureData::set_height() height exceeded i32 range");
         self.inner_mut().Height = height;
     }
 
     /// Set the format of the texture
     pub fn set_format(&mut self, format: TextureFormat) {
-        self.inner_mut().Format = format.into();
+        self.assert_metadata_mutation_allowed("TextureData::set_format()");
+        let raw = self.inner_mut();
+        raw.Format = format.into();
+        raw.BytesPerPixel = texture_format_bytes_per_pixel(format);
     }
 }
 
@@ -760,5 +851,117 @@ mod tests {
         if std::mem::size_of::<usize>() < std::mem::size_of::<u64>() {
             assert_eq!(TextureId::new(u64::MAX).try_as_usize(), None);
         }
+    }
+
+    #[test]
+    fn texture_create_rejects_invalid_sizes_and_status_before_ffi() {
+        let mut texture = TextureData::new();
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.create(TextureFormat::RGBA32, 0, 1);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.create(TextureFormat::RGBA32, -1, 1);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.create(TextureFormat::RGBA32, i32::MAX, 2);
+            }))
+            .is_err()
+        );
+
+        texture.create(TextureFormat::RGBA32, 1, 1);
+        assert_eq!(texture.status(), TextureStatus::WantCreate);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.create(TextureFormat::RGBA32, 1, 1);
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn texture_metadata_setters_are_destroyed_only_and_keep_bpp_in_sync() {
+        let mut texture = TextureData::new();
+
+        texture.set_width(4);
+        texture.set_height(3);
+        texture.set_format(TextureFormat::Alpha8);
+
+        assert_eq!(texture.width(), 4);
+        assert_eq!(texture.height(), 3);
+        assert_eq!(texture.format(), TextureFormat::Alpha8);
+        assert_eq!(texture.bytes_per_pixel(), 1);
+        assert_eq!(texture.pitch(), 4);
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.set_width(0);
+            }))
+            .is_err()
+        );
+
+        texture.create(TextureFormat::RGBA32, 1, 1);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.set_width(2);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.set_height(2);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.set_format(TextureFormat::Alpha8);
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn set_data_checks_byte_count_before_allocating_or_copying() {
+        let mut texture = TextureData::new();
+        unsafe {
+            let raw = texture.as_raw_mut();
+            (*raw).Format = sys::ImTextureFormat_RGBA32;
+            (*raw).Width = i32::MAX;
+            (*raw).Height = 2;
+            (*raw).BytesPerPixel = 4;
+        }
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.set_data(&[0; 4]);
+            }))
+            .is_err()
+        );
+
+        let mut texture = TextureData::new();
+        unsafe {
+            let raw = texture.as_raw_mut();
+            (*raw).Format = sys::ImTextureFormat_RGBA32;
+            (*raw).Width = 1;
+            (*raw).Height = 1;
+            (*raw).BytesPerPixel = 4;
+            (*raw).Status = sys::ImTextureStatus_WantCreate;
+        }
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                texture.set_data(&[1, 2, 3, 4]);
+            }))
+            .is_err()
+        );
+        assert!(unsafe { (*texture.as_raw()).Pixels.is_null() });
     }
 }
