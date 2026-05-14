@@ -20,6 +20,10 @@ use crate::Ui;
 use crate::sys;
 use std::collections::HashSet;
 
+fn usize_to_i32(name: &str, value: usize) -> i32 {
+    i32::try_from(value).unwrap_or_else(|_| panic!("{name} exceeded ImGui's i32 range"))
+}
+
 bitflags::bitflags! {
     /// Independent flags controlling multi-selection behavior.
     ///
@@ -482,6 +486,7 @@ unsafe fn apply_multi_select_requests_indexed<S: MultiSelectIndexStorage>(
 pub struct MultiSelectScope<'ui> {
     ms_io_begin: *mut sys::ImGuiMultiSelectIO,
     items_count: i32,
+    ended: bool,
     _marker: std::marker::PhantomData<&'ui Ui>,
 }
 
@@ -493,12 +498,13 @@ impl<'ui> MultiSelectScope<'ui> {
     ) -> Self {
         let options = flags.into();
         let selection_size_i32 = selection_size.unwrap_or(-1);
-        let items_count_i32 = i32::try_from(items_count).unwrap_or(i32::MAX);
+        let items_count_i32 = usize_to_i32("items_count", items_count);
         let ms_io_begin =
             unsafe { sys::igBeginMultiSelect(options.raw(), selection_size_i32, items_count_i32) };
         Self {
             ms_io_begin,
             items_count: items_count_i32,
+            ended: false,
             _marker: std::marker::PhantomData,
         }
     }
@@ -524,12 +530,24 @@ impl<'ui> MultiSelectScope<'ui> {
     ///
     /// This calls `EndMultiSelect()` and returns a `MultiSelectEnd` wrapper
     /// that can be used to apply the final selection requests.
-    pub fn end(self) -> MultiSelectEnd<'ui> {
+    pub fn end(mut self) -> MultiSelectEnd<'ui> {
         let ms_io_end = unsafe { sys::igEndMultiSelect() };
+        self.ended = true;
         MultiSelectEnd {
             ms_io_end,
             items_count: self.items_count,
             _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for MultiSelectScope<'_> {
+    fn drop(&mut self) {
+        if !self.ended {
+            unsafe {
+                sys::igEndMultiSelect();
+            }
+            self.ended = true;
         }
     }
 }
@@ -627,22 +645,16 @@ impl Ui {
         S: MultiSelectIndexStorage,
         F: FnMut(&Ui, usize, bool),
     {
-        let options = flags.into();
         let items_count = storage.len();
         let selection_size_i32 = storage
             .selected_count_hint()
             .and_then(|n| i32::try_from(n).ok())
             .unwrap_or(-1);
 
-        // Begin multi-select scope.
-        let ms_io_begin = unsafe {
-            sys::igBeginMultiSelect(options.raw(), selection_size_i32, items_count as i32)
-        };
+        let mut scope = MultiSelectScope::new(flags, Some(selection_size_i32), items_count);
 
         // Apply SetAll requests (if any) before submitting items.
-        unsafe {
-            apply_multi_select_requests_indexed(ms_io_begin, storage);
-        }
+        scope.apply_begin_requests_indexed(storage);
 
         // Submit items: for each index we set SelectionUserData and let user
         // draw widgets, passing the current selection state as `is_selected`.
@@ -655,10 +667,7 @@ impl Ui {
         }
 
         // End scope and apply requests generated during item submission.
-        let ms_io_end = unsafe { sys::igEndMultiSelect() };
-        unsafe {
-            apply_multi_select_requests_indexed(ms_io_end, storage);
-        }
+        scope.end().apply_requests_indexed(storage);
     }
 
     /// Multi-select helper for index-based storage inside an active table.
@@ -676,19 +685,15 @@ impl Ui {
         S: MultiSelectIndexStorage,
         F: FnMut(&Ui, usize, bool),
     {
-        let options = flags.into();
         let row_count = storage.len();
         let selection_size_i32 = storage
             .selected_count_hint()
             .and_then(|n| i32::try_from(n).ok())
             .unwrap_or(-1);
 
-        let ms_io_begin =
-            unsafe { sys::igBeginMultiSelect(options.raw(), selection_size_i32, row_count as i32) };
+        let mut scope = MultiSelectScope::new(flags, Some(selection_size_i32), row_count);
 
-        unsafe {
-            apply_multi_select_requests_indexed(ms_io_begin, storage);
-        }
+        scope.apply_begin_requests_indexed(storage);
 
         for row in 0..row_count {
             unsafe {
@@ -702,10 +707,7 @@ impl Ui {
             build_row(self, row, is_selected);
         }
 
-        let ms_io_end = unsafe { sys::igEndMultiSelect() };
-        unsafe {
-            apply_multi_select_requests_indexed(ms_io_end, storage);
-        }
+        scope.end().apply_requests_indexed(storage);
     }
 
     /// Multi-select helper using [`BasicSelection`] as underlying storage.
@@ -727,16 +729,13 @@ impl Ui {
         G: FnMut(usize) -> crate::Id,
         F: FnMut(&Ui, usize, crate::Id, bool),
     {
-        let options = flags.into();
         let selection_size_i32 = i32::try_from(selection.len()).unwrap_or(-1);
 
-        let ms_io_begin = unsafe {
-            sys::igBeginMultiSelect(options.raw(), selection_size_i32, items_count as i32)
-        };
+        let scope = MultiSelectScope::new(flags, Some(selection_size_i32), items_count);
 
         unsafe {
             apply_multi_select_requests_basic(
-                ms_io_begin,
+                scope.ms_io_begin,
                 selection,
                 items_count,
                 &mut id_at_index,
@@ -752,10 +751,9 @@ impl Ui {
             render_item(self, idx, id, is_selected);
         }
 
-        let ms_io_end = unsafe { sys::igEndMultiSelect() };
-        unsafe {
-            apply_multi_select_requests_basic(ms_io_end, selection, items_count, &mut id_at_index);
-        }
+        scope
+            .end()
+            .apply_requests_basic(selection, &mut id_at_index);
     }
 }
 
@@ -804,5 +802,78 @@ unsafe fn apply_multi_select_requests_basic<G>(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_context() -> crate::Context {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+        ctx
+    }
+
+    #[test]
+    fn multi_select_indexed_ends_scope_after_render_panic() {
+        let mut ctx = setup_context();
+        let raw_ctx = ctx.as_raw();
+
+        let ui = ctx.frame();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ui.window("multi_select_panic").build(|| {
+                let mut selected = vec![false; 2];
+                ui.multi_select_indexed(&mut selected, MultiSelectOptions::new(), |_, idx, _| {
+                    if idx == 0 {
+                        panic!("forced panic while multi-select is active");
+                    }
+                });
+            });
+        }));
+
+        assert!(result.is_err());
+        unsafe {
+            let imgui_ctx = raw_ctx as *const sys::ImGuiContext;
+            assert!((*imgui_ctx).CurrentMultiSelect.is_null());
+            assert_eq!((*imgui_ctx).MultiSelectTempDataStacked, 0);
+        }
+    }
+
+    #[test]
+    fn begin_multi_select_raw_end_is_not_called_twice_on_drop() {
+        let mut ctx = setup_context();
+        let raw_ctx = ctx.as_raw();
+
+        let ui = ctx.frame();
+        let _ = ui.window("multi_select_explicit_end").build(|| {
+            let scope = ui.begin_multi_select_raw(MultiSelectOptions::new(), None, 0);
+            let _end = scope.end();
+        });
+
+        unsafe {
+            let imgui_ctx = raw_ctx as *const sys::ImGuiContext;
+            assert!((*imgui_ctx).CurrentMultiSelect.is_null());
+            assert_eq!((*imgui_ctx).MultiSelectTempDataStacked, 0);
+        }
+    }
+
+    #[test]
+    fn begin_multi_select_raw_rejects_items_count_over_i32() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ =
+                ui.begin_multi_select_raw(MultiSelectOptions::new(), None, (i32::MAX as usize) + 1);
+        }));
+
+        assert!(result.is_err());
     }
 }
