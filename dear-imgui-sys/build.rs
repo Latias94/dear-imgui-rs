@@ -89,6 +89,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_USE_CMAKE");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
     println!("cargo:rerun-if-env-changed=CARGO_NET_OFFLINE");
     println!("cargo:rerun-if-env-changed=SDL3_INCLUDE_DIR");
 
@@ -105,8 +106,6 @@ fn main() {
         return;
     }
 
-    // Bindings: default to generating via bindgen, but allow skipping all native
-    // toolchain usage (cc + bindgen) via IMGUI_SYS_SKIP_CC.
     if skip_cc {
         if any_backend_shim_enabled() {
             panic!(
@@ -114,15 +113,21 @@ fn main() {
                  Disable backend shims or allow native C++ compilation."
             );
         }
-        if !use_pregenerated_bindings(&cfg.out_dir) {
+    }
+
+    // Bindings: prefer the checked-in pregenerated bindings for normal builds. This keeps
+    // source builds free of a libclang runtime dependency while still compiling the native
+    // C++ objects and PlatformIO hook shim below. Maintainers can opt into bindgen with
+    // DEAR_IMGUI_RS_REGEN_BINDINGS=1.
+    if !use_pregenerated_bindings(&cfg.out_dir) {
+        if skip_cc {
             panic!(
                 "IMGUI_SYS_SKIP_CC is set but no pregenerated bindings were found. \
                  Please ensure src/bindings_pregenerated.rs exists, or unset IMGUI_SYS_SKIP_CC."
             );
+        } else {
+            generate_bindings_native(&cfg);
         }
-    } else {
-        // Native: generate bindings from cimgui
-        generate_bindings_native(&cfg);
     }
 
     // Build optional backend shim libraries before linking the core library so

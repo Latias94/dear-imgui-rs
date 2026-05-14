@@ -28,7 +28,7 @@
 ## What’s in this repo
 
 - Core
-  - `dear-imgui-sys` — low‑level FFI via cimgui (docking branch), bindgen against Dear ImGui v1.92.7
+  - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.7
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`
   - `dear-app` — convenient Winit + WGPU application runner (docking, themes, add-ons)

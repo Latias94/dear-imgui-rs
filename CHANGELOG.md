@@ -188,6 +188,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Validate `TextCallbackData` buffers and byte positions before exposing Rust slices or
     converting positions into Dear ImGui's `int` callback APIs.
 - Core (`dear-imgui-sys`)
+  - Use checked-in pregenerated bindings by default for normal source builds, so Windows/MSVC
+    users can build `dear-app` without installing LLVM/libclang while still compiling the native
+    Dear ImGui library and PlatformIO hook shim.
   - Route Rust-owned `Platform_GetWindowPos` / `Platform_GetWindowSize` out-parameter
     shims through `dear-imgui-sys` storage instead of cimgui's `BackendLanguageUserData`
     helper, avoiding collisions with language/backend userdata.
