@@ -12,6 +12,34 @@ use crate::Ui;
 use crate::create_token;
 use crate::sys;
 
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn validate_invisible_button_flags(caller: &str, flags: ButtonFlags) {
+    let unsupported = flags.bits() & !ButtonFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiButtonFlags bits: 0x{unsupported:X}"
+    );
+}
+
+fn validate_arrow_direction(caller: &str, dir: crate::Direction) {
+    assert!(
+        matches!(
+            dir,
+            crate::Direction::Left
+                | crate::Direction::Right
+                | crate::Direction::Up
+                | crate::Direction::Down
+        ),
+        "{caller} direction must be Left, Right, Up, or Down"
+    );
+}
+
 bitflags::bitflags! {
     /// Flags for invisible buttons
     #[repr(transparent)]
@@ -21,6 +49,8 @@ bitflags::bitflags! {
         const NONE = 0;
         /// Allow interaction overlap with following items.
         const ALLOW_OVERLAP = sys::ImGuiButtonFlags_AllowOverlap as i32;
+        /// Keep navigation/tabbing enabled for this invisible button.
+        const ENABLE_NAV = sys::ImGuiButtonFlags_EnableNav as i32;
         /// React on left mouse button
         const MOUSE_BUTTON_LEFT = sys::ImGuiButtonFlags_MouseButtonLeft as i32;
         /// React on right mouse button
@@ -76,14 +106,18 @@ impl Ui {
         size: impl Into<[f32; 2]>,
         flags: crate::widget::ButtonFlags,
     ) -> bool {
+        validate_invisible_button_flags("Ui::invisible_button_flags()", flags);
         let id_ptr = self.scratch_txt(str_id);
-        let size_vec: sys::ImVec2 = size.into().into();
+        let size = size.into();
+        assert_finite_vec2("Ui::invisible_button_flags()", "size", size);
+        let size_vec: sys::ImVec2 = size.into();
         unsafe { sys::igInvisibleButton(id_ptr, size_vec, flags.bits()) }
     }
 
     /// Creates an arrow button
     #[doc(alias = "ArrowButton")]
     pub fn arrow_button(&self, str_id: impl AsRef<str>, dir: crate::Direction) -> bool {
+        validate_arrow_direction("Ui::arrow_button()", dir);
         let id_ptr = self.scratch_txt(str_id);
         unsafe { sys::igArrowButton(id_ptr, dir as i32) }
     }

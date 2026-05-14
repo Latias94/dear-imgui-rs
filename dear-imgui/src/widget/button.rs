@@ -6,6 +6,13 @@ use crate::Ui;
 use crate::sys;
 use std::borrow::Cow;
 
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
 impl Ui {
     /// Creates a button with the given label
     #[doc(alias = "Button")]
@@ -113,6 +120,7 @@ impl<'ui> Button<'ui> {
     pub fn build(self) -> bool {
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let size = self.size.unwrap_or([0.0, 0.0]);
+        assert_finite_vec2("Button::build()", "size", size);
         let size_vec: sys::ImVec2 = size.into();
         unsafe { sys::igButton(label_ptr, size_vec) }
     }

@@ -6,6 +6,17 @@ use crate::sys;
 use crate::ui::Ui;
 use std::borrow::Cow;
 
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
 /// # Progress Bar Widgets
 impl Ui {
     /// Creates a progress bar widget.
@@ -90,6 +101,9 @@ impl<'ui> ProgressBar<'ui> {
 
     /// Builds the progress bar
     pub fn build(self) {
+        assert_finite_f32("ProgressBar::build()", "fraction", self.fraction);
+        assert_finite_vec2("ProgressBar::build()", "size", self.size);
+
         let size_vec: sys::ImVec2 = self.size.into();
         let overlay_ptr = self
             .overlay_text

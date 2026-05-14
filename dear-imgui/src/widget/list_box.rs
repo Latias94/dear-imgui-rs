@@ -7,6 +7,13 @@ use std::borrow::Cow;
 use crate::Ui;
 use crate::sys;
 
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
 /// # List Box Widgets
 impl Ui {
     /// Constructs a new list box builder.
@@ -52,6 +59,7 @@ impl<T: AsRef<str>> ListBox<T> {
     /// Returns `None` if the list box is not open and no content should be rendered.
     #[must_use]
     pub fn begin(self, ui: &Ui) -> Option<ListBoxToken<'_>> {
+        assert_finite_vec2("ListBox::begin()", "size", self.size);
         let size_vec = sys::ImVec2 {
             x: self.size[0],
             y: self.size[1],

@@ -11,6 +11,25 @@
 use crate::Ui;
 use crate::sys;
 
+fn assert_non_negative_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+    assert!(
+        value[0] >= 0.0 && value[1] >= 0.0,
+        "{caller} {name} must contain non-negative values"
+    );
+}
+
+fn validate_selectable_flags(caller: &str, flags: SelectableFlags) {
+    let unsupported = flags.bits() & !SelectableFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiSelectableFlags bits: 0x{unsupported:X}"
+    );
+}
+
 bitflags::bitflags! {
     /// Flags for selectables
     #[repr(transparent)]
@@ -26,6 +45,10 @@ bitflags::bitflags! {
         const DISABLED = sys::ImGuiSelectableFlags_Disabled as i32;
         /// Hit testing to allow subsequent widgets to overlap this one
         const ALLOW_OVERLAP = sys::ImGuiSelectableFlags_AllowOverlap as i32;
+        /// Display the selectable as highlighted, as if hovered.
+        const HIGHLIGHT = sys::ImGuiSelectableFlags_Highlight as i32;
+        /// Auto-select when moved into by navigation, unless Ctrl is held.
+        const SELECT_ON_NAV = sys::ImGuiSelectableFlags_SelectOnNav as i32;
     }
 }
 
@@ -141,6 +164,8 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
     ///
     /// Returns true if the selectable was clicked.
     pub fn build(self) -> bool {
+        validate_selectable_flags("Selectable::build()", self.flags);
+        assert_non_negative_finite_vec2("Selectable::build()", "size", self.size);
         let size_vec = sys::ImVec2 {
             x: self.size[0],
             y: self.size[1],
@@ -157,6 +182,8 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
 
     /// Builds the selectable using a mutable reference to selected state.
     pub fn build_with_ref(self, selected: &mut bool) -> bool {
+        validate_selectable_flags("Selectable::build_with_ref()", self.flags);
+        assert_non_negative_finite_vec2("Selectable::build_with_ref()", "size", self.size);
         let size_vec = sys::ImVec2 {
             x: self.size[0],
             y: self.size[1],
