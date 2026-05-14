@@ -320,6 +320,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_USE_CMAKE");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimplot_root = cfg.manifest_dir.join("third-party/cimplot");
@@ -382,8 +383,20 @@ fn main() {
         );
     }
 
-    // Generate bindings (native/source build path)
-    generate_bindings(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+    let bindings_ready = if cfg.target_arch == "wasm32" {
+        if !cfg!(feature = "wasm") {
+            panic!(
+                "dear-implot-sys: building for wasm32 requires the `wasm` feature.\n\
+                 Enable it in your Cargo.toml: features = [\"wasm\"]"
+            );
+        }
+        use_pregenerated_wasm_bindings(&cfg.out_dir)
+    } else {
+        use_pregenerated_bindings(&cfg.out_dir)
+    };
+    if !bindings_ready {
+        generate_bindings(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+    }
 
     // Features: build-from-source forces source build; prebuilt is opt-in
     let force_build =

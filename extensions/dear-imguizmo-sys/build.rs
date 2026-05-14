@@ -350,6 +350,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_USE_CMAKE");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimguizmo_root = cfg.manifest_dir.join("third-party/cimguizmo");
@@ -357,6 +358,40 @@ fn main() {
         docsrs_build(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
         return;
     }
+
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        if !imgui_src.exists() {
+            panic!("ImGui include not found at {:?}", imgui_src);
+        }
+        if !cimgui_root.exists() {
+            panic!("cimgui root not found at {:?}", cimgui_root);
+        }
+        if !cimguizmo_root.exists() {
+            panic!(
+                "cimguizmo root not found at {:?}. Did you init submodules?",
+                cimguizmo_root
+            );
+        }
+        generate_bindings(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
+        return;
+    }
+
+    if env::var("IMGUIZMO_SYS_SKIP_CC").is_ok() {
+        let ok = if cfg.target_arch == "wasm32" {
+            use_pregenerated_wasm_bindings(&cfg.out_dir)
+        } else {
+            use_pregenerated_bindings(&cfg.out_dir)
+        };
+        if !ok {
+            panic!(
+                "IMGUIZMO_SYS_SKIP_CC is set but no pregenerated bindings were found. \
+                 Please ensure src/bindings_pregenerated.rs exists, or unset IMGUIZMO_SYS_SKIP_CC."
+            );
+        }
+        let _ = try_link_prebuilt_all(&cfg);
+        return;
+    }
+
     if !imgui_src.exists() {
         panic!("ImGui include not found at {:?}", imgui_src);
     }
@@ -370,8 +405,20 @@ fn main() {
         );
     }
 
-    // Generate bindings (native/source build path)
-    generate_bindings(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
+    let bindings_ready = if cfg.target_arch == "wasm32" {
+        if !cfg!(feature = "wasm") {
+            panic!(
+                "dear-imguizmo-sys: building for wasm32 requires the `wasm` feature.\n\
+                 Enable it in your Cargo.toml: features = [\"wasm\"]"
+            );
+        }
+        use_pregenerated_wasm_bindings(&cfg.out_dir)
+    } else {
+        use_pregenerated_bindings(&cfg.out_dir)
+    };
+    if !bindings_ready {
+        generate_bindings(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
+    }
 
     // Link/build native
     let force_build =

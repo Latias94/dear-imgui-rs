@@ -363,6 +363,8 @@ fn main() {
         return;
     }
 
-    generate_bindings(&cfg);
+    if !use_pregenerated_bindings(&cfg.manifest_dir, &cfg.out_dir) {
+        generate_bindings(&cfg);
+    }
     build_with_cc(&cfg, &test_engine_root, &imgui_src, &cimgui_root);
 }

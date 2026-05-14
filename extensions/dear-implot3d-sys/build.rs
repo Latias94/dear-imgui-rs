@@ -494,12 +494,43 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_FORCE_BUILD");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimplot3d_root = cfg.manifest_dir.join("third-party/cimplot3d");
 
     if cfg.docs_rs {
         docsrs_build(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
+        return;
+    }
+
+    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        if !imgui_src.exists() {
+            panic!("ImGui source not found at {:?}", imgui_src);
+        }
+        if !cimplot3d_root.exists() {
+            panic!(
+                "cimplot3d root not found at {:?}. Did you init submodules?",
+                cimplot3d_root
+            );
+        }
+        generate_bindings(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
+        return;
+    }
+
+    if env::var("IMPLOT3D_SYS_SKIP_CC").is_ok() {
+        let ok = if cfg.target_arch == "wasm32" {
+            use_pregenerated_wasm_bindings(&cfg.out_dir)
+        } else {
+            use_pregenerated_bindings(&cfg.out_dir)
+        };
+        if !ok {
+            panic!(
+                "IMPLOT3D_SYS_SKIP_CC is set but no pregenerated bindings were found. \
+                 Please ensure src/bindings_pregenerated.rs exists, or unset IMPLOT3D_SYS_SKIP_CC."
+            );
+        }
+        let _ = try_link_prebuilt_all(&cfg);
         return;
     }
 
@@ -513,7 +544,20 @@ fn main() {
         );
     }
 
-    generate_bindings(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
+    let bindings_ready = if cfg.target_arch == "wasm32" {
+        if !cfg!(feature = "wasm") {
+            panic!(
+                "dear-implot3d-sys: building for wasm32 requires the `wasm` feature.\n\
+                 Enable it in your Cargo.toml: features = [\"wasm\"]"
+            );
+        }
+        use_pregenerated_wasm_bindings(&cfg.out_dir)
+    } else {
+        use_pregenerated_bindings(&cfg.out_dir)
+    };
+    if !bindings_ready {
+        generate_bindings(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
+    }
 
     let force_build =
         cfg!(feature = "build-from-source") || env::var("IMPLOT3D_SYS_FORCE_BUILD").is_ok();

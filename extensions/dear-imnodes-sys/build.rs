@@ -257,6 +257,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_USE_CMAKE");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
 
     // docs.rs builds: prefer pregenerated bindings and skip native build logic
     if cfg.docs_rs {
@@ -314,8 +315,20 @@ fn main() {
         );
     }
 
-    // Generate bindings
-    generate_bindings(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
+    let bindings_ready = if cfg.target_arch == "wasm32" {
+        if !cfg!(feature = "wasm") {
+            panic!(
+                "dear-imnodes-sys: building for wasm32 requires the `wasm` feature.\n\
+                 Enable it in your Cargo.toml: features = [\"wasm\"]"
+            );
+        }
+        use_pregenerated_wasm_bindings(&cfg.out_dir)
+    } else {
+        use_pregenerated_bindings(&cfg.out_dir)
+    };
+    if !bindings_ready {
+        generate_bindings(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
+    }
 
     // Try prebuilt then build (unless build-from-source feature)
     let force_build =

@@ -14,16 +14,16 @@ Extensions in this workspace build on top of `dear-imgui-sys` (cimgui C API) and
 
 ## Architecture
 
-Most extensions use C bindings + bindgen (no C++ bindgen):
+Most extensions use C bindings plus checked-in pregenerated bindgen output (no C++ bindgen):
 
 ```
 Core:        dear-imgui-sys (cimgui C API)  ->  dear-imgui (safe Rust)
-Extensions:  dear-xxx-sys (C API + bindgen) ->  dear-xxx (safe Rust)
+Extensions:  dear-xxx-sys (C API + pregenerated bindings) ->  dear-xxx (safe Rust)
 Pure-Rust:   dear-imgui-reflect builds directly on dear-imgui-rs (no -sys crate)
 ```
 
 Key points:
-- `*-sys` crates bind to C APIs (cimgui/cimplot/cimguizmo) with bindgen.
+- `*-sys` crates bind to C APIs (cimgui/cimplot/cimguizmo) with committed bindgen output by default.
 - High-level crates wrap C APIs with RAII tokens and builder-style ergonomics.
 - Linking of the base ImGui static library is unified by `dear-imgui-sys` -> extensions should not duplicate link flags for it.
  - dear-imgui draw APIs accept `Into<ImVec2>`, so arrays, tuples, `mint::Vector2<f32>`, and `ImVec2` all work out of the box.

@@ -230,6 +230,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     process-wide slots, preventing one context's viewport callbacks from using another context's
     renderer or Vulkan handles.
 - Extensions
+  - Use checked-in pregenerated bindings by default for extension `*-sys` normal builds, so
+    ImPlot, ImNodes, ImPlot3D, ImGuizmo, ImGuIZMO.quat, and Test Engine users no longer need
+    LLVM/libclang unless they explicitly regenerate bindings.
   - Require `dear-imguizmo` `IdToken` to be dropped while its original ImGui context is current,
     preventing the token from silently switching Dear ImGui's global current context during
     cleanup.

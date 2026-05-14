@@ -380,7 +380,7 @@ Maintenance rules
 ## Version & FFI
 
 - FFI layer is generated from the cimgui `docking_inter` branch matching Dear ImGui v1.92.7.
-- We avoid the C++ ABI by using the C API + bindgen. The safe layer mirrors imgui-rs style (RAII + builder).
+- We avoid the C++ ABI by using C APIs plus checked-in bindgen output. The safe layer mirrors imgui-rs style (RAII + builder).
 
 ## Crates (workspace)
 
