@@ -88,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     flags before calling Dear ImGui table APIs that otherwise assert or index unchecked.
   - Keep font and draw-list clip-rect stacks balanced when `with_font_and_size` or
     `DrawListMut::with_clip_rect` callbacks panic.
+  - Add scoped draw-list texture APIs that keep Dear ImGui's draw-list texture stack balanced
+    when callbacks panic.
   - Add scoped button-repeat APIs that keep Dear ImGui's item-flag stack balanced when
     callbacks panic.
   - Validate legacy columns counts, nesting, and column indices before crossing FFI, and

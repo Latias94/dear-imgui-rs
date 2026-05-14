@@ -211,6 +211,35 @@ impl Drop for DrawListClipRectGuard<'_> {
     }
 }
 
+/// Tracks a texture pushed to a draw-list texture stack.
+///
+/// The texture is popped when the token is dropped or when [`Self::pop`] is
+/// called explicitly.
+#[must_use]
+pub struct DrawListTextureToken<'draw_list> {
+    draw_list: *mut sys::ImDrawList,
+    _phantom: PhantomData<&'draw_list ()>,
+}
+
+impl<'draw_list> DrawListTextureToken<'draw_list> {
+    fn new(draw_list: *mut sys::ImDrawList) -> Self {
+        Self {
+            draw_list,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Pop the texture immediately instead of waiting for drop.
+    #[doc(alias = "PopTexture")]
+    pub fn pop(self) {}
+}
+
+impl Drop for DrawListTextureToken<'_> {
+    fn drop(&mut self) {
+        unsafe { sys::ImDrawList_PopTexture(self.draw_list) }
+    }
+}
+
 impl Drop for DrawListMut<'_> {
     fn drop(&mut self) {
         let ptr = self.draw_list as usize;
@@ -679,12 +708,40 @@ impl<'ui> DrawListMut<'ui> {
         unsafe { sys::ImDrawList_PushTexture(self.draw_list, tex_ref) }
     }
 
+    /// Push a texture on the draw-list texture stack and return an RAII token.
+    ///
+    /// Prefer this or [`Self::with_texture`] for scoped usage that remains
+    /// balanced if a panic unwinds through the scope. The manual
+    /// [`Self::push_texture`] / [`Self::pop_texture`] pair is kept for
+    /// compatibility with existing push/pop-style code.
+    #[doc(alias = "PushTexture")]
+    pub fn push_texture_token(
+        &self,
+        texture: impl Into<crate::texture::TextureRef>,
+    ) -> DrawListTextureToken<'_> {
+        self.push_texture(texture);
+        DrawListTextureToken::new(self.draw_list)
+    }
+
     /// Pop the last texture from the drawlist texture stack (ImGui 1.92+)
     #[doc(alias = "PopTexture")]
     pub fn pop_texture(&self) {
         unsafe {
             sys::ImDrawList_PopTexture(self.draw_list);
         }
+    }
+
+    /// Push a texture, run `f`, then pop the texture.
+    ///
+    /// The texture is popped during unwinding if `f` panics.
+    #[doc(alias = "PushTexture", alias = "PopTexture")]
+    pub fn with_texture<R>(
+        &self,
+        texture: impl Into<crate::texture::TextureRef>,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        let _texture = self.push_texture_token(texture);
+        f()
     }
 
     /// Push a clip rectangle, optionally intersecting with the current clip rect.
@@ -1348,6 +1405,39 @@ mod channels_tests {
         assert!(result.is_err());
         assert_eq!(
             unsafe { (*raw_draw_list)._ClipRectStack.Size },
+            initial_stack_size
+        );
+    }
+
+    #[test]
+    fn with_texture_pops_after_panic() {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+        let ui = ctx.frame();
+        let draw_list = ui.get_window_draw_list();
+        let raw_draw_list = draw_list.draw_list;
+        let initial_stack_size = unsafe { (*raw_draw_list)._TextureStack.Size };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.with_texture(crate::texture::TextureId::new(1), || {
+                assert_eq!(
+                    unsafe { (*raw_draw_list)._TextureStack.Size },
+                    initial_stack_size + 1
+                );
+                panic!("forced panic while draw-list texture is pushed");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            unsafe { (*raw_draw_list)._TextureStack.Size },
             initial_stack_size
         );
     }
