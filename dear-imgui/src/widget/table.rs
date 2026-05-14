@@ -95,6 +95,11 @@ fn assert_valid_table_column(column_n: i32, caller: &str) {
     assert_valid_table_column_in(table, column_n, caller);
 }
 
+fn assert_non_negative_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
 fn resolve_table_column(column_n: i32, caller: &str) -> i32 {
     let table = assert_current_table(caller);
     let column_n = if column_n < 0 {
@@ -120,6 +125,18 @@ fn assert_table_setup_phase(caller: &str) {
     assert!(
         !unsafe { (*table).IsLayoutLocked },
         "{caller} must be called before the first table row or column"
+    );
+}
+
+fn assert_table_column_width_phase(caller: &str) {
+    let table = assert_current_table(caller);
+    assert!(
+        !unsafe { (*table).IsLayoutLocked },
+        "{caller} must be called before the table layout is locked"
+    );
+    assert!(
+        unsafe { (*table).MinColumnWidth > 0.0 },
+        "{caller} requires Dear ImGui table layout metrics to be initialized"
     );
 }
 
@@ -535,8 +552,9 @@ impl Ui {
     /// Set column width (for fixed-width columns).
     #[doc(alias = "TableSetColumnWidth")]
     pub fn table_set_column_width(&self, column_n: i32, width: f32) {
-        assert_table_setup_phase("Ui::table_set_column_width()");
+        assert_table_column_width_phase("Ui::table_set_column_width()");
         assert_valid_table_column(column_n, "Ui::table_set_column_width()");
+        assert_non_negative_finite_f32("Ui::table_set_column_width()", "width", width);
         unsafe { sys::igTableSetColumnWidth(column_n, width) }
     }
 
@@ -1182,6 +1200,46 @@ mod tests {
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     ui.table_set_column_width(0, 32.0);
+                }))
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn table_set_column_width_rejects_invalid_widths_before_ffi() {
+        let mut ctx = setup_context();
+
+        {
+            let ui = ctx.frame();
+            let _ = ui.window("table_width_bounds").build(|| {
+                let _table = ui.begin_table("table", 1).unwrap();
+                assert!(
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        ui.table_set_column_width(0, 32.0);
+                    }))
+                    .is_err()
+                );
+                ui.table_next_row();
+            });
+        }
+        ctx.render();
+
+        let ui = ctx.frame();
+        let _ = ui.window("table_width_bounds").build(|| {
+            let _table = ui.begin_table("table", 1).unwrap();
+            ui.table_set_column_width(0, 0.0);
+            ui.table_set_column_width(0, 32.0);
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_set_column_width(0, -1.0);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_set_column_width(0, f32::NAN);
                 }))
                 .is_err()
             );

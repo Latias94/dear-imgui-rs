@@ -146,6 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and arrow-button directions before crossing FFI.
   - Validate legacy columns flags, widths, offsets, and percentage setters before crossing FFI,
     and reject invalid viewport geometry/DPI/framebuffer scale values before storing them.
+  - Validate font atlas/config/runtime sizing values and table column widths before crossing FFI,
+    including Dear ImGui's requirement for glyph metric overrides to use a positive reference size.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts

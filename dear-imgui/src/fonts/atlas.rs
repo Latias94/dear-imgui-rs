@@ -14,6 +14,71 @@ use std::marker::PhantomData;
 use std::ptr;
 use std::rc::Rc;
 
+const RASTERIZER_MULTIPLY_MAX: f32 = 16_000_000.0;
+
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
+fn assert_positive_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value > 0.0, "{caller} {name} must be positive");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn assert_non_negative_i8(caller: &str, name: &str, value: i8) {
+    assert!(value >= 0, "{caller} {name} must be non-negative");
+}
+
+fn validate_font_size_pixels(caller: &str, name: &str, size_pixels: f32) -> f32 {
+    assert_non_negative_f32(caller, name, size_pixels);
+    size_pixels
+}
+
+fn validate_font_size_pixels_option(caller: &str, name: &str, size_pixels: Option<f32>) -> f32 {
+    let size_pixels = size_pixels.unwrap_or(0.0);
+    validate_font_size_pixels(caller, name, size_pixels)
+}
+
+fn assert_reference_font_size_for_metrics(
+    caller: &str,
+    size_pixels: f32,
+    has_reference_size_dependent_metrics: bool,
+) {
+    assert!(
+        !has_reference_size_dependent_metrics || size_pixels > 0.0,
+        "{caller} glyph offset/advance overrides require a positive reference size"
+    );
+}
+
+fn assert_font_source_for_add_font(caller: &str, raw: &sys::ImFontConfig) {
+    let has_font_data = !raw.FontData.is_null() && raw.FontDataSize > 0;
+    let has_font_loader = !raw.FontLoader.is_null();
+    assert!(
+        has_font_data || has_font_loader,
+        "{caller} requires FontData/FontDataSize or FontLoader"
+    );
+    if has_font_loader {
+        unsafe {
+            assert!(
+                (*raw.FontLoader).FontBakedLoadGlyph.is_some(),
+                "{caller} FontLoader must provide FontBakedLoadGlyph"
+            );
+        }
+    }
+}
+
 /// Font atlas that manages multiple fonts and their texture data
 ///
 /// The font atlas is responsible for:
@@ -272,7 +337,11 @@ impl FontAtlas {
                 config,
             } => {
                 // For v1.92+, we can use dynamic sizing by passing 0.0
-                let size = size_pixels.unwrap_or(0.0);
+                let size = validate_font_size_pixels_option(
+                    "FontAtlas::add_font()",
+                    "size_pixels",
+                    *size_pixels,
+                );
                 let mut cfg = config.clone().unwrap_or_default();
                 if size > 0.0 {
                     cfg = cfg.size_pixels(size);
@@ -288,7 +357,11 @@ impl FontAtlas {
                 size_pixels,
                 config,
             } => {
-                let size = size_pixels.unwrap_or(0.0);
+                let size = validate_font_size_pixels_option(
+                    "FontAtlas::add_font()",
+                    "size_pixels",
+                    *size_pixels,
+                );
                 let mut cfg = config.clone().unwrap_or_default();
                 if size > 0.0 {
                     cfg = cfg.size_pixels(size);
@@ -306,7 +379,11 @@ impl FontAtlas {
                 size_pixels,
                 config,
             } => {
-                let size = size_pixels.unwrap_or(0.0);
+                let size = validate_font_size_pixels_option(
+                    "FontAtlas::add_font()",
+                    "size_pixels",
+                    *size_pixels,
+                );
                 let mut cfg = config.clone().unwrap_or_default();
                 if size > 0.0 {
                     cfg = cfg.size_pixels(size);
@@ -324,7 +401,11 @@ impl FontAtlas {
                 size_pixels,
                 config,
             } => {
-                let size = size_pixels.unwrap_or(0.0);
+                let size = validate_font_size_pixels_option(
+                    "FontAtlas::add_font()",
+                    "size_pixels",
+                    *size_pixels,
+                );
                 let mut cfg = config.clone().unwrap_or_default();
                 if size > 0.0 {
                     cfg = cfg.size_pixels(size);
@@ -342,7 +423,11 @@ impl FontAtlas {
                 size_pixels,
                 config,
             } => {
-                let size = size_pixels.unwrap_or(0.0);
+                let size = validate_font_size_pixels_option(
+                    "FontAtlas::add_font()",
+                    "size_pixels",
+                    *size_pixels,
+                );
                 let mut cfg = config.clone().unwrap_or_default();
                 if size > 0.0 {
                     cfg = cfg.size_pixels(size);
@@ -361,6 +446,7 @@ impl FontAtlas {
     /// Add a font to the atlas using FontConfig
     #[doc(alias = "AddFont")]
     pub fn add_font_with_config(&mut self, font_cfg: &FontConfig) -> &mut Font {
+        font_cfg.validate_for_add_font("FontAtlas::add_font_with_config()");
         unsafe {
             let font_ptr = sys::ImFontAtlas_AddFont(self.raw, font_cfg.raw());
             if font_cfg.raw.MergeMode {
@@ -373,6 +459,9 @@ impl FontAtlas {
     /// Add the default font to the atlas
     #[doc(alias = "AddFontDefault")]
     pub fn add_font_default(&mut self, font_cfg: Option<&FontConfig>) -> &mut Font {
+        if let Some(cfg) = font_cfg {
+            cfg.validate_for_add_font_default("FontAtlas::add_font_default()");
+        }
         unsafe {
             let cfg_ptr = font_cfg.map_or(ptr::null(), |cfg| cfg.raw());
             let font_ptr = sys::ImFontAtlas_AddFontDefault(self.raw, cfg_ptr);
@@ -394,6 +483,14 @@ impl FontAtlas {
         font_cfg: Option<&FontConfig>,
         glyph_ranges: Option<&[sys::ImWchar]>,
     ) -> Option<&mut Font> {
+        validate_font_size_pixels(
+            "FontAtlas::add_font_from_file_ttf()",
+            "size_pixels",
+            size_pixels,
+        );
+        if let Some(cfg) = font_cfg {
+            cfg.validate_for_add_font_with_size("FontAtlas::add_font_from_file_ttf()", size_pixels);
+        }
         unsafe {
             let filename_cstr = std::ffi::CString::new(filename).ok()?;
             let cfg_ptr = font_cfg.map_or(ptr::null(), |cfg| cfg.raw());
@@ -429,6 +526,17 @@ impl FontAtlas {
         font_cfg: Option<&FontConfig>,
         glyph_ranges: Option<&[sys::ImWchar]>,
     ) -> Option<&mut Font> {
+        validate_font_size_pixels(
+            "FontAtlas::add_font_from_memory_ttf()",
+            "size_pixels",
+            size_pixels,
+        );
+        if let Some(cfg) = font_cfg {
+            cfg.validate_for_add_font_with_size(
+                "FontAtlas::add_font_from_memory_ttf()",
+                size_pixels,
+            );
+        }
         // Dear ImGui asserts on suspiciously small buffers to catch common mistakes.
         // Mirror that behavior by returning `None` instead of panicking/aborting in debug builds.
         if font_data.len() <= 100 {
@@ -490,6 +598,17 @@ impl FontAtlas {
         font_cfg: Option<&FontConfig>,
         glyph_ranges: Option<&[sys::ImWchar]>,
     ) -> Option<&mut Font> {
+        validate_font_size_pixels(
+            "FontAtlas::add_font_from_memory_compressed_ttf()",
+            "size_pixels",
+            size_pixels,
+        );
+        if let Some(cfg) = font_cfg {
+            cfg.validate_for_add_font_with_size(
+                "FontAtlas::add_font_from_memory_compressed_ttf()",
+                size_pixels,
+            );
+        }
         if compressed_font_data.is_empty() {
             return None;
         }
@@ -533,6 +652,17 @@ impl FontAtlas {
         font_cfg: Option<&FontConfig>,
         glyph_ranges: Option<&[sys::ImWchar]>,
     ) -> Option<&mut Font> {
+        validate_font_size_pixels(
+            "FontAtlas::add_font_from_memory_compressed_base85_ttf()",
+            "size_pixels",
+            size_pixels,
+        );
+        if let Some(cfg) = font_cfg {
+            cfg.validate_for_add_font_with_size(
+                "FontAtlas::add_font_from_memory_compressed_base85_ttf()",
+                size_pixels,
+            );
+        }
         if compressed_font_data_base85.is_empty() {
             return None;
         }
@@ -867,10 +997,70 @@ impl FontConfig {
         &self.raw
     }
 
+    fn has_reference_size_dependent_metrics(&self) -> bool {
+        self.raw.GlyphOffset.x != 0.0
+            || self.raw.GlyphOffset.y != 0.0
+            || self.raw.GlyphMinAdvanceX != 0.0
+            || self.raw.GlyphMaxAdvanceX != f32::MAX
+    }
+
+    fn validate_common(&self, caller: &str) {
+        validate_font_size_pixels(caller, "SizePixels", self.raw.SizePixels);
+        assert_finite_vec2(
+            caller,
+            "GlyphOffset",
+            [self.raw.GlyphOffset.x, self.raw.GlyphOffset.y],
+        );
+        assert_non_negative_f32(caller, "GlyphMinAdvanceX", self.raw.GlyphMinAdvanceX);
+        assert_non_negative_f32(caller, "GlyphMaxAdvanceX", self.raw.GlyphMaxAdvanceX);
+        assert!(
+            self.raw.GlyphMinAdvanceX <= self.raw.GlyphMaxAdvanceX,
+            "{caller} GlyphMinAdvanceX must be less than or equal to GlyphMaxAdvanceX"
+        );
+        assert_finite_f32(caller, "GlyphExtraAdvanceX", self.raw.GlyphExtraAdvanceX);
+        assert_non_negative_f32(caller, "RasterizerMultiply", self.raw.RasterizerMultiply);
+        assert!(
+            self.raw.RasterizerMultiply <= RASTERIZER_MULTIPLY_MAX,
+            "{caller} RasterizerMultiply must be less than or equal to {RASTERIZER_MULTIPLY_MAX}"
+        );
+        assert_positive_f32(caller, "RasterizerDensity", self.raw.RasterizerDensity);
+        assert_non_negative_i8(caller, "OversampleH", self.raw.OversampleH);
+        assert_non_negative_i8(caller, "OversampleV", self.raw.OversampleV);
+    }
+
+    fn validate_for_add_font(&self, caller: &str) {
+        self.validate_common(caller);
+        assert_font_source_for_add_font(caller, &self.raw);
+        assert_reference_font_size_for_metrics(
+            caller,
+            self.raw.SizePixels,
+            self.has_reference_size_dependent_metrics(),
+        );
+    }
+
+    fn validate_for_add_font_default(&self, caller: &str) {
+        self.validate_common(caller);
+    }
+
+    fn validate_for_add_font_with_size(&self, caller: &str, size_pixels: f32) {
+        self.validate_common(caller);
+        let effective_size_pixels = if size_pixels > 0.0 {
+            size_pixels
+        } else {
+            self.raw.SizePixels
+        };
+        assert_reference_font_size_for_metrics(
+            caller,
+            effective_size_pixels,
+            self.has_reference_size_dependent_metrics(),
+        );
+    }
+
     /// Set the font size in pixels
     ///
     /// Note: With v1.92+ dynamic fonts, size can be 0.0 to use default sizing
     pub fn size_pixels(mut self, size: f32) -> Self {
+        validate_font_size_pixels("FontConfig::size_pixels()", "size", size);
         self.raw.SizePixels = size;
         self
     }
@@ -977,6 +1167,7 @@ impl FontConfig {
 
     /// Set glyph offset for this font
     pub fn glyph_offset(mut self, offset: [f32; 2]) -> Self {
+        assert_finite_vec2("FontConfig::glyph_offset()", "offset", offset);
         self.raw.GlyphOffset.x = offset[0];
         self.raw.GlyphOffset.y = offset[1];
         self
@@ -984,30 +1175,47 @@ impl FontConfig {
 
     /// Set minimum advance X for glyphs
     pub fn glyph_min_advance_x(mut self, advance: f32) -> Self {
+        assert_non_negative_f32("FontConfig::glyph_min_advance_x()", "advance", advance);
+        assert!(
+            advance <= self.raw.GlyphMaxAdvanceX,
+            "FontConfig::glyph_min_advance_x() advance must be less than or equal to current glyph_max_advance_x"
+        );
         self.raw.GlyphMinAdvanceX = advance;
         self
     }
 
     /// Set maximum advance X for glyphs
     pub fn glyph_max_advance_x(mut self, advance: f32) -> Self {
+        assert_non_negative_f32("FontConfig::glyph_max_advance_x()", "advance", advance);
+        assert!(
+            advance >= self.raw.GlyphMinAdvanceX,
+            "FontConfig::glyph_max_advance_x() advance must be greater than or equal to current glyph_min_advance_x"
+        );
         self.raw.GlyphMaxAdvanceX = advance;
         self
     }
 
     /// Set extra advance X for glyphs (spacing between characters)
     pub fn glyph_extra_advance_x(mut self, advance: f32) -> Self {
+        assert_finite_f32("FontConfig::glyph_extra_advance_x()", "advance", advance);
         self.raw.GlyphExtraAdvanceX = advance;
         self
     }
 
     /// Set rasterizer multiply factor
     pub fn rasterizer_multiply(mut self, multiply: f32) -> Self {
+        assert_non_negative_f32("FontConfig::rasterizer_multiply()", "multiply", multiply);
+        assert!(
+            multiply <= RASTERIZER_MULTIPLY_MAX,
+            "FontConfig::rasterizer_multiply() multiply must be less than or equal to {RASTERIZER_MULTIPLY_MAX}"
+        );
         self.raw.RasterizerMultiply = multiply;
         self
     }
 
     /// Set rasterizer density for DPI scaling
     pub fn rasterizer_density(mut self, density: f32) -> Self {
+        assert_positive_f32("FontConfig::rasterizer_density()", "density", density);
         self.raw.RasterizerDensity = density;
         self
     }
@@ -1020,12 +1228,14 @@ impl FontConfig {
 
     /// Set horizontal oversampling
     pub fn oversample_h(mut self, oversample: i8) -> Self {
+        assert_non_negative_i8("FontConfig::oversample_h()", "oversample", oversample);
         self.raw.OversampleH = oversample;
         self
     }
 
     /// Set vertical oversampling
     pub fn oversample_v(mut self, oversample: i8) -> Self {
+        assert_non_negative_i8("FontConfig::oversample_v()", "oversample", oversample);
         self.raw.OversampleV = oversample;
         self
     }
@@ -1088,6 +1298,126 @@ mod tests {
     }
 
     #[test]
+    fn font_config_rejects_invalid_numeric_inputs() {
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new().size_pixels(f32::NAN);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new().size_pixels(-1.0);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new().glyph_offset([0.0, f32::INFINITY]);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new().glyph_min_advance_x(-1.0);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new()
+                    .glyph_min_advance_x(12.0)
+                    .glyph_max_advance_x(8.0);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new().glyph_extra_advance_x(f32::NAN);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new().rasterizer_multiply(-0.1);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new().rasterizer_multiply(RASTERIZER_MULTIPLY_MAX * 2.0);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new().rasterizer_density(0.0);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = FontConfig::new().oversample_h(-1);
+            })
+            .is_err()
+        );
+
+        let cfg = FontConfig::new()
+            .size_pixels(0.0)
+            .glyph_offset([0.0, 0.0])
+            .glyph_min_advance_x(0.0)
+            .glyph_max_advance_x(f32::MAX)
+            .glyph_extra_advance_x(-1.0)
+            .rasterizer_multiply(256.0)
+            .rasterizer_density(1.0)
+            .oversample_h(0)
+            .oversample_v(1);
+        assert_eq!(cfg.raw.SizePixels, 0.0);
+        assert_eq!(cfg.raw.GlyphExtraAdvanceX, -1.0);
+        assert_eq!(cfg.raw.RasterizerMultiply, 256.0);
+    }
+
+    #[test]
+    fn font_atlas_rejects_glyph_metric_overrides_without_reference_size() {
+        let mut atlas = FontAtlas::new();
+        let cfg = FontConfig::new().glyph_offset([1.0, 0.0]);
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = atlas.add_font_from_memory_ttf(&[0u8; 10], 0.0, Some(&cfg), None);
+            }))
+            .is_err()
+        );
+
+        assert!(
+            atlas
+                .add_font_from_memory_ttf(&[0u8; 10], 13.0, Some(&cfg), None)
+                .is_none()
+        );
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let cfg = FontConfig::new()
+                    .font_data_owned_by_atlas(false)
+                    .glyph_min_advance_x(4.0);
+                let _ = atlas.add_font_with_config(&cfg);
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn add_font_with_config_rejects_missing_font_source_before_ffi() {
+        let mut atlas = FontAtlas::new();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = atlas.add_font_with_config(&FontConfig::new());
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
     fn add_font_from_memory_ttf_rejects_too_small_buffers() {
         let mut ctx = crate::Context::create();
         let mut fonts = ctx.font_atlas_mut();
@@ -1095,6 +1425,24 @@ mod tests {
             fonts
                 .add_font_from_memory_ttf(&[0u8; 10], 13.0, None, None)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn font_sources_reject_invalid_sizes_before_ffi() {
+        let mut atlas = FontAtlas::new();
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = atlas.add_font(&[FontSource::default_font_with_size(f32::NAN)]);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = atlas.add_font(&[FontSource::ttf_data_with_size(&[0u8; 10], -1.0)]);
+            }))
+            .is_err()
         );
     }
 

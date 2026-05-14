@@ -26,6 +26,16 @@ pub use glyph_ranges::*;
 
 use crate::Ui;
 
+fn assert_non_negative_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
+fn assert_positive_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+    assert!(value > 0.0, "{caller} {name} must be positive");
+}
+
 /// # Fonts
 impl Ui {
     /// Returns the current font
@@ -45,6 +55,7 @@ impl Ui {
     /// This allows changing font size at runtime without pre-loading different sizes.
     /// Pass None for font to use the current font with the new size.
     pub fn push_font_with_size(&self, font: Option<&Font>, size: f32) {
+        assert_non_negative_finite_f32("Ui::push_font_with_size()", "size", size);
         unsafe {
             let font_ptr = font.map_or(std::ptr::null_mut(), |f| f.raw());
             crate::sys::igPushFont(font_ptr, size);
@@ -77,7 +88,7 @@ impl Ui {
     /// Prefer [`Ui::push_font_with_size`] or `style.FontScaleMain` for new code.
     #[doc(alias = "SetWindowFontScale")]
     pub fn set_window_font_scale(&self, scale: f32) {
-        assert!(scale > 0.0, "window font scale must be positive");
+        assert_positive_finite_f32("Ui::set_window_font_scale()", "scale", scale);
 
         unsafe {
             let window = crate::sys::igGetCurrentWindow();
@@ -113,6 +124,38 @@ mod tests {
             ui.set_window_font_scale(1.5);
 
             assert_eq!(unsafe { (*window).FontWindowScale }, 1.5);
+        });
+    }
+
+    #[test]
+    fn font_runtime_size_setters_validate_before_ffi() {
+        let mut ctx = setup_context();
+        let raw_ctx = ctx.as_raw();
+        let ui = ctx.frame();
+
+        let initial_stack_size = unsafe { (*raw_ctx).FontStack.Size };
+        ui.with_font_and_size(None, 0.0, || {});
+        assert_eq!(unsafe { (*raw_ctx).FontStack.Size }, initial_stack_size);
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ui.push_font_with_size(None, -1.0);
+            }))
+            .is_err()
+        );
+        assert_eq!(unsafe { (*raw_ctx).FontStack.Size }, initial_stack_size);
+
+        ui.window("font_scale_invalid").build(|| {
+            let window = unsafe { crate::sys::igGetCurrentWindowRead() };
+            assert_eq!(unsafe { (*window).FontWindowScale }, 1.0);
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.set_window_font_scale(f32::INFINITY);
+                }))
+                .is_err()
+            );
+            assert_eq!(unsafe { (*window).FontWindowScale }, 1.0);
         });
     }
 
