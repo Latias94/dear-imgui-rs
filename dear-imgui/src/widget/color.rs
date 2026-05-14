@@ -440,6 +440,31 @@ fn assert_color_single_choice_mask(caller: &str, bits: u32, mask: u32, name: &st
     );
 }
 
+fn assert_finite_color3(caller: &str, name: &str, color: &[f32; 3]) {
+    assert!(
+        color.iter().all(|component| component.is_finite()),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn assert_finite_color4(caller: &str, name: &str, color: &[f32; 4]) {
+    assert!(
+        color.iter().all(|component| component.is_finite()),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn assert_non_negative_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+    assert!(
+        value[0] >= 0.0 && value[1] >= 0.0,
+        "{caller} {name} must contain non-negative values"
+    );
+}
+
 impl std::ops::BitOr for ColorEditFlags {
     type Output = Self;
     fn bitor(self, rhs: Self) -> Self::Output {
@@ -630,6 +655,7 @@ impl<'ui, 'p> ColorEdit3<'ui, 'p> {
     /// Builds the color edit widget
     pub fn build(self) -> bool {
         self.flags.validate("ColorEdit3::build()");
+        assert_finite_color3("ColorEdit3::build()", "color", &*self.color);
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe { sys::igColorEdit3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
@@ -689,6 +715,7 @@ impl<'ui, 'p> ColorEdit4<'ui, 'p> {
     /// Builds the color edit widget
     pub fn build(self) -> bool {
         self.flags.validate("ColorEdit4::build()");
+        assert_finite_color4("ColorEdit4::build()", "color", &*self.color);
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe { sys::igColorEdit4(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
@@ -748,6 +775,7 @@ impl<'ui, 'p> ColorPicker3<'ui, 'p> {
     /// Builds the color picker widget
     pub fn build(self) -> bool {
         self.flags.validate("ColorPicker3::build()");
+        assert_finite_color3("ColorPicker3::build()", "color", &*self.color);
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe { sys::igColorPicker3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32) }
     }
@@ -815,6 +843,10 @@ impl<'ui, 'p> ColorPicker4<'ui, 'p> {
     /// Builds the color picker widget
     pub fn build(self) -> bool {
         self.flags.validate("ColorPicker4::build()");
+        assert_finite_color4("ColorPicker4::build()", "color", &*self.color);
+        if let Some(ref_color) = &self.ref_color {
+            assert_finite_color4("ColorPicker4::build()", "reference color", ref_color);
+        }
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let ref_color_ptr = self
             .ref_color
@@ -876,6 +908,8 @@ impl<'ui> ColorButton<'ui> {
     /// Builds the color button widget
     pub fn build(self) -> bool {
         self.flags.validate("ColorButton::build()");
+        assert_finite_color4("ColorButton::build()", "color", &self.color);
+        assert_non_negative_finite_vec2("ColorButton::build()", "size", self.size);
         let desc_id_ptr = self.ui.scratch_txt(self.desc_id.as_ref());
         let size_vec: sys::ImVec2 = self.size.into();
 

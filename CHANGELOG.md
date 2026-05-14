@@ -139,6 +139,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     tree-line mode flags.
   - Add missing public `TreeNodeFlags` aliases and draw-line bits, and align
     `TreeNodeFlags::COLLAPSING_HEADER` with Dear ImGui's upstream flag combination.
+  - Validate color and image widget float inputs before crossing FFI, and make image builder
+    tint/border color options take effect with Dear ImGui's 1.92 `ImageWithBg` and image-border
+    style path.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts

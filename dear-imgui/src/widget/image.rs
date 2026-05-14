@@ -17,7 +17,50 @@
 use crate::sys;
 use crate::texture::TextureRef;
 use crate::ui::Ui;
+use crate::{StyleColor, StyleVar};
 use std::borrow::Cow;
+
+fn assert_non_negative_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+    assert!(
+        value[0] >= 0.0 && value[1] >= 0.0,
+        "{caller} {name} must contain non-negative values"
+    );
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn assert_finite_vec4(caller: &str, name: &str, value: [f32; 4]) {
+    assert!(
+        value.iter().all(|component| component.is_finite()),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn is_default_tint_color(color: [f32; 4]) -> bool {
+    color == [1.0, 1.0, 1.0, 1.0]
+}
+
+fn is_transparent_color(color: [f32; 4]) -> bool {
+    color == [0.0, 0.0, 0.0, 0.0]
+}
+
+fn im_vec4(value: [f32; 4]) -> sys::ImVec4 {
+    sys::ImVec4 {
+        x: value[0],
+        y: value[1],
+        z: value[2],
+        w: value[3],
+    }
+}
 
 /// # Image Widgets
 ///
@@ -114,12 +157,20 @@ impl<'ui> Image<'ui> {
     }
 
     /// Sets the tint color (default: white, no tint)
+    ///
+    /// Dear ImGui 1.91.9 moved image tinting from `Image()` to `ImageWithBg()`.
+    /// If this is set, [`build`](Self::build) will call the tinted path while
+    /// keeping a transparent background.
     pub fn tint_color(mut self, tint_color: [f32; 4]) -> Self {
         self.tint_color = tint_color;
         self
     }
 
     /// Sets the border color (default: transparent, no border)
+    ///
+    /// Dear ImGui 1.91.9 moved image border thickness to `Style::ImageBorderSize`
+    /// and border color to `StyleColor::Border`; this builder applies matching
+    /// temporary style overrides around [`build`](Self::build).
     pub fn border_color(mut self, border_color: [f32; 4]) -> Self {
         self.border_color = border_color;
         self
@@ -127,42 +178,64 @@ impl<'ui> Image<'ui> {
 
     /// Builds the image widget
     pub fn build(self) {
+        assert_non_negative_finite_vec2("Image::build()", "size", self.size);
+        assert_finite_vec2("Image::build()", "uv0", self.uv0);
+        assert_finite_vec2("Image::build()", "uv1", self.uv1);
+        assert_finite_vec4("Image::build()", "tint_color", self.tint_color);
+        assert_finite_vec4("Image::build()", "border_color", self.border_color);
+
         let size_vec: sys::ImVec2 = self.size.into();
         let uv0_vec: sys::ImVec2 = self.uv0.into();
         let uv1_vec: sys::ImVec2 = self.uv1.into();
-        let _tint_vec: sys::ImVec4 = sys::ImVec4 {
-            x: self.tint_color[0],
-            y: self.tint_color[1],
-            z: self.tint_color[2],
-            w: self.tint_color[3],
-        };
-        let _border_vec: sys::ImVec4 = sys::ImVec4 {
-            x: self.border_color[0],
-            y: self.border_color[1],
-            z: self.border_color[2],
-            w: self.border_color[3],
-        };
 
-        unsafe { sys::igImage(self.texture.raw(), size_vec, uv0_vec, uv1_vec) }
+        let _border_size_token = (self.border_color[3] > 0.0).then(|| {
+            let current_size = unsafe { self._ui.style().image_border_size() };
+            self._ui
+                .push_style_var(StyleVar::ImageBorderSize(current_size.max(1.0)))
+        });
+        let _border_color_token = (self.border_color[3] > 0.0).then(|| {
+            self._ui
+                .push_style_color(StyleColor::Border, self.border_color)
+        });
+
+        if is_default_tint_color(self.tint_color) && is_transparent_color(self.border_color) {
+            unsafe { sys::igImage(self.texture.raw(), size_vec, uv0_vec, uv1_vec) }
+        } else {
+            unsafe {
+                sys::igImageWithBg(
+                    self.texture.raw(),
+                    size_vec,
+                    uv0_vec,
+                    uv1_vec,
+                    im_vec4([0.0, 0.0, 0.0, 0.0]),
+                    im_vec4(self.tint_color),
+                )
+            }
+        }
     }
 
     /// Builds the image widget with background color and tint (v1.92+)
     pub fn build_with_bg(self, bg_color: [f32; 4], tint_color: [f32; 4]) {
+        assert_non_negative_finite_vec2("Image::build_with_bg()", "size", self.size);
+        assert_finite_vec2("Image::build_with_bg()", "uv0", self.uv0);
+        assert_finite_vec2("Image::build_with_bg()", "uv1", self.uv1);
+        assert_finite_vec4("Image::build_with_bg()", "bg_color", bg_color);
+        assert_finite_vec4("Image::build_with_bg()", "tint_color", tint_color);
+        assert_finite_vec4("Image::build_with_bg()", "border_color", self.border_color);
+
         let size_vec: sys::ImVec2 = self.size.into();
         let uv0_vec: sys::ImVec2 = self.uv0.into();
         let uv1_vec: sys::ImVec2 = self.uv1.into();
-        let bg_vec = sys::ImVec4 {
-            x: bg_color[0],
-            y: bg_color[1],
-            z: bg_color[2],
-            w: bg_color[3],
-        };
-        let tint_vec = sys::ImVec4 {
-            x: tint_color[0],
-            y: tint_color[1],
-            z: tint_color[2],
-            w: tint_color[3],
-        };
+
+        let _border_size_token = (self.border_color[3] > 0.0).then(|| {
+            let current_size = unsafe { self._ui.style().image_border_size() };
+            self._ui
+                .push_style_var(StyleVar::ImageBorderSize(current_size.max(1.0)))
+        });
+        let _border_color_token = (self.border_color[3] > 0.0).then(|| {
+            self._ui
+                .push_style_color(StyleColor::Border, self.border_color)
+        });
 
         unsafe {
             sys::igImageWithBg(
@@ -170,8 +243,8 @@ impl<'ui> Image<'ui> {
                 size_vec,
                 uv0_vec,
                 uv1_vec,
-                bg_vec,
-                tint_vec,
+                im_vec4(bg_color),
+                im_vec4(tint_color),
             )
         }
     }
@@ -237,22 +310,16 @@ impl<'ui> ImageButton<'ui> {
 
     /// Builds the image button widget
     pub fn build(self) -> bool {
+        assert_non_negative_finite_vec2("ImageButton::build()", "size", self.size);
+        assert_finite_vec2("ImageButton::build()", "uv0", self.uv0);
+        assert_finite_vec2("ImageButton::build()", "uv1", self.uv1);
+        assert_finite_vec4("ImageButton::build()", "bg_color", self.bg_color);
+        assert_finite_vec4("ImageButton::build()", "tint_color", self.tint_color);
+
         let str_id_ptr = self.ui.scratch_txt(self.str_id.as_ref());
         let size_vec: sys::ImVec2 = self.size.into();
         let uv0_vec: sys::ImVec2 = self.uv0.into();
         let uv1_vec: sys::ImVec2 = self.uv1.into();
-        let bg_vec: sys::ImVec4 = sys::ImVec4 {
-            x: self.bg_color[0],
-            y: self.bg_color[1],
-            z: self.bg_color[2],
-            w: self.bg_color[3],
-        };
-        let tint_vec: sys::ImVec4 = sys::ImVec4 {
-            x: self.tint_color[0],
-            y: self.tint_color[1],
-            z: self.tint_color[2],
-            w: self.tint_color[3],
-        };
 
         unsafe {
             sys::igImageButton(
@@ -261,8 +328,8 @@ impl<'ui> ImageButton<'ui> {
                 size_vec,
                 uv0_vec,
                 uv1_vec,
-                bg_vec,
-                tint_vec,
+                im_vec4(self.bg_color),
+                im_vec4(self.tint_color),
             )
         }
     }
