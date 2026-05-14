@@ -34,6 +34,7 @@ impl Ui {
     /// Instructs ImGui that a popup is open with flags.
     #[doc(alias = "OpenPopup")]
     pub fn open_popup_with_flags(&self, str_id: impl AsRef<str>, flags: PopupFlags) {
+        validate_popup_flags("Ui::open_popup_with_flags()", flags);
         let str_id_ptr = self.scratch_txt(str_id);
         unsafe { sys::igOpenPopup_Str(str_id_ptr, flags.bits()) }
     }
@@ -54,6 +55,7 @@ impl Ui {
         flags: impl Into<PopupContextOptions>,
     ) {
         let options = flags.into();
+        options.validate("Ui::open_popup_on_item_click_with_flags()");
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
@@ -198,6 +200,7 @@ impl Ui {
     /// Returns true if the popup is open with flags.
     #[doc(alias = "IsPopupOpen")]
     pub fn is_popup_open_with_flags(&self, str_id: impl AsRef<str>, flags: PopupFlags) -> bool {
+        validate_popup_query_flags("Ui::is_popup_open_with_flags()", flags);
         let str_id_ptr = self.scratch_txt(str_id);
         unsafe { sys::igIsPopupOpen_Str(str_id_ptr, flags.bits()) }
     }
@@ -225,6 +228,7 @@ impl Ui {
         flags: impl Into<PopupContextOptions>,
     ) -> Option<PopupToken<'_>> {
         let options = flags.into();
+        options.validate("Ui::begin_popup_context_item_with_flags()");
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
@@ -257,6 +261,7 @@ impl Ui {
         flags: impl Into<PopupContextOptions>,
     ) -> Option<PopupToken<'_>> {
         let options = flags.into();
+        options.validate("Ui::begin_popup_context_window_with_flags()");
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
@@ -289,6 +294,7 @@ impl Ui {
         flags: impl Into<PopupContextOptions>,
     ) -> Option<PopupToken<'_>> {
         let options = flags.into();
+        options.validate("Ui::begin_popup_context_void_with_flags()");
         let str_id_ptr = str_id
             .map(|s| self.scratch_txt(s))
             .unwrap_or(std::ptr::null());
@@ -297,6 +303,22 @@ impl Ui {
 
         render.then(|| PopupToken::new(self))
     }
+}
+
+fn validate_popup_flags(caller: &str, flags: PopupFlags) {
+    let unsupported = flags.bits() & !PopupFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiPopupFlags bits: 0x{unsupported:X}"
+    );
+}
+
+fn validate_popup_query_flags(caller: &str, flags: PopupFlags) {
+    validate_popup_flags(caller, flags);
+    assert!(
+        !flags.contains(PopupFlags::ANY_POPUP_LEVEL) || flags.contains(PopupFlags::ANY_POPUP_ID),
+        "{caller} requires ANY_POPUP_ID when using ANY_POPUP_LEVEL with a string id"
+    );
 }
 
 bitflags::bitflags! {
@@ -395,6 +417,15 @@ impl PopupContextOptions {
     #[inline]
     pub(crate) fn raw(self) -> i32 {
         self.flags.bits() | self.mouse_button.raw()
+    }
+
+    #[inline]
+    pub(crate) fn validate(self, caller: &str) {
+        validate_popup_flags(caller, self.flags);
+        assert!(
+            self.flags.bits() & sys::ImGuiPopupFlags_MouseButtonMask_ == 0,
+            "{caller} received non-independent ImGuiPopupFlags mouse-button bits"
+        );
     }
 }
 

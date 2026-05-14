@@ -236,6 +236,44 @@ impl ComboBoxOptions {
     pub(crate) fn raw(self) -> i32 {
         self.flags.bits() | self.height.map_or(0, ComboBoxHeight::raw) | self.preview_mode.raw()
     }
+
+    #[inline]
+    pub(crate) fn validate(self, caller: &str) {
+        let unsupported_flags = self.flags.bits() & !ComboBoxFlags::all().bits();
+        assert!(
+            unsupported_flags == 0,
+            "{caller} received non-independent ImGuiComboFlags bits: 0x{unsupported_flags:X}"
+        );
+        let bits = self.raw();
+        let supported =
+            ComboBoxFlags::all().bits() | sys::ImGuiComboFlags_HeightMask_ | combo_preview_mask();
+        let unsupported = bits & !supported;
+        assert!(
+            unsupported == 0,
+            "{caller} received unsupported ImGuiComboFlags bits: 0x{unsupported:X}"
+        );
+        assert!(
+            bits & (sys::ImGuiComboFlags_NoArrowButton | sys::ImGuiComboFlags_NoPreview)
+                != (sys::ImGuiComboFlags_NoArrowButton | sys::ImGuiComboFlags_NoPreview),
+            "{caller} cannot combine NO_ARROW_BUTTON with NO_PREVIEW"
+        );
+        assert!(
+            bits & sys::ImGuiComboFlags_WidthFitPreview == 0
+                || bits & sys::ImGuiComboFlags_NoPreview == 0,
+            "{caller} cannot combine WIDTH_FIT_PREVIEW with NO_PREVIEW"
+        );
+        assert!(
+            (bits & sys::ImGuiComboFlags_HeightMask_).count_ones() <= 1,
+            "{caller} accepts at most one combo height policy"
+        );
+    }
+}
+
+#[inline]
+const fn combo_preview_mask() -> i32 {
+    sys::ImGuiComboFlags_NoArrowButton
+        | sys::ImGuiComboFlags_NoPreview
+        | sys::ImGuiComboFlags_WidthFitPreview
 }
 
 impl From<ComboBoxFlags> for ComboBoxOptions {

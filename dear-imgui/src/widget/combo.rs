@@ -42,6 +42,7 @@ impl Ui {
         flags: impl Into<ComboBoxOptions>,
     ) -> Option<ComboBoxToken<'_>> {
         let options = flags.into();
+        options.validate("Ui::begin_combo_with_flags()");
         let (label_ptr, preview_ptr) = self.scratch_txt_two(label, preview_value);
 
         let should_render = unsafe { sys::igBeginCombo(label_ptr, preview_ptr, options.raw()) };
@@ -80,6 +81,7 @@ impl Ui {
     ) -> Option<ComboBoxToken<'_>> {
         let mut options = flags.into();
         options.preview_mode = ComboBoxPreviewMode::NoPreview;
+        options.validate("Ui::begin_combo_no_preview_with_flags()");
         let label_ptr = self.scratch_txt(label);
 
         let should_render =
@@ -258,6 +260,7 @@ impl<'ui, Label: AsRef<str>> ComboBox<'ui, Label> {
     /// Returns `None` if the combo box is not open and no content should be rendered.
     #[must_use]
     pub fn begin(self) -> Option<ComboBoxToken<'ui>> {
+        self.options.validate("ComboBox::begin()");
         let (label_ptr, preview_ptr) = self
             .ui
             .scratch_txt_with_opt(self.label.as_ref(), self.preview_value.as_deref());

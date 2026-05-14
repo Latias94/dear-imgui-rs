@@ -98,6 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     internal slider assertions before crossing FFI.
   - Validate input text and numeric input flags before crossing FFI, rejecting unsupported
     bits and combinations that Dear ImGui asserts on.
+  - Reject non-independent combo, tab, and popup option bits before crossing FFI, preventing
+    `from_bits_retain` from bypassing typed option builders.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts

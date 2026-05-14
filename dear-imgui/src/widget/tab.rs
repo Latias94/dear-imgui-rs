@@ -95,6 +95,26 @@ impl TabBarOptions {
     pub(crate) fn raw(self) -> i32 {
         self.flags.bits() | self.fitting_policy.map_or(0, TabBarFittingPolicy::raw)
     }
+
+    #[inline]
+    pub(crate) fn validate(self, caller: &str) {
+        let unsupported_flags = self.flags.bits() & !TabBarFlags::all().bits();
+        assert!(
+            unsupported_flags == 0,
+            "{caller} received non-independent ImGuiTabBarFlags bits: 0x{unsupported_flags:X}"
+        );
+        let bits = self.raw();
+        let supported = TabBarFlags::all().bits() | sys::ImGuiTabBarFlags_FittingPolicyMask_;
+        let unsupported = bits & !supported;
+        assert!(
+            unsupported == 0,
+            "{caller} received unsupported ImGuiTabBarFlags bits: 0x{unsupported:X}"
+        );
+        assert!(
+            (bits & sys::ImGuiTabBarFlags_FittingPolicyMask_).count_ones() <= 1,
+            "{caller} accepts at most one tab-bar fitting policy"
+        );
+    }
 }
 
 impl Default for TabBarOptions {
@@ -185,6 +205,47 @@ impl TabItemOptions {
     #[inline]
     pub(crate) fn raw(self) -> i32 {
         self.flags.bits() | self.placement.map_or(0, TabItemPlacement::raw)
+    }
+
+    #[inline]
+    pub(crate) fn validate_for_tab_item(self, caller: &str) {
+        validate_tab_item_options(caller, self, false);
+    }
+
+    #[inline]
+    pub(crate) fn validate_for_tab_button(self, caller: &str) {
+        validate_tab_item_options(caller, self, true);
+    }
+}
+
+fn validate_tab_item_options(caller: &str, options: TabItemOptions, allow_button_bits: bool) {
+    let unsupported_flags = options.flags.bits() & !TabItemFlags::all().bits();
+    assert!(
+        unsupported_flags == 0,
+        "{caller} received non-independent ImGuiTabItemFlags bits: 0x{unsupported_flags:X}"
+    );
+    let bits = options.raw();
+    let mut supported = TabItemFlags::all().bits()
+        | sys::ImGuiTabItemFlags_Leading
+        | sys::ImGuiTabItemFlags_Trailing;
+    if allow_button_bits {
+        supported |= sys::ImGuiTabItemFlags_Button;
+    }
+    let unsupported = bits & !supported;
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiTabItemFlags bits: 0x{unsupported:X}"
+    );
+    assert!(
+        bits & (sys::ImGuiTabItemFlags_Leading | sys::ImGuiTabItemFlags_Trailing)
+            != (sys::ImGuiTabItemFlags_Leading | sys::ImGuiTabItemFlags_Trailing),
+        "{caller} cannot combine LEADING with TRAILING"
+    );
+    if !allow_button_bits {
+        assert!(
+            bits & sys::ImGuiTabItemFlags_Button == 0,
+            "{caller} cannot use BUTTON; use TabItemButton instead"
+        );
     }
 }
 
@@ -387,6 +448,7 @@ impl Ui {
         flags: impl Into<TabBarOptions>,
     ) -> Option<TabBarToken<'_>> {
         let options = flags.into();
+        options.validate("Ui::tab_bar_with_flags()");
         let id_ptr = self.scratch_txt(id);
         let should_render = unsafe { sys::igBeginTabBar(id_ptr, options.raw()) };
 
@@ -430,6 +492,7 @@ impl Ui {
         flags: impl Into<TabItemOptions>,
     ) -> Option<TabItemToken<'_>> {
         let options = flags.into();
+        options.validate_for_tab_item("Ui::tab_item_with_flags()");
         let label_ptr = self.scratch_txt(label);
         let opened_ptr = opened.map(|x| x as *mut bool).unwrap_or(ptr::null_mut());
 
@@ -455,7 +518,9 @@ impl Ui {
         label: impl AsRef<str>,
         flags: impl Into<TabItemOptions>,
     ) -> bool {
-        unsafe { sys::igTabItemButton(self.scratch_txt(label), flags.into().raw()) }
+        let options = flags.into();
+        options.validate_for_tab_button("Ui::tab_item_button_with_flags()");
+        unsafe { sys::igTabItemButton(self.scratch_txt(label), options.raw()) }
     }
 
     /// Notifies Dear ImGui that a tab (or docked window) has been closed.
