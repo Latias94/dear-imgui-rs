@@ -9,6 +9,7 @@
     clippy::as_conversions
 )]
 use crate::Ui;
+use crate::create_token;
 use crate::sys;
 
 bitflags::bitflags! {
@@ -141,13 +142,50 @@ impl Ui {
 // Button repeat (convenience over item flag)
 // ============================================================================
 
+create_token!(
+    /// Tracks a button repeat item flag pushed with [`Ui::push_button_repeat_token`].
+    pub struct ButtonRepeatToken<'ui>;
+
+    /// Pops the button repeat item flag.
+    #[doc(alias = "PopButtonRepeat")]
+    drop { unsafe { sys::igPopItemFlag() } }
+);
+
+impl ButtonRepeatToken<'_> {
+    /// Pops the button repeat item flag.
+    pub fn pop(self) {
+        self.end()
+    }
+}
+
 impl Ui {
     /// Enable/disable repeating behavior for subsequent buttons.
     ///
     /// Internally uses `PushItemFlag(ImGuiItemFlags_ButtonRepeat, repeat)`.
+    ///
+    /// Prefer [`Self::push_button_repeat_token`] or [`Self::with_button_repeat`]
+    /// for scoped usage that remains balanced if a panic unwinds through the
+    /// scope. This manual API is kept for compatibility with existing
+    /// push/pop-style code.
     #[doc(alias = "PushButtonRepeat")]
     pub fn push_button_repeat(&self, repeat: bool) {
         unsafe { sys::igPushItemFlag(sys::ImGuiItemFlags_ButtonRepeat as i32, repeat) }
+    }
+
+    /// Push a button repeat item flag and return an RAII token that pops it on drop.
+    #[doc(alias = "PushButtonRepeat")]
+    pub fn push_button_repeat_token(&self, repeat: bool) -> ButtonRepeatToken<'_> {
+        self.push_button_repeat(repeat);
+        ButtonRepeatToken::new(self)
+    }
+
+    /// Push a button repeat item flag, run `f`, then pop the flag.
+    ///
+    /// The flag is popped during unwinding if `f` panics.
+    #[doc(alias = "PushButtonRepeat", alias = "PopButtonRepeat")]
+    pub fn with_button_repeat<R>(&self, repeat: bool, f: impl FnOnce() -> R) -> R {
+        let _repeat = self.push_button_repeat_token(repeat);
+        f()
     }
 
     /// Pop the button repeat item flag.
@@ -178,5 +216,43 @@ impl Ui {
     ) {
         let k: sys::ImGuiKey = key as sys::ImGuiKey;
         unsafe { sys::igSetItemKeyOwner_InputFlags(k, flags.raw()) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_context() -> crate::Context {
+        let mut ctx = crate::Context::create();
+        let _ = ctx.font_atlas_mut().build();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        ctx
+    }
+
+    #[test]
+    fn with_button_repeat_pops_after_panic() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+        let raw_ctx = unsafe { sys::igGetCurrentContext() };
+        assert!(!raw_ctx.is_null());
+        let initial_stack_size = unsafe { (*raw_ctx).ItemFlagsStack.Size };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.with_button_repeat(true, || {
+                assert_eq!(
+                    unsafe { (*raw_ctx).ItemFlagsStack.Size },
+                    initial_stack_size + 1
+                );
+                panic!("forced panic while button repeat is pushed");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            unsafe { (*raw_ctx).ItemFlagsStack.Size },
+            initial_stack_size
+        );
     }
 }
