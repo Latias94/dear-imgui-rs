@@ -124,6 +124,7 @@ fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
     }
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_file(path: &Path) {
     if let Ok(content) = std::fs::read_to_string(path) {
         let sanitized = sanitize_bindings_string(&content);
@@ -152,6 +153,7 @@ fn sanitize_bindings_string(content: &str) -> String {
     out
 }
 
+#[cfg(feature = "bindgen")]
 fn generate_bindings(
     cfg: &BuildConfig,
     cimplot3d_root: &Path,
@@ -215,6 +217,19 @@ fn generate_bindings(
         .write_to_file(&out)
         .expect("Couldn't write bindings!");
     sanitize_bindings_file(&out);
+}
+
+#[cfg(not(feature = "bindgen"))]
+fn generate_bindings(
+    _cfg: &BuildConfig,
+    _cimplot3d_root: &Path,
+    _imgui_src: &Path,
+    _cimgui_root: &Path,
+) {
+    panic!(
+        "dear-implot3d-sys: regenerating bindings requires the `bindgen` feature. \
+         Re-run with `--features bindgen` and DEAR_IMGUI_RS_REGEN_BINDINGS=1."
+    );
 }
 
 fn expected_lib_name(target_env: &str) -> &'static str {

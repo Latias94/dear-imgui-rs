@@ -192,7 +192,12 @@ def main() -> int:
             # DEAR_IMGUI_RS_REGEN_BINDINGS, but its build.rs intentionally
             # rejects the SKIP_CC path when regeneration is requested.
             print(f"Generating bindings for {crate} (regen-only build)...")
-        rc = run(["cargo", "build", "-p", crate, *profile_flag], cwd=str(repo_root), env=env, dry=args.dry_run)
+        rc = run(
+            ["cargo", "build", "-p", crate, "--features", "bindgen", *profile_flag],
+            cwd=str(repo_root),
+            env=env,
+            dry=args.dry_run,
+        )
         if rc != 0:
             return rc
         bindings = find_bindings(target_dir, args.profile, crate)

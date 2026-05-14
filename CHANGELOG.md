@@ -194,6 +194,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Use checked-in pregenerated bindings by default for normal source builds, so Windows/MSVC
     users can build `dear-app` without installing LLVM/libclang while still compiling the native
     Dear ImGui library and PlatformIO hook shim.
+  - Make the `bindgen` build dependency optional behind a `bindgen` feature, so normal builds
+    no longer compile `bindgen`/`clang-sys`; binding regeneration now requires both
+    `DEAR_IMGUI_RS_REGEN_BINDINGS=1` and `--features bindgen`.
   - Route Rust-owned `Platform_GetWindowPos` / `Platform_GetWindowSize` out-parameter
     shims through `dear-imgui-sys` storage instead of cimgui's `BackendLanguageUserData`
     helper, avoiding collisions with language/backend userdata.
@@ -236,6 +239,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Use checked-in pregenerated bindings by default for extension `*-sys` normal builds, so
     ImPlot, ImNodes, ImPlot3D, ImGuizmo, ImGuIZMO.quat, and Test Engine users no longer need
     LLVM/libclang unless they explicitly regenerate bindings.
+  - Make extension `*-sys` `bindgen` build dependencies optional behind `bindgen` features, so
+    normal extension builds no longer compile `bindgen`/`clang-sys`.
   - Reject invalid `dear-implot` axis indices, non-finite plot sizes/coordinates, invalid
     axis limits, invalid tick ranges, and invalid zoom constraints before safe Rust crosses
     into ImPlot FFI.

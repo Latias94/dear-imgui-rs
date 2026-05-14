@@ -66,6 +66,7 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+#[cfg(feature = "bindgen")]
 fn generate_bindings(
     cfg: &BuildConfig,
     cimnodes_root: &Path,
@@ -139,6 +140,19 @@ fn generate_bindings(
         .write_to_file(&out)
         .expect("Couldn't write cimnodes bindings!");
     sanitize_bindings_file(&out);
+}
+
+#[cfg(not(feature = "bindgen"))]
+fn generate_bindings(
+    _cfg: &BuildConfig,
+    _cimnodes_root: &Path,
+    _imgui_src: &Path,
+    _cimgui_root: &Path,
+) {
+    panic!(
+        "dear-imnodes-sys: regenerating bindings requires the `bindgen` feature. \
+         Re-run with `--features bindgen` and DEAR_IMGUI_RS_REGEN_BINDINGS=1."
+    );
 }
 
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
@@ -432,6 +446,7 @@ fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
     }
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_file(path: &Path) {
     if let Ok(content) = std::fs::read_to_string(path) {
         let sanitized = sanitize_bindings_string(&content);

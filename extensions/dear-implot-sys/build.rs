@@ -67,6 +67,7 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+#[cfg(feature = "bindgen")]
 fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
     // For wasm32 targets, we rely on pregenerated import-style bindings that
     // import symbols from the shared imgui-sys-v0 provider instead of running
@@ -134,6 +135,19 @@ fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, c
         .write_to_file(&out)
         .expect("Couldn't write bindings!");
     sanitize_bindings_file(&out);
+}
+
+#[cfg(not(feature = "bindgen"))]
+fn generate_bindings(
+    _cfg: &BuildConfig,
+    _cimplot_root: &Path,
+    _imgui_src: &Path,
+    _cimgui_root: &Path,
+) {
+    panic!(
+        "dear-implot-sys: regenerating bindings requires the `bindgen` feature. \
+         Re-run with `--features bindgen` and DEAR_IMGUI_RS_REGEN_BINDINGS=1."
+    );
 }
 
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
@@ -504,6 +518,7 @@ fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
     }
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_file(path: &Path) {
     if let Ok(content) = std::fs::read_to_string(path) {
         let sanitized = sanitize_bindings_string(&content);

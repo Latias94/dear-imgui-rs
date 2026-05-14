@@ -45,7 +45,7 @@ build-support = { package = "dear-imgui-build-support", version = "0.12", path =
 glam = { workspace = true, optional = true }
 
 [build-dependencies]
-bindgen.workspace = true
+bindgen = { workspace = true, optional = true }
 cc.workspace = true
 pkg-config = { workspace = true, optional = true }
 xshell = { workspace = true }
@@ -65,6 +65,7 @@ required-features = ["package-bin"]
 
 [features]
 default = []
+bindgen = ["dep:bindgen"]
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = []

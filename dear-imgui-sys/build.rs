@@ -232,52 +232,10 @@ fn docsrs_build(cfg: &BuildConfig) {
         "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
         cfg.manifest_dir.join("backend-shims").display()
     );
-    let mut bindings = bindgen::Builder::default()
-        .header(cimgui_root.join("cimgui.h").to_string_lossy())
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .clang_arg(format!("-I{}", cimgui_root.display()))
-        .clang_arg(format!("-I{}", imgui_src.display()))
-        .allowlist_function("ig.*")
-        .allowlist_function("Im.*")
-        .blocklist_function("ImGuiPlatformIO_Set_Platform_GetWindowPos")
-        .blocklist_function("ImGuiPlatformIO_Set_Platform_GetWindowSize")
-        .allowlist_type("Im.*")
-        .allowlist_var("Im.*")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-        .derive_default(true)
-        .derive_debug(true)
-        .derive_copy(true)
-        .derive_eq(true)
-        .derive_partialeq(true)
-        .derive_hash(true)
-        .prepend_enum_name(false)
-        .layout_tests(false);
-    // Keep bindgen in sync with the compiled C++ library: we always enable `IMGUI_USE_WCHAR32`
-    // so `ImWchar` is a 32-bit codepoint type.
-    bindings = bindings.clang_arg("-DIMGUI_USE_WCHAR32");
-    if cfg!(feature = "test-engine") {
-        bindings = bindings.clang_arg("-DIMGUI_ENABLE_TEST_ENGINE");
-    }
-    let bindings = bindings
-        .generate()
-        .expect("Unable to generate bindings from cimgui.h (docs.rs)");
-    let out = cfg.out_dir.join("bindings.rs");
-    bindings
-        .write_to_file(&out)
-        .expect("Couldn't write bindings (docs.rs)!");
-    sanitize_bindings_file(&out);
-    println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
-    println!(
-        "cargo:IMGUI_BACKENDS_PATH={}",
-        cfg.imgui_src().join("backends").display()
-    );
-    println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
-    println!(
-        "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
-        cfg.manifest_dir.join("backend-shims").display()
-    );
+    generate_bindings_native(cfg);
 }
 
+#[cfg(feature = "bindgen")]
 fn generate_bindings_native(cfg: &BuildConfig) {
     // For wasm and Android targets, prefer pregenerated bindings to avoid
     // requiring a fully configured cross-target sysroot during bindgen.
@@ -540,6 +498,14 @@ fn build_backend_shims(cfg: &BuildConfig) {
     if cfg.target_os == "android" && cfg!(feature = "backend-shim-android") {
         build_backend_shim_android(cfg);
     }
+}
+
+#[cfg(not(feature = "bindgen"))]
+fn generate_bindings_native(_cfg: &BuildConfig) {
+    panic!(
+        "dear-imgui-sys: regenerating bindings requires the `bindgen` feature. \
+         Re-run with `--features bindgen` and DEAR_IMGUI_RS_REGEN_BINDINGS=1."
+    );
 }
 
 fn build_backend_shim_opengl3(cfg: &BuildConfig) {
@@ -1111,6 +1077,7 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
     false
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_file(path: &Path) {
     if let Ok(content) = std::fs::read_to_string(path) {
         let sanitized = sanitize_bindings_string(&content);

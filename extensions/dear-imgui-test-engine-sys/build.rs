@@ -87,6 +87,7 @@ fn sanitize_bindings_string(content: &str) -> String {
     out
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_file(path: &Path) {
     if let Ok(content) = std::fs::read_to_string(path) {
         let _ = std::fs::write(path, sanitize_bindings_string(&content));
@@ -100,6 +101,7 @@ fn parse_bool_env(name: &str) -> bool {
     )
 }
 
+#[cfg(feature = "bindgen")]
 fn generate_bindings(cfg: &BuildConfig) {
     let header = cfg.manifest_dir.join("shim/cimgui_test_engine.h");
     let bindings = bindgen::Builder::default()
@@ -125,6 +127,14 @@ fn generate_bindings(cfg: &BuildConfig) {
         .write_to_file(&out)
         .expect("Couldn't write imgui_test_engine bindings");
     sanitize_bindings_file(&out);
+}
+
+#[cfg(not(feature = "bindgen"))]
+fn generate_bindings(_cfg: &BuildConfig) {
+    panic!(
+        "dear-imgui-test-engine-sys: regenerating bindings requires the `bindgen` feature. \
+         Re-run with `--features bindgen` and DEAR_IMGUI_RS_REGEN_BINDINGS=1."
+    );
 }
 
 fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, cimgui_root: &Path) {

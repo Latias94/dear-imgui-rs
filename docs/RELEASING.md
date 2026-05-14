@@ -61,8 +61,9 @@ python3 tools/update_submodule_and_bindings.py \
 
 What the script does
 - Optionally updates chosen submodules (`git fetch/checkout/pull` + `submodule update --init --recursive`).
-- For each crate, runs `cargo build -p <crate>` with `DEAR_IMGUI_RS_REGEN_BINDINGS=1`
-  and `*_SYS_SKIP_CC=1` so build scripts run bindgen but skip native library compilation.
+- For each crate, runs `cargo build -p <crate> --features bindgen` with
+  `DEAR_IMGUI_RS_REGEN_BINDINGS=1` and `*_SYS_SKIP_CC=1` so build scripts run bindgen but
+  skip native library compilation.
 - Copies `target/<profile>/build/<crate>-*/out/bindings.rs` into `<crate>/src/bindings_pregenerated.rs` (adds a comment header only).
 
 ## Pre-publish checks

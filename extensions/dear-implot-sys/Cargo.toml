@@ -37,7 +37,7 @@ tar = { workspace = true, optional = true }
 build-support = { package = "dear-imgui-build-support", version = "0.12", path = "../../tools/build-support", optional = true }
 
 [build-dependencies]
-bindgen.workspace = true
+bindgen = { workspace = true, optional = true }
 cc.workspace = true
 xshell = "0.2"
 pkg-config = "0.3"
@@ -52,6 +52,7 @@ required-features = ["package-bin"]
 [features]
 package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
 default = []
+bindgen = ["dep:bindgen", "dear-imgui-sys/bindgen"]
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = ["dear-imgui-sys/multi-viewport"]

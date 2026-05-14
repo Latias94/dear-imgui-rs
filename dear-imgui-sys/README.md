@@ -97,7 +97,7 @@ To refresh the pregenerated bindings file:
 
 ```bash
 # Generate new bindings without C++ compilation
-DEAR_IMGUI_RS_REGEN_BINDINGS=1 cargo build -p dear-imgui-sys
+DEAR_IMGUI_RS_REGEN_BINDINGS=1 cargo build -p dear-imgui-sys --features bindgen
 
 # Copy generated bindings to source tree
 cp target/debug/build/dear-imgui-sys-*/out/bindings.rs dear-imgui-sys/src/bindings_pregenerated.rs
@@ -342,7 +342,7 @@ Control build behavior with these environment variables:
 | `IMGUI_SYS_USE_CMAKE` | Force CMake build instead of cc crate (`1`) |
 | `IMGUI_SYS_SKIP_CC` | Skip C/C++ compilation, use pregenerated bindings only (`1`) |
 | `IMGUI_SYS_FORCE_BUILD` | Force build from source, ignore prebuilt options (`1`) |
-| `DEAR_IMGUI_RS_REGEN_BINDINGS` | Regenerate Rust bindings with bindgen (`1`; requires libclang) |
+| `DEAR_IMGUI_RS_REGEN_BINDINGS` | Regenerate Rust bindings with bindgen (`1`; requires `--features bindgen` and libclang) |
 
 ## Related Crates
 

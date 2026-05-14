@@ -34,7 +34,7 @@ tar = { version = "0.4", optional = true }
 build-support = { package = "dear-imgui-build-support", version = "0.12", path = "../../tools/build-support", optional = true }
 
 [build-dependencies]
-bindgen.workspace = true
+bindgen = { workspace = true, optional = true }
 cc.workspace = true
 pkg-config = { workspace = true, optional = true }
 xshell = { workspace = true }
@@ -47,6 +47,7 @@ required-features = ["package-bin"]
 
 [features]
 default = []
+bindgen = ["dep:bindgen", "dear-imgui-sys/bindgen"]
 package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
 prebuilt = ["build-support/download"]
 build-from-source = []

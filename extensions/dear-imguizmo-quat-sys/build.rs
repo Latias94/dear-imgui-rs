@@ -122,6 +122,7 @@ fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
     }
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_file(path: &Path) {
     if let Ok(content) = std::fs::read_to_string(path) {
         let sanitized = sanitize_bindings_string(&content);
@@ -150,6 +151,7 @@ fn sanitize_bindings_string(content: &str) -> String {
     out
 }
 
+#[cfg(feature = "bindgen")]
 fn generate_bindings(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
     // For wasm32 targets, rely on pregenerated import-style bindings that import
     // from the shared imgui-sys-v0 provider instead of running bindgen here.
@@ -208,6 +210,19 @@ fn generate_bindings(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimg
         .write_to_file(&out)
         .expect("Couldn't write cimguizmo_quat bindings!");
     sanitize_bindings_file(&out);
+}
+
+#[cfg(not(feature = "bindgen"))]
+fn generate_bindings(
+    _cfg: &BuildConfig,
+    _quat_root: &Path,
+    _imgui_src: &Path,
+    _cimgui_root: &Path,
+) {
+    panic!(
+        "dear-imguizmo-quat-sys: regenerating bindings requires the `bindgen` feature. \
+         Re-run with `--features bindgen` and DEAR_IMGUI_RS_REGEN_BINDINGS=1."
+    );
 }
 
 fn docsrs_build(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
