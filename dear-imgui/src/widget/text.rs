@@ -84,12 +84,11 @@ impl Ui {
     #[doc(alias = "TextWrapped")]
     pub fn text_wrapped(&self, text: impl AsRef<str>) {
         let s = text.as_ref();
+        let _wrap = self.push_text_wrap_pos(0.0);
         unsafe {
-            sys::igPushTextWrapPos(0.0);
             let begin = s.as_ptr() as *const std::os::raw::c_char;
             let end = begin.add(s.len());
             sys::igTextUnformatted(begin, end);
-            sys::igPopTextWrapPos();
         }
     }
 

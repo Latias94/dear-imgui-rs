@@ -14,6 +14,58 @@ use crate::Ui;
 use crate::sys;
 use bitflags::bitflags;
 
+fn current_columns() -> *mut sys::ImGuiOldColumns {
+    unsafe {
+        let window = sys::igGetCurrentWindowRead();
+        if window.is_null() {
+            std::ptr::null_mut()
+        } else {
+            (*window).DC.CurrentColumns
+        }
+    }
+}
+
+fn assert_no_current_columns(caller: &str) {
+    assert!(
+        current_columns().is_null(),
+        "{caller} cannot be called while another legacy columns layout is active"
+    );
+}
+
+fn assert_current_columns(caller: &str) -> *mut sys::ImGuiOldColumns {
+    let columns = current_columns();
+    assert!(
+        !columns.is_null(),
+        "{caller} must be called inside a legacy columns layout"
+    );
+    columns
+}
+
+fn assert_columns_count(count: i32, caller: &str) {
+    assert!(count >= 1, "{caller} count must be at least 1");
+}
+
+fn resolve_column_index(column_index: i32, allow_trailing_offset: bool, caller: &str) -> i32 {
+    let columns = assert_current_columns(caller);
+    let column_index = if column_index < 0 {
+        unsafe { (*columns).Current }
+    } else {
+        column_index
+    };
+    let upper_bound = unsafe {
+        if allow_trailing_offset {
+            (*columns).Count
+        } else {
+            (*columns).Count - 1
+        }
+    };
+    assert!(
+        (0..=upper_bound).contains(&column_index),
+        "{caller} column index {column_index} is outside the allowed range 0..={upper_bound}"
+    );
+    column_index
+}
+
 bitflags! {
     /// Flags for old columns system
     #[repr(transparent)]
@@ -50,6 +102,7 @@ impl Ui {
     /// * `border` - Whether to draw borders between columns
     #[doc(alias = "Columns")]
     pub fn columns(&self, count: i32, id: impl AsRef<str>, border: bool) {
+        assert_columns_count(count, "Ui::columns()");
         unsafe { sys::igColumns(count, self.scratch_txt(id), border) }
     }
 
@@ -61,6 +114,8 @@ impl Ui {
     /// * `flags` - Column flags
     #[doc(alias = "BeginColumns")]
     pub fn begin_columns(&self, id: impl AsRef<str>, count: i32, flags: OldColumnFlags) {
+        assert_columns_count(count, "Ui::begin_columns()");
+        assert_no_current_columns("Ui::begin_columns()");
         unsafe { sys::igBeginColumns(self.scratch_txt(id), count, flags.bits()) }
     }
 
@@ -79,6 +134,7 @@ impl Ui {
     /// End columns layout.
     #[doc(alias = "EndColumns")]
     pub fn end_columns(&self) {
+        assert_current_columns("Ui::end_columns()");
         unsafe { sys::igEndColumns() }
     }
 
@@ -105,6 +161,11 @@ impl Ui {
     /// Returns the width of the given column (in pixels)
     #[doc(alias = "GetColumnWidth")]
     pub fn column_width(&self, column_index: i32) -> f32 {
+        let column_index = if current_columns().is_null() {
+            column_index
+        } else {
+            resolve_column_index(column_index, false, "Ui::column_width()")
+        };
         unsafe { sys::igGetColumnWidth(column_index) }
     }
 
@@ -117,6 +178,7 @@ impl Ui {
     /// Sets the width of the given column (in pixels)
     #[doc(alias = "SetColumnWidth")]
     pub fn set_column_width(&self, column_index: i32, width: f32) {
+        let column_index = resolve_column_index(column_index, false, "Ui::set_column_width()");
         unsafe { sys::igSetColumnWidth(column_index, width) };
     }
 
@@ -129,6 +191,11 @@ impl Ui {
     /// Returns the offset of the given column (in pixels from the left side of the content region)
     #[doc(alias = "GetColumnOffset")]
     pub fn column_offset(&self, column_index: i32) -> f32 {
+        let column_index = if current_columns().is_null() {
+            column_index
+        } else {
+            resolve_column_index(column_index, true, "Ui::column_offset()")
+        };
         unsafe { sys::igGetColumnOffset(column_index) }
     }
 
@@ -141,6 +208,7 @@ impl Ui {
     /// Sets the offset of the given column (in pixels from the left side of the content region)
     #[doc(alias = "SetColumnOffset")]
     pub fn set_column_offset(&self, column_index: i32, offset_x: f32) {
+        let column_index = resolve_column_index(column_index, true, "Ui::set_column_offset()");
         unsafe { sys::igSetColumnOffset(column_index, offset_x) };
     }
 
@@ -158,24 +226,28 @@ impl Ui {
     /// This is useful for custom drawing within columns.
     #[doc(alias = "PushColumnClipRect")]
     pub fn push_column_clip_rect(&self, column_index: i32) {
+        let column_index = resolve_column_index(column_index, false, "Ui::push_column_clip_rect()");
         unsafe { sys::igPushColumnClipRect(column_index) }
     }
 
     /// Push columns background for drawing.
     #[doc(alias = "PushColumnsBackground")]
     pub fn push_columns_background(&self) {
+        assert_current_columns("Ui::push_columns_background()");
         unsafe { sys::igPushColumnsBackground() }
     }
 
     /// Pop columns background.
     #[doc(alias = "PopColumnsBackground")]
     pub fn pop_columns_background(&self) {
+        assert_current_columns("Ui::pop_columns_background()");
         unsafe { sys::igPopColumnsBackground() }
     }
 
     /// Get columns ID for the given string ID and count.
     #[doc(alias = "GetColumnsID")]
     pub fn get_columns_id(&self, str_id: impl AsRef<str>, count: i32) -> u32 {
+        assert_columns_count(count, "Ui::get_columns_id()");
         unsafe { sys::igGetColumnsID(self.scratch_txt(str_id), count) }
     }
 
@@ -270,12 +342,17 @@ impl Drop for ColumnsToken<'_> {
 mod tests {
     use super::OldColumnFlags;
 
-    #[test]
-    fn is_any_column_resizing_reads_current_columns_state() {
+    fn setup_context() -> crate::Context {
         let mut ctx = crate::Context::create();
         let _ = ctx.font_atlas_mut().build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
+        ctx
+    }
+
+    #[test]
+    fn is_any_column_resizing_reads_current_columns_state() {
+        let mut ctx = setup_context();
         let ui = ctx.frame();
 
         ui.window("columns_resize_test").build(|| {
@@ -294,6 +371,70 @@ mod tests {
             }
 
             assert!(ui.is_any_column_resizing());
+        });
+    }
+
+    #[test]
+    fn columns_reject_invalid_counts_and_nested_layouts() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("columns_invalid_counts").build(|| {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.columns(0, "bad_columns", true);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _columns = ui.begin_columns_token("bad_columns", 0, OldColumnFlags::NONE);
+                }))
+                .is_err()
+            );
+
+            let _columns = ui.begin_columns_token("outer_columns", 2, OldColumnFlags::NONE);
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _nested = ui.begin_columns_token("nested_columns", 2, OldColumnFlags::NONE);
+                }))
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn columns_reject_out_of_range_indices_before_ffi() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("columns_index_bounds").build(|| {
+            let _columns = ui.begin_columns_token("legacy_columns", 2, OldColumnFlags::NONE);
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = ui.column_width(2);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.set_column_width(2, 10.0);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = ui.column_offset(3);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.push_column_clip_rect(2);
+                }))
+                .is_err()
+            );
         });
     }
 }
