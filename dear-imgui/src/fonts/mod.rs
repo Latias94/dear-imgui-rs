@@ -57,11 +57,8 @@ impl Ui {
         F: FnOnce() -> R,
     {
         self.push_font_with_size(font, size);
-        let result = f();
-        unsafe {
-            crate::sys::igPopFont();
-        }
-        result
+        let _token = crate::FontStackToken::new(self);
+        f()
     }
 
     /// Returns the UV coordinate for a white pixel.
@@ -95,12 +92,17 @@ impl Ui {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn set_window_font_scale_updates_current_window_state() {
+    fn setup_context() -> crate::Context {
         let mut ctx = crate::Context::create();
         let _ = ctx.font_atlas_mut().build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
+        ctx
+    }
+
+    #[test]
+    fn set_window_font_scale_updates_current_window_state() {
+        let mut ctx = setup_context();
         let ui = ctx.frame();
 
         ui.window("font_scale_test").build(|| {
@@ -112,5 +114,23 @@ mod tests {
 
             assert_eq!(unsafe { (*window).FontWindowScale }, 1.5);
         });
+    }
+
+    #[test]
+    fn with_font_and_size_pops_after_panic() {
+        let mut ctx = setup_context();
+        let raw_ctx = ctx.as_raw();
+        let ui = ctx.frame();
+
+        let initial_stack_size = unsafe { (*raw_ctx).FontStack.Size };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.with_font_and_size(None, 18.0, || {
+                assert_eq!(unsafe { (*raw_ctx).FontStack.Size }, initial_stack_size + 1);
+                panic!("forced panic while font is pushed");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(unsafe { (*raw_ctx).FontStack.Size }, initial_stack_size);
     }
 }

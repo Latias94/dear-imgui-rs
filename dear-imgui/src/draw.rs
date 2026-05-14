@@ -201,6 +201,16 @@ impl Drop for ChannelsSplitMergeGuard<'_> {
     }
 }
 
+struct DrawListClipRectGuard<'ui> {
+    draw_list: &'ui DrawListMut<'ui>,
+}
+
+impl Drop for DrawListClipRectGuard<'_> {
+    fn drop(&mut self) {
+        unsafe { sys::ImDrawList_PopClipRect(self.draw_list.draw_list) };
+    }
+}
+
 impl Drop for DrawListMut<'_> {
     fn drop(&mut self) {
         let ptr = self.draw_list as usize;
@@ -729,8 +739,8 @@ impl<'ui> DrawListMut<'ui> {
         F: FnOnce(),
     {
         self.push_clip_rect(clip_rect_min, clip_rect_max, false);
+        let _clip_rect_guard = DrawListClipRectGuard { draw_list: self };
         f();
-        self.pop_clip_rect();
     }
 
     /// Add an image quad (axis-aligned). Tint via `col`.
@@ -1308,6 +1318,39 @@ mod callback_tests {
 #[cfg(test)]
 mod channels_tests {
     use super::*;
+
+    #[test]
+    fn with_clip_rect_pops_after_panic() {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+        let ui = ctx.frame();
+        let draw_list = ui.get_window_draw_list();
+        let raw_draw_list = draw_list.draw_list;
+        let initial_stack_size = unsafe { (*raw_draw_list)._ClipRectStack.Size };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.with_clip_rect([0.0, 0.0], [8.0, 8.0], || {
+                assert_eq!(
+                    unsafe { (*raw_draw_list)._ClipRectStack.Size },
+                    initial_stack_size + 1
+                );
+                panic!("forced panic while draw-list clip rect is pushed");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            unsafe { (*raw_draw_list)._ClipRectStack.Size },
+            initial_stack_size
+        );
+    }
 
     #[test]
     fn channels_split_merges_after_panic() {

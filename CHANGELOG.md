@@ -84,6 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     keeping `BeginMultiSelect`/`EndMultiSelect` balanced when safe render callbacks panic.
   - Add RAII table draw-channel tokens, make table channel closures unwind-safe, and validate
     table column counts and channel preconditions before crossing FFI.
+  - Keep font and draw-list clip-rect stacks balanced when `with_font_and_size` or
+    `DrawListMut::with_clip_rect` callbacks panic.
   - Restore the previous Dear ImGui current context after panic in internal temporary context
     binding paths, avoiding cross-context state leaks during unwinding.
   - Resolve `Context` IO, font atlas, backend-name, settings-filename, and `PlatformIo`
