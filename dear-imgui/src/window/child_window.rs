@@ -26,6 +26,7 @@
 // NOTE: Keep explicit `as u32` casts when using bindgen-generated flag constants.
 // The exact Rust type of `sys::ImGui*Flags_*` may vary across platforms/toolchains, while our
 // public wrapper APIs intentionally expose fixed underlying integer types.
+use super::validate_window_flags;
 use crate::sys;
 use crate::{Ui, WindowFlags};
 use std::borrow::Cow;
@@ -33,6 +34,7 @@ use std::borrow::Cow;
 bitflags::bitflags! {
     /// Configuration flags for child windows
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct ChildFlags: u32 {
         /// No flags
         const NONE = 0;
@@ -54,6 +56,29 @@ bitflags::bitflags! {
         const FRAME_STYLE = sys::ImGuiChildFlags_FrameStyle as u32;
         /// Share focus scope, allow gamepad/keyboard navigation to cross over parent border
         const NAV_FLATTENED = sys::ImGuiChildFlags_NavFlattened as u32;
+    }
+}
+
+fn validate_child_flags(caller: &str, child_flags: ChildFlags, window_flags: WindowFlags) {
+    let unsupported = child_flags.bits() & !ChildFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiChildFlags bits: 0x{unsupported:X}"
+    );
+    validate_window_flags(caller, window_flags);
+    assert!(
+        !window_flags.contains(WindowFlags::ALWAYS_AUTO_RESIZE),
+        "{caller} cannot use WindowFlags::ALWAYS_AUTO_RESIZE; use ChildFlags::ALWAYS_AUTO_RESIZE"
+    );
+    if child_flags.contains(ChildFlags::ALWAYS_AUTO_RESIZE) {
+        assert!(
+            !child_flags.intersects(ChildFlags::RESIZE_X | ChildFlags::RESIZE_Y),
+            "{caller} cannot combine ALWAYS_AUTO_RESIZE with RESIZE_X or RESIZE_Y"
+        );
+        assert!(
+            child_flags.intersects(ChildFlags::AUTO_RESIZE_X | ChildFlags::AUTO_RESIZE_Y),
+            "{caller} requires AUTO_RESIZE_X or AUTO_RESIZE_Y when using ALWAYS_AUTO_RESIZE"
+        );
     }
 }
 
@@ -116,6 +141,11 @@ impl<'ui> ChildWindow<'ui> {
     /// Begins the child window and returns a token
     fn begin(self, ui: &'ui Ui) -> Option<ChildWindowToken<'ui>> {
         let name_ptr = ui.scratch_txt(self.name);
+        validate_child_flags("ChildWindow::begin()", self.child_flags, self.flags);
+        assert!(
+            self.size[0].is_finite() && self.size[1].is_finite(),
+            "ChildWindow::begin() size must contain finite values"
+        );
 
         let result = unsafe {
             let size_vec = sys::ImVec2 {

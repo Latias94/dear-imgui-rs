@@ -51,9 +51,11 @@ use crate::{Condition, Ui};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub(crate) mod child_window;
+mod child_window;
 pub(crate) mod content_region;
 pub(crate) mod scroll;
+
+pub use child_window::{ChildFlags, ChildWindow, ChildWindowToken};
 
 // Window-focused/hovered helpers are available via utils.rs variants.
 // Window hovered/focused flag helpers are provided by crate::utils::HoveredFlags.
@@ -104,8 +106,6 @@ bitflags! {
         // Docking related flags
         /// Disable docking for this window (the window will not be able to dock into another and others won't be able to dock into it)
         const NO_DOCKING = sys::ImGuiWindowFlags_NoDocking as i32;
-        /// Indicate this window is a dock node host. Generally set by imgui internally when hosting a DockSpace.
-        const DOCK_NODE_HOST = sys::ImGuiWindowFlags_DockNodeHost as i32;
         /// Disable gamepad/keyboard navigation and focusing
         const NO_NAV = Self::NO_NAV_INPUTS.bits() | Self::NO_NAV_FOCUS.bits();
         /// Disable all window decorations
@@ -113,6 +113,21 @@ bitflags! {
         /// Disable all user interactions
         const NO_INPUTS = Self::NO_MOUSE_INPUTS.bits() | Self::NO_NAV_INPUTS.bits();
     }
+}
+
+pub(crate) fn validate_window_flags(caller: &str, flags: WindowFlags) {
+    let unsupported = flags.bits() & !WindowFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiWindowFlags bits: 0x{unsupported:X}"
+    );
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
 }
 
 #[cfg(feature = "serde")]
@@ -265,9 +280,11 @@ impl<'ui> Window<'ui> {
     fn begin(self) -> Option<WindowToken<'ui>> {
         let name = self.name;
         let name_ptr = self.ui.scratch_txt(name);
+        validate_window_flags("Window::begin()", self.flags);
 
         // Set window properties before beginning
         if let Some(size) = self.size {
+            assert_finite_vec2("Window::begin()", "size", size);
             unsafe {
                 let size_vec = crate::sys::ImVec2 {
                     x: size[0],
@@ -278,6 +295,8 @@ impl<'ui> Window<'ui> {
         }
 
         if let Some((min, max)) = self.size_constraints {
+            assert_finite_vec2("Window::begin()", "minimum size constraint", min);
+            assert_finite_vec2("Window::begin()", "maximum size constraint", max);
             unsafe {
                 let min_vec = sys::ImVec2_c {
                     x: min[0],
@@ -292,6 +311,7 @@ impl<'ui> Window<'ui> {
         }
 
         if let Some(pos) = self.pos {
+            assert_finite_vec2("Window::begin()", "position", pos);
             unsafe {
                 let pos_vec = crate::sys::ImVec2 {
                     x: pos[0],
@@ -303,6 +323,7 @@ impl<'ui> Window<'ui> {
         }
 
         if let Some(content_size) = self.content_size {
+            assert_finite_vec2("Window::begin()", "content size", content_size);
             unsafe {
                 let content_size_vec = crate::sys::ImVec2 {
                     x: content_size[0],
@@ -327,12 +348,17 @@ impl<'ui> Window<'ui> {
         }
 
         if let Some(alpha) = self.bg_alpha {
+            assert!(
+                alpha.is_finite(),
+                "Window::begin() background alpha must be finite"
+            );
             unsafe {
                 crate::sys::igSetNextWindowBgAlpha(alpha);
             }
         }
 
         if let Some(scroll) = self.scroll {
+            assert_finite_vec2("Window::begin()", "scroll", scroll);
             unsafe {
                 let scroll_vec = sys::ImVec2_c {
                     x: scroll[0],

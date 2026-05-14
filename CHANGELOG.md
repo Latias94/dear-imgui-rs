@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Dear ImGui's 64-bit texture id representation.
   - Remove the duplicate read-only draw-list snapshot types from `draw`; use the unified
     `render` draw data types instead.
+  - Remove `WindowFlags::DOCK_NODE_HOST`; Dear ImGui marks it as an internal
+    `Begin`/`NewFrame` flag, so safe code should not pass it to window builders.
   - Bind `TextCallbackData` to the input-text callback frame lifetime so safe callback
     handlers cannot retain it after Dear ImGui returns.
   - Change `PlatformIo::set_platform_get_window_pos{,_raw}` and
@@ -104,6 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `from_bits_retain` from bypassing typed option builders.
   - Reject non-independent color edit, picker, and button option bits before crossing FFI, preventing
     raw flag operations from bypassing typed color option builders.
+  - Reject unsupported/internal window and child-window flags, invalid child auto-resize
+    combinations, and non-finite window/child geometry values before crossing FFI.
+  - Re-export child-window builder, token, and flag types so downstream code can construct
+    typed `ChildFlags` without relying on private module paths.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts

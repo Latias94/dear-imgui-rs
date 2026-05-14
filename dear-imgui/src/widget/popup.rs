@@ -11,7 +11,7 @@
 use crate::MouseButton;
 use crate::sys;
 use crate::ui::Ui;
-use crate::window::WindowFlags;
+use crate::window::{WindowFlags, validate_window_flags};
 
 /// # Popup Widgets
 impl Ui {
@@ -78,6 +78,7 @@ impl Ui {
         str_id: impl AsRef<str>,
         flags: WindowFlags,
     ) -> Option<PopupToken<'_>> {
+        validate_window_flags("Ui::begin_popup_with_flags()", flags);
         let str_id_ptr = self.scratch_txt(str_id);
         let render = unsafe { sys::igBeginPopup(str_id_ptr, flags.bits()) };
 
@@ -478,6 +479,7 @@ impl<'ui> ModalPopup<'ui> {
 
     /// Begins the modal popup
     pub fn begin(self) -> Option<ModalPopupToken<'ui>> {
+        validate_window_flags("ModalPopup::begin()", self.flags);
         let name_ptr = self.ui.scratch_txt(self.name);
         let opened_ptr = self
             .opened
