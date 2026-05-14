@@ -92,18 +92,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfreetype6-dev
 
-      - name: Install LLVM (libclang) for bindgen (Linux)
-        if: runner.os == 'Linux'
-        uses: KyleMayes/install-llvm-action@v1
-        with:
-          directory: ${{ runner.temp }}/llvm
-          cached: true
-          version: '14.0'
-
-      - name: Install Windows deps
-        if: runner.os == 'Windows'
-        run: choco install -y llvm
-
       - name: Setup vcpkg (Windows)
         if: runner.os == 'Windows'
         uses: lukka/run-vcpkg@v11
