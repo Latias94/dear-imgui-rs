@@ -66,6 +66,31 @@ Notes:
 
 All math parameters are generic over lightweight traits so you can also use plain arrays: `[f32; 4]` for quaternions, `[f32; 3|4]` for vectors.
 
+## Global Settings
+
+ImGuIZMO.quat keeps sensitivity, scale, flip/reverse, color, modifier, and resize
+configuration in upstream C++ `static` variables. These settings are shared by every
+Dear ImGui context in the process, even though the Rust methods are exposed through
+`ui.gizmo_quat()`.
+
+For settings that upstream exposes through getters, use `GizmoQuatSettings`:
+
+```rust
+use dear_imguizmo_quat::GizmoQuatExt;
+
+let gizmo = ui.gizmo_quat();
+let mut settings = gizmo.current_settings();
+settings.gizmo_feeling_rot = 0.75;
+
+let _settings_token = gizmo.push_settings(settings);
+// Draw widgets with temporary sensitivity/scale/flip/reverse settings.
+// Dropping the token restores the previous getter-backed global settings.
+```
+
+Color, modifier, and resize helpers are direct upstream wrappers. Their restore functions
+use one saved value rather than a stack, so avoid nesting `set_*`/`restore_*` or
+`resize_*`/`restore_*` pairs.
+
 ## Quick Start
 
 ```toml

@@ -15,4 +15,6 @@ mod ui;
 
 pub use math::{quat_from_mat4_to, quat_pos_from_mat4_to};
 pub use types::{Mode, Modifiers, QuatLike, Vec3Like, Vec4Like};
-pub use ui::{GizmoQuatBuilder, GizmoQuatExt, GizmoQuatUi};
+pub use ui::{
+    GizmoQuatBuilder, GizmoQuatExt, GizmoQuatSettings, GizmoQuatSettingsToken, GizmoQuatUi,
+};

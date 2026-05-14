@@ -1,6 +1,7 @@
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::sys as imgui_sys;
 use dear_imguizmo_quat_sys as sys;
+use std::marker::PhantomData;
 use std::os::raw::c_char;
 
 use crate::types::{
@@ -18,6 +19,98 @@ fn with_label_ptr<R>(label: &str, f: impl FnOnce(*const c_char) -> R) -> R {
 pub struct GizmoQuatUi<'ui> {
     pub(crate) _ui: &'ui Ui,
     imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+}
+
+/// Snapshot of ImGuIZMO.quat process-global settings that can be read back.
+///
+/// ImGuIZMO.quat stores these values in C++ `static` variables. They are shared by
+/// every ImGui context in the process, not by the `Ui` that exposes this helper.
+/// Color, modifier, and resize helpers are not included because the upstream C API
+/// does not expose getters for them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GizmoQuatSettings {
+    pub gizmo_feeling_rot: f32,
+    pub dolly_scale: f32,
+    pub dolly_wheel_scale: f32,
+    pub pan_scale: f32,
+    pub flip_rot_on_x: bool,
+    pub flip_rot_on_y: bool,
+    pub flip_rot_on_z: bool,
+    pub flip_pan_x: bool,
+    pub flip_pan_y: bool,
+    pub flip_dolly: bool,
+    pub reverse_x: bool,
+    pub reverse_y: bool,
+    pub reverse_z: bool,
+}
+
+impl GizmoQuatSettings {
+    #[inline]
+    fn current_unchecked() -> Self {
+        unsafe {
+            Self {
+                gizmo_feeling_rot: sys::imguiGizmo_getGizmoFeelingRot(),
+                dolly_scale: sys::imguiGizmo_getDollyScale(),
+                dolly_wheel_scale: sys::imguiGizmo_getDollyWheelScale(),
+                pan_scale: sys::imguiGizmo_getPanScale(),
+                flip_rot_on_x: sys::imguiGizmo_getFlipRotOnX(),
+                flip_rot_on_y: sys::imguiGizmo_getFlipRotOnY(),
+                flip_rot_on_z: sys::imguiGizmo_getFlipRotOnZ(),
+                flip_pan_x: sys::imguiGizmo_getFlipPanX(),
+                flip_pan_y: sys::imguiGizmo_getFlipPanY(),
+                flip_dolly: sys::imguiGizmo_getFlipDolly(),
+                reverse_x: sys::imguiGizmo_getReverseX(),
+                reverse_y: sys::imguiGizmo_getReverseY(),
+                reverse_z: sys::imguiGizmo_getReverseZ(),
+            }
+        }
+    }
+
+    #[inline]
+    fn apply_unchecked(self) {
+        unsafe {
+            sys::imguiGizmo_setGizmoFeelingRot(self.gizmo_feeling_rot);
+            sys::imguiGizmo_setDollyScale(self.dolly_scale);
+            sys::imguiGizmo_setDollyWheelScale(self.dolly_wheel_scale);
+            sys::imguiGizmo_setPanScale(self.pan_scale);
+            sys::imguiGizmo_flipRotOnX(self.flip_rot_on_x);
+            sys::imguiGizmo_flipRotOnY(self.flip_rot_on_y);
+            sys::imguiGizmo_flipRotOnZ(self.flip_rot_on_z);
+            sys::imguiGizmo_setFlipPanX(self.flip_pan_x);
+            sys::imguiGizmo_setFlipPanY(self.flip_pan_y);
+            sys::imguiGizmo_setFlipDolly(self.flip_dolly);
+            sys::imguiGizmo_reverseX(self.reverse_x);
+            sys::imguiGizmo_reverseY(self.reverse_y);
+            sys::imguiGizmo_reverseZ(self.reverse_z);
+        }
+    }
+}
+
+/// RAII guard that restores getter-backed ImGuIZMO.quat global settings on drop.
+///
+/// This only covers settings represented by [`GizmoQuatSettings`]. Upstream color
+/// and resize restore helpers are not stack based and are intentionally not wrapped
+/// by this guard.
+pub struct GizmoQuatSettingsToken<'ui> {
+    previous: GizmoQuatSettings,
+    active: bool,
+    _marker: PhantomData<&'ui Ui>,
+}
+
+impl<'ui> GizmoQuatSettingsToken<'ui> {
+    /// Restore the previous settings before the token is dropped.
+    pub fn pop(mut self) {
+        self.previous.apply_unchecked();
+        self.active = false;
+    }
+}
+
+impl Drop for GizmoQuatSettingsToken<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.previous.apply_unchecked();
+        }
+    }
 }
 
 /// Extension methods on dear-imgui's Ui to access ImGuIZMO.quat
@@ -206,6 +299,42 @@ impl<'ui> GizmoQuatUi<'ui> {
     /// ```
     pub fn builder(&self) -> GizmoQuatBuilder<'_> {
         GizmoQuatBuilder::new(*self)
+    }
+
+    /// Read getter-backed process-global ImGuIZMO.quat settings.
+    ///
+    /// These values are shared by all ImGui contexts in the process. Use this
+    /// when temporarily changing sensitivity/scale/flip/reverse settings and
+    /// restoring them later.
+    pub fn current_settings(&self) -> GizmoQuatSettings {
+        self.bind();
+        GizmoQuatSettings::current_unchecked()
+    }
+
+    /// Apply getter-backed process-global ImGuIZMO.quat settings.
+    ///
+    /// This intentionally does not touch color, modifier, or resize helpers
+    /// because upstream does not expose matching getters for them.
+    pub fn apply_settings(&self, settings: GizmoQuatSettings) {
+        self.bind();
+        settings.apply_unchecked();
+    }
+
+    /// Temporarily apply getter-backed global settings until the returned token is dropped.
+    ///
+    /// The token restores only [`GizmoQuatSettings`] fields. Upstream color and
+    /// resize restore helpers are single saved-value helpers rather than stacks,
+    /// so nested color/resize scopes cannot be represented soundly here.
+    #[must_use = "dropping the token immediately restores the previous ImGuIZMO.quat settings"]
+    pub fn push_settings(&self, settings: GizmoQuatSettings) -> GizmoQuatSettingsToken<'ui> {
+        self.bind();
+        let previous = GizmoQuatSettings::current_unchecked();
+        settings.apply_unchecked();
+        GizmoQuatSettingsToken {
+            previous,
+            active: true,
+            _marker: PhantomData,
+        }
     }
 
     /// Gizmo with quaternion for axes rotation
@@ -465,7 +594,10 @@ impl<'ui> GizmoQuatUi<'ui> {
         used
     }
 
-    /// Convenience: set direction/sphere colors using u32 colors (ImGui packed RGBA)
+    /// Set process-global direction/sphere colors using u32 colors (ImGui packed RGBA).
+    ///
+    /// Upstream stores a single saved value, not a stack. Avoid nesting these calls with
+    /// `restore_direction_color`/`restore_sphere_colors_u32`.
     pub fn set_direction_colors_u32(&self, dir: u32, plane: u32) {
         self.bind();
         unsafe { sys::imguiGizmo_setDirectionColor_U32U32(dir, plane) }
@@ -487,7 +619,10 @@ impl<'ui> GizmoQuatUi<'ui> {
         unsafe { sys::imguiGizmo_restoreSphereColors() }
     }
 
-    /// Set direction/plane colors using float rgba
+    /// Set process-global direction/plane colors using float rgba.
+    ///
+    /// Upstream stores a single saved value, not a stack. Avoid nesting these calls with
+    /// `restore_direction_color`/`restore_sphere_colors_u32`.
     pub fn set_direction_colors_vec4(&self, dir: [f32; 4], plane: [f32; 4]) {
         self.bind();
         unsafe {
@@ -538,54 +673,65 @@ impl<'ui> GizmoQuatUi<'ui> {
         }
     }
 
-    /// Global gizmo feel and scales
+    /// Set the process-global rotation sensitivity.
     pub fn set_gizmo_feeling_rot(&self, f: f32) {
         self.bind();
         unsafe { sys::imguiGizmo_setGizmoFeelingRot(f) }
     }
+    /// Read the process-global rotation sensitivity.
     pub fn gizmo_feeling_rot(&self) -> f32 {
         self.bind();
         unsafe { sys::imguiGizmo_getGizmoFeelingRot() }
     }
+    /// Set the process-global dolly sensitivity.
     pub fn set_dolly_scale(&self, f: f32) {
         self.bind();
         unsafe { sys::imguiGizmo_setDollyScale(f) }
     }
+    /// Read the process-global dolly sensitivity.
     pub fn dolly_scale(&self) -> f32 {
         self.bind();
         unsafe { sys::imguiGizmo_getDollyScale() }
     }
+    /// Set the process-global dolly wheel sensitivity.
     pub fn set_dolly_wheel_scale(&self, f: f32) {
         self.bind();
         unsafe { sys::imguiGizmo_setDollyWheelScale(f) }
     }
+    /// Read the process-global dolly wheel sensitivity.
     pub fn dolly_wheel_scale(&self) -> f32 {
         self.bind();
         unsafe { sys::imguiGizmo_getDollyWheelScale() }
     }
+    /// Set the process-global pan sensitivity.
     pub fn set_pan_scale(&self, f: f32) {
         self.bind();
         unsafe { sys::imguiGizmo_setPanScale(f) }
     }
+    /// Read the process-global pan sensitivity.
     pub fn pan_scale(&self) -> f32 {
         self.bind();
         unsafe { sys::imguiGizmo_getPanScale() }
     }
 
-    /// Set the keyboard modifier that activates Pan.
-    /// Default: Control. Combine with bitflags if desired.
+    /// Set the process-global keyboard modifier that activates Pan.
+    ///
+    /// Default: Control. Combine with bitflags if desired. Upstream does not
+    /// expose a getter, so this value is not part of [`GizmoQuatSettings`].
     pub fn set_pan_modifier(&self, m: Modifiers) {
         self.bind();
         unsafe { sys::imguiGizmo_setPanModifier(modifiers_to_sys(m)) }
     }
-    /// Set the keyboard modifier that activates Dolly/Zoom.
-    /// Default: Shift. Combine with bitflags if desired.
+    /// Set the process-global keyboard modifier that activates Dolly/Zoom.
+    ///
+    /// Default: Shift. Combine with bitflags if desired. Upstream does not
+    /// expose a getter, so this value is not part of [`GizmoQuatSettings`].
     pub fn set_dolly_modifier(&self, m: Modifiers) {
         self.bind();
         unsafe { sys::imguiGizmo_setDollyModifier(modifiers_to_sys(m)) }
     }
 
-    /// Flip options
+    /// Set process-global flip options.
     pub fn flip_rot_on_x(&self, b: bool) {
         self.bind();
         unsafe { sys::imguiGizmo_flipRotOnX(b) }
@@ -635,7 +781,7 @@ impl<'ui> GizmoQuatUi<'ui> {
         unsafe { sys::imguiGizmo_getFlipDolly() }
     }
 
-    /// Reverse axis directions
+    /// Set process-global reverse axis directions.
     pub fn reverse_x(&self, b: bool) {
         self.bind();
         unsafe { sys::imguiGizmo_reverseX(b) }
@@ -661,7 +807,10 @@ impl<'ui> GizmoQuatUi<'ui> {
         unsafe { sys::imguiGizmo_getReverseZ() }
     }
 
-    /// Resize helpers
+    /// Process-global resize helpers.
+    ///
+    /// Upstream stores one saved value for axes and one for solids, not a stack.
+    /// Avoid nesting resize/restore pairs.
     pub fn resize_axes_of<V3: Vec3Like>(&self, new_size: &V3) {
         self.bind();
         let s = to_sys_vec3(new_size);
@@ -682,4 +831,50 @@ impl<'ui> GizmoQuatUi<'ui> {
 
     // Note: checkTowards* and getTransforms* variants require an imguiGizmo instance pointer
     // which is not exposed by the C API, so they are intentionally not wrapped here.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GizmoQuatExt;
+    use dear_imgui_rs::{BackendFlags, Context};
+    use std::sync::{Mutex, OnceLock};
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn prepare_imgui(imgui: &mut Context) {
+        let io = imgui.io_mut();
+        io.set_display_size([800.0, 600.0]);
+        io.set_delta_time(1.0 / 60.0);
+        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+    }
+
+    #[test]
+    fn settings_token_restores_getter_backed_globals() {
+        let _guard = test_guard();
+        let mut imgui = Context::create();
+        prepare_imgui(&mut imgui);
+
+        {
+            let ui = imgui.frame();
+            let gizmo = ui.gizmo_quat();
+            let original = gizmo.current_settings();
+            let mut temporary = original;
+            temporary.gizmo_feeling_rot += 0.25;
+            temporary.dolly_scale += 0.5;
+            temporary.flip_pan_x = !temporary.flip_pan_x;
+            temporary.reverse_z = !temporary.reverse_z;
+
+            {
+                let _token = gizmo.push_settings(temporary);
+                assert_eq!(gizmo.current_settings(), temporary);
+            }
+
+            assert_eq!(gizmo.current_settings(), original);
+        }
+
+        let _ = imgui.render();
+    }
 }

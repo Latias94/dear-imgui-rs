@@ -150,6 +150,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Bind `dear-implot3d` per-frame plotting APIs to the `Plot3DContext` and ImGui context that
     created them, preventing multi-context applications from accidentally plotting through
     whichever ImPlot3D context is current.
+  - Clarify `dear-imguizmo-quat` global static setting semantics and add
+    `GizmoQuatSettings` / `GizmoQuatSettingsToken` for temporary restoration of the
+    getter-backed sensitivity, scale, flip, and reverse settings.
 
 ## [0.12.0] - 2026-05-09
 
