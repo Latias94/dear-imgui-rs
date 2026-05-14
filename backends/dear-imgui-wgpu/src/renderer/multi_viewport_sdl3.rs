@@ -406,13 +406,14 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
             // corresponding ImGui viewport, and Dear ImGui calls `Renderer_DestroyWindow` before
             // the platform destroys the window. Therefore the raw handles remain valid until this
             // surface is dropped.
-            let surface_target = match wgpu::SurfaceTargetUnsafe::from_window(&target) {
-                Ok(t) => t,
-                Err(e) => {
-                    eprintln!("[wgpu-mv-sdl3] create_surface handle error: {:?}", e);
-                    return;
-                }
-            };
+            let surface_target =
+                match wgpu::SurfaceTargetUnsafe::from_display_and_window(&target, &target) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("[wgpu-mv-sdl3] create_surface handle error: {:?}", e);
+                        return;
+                    }
+                };
             match instance.create_surface_unsafe(surface_target) {
                 Ok(s) => s,
                 Err(e) => {

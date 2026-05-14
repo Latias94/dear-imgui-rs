@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // SAFETY: SDL3 window handle is valid for the duration of the surface.
     let surface = unsafe {
         instance.create_surface_unsafe(
-            wgpu::SurfaceTargetUnsafe::from_window(&window)
+            wgpu::SurfaceTargetUnsafe::from_display_and_window(&window, &window)
                 .expect("failed to create SurfaceTarget from SDL3 window"),
         )?
     };
@@ -145,6 +145,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => {
+                    imgui_sdl3_backend::shutdown(&mut imgui);
+                    return Ok(());
+                }
+                Event::Window {
+                    win_event: sdl3::event::WindowEvent::CloseRequested,
+                    window_id,
+                    ..
+                } if window_id == window.id() => {
                     imgui_sdl3_backend::shutdown(&mut imgui);
                     return Ok(());
                 }
