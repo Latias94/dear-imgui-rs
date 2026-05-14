@@ -1,10 +1,51 @@
-use crate::{AxisFlags, PlotCond, XAxis, YAxis, sys};
+use crate::{Axis, AxisFlags, PlotCond, XAxis, YAxis, sys};
 use dear_imgui_rs::{
     Context as ImGuiContext, Ui, with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_two,
 };
 use dear_imgui_sys as imgui_sys;
 use std::os::raw::c_char;
 use std::{cell::RefCell, rc::Rc};
+
+fn assert_finite_f64(caller: &str, name: &str, value: f64) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must be finite"
+    );
+}
+
+fn assert_finite_f64_slice(caller: &str, name: &str, values: &[f64]) {
+    assert!(
+        values.iter().all(|value| value.is_finite()),
+        "{caller} {name} must contain only finite values"
+    );
+}
+
+fn assert_axis_limit_range(caller: &str, min: f64, max: f64) {
+    assert_finite_f64(caller, "min", min);
+    assert_finite_f64(caller, "max", max);
+    assert!(min != max, "{caller} min and max must differ");
+}
+
+fn assert_axis_constraint_range(caller: &str, min: f64, max: f64) {
+    assert_finite_f64(caller, "min", min);
+    assert_finite_f64(caller, "max", max);
+    assert!(min <= max, "{caller} min must be <= max");
+}
+
+fn assert_axis_zoom_range(caller: &str, min: f64, max: f64) {
+    assert_finite_f64(caller, "min", min);
+    assert_finite_f64(caller, "max", max);
+    assert!(min > 0.0, "{caller} min must be positive");
+    assert!(min <= max, "{caller} min must be <= max");
+}
+
+fn assert_positive_tick_count(caller: &str, n_ticks: i32) {
+    assert!(n_ticks > 0, "{caller} n_ticks must be positive");
+}
 
 /// ImPlot context that manages the plotting state
 ///
@@ -225,6 +266,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Begin a plot with custom size
     pub fn begin_plot_with_size(&self, title: &str, size: [f32; 2]) -> Option<PlotToken<'_>> {
+        assert_finite_vec2("PlotUi::begin_plot_with_size()", "size", size);
         let plot_size = sys::ImVec2_c {
             x: size[0],
             y: size[1],
@@ -392,6 +434,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup axis limits for a specific X axis
     pub fn setup_x_axis_limits(&self, axis: XAxis, min: f64, max: f64, cond: PlotCond) {
+        assert_axis_limit_range("PlotUi::setup_x_axis_limits()", min, max);
         self.bind();
         unsafe {
             sys::ImPlot_SetupAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
@@ -400,6 +443,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup axis limits for a specific Y axis
     pub fn setup_y_axis_limits(&self, axis: YAxis, min: f64, max: f64, cond: PlotCond) {
+        assert_axis_limit_range("PlotUi::setup_y_axis_limits()", min, max);
         self.bind();
         unsafe {
             sys::ImPlot_SetupAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
@@ -409,7 +453,25 @@ impl<'ui> PlotUi<'ui> {
     /// Link an axis to external min/max values (live binding)
     pub fn setup_axis_links(
         &self,
-        axis: i32,
+        axis: Axis,
+        link_min: Option<&mut f64>,
+        link_max: Option<&mut f64>,
+    ) {
+        let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
+        let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
+        self.bind();
+        unsafe { sys::ImPlot_SetupAxisLinks(axis.to_sys(), pmin, pmax) }
+    }
+
+    /// Link a raw axis to external min/max values (live binding).
+    ///
+    /// # Safety
+    ///
+    /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
+    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
+    pub unsafe fn setup_axis_links_unchecked(
+        &self,
+        axis: sys::ImAxis,
         link_min: Option<&mut f64>,
         link_max: Option<&mut f64>,
     ) {
@@ -478,6 +540,8 @@ impl<'ui> PlotUi<'ui> {
         y_max: f64,
         cond: PlotCond,
     ) {
+        assert_axis_limit_range("PlotUi::setup_axes_limits() x axis", x_min, x_max);
+        assert_axis_limit_range("PlotUi::setup_axes_limits() y axis", y_min, y_max);
         self.bind();
         unsafe { sys::ImPlot_SetupAxesLimits(x_min, x_max, y_min, y_max, cond as sys::ImPlotCond) }
     }
@@ -490,6 +554,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Set next frame limits for a specific axis
     pub fn set_next_x_axis_limits(&self, axis: XAxis, min: f64, max: f64, cond: PlotCond) {
+        assert_axis_limit_range("PlotUi::set_next_x_axis_limits()", min, max);
         self.bind();
         unsafe {
             sys::ImPlot_SetNextAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
@@ -498,6 +563,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Set next frame limits for a specific axis
     pub fn set_next_y_axis_limits(&self, axis: YAxis, min: f64, max: f64, cond: PlotCond) {
+        assert_axis_limit_range("PlotUi::set_next_y_axis_limits()", min, max);
         self.bind();
         unsafe {
             sys::ImPlot_SetNextAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
@@ -507,7 +573,25 @@ impl<'ui> PlotUi<'ui> {
     /// Link an axis to external min/max for next frame
     pub fn set_next_axis_links(
         &self,
-        axis: i32,
+        axis: Axis,
+        link_min: Option<&mut f64>,
+        link_max: Option<&mut f64>,
+    ) {
+        let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
+        let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
+        self.bind();
+        unsafe { sys::ImPlot_SetNextAxisLinks(axis.to_sys(), pmin, pmax) }
+    }
+
+    /// Link a raw axis to external min/max for the next frame.
+    ///
+    /// # Safety
+    ///
+    /// `axis` must be a valid ImPlot `ImAxis` value. Passing an out-of-range
+    /// value lets ImPlot index internal next-plot arrays out of bounds.
+    pub unsafe fn set_next_axis_links_unchecked(
+        &self,
+        axis: sys::ImAxis,
         link_min: Option<&mut f64>,
         link_max: Option<&mut f64>,
     ) {
@@ -526,6 +610,8 @@ impl<'ui> PlotUi<'ui> {
         y_max: f64,
         cond: PlotCond,
     ) {
+        assert_axis_limit_range("PlotUi::set_next_axes_limits() x axis", x_min, x_max);
+        assert_axis_limit_range("PlotUi::set_next_axes_limits() y axis", y_min, y_max);
         self.bind();
         unsafe {
             sys::ImPlot_SetNextAxesLimits(x_min, x_max, y_min, y_max, cond as sys::ImPlotCond)
@@ -538,10 +624,21 @@ impl<'ui> PlotUi<'ui> {
         unsafe { sys::ImPlot_SetNextAxesToFit() }
     }
 
-    /// Fit next frame a specific axis (raw)
-    pub fn set_next_axis_to_fit(&self, axis: i32) {
+    /// Fit next frame a specific axis
+    pub fn set_next_axis_to_fit(&self, axis: Axis) {
         self.bind();
-        unsafe { sys::ImPlot_SetNextAxisToFit(axis as sys::ImAxis) }
+        unsafe { sys::ImPlot_SetNextAxisToFit(axis.to_sys()) }
+    }
+
+    /// Fit next frame a raw axis.
+    ///
+    /// # Safety
+    ///
+    /// `axis` must be a valid ImPlot `ImAxis` value. Passing an out-of-range
+    /// value lets ImPlot index internal next-plot arrays out of bounds.
+    pub unsafe fn set_next_axis_to_fit_unchecked(&self, axis: sys::ImAxis) {
+        self.bind();
+        unsafe { sys::ImPlot_SetNextAxisToFit(axis) }
     }
 
     /// Fit next frame a specific X axis
@@ -566,6 +663,7 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        assert_finite_f64_slice("PlotUi::setup_x_axis_ticks_positions()", "values", values);
         self.bind();
         let count = match i32::try_from(values.len()) {
             Ok(v) => v,
@@ -611,6 +709,7 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        assert_finite_f64_slice("PlotUi::setup_y_axis_ticks_positions()", "values", values);
         self.bind();
         let count = match i32::try_from(values.len()) {
             Ok(v) => v,
@@ -658,10 +757,9 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        assert_axis_limit_range("PlotUi::setup_x_axis_ticks_range()", v_min, v_max);
+        assert_positive_tick_count("PlotUi::setup_x_axis_ticks_range()", n_ticks);
         self.bind();
-        if n_ticks <= 0 {
-            return;
-        }
         if let Some(labels) = labels {
             let Ok(ticks_usize) = usize::try_from(n_ticks) else {
                 return;
@@ -709,10 +807,9 @@ impl<'ui> PlotUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        assert_axis_limit_range("PlotUi::setup_y_axis_ticks_range()", v_min, v_max);
+        assert_positive_tick_count("PlotUi::setup_y_axis_ticks_range()", n_ticks);
         self.bind();
-        if n_ticks <= 0 {
-            return;
-        }
         if let Some(labels) = labels {
             let Ok(ticks_usize) = usize::try_from(n_ticks) else {
                 return;
@@ -783,15 +880,59 @@ impl<'ui> PlotUi<'ui> {
     }
 
     /// Setup axis limits constraints
-    pub fn setup_axis_limits_constraints(&self, axis: i32, v_min: f64, v_max: f64) {
+    pub fn setup_axis_limits_constraints(&self, axis: Axis, v_min: f64, v_max: f64) {
+        assert_axis_constraint_range("PlotUi::setup_axis_limits_constraints()", v_min, v_max);
         self.bind();
-        unsafe { sys::ImPlot_SetupAxisLimitsConstraints(axis as sys::ImAxis, v_min, v_max) }
+        unsafe { sys::ImPlot_SetupAxisLimitsConstraints(axis.to_sys(), v_min, v_max) }
+    }
+
+    /// Setup raw axis limits constraints.
+    ///
+    /// # Safety
+    ///
+    /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
+    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
+    pub unsafe fn setup_axis_limits_constraints_unchecked(
+        &self,
+        axis: sys::ImAxis,
+        v_min: f64,
+        v_max: f64,
+    ) {
+        assert_axis_constraint_range(
+            "PlotUi::setup_axis_limits_constraints_unchecked()",
+            v_min,
+            v_max,
+        );
+        self.bind();
+        unsafe { sys::ImPlot_SetupAxisLimitsConstraints(axis, v_min, v_max) }
     }
 
     /// Setup axis zoom constraints
-    pub fn setup_axis_zoom_constraints(&self, axis: i32, z_min: f64, z_max: f64) {
+    pub fn setup_axis_zoom_constraints(&self, axis: Axis, z_min: f64, z_max: f64) {
+        assert_axis_zoom_range("PlotUi::setup_axis_zoom_constraints()", z_min, z_max);
         self.bind();
-        unsafe { sys::ImPlot_SetupAxisZoomConstraints(axis as sys::ImAxis, z_min, z_max) }
+        unsafe { sys::ImPlot_SetupAxisZoomConstraints(axis.to_sys(), z_min, z_max) }
+    }
+
+    /// Setup raw axis zoom constraints.
+    ///
+    /// # Safety
+    ///
+    /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
+    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
+    pub unsafe fn setup_axis_zoom_constraints_unchecked(
+        &self,
+        axis: sys::ImAxis,
+        z_min: f64,
+        z_max: f64,
+    ) {
+        assert_axis_zoom_range(
+            "PlotUi::setup_axis_zoom_constraints_unchecked()",
+            z_min,
+            z_max,
+        );
+        self.bind();
+        unsafe { sys::ImPlot_SetupAxisZoomConstraints(axis, z_min, z_max) }
     }
 
     // -------- Formatter (closure) --------
@@ -1115,6 +1256,7 @@ impl<'ui> Drop for PlotToken<'ui> {
 #[cfg(test)]
 mod tests {
     use super::{PlotContext, sys};
+    use crate::{Axis, PlotCond, XAxis, YAxis};
     use dear_imgui_rs::{BackendFlags, Context};
     use std::sync::{Mutex, OnceLock};
 
@@ -1194,6 +1336,69 @@ mod tests {
         assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw);
         plot.set_as_current();
 
+        drop(plot);
+    }
+
+    #[test]
+    #[should_panic(expected = "PlotUi::set_next_x_axis_limits() min must be finite")]
+    fn set_next_axis_limits_rejects_non_finite_values_before_ffi() {
+        let _guard = test_guard();
+        let mut imgui = Context::create();
+        prepare_imgui(&mut imgui);
+        let plot = PlotContext::create(&imgui);
+
+        {
+            let ui = imgui.frame();
+            let plot_ui = plot.get_plot_ui(&ui);
+            plot_ui.set_next_x_axis_limits(XAxis::X1, f64::NAN, 1.0, PlotCond::Once);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "PlotUi::setup_axis_zoom_constraints() min must be positive")]
+    fn axis_zoom_constraints_reject_non_positive_min_before_ffi() {
+        let _guard = test_guard();
+        let mut imgui = Context::create();
+        prepare_imgui(&mut imgui);
+        let plot = PlotContext::create(&imgui);
+
+        {
+            let ui = imgui.frame();
+            let plot_ui = plot.get_plot_ui(&ui);
+            let token = plot_ui
+                .begin_plot("constraints")
+                .expect("failed to begin plot");
+            plot_ui.setup_axis_zoom_constraints(Axis::Y1, 0.0, 10.0);
+            token.end();
+        }
+    }
+
+    #[test]
+    fn typed_axis_apis_accept_valid_axes() {
+        let _guard = test_guard();
+        let mut imgui = Context::create();
+        prepare_imgui(&mut imgui);
+        let plot = PlotContext::create(&imgui);
+
+        {
+            let ui = imgui.frame();
+            let plot_ui = plot.get_plot_ui(&ui);
+            plot_ui.set_next_axis_to_fit(Axis::X1);
+
+            let token = plot_ui
+                .begin_plot("typed-axis")
+                .expect("failed to begin plot");
+            plot_ui.setup_x_axis(XAxis::X1, None, crate::AxisFlags::NONE);
+            plot_ui.setup_y_axis(YAxis::Y1, None, crate::AxisFlags::NONE);
+            let mut min = 0.0;
+            let mut max = 1.0;
+            plot_ui.setup_axis_links(Axis::Y1, Some(&mut min), Some(&mut max));
+            plot_ui.setup_axis_limits_constraints(Axis::Y1, -10.0, 10.0);
+            plot_ui.setup_axis_zoom_constraints(Axis::Y1, 0.1, 20.0);
+            token.end();
+        }
+
+        let _ = imgui.render();
         drop(plot);
     }
 }

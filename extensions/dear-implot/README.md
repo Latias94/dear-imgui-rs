@@ -306,11 +306,11 @@ let mut multi_plot = MultiAxisPlot::new("Multi-Axis")
 
 if let Ok(token) = multi_plot.begin() {
     // Plot on first Y-axis
-    token.set_y_axis(0);
+    token.set_y_axis(YAxis::Y1);
     LinePlot::new("Temperature", &time, &temp).plot();
 
     // Plot on second Y-axis
-    token.set_y_axis(1);
+    token.set_y_axis(YAxis::Y2);
     LinePlot::new("Pressure", &time, &pressure).plot();
 
     token.end();

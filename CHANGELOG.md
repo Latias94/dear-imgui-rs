@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Change `dear-implot::PlotContext::current()` to an explicit `unsafe` non-owning wrapper.
     Code that owns an ImPlot context should use `PlotContext::create(...)`; callers that borrow
     a raw current context must now acknowledge the raw lifetime and ownership contract.
+  - Change `dear-implot` APIs that accept arbitrary ImPlot axes to use typed `Axis` / `YAxis`
+    values instead of raw `i32` indices. Raw-axis calls remain available through explicit
+    `unsafe *_unchecked` escape hatches.
 
 ### Changed
 
@@ -233,6 +236,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Use checked-in pregenerated bindings by default for extension `*-sys` normal builds, so
     ImPlot, ImNodes, ImPlot3D, ImGuizmo, ImGuIZMO.quat, and Test Engine users no longer need
     LLVM/libclang unless they explicitly regenerate bindings.
+  - Reject invalid `dear-implot` axis indices, non-finite plot sizes/coordinates, invalid
+    axis limits, invalid tick ranges, and invalid zoom constraints before safe Rust crosses
+    into ImPlot FFI.
   - Require `dear-imguizmo` `IdToken` to be dropped while its original ImGui context is current,
     preventing the token from silently switching Dear ImGui's global current context during
     cleanup.

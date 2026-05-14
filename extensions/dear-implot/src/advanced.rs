@@ -4,9 +4,49 @@
 //! with multiple subplots, legends, and advanced layout management.
 
 use crate::context::PlotScopeGuard;
-use crate::{AxisFlags, plots::PlotError, sys};
+use crate::{AxisFlags, YAxis, plots::PlotError, sys};
 use std::ffi::CString;
 use std::marker::PhantomData;
+
+fn validate_size(caller: &str, size: [f32; 2]) -> Result<(), PlotError> {
+    if size[0].is_finite() && size[1].is_finite() {
+        Ok(())
+    } else {
+        Err(PlotError::InvalidData(format!(
+            "{caller} size must be finite"
+        )))
+    }
+}
+
+fn validate_positive_count(caller: &str, name: &str, value: i32) -> Result<(), PlotError> {
+    if value > 0 {
+        Ok(())
+    } else {
+        Err(PlotError::InvalidData(format!(
+            "{caller} {name} must be positive"
+        )))
+    }
+}
+
+fn validate_ratios(caller: &str, name: &str, ratios: &[f32]) -> Result<(), PlotError> {
+    if ratios.iter().all(|value| value.is_finite() && *value > 0.0) {
+        Ok(())
+    } else {
+        Err(PlotError::InvalidData(format!(
+            "{caller} {name} must contain only positive finite values"
+        )))
+    }
+}
+
+fn validate_range(caller: &str, min: f64, max: f64) -> Result<(), PlotError> {
+    if min.is_finite() && max.is_finite() && min != max {
+        Ok(())
+    } else {
+        Err(PlotError::InvalidData(format!(
+            "{caller} range values must be finite and distinct"
+        )))
+    }
+}
 
 /// Multi-plot layout manager for creating subplot grids
 pub struct SubplotGrid<'a> {
@@ -83,10 +123,13 @@ impl<'a> SubplotGrid<'a> {
 
     /// Begin the subplot grid and return a token
     pub fn begin(self) -> Result<SubplotToken<'a>, PlotError> {
+        validate_positive_count("SubplotGrid::begin()", "rows", self.rows)?;
+        validate_positive_count("SubplotGrid::begin()", "cols", self.cols)?;
         let title_cstr =
             CString::new(self.title).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
         let size = self.size.unwrap_or([-1.0, -1.0]);
+        validate_size("SubplotGrid::begin()", size)?;
         let size_vec = sys::ImVec2_c {
             x: size[0],
             y: size[1],
@@ -96,6 +139,28 @@ impl<'a> SubplotGrid<'a> {
         // casting away constness and to stay sound even if the backend ever writes to them.
         let mut row_ratios = self.row_ratios;
         let mut col_ratios = self.col_ratios;
+        if let Some(row_ratios) = &row_ratios {
+            let rows = usize::try_from(self.rows).map_err(|_| {
+                PlotError::InvalidData("SubplotGrid::begin() rows out of range".to_string())
+            })?;
+            if row_ratios.len() != rows {
+                return Err(PlotError::InvalidData(format!(
+                    "SubplotGrid::begin() row_ratios length must equal rows ({rows})"
+                )));
+            }
+            validate_ratios("SubplotGrid::begin()", "row_ratios", row_ratios)?;
+        }
+        if let Some(col_ratios) = &col_ratios {
+            let cols = usize::try_from(self.cols).map_err(|_| {
+                PlotError::InvalidData("SubplotGrid::begin() cols out of range".to_string())
+            })?;
+            if col_ratios.len() != cols {
+                return Err(PlotError::InvalidData(format!(
+                    "SubplotGrid::begin() col_ratios length must equal cols ({cols})"
+                )));
+            }
+            validate_ratios("SubplotGrid::begin()", "col_ratios", col_ratios)?;
+        }
         let row_ratios_ptr = row_ratios
             .as_mut()
             .map(|r| r.as_mut_ptr())
@@ -204,9 +269,18 @@ impl<'a> MultiAxisPlot<'a> {
                     "Axis label contained an interior NUL byte".to_string(),
                 ));
             }
+            if let Some((min, max)) = axis.range {
+                validate_range("MultiAxisPlot::begin()", min, max)?;
+            }
+        }
+        if self.y_axes.len() > 3 {
+            return Err(PlotError::InvalidData(
+                "MultiAxisPlot::begin() supports at most 3 Y axes".to_string(),
+            ));
         }
 
         let size = self.size.unwrap_or([-1.0, -1.0]);
+        validate_size("MultiAxisPlot::begin()", size)?;
         let size_vec = sys::ImVec2_c {
             x: size[0],
             y: size[1],
@@ -217,7 +291,7 @@ impl<'a> MultiAxisPlot<'a> {
         if success {
             let mut axis_labels: Vec<CString> = Vec::new();
 
-            // Setup Y-axes (Y1..), matching `token.set_y_axis(0..)` convention.
+            // Setup Y-axes (Y1..), matching `token.set_y_axis(YAxis::Y*)` convention.
             for (i, axis_config) in self.y_axes.iter().enumerate() {
                 let label_ptr = if let Some(label) = axis_config.label {
                     let cstr = CString::new(label)
@@ -263,11 +337,26 @@ pub struct MultiAxisToken<'a> {
 
 impl<'a> MultiAxisToken<'a> {
     /// Set the current Y-axis for subsequent plots
-    pub fn set_y_axis(&self, axis: i32) {
+    pub fn set_y_axis(&self, axis: YAxis) {
         unsafe {
             sys::ImPlot_SetAxes(
-                0,        // ImAxis_X1
-                axis + 3, // ImAxis_Y1 = 3
+                0, // ImAxis_X1
+                axis as i32,
+            );
+        }
+    }
+
+    /// Set the current raw Y-axis for subsequent plots.
+    ///
+    /// # Safety
+    ///
+    /// `axis` must be a valid ImPlot Y-axis value for the active plot. Passing an
+    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
+    pub unsafe fn set_y_axis_unchecked(&self, axis: sys::ImAxis) {
+        unsafe {
+            sys::ImPlot_SetAxes(
+                0, // ImAxis_X1
+                axis,
             );
         }
     }

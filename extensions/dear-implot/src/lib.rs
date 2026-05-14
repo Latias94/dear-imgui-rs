@@ -167,6 +167,44 @@ impl YAxis {
     }
 }
 
+/// Any ImPlot axis selector matching ImPlot's ImAxis values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
+pub enum Axis {
+    X1 = 0,
+    X2 = 1,
+    X3 = 2,
+    Y1 = 3,
+    Y2 = 4,
+    Y3 = 5,
+}
+
+impl Axis {
+    pub(crate) fn to_sys(self) -> sys::ImAxis {
+        self as sys::ImAxis
+    }
+}
+
+impl From<XAxis> for Axis {
+    fn from(axis: XAxis) -> Self {
+        match axis {
+            XAxis::X1 => Self::X1,
+            XAxis::X2 => Self::X2,
+            XAxis::X3 => Self::X3,
+        }
+    }
+}
+
+impl From<YAxis> for Axis {
+    fn from(axis: YAxis) -> Self {
+        match axis {
+            YAxis::Y1 => Self::Y1,
+            YAxis::Y2 => Self::Y2,
+            YAxis::Y3 => Self::Y3,
+        }
+    }
+}
+
 /// Ui extension for obtaining a PlotUi from an ImPlot PlotContext
 pub trait ImPlotExt {
     fn implot<'ui>(&'ui self, ctx: &'ui PlotContext) -> PlotUi<'ui>;

@@ -1,7 +1,36 @@
 // Utility functions for ImPlot
 
-use crate::{XAxis, YAxis, compat_ffi, sys};
+use crate::{Axis, XAxis, YAxis, compat_ffi, sys};
 use dear_imgui_rs::with_scratch_txt;
+
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_finite_f64(caller: &str, name: &str, value: f64) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must be finite"
+    );
+}
+
+fn assert_finite_color(caller: &str, name: &str, value: [f32; 4]) {
+    assert!(
+        value.iter().all(|component| component.is_finite()),
+        "{caller} {name} must be finite"
+    );
+}
+
+fn assert_finite_point(caller: &str, name: &str, value: sys::ImPlotPoint) {
+    assert!(
+        value.x.is_finite() && value.y.is_finite(),
+        "{caller} {name} must be finite"
+    );
+}
 
 /// Check if the plot area is hovered
 pub fn is_plot_hovered() -> bool {
@@ -43,6 +72,7 @@ pub fn pixels_to_plot(
     pixel_position: [f32; 2],
     y_axis_choice: Option<crate::YAxisChoice>,
 ) -> sys::ImPlotPoint {
+    assert_finite_vec2("pixels_to_plot()", "pixel_position", pixel_position);
     // Map absolute pixel coordinates to plot coordinates using current plot's axes
     let y_index = match y_axis_choice {
         Some(crate::YAxisChoice::First) => 0,
@@ -69,6 +99,7 @@ pub fn pixels_to_plot_axes(
     x_axis: XAxis,
     y_axis: YAxis,
 ) -> sys::ImPlotPoint {
+    assert_finite_vec2("pixels_to_plot_axes()", "pixel_position", pixel_position);
     unsafe {
         let plot = sys::ImPlot_GetCurrentPlot();
         if plot.is_null() {
@@ -87,6 +118,7 @@ pub fn plot_to_pixels(
     plot_position: sys::ImPlotPoint,
     y_axis_choice: Option<crate::YAxisChoice>,
 ) -> [f32; 2] {
+    assert_finite_point("plot_to_pixels()", "plot_position", plot_position);
     let y_index = match y_axis_choice {
         Some(crate::YAxisChoice::First) => 0,
         Some(crate::YAxisChoice::Second) => 1,
@@ -112,6 +144,7 @@ pub fn plot_to_pixels_axes(
     x_axis: XAxis,
     y_axis: YAxis,
 ) -> [f32; 2] {
+    assert_finite_point("plot_to_pixels_axes()", "plot_position", plot_position);
     unsafe {
         let plot = sys::ImPlot_GetCurrentPlot();
         if plot.is_null() {
@@ -163,6 +196,10 @@ pub fn annotation_point(
     clamp: bool,
     round: bool,
 ) {
+    assert_finite_f64("annotation_point()", "x", x);
+    assert_finite_f64("annotation_point()", "y", y);
+    assert_finite_color("annotation_point()", "color", color);
+    assert_finite_vec2("annotation_point()", "pixel_offset", pixel_offset);
     let col = sys::ImVec4_c {
         x: color[0],
         y: color[1],
@@ -188,6 +225,10 @@ pub fn annotation_text(
     clamp: bool,
     text: &str,
 ) {
+    assert_finite_f64("annotation_text()", "x", x);
+    assert_finite_f64("annotation_text()", "y", y);
+    assert_finite_color("annotation_text()", "color", color);
+    assert_finite_vec2("annotation_text()", "pixel_offset", pixel_offset);
     let col = sys::ImVec4_c {
         x: color[0],
         y: color[1],
@@ -206,6 +247,8 @@ pub fn annotation_text(
 
 /// Tag the X axis at position x with a tick-like mark
 pub fn tag_x(x: f64, color: [f32; 4], round: bool) {
+    assert_finite_f64("tag_x()", "x", x);
+    assert_finite_color("tag_x()", "color", color);
     let col = sys::ImVec4_c {
         x: color[0],
         y: color[1],
@@ -217,6 +260,8 @@ pub fn tag_x(x: f64, color: [f32; 4], round: bool) {
 
 /// Tag the X axis at position x with a text label using the non-variadic `ImPlot_TagX_Str0` API.
 pub fn tag_x_text(x: f64, color: [f32; 4], text: &str) {
+    assert_finite_f64("tag_x_text()", "x", x);
+    assert_finite_color("tag_x_text()", "color", color);
     let col = sys::ImVec4_c {
         x: color[0],
         y: color[1],
@@ -231,6 +276,8 @@ pub fn tag_x_text(x: f64, color: [f32; 4], text: &str) {
 
 /// Tag the Y axis at position y with a tick-like mark
 pub fn tag_y(y: f64, color: [f32; 4], round: bool) {
+    assert_finite_f64("tag_y()", "y", y);
+    assert_finite_color("tag_y()", "color", color);
     let col = sys::ImVec4_c {
         x: color[0],
         y: color[1],
@@ -242,6 +289,8 @@ pub fn tag_y(y: f64, color: [f32; 4], round: bool) {
 
 /// Tag the Y axis at position y with a text label using the non-variadic `ImPlot_TagY_Str0` API.
 pub fn tag_y_text(y: f64, color: [f32; 4], text: &str) {
+    assert_finite_f64("tag_y_text()", "y", y);
+    assert_finite_color("tag_y_text()", "color", color);
     let col = sys::ImVec4_c {
         x: color[0],
         y: color[1],
@@ -260,18 +309,28 @@ pub fn get_plot_limits_axes(x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotRect {
 }
 
 /// Check if an axis is hovered
-pub fn is_axis_hovered(axis: i32) -> bool {
+pub fn is_axis_hovered(axis: Axis) -> bool {
+    unsafe { sys::ImPlot_IsAxisHovered(axis.to_sys()) }
+}
+
+/// Check if a raw axis is hovered.
+///
+/// # Safety
+///
+/// `axis` must be a valid ImPlot `ImAxis` value for the current plot. Passing an
+/// out-of-range value lets ImPlot index internal axis arrays out of bounds.
+pub unsafe fn is_axis_hovered_unchecked(axis: sys::ImAxis) -> bool {
     unsafe { sys::ImPlot_IsAxisHovered(axis) }
 }
 
 /// Check if the X axis is hovered
 pub fn is_plot_x_axis_hovered() -> bool {
-    is_axis_hovered(XAxis::X1 as i32)
+    is_axis_hovered(Axis::X1)
 }
 
 /// Check if a specific X axis is hovered
 pub fn is_plot_x_axis_hovered_axis(x_axis: XAxis) -> bool {
-    is_axis_hovered(x_axis as i32)
+    is_axis_hovered(x_axis.into())
 }
 
 /// Check if a Y axis is hovered
@@ -282,12 +341,17 @@ pub fn is_plot_y_axis_hovered(y_axis_choice: Option<crate::YAxisChoice>) -> bool
         Some(crate::YAxisChoice::Third) => 5,  // ImAxis_Y3
         None => 3,                             // Default to Y1
     };
-    is_axis_hovered(y_axis)
+    is_axis_hovered(match y_axis {
+        3 => Axis::Y1,
+        4 => Axis::Y2,
+        5 => Axis::Y3,
+        _ => Axis::Y1,
+    })
 }
 
 /// Check if a specific Y axis is hovered
 pub fn is_plot_y_axis_hovered_axis(y_axis: YAxis) -> bool {
-    is_axis_hovered(y_axis as i32)
+    is_axis_hovered(y_axis.into())
 }
 
 /// Show the ImPlot demo window (requires sys demo symbols to be linked)
@@ -329,6 +393,7 @@ pub fn get_plot_draw_list() -> *mut sys::ImDrawList {
 
 /// Push plot clip rect
 pub fn push_plot_clip_rect(expand: f32) {
+    assert_finite_f32("push_plot_clip_rect()", "expand", expand);
     unsafe { sys::ImPlot_PushPlotClipRect(expand) }
 }
 
