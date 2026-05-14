@@ -129,6 +129,24 @@ fn validate_focused_flags(caller: &str, flags: FocusedFlags) {
     );
 }
 
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn assert_finite_vec4(caller: &str, name: &str, value: [f32; 4]) {
+    assert!(
+        value.iter().all(|component| component.is_finite()),
+        "{caller} {name} must contain finite values"
+    );
+}
+
 /// Utility functions for Dear ImGui
 impl crate::ui::Ui {
     // ============================================================================
@@ -204,6 +222,8 @@ impl crate::ui::Ui {
     /// Returns the number of times the key was pressed in the current frame
     #[doc(alias = "GetKeyPressedAmount")]
     pub fn get_key_pressed_amount(&self, key: Key, repeat_delay: f32, rate: f32) -> i32 {
+        assert_finite_f32("Ui::get_key_pressed_amount()", "repeat_delay", repeat_delay);
+        assert_finite_f32("Ui::get_key_pressed_amount()", "rate", rate);
         unsafe { sys::igGetKeyPressedAmount(key.into(), repeat_delay, rate) }
     }
 
@@ -243,6 +263,11 @@ impl crate::ui::Ui {
     /// Returns the mouse drag delta
     #[doc(alias = "GetMouseDragDelta")]
     pub fn get_mouse_drag_delta(&self, button: MouseButton, lock_threshold: f32) -> [f32; 2] {
+        assert_finite_f32(
+            "Ui::get_mouse_drag_delta()",
+            "lock_threshold",
+            lock_threshold,
+        );
         let delta = unsafe { sys::igGetMouseDragDelta(button.into(), lock_threshold) };
         [delta.x, delta.y]
     }
@@ -358,6 +383,7 @@ impl crate::ui::Ui {
     /// Returns an ImGui-packed ABGR color (`ImU32`) from a style color, with alpha multiplier.
     #[doc(alias = "GetColorU32")]
     pub fn get_color_u32_with_alpha(&self, style_color: StyleColor, alpha_mul: f32) -> u32 {
+        assert_finite_f32("Ui::get_color_u32_with_alpha()", "alpha_mul", alpha_mul);
         unsafe { sys::igGetColorU32_Col(style_color as sys::ImGuiCol, alpha_mul) }
     }
 
@@ -366,6 +392,7 @@ impl crate::ui::Ui {
     /// Note: Dear ImGui applies the global style alpha when converting colors for rendering.
     #[doc(alias = "GetColorU32")]
     pub fn get_color_u32_from_rgba(&self, rgba: [f32; 4]) -> u32 {
+        assert_finite_vec4("Ui::get_color_u32_from_rgba()", "rgba", rgba);
         unsafe {
             sys::igGetColorU32_Vec4(sys::ImVec4_c {
                 x: rgba[0],
@@ -379,6 +406,7 @@ impl crate::ui::Ui {
     /// Returns an ImGui-packed ABGR color (`ImU32`) from an existing packed color, with alpha multiplier.
     #[doc(alias = "GetColorU32")]
     pub fn get_color_u32_from_packed(&self, abgr: u32, alpha_mul: f32) -> u32 {
+        assert_finite_f32("Ui::get_color_u32_from_packed()", "alpha_mul", alpha_mul);
         unsafe { sys::igGetColorU32_U32(abgr, alpha_mul) }
     }
 
@@ -402,6 +430,7 @@ impl crate::ui::Ui {
     /// Test if rectangle (of given size, starting from cursor position) is visible / not clipped.
     #[doc(alias = "IsRectVisible")]
     pub fn is_rect_visible(&self, size: [f32; 2]) -> bool {
+        assert_finite_vec2("Ui::is_rect_visible()", "size", size);
         unsafe {
             let size = sys::ImVec2 {
                 x: size[0],
@@ -414,6 +443,8 @@ impl crate::ui::Ui {
     /// Test if rectangle (in screen space) is visible / not clipped.
     #[doc(alias = "IsRectVisible")]
     pub fn is_rect_visible_ex(&self, rect_min: [f32; 2], rect_max: [f32; 2]) -> bool {
+        assert_finite_vec2("Ui::is_rect_visible_ex()", "rect_min", rect_min);
+        assert_finite_vec2("Ui::is_rect_visible_ex()", "rect_max", rect_max);
         unsafe {
             let rect_min = sys::ImVec2 {
                 x: rect_min[0],
