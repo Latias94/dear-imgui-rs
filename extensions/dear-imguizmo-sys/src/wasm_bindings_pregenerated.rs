@@ -560,6 +560,7 @@ pub struct ImGuiStyle {
     pub ColorButtonPosition: ImGuiDir,
     pub ButtonTextAlign: ImVec2_c,
     pub SelectableTextAlign: ImVec2_c,
+    pub SeparatorSize: f32,
     pub SeparatorTextBorderSize: f32,
     pub SeparatorTextAlign: ImVec2_c,
     pub SeparatorTextPadding: ImVec2_c,
@@ -573,7 +574,7 @@ pub struct ImGuiStyle {
     pub AntiAliasedFill: bool,
     pub CurveTessellationTol: f32,
     pub CircleTessellationMaxError: f32,
-    pub Colors: [ImVec4_c; 62usize],
+    pub Colors: [ImVec4_c; 63usize],
     pub HoverStationaryDelay: f32,
     pub HoverDelayShort: f32,
     pub HoverDelayNormal: f32,
@@ -767,6 +768,7 @@ pub struct ImGuiWindowClass {
     pub DockNodeFlagsOverrideSet: ImGuiDockNodeFlags,
     pub DockingAlwaysTabBar: bool,
     pub DockingAllowUnclassed: bool,
+    pub PlatformIconData: *mut ::std::os::raw::c_void,
 }
 impl Default for ImGuiWindowClass {
     fn default() -> Self {
@@ -890,15 +892,16 @@ impl Default for ImGuiStorage {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiListClipper {
-    pub Ctx: *mut ImGuiContext,
     pub DisplayStart: ::std::os::raw::c_int,
     pub DisplayEnd: ::std::os::raw::c_int,
+    pub UserIndex: ::std::os::raw::c_int,
     pub ItemsCount: ::std::os::raw::c_int,
     pub ItemsHeight: f32,
+    pub Flags: ImGuiListClipperFlags,
     pub StartPosY: f64,
     pub StartSeekOffsetY: f64,
+    pub Ctx: *mut ImGuiContext,
     pub TempData: *mut ::std::os::raw::c_void,
-    pub Flags: ImGuiListClipperFlags,
 }
 impl Default for ImGuiListClipper {
     fn default() -> Self {
@@ -1887,6 +1890,7 @@ pub struct ImGuiViewport {
     pub DrawData: *mut ImDrawData,
     pub RendererUserData: *mut ::std::os::raw::c_void,
     pub PlatformUserData: *mut ::std::os::raw::c_void,
+    pub PlatformIconData: *mut ::std::os::raw::c_void,
     pub PlatformHandle: *mut ::std::os::raw::c_void,
     pub PlatformHandleRaw: *mut ::std::os::raw::c_void,
     pub PlatformWindowCreated: bool,
@@ -1961,6 +1965,9 @@ pub struct ImGuiPlatformIO {
     pub Renderer_TextureMaxWidth: ::std::os::raw::c_int,
     pub Renderer_TextureMaxHeight: ::std::os::raw::c_int,
     pub Renderer_RenderState: *mut ::std::os::raw::c_void,
+    pub DrawCallback_ResetRenderState: ImDrawCallback,
+    pub DrawCallback_SetSamplerLinear: ImDrawCallback,
+    pub DrawCallback_SetSamplerNearest: ImDrawCallback,
     pub Platform_CreateWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_DestroyWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_ShowWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
@@ -2326,7 +2333,8 @@ pub struct ImGuiInputTextState {
     pub CursorFollow: bool,
     pub CursorCenterY: bool,
     pub SelectedAllMouseLock: bool,
-    pub Edited: bool,
+    pub EditedBefore: bool,
+    pub EditedThisFrame: bool,
     pub WantReloadUserBuf: bool,
     pub LastMoveDirectionLR: ImS8,
     pub ReloadSelectionStart: ::std::os::raw::c_int,
@@ -2931,6 +2939,7 @@ pub struct ImGuiBoxSelectState {
     pub Window: *mut ImGuiWindow,
     pub UnclipMode: bool,
     pub UnclipRect: ImRect_c,
+    pub UnclipRects: [ImRect_c; 2usize],
     pub BoxSelectRectPrev: ImRect_c,
     pub BoxSelectRectCurr: ImRect_c,
 }
@@ -2995,7 +3004,6 @@ pub struct ImGuiMultiSelectTempData {
     pub Flags: ImGuiMultiSelectFlags,
     pub ScopeRectMin: ImVec2_c,
     pub BackupCursorMaxPos: ImVec2_c,
-    pub LastSubmittedItem: ImGuiSelectionUserData,
     pub BoxSelectId: ImGuiID,
     pub KeyMods: ImGuiKeyChord,
     pub LoopRequestSetAll: ImS8,
@@ -3072,8 +3080,8 @@ pub struct ImGuiDockNode {
     pub Size: ImVec2_c,
     pub SizeRef: ImVec2_c,
     pub SplitAxis: ImGuiAxis,
-    pub WindowClass: ImGuiWindowClass,
     pub LastBgColor: ImU32,
+    pub WindowClass: ImGuiWindowClass,
     pub HostWindow: *mut ImGuiWindow,
     pub VisibleWindow: *mut ImGuiWindow,
     pub CentralNode: *mut ImGuiDockNode,
@@ -3709,7 +3717,7 @@ pub struct ImGuiViewportP {
     pub LastAlpha: f32,
     pub LastFocusedHadNavWindow: bool,
     pub PlatformMonitor: ::std::os::raw::c_short,
-    pub BgFgDrawListsLastFrame: [::std::os::raw::c_int; 2usize],
+    pub BgFgDrawListsLastTimeActive: [f32; 2usize],
     pub BgFgDrawLists: [*mut ImDrawList; 2usize],
     pub DrawDataP: ImDrawData,
     pub DrawDataBuilder: ImDrawDataBuilder,
@@ -3914,6 +3922,13 @@ impl Default for ImGuiContextHook {
         }
     }
 }
+pub type ImGuiDemoMarkerCallback = ::std::option::Option<
+    unsafe extern "C" fn(
+        file: *const ::std::os::raw::c_char,
+        line: ::std::os::raw::c_int,
+        section: *const ::std::os::raw::c_char,
+    ),
+>;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImFontAtlasPtr {
@@ -5397,8 +5412,9 @@ pub struct ImGuiTable {
     pub ResizedColumn: ImGuiTableColumnIdx,
     pub LastResizedColumn: ImGuiTableColumnIdx,
     pub HeldHeaderColumn: ImGuiTableColumnIdx,
+    pub LastHeldHeaderColumn: ImGuiTableColumnIdx,
     pub ReorderColumn: ImGuiTableColumnIdx,
-    pub ReorderColumnDir: ImGuiTableColumnIdx,
+    pub ReorderColumnDstOrder: ImGuiTableColumnIdx,
     pub LeftMostEnabledColumn: ImGuiTableColumnIdx,
     pub RightMostEnabledColumn: ImGuiTableColumnIdx,
     pub LeftMostStretchedColumn: ImGuiTableColumnIdx,
@@ -5890,6 +5906,23 @@ pub type OPERATION = ::std::os::raw::c_int;
 pub const LOCAL: MODE = 0;
 pub const WORLD: MODE = 1;
 pub type MODE = ::std::os::raw::c_int;
+pub const MT_NONE: MOVETYPE = 0;
+pub const MT_MOVE_X: MOVETYPE = 1;
+pub const MT_MOVE_Y: MOVETYPE = 2;
+pub const MT_MOVE_Z: MOVETYPE = 3;
+pub const MT_MOVE_YZ: MOVETYPE = 4;
+pub const MT_MOVE_ZX: MOVETYPE = 5;
+pub const MT_MOVE_XY: MOVETYPE = 6;
+pub const MT_MOVE_SCREEN: MOVETYPE = 7;
+pub const MT_ROTATE_X: MOVETYPE = 8;
+pub const MT_ROTATE_Y: MOVETYPE = 9;
+pub const MT_ROTATE_Z: MOVETYPE = 10;
+pub const MT_ROTATE_SCREEN: MOVETYPE = 11;
+pub const MT_SCALE_X: MOVETYPE = 12;
+pub const MT_SCALE_Y: MOVETYPE = 13;
+pub const MT_SCALE_Z: MOVETYPE = 14;
+pub const MT_SCALE_XYZ: MOVETYPE = 15;
+pub type MOVETYPE = ::std::os::raw::c_int;
 pub const DIRECTION_X: COLOR = 0;
 pub const DIRECTION_Y: COLOR = 1;
 pub const DIRECTION_Z: COLOR = 2;
@@ -5992,6 +6025,15 @@ unsafe extern "C" {
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
+    pub fn ImGuizmo_DrawAxes(
+        view: *const f32,
+        projection: *const f32,
+        matrices: *const f32,
+        matrixCount: ::std::os::raw::c_int,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
     pub fn ImGuizmo_DrawCubes(
         view: *const f32,
         projection: *const f32,
@@ -6006,6 +6048,31 @@ unsafe extern "C" {
         projection: *const f32,
         matrix: *const f32,
         gridSize: f32,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImGuizmo_DrawGridCustom(
+        view: *const f32,
+        projection: *const f32,
+        matrix: *const f32,
+        gridSize: f32,
+        majorStep: f32,
+        subdivision: ::std::os::raw::c_uint,
+    );
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImGuizmo_DrawGridCustomColor(
+        view: *const f32,
+        projection: *const f32,
+        matrix: *const f32,
+        gridSize: f32,
+        majorStep: f32,
+        subdivision: ::std::os::raw::c_uint,
+        majorCol: ImU32,
+        minorCol: ImU32,
+        centerCol: ImU32,
     );
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
@@ -6099,6 +6166,22 @@ unsafe extern "C" {
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
     pub fn ImGuizmo_SetGizmoSizeClipSpace(value: f32);
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImGuizmo_GetActiveHandleType() -> MOVETYPE;
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImGuizmo_GetHoveredHandleType() -> MOVETYPE;
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImGuizmo_GetActiveMoveType() -> MOVETYPE;
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn ImGuizmo_GetHoveredMoveType() -> MOVETYPE;
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {

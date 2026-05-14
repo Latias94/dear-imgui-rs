@@ -118,20 +118,30 @@ impl WgpuRenderer {
 
         // Extract common bind group handles up front to avoid borrowing conflicts with render_resources.
         let device = backend_data.device.clone();
-        let (common_layout, uniform_buffer, default_common_bg) = {
+        let (common_layout, uniform_buffer, default_common_bg, nearest_common_bg) = {
             let ub = backend_data
                 .render_resources
                 .uniform_buffer()
                 .ok_or_else(|| {
                     RendererError::InvalidRenderState("Uniform buffer not initialized".to_string())
                 })?;
+            let nearest_bg = backend_data
+                .render_resources
+                .nearest_common_bind_group()
+                .ok_or_else(|| {
+                    RendererError::InvalidRenderState(
+                        "Nearest sampler bind group not initialized".to_string(),
+                    )
+                })?;
             (
                 ub.bind_group_layout().clone(),
                 ub.buffer().clone(),
                 ub.bind_group().clone(),
+                nearest_bg.clone(),
             )
         };
-        let mut current_sampler_id: Option<u64> = None; // None = default sampler
+        let mut standard_sampler = ActiveSampler::Linear;
+        let mut current_sampler = ActiveSampler::Linear;
 
         for draw_list in draw_data.draw_lists() {
             for cmd in draw_list.commands() {
@@ -147,30 +157,40 @@ impl WgpuRenderer {
                             dear_imgui_rs::sys::ImDrawCmd_GetTexID(&mut cmd_copy)
                         } as u64;
 
-                        // Switch common bind group (sampler) if this texture uses a custom sampler.
-                        let desired_sampler_id = if tex_id == 0 {
-                            None
+                        // Switch common bind group (sampler) if this texture uses a custom sampler
+                        // or a standard sampler callback changed the default.
+                        let desired_sampler = if tex_id == 0 {
+                            standard_sampler
                         } else {
-                            texture_manager.custom_sampler_id_for_texture(tex_id)
+                            texture_manager
+                                .custom_sampler_id_for_texture(tex_id)
+                                .map(ActiveSampler::Custom)
+                                .unwrap_or(standard_sampler)
                         };
-                        if desired_sampler_id != current_sampler_id {
-                            if let Some(sampler_id) = desired_sampler_id {
-                                if let Some(bg0) = texture_manager
-                                    .get_or_create_common_bind_group_for_sampler(
-                                        &device,
-                                        &common_layout,
-                                        &uniform_buffer,
-                                        sampler_id,
-                                    )
-                                {
-                                    render_pass.set_bind_group(0, &bg0, &[]);
-                                } else {
+                        if desired_sampler != current_sampler {
+                            match desired_sampler {
+                                ActiveSampler::Linear => {
                                     render_pass.set_bind_group(0, &default_common_bg, &[]);
                                 }
-                            } else {
-                                render_pass.set_bind_group(0, &default_common_bg, &[]);
+                                ActiveSampler::Nearest => {
+                                    render_pass.set_bind_group(0, &nearest_common_bg, &[]);
+                                }
+                                ActiveSampler::Custom(sampler_id) => {
+                                    if let Some(bg0) = texture_manager
+                                        .get_or_create_common_bind_group_for_sampler(
+                                            &device,
+                                            &common_layout,
+                                            &uniform_buffer,
+                                            sampler_id,
+                                        )
+                                    {
+                                        render_pass.set_bind_group(0, &bg0, &[]);
+                                    } else {
+                                        render_pass.set_bind_group(0, &default_common_bg, &[]);
+                                    }
+                                }
                             }
-                            current_sampler_id = desired_sampler_id;
+                            current_sampler = desired_sampler;
                         }
 
                         let texture_bind_group = if tex_id == 0 {
@@ -267,7 +287,22 @@ impl WgpuRenderer {
                             backend_data,
                             gamma,
                         )?;
-                        current_sampler_id = None;
+                        standard_sampler = ActiveSampler::Linear;
+                        current_sampler = ActiveSampler::Linear;
+                    }
+                    dear_imgui_rs::render::DrawCmd::SetSamplerLinear => {
+                        standard_sampler = ActiveSampler::Linear;
+                        if current_sampler != ActiveSampler::Linear {
+                            render_pass.set_bind_group(0, &default_common_bg, &[]);
+                            current_sampler = ActiveSampler::Linear;
+                        }
+                    }
+                    dear_imgui_rs::render::DrawCmd::SetSamplerNearest => {
+                        standard_sampler = ActiveSampler::Nearest;
+                        if current_sampler != ActiveSampler::Nearest {
+                            render_pass.set_bind_group(0, &nearest_common_bg, &[]);
+                            current_sampler = ActiveSampler::Nearest;
+                        }
                     }
                     dear_imgui_rs::render::DrawCmd::RawCallback { .. } => {
                         tracing::warn!(

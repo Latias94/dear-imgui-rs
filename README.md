@@ -28,7 +28,7 @@
 ## What’s in this repo
 
 - Core
-  - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.7
+  - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.8
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`
   - `dear-app` — convenient Winit + WGPU application runner (docking, themes, add-ons)
@@ -324,7 +324,7 @@ Core
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
 | dear-imgui-rs   | 0.12.0   | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.12.0   | Binds Dear ImGui v1.92.7 (docking branch) |
+| dear-imgui-sys  | 0.12.0   | Binds Dear ImGui v1.92.8 (docking branch) |
 
 Backends
 
@@ -379,14 +379,14 @@ Maintenance rules
 
 ## Version & FFI
 
-- FFI layer is generated from the cimgui `docking_inter` branch matching Dear ImGui v1.92.7.
+- FFI layer is generated from the cimgui `docking_inter` branch matching Dear ImGui v1.92.8.
 - We avoid the C++ ABI by using C APIs plus checked-in bindgen output. The safe layer mirrors imgui-rs style (RAII + builder).
 
 ## Crates (workspace)
 
 ```text
 dear-imgui-rs/         # Safe Rust bindings (renamed from dear-imgui)
-dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.92.7)
+dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.92.8)
 backends/
   dear-imgui-wgpu/     # WGPU renderer
   dear-imgui-glow/     # OpenGL renderer

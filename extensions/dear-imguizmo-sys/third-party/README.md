@@ -15,6 +15,9 @@ Verify the following files exist after initialization:
 
 - `cimguizmo/cimguizmo.h`
 - `cimguizmo/cimguizmo.cpp`
-- `cimguizmo/ImGuizmo/ImGuizmo.cpp`
+- `cimguizmo/ImGuizmo/src/ImGuizmo.cpp`
+
+Older ImGuizmo revisions may use `cimguizmo/ImGuizmo/ImGuizmo.cpp`; the build script accepts
+that legacy layout as a fallback.
 
 If the submodule is not initialized, the build script will error with a helpful message.

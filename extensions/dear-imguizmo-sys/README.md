@@ -14,7 +14,8 @@ Low-level FFI bindings for ImGuizmo via the cimguizmo C API. This crate pairs wi
 This crate supports three ways to obtain the native `dear_imguizmo` static library:
 
 - Source build (default)
-  - Compiles `cimguizmo.cpp` and upstream `ImGuizmo/ImGuizmo.cpp` with `cc`.
+  - Compiles `cimguizmo.cpp` and upstream `ImGuizmo/src/ImGuizmo.cpp` with `cc`
+    (falling back to the legacy `ImGuizmo/ImGuizmo.cpp` layout when present).
   - Inherits include paths and preprocessor defines from `dear-imgui-sys`.
 - System/prebuilt library
   - Links an existing static library from a directory you provide (see env vars below).

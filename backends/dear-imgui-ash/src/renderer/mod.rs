@@ -18,6 +18,12 @@ use std::collections::{HashMap, VecDeque};
 use self::allocator::{Allocate, Allocator, Memory};
 use self::vulkan::*;
 
+unsafe extern "C" fn draw_callback_reset_render_state(
+    _parent_list: *const dear_imgui_rs::sys::ImDrawList,
+    _cmd: *const dear_imgui_rs::sys::ImDrawCmd,
+) {
+}
+
 /// Optional parameters of the renderer.
 #[derive(Debug, Clone, Copy)]
 pub struct Options {
@@ -233,6 +239,10 @@ impl AshRenderer {
             flags.insert(BackendFlags::RENDERER_HAS_VIEWPORTS);
         }
         io.set_backend_flags(flags);
+
+        imgui_context
+            .platform_io_mut()
+            .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
     }
 
     /// Create a new renderer using the internal default allocator.
@@ -1518,6 +1528,11 @@ fn record_draw_commands(
                         vk::IndexType::UINT16,
                     );
                 },
+                dear_imgui_rs::render::DrawCmd::SetSamplerLinear
+                | dear_imgui_rs::render::DrawCmd::SetSamplerNearest => {
+                    // Standard sampler callbacks are only installed by backends that can
+                    // switch sampler state without rebuilding Vulkan descriptor bindings.
+                }
                 dear_imgui_rs::render::DrawCmd::RawCallback { .. } => {
                     // Skip raw callbacks.
                 }

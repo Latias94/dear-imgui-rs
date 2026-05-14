@@ -22,7 +22,7 @@ Core
 | Crate           | Version | Upstream        | Notes                                     |
 |-----------------|---------|-----------------|-------------------------------------------|
 | dear-imgui-rs   | 0.12.0  | —               | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.12.0  | ImGui v1.92.7   | Docking branch via cimgui                 |
+| dear-imgui-sys  | 0.12.0  | ImGui v1.92.8   | Docking branch via cimgui                 |
 
 Backends
 
@@ -62,14 +62,14 @@ Extensions
 
 - Next release train: TBD.
 - Main branch currently reflects post-`0.12.0` development and may move independently until the next planned release is cut.
-- Current baselines after the `0.12.0` release: Dear ImGui v1.92.7 (docking) via cimgui, unified `dear-*` crate minor `0.12`, MSRV 1.92, and the external dependency baseline described above.
+- Current baselines after the `0.12.0` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.12`, MSRV 1.92, and the external dependency baseline described above.
 
 ## History
 
 Release Train 0.12 (current)
 
 - All crates unified to 0.12.0 across the workspace (use `version = "0.12"`).
-- Core + backends aligned with Dear ImGui v1.92.7 (docking) via cimgui.
+- Core + backends aligned with Dear ImGui v1.92.8 (docking) via cimgui.
 - `dear-imgui-build-support` ships on the same `0.12.x` train as the published workspace crates.
 - External dependencies baseline: wgpu 29, winit 0.30.13, glow 0.17, sdl3 0.17.
 - Minimum supported Rust: 1.92 (workspace baseline).

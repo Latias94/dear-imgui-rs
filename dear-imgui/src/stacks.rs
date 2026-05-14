@@ -280,6 +280,9 @@ unsafe fn push_style_var(style_var: StyleVar) {
         TreeLinesRounding(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TreeLinesRounding as i32, v)
         },
+        DragDropTargetRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DragDropTargetRounding as i32, v)
+        },
         ButtonTextAlign(v) => {
             let p: [f32; 2] = v;
             let vec = sys::ImVec2 { x: p[0], y: p[1] };

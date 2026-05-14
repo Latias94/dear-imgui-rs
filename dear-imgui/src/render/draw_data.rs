@@ -284,9 +284,59 @@ const _: [(); std::mem::align_of::<sys::ImDrawList>()] = [(); std::mem::align_of
 
 type RawDrawCallback = unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd);
 
+const LEGACY_RESET_RENDER_STATE_CALLBACK_VALUE: usize = usize::MAX;
+const RESET_RENDER_STATE_CALLBACK_VALUE: usize = usize::MAX - 7;
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) enum StandardDrawCallback {
+    ResetRenderState,
+    SetSamplerLinear,
+    SetSamplerNearest,
+}
+
 #[inline]
-fn is_reset_render_state_callback(callback: RawDrawCallback) -> bool {
-    callback as usize == usize::MAX
+fn callback_matches(callback: RawDrawCallback, standard: sys::ImDrawCallback) -> bool {
+    standard.is_some_and(|standard| standard as usize == callback as usize)
+}
+
+#[inline]
+pub(crate) fn classify_standard_draw_callback(
+    callback: sys::ImDrawCallback,
+) -> Option<StandardDrawCallback> {
+    let callback = callback?;
+    let callback_value = callback as usize;
+
+    if callback_value == RESET_RENDER_STATE_CALLBACK_VALUE
+        || callback_value == LEGACY_RESET_RENDER_STATE_CALLBACK_VALUE
+    {
+        return Some(StandardDrawCallback::ResetRenderState);
+    }
+
+    let context = unsafe { sys::igGetCurrentContext() };
+    if context.is_null() {
+        return None;
+    }
+
+    let platform_io = unsafe { sys::igGetPlatformIO_ContextPtr(context) };
+    if platform_io.is_null() {
+        return None;
+    }
+
+    let platform_io = unsafe { &*platform_io };
+    if callback_matches(callback, platform_io.DrawCallback_ResetRenderState) {
+        Some(StandardDrawCallback::ResetRenderState)
+    } else if callback_matches(callback, platform_io.DrawCallback_SetSamplerLinear) {
+        Some(StandardDrawCallback::SetSamplerLinear)
+    } else if callback_matches(callback, platform_io.DrawCallback_SetSamplerNearest) {
+        Some(StandardDrawCallback::SetSamplerNearest)
+    } else {
+        None
+    }
+}
+
+#[inline]
+fn is_standard_draw_callback(callback: sys::ImDrawCallback) -> bool {
+    classify_standard_draw_callback(callback).is_some()
 }
 
 pub(crate) unsafe fn draw_list_has_uncloneable_callbacks(raw: *const sys::ImDrawList) -> bool {
@@ -306,10 +356,7 @@ pub(crate) unsafe fn draw_list_has_uncloneable_callbacks(raw: *const sys::ImDraw
 
     unsafe { slice::from_raw_parts(cmd_buffer.Data, len) }
         .iter()
-        .any(|cmd| {
-            cmd.UserCallback
-                .is_some_and(|callback| !is_reset_render_state_callback(callback))
-        })
+        .any(|cmd| cmd.UserCallback.is_some() && !is_standard_draw_callback(cmd.UserCallback))
 }
 
 pub(crate) unsafe fn assert_draw_list_cloneable(raw: *const sys::ImDrawList, caller: &str) {
@@ -451,19 +498,20 @@ impl<'a> Iterator for DrawCmdIterator<'a> {
                 idx_offset: cmd.IdxOffset as usize,
             };
 
-            // Check for special callback values
-            match cmd.UserCallback {
-                Some(raw_callback) if is_reset_render_state_callback(raw_callback) => {
-                    DrawCmd::ResetRenderState
-                }
-                Some(raw_callback) => DrawCmd::RawCallback {
-                    callback: raw_callback,
-                    raw_cmd: cmd,
-                },
-                None => DrawCmd::Elements {
-                    count: cmd.ElemCount as usize,
-                    cmd_params,
-                    raw_cmd: cmd as *const sys::ImDrawCmd,
+            match classify_standard_draw_callback(cmd.UserCallback) {
+                Some(StandardDrawCallback::ResetRenderState) => DrawCmd::ResetRenderState,
+                Some(StandardDrawCallback::SetSamplerLinear) => DrawCmd::SetSamplerLinear,
+                Some(StandardDrawCallback::SetSamplerNearest) => DrawCmd::SetSamplerNearest,
+                None => match cmd.UserCallback {
+                    Some(raw_callback) => DrawCmd::RawCallback {
+                        callback: raw_callback,
+                        raw_cmd: cmd,
+                    },
+                    None => DrawCmd::Elements {
+                        count: cmd.ElemCount as usize,
+                        cmd_params,
+                        raw_cmd: cmd as *const sys::ImDrawCmd,
+                    },
                 },
             }
         })
@@ -507,6 +555,10 @@ pub enum DrawCmd {
     },
     /// Reset render state
     ResetRenderState,
+    /// Switch texture sampling to linear/filtering.
+    SetSamplerLinear,
+    /// Switch texture sampling to nearest/point.
+    SetSamplerNearest,
     /// Raw callback
     RawCallback {
         callback: unsafe extern "C" fn(*const sys::ImDrawList, cmd: *const sys::ImDrawCmd),
@@ -861,5 +913,43 @@ mod tests {
             sys::ImDrawList_destroy(raw_draw_list);
             sys::ImDrawListSharedData_destroy(shared);
         }
+    }
+
+    #[test]
+    fn platform_io_standard_draw_callbacks_are_classified() {
+        unsafe extern "C" fn reset(
+            _parent_list: *const sys::ImDrawList,
+            _cmd: *const sys::ImDrawCmd,
+        ) {
+        }
+        unsafe extern "C" fn linear(
+            _parent_list: *const sys::ImDrawList,
+            _cmd: *const sys::ImDrawCmd,
+        ) {
+        }
+        unsafe extern "C" fn nearest(
+            _parent_list: *const sys::ImDrawList,
+            _cmd: *const sys::ImDrawCmd,
+        ) {
+        }
+
+        let mut ctx = crate::Context::create();
+        let platform_io = ctx.platform_io_mut();
+        platform_io.set_draw_callback_reset_render_state_raw(Some(reset));
+        platform_io.set_draw_callback_set_sampler_linear_raw(Some(linear));
+        platform_io.set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+
+        assert_eq!(
+            classify_standard_draw_callback(Some(reset)),
+            Some(StandardDrawCallback::ResetRenderState)
+        );
+        assert_eq!(
+            classify_standard_draw_callback(Some(linear)),
+            Some(StandardDrawCallback::SetSamplerLinear)
+        );
+        assert_eq!(
+            classify_standard_draw_callback(Some(nearest)),
+            Some(StandardDrawCallback::SetSamplerNearest)
+        );
     }
 }

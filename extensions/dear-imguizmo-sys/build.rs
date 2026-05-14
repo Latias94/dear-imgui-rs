@@ -194,6 +194,10 @@ fn generate_bindings(
         .clang_arg(format!("-I{}", imgui_src.display()))
         .clang_arg(format!("-I{}", cimguizmo_root.display()))
         .clang_arg(format!("-I{}", cimguizmo_root.join("ImGuizmo").display()))
+        .clang_arg(format!(
+            "-I{}",
+            cimguizmo_root.join("ImGuizmo/src").display()
+        ))
         .clang_arg("-DIMGUI_USE_WCHAR32")
         .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
         .derive_default(true)
@@ -247,6 +251,23 @@ fn docsrs_build(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cimg
     }
 
     generate_bindings(cfg, cimguizmo_root, imgui_src, cimgui_root);
+}
+
+fn resolve_imguizmo_cpp(cimguizmo_root: &Path) -> PathBuf {
+    let current = cimguizmo_root.join("ImGuizmo/src/ImGuizmo.cpp");
+    if current.exists() {
+        return current;
+    }
+
+    let legacy = cimguizmo_root.join("ImGuizmo/ImGuizmo.cpp");
+    if legacy.exists() {
+        return legacy;
+    }
+
+    panic!(
+        "ImGuizmo.cpp not found under {:?}. Expected either {:?} or {:?}. Did you init submodules?",
+        cimguizmo_root, current, legacy
+    );
 }
 
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
@@ -325,9 +346,10 @@ fn build_with_cc(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cim
     build.include(cimgui_root);
     build.include(cimguizmo_root);
     build.include(cimguizmo_root.join("ImGuizmo"));
+    build.include(cimguizmo_root.join("ImGuizmo/src"));
     build.define("IMGUI_USE_WCHAR32", None);
     build.file(cimguizmo_root.join("cimguizmo.cpp"));
-    build.file(cimguizmo_root.join("ImGuizmo/ImGuizmo.cpp"));
+    build.file(resolve_imguizmo_cpp(cimguizmo_root));
 
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -358,6 +380,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=third-party/cimguizmo/cimguizmo.h");
     println!("cargo:rerun-if-changed=third-party/cimguizmo/cimguizmo.cpp");
+    println!("cargo:rerun-if-changed=third-party/cimguizmo/ImGuizmo/src/ImGuizmo.cpp");
     println!("cargo:rerun-if-changed=third-party/cimguizmo/ImGuizmo/ImGuizmo.cpp");
     println!("cargo:rerun-if-changed=../../dear-imgui-sys");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_LIB_DIR");

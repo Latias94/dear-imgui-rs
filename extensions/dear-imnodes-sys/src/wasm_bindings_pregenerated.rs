@@ -519,6 +519,7 @@ pub struct ImGuiStyle {
     pub ColorButtonPosition: ImGuiDir,
     pub ButtonTextAlign: ImVec2_c,
     pub SelectableTextAlign: ImVec2_c,
+    pub SeparatorSize: f32,
     pub SeparatorTextBorderSize: f32,
     pub SeparatorTextAlign: ImVec2_c,
     pub SeparatorTextPadding: ImVec2_c,
@@ -532,7 +533,7 @@ pub struct ImGuiStyle {
     pub AntiAliasedFill: bool,
     pub CurveTessellationTol: f32,
     pub CircleTessellationMaxError: f32,
-    pub Colors: [ImVec4_c; 62usize],
+    pub Colors: [ImVec4_c; 63usize],
     pub HoverStationaryDelay: f32,
     pub HoverDelayShort: f32,
     pub HoverDelayNormal: f32,
@@ -717,7 +718,7 @@ impl Default for ImGuiSizeCallbackData {
     }
 }
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiWindowClass {
     pub ClassId: ImGuiID,
     pub ParentViewportId: ImGuiID,
@@ -728,6 +729,16 @@ pub struct ImGuiWindowClass {
     pub DockNodeFlagsOverrideSet: ImGuiDockNodeFlags,
     pub DockingAlwaysTabBar: bool,
     pub DockingAllowUnclassed: bool,
+    pub PlatformIconData: *mut ::std::os::raw::c_void,
+}
+impl Default for ImGuiWindowClass {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -844,15 +855,16 @@ impl Default for ImGuiStorage {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ImGuiListClipper {
-    pub Ctx: *mut ImGuiContext,
     pub DisplayStart: ::std::os::raw::c_int,
     pub DisplayEnd: ::std::os::raw::c_int,
+    pub UserIndex: ::std::os::raw::c_int,
     pub ItemsCount: ::std::os::raw::c_int,
     pub ItemsHeight: f32,
+    pub Flags: ImGuiListClipperFlags,
     pub StartPosY: f64,
     pub StartSeekOffsetY: f64,
+    pub Ctx: *mut ImGuiContext,
     pub TempData: *mut ::std::os::raw::c_void,
-    pub Flags: ImGuiListClipperFlags,
 }
 impl Default for ImGuiListClipper {
     fn default() -> Self {
@@ -1844,6 +1856,7 @@ pub struct ImGuiViewport {
     pub DrawData: *mut ImDrawData,
     pub RendererUserData: *mut ::std::os::raw::c_void,
     pub PlatformUserData: *mut ::std::os::raw::c_void,
+    pub PlatformIconData: *mut ::std::os::raw::c_void,
     pub PlatformHandle: *mut ::std::os::raw::c_void,
     pub PlatformHandleRaw: *mut ::std::os::raw::c_void,
     pub PlatformWindowCreated: bool,
@@ -1918,6 +1931,9 @@ pub struct ImGuiPlatformIO {
     pub Renderer_TextureMaxWidth: ::std::os::raw::c_int,
     pub Renderer_TextureMaxHeight: ::std::os::raw::c_int,
     pub Renderer_RenderState: *mut ::std::os::raw::c_void,
+    pub DrawCallback_ResetRenderState: ImDrawCallback,
+    pub DrawCallback_SetSamplerLinear: ImDrawCallback,
+    pub DrawCallback_SetSamplerNearest: ImDrawCallback,
     pub Platform_CreateWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_DestroyWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_ShowWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
@@ -2269,7 +2285,8 @@ pub struct ImGuiInputTextState {
     pub CursorFollow: bool,
     pub CursorCenterY: bool,
     pub SelectedAllMouseLock: bool,
-    pub Edited: bool,
+    pub EditedBefore: bool,
+    pub EditedThisFrame: bool,
     pub WantReloadUserBuf: bool,
     pub LastMoveDirectionLR: ImS8,
     pub ReloadSelectionStart: ::std::os::raw::c_int,
@@ -2818,6 +2835,7 @@ pub struct ImGuiBoxSelectState {
     pub Window: *mut ImGuiWindow,
     pub UnclipMode: bool,
     pub UnclipRect: ImRect_c,
+    pub UnclipRects: [ImRect_c; 2usize],
     pub BoxSelectRectPrev: ImRect_c,
     pub BoxSelectRectCurr: ImRect_c,
 }
@@ -2883,7 +2901,6 @@ pub struct ImGuiMultiSelectTempData {
     pub Flags: ImGuiMultiSelectFlags,
     pub ScopeRectMin: ImVec2_c,
     pub BackupCursorMaxPos: ImVec2_c,
-    pub LastSubmittedItem: ImGuiSelectionUserData,
     pub BoxSelectId: ImGuiID,
     pub KeyMods: ImGuiKeyChord,
     pub LoopRequestSetAll: ImS8,
@@ -2962,8 +2979,8 @@ pub struct ImGuiDockNode {
     pub Size: ImVec2_c,
     pub SizeRef: ImVec2_c,
     pub SplitAxis: ImGuiAxis,
-    pub WindowClass: ImGuiWindowClass,
     pub LastBgColor: ImU32,
+    pub WindowClass: ImGuiWindowClass,
     pub HostWindow: *mut ImGuiWindow,
     pub VisibleWindow: *mut ImGuiWindow,
     pub CentralNode: *mut ImGuiDockNode,
@@ -3600,7 +3617,7 @@ pub struct ImGuiViewportP {
     pub LastAlpha: f32,
     pub LastFocusedHadNavWindow: bool,
     pub PlatformMonitor: ::std::os::raw::c_short,
-    pub BgFgDrawListsLastFrame: [::std::os::raw::c_int; 2usize],
+    pub BgFgDrawListsLastTimeActive: [f32; 2usize],
     pub BgFgDrawLists: [*mut ImDrawList; 2usize],
     pub DrawDataP: ImDrawData,
     pub DrawDataBuilder: ImDrawDataBuilder,
@@ -3792,6 +3809,13 @@ impl Default for ImGuiContextHook {
         }
     }
 }
+pub type ImGuiDemoMarkerCallback = ::std::option::Option<
+    unsafe extern "C" fn(
+        file: *const ::std::os::raw::c_char,
+        line: ::std::os::raw::c_int,
+        section: *const ::std::os::raw::c_char,
+    ),
+>;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImVector_ImFontAtlasPtr {
@@ -5262,8 +5286,9 @@ pub struct ImGuiTable {
     pub ResizedColumn: ImGuiTableColumnIdx,
     pub LastResizedColumn: ImGuiTableColumnIdx,
     pub HeldHeaderColumn: ImGuiTableColumnIdx,
+    pub LastHeldHeaderColumn: ImGuiTableColumnIdx,
     pub ReorderColumn: ImGuiTableColumnIdx,
-    pub ReorderColumnDir: ImGuiTableColumnIdx,
+    pub ReorderColumnDstOrder: ImGuiTableColumnIdx,
     pub LeftMostEnabledColumn: ImGuiTableColumnIdx,
     pub RightMostEnabledColumn: ImGuiTableColumnIdx,
     pub LeftMostStretchedColumn: ImGuiTableColumnIdx,

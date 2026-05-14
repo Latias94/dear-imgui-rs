@@ -205,6 +205,7 @@ pub(crate) fn validate_style_var(caller: &str, style_var: StyleVar) {
         }
         TreeLinesSize(value) => assert_non_negative_f32(caller, "TreeLinesSize", value),
         TreeLinesRounding(value) => assert_non_negative_f32(caller, "TreeLinesRounding", value),
+        DragDropTargetRounding(value) => assert_finite_f32(caller, "DragDropTargetRounding", value),
         ButtonTextAlign(value) => assert_unit_vec2(caller, "ButtonTextAlign", value),
         SelectableTextAlign(value) => assert_unit_vec2(caller, "SelectableTextAlign", value),
         SeparatorSize(value) => assert_non_negative_f32(caller, "SeparatorSize", value),
@@ -742,6 +743,38 @@ impl Style {
         self.inner_mut().TreeLinesRounding = v;
     }
 
+    pub fn drag_drop_target_rounding(&self) -> f32 {
+        self.inner().DragDropTargetRounding
+    }
+    pub fn set_drag_drop_target_rounding(&mut self, v: f32) {
+        assert_finite_f32("Style::set_drag_drop_target_rounding()", "v", v);
+        self.inner_mut().DragDropTargetRounding = v;
+    }
+
+    pub fn drag_drop_target_border_size(&self) -> f32 {
+        self.inner().DragDropTargetBorderSize
+    }
+    pub fn set_drag_drop_target_border_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_drag_drop_target_border_size()", "v", v);
+        self.inner_mut().DragDropTargetBorderSize = v;
+    }
+
+    pub fn drag_drop_target_padding(&self) -> f32 {
+        self.inner().DragDropTargetPadding
+    }
+    pub fn set_drag_drop_target_padding(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_drag_drop_target_padding()", "v", v);
+        self.inner_mut().DragDropTargetPadding = v;
+    }
+
+    pub fn color_marker_size(&self) -> f32 {
+        self.inner().ColorMarkerSize
+    }
+    pub fn set_color_marker_size(&mut self, v: f32) {
+        assert_non_negative_f32("Style::set_color_marker_size()", "v", v);
+        self.inner_mut().ColorMarkerSize = v;
+    }
+
     pub fn separator_size(&self) -> f32 {
         self.inner().SeparatorSize
     }
@@ -897,6 +930,7 @@ pub enum StyleColor {
     ScrollbarGrabHovered = sys::ImGuiCol_ScrollbarGrabHovered as i32,
     ScrollbarGrabActive = sys::ImGuiCol_ScrollbarGrabActive as i32,
     CheckMark = sys::ImGuiCol_CheckMark as i32,
+    CheckboxSelectedBg = sys::ImGuiCol_CheckboxSelectedBg as i32,
     SliderGrab = sys::ImGuiCol_SliderGrab as i32,
     SliderGrabActive = sys::ImGuiCol_SliderGrabActive as i32,
     Button = sys::ImGuiCol_Button as i32,
@@ -1045,6 +1079,8 @@ pub enum StyleVar {
     TreeLinesSize(f32),
     /// Rounding radius of tree hierarchy outlines
     TreeLinesRounding(f32),
+    /// Rounding radius of drag and drop target highlights; negative values use frame rounding
+    DragDropTargetRounding(f32),
     /// Alignment of button text when button is larger than text
     ButtonTextAlign([f32; 2]),
     /// Alignment of selectable text when selectable is larger than text

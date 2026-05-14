@@ -10,5 +10,5 @@ mod ui;
 pub use mat::{Mat4Like, decompose_matrix, recompose_matrix};
 pub use op::Manipulate;
 pub use style::Style;
-pub use types::{AxisMask, Color, DrawListTarget, GuizmoId, Mode, Operation};
-pub use ui::{GizmoUi, GuizmoContext, GuizmoExt, IdToken};
+pub use types::{AxisMask, Color, DrawListTarget, GuizmoId, Mode, MoveType, Operation};
+pub use ui::{GizmoUi, GridColors, GuizmoContext, GuizmoExt, IdToken};

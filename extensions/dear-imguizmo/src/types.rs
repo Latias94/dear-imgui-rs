@@ -54,6 +54,42 @@ impl From<Mode> for sys::MODE {
     }
 }
 
+/// ImGuizmo handle/move type reported by hover and active-handle queries.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct MoveType(sys::MOVETYPE);
+
+impl MoveType {
+    pub const NONE: Self = Self(sys::MT_NONE);
+    pub const MOVE_X: Self = Self(sys::MT_MOVE_X);
+    pub const MOVE_Y: Self = Self(sys::MT_MOVE_Y);
+    pub const MOVE_Z: Self = Self(sys::MT_MOVE_Z);
+    pub const MOVE_YZ: Self = Self(sys::MT_MOVE_YZ);
+    pub const MOVE_ZX: Self = Self(sys::MT_MOVE_ZX);
+    pub const MOVE_XY: Self = Self(sys::MT_MOVE_XY);
+    pub const MOVE_SCREEN: Self = Self(sys::MT_MOVE_SCREEN);
+    pub const ROTATE_X: Self = Self(sys::MT_ROTATE_X);
+    pub const ROTATE_Y: Self = Self(sys::MT_ROTATE_Y);
+    pub const ROTATE_Z: Self = Self(sys::MT_ROTATE_Z);
+    pub const ROTATE_SCREEN: Self = Self(sys::MT_ROTATE_SCREEN);
+    pub const SCALE_X: Self = Self(sys::MT_SCALE_X);
+    pub const SCALE_Y: Self = Self(sys::MT_SCALE_Y);
+    pub const SCALE_Z: Self = Self(sys::MT_SCALE_Z);
+    pub const SCALE_XYZ: Self = Self(sys::MT_SCALE_XYZ);
+
+    pub const fn from_raw(raw: sys::MOVETYPE) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(self) -> sys::MOVETYPE {
+        self.0
+    }
+
+    pub const fn is_none(self) -> bool {
+        self.0 == sys::MT_NONE
+    }
+}
+
 /// Color slots used by ImGuizmo style
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]

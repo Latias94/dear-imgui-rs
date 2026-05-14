@@ -19,6 +19,24 @@ use crate::{
     versions::GlVersion,
 };
 
+unsafe extern "C" fn draw_callback_reset_render_state(
+    _parent_list: *const sys::ImDrawList,
+    _cmd: *const sys::ImDrawCmd,
+) {
+}
+
+unsafe extern "C" fn draw_callback_set_sampler_linear(
+    _parent_list: *const sys::ImDrawList,
+    _cmd: *const sys::ImDrawCmd,
+) {
+}
+
+unsafe extern "C" fn draw_callback_set_sampler_nearest(
+    _parent_list: *const sys::ImDrawList,
+    _cmd: *const sys::ImDrawCmd,
+) {
+}
+
 /// Main renderer for Dear ImGui using Glow (OpenGL)
 ///
 /// This renderer provides a unified API similar to the WGPU backend while maintaining
@@ -408,6 +426,14 @@ impl GlowRenderer {
         }
 
         io.set_backend_flags(flags);
+
+        let platform_io = imgui_context.platform_io_mut();
+        platform_io
+            .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
+        platform_io
+            .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
+        platform_io
+            .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
     }
 
     /// Destroy the renderer and free OpenGL resources
@@ -785,6 +811,8 @@ impl GlowRenderer {
     ) -> RenderResult<()> {
         gl_debug_message(gl, "start loop over draw lists");
 
+        let mut sampler_filter = glow::LINEAR;
+
         for draw_list in draw_data.draw_lists() {
             // Upload vertex/index buffers
             self.upload_vertex_buffer(gl, draw_list.vtx_buffer())?;
@@ -810,6 +838,7 @@ impl GlowRenderer {
                             tex_id,
                             &cmd_params,
                             draw_data,
+                            sampler_filter,
                         )?;
                     }
                     DrawCmd::ResetRenderState => {
@@ -819,6 +848,13 @@ impl GlowRenderer {
                             draw_data.display_size[0] * draw_data.framebuffer_scale[0],
                             draw_data.display_size[1] * draw_data.framebuffer_scale[1],
                         )?;
+                        sampler_filter = glow::LINEAR;
+                    }
+                    DrawCmd::SetSamplerLinear => {
+                        sampler_filter = glow::LINEAR;
+                    }
+                    DrawCmd::SetSamplerNearest => {
+                        sampler_filter = glow::NEAREST;
                     }
                     DrawCmd::RawCallback { callback, raw_cmd } => {
                         let res =
@@ -892,6 +928,7 @@ impl GlowRenderer {
         effective_tex_id: dear_imgui_rs::TextureId,
         cmd_params: &DrawCmdParams,
         draw_data: &DrawData,
+        sampler_filter: u32,
     ) -> RenderResult<()> {
         // Get texture
         let texture = if let Some(tex) = texture_map.get(effective_tex_id) {
@@ -906,6 +943,16 @@ impl GlowRenderer {
         unsafe {
             // Bind texture
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                sampler_filter as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                sampler_filter as i32,
+            );
 
             // Set scissor rectangle
             let clip_rect = cmd_params.clip_rect;

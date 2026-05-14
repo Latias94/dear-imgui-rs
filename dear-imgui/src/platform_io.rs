@@ -1411,6 +1411,46 @@ impl PlatformIo {
     pub unsafe fn renderer_render_state(&self) -> *mut std::ffi::c_void {
         self.inner().Renderer_RenderState
     }
+
+    /// Set the standard draw callback used to request renderer-state reset.
+    ///
+    /// Renderer backends may install a backend-specific function pointer here. Higher-level
+    /// draw iteration recognizes this callback as [`crate::render::DrawCmd::ResetRenderState`]
+    /// instead of treating it as an arbitrary raw callback.
+    #[doc(alias = "DrawCallback_ResetRenderState")]
+    pub fn set_draw_callback_reset_render_state_raw(&mut self, callback: sys::ImDrawCallback) {
+        self.inner_mut().DrawCallback_ResetRenderState = callback;
+    }
+
+    /// Get the standard draw callback used to request renderer-state reset.
+    #[doc(alias = "DrawCallback_ResetRenderState")]
+    pub fn draw_callback_reset_render_state_raw(&self) -> sys::ImDrawCallback {
+        self.inner().DrawCallback_ResetRenderState
+    }
+
+    /// Set the standard draw callback used to request linear texture sampling.
+    #[doc(alias = "DrawCallback_SetSamplerLinear")]
+    pub fn set_draw_callback_set_sampler_linear_raw(&mut self, callback: sys::ImDrawCallback) {
+        self.inner_mut().DrawCallback_SetSamplerLinear = callback;
+    }
+
+    /// Get the standard draw callback used to request linear texture sampling.
+    #[doc(alias = "DrawCallback_SetSamplerLinear")]
+    pub fn draw_callback_set_sampler_linear_raw(&self) -> sys::ImDrawCallback {
+        self.inner().DrawCallback_SetSamplerLinear
+    }
+
+    /// Set the standard draw callback used to request nearest/point texture sampling.
+    #[doc(alias = "DrawCallback_SetSamplerNearest")]
+    pub fn set_draw_callback_set_sampler_nearest_raw(&mut self, callback: sys::ImDrawCallback) {
+        self.inner_mut().DrawCallback_SetSamplerNearest = callback;
+    }
+
+    /// Get the standard draw callback used to request nearest/point texture sampling.
+    #[doc(alias = "DrawCallback_SetSamplerNearest")]
+    pub fn draw_callback_set_sampler_nearest_raw(&self) -> sys::ImDrawCallback {
+        self.inner().DrawCallback_SetSamplerNearest
+    }
 }
 
 // TODO: Add safe wrappers for platform IO functionality:
@@ -1435,6 +1475,12 @@ mod tests {
             sys::ImGuiPlatformIO_destroy(p);
             v
         }
+    }
+
+    unsafe extern "C" fn draw_callback_marker(
+        _parent_list: *const sys::ImDrawList,
+        _cmd: *const sys::ImDrawCmd,
+    ) {
     }
 
     #[test]
@@ -1469,6 +1515,32 @@ mod tests {
         let mutable = unsafe { PlatformIo::from_raw_mut(raw_ptr) };
 
         assert_eq!(shared.as_raw(), mutable.as_raw());
+    }
+
+    #[test]
+    fn platform_io_standard_draw_callback_accessors_roundtrip() {
+        let mut raw: sys::ImGuiPlatformIO = new_platform_io();
+        let pio = unsafe { PlatformIo::from_raw_mut((&mut raw) as *mut sys::ImGuiPlatformIO) };
+
+        pio.set_draw_callback_reset_render_state_raw(Some(draw_callback_marker));
+        pio.set_draw_callback_set_sampler_linear_raw(Some(draw_callback_marker));
+        pio.set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_marker));
+
+        assert_eq!(
+            pio.draw_callback_reset_render_state_raw()
+                .map(|f| f as usize),
+            Some(draw_callback_marker as usize)
+        );
+        assert_eq!(
+            pio.draw_callback_set_sampler_linear_raw()
+                .map(|f| f as usize),
+            Some(draw_callback_marker as usize)
+        );
+        assert_eq!(
+            pio.draw_callback_set_sampler_nearest_raw()
+                .map(|f| f as usize),
+            Some(draw_callback_marker as usize)
+        );
     }
 
     #[cfg(feature = "multi-viewport")]

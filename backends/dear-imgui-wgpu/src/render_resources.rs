@@ -13,10 +13,14 @@ use wgpu::*;
 /// Contains samplers, uniform buffers, and bind group layouts that are shared
 /// across all frames.
 pub struct RenderResources {
-    /// Texture sampler
+    /// Linear texture sampler
     pub sampler: Option<Sampler>,
+    /// Nearest/point texture sampler
+    pub sampler_nearest: Option<Sampler>,
     /// Uniform buffer manager (also owns the common bind group layout)
     pub uniform_buffer: Option<UniformBuffer>,
+    /// Common bind group using the nearest/point sampler
+    pub nearest_common_bind_group: Option<BindGroup>,
     /// Image bind groups cache (texture_id -> bind_group)
     pub image_bind_groups: HashMap<u64, BindGroup>,
     /// Image bind group layout (cached for efficiency)
@@ -28,7 +32,9 @@ impl RenderResources {
     pub fn new() -> Self {
         Self {
             sampler: None,
+            sampler_nearest: None,
             uniform_buffer: None,
+            nearest_common_bind_group: None,
             image_bind_groups: HashMap::new(),
             image_bind_group_layout: None,
         }
@@ -40,12 +46,20 @@ impl RenderResources {
         fn linear_mipmap_filter() -> FilterMode {
             FilterMode::Linear
         }
+        #[cfg(feature = "wgpu-27")]
+        fn nearest_mipmap_filter() -> FilterMode {
+            FilterMode::Nearest
+        }
         #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
         fn linear_mipmap_filter() -> MipmapFilterMode {
             MipmapFilterMode::Linear
         }
+        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
+        fn nearest_mipmap_filter() -> MipmapFilterMode {
+            MipmapFilterMode::Nearest
+        }
 
-        // Create texture sampler (matches imgui_impl_wgpu.cpp sampler setup)
+        // Create linear texture sampler (matches imgui_impl_wgpu.cpp sampler setup)
         // Bilinear sampling is required by default. Set 'io.Fonts->Flags |= ImFontAtlasFlags_NoBakedLines'
         // or 'style.AntiAliasedLinesUseTex = false' to allow point/nearest sampling
         let sampler = device.create_sampler(&SamplerDescriptor {
@@ -60,8 +74,35 @@ impl RenderResources {
             ..Default::default()
         });
 
+        let sampler_nearest = device.create_sampler(&SamplerDescriptor {
+            label: Some("Dear ImGui Texture Sampler Nearest"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Nearest,
+            min_filter: FilterMode::Nearest,
+            mipmap_filter: nearest_mipmap_filter(),
+            anisotropy_clamp: 1,
+            ..Default::default()
+        });
+
         // Create uniform buffer + common bind group layout
         let uniform_buffer = UniformBuffer::new(device, &sampler);
+
+        let nearest_common_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Dear ImGui Common Bind Group Nearest Sampler"),
+            layout: uniform_buffer.bind_group_layout(),
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.buffer().as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&sampler_nearest),
+                },
+            ],
+        });
 
         // Create image bind group layout (for texture views)
         let image_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -79,7 +120,9 @@ impl RenderResources {
         });
 
         self.sampler = Some(sampler);
+        self.sampler_nearest = Some(sampler_nearest);
         self.uniform_buffer = Some(uniform_buffer);
+        self.nearest_common_bind_group = Some(nearest_common_bind_group);
         self.image_bind_group_layout = Some(image_bind_group_layout);
 
         Ok(())
@@ -139,6 +182,11 @@ impl RenderResources {
         self.sampler.as_ref()
     }
 
+    /// Get the nearest/point texture sampler
+    pub fn sampler_nearest(&self) -> Option<&Sampler> {
+        self.sampler_nearest.as_ref()
+    }
+
     /// Get the uniform buffer
     pub fn uniform_buffer(&self) -> Option<&UniformBuffer> {
         self.uniform_buffer.as_ref()
@@ -149,6 +197,11 @@ impl RenderResources {
         self.uniform_buffer.as_ref().map(|ub| ub.bind_group())
     }
 
+    /// Get the common bind group using nearest/point sampling
+    pub fn nearest_common_bind_group(&self) -> Option<&BindGroup> {
+        self.nearest_common_bind_group.as_ref()
+    }
+
     /// Get the image bind group layout
     pub fn image_bind_group_layout(&self) -> Option<&BindGroupLayout> {
         self.image_bind_group_layout.as_ref()
@@ -157,7 +210,9 @@ impl RenderResources {
     /// Check if resources are initialized
     pub fn is_initialized(&self) -> bool {
         self.sampler.is_some()
+            && self.sampler_nearest.is_some()
             && self.uniform_buffer.is_some()
+            && self.nearest_common_bind_group.is_some()
             && self.image_bind_group_layout.is_some()
     }
 

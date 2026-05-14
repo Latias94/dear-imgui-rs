@@ -115,6 +115,10 @@ fn style_setters_reject_non_finite_or_invalid_runtime_numbers_before_storing() {
     style.set_font_scale_dpi(1.3);
     style.set_color(imgui::StyleColor::Text, [1.0, 0.5, 0.25, 1.0]);
     style.set_table_angled_headers_angle(0.25);
+    style.set_drag_drop_target_rounding(-1.0);
+    style.set_drag_drop_target_border_size(2.0);
+    style.set_drag_drop_target_padding(3.0);
+    style.set_color_marker_size(4.0);
     style.set_tab_close_button_min_width_selected(-1.0);
     style.set_tab_close_button_min_width_unselected(100.0);
     style.set_button_text_align([0.0, 1.0]);
@@ -125,6 +129,10 @@ fn style_setters_reject_non_finite_or_invalid_runtime_numbers_before_storing() {
     assert_eq!(style.font_scale_dpi(), 1.3);
     assert_eq!(style.color(imgui::StyleColor::Text), [1.0, 0.5, 0.25, 1.0]);
     assert_eq!(style.table_angled_headers_angle(), 0.25);
+    assert_eq!(style.drag_drop_target_rounding(), -1.0);
+    assert_eq!(style.drag_drop_target_border_size(), 2.0);
+    assert_eq!(style.drag_drop_target_padding(), 3.0);
+    assert_eq!(style.color_marker_size(), 4.0);
     assert_eq!(style.tab_close_button_min_width_selected(), -1.0);
     assert_eq!(style.tab_close_button_min_width_unselected(), 100.0);
     assert_eq!(style.button_text_align(), [0.0, 1.0]);
@@ -150,6 +158,26 @@ fn style_setters_reject_non_finite_or_invalid_runtime_numbers_before_storing() {
         style.set_table_angled_headers_angle(1.0);
     });
     assert_eq!(style.table_angled_headers_angle(), 0.25);
+
+    assert_panics!({
+        style.set_drag_drop_target_rounding(f32::NAN);
+    });
+    assert_eq!(style.drag_drop_target_rounding(), -1.0);
+
+    assert_panics!({
+        style.set_drag_drop_target_border_size(-0.1);
+    });
+    assert_eq!(style.drag_drop_target_border_size(), 2.0);
+
+    assert_panics!({
+        style.set_drag_drop_target_padding(f32::INFINITY);
+    });
+    assert_eq!(style.drag_drop_target_padding(), 3.0);
+
+    assert_panics!({
+        style.set_color_marker_size(-0.1);
+    });
+    assert_eq!(style.color_marker_size(), 4.0);
 
     assert_panics!({
         style.set_tab_close_button_min_width_selected(-2.0);
@@ -232,6 +260,22 @@ fn style_stack_rejects_invalid_values_before_push_and_leaves_style_unchanged() {
         baseline.table_angled_headers_angle()
     );
 
+    let token = ui.push_style_var(imgui::StyleVar::DragDropTargetRounding(-1.0));
+    assert_eq!(unsafe { ui.style().drag_drop_target_rounding() }, -1.0);
+    token.pop();
+    assert_eq!(
+        unsafe { ui.style().drag_drop_target_rounding() },
+        baseline.drag_drop_target_rounding()
+    );
+
+    assert_panics!({
+        let _ = ui.push_style_var(imgui::StyleVar::DragDropTargetRounding(f32::NAN));
+    });
+    assert_eq!(
+        unsafe { ui.style().drag_drop_target_rounding() },
+        baseline.drag_drop_target_rounding()
+    );
+
     assert_panics!({
         let _ = ui.push_style_color(imgui::StyleColor::Text, [0.0, f32::NAN, 0.0, 1.0]);
     });
@@ -243,6 +287,11 @@ fn style_stack_rejects_invalid_values_before_push_and_leaves_style_unchanged() {
 
 #[test]
 fn tree_node_flags_include_public_upstream_draw_line_bits() {
+    assert_eq!(
+        imgui::StyleColor::CheckboxSelectedBg as i32,
+        imgui::sys::ImGuiCol_CheckboxSelectedBg
+    );
+
     assert_eq!(
         imgui::TreeNodeFlags::ALLOW_OVERLAP.bits(),
         imgui::sys::ImGuiTreeNodeFlags_AllowOverlap

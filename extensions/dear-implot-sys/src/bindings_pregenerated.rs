@@ -503,7 +503,7 @@ impl Default for ImGuiSizeCallbackData {
     }
 }
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ImGuiWindowClass {
     pub ClassId: ImGuiID,
     pub ParentViewportId: ImGuiID,
@@ -514,6 +514,16 @@ pub struct ImGuiWindowClass {
     pub DockNodeFlagsOverrideSet: ImGuiDockNodeFlags,
     pub DockingAlwaysTabBar: bool,
     pub DockingAllowUnclassed: bool,
+    pub PlatformIconData: *mut ::std::os::raw::c_void,
+}
+impl Default for ImGuiWindowClass {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -1578,6 +1588,7 @@ pub struct ImGuiViewport {
     pub DrawData: *mut ImDrawData,
     pub RendererUserData: *mut ::std::os::raw::c_void,
     pub PlatformUserData: *mut ::std::os::raw::c_void,
+    pub PlatformIconData: *mut ::std::os::raw::c_void,
     pub PlatformHandle: *mut ::std::os::raw::c_void,
     pub PlatformHandleRaw: *mut ::std::os::raw::c_void,
     pub PlatformWindowCreated: bool,
@@ -1652,6 +1663,9 @@ pub struct ImGuiPlatformIO {
     pub Renderer_TextureMaxWidth: ::std::os::raw::c_int,
     pub Renderer_TextureMaxHeight: ::std::os::raw::c_int,
     pub Renderer_RenderState: *mut ::std::os::raw::c_void,
+    pub DrawCallback_ResetRenderState: ImDrawCallback,
+    pub DrawCallback_SetSamplerLinear: ImDrawCallback,
+    pub DrawCallback_SetSamplerNearest: ImDrawCallback,
     pub Platform_CreateWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_DestroyWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
     pub Platform_ShowWindow: ::std::option::Option<unsafe extern "C" fn(vp: *mut ImGuiViewport)>,
@@ -2552,6 +2566,7 @@ pub struct ImGuiBoxSelectState {
     pub Window: *mut ImGuiWindow,
     pub UnclipMode: bool,
     pub UnclipRect: ImRect_c,
+    pub UnclipRects: [ImRect_c; 2usize],
     pub BoxSelectRectPrev: ImRect_c,
     pub BoxSelectRectCurr: ImRect_c,
 }
@@ -2617,7 +2632,6 @@ pub struct ImGuiMultiSelectTempData {
     pub Flags: ImGuiMultiSelectFlags,
     pub ScopeRectMin: ImVec2_c,
     pub BackupCursorMaxPos: ImVec2_c,
-    pub LastSubmittedItem: ImGuiSelectionUserData,
     pub BoxSelectId: ImGuiID,
     pub KeyMods: ImGuiKeyChord,
     pub LoopRequestSetAll: ImS8,
@@ -2696,8 +2710,8 @@ pub struct ImGuiDockNode {
     pub Size: ImVec2_c,
     pub SizeRef: ImVec2_c,
     pub SplitAxis: ImGuiAxis,
-    pub WindowClass: ImGuiWindowClass,
     pub LastBgColor: ImU32,
+    pub WindowClass: ImGuiWindowClass,
     pub HostWindow: *mut ImGuiWindow,
     pub VisibleWindow: *mut ImGuiWindow,
     pub CentralNode: *mut ImGuiDockNode,

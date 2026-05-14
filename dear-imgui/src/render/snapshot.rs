@@ -3,7 +3,9 @@
 //! This module provides `Send + Sync` data structures which capture everything a renderer backend
 //! needs to render a frame, without retaining any pointers into ImGui-owned memory.
 
-use crate::render::draw_data::{DrawData, DrawIdx, DrawList, DrawVert};
+use crate::render::draw_data::{
+    DrawData, DrawIdx, DrawList, DrawVert, StandardDrawCallback, classify_standard_draw_callback,
+};
 use crate::sys;
 use crate::texture::{TextureFormat, TextureId, TextureRect, TextureStatus};
 use thiserror::Error;
@@ -106,6 +108,8 @@ pub enum DrawCmdSnapshot {
         idx_offset: usize,
     },
     ResetRenderState,
+    SetSamplerLinear,
+    SetSamplerNearest,
 }
 
 /// A thread-safe managed texture request (ImGui 1.92+).
@@ -197,15 +201,26 @@ fn snapshot_draw_list(
 
     let mut commands = Vec::new();
     for cmd in unsafe { draw_list.cmd_buffer() } {
-        if let Some(cb) = cmd.UserCallback {
-            if cb as usize == usize::MAX {
-                commands.push(DrawCmdSnapshot::ResetRenderState);
-                continue;
-            }
-
-            match options.user_callback_policy {
-                UserCallbackPolicy::Error => return Err(SnapshotError::UserCallbackUnsupported),
-                UserCallbackPolicy::Drop => continue,
+        if cmd.UserCallback.is_some() {
+            match classify_standard_draw_callback(cmd.UserCallback) {
+                Some(StandardDrawCallback::ResetRenderState) => {
+                    commands.push(DrawCmdSnapshot::ResetRenderState);
+                    continue;
+                }
+                Some(StandardDrawCallback::SetSamplerLinear) => {
+                    commands.push(DrawCmdSnapshot::SetSamplerLinear);
+                    continue;
+                }
+                Some(StandardDrawCallback::SetSamplerNearest) => {
+                    commands.push(DrawCmdSnapshot::SetSamplerNearest);
+                    continue;
+                }
+                None => match options.user_callback_policy {
+                    UserCallbackPolicy::Error => {
+                        return Err(SnapshotError::UserCallbackUnsupported);
+                    }
+                    UserCallbackPolicy::Drop => continue,
+                },
             }
         }
 

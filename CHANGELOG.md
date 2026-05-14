@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Extend `WindowClass` with typed viewport, tab item, and dock node override fields. Code
     constructing `WindowClass` with struct literals should include the new fields or use
     `WindowClass::new` / `Default`.
+  - Add `WindowClass::platform_icon_data` and make `set_item_key_owner{,_with_flags}` return
+    Dear ImGui's ownership-request result, matching Dear ImGui v1.92.8.
+  - Add `DrawCmd::SetSamplerLinear` and `DrawCmd::SetSamplerNearest` for Dear ImGui's standard
+    sampler draw callbacks. Exhaustive draw-command matches should handle the new variants.
 - Core (`dear-imgui-sys`)
   - Stop exposing cimgui's `ImGuiPlatformIO_Set_Platform_GetWindowPos` and
     `ImGuiPlatformIO_Set_Platform_GetWindowSize` helpers from generated bindings. Use the
@@ -57,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Core (`dear-imgui-rs`)
+  - Upgrade the core Dear ImGui/cimgui baseline to Dear ImGui v1.92.8 (docking).
   - Store typed `PlatformIo` callbacks per active `ImGuiContext` instead of in process-wide
     Rust slots, while preserving the `dear-imgui-sys` out-parameter shim path for
     `Platform_GetWindowPos`, `Platform_GetWindowSize`, and
@@ -70,6 +75,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Track `DrawListMut` borrows per raw `ImDrawList*` on the current thread instead of using
     process-wide locks, and resolve background/foreground draw lists against the main viewport.
   - Make `DrawListMut::clone_output()` return `render::OwnedDrawList`.
+  - Expose Dear ImGui v1.92.8 style additions:
+    `StyleColor::CheckboxSelectedBg`, `StyleVar::DragDropTargetRounding`,
+    `Style::drag_drop_target_rounding`, `drag_drop_target_border_size`,
+    `drag_drop_target_padding`, and `color_marker_size`.
+  - Expose Dear ImGui v1.92.8 draw-list helpers `DrawListMut::add_line_h` and
+    `DrawListMut::add_line_v`.
+  - Expose raw `PlatformIo` accessors for standard draw callbacks:
+    `DrawCallback_ResetRenderState`, `DrawCallback_SetSamplerLinear`, and
+    `DrawCallback_SetSamplerNearest`.
 
 ### Fixed
 
@@ -91,6 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     safe `TextCallbackData` accessors.
   - Reject safe draw-list and draw-data cloning when command buffers contain user callbacks,
     preventing duplicated opaque callback userdata pointers and possible double-free or UAF.
+  - Avoid calling `GetPlatformIO()` without a current Dear ImGui context while classifying
+    standard draw callbacks, preserving safe clone rejection for manually constructed draw lists.
   - Validate draw-list channel split counts and always merge split channels during unwinding,
     keeping safe `DrawListMut::channels_split` calls balanced after panic.
   - Validate draw-list geometry/text/image inputs and `Font` runtime sizing inputs before
@@ -191,9 +207,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Validate `TextCallbackData` buffers and byte positions before exposing Rust slices or
     converting positions into Dear ImGui's `int` callback APIs.
 - Core (`dear-imgui-sys`)
+  - Regenerate native and WASM pregenerated bindings for Dear ImGui v1.92.8 via cimgui
+    `docking_inter`.
   - Use checked-in pregenerated bindings by default for normal source builds, so Windows/MSVC
     users can build `dear-app` without installing LLVM/libclang while still compiling the native
-    Dear ImGui library and PlatformIO hook shim.
+    Dear ImGui library and PlatformIO hook shim. Normal builds and installs now only need the
+    platform C++ toolchain; LLVM/libclang is required only for explicit binding regeneration.
+    Fixes #28, thanks @dtugend.
   - Make the `bindgen` build dependency optional behind a `bindgen` feature, so normal builds
     no longer compile `bindgen`/`clang-sys`; binding regeneration now requires both
     `DEAR_IMGUI_RS_REGEN_BINDINGS=1` and `--features bindgen`.
@@ -206,6 +226,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Report unavailable `PlatformIO` out-parameter hooks through a capability flag and explicit
     callback-installation panic instead of leaving raw external symbols unresolved.
 - Backends
+  - Register Dear ImGui v1.92.8 standard reset/sampler draw callbacks in the WGPU and Glow
+    renderers. WGPU now keeps both linear and nearest sampler bind groups; Glow switches texture
+    filtering when sampler callbacks are encountered.
   - Route winit multi-viewport `Platform_GetWindowFramebufferScale` through the same
     out-parameter shim as the window position and size getters, including on Windows.
   - Bind winit multi-viewport shutdown to the provided `Context` before destroying platform
@@ -236,6 +259,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     process-wide slots, preventing one context's viewport callbacks from using another context's
     renderer or Vulkan handles.
 - Extensions
+  - Refresh `dear-implot-sys`, `dear-implot3d-sys`, `dear-imnodes-sys`, `dear-imguizmo-sys`,
+    `dear-imguizmo-quat-sys`, and `dear-imgui-test-engine-sys` submodules and pregenerated
+    native/WASM bindings against the Dear ImGui v1.92.8 stack.
+  - Expose new ImGuizmo handle/move-type queries and custom grid/axis drawing helpers through
+    `MoveType`, `GizmoUi::active_handle_type`, `hovered_handle_type`, `active_move_type`,
+    `hovered_move_type`, `draw_axes`, `draw_grid_custom`, and `draw_grid_custom_color`.
   - Use checked-in pregenerated bindings by default for extension `*-sys` normal builds, so
     ImPlot, ImNodes, ImPlot3D, ImGuizmo, ImGuIZMO.quat, and Test Engine users no longer need
     LLVM/libclang unless they explicitly regenerate bindings.

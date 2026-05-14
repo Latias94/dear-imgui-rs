@@ -4,7 +4,7 @@ use dear_imguizmo_sys as sys;
 
 use crate::mat::Mat4Like;
 use crate::style::Style;
-use crate::types::{AxisMask, DrawListTarget, GuizmoId, Mode, Operation, Vec3Like};
+use crate::types::{AxisMask, DrawListTarget, GuizmoId, Mode, MoveType, Operation, Vec3Like};
 
 /// Context handle; lightweight wrapper to bind ImGui context and build a GizmoUi
 #[derive(Default, Clone, Copy)]
@@ -48,6 +48,13 @@ impl GuizmoContext {
 pub struct GizmoUi<'ui> {
     pub(crate) _ui: &'ui Ui,
     imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct GridColors {
+    pub major: u32,
+    pub minor: u32,
+    pub center: u32,
 }
 
 impl<'ui> GizmoUi<'ui> {
@@ -107,6 +114,81 @@ impl<'ui> GizmoUi<'ui> {
                 projection.to_cols_array().as_ptr(),
                 model.to_cols_array().as_ptr(),
                 grid_size,
+            )
+        }
+    }
+
+    pub fn draw_grid_custom<T: Mat4Like>(
+        &self,
+        view: &T,
+        projection: &T,
+        model: &T,
+        grid_size: f32,
+        major_step: f32,
+        subdivision: u32,
+    ) {
+        self.bind();
+        unsafe {
+            sys::ImGuizmo_DrawGridCustom(
+                view.to_cols_array().as_ptr(),
+                projection.to_cols_array().as_ptr(),
+                model.to_cols_array().as_ptr(),
+                grid_size,
+                major_step,
+                subdivision,
+            )
+        }
+    }
+
+    pub fn draw_grid_custom_color<T: Mat4Like>(
+        &self,
+        view: &T,
+        projection: &T,
+        model: &T,
+        grid_size: f32,
+        major_step: f32,
+        subdivision: u32,
+        colors: GridColors,
+    ) {
+        self.bind();
+        unsafe {
+            sys::ImGuizmo_DrawGridCustomColor(
+                view.to_cols_array().as_ptr(),
+                projection.to_cols_array().as_ptr(),
+                model.to_cols_array().as_ptr(),
+                grid_size,
+                major_step,
+                subdivision,
+                colors.major,
+                colors.minor,
+                colors.center,
+            )
+        }
+    }
+
+    pub fn draw_axes<T: Mat4Like>(&self, view: &T, projection: &T, matrices: &[T]) {
+        let count = match i32::try_from(matrices.len()) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        if count == 0 {
+            return;
+        }
+        let cap = match matrices.len().checked_mul(16) {
+            Some(v) => v,
+            None => return,
+        };
+        let mut flat: Vec<f32> = Vec::with_capacity(cap);
+        for m in matrices {
+            flat.extend_from_slice(&m.to_cols_array());
+        }
+        self.bind();
+        unsafe {
+            sys::ImGuizmo_DrawAxes(
+                view.to_cols_array().as_ptr(),
+                projection.to_cols_array().as_ptr(),
+                flat.as_ptr(),
+                count,
             )
         }
     }
@@ -352,6 +434,26 @@ impl<'ui> GizmoUi<'ui> {
     pub fn is_over_operation(&self, operation: Operation) -> bool {
         self.bind();
         unsafe { sys::ImGuizmo_IsOver_OPERATION(operation.into()) }
+    }
+
+    pub fn active_handle_type(&self) -> MoveType {
+        self.bind();
+        MoveType::from_raw(unsafe { sys::ImGuizmo_GetActiveHandleType() })
+    }
+
+    pub fn hovered_handle_type(&self) -> MoveType {
+        self.bind();
+        MoveType::from_raw(unsafe { sys::ImGuizmo_GetHoveredHandleType() })
+    }
+
+    pub fn active_move_type(&self) -> MoveType {
+        self.bind();
+        MoveType::from_raw(unsafe { sys::ImGuizmo_GetActiveMoveType() })
+    }
+
+    pub fn hovered_move_type(&self) -> MoveType {
+        self.bind();
+        MoveType::from_raw(unsafe { sys::ImGuizmo_GetHoveredMoveType() })
     }
 
     /// Test if the mouse is within `pixel_radius` of a world position once

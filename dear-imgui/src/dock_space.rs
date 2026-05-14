@@ -106,6 +106,11 @@ pub struct WindowClass {
     pub docking_always_tab_bar: bool,
     /// Set to true to allow windows of this class to be docked/merged with an unclassed window
     pub docking_allow_unclassed: bool,
+    /// Opaque platform-backend icon payload.
+    ///
+    /// Dear ImGui treats this as backend-owned data. Keep the pointed-to allocation valid for as
+    /// long as the platform backend may inspect this window class.
+    pub platform_icon_data: Option<ptr::NonNull<std::ffi::c_void>>,
 }
 
 impl Default for WindowClass {
@@ -120,6 +125,7 @@ impl Default for WindowClass {
             dock_node_flags_override_set: DockNodeFlags::NONE,
             docking_always_tab_bar: false,
             docking_allow_unclassed: true,
+            platform_icon_data: None,
         }
     }
 }
@@ -195,6 +201,17 @@ impl WindowClass {
         self
     }
 
+    /// Sets opaque icon data consumed by the platform backend.
+    ///
+    /// # Safety
+    ///
+    /// `data` must remain valid for as long as the platform backend may read it, and it must point
+    /// to the representation expected by that backend.
+    pub unsafe fn platform_icon_data_raw(mut self, data: *mut std::ffi::c_void) -> Self {
+        self.platform_icon_data = ptr::NonNull::new(data);
+        self
+    }
+
     fn validate(&self, caller: &str) {
         crate::io::validate_viewport_flags(
             caller,
@@ -224,6 +241,9 @@ impl WindowClass {
             DockNodeFlagsOverrideSet: self.dock_node_flags_override_set.bits(),
             DockingAlwaysTabBar: self.docking_always_tab_bar,
             DockingAllowUnclassed: self.docking_allow_unclassed,
+            PlatformIconData: self
+                .platform_icon_data
+                .map_or(ptr::null_mut(), ptr::NonNull::as_ptr),
         }
     }
 }

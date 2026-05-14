@@ -418,6 +418,52 @@ impl<'ui> DrawListMut<'ui> {
         Line::new(self, p1, p2, c)
     }
 
+    /// Draw a horizontal line from `min_x` to `max_x` at `y`.
+    #[doc(alias = "AddLineH")]
+    pub fn add_line_h<C>(&self, min_x: f32, max_x: f32, y: f32, col: C, thickness: f32)
+    where
+        C: Into<ImColor32>,
+    {
+        assert_finite_f32("DrawListMut::add_line_h()", "min_x", min_x);
+        assert_finite_f32("DrawListMut::add_line_h()", "max_x", max_x);
+        assert_finite_f32("DrawListMut::add_line_h()", "y", y);
+        assert_positive_f32("DrawListMut::add_line_h()", "thickness", thickness);
+
+        unsafe {
+            sys::ImDrawList_AddLineH(
+                self.draw_list,
+                min_x,
+                max_x,
+                y,
+                col.into().into(),
+                thickness,
+            )
+        }
+    }
+
+    /// Draw a vertical line from `min_y` to `max_y` at `x`.
+    #[doc(alias = "AddLineV")]
+    pub fn add_line_v<C>(&self, x: f32, min_y: f32, max_y: f32, col: C, thickness: f32)
+    where
+        C: Into<ImColor32>,
+    {
+        assert_finite_f32("DrawListMut::add_line_v()", "x", x);
+        assert_finite_f32("DrawListMut::add_line_v()", "min_y", min_y);
+        assert_finite_f32("DrawListMut::add_line_v()", "max_y", max_y);
+        assert_positive_f32("DrawListMut::add_line_v()", "thickness", thickness);
+
+        unsafe {
+            sys::ImDrawList_AddLineV(
+                self.draw_list,
+                x,
+                min_y,
+                max_y,
+                col.into().into(),
+                thickness,
+            )
+        }
+    }
+
     /// Returns a rectangle whose upper-left corner is at point `p1`
     /// and lower-right corner is at point `p2`, with color `c`.
     pub fn add_rect<C>(
@@ -705,7 +751,7 @@ impl<'ui> DrawListMut<'ui> {
         assert_positive_f32("DrawListMut::path_stroke()", "thickness", thickness);
 
         unsafe {
-            // PathStroke is inline: AddPolyline(_Path.Data, _Path.Size, col, flags, thickness); _Path.Size = 0;
+            // PathStroke is inline: AddPolyline(_Path.Data, _Path.Size, col, thickness, flags); _Path.Size = 0;
             let draw_list = self.draw_list;
             let path = &mut (*draw_list)._Path;
 
@@ -715,8 +761,8 @@ impl<'ui> DrawListMut<'ui> {
                     path.Data,
                     path.Size,
                     color.into().into(),
-                    flags.bits() as sys::ImDrawFlags,
                     thickness,
+                    flags.bits() as sys::ImDrawFlags,
                 );
                 path.Size = 0; // Clear path after stroking
             }
@@ -1756,6 +1802,12 @@ mod draw_numeric_tests {
         let fixture = TestDrawList::new();
 
         assert_panics_without_buffer_change(&fixture, |draw_list| {
+            draw_list.add_line_h(f32::NAN, 1.0, 0.0, ImColor32::WHITE, 1.0);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            draw_list.add_line_v(0.0, 0.0, 1.0, ImColor32::WHITE, 0.0);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
             draw_list.add_quad(
                 [f32::NAN, 0.0],
                 [1.0, 0.0],
@@ -2256,8 +2308,8 @@ impl<'ui> Rect<'ui> {
                     p2,
                     self.color.into(),
                     self.rounding,
-                    self.flags.bits() as sys::ImDrawFlags,
                     self.thickness,
+                    self.flags.bits() as sys::ImDrawFlags,
                 )
             }
         }
@@ -2506,8 +2558,8 @@ impl<'ui> Polyline<'ui> {
                     self.points.as_ptr(),
                     count,
                     self.color.into(),
-                    self.flags.bits() as sys::ImDrawFlags,
                     self.thickness,
+                    self.flags.bits() as sys::ImDrawFlags,
                 )
             }
         }
