@@ -191,6 +191,16 @@ pub struct DrawListMut<'ui> {
     _phantom: PhantomData<&'ui crate::Ui>,
 }
 
+struct ChannelsSplitMergeGuard<'ui> {
+    draw_list: &'ui DrawListMut<'ui>,
+}
+
+impl Drop for ChannelsSplitMergeGuard<'_> {
+    fn drop(&mut self) {
+        unsafe { sys::ImDrawList_ChannelsMerge(self.draw_list.draw_list) };
+    }
+}
+
 impl Drop for DrawListMut<'_> {
     fn drop(&mut self) {
         let ptr = self.draw_list as usize;
@@ -247,12 +257,16 @@ impl<'ui> DrawListMut<'ui> {
     /// Split draw into multiple channels and merge automatically at the end of the closure.
     #[doc(alias = "ChannelsSplit")]
     pub fn channels_split<F: FnOnce(&ChannelsSplit<'ui>)>(&'ui self, channels_count: u32, f: F) {
-        unsafe { sys::ImDrawList_ChannelsSplit(self.draw_list, channels_count as i32) };
+        assert!(channels_count > 0, "channels_count must be greater than 0");
+        let channels_count_i32 =
+            i32::try_from(channels_count).expect("channels_count exceeded ImGui's i32 range");
+
+        unsafe { sys::ImDrawList_ChannelsSplit(self.draw_list, channels_count_i32) };
+        let _merge_guard = ChannelsSplitMergeGuard { draw_list: self };
         f(&ChannelsSplit {
             draw_list: self,
             channels_count,
         });
-        unsafe { sys::ImDrawList_ChannelsMerge(self.draw_list) };
     }
     /// Returns a line from point `p1` to `p2` with color `c`.
     pub fn add_line<C>(
@@ -1283,6 +1297,74 @@ mod callback_tests {
         };
         let cmd_copy = unsafe { *cmd_ptr };
         unsafe { cmd_copy.UserCallback.unwrap()(draw_list.draw_list as *const _, cmd_ptr) }
+
+        unsafe {
+            sys::ImDrawList_destroy(raw_draw_list);
+            sys::ImDrawListSharedData_destroy(shared);
+        }
+    }
+}
+
+#[cfg(test)]
+mod channels_tests {
+    use super::*;
+
+    #[test]
+    fn channels_split_merges_after_panic() {
+        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
+        assert!(!shared.is_null());
+        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
+        assert!(!raw_draw_list.is_null());
+
+        unsafe { sys::ImDrawList_AddDrawCmd(raw_draw_list) };
+
+        let draw_list = DrawListMut {
+            draw_list: raw_draw_list,
+            _phantom: PhantomData,
+        };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.channels_split(2, |channels| {
+                channels.set_current(1);
+                panic!("forced panic while channels are split");
+            });
+        }));
+
+        assert!(result.is_err());
+        unsafe {
+            assert_eq!((*raw_draw_list)._Splitter._Count, 1);
+            assert_eq!((*raw_draw_list)._Splitter._Current, 0);
+        }
+
+        unsafe {
+            sys::ImDrawList_destroy(raw_draw_list);
+            sys::ImDrawListSharedData_destroy(shared);
+        }
+    }
+
+    #[test]
+    fn channels_split_rejects_zero_channels() {
+        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
+        assert!(!shared.is_null());
+        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
+        assert!(!raw_draw_list.is_null());
+
+        let draw_list = DrawListMut {
+            draw_list: raw_draw_list,
+            _phantom: PhantomData,
+        };
+        let initial_count = unsafe { (*raw_draw_list)._Splitter._Count };
+        let initial_current = unsafe { (*raw_draw_list)._Splitter._Current };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.channels_split(0, |_| {});
+        }));
+
+        assert!(result.is_err());
+        unsafe {
+            assert_eq!((*raw_draw_list)._Splitter._Count, initial_count);
+            assert_eq!((*raw_draw_list)._Splitter._Current, initial_current);
+        }
 
         unsafe {
             sys::ImDrawList_destroy(raw_draw_list);
