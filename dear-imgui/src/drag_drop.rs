@@ -50,6 +50,31 @@ pub enum DragDropPayloadCond {
 }
 use std::{any, ffi};
 
+const MAX_PAYLOAD_TYPE_LEN: usize = 32;
+
+fn validate_payload_type_name(name: &str, caller: &str) {
+    assert!(
+        name.len() <= MAX_PAYLOAD_TYPE_LEN,
+        "{caller} payload type name must be at most {MAX_PAYLOAD_TYPE_LEN} bytes"
+    );
+}
+
+fn validate_payload_data(ptr: *const ffi::c_void, size: usize, caller: &str) {
+    assert!(
+        size <= i32::MAX as usize,
+        "{caller} payload size exceeds Dear ImGui's i32 payload range"
+    );
+    assert!(
+        (size == 0 && ptr.is_null()) || (size > 0 && !ptr.is_null()),
+        "{caller} payload pointer and size must both be empty or both be non-empty"
+    );
+}
+
+fn validate_payload_submission(name: &str, ptr: *const ffi::c_void, size: usize, caller: &str) {
+    validate_payload_type_name(name, caller);
+    validate_payload_data(ptr, size, caller);
+}
+
 bitflags::bitflags! {
     /// Flags for drag and drop operations
     #[repr(transparent)]
@@ -155,18 +180,7 @@ impl Ui {
             if ptr.is_null() {
                 return None;
             }
-            let inner = *ptr;
-            let size = if inner.DataSize <= 0 || inner.Data.is_null() {
-                0
-            } else {
-                inner.DataSize as usize
-            };
-            Some(DragDropPayload {
-                data: inner.Data,
-                size,
-                preview: inner.Preview,
-                delivery: inner.Delivery,
-            })
+            Some(DragDropPayload::from_raw(*ptr))
         }
     }
 }
@@ -230,11 +244,14 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
         payload: P,
     ) -> Option<DragDropSourceTooltip<'ui>> {
         unsafe {
+            let payload_size = std::mem::size_of::<TypedPayload<P>>();
+            assert!(
+                payload_size <= i32::MAX as usize,
+                "DragDropSource::begin_payload() payload size exceeds Dear ImGui's i32 payload range"
+            );
+
             let payload = make_typed_payload(payload);
-            self.begin_payload_unchecked(
-                &payload as *const _ as *const ffi::c_void,
-                std::mem::size_of::<TypedPayload<P>>(),
-            )
+            self.begin_payload_unchecked(&payload as *const _ as *const ffi::c_void, payload_size)
         }
     }
 
@@ -254,12 +271,18 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
         ptr: *const ffi::c_void,
         size: usize,
     ) -> Option<DragDropSourceTooltip<'ui>> {
+        validate_payload_submission(
+            self.name.as_ref(),
+            ptr,
+            size,
+            "DragDropSource::begin_payload_unchecked()",
+        );
         unsafe {
             let should_begin = sys::igBeginDragDropSource(self.flags.bits() as i32);
 
             if should_begin {
                 sys::igSetDragDropPayload(
-                    self.ui.scratch_txt(&self.name),
+                    self.ui.scratch_txt(self.name.as_ref()),
                     ptr,
                     size,
                     self.cond as i32,
@@ -352,25 +375,7 @@ impl<'ui> DragDropTarget<'ui> {
     ) -> Option<Result<DragDropPayloadPod<T>, PayloadIsWrongType>> {
         let output = unsafe { self.accept_payload_unchecked(name, flags) };
 
-        output.map(|payload| {
-            if payload.data.is_null() || payload.size < std::mem::size_of::<TypedPayload<T>>() {
-                return Err(PayloadIsWrongType);
-            }
-
-            // Dear ImGui stores payload data in an unaligned byte buffer, so always read unaligned.
-            let typed_payload: TypedPayload<T> =
-                unsafe { std::ptr::read_unaligned(payload.data as *const TypedPayload<T>) };
-
-            if typed_payload.type_id == any::TypeId::of::<T>() {
-                Ok(DragDropPayloadPod {
-                    data: typed_payload.data,
-                    preview: payload.preview,
-                    delivery: payload.delivery,
-                })
-            } else {
-                Err(PayloadIsWrongType)
-            }
-        })
+        output.map(decode_typed_payload)
     }
 
     /// Accept raw payload data (unsafe)
@@ -388,24 +393,14 @@ impl<'ui> DragDropTarget<'ui> {
         name: impl AsRef<str>,
         flags: DragDropFlags,
     ) -> Option<DragDropPayload> {
+        validate_payload_type_name(name.as_ref(), "DragDropTarget::accept_payload_unchecked()");
         let inner =
             unsafe { sys::igAcceptDragDropPayload(self.0.scratch_txt(name), flags.bits() as i32) };
 
         if inner.is_null() {
             None
         } else {
-            let inner = unsafe { *inner };
-            let size = if inner.DataSize <= 0 || inner.Data.is_null() {
-                0
-            } else {
-                inner.DataSize as usize
-            };
-            Some(DragDropPayload {
-                data: inner.Data,
-                size,
-                preview: inner.Preview,
-                delivery: inner.Delivery,
-            })
+            Some(DragDropPayload::from_raw(unsafe { *inner }))
         }
     }
 
@@ -483,6 +478,23 @@ pub struct DragDropPayload {
     pub delivery: bool,
 }
 
+impl DragDropPayload {
+    fn from_raw(inner: sys::ImGuiPayload) -> Self {
+        let size = if inner.DataSize <= 0 || inner.Data.is_null() {
+            0
+        } else {
+            inner.DataSize as usize
+        };
+
+        Self {
+            data: inner.Data,
+            size,
+            preview: inner.Preview,
+            delivery: inner.Delivery,
+        }
+    }
+}
+
 /// Error type for payload type mismatches
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PayloadIsWrongType;
@@ -494,6 +506,28 @@ impl std::fmt::Display for PayloadIsWrongType {
 }
 
 impl std::error::Error for PayloadIsWrongType {}
+
+fn decode_typed_payload<T: 'static + Copy>(
+    payload: DragDropPayload,
+) -> Result<DragDropPayloadPod<T>, PayloadIsWrongType> {
+    if payload.data.is_null() || payload.size != std::mem::size_of::<TypedPayload<T>>() {
+        return Err(PayloadIsWrongType);
+    }
+
+    // Dear ImGui stores payload data in an unaligned byte buffer, so always read unaligned.
+    let typed_payload: TypedPayload<T> =
+        unsafe { std::ptr::read_unaligned(payload.data as *const TypedPayload<T>) };
+
+    if typed_payload.type_id == any::TypeId::of::<T>() {
+        Ok(DragDropPayloadPod {
+            data: typed_payload.data,
+            preview: payload.preview,
+            delivery: payload.delivery,
+        })
+    } else {
+        Err(PayloadIsWrongType)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -529,5 +563,63 @@ mod tests {
         let decoded = unsafe { std::ptr::read_unaligned(ptr) };
         assert_eq!(decoded.type_id, any::TypeId::of::<u8>());
         assert_eq!(decoded.data, 7u8);
+    }
+
+    #[test]
+    fn payload_submission_rejects_imgui_assert_conditions_before_ffi() {
+        let byte = 1u8;
+        let ptr = std::ptr::from_ref(&byte).cast::<ffi::c_void>();
+        let long_name = "x".repeat(MAX_PAYLOAD_TYPE_LEN + 1);
+
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_payload_submission(
+                    &long_name,
+                    ptr,
+                    1,
+                    "payload_submission_rejects_imgui_assert_conditions_before_ffi",
+                );
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_payload_submission(
+                    "payload",
+                    std::ptr::null(),
+                    1,
+                    "payload_submission_rejects_imgui_assert_conditions_before_ffi",
+                );
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_payload_submission(
+                    "payload",
+                    ptr,
+                    0,
+                    "payload_submission_rejects_imgui_assert_conditions_before_ffi",
+                );
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn typed_accept_rejects_trailing_payload_bytes() {
+        let bytes = payload_bytes(7u8);
+        let mut buf = bytes.clone();
+        buf.push(0);
+
+        let payload = DragDropPayload {
+            data: buf.as_ptr().cast::<ffi::c_void>(),
+            size: buf.len(),
+            preview: false,
+            delivery: false,
+        };
+
+        assert_ne!(payload.size, std::mem::size_of::<TypedPayload<u8>>());
+        assert!(decode_typed_payload::<u8>(payload).is_err());
     }
 }
