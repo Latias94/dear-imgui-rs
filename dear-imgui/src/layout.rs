@@ -23,6 +23,17 @@
 use crate::Ui;
 use crate::sys;
 
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
 create_token!(
     /// Tracks a layout group that can be ended with `end` or by dropping.
     pub struct GroupToken<'ui>;
@@ -95,6 +106,8 @@ impl Ui {
     /// X position is given in window coordinates.
     #[doc(alias = "SameLine")]
     pub fn same_line_with_spacing(&self, pos_x: f32, spacing_w: f32) {
+        assert_finite_f32("Ui::same_line_with_spacing()", "pos_x", pos_x);
+        assert_finite_f32("Ui::same_line_with_spacing()", "spacing_w", spacing_w);
         unsafe { sys::igSameLine(pos_x, spacing_w) }
     }
 
@@ -115,7 +128,9 @@ impl Ui {
     /// Can be used to move the cursor on the window.
     #[doc(alias = "Dummy")]
     pub fn dummy(&self, size: impl Into<[f32; 2]>) {
-        let size_vec: sys::ImVec2 = size.into().into();
+        let size = size.into();
+        assert_finite_vec2("Ui::dummy()", "size", size);
+        let size_vec: sys::ImVec2 = size.into();
         unsafe { sys::igDummy(size_vec) }
     }
 
@@ -131,6 +146,7 @@ impl Ui {
     /// Moves content position to the right by `width`
     #[doc(alias = "Indent")]
     pub fn indent_by(&self, width: f32) {
+        assert_finite_f32("Ui::indent_by()", "width", width);
         unsafe { sys::igIndent(width) };
     }
 
@@ -146,6 +162,7 @@ impl Ui {
     /// Moves content position to the left by `width`
     #[doc(alias = "Unindent")]
     pub fn unindent_by(&self, width: f32) {
+        assert_finite_f32("Ui::unindent_by()", "width", width);
         unsafe { sys::igUnindent(width) };
     }
 
@@ -187,6 +204,7 @@ impl Ui {
     #[doc(alias = "SetCursorPos")]
     pub fn set_cursor_pos(&self, pos: impl Into<[f32; 2]>) {
         let pos_array = pos.into();
+        assert_finite_vec2("Ui::set_cursor_pos()", "position", pos_array);
         let pos_vec = sys::ImVec2 {
             x: pos_array[0],
             y: pos_array[1],
@@ -198,6 +216,7 @@ impl Ui {
     #[doc(alias = "SetCursorScreenPos")]
     pub fn set_cursor_screen_pos(&self, pos: impl Into<[f32; 2]>) {
         let pos_array = pos.into();
+        assert_finite_vec2("Ui::set_cursor_screen_pos()", "position", pos_array);
         let pos_vec = sys::ImVec2 {
             x: pos_array[0],
             y: pos_array[1],
@@ -220,12 +239,14 @@ impl Ui {
     /// Sets the X cursor position (in window coordinates)
     #[doc(alias = "SetCursorPosX")]
     pub fn set_cursor_pos_x(&self, x: f32) {
+        assert_finite_f32("Ui::set_cursor_pos_x()", "x", x);
         unsafe { sys::igSetCursorPosX(x) };
     }
 
     /// Sets the Y cursor position (in window coordinates)
     #[doc(alias = "SetCursorPosY")]
     pub fn set_cursor_pos_y(&self, y: f32) {
+        assert_finite_f32("Ui::set_cursor_pos_y()", "y", y);
         unsafe { sys::igSetCursorPosY(y) };
     }
 
@@ -276,6 +297,8 @@ impl Ui {
     ) {
         let min = min.into();
         let max = max.into();
+        assert_finite_vec2("Ui::push_clip_rect()", "min", min);
+        assert_finite_vec2("Ui::push_clip_rect()", "max", max);
         let min_v = sys::ImVec2 {
             x: min[0],
             y: min[1],
@@ -315,6 +338,8 @@ impl Ui {
     ) -> bool {
         let mn = rect_min.into();
         let mx = rect_max.into();
+        assert_finite_vec2("Ui::is_rect_visible_min_max()", "rect_min", mn);
+        assert_finite_vec2("Ui::is_rect_visible_min_max()", "rect_max", mx);
         let mn_v = sys::ImVec2 { x: mn[0], y: mn[1] };
         let mx_v = sys::ImVec2 { x: mx[0], y: mx[1] };
         unsafe { sys::igIsRectVisible_Vec2(mn_v, mx_v) }
@@ -324,6 +349,7 @@ impl Ui {
     #[doc(alias = "IsRectVisible")]
     pub fn is_rect_visible_with_size(&self, size: impl Into<[f32; 2]>) -> bool {
         let s = size.into();
+        assert_finite_vec2("Ui::is_rect_visible_with_size()", "size", s);
         let v = sys::ImVec2 { x: s[0], y: s[1] };
         unsafe { sys::igIsRectVisible_Nil(v) }
     }

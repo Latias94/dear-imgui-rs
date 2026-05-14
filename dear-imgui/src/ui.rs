@@ -29,6 +29,17 @@ pub struct Ui {
 }
 
 impl Ui {
+    fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+        assert!(value.is_finite(), "{caller} {name} must be finite");
+    }
+
+    fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+        assert!(
+            value[0].is_finite() && value[1].is_finite(),
+            "{caller} {name} must contain finite values"
+        );
+    }
+
     /// Returns a reference to the main Dear ImGui viewport (safe wrapper)
     ///
     /// Same viewport used by `dockspace_over_main_viewport()`.
@@ -422,6 +433,7 @@ impl Ui {
     /// Sets the position of the current window with a condition.
     #[doc(alias = "SetWindowPos")]
     pub fn set_window_pos_with_cond(&self, pos: [f32; 2], cond: crate::Condition) {
+        Self::assert_finite_vec2("Ui::set_window_pos_with_cond()", "position", pos);
         let pos_vec = sys::ImVec2_c {
             x: pos[0],
             y: pos[1],
@@ -443,6 +455,7 @@ impl Ui {
         pos: [f32; 2],
         cond: crate::Condition,
     ) {
+        Self::assert_finite_vec2("Ui::set_window_pos_by_name_with_cond()", "position", pos);
         let pos_vec = sys::ImVec2_c {
             x: pos[0],
             y: pos[1],
@@ -459,6 +472,7 @@ impl Ui {
     /// Sets the size of the current window with a condition.
     #[doc(alias = "SetWindowSize")]
     pub fn set_window_size_with_cond(&self, size: [f32; 2], cond: crate::Condition) {
+        Self::assert_finite_vec2("Ui::set_window_size_with_cond()", "size", size);
         let size_vec = sys::ImVec2_c {
             x: size[0],
             y: size[1],
@@ -480,6 +494,7 @@ impl Ui {
         size: [f32; 2],
         cond: crate::Condition,
     ) {
+        Self::assert_finite_vec2("Ui::set_window_size_by_name_with_cond()", "size", size);
         let size_vec = sys::ImVec2_c {
             x: size[0],
             y: size[1],
@@ -545,6 +560,7 @@ impl Ui {
     /// Set to 0.0 for default width, >0.0 for explicit width, <0.0 for relative width.
     #[doc(alias = "SetNextItemWidth")]
     pub fn set_next_item_width(&self, item_width: f32) {
+        Self::assert_finite_f32("Ui::set_next_item_width()", "item_width", item_width);
         unsafe {
             sys::igSetNextItemWidth(item_width);
         }
