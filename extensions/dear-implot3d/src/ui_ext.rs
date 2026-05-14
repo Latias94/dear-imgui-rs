@@ -8,7 +8,7 @@ pub trait ImPlot3DExt {
 
 impl ImPlot3DExt for Ui {
     fn implot3d<'ui>(&'ui self) -> Plot3DUi<'ui> {
-        Plot3DUi { _ui: self }
+        Plot3DUi::from_current(self)
     }
 }
 

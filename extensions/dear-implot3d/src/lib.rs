@@ -361,6 +361,15 @@ impl Plot3DContext {
 
     /// Set this context as the current ImPlot3D context.
     pub fn set_as_current(&self) {
+        assert!(
+            self.imgui_alive.is_alive(),
+            "dear-implot3d: ImGui context has been dropped"
+        );
+        assert_eq!(
+            unsafe { imgui_sys::igGetCurrentContext() },
+            self.imgui_ctx_raw,
+            "dear-implot3d: Plot3DContext must be used with the currently-active ImGui context"
+        );
         unsafe {
             sys::ImPlot3D_SetCurrentContext(self.raw);
         }
@@ -379,7 +388,15 @@ impl Plot3DContext {
     /// Call this once per frame to get access to plotting functions.
     /// The returned `Plot3DUi` is tied to the lifetime of the `Ui` frame.
     pub fn get_plot_ui<'ui>(&self, ui: &'ui Ui) -> Plot3DUi<'ui> {
-        Plot3DUi { _ui: ui }
+        self.set_as_current();
+        Plot3DUi {
+            _ui: ui,
+            binding: Plot3DContextBinding {
+                plot_ctx_raw: self.raw,
+                imgui_ctx_raw: self.imgui_ctx_raw,
+            },
+            imgui_alive: Some(self.imgui_alive.clone()),
+        }
     }
 }
 
@@ -431,15 +448,76 @@ impl Drop for Plot3DContext {
 /// ```
 pub struct Plot3DUi<'ui> {
     _ui: &'ui Ui,
+    binding: Plot3DContextBinding,
+    imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
+}
+
+#[derive(Clone, Copy)]
+struct Plot3DContextBinding {
+    plot_ctx_raw: *mut sys::ImPlot3DContext,
+    imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+}
+
+impl Plot3DContextBinding {
+    fn bind(self) {
+        assert!(
+            !self.imgui_ctx_raw.is_null(),
+            "dear-implot3d: Plot3DUi requires an active ImGui context"
+        );
+        assert!(
+            !self.plot_ctx_raw.is_null(),
+            "dear-implot3d: Plot3DUi requires an active ImPlot3D context"
+        );
+        assert_eq!(
+            unsafe { imgui_sys::igGetCurrentContext() },
+            self.imgui_ctx_raw,
+            "dear-implot3d: Plot3DUi must be used with the currently-active ImGui context"
+        );
+        unsafe { sys::ImPlot3D_SetCurrentContext(self.plot_ctx_raw) };
+    }
 }
 
 /// RAII token that ends the plot on drop
 ///
 /// This token is returned by `Plot3DBuilder::build()` and automatically calls
 /// `ImPlot3D_EndPlot()` when it goes out of scope, ensuring proper cleanup.
-pub struct Plot3DToken;
+pub struct Plot3DToken {
+    binding: Plot3DContextBinding,
+    imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
+}
 
 impl<'ui> Plot3DUi<'ui> {
+    pub(crate) fn from_current(ui: &'ui Ui) -> Self {
+        let imgui_ctx_raw = unsafe { imgui_sys::igGetCurrentContext() };
+        assert!(
+            !imgui_ctx_raw.is_null(),
+            "dear-implot3d: Plot3DUi requires an active ImGui context"
+        );
+        let plot_ctx_raw = unsafe { sys::ImPlot3D_GetCurrentContext() };
+        assert!(
+            !plot_ctx_raw.is_null(),
+            "dear-implot3d: Plot3DUi requires an active ImPlot3D context"
+        );
+        Self {
+            _ui: ui,
+            binding: Plot3DContextBinding {
+                plot_ctx_raw,
+                imgui_ctx_raw,
+            },
+            imgui_alive: None,
+        }
+    }
+
+    fn bind(&self) {
+        if let Some(alive) = &self.imgui_alive {
+            assert!(
+                alive.is_alive(),
+                "dear-implot3d: ImGui context has been dropped"
+            );
+        }
+        self.binding.bind();
+    }
+
     /// Builder to configure and begin a 3D plot
     ///
     /// Returns a `Plot3DBuilder` that allows you to configure the plot before calling `.build()`.
@@ -460,7 +538,10 @@ impl<'ui> Plot3DUi<'ui> {
     /// }
     /// ```
     pub fn begin_plot<S: AsRef<str>>(&self, title: S) -> Plot3DBuilder {
+        self.bind();
         Plot3DBuilder {
+            binding: self.binding,
+            imgui_alive: self.imgui_alive.clone(),
             title: title.as_ref().into(),
             size: None,
             flags: Plot3DFlags::empty(),
@@ -499,6 +580,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Line3DFlags,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -534,6 +616,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -571,6 +654,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Line3DFlags,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -606,6 +690,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -643,6 +728,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Scatter3DFlags,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -678,6 +764,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -715,6 +802,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Scatter3DFlags,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -750,6 +838,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -787,6 +876,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Triangle3DFlags,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -821,6 +911,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -858,6 +949,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Quad3DFlags,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -892,6 +984,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -929,6 +1022,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Triangle3DFlags,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -963,6 +1057,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -1000,6 +1095,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Quad3DFlags,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -1034,6 +1130,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -1065,6 +1162,13 @@ impl<'ui> Plot3DUi<'ui> {
 
 impl Drop for Plot3DToken {
     fn drop(&mut self) {
+        if let Some(alive) = &self.imgui_alive {
+            assert!(
+                alive.is_alive(),
+                "dear-implot3d: ImGui context has been dropped"
+            );
+        }
+        self.binding.bind();
         unsafe {
             debug_end_plot();
             sys::ImPlot3D_EndPlot();
@@ -1074,6 +1178,8 @@ impl Drop for Plot3DToken {
 
 /// Plot builder for configuring the 3D plot
 pub struct Plot3DBuilder {
+    binding: Plot3DContextBinding,
+    imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
     title: String,
     size: Option<[f32; 2]>,
     flags: Plot3DFlags,
@@ -1089,6 +1195,13 @@ impl Plot3DBuilder {
         self
     }
     pub fn build(self) -> Option<Plot3DToken> {
+        if let Some(alive) = &self.imgui_alive {
+            assert!(
+                alive.is_alive(),
+                "dear-implot3d: ImGui context has been dropped"
+            );
+        }
+        self.binding.bind();
         if self.title.contains('\0') {
             return None;
         }
@@ -1111,7 +1224,10 @@ impl Plot3DBuilder {
         });
         if ok {
             debug_begin_plot();
-            Some(Plot3DToken)
+            Some(Plot3DToken {
+                binding: self.binding,
+                imgui_alive: self.imgui_alive,
+            })
         } else {
             None
         }
@@ -1226,6 +1342,7 @@ impl<'ui> Surface3DBuilder<'ui> {
         self
     }
     pub fn plot(self) {
+        self._ui.bind();
         let x_count = match i32::try_from(self.xs.len()) {
             Ok(v) => v,
             Err(_) => return,
@@ -1278,6 +1395,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &'ui [f32],
         zs: &'ui [f32],
     ) -> Surface3DBuilder<'ui> {
+        self.bind();
         Surface3DBuilder {
             _ui: self,
             label: label.into(),
@@ -1305,6 +1423,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         debug_before_plot();
         let x_count = xs.len();
         let y_count = ys.len();
@@ -1370,6 +1489,7 @@ impl<'ui> Plot3DUi<'ui> {
         offset: i32,
         stride: i32,
     ) {
+        self.bind();
         debug_before_plot();
         if x_count <= 0 || y_count <= 0 {
             return;
@@ -1435,6 +1555,7 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
         self
     }
     pub fn plot(self) {
+        self._ui.bind();
         let label = self.label.as_ref();
         let label = if label.contains('\0') { "image" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
@@ -1508,6 +1629,7 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
         self
     }
     pub fn plot(self) {
+        self._ui.bind();
         let label = self.label.as_ref();
         let label = if label.contains('\0') { "image" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
@@ -1562,6 +1684,7 @@ impl<'ui> Plot3DUi<'ui> {
         axis_u: [f32; 3],
         axis_v: [f32; 3],
     ) -> Image3DByAxesBuilder<'ui> {
+        self.bind();
         let tr = tex.into().raw();
         let tex_ref = sys::ImTextureRef_c {
             _TexData: tr._TexData as *mut sys::ImTextureData,
@@ -1594,6 +1717,7 @@ impl<'ui> Plot3DUi<'ui> {
         p2: [f32; 3],
         p3: [f32; 3],
     ) -> Image3DByCornersBuilder<'ui> {
+        self.bind();
         let tr = tex.into().raw();
         let tex_ref = sys::ImTextureRef_c {
             _TexData: tr._TexData as *mut sys::ImTextureData,
@@ -1631,6 +1755,7 @@ impl<'ui> Plot3DUi<'ui> {
         y_flags: Axis3DFlags,
         z_flags: Axis3DFlags,
     ) {
+        self.bind();
         debug_before_setup();
         if x_label.contains('\0') || y_label.contains('\0') || z_label.contains('\0') {
             return;
@@ -1653,6 +1778,7 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn setup_axis(&self, axis: Axis3D, label: &str, flags: Axis3DFlags) {
+        self.bind();
         debug_before_setup();
         if label.contains('\0') {
             return;
@@ -1663,6 +1789,7 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn setup_axis_limits(&self, axis: Axis3D, min: f64, max: f64, cond: Plot3DCond) {
+        self.bind();
         debug_before_setup();
         unsafe { sys::ImPlot3D_SetupAxisLimits(axis as i32, min, max, cond as i32) }
     }
@@ -1677,6 +1804,7 @@ impl<'ui> Plot3DUi<'ui> {
         z_max: f64,
         cond: Plot3DCond,
     ) {
+        self.bind();
         debug_before_setup();
         unsafe {
             sys::ImPlot3D_SetupAxesLimits(x_min, x_max, y_min, y_max, z_min, z_max, cond as i32)
@@ -1684,11 +1812,13 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn setup_axis_limits_constraints(&self, axis: Axis3D, v_min: f64, v_max: f64) {
+        self.bind();
         debug_before_setup();
         unsafe { sys::ImPlot3D_SetupAxisLimitsConstraints(axis as i32, v_min, v_max) }
     }
 
     pub fn setup_axis_zoom_constraints(&self, axis: Axis3D, z_min: f64, z_max: f64) {
+        self.bind();
         debug_before_setup();
         unsafe { sys::ImPlot3D_SetupAxisZoomConstraints(axis as i32, z_min, z_max) }
     }
@@ -1703,6 +1833,7 @@ impl<'ui> Plot3DUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        self.bind();
         debug_before_setup();
         let Some(n_ticks) = len_i32(values.len()) else {
             return;
@@ -1746,6 +1877,7 @@ impl<'ui> Plot3DUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        self.bind();
         debug_before_setup();
         if let Some(lbls) = labels {
             let cleaned: Vec<&str> = lbls
@@ -1777,6 +1909,7 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn setup_box_scale(&self, x: f32, y: f32, z: f32) {
+        self.bind();
         debug_before_setup();
         unsafe { sys::ImPlot3D_SetupBoxScale(x as f64, y as f64, z as f64) }
     }
@@ -1788,6 +1921,7 @@ impl<'ui> Plot3DUi<'ui> {
         animate: bool,
         cond: Plot3DCond,
     ) {
+        self.bind();
         debug_before_setup();
         unsafe {
             sys::ImPlot3D_SetupBoxRotation_double(
@@ -1800,11 +1934,13 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn setup_box_initial_rotation(&self, elevation: f32, azimuth: f32) {
+        self.bind();
         debug_before_setup();
         unsafe { sys::ImPlot3D_SetupBoxInitialRotation_double(elevation as f64, azimuth as f64) }
     }
 
     pub fn plot_text(&self, text: &str, x: f32, y: f32, z: f32, angle: f32, pix_offset: [f32; 2]) {
+        self.bind();
         if text.contains('\0') {
             return;
         }
@@ -1822,6 +1958,7 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn plot_to_pixels(&self, point: [f32; 3]) -> [f32; 2] {
+        self.bind();
         unsafe {
             let out = compat_ffi::ImPlot3D_PlotToPixels_double(
                 point[0] as f64,
@@ -1833,10 +1970,12 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn get_plot_draw_list(&self) -> *mut sys::ImDrawList {
+        self.bind();
         unsafe { sys::ImPlot3D_GetPlotDrawList() }
     }
 
     pub fn get_frame_pos(&self) -> [f32; 2] {
+        self.bind();
         unsafe {
             let out = compat_ffi::ImPlot3D_GetPlotRectPos();
             [out.x, out.y]
@@ -1844,6 +1983,7 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn get_frame_size(&self) -> [f32; 2] {
+        self.bind();
         unsafe {
             let out = compat_ffi::ImPlot3D_GetPlotRectSize();
             [out.x, out.y]
@@ -1868,6 +2008,7 @@ impl<'ui> Mesh3DBuilder<'ui> {
         self
     }
     pub fn plot(self) {
+        self._ui.bind();
         let Some(vtx_count) = len_i32(self.vertices.len()) else {
             return;
         };
@@ -1915,6 +2056,7 @@ impl<'ui> Plot3DUi<'ui> {
         vertices: &'ui [[f32; 3]],
         indices: &'ui [u32],
     ) -> Mesh3DBuilder<'ui> {
+        self.bind();
         Mesh3DBuilder {
             _ui: self,
             label: label.into(),
@@ -1929,12 +2071,80 @@ impl<'ui> Plot3DUi<'ui> {
 
 #[cfg(test)]
 mod tests {
-    use super::sys;
+    use super::{Context, Plot3DContext, Plot3DContextBinding, sys};
     use std::mem::{align_of, size_of};
+    use std::sync::{Mutex, OnceLock};
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn ffi_layout_implot3d_point_is_3_f64() {
         assert_eq!(size_of::<sys::ImPlot3DPoint>(), 3 * size_of::<f64>());
         assert_eq!(align_of::<sys::ImPlot3DPoint>(), align_of::<f64>());
+    }
+
+    #[test]
+    fn plot3d_ui_binds_own_context() {
+        let _guard = test_guard();
+        let imgui = Context::create();
+        let plot_a = Plot3DContext::create(&imgui);
+        let raw_a = plot_a.raw;
+        let plot_b = Plot3DContext::create(&imgui);
+        let raw_b = plot_b.raw;
+
+        unsafe { sys::ImPlot3D_SetCurrentContext(raw_b) };
+
+        Plot3DContextBinding {
+            plot_ctx_raw: plot_a.raw,
+            imgui_ctx_raw: plot_a.imgui_ctx_raw,
+        }
+        .bind();
+
+        assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, raw_a);
+    }
+
+    #[test]
+    fn plot3d_ui_rejects_wrong_imgui_context() {
+        let _guard = test_guard();
+        let imgui_a = Context::create();
+        let plot_a = Plot3DContext::create(&imgui_a);
+        let suspended_a = imgui_a.suspend();
+        let imgui_b = Context::create();
+
+        let previous = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+        struct RestoreCurrentContext(*mut dear_imgui_rs::sys::ImGuiContext);
+        impl Drop for RestoreCurrentContext {
+            fn drop(&mut self) {
+                unsafe { dear_imgui_rs::sys::igSetCurrentContext(self.0) };
+            }
+        }
+        let _restore = RestoreCurrentContext(previous);
+
+        assert_eq!(
+            unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+            imgui_b.as_raw()
+        );
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Plot3DContextBinding {
+                plot_ctx_raw: plot_a.raw,
+                imgui_ctx_raw: plot_a.imgui_ctx_raw,
+            }
+            .bind();
+        }))
+        .expect_err("expected wrong ImGui context to panic");
+
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&'static str>().copied())
+            .unwrap_or("");
+        assert!(message.contains("Plot3DUi must be used with the currently-active ImGui context"));
+        drop(plot_a);
+        drop(_restore);
+        drop(imgui_b);
+        drop(suspended_a);
     }
 }
