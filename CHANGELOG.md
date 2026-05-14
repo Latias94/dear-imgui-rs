@@ -88,6 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     preventing duplicated opaque callback userdata pointers and possible double-free or UAF.
   - Validate draw-list channel split counts and always merge split channels during unwinding,
     keeping safe `DrawListMut::channels_split` calls balanced after panic.
+  - Validate draw-list geometry/text/image inputs and `Font` runtime sizing inputs before
+    they cross FFI, rejecting non-finite coordinates, invalid radii/thickness, unsupported
+    draw flags, empty-path Bezier calls, and wrapped Bezier segment counts.
   - Make multi-select scopes true RAII guards and validate item counts before crossing FFI,
     keeping `BeginMultiSelect`/`EndMultiSelect` balanced when safe render callbacks panic.
   - Add RAII table draw-channel tokens, make table channel closures unwind-safe, and validate

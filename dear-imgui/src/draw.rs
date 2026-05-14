@@ -36,6 +36,103 @@ thread_local! {
 
 // (MintVec2 legacy alias removed; draw APIs now accept Into<sys::ImVec2>)
 
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
+fn assert_positive_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value > 0.0, "{caller} {name} must be positive");
+}
+
+fn assert_non_negative_i32(caller: &str, name: &str, value: i32) {
+    assert!(value >= 0, "{caller} {name} must be non-negative");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: sys::ImVec2) {
+    assert!(
+        value.x.is_finite() && value.y.is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn assert_non_negative_vec2(caller: &str, name: &str, value: sys::ImVec2) {
+    assert_finite_vec2(caller, name, value);
+    assert!(
+        value.x >= 0.0 && value.y >= 0.0,
+        "{caller} {name} must contain non-negative values"
+    );
+}
+
+fn assert_finite_vec4(caller: &str, name: &str, value: sys::ImVec4) {
+    assert!(
+        value.x.is_finite() && value.y.is_finite() && value.z.is_finite() && value.w.is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+fn finite_vec2(caller: &str, name: &str, value: impl Into<sys::ImVec2>) -> sys::ImVec2 {
+    let value = value.into();
+    assert_finite_vec2(caller, name, value);
+    value
+}
+
+fn non_negative_vec2(caller: &str, name: &str, value: impl Into<sys::ImVec2>) -> sys::ImVec2 {
+    let value = value.into();
+    assert_non_negative_vec2(caller, name, value);
+    value
+}
+
+fn finite_vec4(caller: &str, name: &str, value: impl Into<sys::ImVec4>) -> sys::ImVec4 {
+    let value = value.into();
+    assert_finite_vec4(caller, name, value);
+    value
+}
+
+fn assert_path_not_empty(draw_list: *mut sys::ImDrawList, caller: &str) {
+    let path_size = unsafe { (*draw_list)._Path.Size };
+    assert!(
+        path_size > 0,
+        "{caller} requires a current path point; call path_line_to() first"
+    );
+}
+
+fn assert_arc_fast_steps(caller: &str, a_min_of_12: i32, a_max_of_12: i32) {
+    assert!(
+        (0..=12).contains(&a_min_of_12),
+        "{caller} a_min_of_12 must be in 0..=12"
+    );
+    assert!(
+        (0..=12).contains(&a_max_of_12),
+        "{caller} a_max_of_12 must be in 0..=12"
+    );
+}
+
+fn assert_polyline_flags(caller: &str, flags: PolylineFlags) {
+    assert!(
+        flags.difference(PolylineFlags::CLOSED).is_empty(),
+        "{caller} flags contain unsupported ImDrawFlags bits"
+    );
+}
+
+fn assert_corner_flags(caller: &str, flags: DrawCornerFlags) {
+    let supported = sys::ImDrawFlags_RoundCornersMask_ as u32;
+    assert!(
+        flags.bits() & !supported == 0,
+        "{caller} flags contain unsupported ImDrawFlags bits"
+    );
+}
+
+#[cfg(test)]
+fn draw_list_counts(draw_list: *mut sys::ImDrawList) -> (i32, i32) {
+    unsafe { ((*draw_list).VtxBuffer.Size, (*draw_list).IdxBuffer.Size) }
+}
+
 /// Packed RGBA color compatible with imgui-rs
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -351,8 +448,8 @@ impl<'ui> DrawListMut<'ui> {
         C3: Into<ImColor32>,
         C4: Into<ImColor32>,
     {
-        let p_min: sys::ImVec2 = p1.into();
-        let p_max: sys::ImVec2 = p2.into();
+        let p_min = finite_vec2("DrawListMut::add_rect_filled_multicolor()", "p1", p1);
+        let p_max = finite_vec2("DrawListMut::add_rect_filled_multicolor()", "p2", p2);
         let c_ul: u32 = col_upr_left.into().into();
         let c_ur: u32 = col_upr_right.into().into();
         let c_br: u32 = col_bot_right.into().into();
@@ -439,13 +536,15 @@ impl<'ui> DrawListMut<'ui> {
     /// Add a point to the current path.
     #[doc(alias = "PathLineTo")]
     pub fn path_line_to(&self, pos: impl Into<sys::ImVec2>) {
-        unsafe { sys::ImDrawList_PathLineTo(self.draw_list, pos.into()) }
+        let pos = finite_vec2("DrawListMut::path_line_to()", "pos", pos);
+        unsafe { sys::ImDrawList_PathLineTo(self.draw_list, pos) }
     }
 
     /// Add a point to the current path, merging duplicate points.
     #[doc(alias = "PathLineToMergeDuplicate")]
     pub fn path_line_to_merge_duplicate(&self, pos: impl Into<sys::ImVec2>) {
-        unsafe { sys::ImDrawList_PathLineToMergeDuplicate(self.draw_list, pos.into()) }
+        let pos = finite_vec2("DrawListMut::path_line_to_merge_duplicate()", "pos", pos);
+        unsafe { sys::ImDrawList_PathLineToMergeDuplicate(self.draw_list, pos) }
     }
 
     /// Add an arc to the current path.
@@ -458,8 +557,12 @@ impl<'ui> DrawListMut<'ui> {
         a_max: f32,
         num_segments: i32,
     ) {
+        let center_vec = finite_vec2("DrawListMut::path_arc_to()", "center", center);
+        assert_non_negative_f32("DrawListMut::path_arc_to()", "radius", radius);
+        assert_finite_f32("DrawListMut::path_arc_to()", "a_min", a_min);
+        assert_finite_f32("DrawListMut::path_arc_to()", "a_max", a_max);
+
         unsafe {
-            let center_vec: sys::ImVec2 = center.into();
             sys::ImDrawList_PathArcTo(
                 self.draw_list,
                 center_vec,
@@ -480,8 +583,11 @@ impl<'ui> DrawListMut<'ui> {
         a_min_of_12: i32,
         a_max_of_12: i32,
     ) {
+        let center_vec = finite_vec2("DrawListMut::path_arc_to_fast()", "center", center);
+        assert_non_negative_f32("DrawListMut::path_arc_to_fast()", "radius", radius);
+        assert_arc_fast_steps("DrawListMut::path_arc_to_fast()", a_min_of_12, a_max_of_12);
+
         unsafe {
-            let center_vec: sys::ImVec2 = center.into();
             sys::ImDrawList_PathArcToFast(
                 self.draw_list,
                 center_vec,
@@ -501,9 +607,12 @@ impl<'ui> DrawListMut<'ui> {
         rounding: f32,
         flags: DrawCornerFlags,
     ) {
+        let min_vec = finite_vec2("DrawListMut::path_rect()", "rect_min", rect_min);
+        let max_vec = finite_vec2("DrawListMut::path_rect()", "rect_max", rect_max);
+        assert_non_negative_f32("DrawListMut::path_rect()", "rounding", rounding);
+        assert_corner_flags("DrawListMut::path_rect()", flags);
+
         unsafe {
-            let min_vec: sys::ImVec2 = rect_min.into();
-            let max_vec: sys::ImVec2 = rect_max.into();
             sys::ImDrawList_PathRect(
                 self.draw_list,
                 min_vec,
@@ -525,11 +634,17 @@ impl<'ui> DrawListMut<'ui> {
         a_max: f32,
         num_segments: i32,
     ) {
+        let center = finite_vec2("DrawListMut::path_elliptical_arc_to()", "center", center);
+        let radius = non_negative_vec2("DrawListMut::path_elliptical_arc_to()", "radius", radius);
+        assert_finite_f32("DrawListMut::path_elliptical_arc_to()", "rot", rot);
+        assert_finite_f32("DrawListMut::path_elliptical_arc_to()", "a_min", a_min);
+        assert_finite_f32("DrawListMut::path_elliptical_arc_to()", "a_max", a_max);
+
         unsafe {
             sys::ImDrawList_PathEllipticalArcTo(
                 self.draw_list,
-                center.into(),
-                radius.into(),
+                center,
+                radius,
                 rot,
                 a_min,
                 a_max,
@@ -546,14 +661,19 @@ impl<'ui> DrawListMut<'ui> {
         p3: impl Into<sys::ImVec2>,
         num_segments: i32,
     ) {
-        unsafe {
-            sys::ImDrawList_PathBezierQuadraticCurveTo(
-                self.draw_list,
-                p2.into(),
-                p3.into(),
-                num_segments,
-            )
-        }
+        let p2 = finite_vec2("DrawListMut::path_bezier_quadratic_curve_to()", "p2", p2);
+        let p3 = finite_vec2("DrawListMut::path_bezier_quadratic_curve_to()", "p3", p3);
+        assert_non_negative_i32(
+            "DrawListMut::path_bezier_quadratic_curve_to()",
+            "num_segments",
+            num_segments,
+        );
+        assert_path_not_empty(
+            self.draw_list,
+            "DrawListMut::path_bezier_quadratic_curve_to()",
+        );
+
+        unsafe { sys::ImDrawList_PathBezierQuadraticCurveTo(self.draw_list, p2, p3, num_segments) }
     }
 
     /// Add a cubic bezier curve to the current path.
@@ -565,20 +685,25 @@ impl<'ui> DrawListMut<'ui> {
         p4: impl Into<sys::ImVec2>,
         num_segments: i32,
     ) {
-        unsafe {
-            sys::ImDrawList_PathBezierCubicCurveTo(
-                self.draw_list,
-                p2.into(),
-                p3.into(),
-                p4.into(),
-                num_segments,
-            )
-        }
+        let p2 = finite_vec2("DrawListMut::path_bezier_cubic_curve_to()", "p2", p2);
+        let p3 = finite_vec2("DrawListMut::path_bezier_cubic_curve_to()", "p3", p3);
+        let p4 = finite_vec2("DrawListMut::path_bezier_cubic_curve_to()", "p4", p4);
+        assert_non_negative_i32(
+            "DrawListMut::path_bezier_cubic_curve_to()",
+            "num_segments",
+            num_segments,
+        );
+        assert_path_not_empty(self.draw_list, "DrawListMut::path_bezier_cubic_curve_to()");
+
+        unsafe { sys::ImDrawList_PathBezierCubicCurveTo(self.draw_list, p2, p3, p4, num_segments) }
     }
 
     /// Stroke the current path with the specified color and thickness.
     #[doc(alias = "PathStroke")]
     pub fn path_stroke(&self, color: impl Into<ImColor32>, flags: PolylineFlags, thickness: f32) {
+        assert_polyline_flags("DrawListMut::path_stroke()", flags);
+        assert_positive_f32("DrawListMut::path_stroke()", "thickness", thickness);
+
         unsafe {
             // PathStroke is inline: AddPolyline(_Path.Data, _Path.Size, col, flags, thickness); _Path.Size = 0;
             let draw_list = self.draw_list;
@@ -628,7 +753,7 @@ impl<'ui> DrawListMut<'ui> {
         use std::os::raw::c_char;
 
         let text = text.as_ref();
-        let pos: sys::ImVec2 = pos.into();
+        let pos = finite_vec2("DrawListMut::add_text()", "pos", pos);
         let col = col.into();
 
         unsafe {
@@ -654,16 +779,18 @@ impl<'ui> DrawListMut<'ui> {
     ) {
         use std::os::raw::c_char;
         let text = text.as_ref();
-        let pos: sys::ImVec2 = pos.into();
+        let pos = finite_vec2("DrawListMut::add_text_with_font()", "pos", pos);
+        assert_non_negative_f32("DrawListMut::add_text_with_font()", "font_size", font_size);
+        assert_non_negative_f32(
+            "DrawListMut::add_text_with_font()",
+            "wrap_width",
+            wrap_width,
+        );
         let col = col.into();
         let font_ptr = font.raw();
 
-        let clip_vec4 = cpu_fine_clip_rect.map(|r| sys::ImVec4 {
-            x: r[0],
-            y: r[1],
-            z: r[2],
-            w: r[3],
-        });
+        let clip_vec4 = cpu_fine_clip_rect
+            .map(|r| finite_vec4("DrawListMut::add_text_with_font()", "cpu_fine_clip_rect", r));
         let clip_ptr = match clip_vec4.as_ref() {
             Some(v) => v as *const sys::ImVec4,
             None => std::ptr::null(),
@@ -753,11 +880,22 @@ impl<'ui> DrawListMut<'ui> {
         clip_rect_max: impl Into<sys::ImVec2>,
         intersect_with_current: bool,
     ) {
+        let clip_rect_min = finite_vec2(
+            "DrawListMut::push_clip_rect()",
+            "clip_rect_min",
+            clip_rect_min,
+        );
+        let clip_rect_max = finite_vec2(
+            "DrawListMut::push_clip_rect()",
+            "clip_rect_max",
+            clip_rect_max,
+        );
+
         unsafe {
             sys::ImDrawList_PushClipRect(
                 self.draw_list,
-                clip_rect_min.into(),
-                clip_rect_max.into(),
+                clip_rect_min,
+                clip_rect_max,
                 intersect_with_current,
             )
         }
@@ -815,10 +953,10 @@ impl<'ui> DrawListMut<'ui> {
         // Example:
         // let tex = texture::TextureId::new(5);
         // self.add_image(tex, [10.0,10.0], [110.0,110.0], [0.0,0.0], [1.0,1.0], Color::WHITE);
-        let p_min: sys::ImVec2 = p_min.into();
-        let p_max: sys::ImVec2 = p_max.into();
-        let uv_min: sys::ImVec2 = uv_min.into();
-        let uv_max: sys::ImVec2 = uv_max.into();
+        let p_min = finite_vec2("DrawListMut::add_image()", "p_min", p_min);
+        let p_max = finite_vec2("DrawListMut::add_image()", "p_max", p_max);
+        let uv_min = finite_vec2("DrawListMut::add_image()", "uv_min", uv_min);
+        let uv_max = finite_vec2("DrawListMut::add_image()", "uv_max", uv_max);
         let col = col.into().to_bits();
         let tex_ref = texture.into().raw();
         unsafe {
@@ -849,14 +987,14 @@ impl<'ui> DrawListMut<'ui> {
         //     [0.0,0.0], [1.0,0.0], [1.0,1.0], [0.0,1.0],
         //     Color::WHITE,
         // );
-        let p1: sys::ImVec2 = p1.into();
-        let p2: sys::ImVec2 = p2.into();
-        let p3: sys::ImVec2 = p3.into();
-        let p4: sys::ImVec2 = p4.into();
-        let uv1: sys::ImVec2 = uv1.into();
-        let uv2: sys::ImVec2 = uv2.into();
-        let uv3: sys::ImVec2 = uv3.into();
-        let uv4: sys::ImVec2 = uv4.into();
+        let p1 = finite_vec2("DrawListMut::add_image_quad()", "p1", p1);
+        let p2 = finite_vec2("DrawListMut::add_image_quad()", "p2", p2);
+        let p3 = finite_vec2("DrawListMut::add_image_quad()", "p3", p3);
+        let p4 = finite_vec2("DrawListMut::add_image_quad()", "p4", p4);
+        let uv1 = finite_vec2("DrawListMut::add_image_quad()", "uv1", uv1);
+        let uv2 = finite_vec2("DrawListMut::add_image_quad()", "uv2", uv2);
+        let uv3 = finite_vec2("DrawListMut::add_image_quad()", "uv3", uv3);
+        let uv4 = finite_vec2("DrawListMut::add_image_quad()", "uv4", uv4);
         let col = col.into().to_bits();
         let tex_ref = texture.into().raw();
         unsafe {
@@ -899,10 +1037,12 @@ impl<'ui> DrawListMut<'ui> {
         //     8.0,
         //     DrawCornerFlags::ALL,
         // );
-        let p_min: sys::ImVec2 = p_min.into();
-        let p_max: sys::ImVec2 = p_max.into();
-        let uv_min: sys::ImVec2 = uv_min.into();
-        let uv_max: sys::ImVec2 = uv_max.into();
+        let p_min = finite_vec2("DrawListMut::add_image_rounded()", "p_min", p_min);
+        let p_max = finite_vec2("DrawListMut::add_image_rounded()", "p_max", p_max);
+        let uv_min = finite_vec2("DrawListMut::add_image_rounded()", "uv_min", uv_min);
+        let uv_max = finite_vec2("DrawListMut::add_image_rounded()", "uv_max", uv_max);
+        assert_non_negative_f32("DrawListMut::add_image_rounded()", "rounding", rounding);
+        assert_corner_flags("DrawListMut::add_image_rounded()", flags);
         let col = col.into().to_bits();
         let tex_ref = texture.into().raw();
         unsafe {
@@ -933,16 +1073,14 @@ impl<'ui> DrawListMut<'ui> {
     ) where
         C: Into<ImColor32>,
     {
+        let p1 = finite_vec2("DrawListMut::add_quad()", "p1", p1);
+        let p2 = finite_vec2("DrawListMut::add_quad()", "p2", p2);
+        let p3 = finite_vec2("DrawListMut::add_quad()", "p3", p3);
+        let p4 = finite_vec2("DrawListMut::add_quad()", "p4", p4);
+        assert_positive_f32("DrawListMut::add_quad()", "thickness", thickness);
+
         unsafe {
-            sys::ImDrawList_AddQuad(
-                self.draw_list,
-                p1.into(),
-                p2.into(),
-                p3.into(),
-                p4.into(),
-                col.into().into(),
-                thickness,
-            )
+            sys::ImDrawList_AddQuad(self.draw_list, p1, p2, p3, p4, col.into().into(), thickness)
         }
     }
 
@@ -958,16 +1096,12 @@ impl<'ui> DrawListMut<'ui> {
     ) where
         C: Into<ImColor32>,
     {
-        unsafe {
-            sys::ImDrawList_AddQuadFilled(
-                self.draw_list,
-                p1.into(),
-                p2.into(),
-                p3.into(),
-                p4.into(),
-                col.into().into(),
-            )
-        }
+        let p1 = finite_vec2("DrawListMut::add_quad_filled()", "p1", p1);
+        let p2 = finite_vec2("DrawListMut::add_quad_filled()", "p2", p2);
+        let p3 = finite_vec2("DrawListMut::add_quad_filled()", "p3", p3);
+        let p4 = finite_vec2("DrawListMut::add_quad_filled()", "p4", p4);
+
+        unsafe { sys::ImDrawList_AddQuadFilled(self.draw_list, p1, p2, p3, p4, col.into().into()) }
     }
 
     /// Draw a regular n-gon outline.
@@ -982,10 +1116,14 @@ impl<'ui> DrawListMut<'ui> {
     ) where
         C: Into<ImColor32>,
     {
+        let center = finite_vec2("DrawListMut::add_ngon()", "center", center);
+        assert_non_negative_f32("DrawListMut::add_ngon()", "radius", radius);
+        assert_positive_f32("DrawListMut::add_ngon()", "thickness", thickness);
+
         unsafe {
             sys::ImDrawList_AddNgon(
                 self.draw_list,
-                center.into(),
+                center,
                 radius,
                 col.into().into(),
                 num_segments,
@@ -1005,10 +1143,13 @@ impl<'ui> DrawListMut<'ui> {
     ) where
         C: Into<ImColor32>,
     {
+        let center = finite_vec2("DrawListMut::add_ngon_filled()", "center", center);
+        assert_non_negative_f32("DrawListMut::add_ngon_filled()", "radius", radius);
+
         unsafe {
             sys::ImDrawList_AddNgonFilled(
                 self.draw_list,
-                center.into(),
+                center,
                 radius,
                 col.into().into(),
                 num_segments,
@@ -1029,11 +1170,16 @@ impl<'ui> DrawListMut<'ui> {
     ) where
         C: Into<ImColor32>,
     {
+        let center = finite_vec2("DrawListMut::add_ellipse()", "center", center);
+        let radius = non_negative_vec2("DrawListMut::add_ellipse()", "radius", radius);
+        assert_finite_f32("DrawListMut::add_ellipse()", "rot", rot);
+        assert_positive_f32("DrawListMut::add_ellipse()", "thickness", thickness);
+
         unsafe {
             sys::ImDrawList_AddEllipse(
                 self.draw_list,
-                center.into(),
-                radius.into(),
+                center,
+                radius,
                 col.into().into(),
                 rot,
                 num_segments,
@@ -1054,11 +1200,15 @@ impl<'ui> DrawListMut<'ui> {
     ) where
         C: Into<ImColor32>,
     {
+        let center = finite_vec2("DrawListMut::add_ellipse_filled()", "center", center);
+        let radius = non_negative_vec2("DrawListMut::add_ellipse_filled()", "radius", radius);
+        assert_finite_f32("DrawListMut::add_ellipse_filled()", "rot", rot);
+
         unsafe {
             sys::ImDrawList_AddEllipseFilled(
                 self.draw_list,
-                center.into(),
-                radius.into(),
+                center,
+                radius,
                 col.into().into(),
                 rot,
                 num_segments,
@@ -1079,12 +1229,26 @@ impl<'ui> DrawListMut<'ui> {
     ) where
         C: Into<ImColor32>,
     {
+        let p1 = finite_vec2("DrawListMut::add_bezier_quadratic()", "p1", p1);
+        let p2 = finite_vec2("DrawListMut::add_bezier_quadratic()", "p2", p2);
+        let p3 = finite_vec2("DrawListMut::add_bezier_quadratic()", "p3", p3);
+        assert_positive_f32(
+            "DrawListMut::add_bezier_quadratic()",
+            "thickness",
+            thickness,
+        );
+        assert_non_negative_i32(
+            "DrawListMut::add_bezier_quadratic()",
+            "num_segments",
+            num_segments,
+        );
+
         unsafe {
             sys::ImDrawList_AddBezierQuadratic(
                 self.draw_list,
-                p1.into(),
-                p2.into(),
-                p3.into(),
+                p1,
+                p2,
+                p3,
                 col.into().into(),
                 thickness,
                 num_segments,
@@ -1105,8 +1269,13 @@ impl<'ui> DrawListMut<'ui> {
             points.len(),
         );
         let mut buf: Vec<sys::ImVec2> = Vec::with_capacity(points.len());
-        for p in points.iter().copied() {
-            buf.push(p.into());
+        for (i, p) in points.iter().copied().enumerate() {
+            let name = format!("points[{i}]");
+            buf.push(finite_vec2(
+                "DrawListMut::add_concave_poly_filled()",
+                &name,
+                p,
+            ));
         }
         unsafe {
             sys::ImDrawList_AddConcavePolyFilled(
@@ -1528,6 +1697,256 @@ mod channels_tests {
     }
 }
 
+#[cfg(test)]
+mod draw_numeric_tests {
+    use super::*;
+
+    struct TestDrawList {
+        shared: *mut sys::ImDrawListSharedData,
+        raw: *mut sys::ImDrawList,
+    }
+
+    impl TestDrawList {
+        fn new() -> Self {
+            let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
+            assert!(!shared.is_null());
+            let raw = unsafe { sys::ImDrawList_ImDrawList(shared) };
+            assert!(!raw.is_null());
+            Self { shared, raw }
+        }
+
+        fn draw_list(&self) -> DrawListMut<'static> {
+            DrawListMut {
+                draw_list: self.raw,
+                _phantom: PhantomData,
+            }
+        }
+
+        fn path_size(&self) -> i32 {
+            unsafe { (*self.raw)._Path.Size }
+        }
+
+        fn clip_stack_size(&self) -> i32 {
+            unsafe { (*self.raw)._ClipRectStack.Size }
+        }
+    }
+
+    impl Drop for TestDrawList {
+        fn drop(&mut self) {
+            unsafe {
+                sys::ImDrawList_destroy(self.raw);
+                sys::ImDrawListSharedData_destroy(self.shared);
+            }
+        }
+    }
+
+    fn assert_panics_without_buffer_change(
+        fixture: &TestDrawList,
+        f: impl FnOnce(&DrawListMut<'static>),
+    ) {
+        let draw_list = fixture.draw_list();
+        let before = draw_list_counts(fixture.raw);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&draw_list)));
+        assert!(result.is_err());
+        assert_eq!(draw_list_counts(fixture.raw), before);
+    }
+
+    #[test]
+    fn direct_draw_inputs_validate_before_ffi() {
+        let fixture = TestDrawList::new();
+
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            draw_list.add_quad(
+                [f32::NAN, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.0, 1.0],
+                ImColor32::WHITE,
+                1.0,
+            );
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            draw_list.add_ellipse([0.0, 0.0], [-1.0, 4.0], ImColor32::WHITE, 0.0, 0, 1.0);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            draw_list.add_bezier_quadratic(
+                [0.0, 0.0],
+                [1.0, 1.0],
+                [2.0, 0.0],
+                ImColor32::WHITE,
+                1.0,
+                -1,
+            );
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            draw_list.add_image_rounded(
+                crate::texture::TextureId::new(1),
+                [0.0, 0.0],
+                [16.0, 16.0],
+                [0.0, 0.0],
+                [1.0, 1.0],
+                ImColor32::WHITE,
+                f32::INFINITY,
+                DrawCornerFlags::ALL,
+            );
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            draw_list.path_rect(
+                [0.0, 0.0],
+                [1.0, 1.0],
+                1.0,
+                DrawCornerFlags::from_bits_retain(sys::ImDrawFlags_Closed as u32),
+            );
+        });
+    }
+
+    #[test]
+    fn path_inputs_validate_before_path_mutation() {
+        let fixture = TestDrawList::new();
+        let draw_list = fixture.draw_list();
+
+        draw_list.path_line_to([1.0, 1.0]);
+        let path_size = fixture.path_size();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.path_line_to([f32::NAN, 2.0]);
+        }));
+        assert!(result.is_err());
+        assert_eq!(fixture.path_size(), path_size);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.path_arc_to([0.0, 0.0], -1.0, 0.0, 1.0, 0);
+        }));
+        assert!(result.is_err());
+        assert_eq!(fixture.path_size(), path_size);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.path_arc_to_fast([0.0, 0.0], 1.0, 0, 13);
+        }));
+        assert!(result.is_err());
+        assert_eq!(fixture.path_size(), path_size);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.path_bezier_quadratic_curve_to([2.0, 2.0], [3.0, 3.0], -1);
+        }));
+        assert!(result.is_err());
+        assert_eq!(fixture.path_size(), path_size);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.path_stroke(
+                ImColor32::WHITE,
+                PolylineFlags::from_bits_retain(sys::ImDrawFlags_RoundCornersTopLeft as u32),
+                1.0,
+            );
+        }));
+        assert!(result.is_err());
+        assert_eq!(fixture.path_size(), path_size);
+
+        draw_list.path_clear();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.path_bezier_cubic_curve_to([2.0, 2.0], [3.0, 3.0], [4.0, 4.0], 0);
+        }));
+        assert!(result.is_err());
+        assert_eq!(fixture.path_size(), 0);
+    }
+
+    #[test]
+    fn builder_inputs_validate_before_ffi() {
+        let fixture = TestDrawList::new();
+
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            let _ = draw_list
+                .add_line([0.0, 0.0], [1.0, 1.0], ImColor32::WHITE)
+                .thickness(0.0);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            let _ = draw_list.add_circle([0.0, 0.0], -1.0, ImColor32::WHITE);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            let _ = draw_list
+                .add_rect([0.0, 0.0], [1.0, 1.0], ImColor32::WHITE)
+                .rounding(f32::NAN);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            let _ =
+                draw_list.add_polyline(vec![[0.0, 0.0], [f32::INFINITY, 1.0]], ImColor32::WHITE);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            let _ = draw_list
+                .add_bezier_curve(
+                    [0.0, 0.0],
+                    [1.0, 1.0],
+                    [2.0, 1.0],
+                    [3.0, 0.0],
+                    ImColor32::WHITE,
+                )
+                .num_segments((i32::MAX as u32) + 1);
+        });
+    }
+
+    #[test]
+    fn text_and_clip_inputs_validate_before_ffi() {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+        let ui = ctx.frame();
+        let draw_list = ui.get_window_draw_list();
+        let raw_draw_list = draw_list.draw_list;
+        let font = ui.current_font();
+        let before = draw_list_counts(raw_draw_list);
+        let clip_stack_size = unsafe { (*raw_draw_list)._ClipRectStack.Size };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.add_text([f32::NAN, 0.0], ImColor32::WHITE, "hello");
+        }));
+        assert!(result.is_err());
+        assert_eq!(draw_list_counts(raw_draw_list), before);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.add_text_with_font(
+                font,
+                -1.0,
+                [0.0, 0.0],
+                ImColor32::WHITE,
+                "hello",
+                0.0,
+                None,
+            );
+        }));
+        assert!(result.is_err());
+        assert_eq!(draw_list_counts(raw_draw_list), before);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.push_clip_rect([f32::NAN, 0.0], [1.0, 1.0], false);
+        }));
+        assert!(result.is_err());
+        assert_eq!(
+            unsafe { (*raw_draw_list)._ClipRectStack.Size },
+            clip_stack_size
+        );
+    }
+
+    #[test]
+    fn raw_draw_list_clip_helper_reads_stack_without_mutation() {
+        let fixture = TestDrawList::new();
+        let before = fixture.clip_stack_size();
+        let draw_list = fixture.draw_list();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.push_clip_rect([0.0, 0.0], [f32::INFINITY, 1.0], false);
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(fixture.clip_stack_size(), before);
+    }
+}
+
 impl<'ui> DrawListMut<'ui> {
     /// Safe variant: add a Rust callback (executed when the draw list is rendered).
     /// Note: if the draw list is never rendered, the callback will not run and its resources won't be reclaimed.
@@ -1557,6 +1976,8 @@ impl<'ui> DrawListMut<'ui> {
     /// # Safety
     /// Caller must write exactly the reserved amount using `prim_write_*` and ensure valid topology.
     pub unsafe fn prim_reserve(&self, idx_count: i32, vtx_count: i32) {
+        assert_non_negative_i32("DrawListMut::prim_reserve()", "idx_count", idx_count);
+        assert_non_negative_i32("DrawListMut::prim_reserve()", "vtx_count", vtx_count);
         unsafe { sys::ImDrawList_PrimReserve(self.draw_list, idx_count, vtx_count) }
     }
 
@@ -1565,6 +1986,8 @@ impl<'ui> DrawListMut<'ui> {
     /// # Safety
     /// Must match a prior call to `prim_reserve` which hasn't been fully written.
     pub unsafe fn prim_unreserve(&self, idx_count: i32, vtx_count: i32) {
+        assert_non_negative_i32("DrawListMut::prim_unreserve()", "idx_count", idx_count);
+        assert_non_negative_i32("DrawListMut::prim_unreserve()", "vtx_count", vtx_count);
         unsafe { sys::ImDrawList_PrimUnreserve(self.draw_list, idx_count, vtx_count) }
     }
 
@@ -1578,7 +2001,9 @@ impl<'ui> DrawListMut<'ui> {
         b: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
-        unsafe { sys::ImDrawList_PrimRect(self.draw_list, a.into(), b.into(), col.into().into()) }
+        let a = finite_vec2("DrawListMut::prim_rect()", "a", a);
+        let b = finite_vec2("DrawListMut::prim_rect()", "b", b);
+        unsafe { sys::ImDrawList_PrimRect(self.draw_list, a, b, col.into().into()) }
     }
 
     /// Unsafe low-level geometry API: append a rectangle primitive with UVs and color.
@@ -1593,16 +2018,12 @@ impl<'ui> DrawListMut<'ui> {
         uv_b: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
-        unsafe {
-            sys::ImDrawList_PrimRectUV(
-                self.draw_list,
-                a.into(),
-                b.into(),
-                uv_a.into(),
-                uv_b.into(),
-                col.into().into(),
-            )
-        }
+        let a = finite_vec2("DrawListMut::prim_rect_uv()", "a", a);
+        let b = finite_vec2("DrawListMut::prim_rect_uv()", "b", b);
+        let uv_a = finite_vec2("DrawListMut::prim_rect_uv()", "uv_a", uv_a);
+        let uv_b = finite_vec2("DrawListMut::prim_rect_uv()", "uv_b", uv_b);
+
+        unsafe { sys::ImDrawList_PrimRectUV(self.draw_list, a, b, uv_a, uv_b, col.into().into()) }
     }
 
     /// Unsafe low-level geometry API: append a quad primitive with UVs and color.
@@ -1621,17 +2042,26 @@ impl<'ui> DrawListMut<'ui> {
         uv_d: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
+        let a = finite_vec2("DrawListMut::prim_quad_uv()", "a", a);
+        let b = finite_vec2("DrawListMut::prim_quad_uv()", "b", b);
+        let c = finite_vec2("DrawListMut::prim_quad_uv()", "c", c);
+        let d = finite_vec2("DrawListMut::prim_quad_uv()", "d", d);
+        let uv_a = finite_vec2("DrawListMut::prim_quad_uv()", "uv_a", uv_a);
+        let uv_b = finite_vec2("DrawListMut::prim_quad_uv()", "uv_b", uv_b);
+        let uv_c = finite_vec2("DrawListMut::prim_quad_uv()", "uv_c", uv_c);
+        let uv_d = finite_vec2("DrawListMut::prim_quad_uv()", "uv_d", uv_d);
+
         unsafe {
             sys::ImDrawList_PrimQuadUV(
                 self.draw_list,
-                a.into(),
-                b.into(),
-                c.into(),
-                d.into(),
-                uv_a.into(),
-                uv_b.into(),
-                uv_c.into(),
-                uv_d.into(),
+                a,
+                b,
+                c,
+                d,
+                uv_a,
+                uv_b,
+                uv_c,
+                uv_d,
                 col.into().into(),
             )
         }
@@ -1647,9 +2077,9 @@ impl<'ui> DrawListMut<'ui> {
         uv: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
-        unsafe {
-            sys::ImDrawList_PrimWriteVtx(self.draw_list, pos.into(), uv.into(), col.into().into())
-        }
+        let pos = finite_vec2("DrawListMut::prim_write_vtx()", "pos", pos);
+        let uv = finite_vec2("DrawListMut::prim_write_vtx()", "uv", uv);
+        unsafe { sys::ImDrawList_PrimWriteVtx(self.draw_list, pos, uv, col.into().into()) }
     }
 
     /// Unsafe low-level geometry API: write an index.
@@ -1670,7 +2100,9 @@ impl<'ui> DrawListMut<'ui> {
         uv: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
     ) {
-        unsafe { sys::ImDrawList_PrimVtx(self.draw_list, pos.into(), uv.into(), col.into().into()) }
+        let pos = finite_vec2("DrawListMut::prim_vtx()", "pos", pos);
+        let uv = finite_vec2("DrawListMut::prim_vtx()", "uv", uv);
+        unsafe { sys::ImDrawList_PrimVtx(self.draw_list, pos, uv, col.into().into()) }
     }
 }
 
@@ -1695,14 +2127,8 @@ impl<'ui> Line<'ui> {
         C: Into<ImColor32>,
     {
         Self {
-            p1: {
-                let v: sys::ImVec2 = p1.into();
-                v.into()
-            },
-            p2: {
-                let v: sys::ImVec2 = p2.into();
-                v.into()
-            },
+            p1: finite_vec2("Line::new()", "p1", p1).into(),
+            p2: finite_vec2("Line::new()", "p2", p2).into(),
             color: c.into(),
             thickness: 1.0,
             draw_list,
@@ -1711,6 +2137,7 @@ impl<'ui> Line<'ui> {
 
     /// Set line's thickness (default to 1.0 pixel)
     pub fn thickness(mut self, thickness: f32) -> Self {
+        assert_positive_f32("Line::thickness()", "thickness", thickness);
         self.thickness = thickness;
         self
     }
@@ -1761,14 +2188,8 @@ impl<'ui> Rect<'ui> {
         C: Into<ImColor32>,
     {
         Self {
-            p1: {
-                let v: sys::ImVec2 = p1.into();
-                v.into()
-            },
-            p2: {
-                let v: sys::ImVec2 = p2.into();
-                v.into()
-            },
+            p1: finite_vec2("Rect::new()", "p1", p1).into(),
+            p2: finite_vec2("Rect::new()", "p2", p2).into(),
             color: c.into(),
             rounding: 0.0,
             flags: DrawCornerFlags::ALL,
@@ -1780,12 +2201,14 @@ impl<'ui> Rect<'ui> {
 
     /// Set rectangle's corner rounding (default to 0.0 = no rounding)
     pub fn rounding(mut self, rounding: f32) -> Self {
+        assert_non_negative_f32("Rect::rounding()", "rounding", rounding);
         self.rounding = rounding;
         self
     }
 
     /// Set rectangle's thickness (default to 1.0 pixel). Has no effect if filled
     pub fn thickness(mut self, thickness: f32) -> Self {
+        assert_positive_f32("Rect::thickness()", "thickness", thickness);
         self.thickness = thickness;
         self
     }
@@ -1798,6 +2221,7 @@ impl<'ui> Rect<'ui> {
 
     /// Set rectangle's corner rounding flags
     pub fn flags(mut self, flags: DrawCornerFlags) -> Self {
+        assert_corner_flags("Rect::flags()", flags);
         self.flags = flags;
         self
     }
@@ -1862,11 +2286,9 @@ impl<'ui> Circle<'ui> {
     where
         C: Into<ImColor32>,
     {
+        assert_non_negative_f32("Circle::new()", "radius", radius);
         Self {
-            center: {
-                let v: sys::ImVec2 = center.into();
-                v.into()
-            },
+            center: finite_vec2("Circle::new()", "center", center).into(),
             radius,
             color: color.into(),
             num_segments: 0, // 0 = auto
@@ -1878,6 +2300,7 @@ impl<'ui> Circle<'ui> {
 
     /// Set circle's thickness (default to 1.0 pixel). Has no effect if filled
     pub fn thickness(mut self, thickness: f32) -> Self {
+        assert_positive_f32("Circle::thickness()", "thickness", thickness);
         self.thickness = thickness;
         self
     }
@@ -1936,7 +2359,7 @@ pub struct BezierCurve<'ui> {
     color: ImColor32,
     thickness: f32,
     /// If num_segments is not set, the bezier curve is auto-tessalated.
-    num_segments: Option<u32>,
+    num_segments: Option<i32>,
     draw_list: &'ui DrawListMut<'ui>,
 }
 
@@ -1954,22 +2377,10 @@ impl<'ui> BezierCurve<'ui> {
         C: Into<ImColor32>,
     {
         Self {
-            pos0: {
-                let v: sys::ImVec2 = pos0.into();
-                v.into()
-            },
-            cp0: {
-                let v: sys::ImVec2 = cp0.into();
-                v.into()
-            },
-            cp1: {
-                let v: sys::ImVec2 = cp1.into();
-                v.into()
-            },
-            pos1: {
-                let v: sys::ImVec2 = pos1.into();
-                v.into()
-            },
+            pos0: finite_vec2("BezierCurve::new()", "pos0", pos0).into(),
+            cp0: finite_vec2("BezierCurve::new()", "cp0", cp0).into(),
+            cp1: finite_vec2("BezierCurve::new()", "cp1", cp1).into(),
+            pos1: finite_vec2("BezierCurve::new()", "pos1", pos1).into(),
             color: c.into(),
             thickness: 1.0,
             num_segments: None,
@@ -1979,6 +2390,7 @@ impl<'ui> BezierCurve<'ui> {
 
     /// Set curve's thickness (default to 1.0 pixel)
     pub fn thickness(mut self, thickness: f32) -> Self {
+        assert_positive_f32("BezierCurve::thickness()", "thickness", thickness);
         self.thickness = thickness;
         self
     }
@@ -1986,6 +2398,8 @@ impl<'ui> BezierCurve<'ui> {
     /// Set number of segments used to draw the Bezier curve. If not set, the
     /// bezier curve is auto-tessalated.
     pub fn num_segments(mut self, num_segments: u32) -> Self {
+        let num_segments = i32::try_from(num_segments)
+            .expect("BezierCurve::num_segments() num_segments exceeded ImGui's i32 range");
         self.num_segments = Some(num_segments);
         self
     }
@@ -2006,7 +2420,7 @@ impl<'ui> BezierCurve<'ui> {
                 pos1,
                 self.color.into(),
                 self.thickness,
-                self.num_segments.unwrap_or(0) as i32,
+                self.num_segments.unwrap_or(0),
             )
         }
     }
@@ -2030,7 +2444,14 @@ impl<'ui> Polyline<'ui> {
         P: Into<sys::ImVec2>,
     {
         Self {
-            points: points.into_iter().map(Into::into).collect(),
+            points: points
+                .into_iter()
+                .enumerate()
+                .map(|(i, point)| {
+                    let name = format!("points[{i}]");
+                    finite_vec2("Polyline::new()", &name, point)
+                })
+                .collect(),
             color: c.into(),
             thickness: 1.0,
             flags: PolylineFlags::NONE,
@@ -2042,12 +2463,14 @@ impl<'ui> Polyline<'ui> {
     /// Set line's thickness (default to 1.0 pixel). Has no effect if
     /// shape is filled
     pub fn thickness(mut self, thickness: f32) -> Self {
+        assert_positive_f32("Polyline::thickness()", "thickness", thickness);
         self.thickness = thickness;
         self
     }
 
     /// Set polyline flags. Has no effect if shape is filled.
     pub fn flags(mut self, flags: PolylineFlags) -> Self {
+        assert_polyline_flags("Polyline::flags()", flags);
         self.flags = flags;
         self
     }
@@ -2115,18 +2538,9 @@ impl<'ui> Triangle<'ui> {
         C: Into<ImColor32>,
     {
         Self {
-            p1: {
-                let v: sys::ImVec2 = p1.into();
-                v.into()
-            },
-            p2: {
-                let v: sys::ImVec2 = p2.into();
-                v.into()
-            },
-            p3: {
-                let v: sys::ImVec2 = p3.into();
-                v.into()
-            },
+            p1: finite_vec2("Triangle::new()", "p1", p1).into(),
+            p2: finite_vec2("Triangle::new()", "p2", p2).into(),
+            p3: finite_vec2("Triangle::new()", "p3", p3).into(),
             color: c.into(),
             thickness: 1.0,
             filled: false,
@@ -2136,6 +2550,7 @@ impl<'ui> Triangle<'ui> {
 
     /// Set triangle's thickness (default to 1.0 pixel)
     pub fn thickness(mut self, thickness: f32) -> Self {
+        assert_positive_f32("Triangle::thickness()", "thickness", thickness);
         self.thickness = thickness;
         self
     }

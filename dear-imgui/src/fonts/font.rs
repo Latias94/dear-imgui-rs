@@ -7,6 +7,20 @@ use super::FontId;
 use crate::sys;
 use std::cell::UnsafeCell;
 
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
+fn assert_positive_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value > 0.0, "{caller} {name} must be positive");
+}
+
 /// A font instance with runtime data
 ///
 /// This represents a single font that can be used for text rendering.
@@ -70,6 +84,10 @@ impl Font {
         wrap_width: f32,
         text: &str,
     ) -> [f32; 2] {
+        assert_positive_f32("Font::calc_text_size()", "size", size);
+        assert_non_negative_f32("Font::calc_text_size()", "max_width", max_width);
+        assert_non_negative_f32("Font::calc_text_size()", "wrap_width", wrap_width);
+
         unsafe {
             let text_start = text.as_ptr() as *const std::os::raw::c_char;
             let text_end = text_start.add(text.len());
@@ -90,6 +108,9 @@ impl Font {
     /// Calculate word wrap position for the given text
     #[doc(alias = "CalcWordWrapPosition")]
     pub fn calc_word_wrap_position(&self, size: f32, text: &str, wrap_width: f32) -> usize {
+        assert_positive_f32("Font::calc_word_wrap_position()", "size", size);
+        assert_non_negative_f32("Font::calc_word_wrap_position()", "wrap_width", wrap_width);
+
         unsafe {
             let text_start = text.as_ptr() as *const std::os::raw::c_char;
             let text_end = text_start.add(text.len());
@@ -150,3 +171,60 @@ impl Font {
 
 // NOTE: Do not mark Font as Send/Sync. It refers to memory owned by ImGui
 // context and is not thread-safe to move/share across threads.
+
+#[cfg(test)]
+mod tests {
+    fn setup_context() -> crate::Context {
+        let mut ctx = crate::Context::create();
+        let _ = ctx.font_atlas_mut().build();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        ctx
+    }
+
+    #[test]
+    fn calc_text_size_validates_runtime_sizes_before_ffi() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+        let font = ui.current_font();
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = font.calc_text_size(0.0, f32::MAX, 0.0, "hello");
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = font.calc_text_size(13.0, f32::NAN, 0.0, "hello");
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = font.calc_text_size(13.0, f32::MAX, -1.0, "hello");
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn calc_word_wrap_position_validates_runtime_sizes_before_ffi() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+        let font = ui.current_font();
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = font.calc_word_wrap_position(f32::INFINITY, "hello", 32.0);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = font.calc_word_wrap_position(13.0, "hello", -1.0);
+            }))
+            .is_err()
+        );
+    }
+}
