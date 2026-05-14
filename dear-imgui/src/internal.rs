@@ -52,6 +52,12 @@ pub(crate) fn plot_value_count_i32(caller: &str, len: usize) -> i32 {
     })
 }
 
+pub(crate) fn len_i32(caller: &str, what: &str, len: usize) -> i32 {
+    i32::try_from(len).unwrap_or_else(|_| {
+        panic!("{caller} supports at most i32::MAX {what}");
+    })
+}
+
 unsafe impl DataTypeKind for i8 {
     const KIND: DataType = DataType::I8;
 }
@@ -314,7 +320,7 @@ pub unsafe trait RawCast<T>: Sized {
 
 #[cfg(test)]
 mod tests {
-    use super::{component_count_i32, plot_value_count_i32};
+    use super::{component_count_i32, len_i32, plot_value_count_i32};
 
     #[test]
     fn component_count_rejects_zero_and_overflow() {
@@ -333,6 +339,15 @@ mod tests {
         assert!(
             std::panic::catch_unwind(|| plot_value_count_i32("test", (i32::MAX as usize) + 1))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn len_i32_rejects_overflow() {
+        assert_eq!(len_i32("test", "items", 0), 0);
+        assert_eq!(len_i32("test", "items", 1), 1);
+        assert!(
+            std::panic::catch_unwind(|| len_i32("test", "items", (i32::MAX as usize) + 1)).is_err()
         );
     }
 }

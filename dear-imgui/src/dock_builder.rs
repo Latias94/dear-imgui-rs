@@ -42,6 +42,7 @@
 //! ```
 
 use crate::Id;
+use crate::internal::len_i32;
 use crate::sys;
 use crate::ui::Ui;
 use std::ffi::CString;
@@ -470,15 +471,24 @@ impl DockBuilder {
         dst_dockspace_id: Id,
         window_remaps: &[(&str, &str)],
     ) {
+        assert!(
+            window_remaps.len() <= (i32::MAX as usize) / 2,
+            "DockBuilder::copy_dock_space_with_window_remap() supports at most i32::MAX remap strings"
+        );
+
         // Build CStrings and a contiguous array of const char* pointers
         let mut cstrings: Vec<CString> = Vec::with_capacity(window_remaps.len() * 2);
         for (src, dst) in window_remaps {
-            let Ok(src) = CString::new(*src) else {
-                continue;
-            };
-            let Ok(dst) = CString::new(*dst) else {
-                continue;
-            };
+            let src = CString::new(*src).unwrap_or_else(|_| {
+                panic!(
+                    "DockBuilder::copy_dock_space_with_window_remap() source window name contains an interior NUL byte"
+                )
+            });
+            let dst = CString::new(*dst).unwrap_or_else(|_| {
+                panic!(
+                    "DockBuilder::copy_dock_space_with_window_remap() destination window name contains an interior NUL byte"
+                )
+            });
             cstrings.push(src);
             cstrings.push(dst);
         }
@@ -487,10 +497,11 @@ impl DockBuilder {
         }
         let ptrs: Vec<*const c_char> = cstrings.iter().map(|s| s.as_ptr()).collect();
         let mut boxed: Box<[*const c_char]> = ptrs.into_boxed_slice();
-        let boxed_len_i32 = match i32::try_from(boxed.len()) {
-            Ok(n) => n,
-            Err(_) => return,
-        };
+        let boxed_len_i32 = len_i32(
+            "DockBuilder::copy_dock_space_with_window_remap()",
+            "remap strings",
+            boxed.len(),
+        );
         let mut vec_in = sys::ImVector_const_charPtr {
             Size: boxed_len_i32,
             Capacity: boxed_len_i32,
@@ -560,5 +571,35 @@ impl DockBuilder {
     #[doc(alias = "DockBuilderFinish")]
     pub fn finish(node_id: Id) {
         unsafe { sys::igDockBuilderFinish(node_id.into()) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DockBuilder;
+    use crate::Id;
+
+    #[test]
+    fn copy_dock_space_with_window_remap_rejects_interior_nul_names() {
+        assert!(
+            std::panic::catch_unwind(|| {
+                DockBuilder::copy_dock_space_with_window_remap(
+                    Id::from(1),
+                    Id::from(2),
+                    &[("bad\0src", "dst")],
+                );
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                DockBuilder::copy_dock_space_with_window_remap(
+                    Id::from(1),
+                    Id::from(2),
+                    &[("src", "bad\0dst")],
+                );
+            })
+            .is_err()
+        );
     }
 }

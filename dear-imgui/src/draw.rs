@@ -27,6 +27,7 @@ use std::cell::RefCell;
 use std::marker::PhantomData;
 
 use crate::colors::Color;
+use crate::internal::len_i32;
 use crate::sys;
 
 thread_local! {
@@ -1098,14 +1099,15 @@ impl<'ui> DrawListMut<'ui> {
         C: Into<ImColor32>,
         P: Copy + Into<sys::ImVec2>,
     {
+        let count = len_i32(
+            "DrawListMut::add_concave_poly_filled()",
+            "points",
+            points.len(),
+        );
         let mut buf: Vec<sys::ImVec2> = Vec::with_capacity(points.len());
         for p in points.iter().copied() {
             buf.push(p.into());
         }
-        let count = match i32::try_from(buf.len()) {
-            Ok(n) => n,
-            Err(_) => return,
-        };
         unsafe {
             sys::ImDrawList_AddConcavePolyFilled(
                 self.draw_list,
@@ -1503,6 +1505,26 @@ mod channels_tests {
             sys::ImDrawList_destroy(raw_draw_list);
             sys::ImDrawListSharedData_destroy(shared);
         }
+    }
+
+    #[test]
+    fn draw_list_point_count_helpers_reject_overflow() {
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = len_i32("Polyline::build()", "points", (i32::MAX as usize) + 1);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = len_i32(
+                    "DrawListMut::add_concave_poly_filled()",
+                    "points",
+                    (i32::MAX as usize) + 1,
+                );
+            })
+            .is_err()
+        );
     }
 }
 
@@ -2044,10 +2066,7 @@ impl<'ui> Polyline<'ui> {
 
     /// Draw the line on the window
     pub fn build(self) {
-        let count = match i32::try_from(self.points.len()) {
-            Ok(n) => n,
-            Err(_) => return,
-        };
+        let count = len_i32("Polyline::build()", "points", self.points.len());
         if self.filled {
             unsafe {
                 sys::ImDrawList_AddConvexPolyFilled(

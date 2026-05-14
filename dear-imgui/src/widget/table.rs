@@ -38,6 +38,7 @@
     clippy::as_conversions
 )]
 use crate::draw::ImColor32;
+use crate::internal::len_i32;
 use crate::sys;
 use crate::ui::Ui;
 use crate::widget::{
@@ -888,12 +889,19 @@ impl Ui {
             unsafe { sys::igTableAngledHeadersRow() }
             return;
         }
-        let count = match i32::try_from(headers.len()) {
-            Ok(n) => n,
-            Err(_) => return,
-        };
+        let count = len_i32(
+            "Ui::table_angled_headers_row_ex_with_data()",
+            "headers",
+            headers.len(),
+        );
+        let table = assert_current_table("Ui::table_angled_headers_row_ex_with_data()");
         let mut data: Vec<sys::ImGuiTableHeaderData> = Vec::with_capacity(headers.len());
         for h in headers {
+            assert_valid_table_column_in(
+                table,
+                i32::from(h.index),
+                "Ui::table_angled_headers_row_ex_with_data()",
+            );
             data.push(sys::ImGuiTableHeaderData {
                 Index: h.index as sys::ImGuiTableColumnIdx,
                 TextColor: u32::from(h.text_color),
@@ -1186,6 +1194,43 @@ mod tests {
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     ui.table_set_bg_color_u32(TableBgTarget::RowBg0, 0, 0);
+                }))
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn table_angled_headers_validate_indices_before_ffi() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        let _ = ui.window("table_angled_header_invalid").build(|| {
+            let _table = ui.begin_table("table", 2).unwrap();
+            ui.table_setup_column("one", TableColumnFlags::ANGLED_HEADER, None, 0);
+            ui.table_setup_column("two", TableColumnFlags::ANGLED_HEADER, None, 0);
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let invalid = [TableHeaderData::new(
+                        -1,
+                        ImColor32::WHITE,
+                        ImColor32::BLACK,
+                        ImColor32::BLACK,
+                    )];
+                    ui.table_angled_headers_row_ex_with_data(0, 0.0, 0.0, &invalid);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let invalid = [TableHeaderData::new(
+                        2,
+                        ImColor32::WHITE,
+                        ImColor32::BLACK,
+                        ImColor32::BLACK,
+                    )];
+                    ui.table_angled_headers_row_ex_with_data(0, 0.0, 0.0, &invalid);
                 }))
                 .is_err()
             );
