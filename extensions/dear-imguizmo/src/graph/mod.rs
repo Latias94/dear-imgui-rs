@@ -849,7 +849,7 @@ fn draw_core<'ui, 'h>(
 
     // right click reporting
     if right_clicked && mouse_in_region {
-        let mut rc_node = view.hovered_node;
+        let rc_node = view.hovered_node;
         let mut rc_pin: Option<(PinId, PinKind)> = None;
         if let Some((pid, _nid, kind)) = view.hovered_pin {
             rc_pin = Some((pid, kind));

@@ -139,6 +139,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     process-wide slots, preventing one context's viewport callbacks from using another context's
     renderer or Vulkan handles.
 - Extensions
+  - Require `dear-imguizmo` `IdToken` to be dropped while its original ImGui context is current,
+    preventing the token from silently switching Dear ImGui's global current context during
+    cleanup.
   - Bind `dear-implot` `PlotUi` and `PlotToken` operations to the `PlotContext` and ImGui context
     that created them, preventing multi-context applications from accidentally plotting through
     whichever ImPlot context is current.

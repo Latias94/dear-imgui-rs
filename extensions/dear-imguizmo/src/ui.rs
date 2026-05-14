@@ -456,6 +456,11 @@ pub struct IdToken<'ui> {
 }
 impl<'ui> Drop for IdToken<'ui> {
     fn drop(&mut self) {
+        let cur = unsafe { imgui_sys::igGetCurrentContext() };
+        assert_eq!(
+            cur, self.imgui_ctx_raw,
+            "dear-imguizmo: IdToken must be dropped with the currently-active ImGui context"
+        );
         unsafe {
             sys::ImGuizmo_SetImGuiContext(self.imgui_ctx_raw);
             sys::ImGuizmo_PopID();
@@ -470,5 +475,79 @@ pub trait GuizmoExt {
 impl GuizmoExt for Ui {
     fn guizmo(&self) -> GizmoUi<'_> {
         GuizmoContext::new().begin_frame(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GuizmoExt, sys};
+    use dear_imgui_rs::{BackendFlags, Context};
+    use dear_imgui_sys as imgui_sys;
+    use std::sync::{Mutex, OnceLock};
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn prepare_imgui(imgui: &mut Context) {
+        let io = imgui.io_mut();
+        io.set_display_size([800.0, 600.0]);
+        io.set_delta_time(1.0 / 60.0);
+        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+    }
+
+    #[test]
+    fn id_token_drops_with_matching_imgui_context() {
+        let _guard = test_guard();
+        let mut imgui = Context::create();
+        prepare_imgui(&mut imgui);
+
+        {
+            let ui = imgui.frame();
+            let giz = ui.guizmo();
+            let id = giz.push_id(7);
+            drop(id);
+        }
+        let _ = imgui.render();
+    }
+
+    #[test]
+    fn id_token_rejects_wrong_imgui_context_on_drop() {
+        let _guard = test_guard();
+        let mut imgui_a = Context::create();
+        prepare_imgui(&mut imgui_a);
+        let raw_a = imgui_a.as_raw();
+
+        let ui = imgui_a.frame();
+        let giz = ui.guizmo();
+        let id = giz.push_id(7);
+
+        unsafe { imgui_sys::igSetCurrentContext(std::ptr::null_mut()) };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(id)));
+        assert_eq!(
+            unsafe { imgui_sys::igGetCurrentContext() },
+            std::ptr::null_mut()
+        );
+
+        unsafe {
+            imgui_sys::igSetCurrentContext(raw_a);
+            sys::ImGuizmo_SetImGuiContext(raw_a);
+            if result.is_err() {
+                sys::ImGuizmo_PopID();
+            }
+        }
+        let _ = imgui_a.render();
+
+        let panic = result.expect_err("expected IdToken drop on wrong ImGui context to panic");
+
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&'static str>().copied())
+            .unwrap_or("");
+        assert!(
+            message.contains("IdToken must be dropped with the currently-active ImGui context")
+        );
     }
 }
