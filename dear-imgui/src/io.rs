@@ -94,6 +94,7 @@ impl<'de> Deserialize<'de> for ViewportFlags {
 bitflags! {
     /// Configuration flags
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct ConfigFlags: i32 {
         /// Master keyboard navigation enable flag.
         const NAV_ENABLE_KEYBOARD = sys::ImGuiConfigFlags_NavEnableKeyboard as i32;
@@ -103,6 +104,8 @@ bitflags! {
         const NO_MOUSE = sys::ImGuiConfigFlags_NoMouse as i32;
         /// Instruction backend to not alter mouse cursor shape and visibility.
         const NO_MOUSE_CURSOR_CHANGE = sys::ImGuiConfigFlags_NoMouseCursorChange as i32;
+        /// Disable keyboard inputs and interactions.
+        const NO_KEYBOARD = sys::ImGuiConfigFlags_NoKeyboard as i32;
         /// Application is SRGB-aware.
         const IS_SRGB = sys::ImGuiConfigFlags_IsSRGB as i32;
         /// Application is using a touch screen instead of a mouse.
@@ -117,6 +120,7 @@ bitflags! {
 bitflags! {
     /// Backend capabilities
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct BackendFlags: i32 {
         /// Backend supports gamepad and currently has one connected
         const HAS_GAMEPAD = sys::ImGuiBackendFlags_HasGamepad as i32;
@@ -127,6 +131,8 @@ bitflags! {
         /// Backend can report which viewport the OS mouse is hovering via `add_mouse_viewport_event`
         const HAS_MOUSE_HOVERED_VIEWPORT =
             sys::ImGuiBackendFlags_HasMouseHoveredViewport as i32;
+        /// Backend platform can honor viewport parent/child relationships.
+        const HAS_PARENT_VIEWPORT = sys::ImGuiBackendFlags_HasParentViewport as i32;
         /// Backend renderer supports DrawCmd::vtx_offset.
         const RENDERER_HAS_VTX_OFFSET = sys::ImGuiBackendFlags_RendererHasVtxOffset as i32;
         /// Backend renderer supports ImTextureData requests to create/update/destroy textures.
@@ -145,6 +151,7 @@ bitflags! {
 bitflags! {
     /// Viewport flags for multi-viewport support
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct ViewportFlags: i32 {
         /// No flags
         const NONE = 0;
@@ -177,6 +184,22 @@ bitflags! {
         /// Platform Window: Window is focused (last call to Platform_GetWindowFocus() returned true)
         const IS_FOCUSED = sys::ImGuiViewportFlags_IsFocused as i32;
     }
+}
+
+fn validate_config_flags(caller: &str, flags: ConfigFlags) {
+    let unsupported = flags.bits() & !ConfigFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiConfigFlags bits: 0x{unsupported:X}"
+    );
+}
+
+fn validate_backend_flags(caller: &str, flags: BackendFlags) {
+    let unsupported = flags.bits() & !BackendFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiBackendFlags bits: 0x{unsupported:X}"
+    );
 }
 
 /// Settings and inputs/outputs for imgui-rs
@@ -437,6 +460,7 @@ impl Io {
 
     /// Set configuration flags
     pub fn set_config_flags(&mut self, flags: ConfigFlags) {
+        validate_config_flags("Io::set_config_flags()", flags);
         self.inner_mut().ConfigFlags = flags.bits();
     }
 
@@ -1049,6 +1073,7 @@ impl Io {
 
     /// Set backend flags
     pub fn set_backend_flags(&mut self, flags: BackendFlags) {
+        validate_backend_flags("Io::set_backend_flags()", flags);
         self.inner_mut().BackendFlags = flags.bits();
     }
 

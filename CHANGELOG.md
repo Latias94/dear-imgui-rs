@@ -115,6 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pass required remap vectors to `DockBuilder::copy_node` and `copy_dock_space`, avoiding
     Dear ImGui assertions from null vector pointers.
   - Keep temporary `WindowClass` storage alive across `DockSpace` FFI calls.
+  - Add missing public IO flag bits and reject unsupported `ConfigFlags`/`BackendFlags` bits
+    before storing them in `ImGuiIO`.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts
