@@ -668,6 +668,8 @@ bitflags! {
         const AUTO_SELECT_ALL = sys::ImGuiInputTextFlags_AutoSelectAll as i32;
         /// Return 'true' when Enter is pressed (as opposed to every time the value was modified)
         const ENTER_RETURNS_TRUE = sys::ImGuiInputTextFlags_EnterReturnsTrue as i32;
+        /// Escape key clears content if not empty, and deactivates otherwise.
+        const ESCAPE_CLEARS_ALL = sys::ImGuiInputTextFlags_EscapeClearsAll as i32;
         /// Callback on pressing TAB (for completion handling)
         const CALLBACK_COMPLETION = sys::ImGuiInputTextFlags_CallbackCompletion as i32;
         /// Callback on pressing Up/Down arrows (for history handling)
@@ -684,18 +686,26 @@ bitflags! {
         const NO_HORIZONTAL_SCROLL = sys::ImGuiInputTextFlags_NoHorizontalScroll as i32;
         /// Overwrite mode
         const ALWAYS_OVERWRITE = sys::ImGuiInputTextFlags_AlwaysOverwrite as i32;
+        /// InputFloat(), InputInt(), InputScalar() etc. only: parse empty text as zero value.
+        const PARSE_EMPTY_REF_VAL = sys::ImGuiInputTextFlags_ParseEmptyRefVal as i32;
+        /// InputFloat(), InputInt(), InputScalar() etc. only: display zero value as empty text.
+        const DISPLAY_EMPTY_REF_VAL = sys::ImGuiInputTextFlags_DisplayEmptyRefVal as i32;
         /// Read-only mode
         const READ_ONLY = sys::ImGuiInputTextFlags_ReadOnly as i32;
         /// Password mode, display all characters as '*'
         const PASSWORD = sys::ImGuiInputTextFlags_Password as i32;
         /// Disable undo/redo
         const NO_UNDO_REDO = sys::ImGuiInputTextFlags_NoUndoRedo as i32;
+        /// When text doesn't fit, elide the left side. Single-line inputs only.
+        const ELIDE_LEFT = sys::ImGuiInputTextFlags_ElideLeft as i32;
         /// Allow 0123456789.+-*/eE (Scientific notation input)
         const CHARS_SCIENTIFIC = sys::ImGuiInputTextFlags_CharsScientific as i32;
         /// Callback on buffer capacity changes request
         const CALLBACK_RESIZE = sys::ImGuiInputTextFlags_CallbackResize as i32;
         /// Callback on any edit (note that InputText() already returns true on edit)
         const CALLBACK_EDIT = sys::ImGuiInputTextFlags_CallbackEdit as i32;
+        /// Word-wrap lines that are too long. Multiline inputs only.
+        const WORD_WRAP = sys::ImGuiInputTextFlags_WordWrap as i32;
     }
 }
 

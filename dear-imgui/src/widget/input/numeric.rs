@@ -1,3 +1,4 @@
+use super::validate_input_scalar_flags;
 use crate::InputTextFlags;
 use crate::internal::{DataTypeKind, component_count_i32};
 use crate::sys;
@@ -49,6 +50,7 @@ impl<'ui> InputInt<'ui> {
 
     /// Builds the integer input widget
     pub fn build(self, value: &mut i32) -> bool {
+        validate_input_scalar_flags("InputInt::build()", self.flags);
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         unsafe {
             sys::igInputInt(
@@ -113,6 +115,7 @@ impl<'ui> InputFloat<'ui> {
 
     /// Builds the float input widget
     pub fn build(self, value: &mut f32) -> bool {
+        validate_input_scalar_flags("InputFloat::build()", self.flags);
         let format = self.format.as_deref().unwrap_or("%.3f");
         let (label_ptr, format_ptr) = self.ui.scratch_txt_two(self.label.as_ref(), format);
 
@@ -180,6 +183,7 @@ impl<'ui> InputDouble<'ui> {
 
     /// Builds the double input widget
     pub fn build(self, value: &mut f64) -> bool {
+        validate_input_scalar_flags("InputDouble::build()", self.flags);
         let format = self.format.as_deref().unwrap_or("%.6f");
         let (label_ptr, format_ptr) = self.ui.scratch_txt_two(self.label.as_ref(), format);
 
@@ -266,6 +270,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p
     ///
     /// Returns true if the value was changed.
     pub fn build(self) -> bool {
+        validate_input_scalar_flags("InputScalar::build()", self.flags);
         unsafe {
             let (one, two) = self
                 .ui
@@ -360,6 +365,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
     ///
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
+        validate_input_scalar_flags("InputScalarN::build()", self.flags);
         let count = component_count_i32("InputScalarN::build()", self.values.len());
         unsafe {
             let (one, two) = self
@@ -433,6 +439,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat2<'ui, 'p, L, F> {
     ///
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
+        validate_input_scalar_flags("InputFloat2::build()", self.flags);
         unsafe {
             let (one, two) = self
                 .ui
@@ -490,6 +497,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat3<'ui, 'p, L, F> {
     ///
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
+        validate_input_scalar_flags("InputFloat3::build()", self.flags);
         unsafe {
             let (one, two) = self
                 .ui
@@ -547,6 +555,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat4<'ui, 'p, L, F> {
     ///
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
+        validate_input_scalar_flags("InputFloat4::build()", self.flags);
         unsafe {
             let (one, two) = self
                 .ui
@@ -589,6 +598,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt2<'ui, 'p, L> {
     ///
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
+        validate_input_scalar_flags("InputInt2::build()", self.flags);
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
@@ -629,6 +639,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt3<'ui, 'p, L> {
     ///
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
+        validate_input_scalar_flags("InputInt3::build()", self.flags);
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 
@@ -669,6 +680,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt4<'ui, 'p, L> {
     ///
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
+        validate_input_scalar_flags("InputInt4::build()", self.flags);
         unsafe {
             let label_cstr = self.ui.scratch_txt(self.label);
 

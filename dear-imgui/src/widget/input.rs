@@ -108,6 +108,56 @@ fn finish_string_input_buffer(target: &mut String, mut buffer: Vec<u8>) {
     *target = text;
 }
 
+pub(super) fn validate_input_text_flags(caller: &str, flags: InputTextFlags, multiline: bool) {
+    let unsupported = flags.bits() & !InputTextFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiInputTextFlags bits: 0x{unsupported:X}"
+    );
+    assert!(
+        !flags.contains(InputTextFlags::CALLBACK_COMPLETION)
+            || !flags.contains(InputTextFlags::ALLOW_TAB_INPUT),
+        "{caller} cannot combine CALLBACK_COMPLETION with ALLOW_TAB_INPUT"
+    );
+    assert!(
+        !flags.contains(InputTextFlags::WORD_WRAP) || !flags.contains(InputTextFlags::PASSWORD),
+        "{caller} cannot combine WORD_WRAP with PASSWORD"
+    );
+    if multiline {
+        assert!(
+            !flags.contains(InputTextFlags::CALLBACK_HISTORY),
+            "{caller} cannot combine CALLBACK_HISTORY with multiline inputs"
+        );
+        assert!(
+            !flags.contains(InputTextFlags::ELIDE_LEFT),
+            "{caller} cannot combine ELIDE_LEFT with multiline inputs"
+        );
+    } else {
+        assert!(
+            !flags.contains(InputTextFlags::WORD_WRAP),
+            "{caller} cannot use WORD_WRAP with single-line inputs"
+        );
+    }
+}
+
+pub(super) fn validate_input_scalar_flags(caller: &str, flags: InputTextFlags) {
+    validate_input_text_flags(caller, flags, false);
+    assert!(
+        !flags.contains(InputTextFlags::ENTER_RETURNS_TRUE),
+        "{caller} does not support ENTER_RETURNS_TRUE"
+    );
+    let callback_flags = InputTextFlags::CALLBACK_COMPLETION
+        | InputTextFlags::CALLBACK_HISTORY
+        | InputTextFlags::CALLBACK_ALWAYS
+        | InputTextFlags::CALLBACK_CHAR_FILTER
+        | InputTextFlags::CALLBACK_RESIZE
+        | InputTextFlags::CALLBACK_EDIT;
+    assert!(
+        !flags.intersects(callback_flags),
+        "{caller} does not support input text callback flags"
+    );
+}
+
 /// # Input Widgets
 impl Ui {
     /// Creates a single-line text input widget builder.
@@ -410,6 +460,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
         }
 
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
+        validate_input_text_flags("InputTextImStr::build()", flags, false);
         let result = unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
@@ -659,6 +710,7 @@ where
         let user_ptr = &mut user_data as *mut _ as *mut c_void;
 
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
+        validate_input_text_flags("InputText::build()", flags, false);
         let result = unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
@@ -771,6 +823,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
         }
 
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
+        validate_input_text_flags("InputTextMultilineImStr::build()", flags, true);
         let result = unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
@@ -878,6 +931,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
 
         let size_vec: sys::ImVec2 = self.size.into();
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
+        validate_input_text_flags("InputTextMultiline::build()", flags, true);
         let result = unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
@@ -1032,6 +1086,7 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
 
         let size_vec: sys::ImVec2 = self.size.into();
         let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
+        validate_input_text_flags("InputTextMultilineWithCb::build()", flags, true);
         let result = unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
@@ -1105,5 +1160,101 @@ mod tests {
         assert!(buffer.len() >= 32);
         assert_eq!(data.Buf, buffer.as_mut_ptr().cast());
         assert!(data.BufDirty);
+    }
+
+    #[test]
+    fn input_text_flags_reject_unsupported_bits_and_invalid_combinations() {
+        let private_multiline =
+            InputTextFlags::from_bits_retain(sys::ImGuiInputTextFlags_Multiline);
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_text_flags("test", private_multiline, false)
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_text_flags(
+                    "test",
+                    InputTextFlags::CALLBACK_COMPLETION | InputTextFlags::ALLOW_TAB_INPUT,
+                    false,
+                )
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_text_flags(
+                    "test",
+                    InputTextFlags::WORD_WRAP | InputTextFlags::PASSWORD,
+                    true,
+                )
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_text_flags("test", InputTextFlags::WORD_WRAP, false)
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_text_flags("test", InputTextFlags::ELIDE_LEFT, true)
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_text_flags("test", InputTextFlags::CALLBACK_HISTORY, true)
+            })
+            .is_err()
+        );
+
+        validate_input_text_flags(
+            "test",
+            InputTextFlags::WORD_WRAP | InputTextFlags::CALLBACK_CHAR_FILTER,
+            true,
+        );
+        validate_input_text_flags(
+            "test",
+            InputTextFlags::ELIDE_LEFT | InputTextFlags::PASSWORD,
+            false,
+        );
+    }
+
+    #[test]
+    fn input_scalar_flags_reject_callback_and_enter_return_flags() {
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_scalar_flags("test", InputTextFlags::ENTER_RETURNS_TRUE)
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_scalar_flags("test", InputTextFlags::CALLBACK_EDIT)
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_scalar_flags("test", InputTextFlags::CALLBACK_RESIZE)
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_input_scalar_flags("test", InputTextFlags::WORD_WRAP)
+            })
+            .is_err()
+        );
+
+        validate_input_scalar_flags(
+            "test",
+            InputTextFlags::CHARS_DECIMAL
+                | InputTextFlags::PARSE_EMPTY_REF_VAL
+                | InputTextFlags::DISPLAY_EMPTY_REF_VAL,
+        );
     }
 }
