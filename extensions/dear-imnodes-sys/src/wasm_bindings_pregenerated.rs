@@ -6295,3 +6295,11 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn imnodes_getIOKeyAltPtr() -> *mut bool;
 }
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn imnodes_EditorContextResetToDefault();
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
+    pub fn imnodes_EditorContextResetToDefaultIfCurrent(editor: *mut ImNodesEditorContext);
+}

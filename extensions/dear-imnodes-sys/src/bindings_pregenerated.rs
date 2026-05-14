@@ -6208,3 +6208,9 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn imnodes_getIOKeyAltPtr() -> *mut bool;
 }
+unsafe extern "C" {
+    pub fn imnodes_EditorContextResetToDefault();
+}
+unsafe extern "C" {
+    pub fn imnodes_EditorContextResetToDefaultIfCurrent(editor: *mut ImNodesEditorContext);
+}

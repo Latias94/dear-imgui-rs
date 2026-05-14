@@ -1,10 +1,14 @@
-use super::{Context, EditorContext, ImNodesScope};
+use super::{
+    Context, EditorContext, ImGuiContextGuard, ImNodesContextAliveToken, ImNodesContextGuard,
+    ImNodesScope,
+};
 use crate::sys;
 use dear_imgui_rs::Context as ImGuiContext;
 use dear_imgui_rs::sys as imgui_sys;
 use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::ptr::NonNull;
+use std::rc::Rc;
 
 /// An ImNodes editor context bound to a specific ImNodes context.
 ///
@@ -110,18 +114,19 @@ impl Context {
     pub fn try_create(imgui: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
         let imgui_ctx_raw = imgui.as_raw();
         let imgui_alive = imgui.alive_token();
-        unsafe { sys::imnodes_SetImGuiContext(imgui_ctx_raw) };
+        let _imgui_guard = ImGuiContextGuard::bind(imgui_ctx_raw);
+        let _nodes_guard = ImNodesContextGuard::bind(std::ptr::null_mut());
         let raw = unsafe { sys::imnodes_CreateContext() };
         if raw.is_null() {
             return Err(dear_imgui_rs::ImGuiError::context_creation(
                 "imnodes_CreateContext returned null",
             ));
         }
-        unsafe { sys::imnodes_SetCurrentContext(raw) };
         Ok(Self {
             raw,
             imgui_ctx_raw,
             imgui_alive,
+            alive: Rc::new(()),
             _not_send_sync: PhantomData,
         })
     }
@@ -137,8 +142,15 @@ impl Context {
             self.imgui_alive.is_alive(),
             "dear-imnodes: ImGui context has been dropped"
         );
-        unsafe { sys::imnodes_SetImGuiContext(self.imgui_ctx_raw) };
-        unsafe { sys::imnodes_SetCurrentContext(self.raw) };
+        assert_eq!(
+            unsafe { imgui_sys::igGetCurrentContext() },
+            self.imgui_ctx_raw,
+            "dear-imnodes: Context must be used with the currently-active ImGui context"
+        );
+        unsafe {
+            sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
+            sys::imnodes_SetCurrentContext(self.raw);
+        };
     }
 
     /// Return the raw pointer for this context.
@@ -169,6 +181,7 @@ impl Context {
             imgui_ctx_raw: self.imgui_ctx_raw,
             imgui_alive: self.imgui_alive.clone(),
             ctx_raw: self.raw,
+            ctx_alive: self.alive_token(),
             editor_raw: Some(editor.raw),
         };
         BoundEditor {
@@ -183,10 +196,8 @@ impl Context {
             self.imgui_alive.is_alive(),
             "dear-imnodes: ImGui context has been dropped"
         );
-        unsafe {
-            sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
-            sys::imnodes_SetCurrentContext(self.raw);
-        }
+        let _imgui_guard = ImGuiContextGuard::bind(self.imgui_ctx_raw);
+        let _nodes_guard = ImNodesContextGuard::bind(self.raw);
         let raw = unsafe { sys::imnodes_EditorContextCreate() };
         if raw.is_null() {
             return Err(dear_imgui_rs::ImGuiError::context_creation(
@@ -196,6 +207,7 @@ impl Context {
         Ok(EditorContext {
             raw,
             bound_ctx_raw: Some(self.raw),
+            bound_ctx_alive: Some(self.alive_token()),
             bound_imgui_ctx_raw: Some(self.imgui_ctx_raw),
             bound_imgui_alive: Some(self.imgui_alive.clone()),
             _not_send_sync: PhantomData,
@@ -206,17 +218,20 @@ impl Context {
         self.try_create_editor_context()
             .expect("Failed to create ImNodes editor context")
     }
+
+    pub(crate) fn alive_token(&self) -> ImNodesContextAliveToken {
+        ImNodesContextAliveToken(Rc::downgrade(&self.alive))
+    }
 }
 
 impl Drop for Context {
     fn drop(&mut self) {
         if !self.raw.is_null() {
             if self.imgui_alive.is_alive() {
+                let _imgui_guard = ImGuiContextGuard::bind(self.imgui_ctx_raw);
+                let _nodes_guard = ImNodesContextGuard::bind(self.raw);
                 unsafe {
-                    sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
-                    if sys::imnodes_GetCurrentContext() == self.raw {
-                        sys::imnodes_SetCurrentContext(std::ptr::null_mut());
-                    }
+                    sys::imnodes_DestroyContext(self.raw);
                 }
             } else {
                 // Avoid calling `SetImGuiContext` with a dangling pointer.
@@ -225,9 +240,9 @@ impl Drop for Context {
                     if sys::imnodes_GetCurrentContext() == self.raw {
                         sys::imnodes_SetCurrentContext(std::ptr::null_mut());
                     }
+                    sys::imnodes_DestroyContext(self.raw);
                 }
             }
-            unsafe { sys::imnodes_DestroyContext(self.raw) };
         }
     }
 }
@@ -244,13 +259,33 @@ impl Drop for EditorContext {
                     return;
                 }
             }
+            if let Some(alive) = &self.bound_ctx_alive {
+                if !alive.is_alive() {
+                    // The owner ImNodes context has already been destroyed. Free this editor
+                    // without rebinding the dangling `ImNodesContext*`.
+                    if let Some(imgui_ctx_raw) = self.bound_imgui_ctx_raw {
+                        let _imgui_guard = ImGuiContextGuard::bind(imgui_ctx_raw);
+                        unsafe { sys::imnodes_EditorContextFree(self.raw) };
+                    } else {
+                        unsafe { sys::imnodes_EditorContextFree(self.raw) };
+                    }
+                    return;
+                }
+            }
             if let Some(imgui_ctx_raw) = self.bound_imgui_ctx_raw {
-                unsafe { sys::imnodes_SetImGuiContext(imgui_ctx_raw) };
+                let _imgui_guard = ImGuiContextGuard::bind(imgui_ctx_raw);
+                if let Some(ctx_raw) = self.bound_ctx_raw {
+                    let _nodes_guard = ImNodesContextGuard::bind(ctx_raw);
+                    unsafe {
+                        sys::imnodes_EditorContextResetToDefaultIfCurrent(self.raw);
+                        sys::imnodes_EditorContextFree(self.raw);
+                    }
+                } else {
+                    unsafe { sys::imnodes_EditorContextFree(self.raw) };
+                }
+            } else {
+                unsafe { sys::imnodes_EditorContextFree(self.raw) };
             }
-            if let Some(ctx_raw) = self.bound_ctx_raw {
-                unsafe { sys::imnodes_SetCurrentContext(ctx_raw) };
-            }
-            unsafe { sys::imnodes_EditorContextFree(self.raw) };
         }
     }
 }

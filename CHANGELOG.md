@@ -153,6 +153,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Clarify `dear-imguizmo-quat` global static setting semantics and add
     `GizmoQuatSettings` / `GizmoQuatSettingsToken` for temporary restoration of the
     getter-backed sensitivity, scale, flip, and reverse settings.
+  - Bind `dear-imnodes` frame/token operations to the active ImGui context and restore
+    the previous Dear ImGui and ImNodes current contexts after context/editor cleanup,
+    preventing hidden current-context switches during multi-context use.
+  - Reset `dear-imnodes` to the default editor context when `NodeEditor` is opened without
+    an explicit `EditorContext` or when the current explicit editor is dropped, preventing
+    stale editor pointers after using a custom editor.
 
 ## [0.12.0] - 2026-05-09
 

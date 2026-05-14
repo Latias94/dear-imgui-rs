@@ -15,6 +15,7 @@ impl<'ui> NodesUi<'ui> {
             imgui_ctx_raw: ctx.imgui_ctx_raw,
             imgui_alive: ctx.imgui_alive.clone(),
             ctx_raw: ctx.raw,
+            ctx_alive: ctx.alive_token(),
             editor_raw: None,
         };
         scope.bind();
