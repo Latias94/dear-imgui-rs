@@ -424,7 +424,7 @@ impl PopupContextOptions {
     pub(crate) fn validate(self, caller: &str) {
         validate_popup_flags(caller, self.flags);
         assert!(
-            self.flags.bits() & sys::ImGuiPopupFlags_MouseButtonMask_ == 0,
+            self.flags.bits() & (sys::ImGuiPopupFlags_MouseButtonMask_ as i32) == 0,
             "{caller} received non-independent ImGuiPopupFlags mouse-button bits"
         );
     }

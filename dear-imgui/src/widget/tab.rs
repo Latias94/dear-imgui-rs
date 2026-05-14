@@ -104,14 +104,15 @@ impl TabBarOptions {
             "{caller} received non-independent ImGuiTabBarFlags bits: 0x{unsupported_flags:X}"
         );
         let bits = self.raw();
-        let supported = TabBarFlags::all().bits() | sys::ImGuiTabBarFlags_FittingPolicyMask_;
+        let fitting_policy_mask = sys::ImGuiTabBarFlags_FittingPolicyMask_ as i32;
+        let supported = TabBarFlags::all().bits() | fitting_policy_mask;
         let unsupported = bits & !supported;
         assert!(
             unsupported == 0,
             "{caller} received unsupported ImGuiTabBarFlags bits: 0x{unsupported:X}"
         );
         assert!(
-            (bits & sys::ImGuiTabBarFlags_FittingPolicyMask_).count_ones() <= 1,
+            (bits & fitting_policy_mask).count_ones() <= 1,
             "{caller} accepts at most one tab-bar fitting policy"
         );
     }
@@ -226,24 +227,24 @@ fn validate_tab_item_options(caller: &str, options: TabItemOptions, allow_button
     );
     let bits = options.raw();
     let mut supported = TabItemFlags::all().bits()
-        | sys::ImGuiTabItemFlags_Leading
-        | sys::ImGuiTabItemFlags_Trailing;
+        | (sys::ImGuiTabItemFlags_Leading as i32)
+        | (sys::ImGuiTabItemFlags_Trailing as i32);
     if allow_button_bits {
-        supported |= sys::ImGuiTabItemFlags_Button;
+        supported |= sys::ImGuiTabItemFlags_Button as i32;
     }
     let unsupported = bits & !supported;
     assert!(
         unsupported == 0,
         "{caller} received unsupported ImGuiTabItemFlags bits: 0x{unsupported:X}"
     );
+    let placement_mask = (sys::ImGuiTabItemFlags_Leading | sys::ImGuiTabItemFlags_Trailing) as i32;
     assert!(
-        bits & (sys::ImGuiTabItemFlags_Leading | sys::ImGuiTabItemFlags_Trailing)
-            != (sys::ImGuiTabItemFlags_Leading | sys::ImGuiTabItemFlags_Trailing),
+        bits & placement_mask != placement_mask,
         "{caller} cannot combine LEADING with TRAILING"
     );
     if !allow_button_bits {
         assert!(
-            bits & sys::ImGuiTabItemFlags_Button == 0,
+            bits & (sys::ImGuiTabItemFlags_Button as i32) == 0,
             "{caller} cannot use BUTTON; use TabItemButton instead"
         );
     }

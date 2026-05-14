@@ -258,25 +258,26 @@ impl ComboBoxOptions {
             "{caller} received non-independent ImGuiComboFlags bits: 0x{unsupported_flags:X}"
         );
         let bits = self.raw();
-        let supported =
-            ComboBoxFlags::all().bits() | sys::ImGuiComboFlags_HeightMask_ | combo_preview_mask();
+        let height_mask = sys::ImGuiComboFlags_HeightMask_ as i32;
+        let no_arrow_button = sys::ImGuiComboFlags_NoArrowButton as i32;
+        let no_preview = sys::ImGuiComboFlags_NoPreview as i32;
+        let width_fit_preview = sys::ImGuiComboFlags_WidthFitPreview as i32;
+        let supported = ComboBoxFlags::all().bits() | height_mask | combo_preview_mask();
         let unsupported = bits & !supported;
         assert!(
             unsupported == 0,
             "{caller} received unsupported ImGuiComboFlags bits: 0x{unsupported:X}"
         );
         assert!(
-            bits & (sys::ImGuiComboFlags_NoArrowButton | sys::ImGuiComboFlags_NoPreview)
-                != (sys::ImGuiComboFlags_NoArrowButton | sys::ImGuiComboFlags_NoPreview),
+            bits & (no_arrow_button | no_preview) != (no_arrow_button | no_preview),
             "{caller} cannot combine NO_ARROW_BUTTON with NO_PREVIEW"
         );
         assert!(
-            bits & sys::ImGuiComboFlags_WidthFitPreview == 0
-                || bits & sys::ImGuiComboFlags_NoPreview == 0,
+            bits & width_fit_preview == 0 || bits & no_preview == 0,
             "{caller} cannot combine WIDTH_FIT_PREVIEW with NO_PREVIEW"
         );
         assert!(
-            (bits & sys::ImGuiComboFlags_HeightMask_).count_ones() <= 1,
+            (bits & height_mask).count_ones() <= 1,
             "{caller} accepts at most one combo height policy"
         );
     }
@@ -284,9 +285,9 @@ impl ComboBoxOptions {
 
 #[inline]
 const fn combo_preview_mask() -> i32 {
-    sys::ImGuiComboFlags_NoArrowButton
+    (sys::ImGuiComboFlags_NoArrowButton
         | sys::ImGuiComboFlags_NoPreview
-        | sys::ImGuiComboFlags_WidthFitPreview
+        | sys::ImGuiComboFlags_WidthFitPreview) as i32
 }
 
 impl From<ComboBoxFlags> for ComboBoxOptions {
@@ -444,13 +445,14 @@ impl TableOptions {
             "{caller} received non-independent ImGuiTableFlags bits: 0x{unsupported_flags:X}"
         );
         let bits = self.raw();
-        let supported = TableFlags::all().bits() | sys::ImGuiTableFlags_SizingMask_;
+        let sizing_mask = sys::ImGuiTableFlags_SizingMask_ as i32;
+        let supported = TableFlags::all().bits() | sizing_mask;
         let unsupported = bits & !supported;
         assert!(
             unsupported == 0,
             "{caller} received unsupported ImGuiTableFlags bits: 0x{unsupported:X}"
         );
-        let sizing_policy = bits & sys::ImGuiTableFlags_SizingMask_;
+        let sizing_policy = bits & sizing_mask;
         assert!(
             is_valid_table_sizing_policy(sizing_policy),
             "{caller} received invalid table sizing policy bits: 0x{sizing_policy:X}"
@@ -673,20 +675,20 @@ impl TableColumnFlags {
         let bits = self.bits()
             | width.map_or(0, TableColumnWidth::raw_flags)
             | indent.map_or(0, TableColumnIndent::raw_flags);
-        let supported = TableColumnFlags::all().bits()
-            | sys::ImGuiTableColumnFlags_WidthMask_
-            | sys::ImGuiTableColumnFlags_IndentMask_;
+        let width_mask = sys::ImGuiTableColumnFlags_WidthMask_ as i32;
+        let indent_mask = sys::ImGuiTableColumnFlags_IndentMask_ as i32;
+        let supported = TableColumnFlags::all().bits() | width_mask | indent_mask;
         let unsupported = bits & !supported;
         assert!(
             unsupported == 0,
             "{caller} received unsupported ImGuiTableColumnFlags bits: 0x{unsupported:X}"
         );
         assert!(
-            (bits & sys::ImGuiTableColumnFlags_WidthMask_).count_ones() <= 1,
+            (bits & width_mask).count_ones() <= 1,
             "{caller} accepts at most one table column width policy"
         );
         assert!(
-            (bits & sys::ImGuiTableColumnFlags_IndentMask_).count_ones() <= 1,
+            (bits & indent_mask).count_ones() <= 1,
             "{caller} accepts at most one table column indent policy"
         );
     }

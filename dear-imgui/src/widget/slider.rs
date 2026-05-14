@@ -16,7 +16,7 @@ use std::ffi::c_void;
 fn validate_slider_flags(caller: &str, flags: SliderFlags) {
     let bits = flags.bits();
     assert!(
-        bits & sys::ImGuiSliderFlags_WrapAround == 0,
+        bits & (sys::ImGuiSliderFlags_WrapAround as i32) == 0,
         "{caller} does not support ImGuiSliderFlags_WrapAround; use DragFlags::WRAP_AROUND with drag widgets"
     );
     let unsupported = bits & !SliderFlags::all().bits();
