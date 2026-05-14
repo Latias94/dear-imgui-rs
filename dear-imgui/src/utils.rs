@@ -29,12 +29,20 @@ bitflags! {
         const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup as i32;
         /// Return true even if an active item is blocking access to this item/window. Useful for Drag and Drop patterns.
         const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
+        /// IsItemHovered() only: Return true even if the item uses AllowOverlap mode and is overlapped by another hoverable item.
+        const ALLOW_WHEN_OVERLAPPED_BY_ITEM = sys::ImGuiHoveredFlags_AllowWhenOverlappedByItem as i32;
+        /// IsItemHovered() only: Return true even if the item position is overlapped by another window.
+        const ALLOW_WHEN_OVERLAPPED_BY_WINDOW = sys::ImGuiHoveredFlags_AllowWhenOverlappedByWindow as i32;
         /// IsItemHovered() only: Return true even if the position is obstructed or overlapped by another window
         const ALLOW_WHEN_OVERLAPPED = sys::ImGuiHoveredFlags_AllowWhenOverlapped as i32;
         /// IsItemHovered() only: Return true even if the item is disabled
         const ALLOW_WHEN_DISABLED = sys::ImGuiHoveredFlags_AllowWhenDisabled as i32;
         /// IsItemHovered() only: Disable using gamepad/keyboard navigation state when active, always query mouse.
         const NO_NAV_OVERRIDE = sys::ImGuiHoveredFlags_NoNavOverride as i32;
+        /// IsItemHovered() only: test rectangle visibility with popup/active-item/overlap bypasses.
+        const RECT_ONLY = sys::ImGuiHoveredFlags_RectOnly as i32;
+        /// IsWindowHovered() only: Shortcut for `ROOT_WINDOW | CHILD_WINDOWS`.
+        const ROOT_AND_CHILD_WINDOWS = sys::ImGuiHoveredFlags_RootAndChildWindows as i32;
         /// Shortcut for standard flags when using IsItemHovered() + SetTooltip() sequence.
         const FOR_TOOLTIP = sys::ImGuiHoveredFlags_ForTooltip as i32;
         /// Require mouse to be stationary for style.HoverStationaryDelay (~0.15 sec) _at least one time_. After this, can move on same item/window. Using the stationary test tends to reduces the need for a long delay.
@@ -73,6 +81,8 @@ bitflags! {
         const NO_POPUP_HIERARCHY = sys::ImGuiFocusedFlags_NoPopupHierarchy as i32;
         /// IsWindowFocused() only: Consider docking hierarchy
         const DOCK_HIERARCHY = sys::ImGuiFocusedFlags_DockHierarchy as i32;
+        /// IsWindowFocused() only: Shortcut for `ROOT_WINDOW | CHILD_WINDOWS`.
+        const ROOT_AND_CHILD_WINDOWS = sys::ImGuiFocusedFlags_RootAndChildWindows as i32;
     }
 }
 
@@ -80,6 +90,43 @@ impl Default for FocusedFlags {
     fn default() -> Self {
         FocusedFlags::NONE
     }
+}
+
+const HOVERED_FLAGS_ALLOWED_FOR_WINDOW: i32 =
+    sys::ImGuiHoveredFlags_AllowedMaskForIsWindowHovered as i32;
+const HOVERED_FLAGS_ALLOWED_FOR_ITEM: i32 =
+    sys::ImGuiHoveredFlags_AllowedMaskForIsItemHovered as i32;
+
+fn validate_hovered_flags(caller: &str, flags: HoveredFlags, allowed_mask: i32) {
+    let unsupported = flags.bits() & !allowed_mask;
+    assert!(
+        unsupported == 0,
+        "{caller} received ImGuiHoveredFlags bits that are invalid for this call: 0x{unsupported:X}"
+    );
+}
+
+pub(crate) fn validate_window_hovered_flags(caller: &str, flags: HoveredFlags) {
+    validate_hovered_flags(caller, flags, HOVERED_FLAGS_ALLOWED_FOR_WINDOW);
+}
+
+pub(crate) fn validate_item_hovered_flags(caller: &str, flags: HoveredFlags) {
+    validate_hovered_flags(caller, flags, HOVERED_FLAGS_ALLOWED_FOR_ITEM);
+}
+
+pub(crate) fn validate_tooltip_hovered_flags(caller: &str, flags: HoveredFlags) {
+    validate_item_hovered_flags(caller, flags);
+    assert!(
+        !flags.contains(HoveredFlags::FOR_TOOLTIP),
+        "{caller} stores the flags expanded by ImGuiHoveredFlags_ForTooltip, so FOR_TOOLTIP itself is not valid here"
+    );
+}
+
+fn validate_focused_flags(caller: &str, flags: FocusedFlags) {
+    let unsupported = flags.bits() & !FocusedFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiFocusedFlags bits: 0x{unsupported:X}"
+    );
 }
 
 /// Utility functions for Dear ImGui
@@ -121,6 +168,7 @@ impl crate::ui::Ui {
     /// Returns `true` if the current window is hovered based on the given flags
     #[doc(alias = "IsWindowHovered")]
     pub fn is_window_hovered_with_flags(&self, flags: HoveredFlags) -> bool {
+        validate_window_hovered_flags("Ui::is_window_hovered_with_flags()", flags);
         unsafe { sys::igIsWindowHovered(flags.bits()) }
     }
 
@@ -133,6 +181,7 @@ impl crate::ui::Ui {
     /// Returns `true` if the current window is focused based on the given flags
     #[doc(alias = "IsWindowFocused")]
     pub fn is_window_focused_with_flags(&self, flags: FocusedFlags) -> bool {
+        validate_focused_flags("Ui::is_window_focused_with_flags()", flags);
         unsafe { sys::igIsWindowFocused(flags.bits()) }
     }
 

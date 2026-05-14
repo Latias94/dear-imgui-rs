@@ -37,7 +37,7 @@
 use crate::Context;
 use crate::internal::RawWrapper;
 use crate::sys;
-use crate::utils::HoveredFlags;
+use crate::utils::{HoveredFlags, validate_tooltip_hovered_flags};
 use crate::widget::TreeNodeFlags;
 use crate::widget::{TableFlags, TableRowFlags};
 use crate::window::WindowFlags;
@@ -596,6 +596,7 @@ impl Style {
         HoveredFlags::from_bits_truncate(self.inner().HoverFlagsForTooltipMouse as i32)
     }
     pub fn set_hover_flags_for_tooltip_mouse(&mut self, flags: HoveredFlags) {
+        validate_tooltip_hovered_flags("Style::set_hover_flags_for_tooltip_mouse()", flags);
         self.inner_mut().HoverFlagsForTooltipMouse = flags.bits() as sys::ImGuiHoveredFlags;
     }
 
@@ -603,6 +604,7 @@ impl Style {
         HoveredFlags::from_bits_truncate(self.inner().HoverFlagsForTooltipNav as i32)
     }
     pub fn set_hover_flags_for_tooltip_nav(&mut self, flags: HoveredFlags) {
+        validate_tooltip_hovered_flags("Style::set_hover_flags_for_tooltip_nav()", flags);
         self.inner_mut().HoverFlagsForTooltipNav = flags.bits() as sys::ImGuiHoveredFlags;
     }
 }
