@@ -41,6 +41,14 @@ impl ListClipper {
     }
 
     pub fn begin(self, ui: &Ui) -> ListClipperToken<'_> {
+        assert!(
+            self.items_count >= 0,
+            "ListClipper::begin() items_count must be non-negative"
+        );
+        assert!(
+            self.items_height.is_finite(),
+            "ListClipper::begin() items_height must be finite"
+        );
         unsafe {
             let ptr = sys::ImGuiListClipper_ImGuiListClipper();
             if ptr.is_null() {
@@ -60,15 +68,7 @@ impl ListClipper {
 pub struct ListClipperToken<'ui> {
     list_clipper: *mut sys::ImGuiListClipper,
     _phantom: PhantomData<&'ui Ui>,
-
-    /// In upstream imgui < 1.87, calling step too many times will
-    /// cause a segfault due to null pointer. So we keep track of this
-    /// and panic instead.
-    ///
-    /// Fixed in https://github.com/ocornut/imgui/commit/dca527b which
-    /// will likely be part of imgui 1.88 - at which point this can be
-    /// removed.
-    consumed_workaround: bool,
+    ended: bool,
 }
 
 impl<'ui> ListClipperToken<'ui> {
@@ -76,7 +76,7 @@ impl<'ui> ListClipperToken<'ui> {
         Self {
             list_clipper,
             _phantom: PhantomData,
-            consumed_workaround: false,
+            ended: false,
         }
     }
 
@@ -91,26 +91,24 @@ impl<'ui> ListClipperToken<'ui> {
     ///
     /// It is recommended to use the iterator interface!
     pub fn step(&mut self) -> bool {
-        let is_imgui_1_88_or_higher = false;
-        if is_imgui_1_88_or_higher {
-            unsafe { sys::ImGuiListClipper_Step(self.list_clipper) }
-        } else {
-            if self.consumed_workaround {
-                panic!("ListClipperToken::step called after it has previously returned false");
-            }
-            let ret = unsafe { sys::ImGuiListClipper_Step(self.list_clipper) };
-            if !ret {
-                self.consumed_workaround = true;
-            }
-            ret
+        if self.ended {
+            panic!("ListClipperToken::step() called after the clipper has ended");
         }
+        let ret = unsafe { sys::ImGuiListClipper_Step(self.list_clipper) };
+        if !ret {
+            self.ended = true;
+        }
+        ret
     }
 
     /// This is automatically called back the final call to
     /// `step`. You can call it sooner but typically not needed.
     pub fn end(&mut self) {
-        unsafe {
-            sys::ImGuiListClipper_End(self.list_clipper);
+        if !self.ended {
+            unsafe {
+                sys::ImGuiListClipper_End(self.list_clipper);
+            }
+            self.ended = true;
         }
     }
 
@@ -136,6 +134,70 @@ impl Drop for ListClipperToken<'_> {
         unsafe {
             sys::ImGuiListClipper_destroy(self.list_clipper);
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_context() -> crate::Context {
+        let mut ctx = crate::Context::create();
+        let _ = ctx.font_atlas_mut().build();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        ctx
+    }
+
+    #[test]
+    fn step_after_end_panics_before_ffi() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("list_clipper_step_after_end").build(|| {
+            let mut clipper = ListClipper::new(0).begin(ui);
+            clipper.end();
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = clipper.step();
+            }));
+
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn end_after_step_false_is_a_noop() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("list_clipper_end_after_step_false").build(|| {
+            let mut clipper = ListClipper::new(0).begin(ui);
+            assert!(!clipper.step());
+            clipper.end();
+        });
+    }
+
+    #[test]
+    fn begin_rejects_invalid_inputs_before_ffi() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("list_clipper_invalid_inputs").build(|| {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _clipper = ListClipper::new(-1).begin(ui);
+                }))
+                .is_err()
+            );
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _clipper = ListClipper::new(1).items_height(f32::NAN).begin(ui);
+                }))
+                .is_err()
+            );
+        });
     }
 }
 

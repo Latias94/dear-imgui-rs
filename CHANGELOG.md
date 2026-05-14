@@ -92,6 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     when callbacks panic.
   - Add scoped button-repeat APIs that keep Dear ImGui's item-flag stack balanced when
     callbacks panic.
+  - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
+    crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate legacy columns counts, nesting, and column indices before crossing FFI, and
     use an RAII token for wrapped-text push/pop state.
   - Restore the previous Dear ImGui current context after panic in internal temporary context
