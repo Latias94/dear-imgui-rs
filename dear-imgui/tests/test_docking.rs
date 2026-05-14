@@ -64,16 +64,29 @@ fn test_window_class() {
         default_class.viewport_flags_override_clear,
         ViewportFlags::NONE
     );
+    assert_eq!(
+        default_class.tab_item_flags_override_set,
+        TabItemOptions::new()
+    );
+    assert_eq!(
+        default_class.dock_node_flags_override_set,
+        DockNodeFlags::NONE
+    );
     assert!(!default_class.docking_always_tab_bar);
     assert!(default_class.docking_allow_unclassed);
     println!("Default window class: {:?}", default_class);
 
     // Test custom window class
+    let tab_options = TabItemOptions::new()
+        .flags(TabItemFlags::NO_REORDER)
+        .placement(TabItemPlacement::Trailing);
     let custom_class = WindowClass::new(42)
         .parent_viewport_id(100)
         .focus_route_parent_window_id(200)
         .viewport_flags_override_set(ViewportFlags::NO_DECORATION)
         .viewport_flags_override_clear(ViewportFlags::NO_TASK_BAR_ICON)
+        .tab_item_flags_override_set(tab_options)
+        .dock_node_flags_override_set(DockNodeFlags::NO_RESIZE)
         .docking_always_tab_bar(true)
         .docking_allow_unclassed(false);
 
@@ -87,6 +100,11 @@ fn test_window_class() {
     assert_eq!(
         custom_class.viewport_flags_override_clear,
         ViewportFlags::NO_TASK_BAR_ICON
+    );
+    assert_eq!(custom_class.tab_item_flags_override_set, tab_options);
+    assert_eq!(
+        custom_class.dock_node_flags_override_set,
+        DockNodeFlags::NO_RESIZE
     );
     assert!(custom_class.docking_always_tab_bar);
     assert!(!custom_class.docking_allow_unclassed);

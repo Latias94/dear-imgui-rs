@@ -34,9 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Change `Viewport::flags()` and `Viewport::set_flags(...)` to use typed `ViewportFlags`
     instead of raw `ImGuiViewportFlags`. Use `raw_flags()` or the unsafe
     `set_raw_flags_unchecked(...)` escape hatch when backend code must manipulate raw bits.
-  - Extend `WindowClass` with typed viewport flag override fields. Code constructing
-    `WindowClass` with struct literals should include the new fields or use `WindowClass::new`
-    / `Default`.
+  - Extend `WindowClass` with typed viewport, tab item, and dock node override fields. Code
+    constructing `WindowClass` with struct literals should include the new fields or use
+    `WindowClass::new` / `Default`.
 - Core (`dear-imgui-sys`)
   - Stop exposing cimgui's `ImGuiPlatformIO_Set_Platform_GetWindowPos` and
     `ImGuiPlatformIO_Set_Platform_GetWindowSize` helpers from generated bindings. Use the
@@ -126,8 +126,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Validate hover/focus query flags and tooltip hover-style flags before crossing FFI or storing
     them, matching Dear ImGui's per-call `ImGuiHoveredFlags` allowed masks.
   - Reject unsupported `ViewportFlags` bits before storing them in an `ImGuiViewport`.
-  - Expose typed `WindowClass` viewport flag overrides and reject unsupported or overlapping
-    set/clear masks before calling `SetNextWindowClass` or `DockSpace`.
+  - Expose typed `WindowClass` flag overrides and reject unsupported or overlapping masks before
+    calling `SetNextWindowClass` or `DockSpace`.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts

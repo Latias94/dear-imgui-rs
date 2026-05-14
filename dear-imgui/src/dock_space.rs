@@ -98,6 +98,10 @@ pub struct WindowClass {
     pub viewport_flags_override_set: crate::ViewportFlags,
     /// Viewport flags to clear when a window of this class owns a viewport.
     pub viewport_flags_override_clear: crate::ViewportFlags,
+    /// Tab item flags to set when a window of this class is submitted into a dock node tab bar.
+    pub tab_item_flags_override_set: crate::widget::TabItemOptions,
+    /// Dock node flags to set when a window of this class is hosted by a dock node.
+    pub dock_node_flags_override_set: DockNodeFlags,
     /// Set to true to enforce single floating windows of this class always having their own docking node
     pub docking_always_tab_bar: bool,
     /// Set to true to allow windows of this class to be docked/merged with an unclassed window
@@ -112,6 +116,8 @@ impl Default for WindowClass {
             focus_route_parent_window_id: 0,
             viewport_flags_override_set: crate::ViewportFlags::NONE,
             viewport_flags_override_clear: crate::ViewportFlags::NONE,
+            tab_item_flags_override_set: crate::widget::TabItemOptions::new(),
+            dock_node_flags_override_set: DockNodeFlags::NONE,
             docking_always_tab_bar: false,
             docking_allow_unclassed: true,
         }
@@ -162,6 +168,21 @@ impl WindowClass {
         self
     }
 
+    /// Sets tab item flags when a window of this class is submitted into a dock node tab bar.
+    pub fn tab_item_flags_override_set(
+        mut self,
+        options: impl Into<crate::widget::TabItemOptions>,
+    ) -> Self {
+        self.tab_item_flags_override_set = options.into();
+        self
+    }
+
+    /// Sets dock node flags when a window of this class is hosted by a dock node.
+    pub fn dock_node_flags_override_set(mut self, flags: DockNodeFlags) -> Self {
+        self.dock_node_flags_override_set = flags;
+        self
+    }
+
     /// Enables always showing tab bar for single floating windows
     pub fn docking_always_tab_bar(mut self, enabled: bool) -> Self {
         self.docking_always_tab_bar = enabled;
@@ -185,6 +206,9 @@ impl WindowClass {
             overlap == 0,
             "{caller} cannot set and clear the same ImGuiViewportFlags bits: 0x{overlap:X}"
         );
+        self.tab_item_flags_override_set
+            .validate_for_tab_item(caller);
+        validate_dock_node_flags(caller, self.dock_node_flags_override_set);
     }
 
     /// Converts to ImGui's internal representation
@@ -196,8 +220,8 @@ impl WindowClass {
             FocusRouteParentWindowId: self.focus_route_parent_window_id,
             ViewportFlagsOverrideSet: self.viewport_flags_override_set.bits(),
             ViewportFlagsOverrideClear: self.viewport_flags_override_clear.bits(),
-            TabItemFlagsOverrideSet: 0,
-            DockNodeFlagsOverrideSet: 0,
+            TabItemFlagsOverrideSet: self.tab_item_flags_override_set.bits(),
+            DockNodeFlagsOverrideSet: self.dock_node_flags_override_set.bits(),
             DockingAlwaysTabBar: self.docking_always_tab_bar,
             DockingAllowUnclassed: self.docking_allow_unclassed,
         }

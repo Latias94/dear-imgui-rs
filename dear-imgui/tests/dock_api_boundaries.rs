@@ -165,7 +165,7 @@ fn dock_builder_copy_helpers_reject_missing_source_nodes_before_ffi() {
 }
 
 #[test]
-fn window_class_rejects_invalid_viewport_flag_overrides_before_ffi() {
+fn window_class_rejects_invalid_flag_overrides_before_ffi() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
@@ -192,11 +192,39 @@ fn window_class_rejects_invalid_viewport_flag_overrides_before_ffi() {
         .is_err()
     );
 
-    let dockspace_id = ui.get_id("Window class boundaries");
-    let valid_class = imgui::WindowClass::new(3).viewport_flags_overrides(
-        imgui::ViewportFlags::NO_DECORATION,
-        imgui::ViewportFlags::NO_TASK_BAR_ICON,
+    let private_tab_button =
+        imgui::TabItemFlags::from_bits_retain(imgui::sys::ImGuiTabItemFlags_Button as i32);
+    let invalid_tab_class =
+        imgui::WindowClass::new(3).tab_item_flags_override_set(private_tab_button);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.set_next_window_class(&invalid_tab_class);
+        }))
+        .is_err()
     );
+
+    let private_dock_flag =
+        imgui::DockNodeFlags::from_bits_retain(imgui::sys::ImGuiDockNodeFlags_HiddenTabBar);
+    let invalid_dock_class =
+        imgui::WindowClass::new(4).dock_node_flags_override_set(private_dock_flag);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.set_next_window_class(&invalid_dock_class);
+        }))
+        .is_err()
+    );
+
+    let dockspace_id = ui.get_id("Window class boundaries");
+    let valid_tab_options = imgui::TabItemOptions::new()
+        .flags(imgui::TabItemFlags::NO_REORDER)
+        .placement(imgui::TabItemPlacement::Leading);
+    let valid_class = imgui::WindowClass::new(5)
+        .viewport_flags_overrides(
+            imgui::ViewportFlags::NO_DECORATION,
+            imgui::ViewportFlags::NO_TASK_BAR_ICON,
+        )
+        .tab_item_flags_override_set(valid_tab_options)
+        .dock_node_flags_override_set(imgui::DockNodeFlags::NO_RESIZE);
     let _ = ui.window("Window class boundaries").build(|| {
         let _ = ui.dock_space_with_class(
             dockspace_id,
