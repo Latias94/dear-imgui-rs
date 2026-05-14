@@ -94,6 +94,10 @@ pub struct WindowClass {
     pub parent_viewport_id: sys::ImGuiID,
     /// ID of parent window for shortcut focus route evaluation
     pub focus_route_parent_window_id: sys::ImGuiID,
+    /// Viewport flags to set when a window of this class owns a viewport.
+    pub viewport_flags_override_set: crate::ViewportFlags,
+    /// Viewport flags to clear when a window of this class owns a viewport.
+    pub viewport_flags_override_clear: crate::ViewportFlags,
     /// Set to true to enforce single floating windows of this class always having their own docking node
     pub docking_always_tab_bar: bool,
     /// Set to true to allow windows of this class to be docked/merged with an unclassed window
@@ -106,6 +110,8 @@ impl Default for WindowClass {
             class_id: 0,
             parent_viewport_id: !0, // -1 as u32
             focus_route_parent_window_id: 0,
+            viewport_flags_override_set: crate::ViewportFlags::NONE,
+            viewport_flags_override_clear: crate::ViewportFlags::NONE,
             docking_always_tab_bar: false,
             docking_allow_unclassed: true,
         }
@@ -133,6 +139,29 @@ impl WindowClass {
         self
     }
 
+    /// Sets viewport flags when a window of this class owns a viewport.
+    pub fn viewport_flags_override_set(mut self, flags: crate::ViewportFlags) -> Self {
+        self.viewport_flags_override_set = flags;
+        self
+    }
+
+    /// Clears viewport flags when a window of this class owns a viewport.
+    pub fn viewport_flags_override_clear(mut self, flags: crate::ViewportFlags) -> Self {
+        self.viewport_flags_override_clear = flags;
+        self
+    }
+
+    /// Sets and clears viewport flags when a window of this class owns a viewport.
+    pub fn viewport_flags_overrides(
+        mut self,
+        set: crate::ViewportFlags,
+        clear: crate::ViewportFlags,
+    ) -> Self {
+        self.viewport_flags_override_set = set;
+        self.viewport_flags_override_clear = clear;
+        self
+    }
+
     /// Enables always showing tab bar for single floating windows
     pub fn docking_always_tab_bar(mut self, enabled: bool) -> Self {
         self.docking_always_tab_bar = enabled;
@@ -145,14 +174,28 @@ impl WindowClass {
         self
     }
 
+    fn validate(&self, caller: &str) {
+        crate::io::validate_viewport_flags(
+            caller,
+            self.viewport_flags_override_set | self.viewport_flags_override_clear,
+        );
+        let overlap =
+            self.viewport_flags_override_set.bits() & self.viewport_flags_override_clear.bits();
+        assert!(
+            overlap == 0,
+            "{caller} cannot set and clear the same ImGuiViewportFlags bits: 0x{overlap:X}"
+        );
+    }
+
     /// Converts to ImGui's internal representation
-    fn to_imgui(&self) -> sys::ImGuiWindowClass {
+    fn to_imgui(&self, caller: &str) -> sys::ImGuiWindowClass {
+        self.validate(caller);
         sys::ImGuiWindowClass {
             ClassId: self.class_id,
             ParentViewportId: self.parent_viewport_id,
             FocusRouteParentWindowId: self.focus_route_parent_window_id,
-            ViewportFlagsOverrideSet: 0,
-            ViewportFlagsOverrideClear: 0,
+            ViewportFlagsOverrideSet: self.viewport_flags_override_set.bits(),
+            ViewportFlagsOverrideClear: self.viewport_flags_override_clear.bits(),
             TabItemFlagsOverrideSet: 0,
             DockNodeFlagsOverrideSet: 0,
             DockingAlwaysTabBar: self.docking_always_tab_bar,
@@ -273,7 +316,8 @@ impl Ui {
                 x: size[0],
                 y: size[1],
             };
-            let imgui_window_class = window_class.map(WindowClass::to_imgui);
+            let imgui_window_class =
+                window_class.map(|class| class.to_imgui("Ui::dock_space_with_class()"));
             let window_class_ptr = imgui_window_class
                 .as_ref()
                 .map_or(ptr::null(), |wc| wc as *const _);
@@ -388,7 +432,7 @@ impl Ui {
     #[doc(alias = "SetNextWindowClass")]
     pub fn set_next_window_class(&self, window_class: &WindowClass) {
         unsafe {
-            let imgui_wc = window_class.to_imgui();
+            let imgui_wc = window_class.to_imgui("Ui::set_next_window_class()");
             sys::igSetNextWindowClass(&imgui_wc as *const _);
         }
     }

@@ -163,3 +163,46 @@ fn dock_builder_copy_helpers_reject_missing_source_nodes_before_ffi() {
         .is_err()
     );
 }
+
+#[test]
+fn window_class_rejects_invalid_viewport_flag_overrides_before_ffi() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let raw_unknown = imgui::ViewportFlags::from_bits_retain(1 << 14);
+    let unsupported_class = imgui::WindowClass::new(1).viewport_flags_override_set(raw_unknown);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.set_next_window_class(&unsupported_class);
+        }))
+        .is_err()
+    );
+
+    let overlapping_class = imgui::WindowClass::new(2).viewport_flags_overrides(
+        imgui::ViewportFlags::NO_DECORATION,
+        imgui::ViewportFlags::NO_DECORATION,
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.set_next_window_class(&overlapping_class);
+        }))
+        .is_err()
+    );
+
+    let dockspace_id = ui.get_id("Window class boundaries");
+    let valid_class = imgui::WindowClass::new(3).viewport_flags_overrides(
+        imgui::ViewportFlags::NO_DECORATION,
+        imgui::ViewportFlags::NO_TASK_BAR_ICON,
+    );
+    let _ = ui.window("Window class boundaries").build(|| {
+        let _ = ui.dock_space_with_class(
+            dockspace_id,
+            [100.0, 100.0],
+            imgui::DockNodeFlags::NONE,
+            Some(&valid_class),
+        );
+    });
+}

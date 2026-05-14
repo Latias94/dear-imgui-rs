@@ -56,6 +56,14 @@ fn test_window_class() {
     assert_eq!(default_class.class_id, 0);
     assert_eq!(default_class.parent_viewport_id, !0); // -1 as u32
     assert_eq!(default_class.focus_route_parent_window_id, 0);
+    assert_eq!(
+        default_class.viewport_flags_override_set,
+        ViewportFlags::NONE
+    );
+    assert_eq!(
+        default_class.viewport_flags_override_clear,
+        ViewportFlags::NONE
+    );
     assert!(!default_class.docking_always_tab_bar);
     assert!(default_class.docking_allow_unclassed);
     println!("Default window class: {:?}", default_class);
@@ -64,12 +72,22 @@ fn test_window_class() {
     let custom_class = WindowClass::new(42)
         .parent_viewport_id(100)
         .focus_route_parent_window_id(200)
+        .viewport_flags_override_set(ViewportFlags::NO_DECORATION)
+        .viewport_flags_override_clear(ViewportFlags::NO_TASK_BAR_ICON)
         .docking_always_tab_bar(true)
         .docking_allow_unclassed(false);
 
     assert_eq!(custom_class.class_id, 42);
     assert_eq!(custom_class.parent_viewport_id, 100);
     assert_eq!(custom_class.focus_route_parent_window_id, 200);
+    assert_eq!(
+        custom_class.viewport_flags_override_set,
+        ViewportFlags::NO_DECORATION
+    );
+    assert_eq!(
+        custom_class.viewport_flags_override_clear,
+        ViewportFlags::NO_TASK_BAR_ICON
+    );
     assert!(custom_class.docking_always_tab_bar);
     assert!(!custom_class.docking_allow_unclassed);
     println!("Custom window class: {:?}", custom_class);
