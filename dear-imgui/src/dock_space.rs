@@ -37,7 +37,7 @@ use std::ptr;
 bitflags::bitflags! {
     /// Flags for dock nodes
     #[repr(transparent)]
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct DockNodeFlags: i32 {
         /// No flags
         const NONE = sys::ImGuiDockNodeFlags_None as i32;
@@ -56,6 +56,33 @@ bitflags::bitflags! {
         /// Disable undocking this node.
         const NO_UNDOCKING = sys::ImGuiDockNodeFlags_NoUndocking as i32;
     }
+}
+
+pub(crate) fn validate_dock_node_flags(caller: &str, flags: DockNodeFlags) {
+    let unsupported = flags.bits() & !DockNodeFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiDockNodeFlags bits: 0x{unsupported:X}"
+    );
+}
+
+pub(crate) fn assert_nonzero_id(caller: &str, name: &str, id: Id) {
+    assert!(id.raw() != 0, "{caller} {name} must be non-zero");
+}
+
+pub(crate) fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value[0].is_finite() && value[1].is_finite(),
+        "{caller} {name} must contain finite values"
+    );
+}
+
+pub(crate) fn assert_positive_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert_finite_vec2(caller, name, value);
+    assert!(
+        value[0] > 0.0 && value[1] > 0.0,
+        "{caller} {name} must contain positive values"
+    );
 }
 
 /// Window class for docking configuration
@@ -167,6 +194,7 @@ impl Ui {
         dockspace_id: Id,
         flags: DockNodeFlags,
     ) -> Id {
+        validate_dock_node_flags("Ui::dockspace_over_main_viewport_with_flags()", flags);
         unsafe {
             Id::from(sys::igDockSpaceOverViewport(
                 dockspace_id.into(),
@@ -206,7 +234,7 @@ impl Ui {
     ///
     /// # Parameters
     ///
-    /// * `id` - The ID for the dockspace (use 0 to auto-generate)
+    /// * `id` - The non-zero ID for the dockspace. Use [`Ui::get_id`] to create one.
     /// * `size` - The size of the dockspace in pixels
     /// * `flags` - Dock node flags
     /// * `window_class` - Optional window class for docking configuration
@@ -221,8 +249,9 @@ impl Ui {
     /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
+    /// let dockspace_id = ui.get_id("MyDockspace");
     /// let dockspace_id = ui.dock_space_with_class(
-    ///     0.into(),
+    ///     dockspace_id,
     ///     [800.0, 600.0],
     ///     DockNodeFlags::NO_DOCKING_SPLIT,
     ///     Some(&WindowClass::new(1))
@@ -236,17 +265,18 @@ impl Ui {
         flags: DockNodeFlags,
         window_class: Option<&WindowClass>,
     ) -> Id {
+        validate_dock_node_flags("Ui::dock_space_with_class()", flags);
+        assert_nonzero_id("Ui::dock_space_with_class()", "id", id);
+        assert_finite_vec2("Ui::dock_space_with_class()", "size", size);
         unsafe {
             let size_vec = sys::ImVec2 {
                 x: size[0],
                 y: size[1],
             };
-            let window_class_ptr = if let Some(wc) = window_class {
-                let imgui_wc = wc.to_imgui();
-                &imgui_wc as *const _
-            } else {
-                ptr::null()
-            };
+            let imgui_window_class = window_class.map(WindowClass::to_imgui);
+            let window_class_ptr = imgui_window_class
+                .as_ref()
+                .map_or(ptr::null(), |wc| wc as *const _);
             Id::from(sys::igDockSpace(
                 id.into(),
                 size_vec,
@@ -260,7 +290,7 @@ impl Ui {
     ///
     /// # Parameters
     ///
-    /// * `id` - The ID for the dockspace (use 0 to auto-generate)
+    /// * `id` - The non-zero ID for the dockspace
     /// * `size` - The size of the dockspace in pixels
     ///
     /// # Returns
@@ -273,7 +303,8 @@ impl Ui {
     /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
-    /// let dockspace_id = ui.dock_space(0.into(), [800.0, 600.0]);
+    /// let dockspace_id = ui.get_id("MyDockspace");
+    /// let dockspace_id = ui.dock_space(dockspace_id, [800.0, 600.0]);
     /// ```
     #[doc(alias = "DockSpace")]
     pub fn dock_space(&self, id: Id, size: [f32; 2]) -> Id {

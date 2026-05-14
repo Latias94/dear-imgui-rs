@@ -42,6 +42,9 @@
 //! ```
 
 use crate::Id;
+use crate::dock_space::{
+    assert_finite_vec2, assert_nonzero_id, assert_positive_finite_vec2, validate_dock_node_flags,
+};
 use crate::internal::len_i32;
 use crate::sys;
 use crate::ui::Ui;
@@ -77,6 +80,25 @@ impl From<SplitDirection> for sys::ImGuiDir {
 
 /// DockBuilder API for programmatic dock layout creation
 pub struct DockBuilder;
+
+fn assert_existing_dock_node(caller: &str, node_id: Id) {
+    assert_nonzero_id(caller, "node_id", node_id);
+    let ctx = unsafe { sys::igGetCurrentContext() };
+    assert!(!ctx.is_null(), "{caller} requires a current ImGui context");
+    let node = unsafe { sys::igDockBuilderGetNode(node_id.into()) };
+    assert!(!node.is_null(), "{caller} requires an existing dock node");
+}
+
+unsafe fn free_imgui_id_vector(vector: &mut sys::ImVector_ImGuiID) {
+    if !vector.Data.is_null() {
+        unsafe {
+            sys::igMemFree(vector.Data as *mut c_void);
+        }
+        vector.Size = 0;
+        vector.Capacity = 0;
+        vector.Data = std::ptr::null_mut();
+    }
+}
 
 /// Opaque reference to an ImGui dock node, valid for the duration of the current frame.
 ///
@@ -232,6 +254,7 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderAddNode")]
     pub fn add_node(node_id: Id, flags: crate::DockNodeFlags) -> Id {
+        validate_dock_node_flags("DockBuilder::add_node()", flags);
         unsafe { Id::from(sys::igDockBuilderAddNode(node_id.into(), flags.bits())) }
     }
 
@@ -249,6 +272,11 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderRemoveNode")]
     pub fn remove_node(node_id: Id) {
+        let ctx = unsafe { sys::igGetCurrentContext() };
+        assert!(
+            !ctx.is_null(),
+            "DockBuilder::remove_node() requires a current ImGui context"
+        );
         unsafe { sys::igDockBuilderRemoveNode(node_id.into()) }
     }
 
@@ -267,6 +295,11 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeDockedWindows")]
     pub fn remove_node_docked_windows(node_id: Id, clear_settings_refs: bool) {
+        let ctx = unsafe { sys::igGetCurrentContext() };
+        assert!(
+            !ctx.is_null(),
+            "DockBuilder::remove_node_docked_windows() requires a current ImGui context"
+        );
         unsafe { sys::igDockBuilderRemoveNodeDockedWindows(node_id.into(), clear_settings_refs) }
     }
 
@@ -284,6 +317,11 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderRemoveNodeChildNodes")]
     pub fn remove_node_child_nodes(node_id: Id) {
+        let ctx = unsafe { sys::igGetCurrentContext() };
+        assert!(
+            !ctx.is_null(),
+            "DockBuilder::remove_node_child_nodes() requires a current ImGui context"
+        );
         unsafe { sys::igDockBuilderRemoveNodeChildNodes(node_id.into()) }
     }
 
@@ -302,6 +340,7 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderSetNodePos")]
     pub fn set_node_pos(node_id: Id, pos: [f32; 2]) {
+        assert_finite_vec2("DockBuilder::set_node_pos()", "pos", pos);
         unsafe {
             let pos_vec = sys::ImVec2 {
                 x: pos[0],
@@ -326,6 +365,7 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderSetNodeSize")]
     pub fn set_node_size(node_id: Id, size: [f32; 2]) {
+        assert_positive_finite_vec2("DockBuilder::set_node_size()", "size", size);
         unsafe {
             let size_vec = sys::ImVec2 {
                 x: size[0],
@@ -393,6 +433,15 @@ impl DockBuilder {
         split_dir: SplitDirection,
         size_ratio_for_node_at_dir: f32,
     ) -> (Id, Id) {
+        assert!(
+            size_ratio_for_node_at_dir.is_finite(),
+            "DockBuilder::split_node() size_ratio_for_node_at_dir must be finite"
+        );
+        assert!(
+            (0.0..=1.0).contains(&size_ratio_for_node_at_dir),
+            "DockBuilder::split_node() size_ratio_for_node_at_dir must be between 0.0 and 1.0"
+        );
+        assert_existing_dock_node("DockBuilder::split_node()", node_id);
         unsafe {
             let mut id_at_dir: sys::ImGuiID = 0;
             let mut id_at_opposite: sys::ImGuiID = 0;
@@ -422,6 +471,11 @@ impl DockBuilder {
     /// ```
     #[doc(alias = "DockBuilderDockWindow")]
     pub fn dock_window(window_name: &str, node_id: Id) {
+        let ctx = unsafe { sys::igGetCurrentContext() };
+        assert!(
+            !ctx.is_null(),
+            "DockBuilder::dock_window() requires a current ImGui context"
+        );
         let window_name_ptr = crate::string::tls_scratch_txt(window_name);
         unsafe { sys::igDockBuilderDockWindow(window_name_ptr, node_id.into()) }
     }
@@ -434,11 +488,18 @@ impl DockBuilder {
     /// For advanced remapping, prefer using the raw sys bindings.
     #[doc(alias = "DockBuilderCopyDockSpace")]
     pub fn copy_dock_space(src_dockspace_id: Id, dst_dockspace_id: Id) {
+        assert_existing_dock_node("DockBuilder::copy_dock_space()", src_dockspace_id);
+        assert_nonzero_id(
+            "DockBuilder::copy_dock_space()",
+            "dst_dockspace_id",
+            dst_dockspace_id,
+        );
+        let mut empty_remaps = sys::ImVector_const_charPtr::default();
         unsafe {
             sys::igDockBuilderCopyDockSpace(
                 src_dockspace_id.into(),
                 dst_dockspace_id.into(),
-                std::ptr::null_mut(),
+                &mut empty_remaps,
             )
         }
     }
@@ -449,8 +510,12 @@ impl DockBuilder {
     /// use the raw sys bindings and provide an `ImVector_ImGuiID` buffer.
     #[doc(alias = "DockBuilderCopyNode")]
     pub fn copy_node(src_node_id: Id, dst_node_id: Id) {
+        assert_existing_dock_node("DockBuilder::copy_node()", src_node_id);
+        assert_nonzero_id("DockBuilder::copy_node()", "dst_node_id", dst_node_id);
+        let mut out = sys::ImVector_ImGuiID::default();
         unsafe {
-            sys::igDockBuilderCopyNode(src_node_id.into(), dst_node_id.into(), std::ptr::null_mut())
+            sys::igDockBuilderCopyNode(src_node_id.into(), dst_node_id.into(), &mut out);
+            free_imgui_id_vector(&mut out);
         }
     }
 
@@ -493,8 +558,18 @@ impl DockBuilder {
             cstrings.push(dst);
         }
         if cstrings.is_empty() {
+            Self::copy_dock_space(src_dockspace_id, dst_dockspace_id);
             return;
         }
+        assert_existing_dock_node(
+            "DockBuilder::copy_dock_space_with_window_remap()",
+            src_dockspace_id,
+        );
+        assert_nonzero_id(
+            "DockBuilder::copy_dock_space_with_window_remap()",
+            "dst_dockspace_id",
+            dst_dockspace_id,
+        );
         let ptrs: Vec<*const c_char> = cstrings.iter().map(|s| s.as_ptr()).collect();
         let mut boxed: Box<[*const c_char]> = ptrs.into_boxed_slice();
         let boxed_len_i32 = len_i32(
@@ -523,6 +598,12 @@ impl DockBuilder {
     /// of `(old_id, new_id)` tuples.
     #[doc(alias = "DockBuilderCopyNode")]
     pub fn copy_node_with_remap_out(src_node_id: Id, dst_node_id: Id) -> Vec<(Id, Id)> {
+        assert_existing_dock_node("DockBuilder::copy_node_with_remap_out()", src_node_id);
+        assert_nonzero_id(
+            "DockBuilder::copy_node_with_remap_out()",
+            "dst_node_id",
+            dst_node_id,
+        );
         let mut out = sys::ImVector_ImGuiID::default();
         unsafe {
             sys::igDockBuilderCopyNode(src_node_id.into(), dst_node_id.into(), &mut out);
@@ -534,7 +615,7 @@ impl DockBuilder {
                     let len = match usize::try_from(out.Size) {
                         Ok(len) => len,
                         Err(_) => {
-                            sys::igMemFree(out.Data as *mut c_void);
+                            free_imgui_id_vector(&mut out);
                             return result;
                         }
                     };
@@ -545,7 +626,7 @@ impl DockBuilder {
                     }
                 }
                 // Free the buffer allocated by ImGui (ImVector uses ImGui::MemAlloc)
-                sys::igMemFree(out.Data as *mut c_void);
+                free_imgui_id_vector(&mut out);
             }
         }
         result

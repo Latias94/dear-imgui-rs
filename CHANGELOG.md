@@ -110,6 +110,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     combinations, and non-finite window/child geometry values before crossing FFI.
   - Re-export child-window builder, token, and flag types so downstream code can construct
     typed `ChildFlags` without relying on private module paths.
+  - Reject unsupported/private dock-node flags, invalid dockspace IDs, and non-finite dock
+    builder geometry before crossing FFI.
+  - Pass required remap vectors to `DockBuilder::copy_node` and `copy_dock_space`, avoiding
+    Dear ImGui assertions from null vector pointers.
+  - Keep temporary `WindowClass` storage alive across `DockSpace` FFI calls.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts
