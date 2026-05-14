@@ -9,7 +9,7 @@
     clippy::as_conversions
 )]
 use crate::Ui;
-use crate::internal::DataTypeKind;
+use crate::internal::{DataTypeKind, component_count_i32};
 use crate::sys;
 use std::ffi::c_void;
 
@@ -126,10 +126,13 @@ where
     ///
     /// Returns true if any slider value was changed.
     pub fn build_array(self, values: &mut [Data]) -> bool {
-        let count = match i32::try_from(values.len()) {
-            Ok(n) => n,
-            Err(_) => return false,
-        };
+        let count = component_count_i32("Slider::build_array()", values.len());
+        if self.flags.contains(SliderFlags::COLOR_MARKERS) {
+            assert!(
+                count <= 4,
+                "Slider::build_array() supports at most 4 components with COLOR_MARKERS"
+            );
+        }
         unsafe {
             let (label, display_format) = self
                 .ui
@@ -401,6 +404,10 @@ bitflags::bitflags! {
         const NO_ROUND_TO_FORMAT = sys::ImGuiSliderFlags_NoRoundToFormat as i32;
         /// Disable CTRL+Click or Enter key allowing to input text directly into the widget
         const NO_INPUT = sys::ImGuiSliderFlags_NoInput as i32;
+        /// Draw R/G/B/A color markers on each component.
+        ///
+        /// Dear ImGui only defines four default component colors.
+        const COLOR_MARKERS = sys::ImGuiSliderFlags_ColorMarkers as i32;
     }
 }
 

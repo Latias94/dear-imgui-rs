@@ -8,6 +8,7 @@
     clippy::cast_sign_loss,
     clippy::as_conversions
 )]
+use crate::internal::plot_value_count_i32;
 use crate::sys;
 use crate::ui::Ui;
 use std::borrow::Cow;
@@ -106,10 +107,15 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
 
     /// Builds the plot lines widget
     pub fn build(self) {
-        let count = match i32::try_from(self.values.len()) {
-            Ok(n) => n,
-            Err(_) => return,
-        };
+        let count = plot_value_count_i32("PlotLines::build()", self.values.len());
+        assert!(
+            self.values_offset >= 0,
+            "PlotLines::build() values_offset must be non-negative"
+        );
+        assert!(
+            count == 0 || self.values_offset < count,
+            "PlotLines::build() values_offset must be less than values.len()"
+        );
         let (label_ptr, overlay_ptr) = self
             .ui
             .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());
@@ -192,10 +198,15 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
 
     /// Builds the plot histogram widget
     pub fn build(self) {
-        let count = match i32::try_from(self.values.len()) {
-            Ok(n) => n,
-            Err(_) => return,
-        };
+        let count = plot_value_count_i32("PlotHistogram::build()", self.values.len());
+        assert!(
+            self.values_offset >= 0,
+            "PlotHistogram::build() values_offset must be non-negative"
+        );
+        assert!(
+            count == 0 || self.values_offset < count,
+            "PlotHistogram::build() values_offset must be less than values.len()"
+        );
         let (label_ptr, overlay_ptr) = self
             .ui
             .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());

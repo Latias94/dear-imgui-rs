@@ -37,3 +37,61 @@ fn slider_vector_helpers_no_panic() {
         let _ = ui.slider_int4("i4", &mut i4, 0, 10);
     });
 }
+
+#[test]
+fn scalar_array_widgets_reject_invalid_component_counts() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    {
+        let io = ctx.io_mut();
+        io.set_display_size([800.0, 600.0]);
+        io.set_delta_time(1.0 / 60.0);
+    }
+    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+    let ui = ctx.frame();
+    let mut empty: [f32; 0] = [];
+    let mut five = [0.0f32; 5];
+
+    let _ = ui.window("Invalid scalar arrays").build(|| {
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui
+                    .slider_config("empty_slider", 0.0f32, 1.0)
+                    .build_array(&mut empty);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.input_scalar_n("empty_input", &mut empty).build();
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = imgui::Drag::<f32, _>::new("empty_drag").build_array(ui, &mut empty);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui
+                    .slider_config("marker_slider", 0.0f32, 1.0)
+                    .flags(imgui::SliderFlags::COLOR_MARKERS)
+                    .build_array(&mut five);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = imgui::Drag::<f32, _>::new("marker_drag")
+                    .flags(imgui::DragFlags::COLOR_MARKERS)
+                    .build_array(ui, &mut five);
+            }))
+            .is_err()
+        );
+    });
+}

@@ -96,6 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts
     before exposing them through typed safe APIs.
+  - Reject invalid scalar array component counts and plot value offsets before crossing FFI,
+    avoiding Dear ImGui assertions, negative plot indexing, and silent overflow no-ops.
   - Validate legacy columns counts, nesting, and column indices before crossing FFI, and
     use an RAII token for wrapped-text push/pop state.
   - Restore the previous Dear ImGui current context after panic in internal temporary context

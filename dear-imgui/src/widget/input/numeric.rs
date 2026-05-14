@@ -1,5 +1,5 @@
 use crate::InputTextFlags;
-use crate::internal::DataTypeKind;
+use crate::internal::{DataTypeKind, component_count_i32};
 use crate::sys;
 use crate::ui::Ui;
 use std::borrow::Cow;
@@ -360,10 +360,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
     ///
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
-        let count = match i32::try_from(self.values.len()) {
-            Ok(n) => n,
-            Err(_) => return false,
-        };
+        let count = component_count_i32("InputScalarN::build()", self.values.len());
         unsafe {
             let (one, two) = self
                 .ui

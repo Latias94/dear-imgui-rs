@@ -39,6 +39,19 @@ pub unsafe trait DataTypeKind: Copy {
     const KIND: DataType;
 }
 
+pub(crate) fn component_count_i32(caller: &str, len: usize) -> i32 {
+    assert!(len > 0, "{caller} requires at least one component");
+    i32::try_from(len).unwrap_or_else(|_| {
+        panic!("{caller} supports at most i32::MAX components");
+    })
+}
+
+pub(crate) fn plot_value_count_i32(caller: &str, len: usize) -> i32 {
+    i32::try_from(len).unwrap_or_else(|_| {
+        panic!("{caller} supports at most i32::MAX values");
+    })
+}
+
 unsafe impl DataTypeKind for i8 {
     const KIND: DataType = DataType::I8;
 }
@@ -296,5 +309,30 @@ pub unsafe trait RawCast<T>: Sized {
     #[inline]
     unsafe fn raw_mut(&mut self) -> &mut T {
         unsafe { &mut *(self as *mut _ as *mut T) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{component_count_i32, plot_value_count_i32};
+
+    #[test]
+    fn component_count_rejects_zero_and_overflow() {
+        assert_eq!(component_count_i32("test", 1), 1);
+        assert!(std::panic::catch_unwind(|| component_count_i32("test", 0)).is_err());
+        assert!(
+            std::panic::catch_unwind(|| component_count_i32("test", (i32::MAX as usize) + 1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn plot_value_count_allows_zero_but_rejects_overflow() {
+        assert_eq!(plot_value_count_i32("test", 0), 0);
+        assert_eq!(plot_value_count_i32("test", 1), 1);
+        assert!(
+            std::panic::catch_unwind(|| plot_value_count_i32("test", (i32::MAX as usize) + 1))
+                .is_err()
+        );
     }
 }
