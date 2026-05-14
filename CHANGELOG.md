@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Require typed and out-parameter-shim `PlatformIo` callback setters to be called on the
     active context's `PlatformIo`; cross-context installation now panics instead of silently
     splitting the C callback table and Rust callback storage across different contexts.
+  - Change `Viewport::flags()` and `Viewport::set_flags(...)` to use typed `ViewportFlags`
+    instead of raw `ImGuiViewportFlags`. Use `raw_flags()` or the unsafe
+    `set_raw_flags_unchecked(...)` escape hatch when backend code must manipulate raw bits.
 - Core (`dear-imgui-sys`)
   - Stop exposing cimgui's `ImGuiPlatformIO_Set_Platform_GetWindowPos` and
     `ImGuiPlatformIO_Set_Platform_GetWindowSize` helpers from generated bindings. Use the
@@ -119,6 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     before storing them in `ImGuiIO`.
   - Validate hover/focus query flags and tooltip hover-style flags before crossing FFI or storing
     them, matching Dear ImGui's per-call `ImGuiHoveredFlags` allowed masks.
+  - Reject unsupported `ViewportFlags` bits before storing them in an `ImGuiViewport`.
   - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
     crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
   - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts

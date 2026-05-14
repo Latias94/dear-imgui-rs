@@ -267,12 +267,28 @@ impl Viewport {
     }
 
     /// Get the viewport flags
-    pub fn flags(&self) -> sys::ImGuiViewportFlags {
-        self.inner().Flags
+    pub fn flags(&self) -> crate::ViewportFlags {
+        crate::ViewportFlags::from_bits_retain(self.inner().Flags)
     }
 
     /// Set the viewport flags
-    pub fn set_flags(&mut self, flags: sys::ImGuiViewportFlags) {
+    pub fn set_flags(&mut self, flags: crate::ViewportFlags) {
+        crate::io::validate_viewport_flags("Viewport::set_flags()", flags);
+        self.inner_mut().Flags = flags.bits();
+    }
+
+    /// Get the raw viewport flag bits.
+    pub fn raw_flags(&self) -> sys::ImGuiViewportFlags {
+        self.inner().Flags
+    }
+
+    /// Set raw viewport flag bits without validation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure `flags` contains only bits valid for this Dear ImGui version and
+    /// preserves any viewport invariants expected by the platform and renderer backends.
+    pub unsafe fn set_raw_flags_unchecked(&mut self, flags: sys::ImGuiViewportFlags) {
         self.inner_mut().Flags = flags;
     }
 
@@ -380,6 +396,33 @@ mod tests {
             let handle = 0x1234usize as *mut c_void;
             viewport.set_platform_handle_raw(handle);
             assert_eq!(viewport.platform_handle_raw(), handle);
+
+            sys::ImGuiViewport_destroy(raw);
+        }
+    }
+
+    #[test]
+    fn viewport_flags_are_typed_and_checked_before_storage() {
+        let raw = new_viewport();
+        unsafe {
+            let viewport = Viewport::from_raw_mut(raw);
+
+            let flags = crate::ViewportFlags::OWNED_BY_APP | crate::ViewportFlags::NO_DECORATION;
+            viewport.set_flags(flags);
+            assert_eq!(viewport.flags(), flags);
+            assert_eq!(viewport.raw_flags(), flags.bits());
+
+            let unsupported = crate::ViewportFlags::from_bits_retain(1 << 14);
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    viewport.set_flags(unsupported);
+                }))
+                .is_err()
+            );
+            assert_eq!(viewport.flags(), flags);
+
+            viewport.set_raw_flags_unchecked(unsupported.bits());
+            assert_eq!(viewport.raw_flags(), unsupported.bits());
 
             sys::ImGuiViewport_destroy(raw);
         }

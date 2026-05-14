@@ -70,7 +70,7 @@ impl<'de> Deserialize<'de> for BackendFlags {
     }
 }
 
-#[cfg(all(feature = "serde", feature = "multi-viewport"))]
+#[cfg(feature = "serde")]
 impl Serialize for ViewportFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -80,7 +80,7 @@ impl Serialize for ViewportFlags {
     }
 }
 
-#[cfg(all(feature = "serde", feature = "multi-viewport"))]
+#[cfg(feature = "serde")]
 impl<'de> Deserialize<'de> for ViewportFlags {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -147,7 +147,6 @@ bitflags! {
     }
 }
 
-#[cfg(feature = "multi-viewport")]
 bitflags! {
     /// Viewport flags for multi-viewport support
     #[repr(transparent)]
@@ -199,6 +198,14 @@ fn validate_backend_flags(caller: &str, flags: BackendFlags) {
     assert!(
         unsupported == 0,
         "{caller} received unsupported ImGuiBackendFlags bits: 0x{unsupported:X}"
+    );
+}
+
+pub(crate) fn validate_viewport_flags(caller: &str, flags: ViewportFlags) {
+    let unsupported = flags.bits() & !ViewportFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiViewportFlags bits: 0x{unsupported:X}"
     );
 }
 
