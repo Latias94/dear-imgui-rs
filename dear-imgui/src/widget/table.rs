@@ -49,6 +49,51 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::ffi::CStr;
 
+const TABLE_MAX_COLUMNS: usize = 512;
+
+fn table_column_count_to_i32(column_count: usize) -> i32 {
+    assert!(
+        column_count > 0,
+        "table column_count must be greater than zero"
+    );
+    assert!(
+        column_count < TABLE_MAX_COLUMNS,
+        "table column_count must be less than {TABLE_MAX_COLUMNS}"
+    );
+    i32::try_from(column_count).expect("table column_count exceeded ImGui's i32 range")
+}
+
+fn current_table() -> *mut sys::ImGuiTable {
+    unsafe { sys::igGetCurrentTable() }
+}
+
+fn assert_current_table(caller: &str) -> *mut sys::ImGuiTable {
+    let table = current_table();
+    assert!(
+        !table.is_null(),
+        "{caller} must be called inside a BeginTable/EndTable scope"
+    );
+    table
+}
+
+fn assert_valid_table_column(column_n: i32, caller: &str) {
+    let table = assert_current_table(caller);
+    let column_count = unsafe { (*table).ColumnsCount };
+    assert!(
+        (0..column_count).contains(&column_n),
+        "{caller} column index {column_n} is outside the current table column range 0..{column_count}"
+    );
+}
+
+fn assert_current_table_cell(caller: &str) {
+    let table = assert_current_table(caller);
+    let (current_column, column_count) = unsafe { ((*table).CurrentColumn, (*table).ColumnsCount) };
+    assert!(
+        (0..column_count).contains(&current_column),
+        "{caller} must be called while a table cell is current"
+    );
+}
+
 /// Table column setup information
 #[derive(Clone, Debug)]
 pub struct TableColumnSetup<Name> {
@@ -176,11 +221,12 @@ impl Ui {
         let options = flags.into();
         let str_id_ptr = self.scratch_txt(str_id);
         let outer_size_vec: sys::ImVec2 = outer_size.into().into();
+        let column_count = table_column_count_to_i32(column_count);
 
         let should_render = unsafe {
             sys::igBeginTable(
                 str_id_ptr,
-                column_count as i32,
+                column_count,
                 options.raw(),
                 outer_size_vec,
                 inner_width,
@@ -632,6 +678,58 @@ impl<'ui> Drop for TableToken<'ui> {
     }
 }
 
+/// Tracks a pushed table background draw channel.
+#[must_use = "dropping the token pops the table background draw channel immediately"]
+pub struct TableBackgroundChannelToken<'ui> {
+    _ui: &'ui Ui,
+}
+
+impl<'ui> TableBackgroundChannelToken<'ui> {
+    fn new(ui: &'ui Ui) -> Self {
+        Self { _ui: ui }
+    }
+
+    /// Pops the table background draw channel.
+    pub fn pop(self) {}
+
+    /// Pops the table background draw channel.
+    pub fn end(self) {}
+}
+
+impl Drop for TableBackgroundChannelToken<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            sys::igTablePopBackgroundChannel();
+        }
+    }
+}
+
+/// Tracks a pushed table column draw channel.
+#[must_use = "dropping the token pops the table column draw channel immediately"]
+pub struct TableColumnChannelToken<'ui> {
+    _ui: &'ui Ui,
+}
+
+impl<'ui> TableColumnChannelToken<'ui> {
+    fn new(ui: &'ui Ui) -> Self {
+        Self { _ui: ui }
+    }
+
+    /// Pops the table column draw channel.
+    pub fn pop(self) {}
+
+    /// Pops the table column draw channel.
+    pub fn end(self) {}
+}
+
+impl Drop for TableColumnChannelToken<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            sys::igTablePopColumnChannel();
+        }
+    }
+}
+
 // ============================================================================
 // Additional table convenience APIs
 // ============================================================================
@@ -713,41 +811,57 @@ impl Ui {
     /// Push background draw channel for the current table and return a token to pop it.
     #[doc(alias = "TablePushBackgroundChannel")]
     pub fn table_push_background_channel(&self) {
+        assert_current_table_cell("Ui::table_push_background_channel()");
         unsafe { sys::igTablePushBackgroundChannel() }
     }
 
     /// Pop background draw channel for the current table.
     #[doc(alias = "TablePopBackgroundChannel")]
     pub fn table_pop_background_channel(&self) {
+        assert_current_table_cell("Ui::table_pop_background_channel()");
         unsafe { sys::igTablePopBackgroundChannel() }
     }
 
     /// Push column draw channel for the given column index and return a token to pop it.
     #[doc(alias = "TablePushColumnChannel")]
     pub fn table_push_column_channel(&self, column_n: i32) {
+        assert_valid_table_column(column_n, "Ui::table_push_column_channel()");
         unsafe { sys::igTablePushColumnChannel(column_n) }
     }
 
     /// Pop column draw channel.
     #[doc(alias = "TablePopColumnChannel")]
     pub fn table_pop_column_channel(&self) {
+        assert_current_table_cell("Ui::table_pop_column_channel()");
         unsafe { sys::igTablePopColumnChannel() }
+    }
+
+    /// Push background draw channel for the current table and return a token to pop it.
+    #[must_use = "dropping the token pops the table background draw channel immediately"]
+    #[doc(alias = "TablePushBackgroundChannel")]
+    pub fn table_background_channel(&self) -> TableBackgroundChannelToken<'_> {
+        self.table_push_background_channel();
+        TableBackgroundChannelToken::new(self)
+    }
+
+    /// Push column draw channel for the given column index and return a token to pop it.
+    #[must_use = "dropping the token pops the table column draw channel immediately"]
+    #[doc(alias = "TablePushColumnChannel")]
+    pub fn table_column_channel(&self, column_n: i32) -> TableColumnChannelToken<'_> {
+        self.table_push_column_channel(column_n);
+        TableColumnChannelToken::new(self)
     }
 
     /// Run a closure after pushing table background channel (auto-pop on return).
     pub fn with_table_background_channel<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.table_push_background_channel();
-        let result = f();
-        self.table_pop_background_channel();
-        result
+        let _token = self.table_background_channel();
+        f()
     }
 
     /// Run a closure after pushing a table column channel (auto-pop on return).
     pub fn with_table_column_channel<R>(&self, column_n: i32, f: impl FnOnce() -> R) -> R {
-        self.table_push_column_channel(column_n);
-        let result = f();
-        self.table_pop_column_channel();
-        result
+        let _token = self.table_column_channel(column_n);
+        f()
     }
 
     /// Open the table context menu for a given column (use -1 for current/default).
@@ -762,6 +876,124 @@ impl Ui {
 // ============================================================================
 // TableBuilder: ergonomic table construction
 // ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_context() -> crate::Context {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+        ctx
+    }
+
+    unsafe fn current_table_draw_channel() -> i32 {
+        let table = assert_current_table("current_table_draw_channel()");
+        let draw_list = unsafe { (*(*table).InnerWindow).DrawList };
+        unsafe { (*draw_list)._Splitter._Current }
+    }
+
+    #[test]
+    fn table_column_channel_is_popped_after_panic() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ui.window("table_channel_panic").build(|| {
+                let _table = ui.begin_table("table", 2).unwrap();
+                ui.table_next_row();
+                assert!(ui.table_set_column_index(0));
+                let initial_channel = unsafe { current_table_draw_channel() };
+
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.with_table_column_channel(1, || {
+                        let pushed_channel = unsafe { current_table_draw_channel() };
+                        assert_ne!(pushed_channel, initial_channel);
+                        panic!("forced panic while table column channel is pushed");
+                    });
+                }));
+
+                assert!(result.is_err());
+                assert_eq!(unsafe { current_table_draw_channel() }, initial_channel);
+            });
+        }));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn begin_table_rejects_invalid_column_counts_before_ffi() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.begin_table("zero_columns", 0);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.begin_table("too_many_columns", TABLE_MAX_COLUMNS);
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn table_column_channel_rejects_out_of_range_column_before_ffi() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        let _ = ui.window("table_channel_oob").build(|| {
+            let _table = ui.begin_table("table", 2).unwrap();
+            ui.table_next_row();
+            assert!(ui.table_set_column_index(0));
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _token = ui.table_column_channel(-1);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _token = ui.table_column_channel(2);
+                }))
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn table_channels_require_current_cell_before_ffi() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        let _ = ui.window("table_channel_cell_required").build(|| {
+            let _table = ui.begin_table("table", 2).unwrap();
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _token = ui.table_background_channel();
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_pop_column_channel();
+                }))
+                .is_err()
+            );
+        });
+    }
+}
 
 /// Builder for ImGui tables with columns + headers + sizing/freeze options.
 #[derive(Debug)]

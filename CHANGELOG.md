@@ -82,6 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     keeping safe `DrawListMut::channels_split` calls balanced after panic.
   - Make multi-select scopes true RAII guards and validate item counts before crossing FFI,
     keeping `BeginMultiSelect`/`EndMultiSelect` balanced when safe render callbacks panic.
+  - Add RAII table draw-channel tokens, make table channel closures unwind-safe, and validate
+    table column counts and channel preconditions before crossing FFI.
   - Restore the previous Dear ImGui current context after panic in internal temporary context
     binding paths, avoiding cross-context state leaks during unwinding.
   - Resolve `Context` IO, font atlas, backend-name, settings-filename, and `PlatformIo`
