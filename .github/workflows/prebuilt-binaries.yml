@@ -62,7 +62,7 @@ jobs:
             crt: mt
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: true
           ref: ${{ inputs.tag || inputs.branch || github.ref }}
@@ -302,7 +302,7 @@ jobs:
 
       - name: Upload artifact (branch builds)
         if: inputs.branch && !inputs.tag && github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: prebuilt-${{ matrix.target }}${{ matrix.crt && format('-{0}', matrix.crt) || '' }}-${{ inputs.branch }}-${{ github.sha }}
           path: ${{ github.workspace }}/packages/*.tar.gz
