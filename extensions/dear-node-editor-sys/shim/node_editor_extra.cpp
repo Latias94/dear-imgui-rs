@@ -34,6 +34,7 @@ static uintptr_t value(ed::LinkId id) { return id.Get(); }
 static ImVec2 to_imgui(ImVec2_c value) { return ImVec2(value.x, value.y); }
 static ImVec4 to_imgui(ImVec4_c value) { return ImVec4(value.x, value.y, value.z, value.w); }
 static ImVec2_c from_imgui(ImVec2 value) { return ImVec2_c{value.x, value.y}; }
+static ImVec4_c from_imgui(ImVec4 value) { return ImVec4_c{value.x, value.y, value.z, value.w}; }
 
 static ed::EditorContext* raw_editor(DneEditorContext* ctx)
 {
@@ -141,6 +142,12 @@ static void copy_config(ed::Config& out, DneCallbackBridge*& bridge, const DneCo
     out.ContextMenuButtonIndex = config->context_menu_button_index;
     out.EnableSmoothZoom = config->enable_smooth_zoom;
     out.SmoothZoomPower = config->smooth_zoom_power;
+    if (config->custom_zoom_levels && config->custom_zoom_level_count > 0)
+    {
+        out.CustomZoomLevels.reserve(config->custom_zoom_level_count);
+        for (int i = 0; i < config->custom_zoom_level_count; ++i)
+            out.CustomZoomLevels.push_back(config->custom_zoom_levels[i]);
+    }
 
     if (config->begin_save_session || config->end_save_session || config->save_settings ||
         config->load_settings || config->save_node_settings || config->load_node_settings)
@@ -222,7 +229,50 @@ CIMGUI_API void dne_set_current_editor(DneEditorContext* ctx)
 
 CIMGUI_API const char* dne_get_style_color_name(DneStyleColor color)
 {
-    return ed::GetStyleColorName(to_style_color(color));
+    switch (color)
+    {
+    case DNE_STYLE_COLOR_BG:
+        return "Bg";
+    case DNE_STYLE_COLOR_GRID:
+        return "Grid";
+    case DNE_STYLE_COLOR_NODE_BG:
+        return "NodeBg";
+    case DNE_STYLE_COLOR_NODE_BORDER:
+        return "NodeBorder";
+    case DNE_STYLE_COLOR_HOVERED_NODE_BORDER:
+        return "HovNodeBorder";
+    case DNE_STYLE_COLOR_SELECTED_NODE_BORDER:
+        return "SelNodeBorder";
+    case DNE_STYLE_COLOR_NODE_SELECTION_RECT:
+        return "NodeSelRect";
+    case DNE_STYLE_COLOR_NODE_SELECTION_RECT_BORDER:
+        return "NodeSelRectBorder";
+    case DNE_STYLE_COLOR_HOVERED_LINK_BORDER:
+        return "HovLinkBorder";
+    case DNE_STYLE_COLOR_SELECTED_LINK_BORDER:
+        return "SelLinkBorder";
+    case DNE_STYLE_COLOR_HIGHLIGHT_LINK_BORDER:
+        return "HighlightLinkBorder";
+    case DNE_STYLE_COLOR_LINK_SELECTION_RECT:
+        return "LinkSelRect";
+    case DNE_STYLE_COLOR_LINK_SELECTION_RECT_BORDER:
+        return "LinkSelRectBorder";
+    case DNE_STYLE_COLOR_PIN_RECT:
+        return "PinRect";
+    case DNE_STYLE_COLOR_PIN_RECT_BORDER:
+        return "PinRectBorder";
+    case DNE_STYLE_COLOR_FLOW:
+        return "Flow";
+    case DNE_STYLE_COLOR_FLOW_MARKER:
+        return "FlowMarker";
+    case DNE_STYLE_COLOR_GROUP_BG:
+        return "GroupBg";
+    case DNE_STYLE_COLOR_GROUP_BORDER:
+        return "GroupBorder";
+    case DNE_STYLE_COLOR_COUNT:
+    default:
+        return nullptr;
+    }
 }
 
 CIMGUI_API void dne_push_style_color(DneStyleColor color, ImVec4_c value)
@@ -253,6 +303,286 @@ CIMGUI_API void dne_push_style_var_vec4(DneStyleVar var, ImVec4_c value)
 CIMGUI_API void dne_pop_style_var(int count)
 {
     ed::PopStyleVar(count);
+}
+
+CIMGUI_API ImVec4_c dne_get_style_node_padding()
+{
+    return from_imgui(ed::GetStyle().NodePadding);
+}
+
+CIMGUI_API void dne_set_style_node_padding(ImVec4_c value)
+{
+    ed::GetStyle().NodePadding = to_imgui(value);
+}
+
+CIMGUI_API float dne_get_style_node_rounding()
+{
+    return ed::GetStyle().NodeRounding;
+}
+
+CIMGUI_API void dne_set_style_node_rounding(float value)
+{
+    ed::GetStyle().NodeRounding = value;
+}
+
+CIMGUI_API float dne_get_style_node_border_width()
+{
+    return ed::GetStyle().NodeBorderWidth;
+}
+
+CIMGUI_API void dne_set_style_node_border_width(float value)
+{
+    ed::GetStyle().NodeBorderWidth = value;
+}
+
+CIMGUI_API float dne_get_style_hovered_node_border_width()
+{
+    return ed::GetStyle().HoveredNodeBorderWidth;
+}
+
+CIMGUI_API void dne_set_style_hovered_node_border_width(float value)
+{
+    ed::GetStyle().HoveredNodeBorderWidth = value;
+}
+
+CIMGUI_API float dne_get_style_hovered_node_border_offset()
+{
+    return ed::GetStyle().HoverNodeBorderOffset;
+}
+
+CIMGUI_API void dne_set_style_hovered_node_border_offset(float value)
+{
+    ed::GetStyle().HoverNodeBorderOffset = value;
+}
+
+CIMGUI_API float dne_get_style_selected_node_border_width()
+{
+    return ed::GetStyle().SelectedNodeBorderWidth;
+}
+
+CIMGUI_API void dne_set_style_selected_node_border_width(float value)
+{
+    ed::GetStyle().SelectedNodeBorderWidth = value;
+}
+
+CIMGUI_API float dne_get_style_selected_node_border_offset()
+{
+    return ed::GetStyle().SelectedNodeBorderOffset;
+}
+
+CIMGUI_API void dne_set_style_selected_node_border_offset(float value)
+{
+    ed::GetStyle().SelectedNodeBorderOffset = value;
+}
+
+CIMGUI_API float dne_get_style_pin_rounding()
+{
+    return ed::GetStyle().PinRounding;
+}
+
+CIMGUI_API void dne_set_style_pin_rounding(float value)
+{
+    ed::GetStyle().PinRounding = value;
+}
+
+CIMGUI_API float dne_get_style_pin_border_width()
+{
+    return ed::GetStyle().PinBorderWidth;
+}
+
+CIMGUI_API void dne_set_style_pin_border_width(float value)
+{
+    ed::GetStyle().PinBorderWidth = value;
+}
+
+CIMGUI_API float dne_get_style_link_strength()
+{
+    return ed::GetStyle().LinkStrength;
+}
+
+CIMGUI_API void dne_set_style_link_strength(float value)
+{
+    ed::GetStyle().LinkStrength = value;
+}
+
+CIMGUI_API ImVec2_c dne_get_style_source_direction()
+{
+    return from_imgui(ed::GetStyle().SourceDirection);
+}
+
+CIMGUI_API void dne_set_style_source_direction(ImVec2_c value)
+{
+    ed::GetStyle().SourceDirection = to_imgui(value);
+}
+
+CIMGUI_API ImVec2_c dne_get_style_target_direction()
+{
+    return from_imgui(ed::GetStyle().TargetDirection);
+}
+
+CIMGUI_API void dne_set_style_target_direction(ImVec2_c value)
+{
+    ed::GetStyle().TargetDirection = to_imgui(value);
+}
+
+CIMGUI_API float dne_get_style_scroll_duration()
+{
+    return ed::GetStyle().ScrollDuration;
+}
+
+CIMGUI_API void dne_set_style_scroll_duration(float value)
+{
+    ed::GetStyle().ScrollDuration = value;
+}
+
+CIMGUI_API float dne_get_style_flow_marker_distance()
+{
+    return ed::GetStyle().FlowMarkerDistance;
+}
+
+CIMGUI_API void dne_set_style_flow_marker_distance(float value)
+{
+    ed::GetStyle().FlowMarkerDistance = value;
+}
+
+CIMGUI_API float dne_get_style_flow_speed()
+{
+    return ed::GetStyle().FlowSpeed;
+}
+
+CIMGUI_API void dne_set_style_flow_speed(float value)
+{
+    ed::GetStyle().FlowSpeed = value;
+}
+
+CIMGUI_API float dne_get_style_flow_duration()
+{
+    return ed::GetStyle().FlowDuration;
+}
+
+CIMGUI_API void dne_set_style_flow_duration(float value)
+{
+    ed::GetStyle().FlowDuration = value;
+}
+
+CIMGUI_API ImVec2_c dne_get_style_pivot_alignment()
+{
+    return from_imgui(ed::GetStyle().PivotAlignment);
+}
+
+CIMGUI_API void dne_set_style_pivot_alignment(ImVec2_c value)
+{
+    ed::GetStyle().PivotAlignment = to_imgui(value);
+}
+
+CIMGUI_API ImVec2_c dne_get_style_pivot_size()
+{
+    return from_imgui(ed::GetStyle().PivotSize);
+}
+
+CIMGUI_API void dne_set_style_pivot_size(ImVec2_c value)
+{
+    ed::GetStyle().PivotSize = to_imgui(value);
+}
+
+CIMGUI_API ImVec2_c dne_get_style_pivot_scale()
+{
+    return from_imgui(ed::GetStyle().PivotScale);
+}
+
+CIMGUI_API void dne_set_style_pivot_scale(ImVec2_c value)
+{
+    ed::GetStyle().PivotScale = to_imgui(value);
+}
+
+CIMGUI_API float dne_get_style_pin_corners()
+{
+    return ed::GetStyle().PinCorners;
+}
+
+CIMGUI_API void dne_set_style_pin_corners(float value)
+{
+    ed::GetStyle().PinCorners = value;
+}
+
+CIMGUI_API float dne_get_style_pin_radius()
+{
+    return ed::GetStyle().PinRadius;
+}
+
+CIMGUI_API void dne_set_style_pin_radius(float value)
+{
+    ed::GetStyle().PinRadius = value;
+}
+
+CIMGUI_API float dne_get_style_pin_arrow_size()
+{
+    return ed::GetStyle().PinArrowSize;
+}
+
+CIMGUI_API void dne_set_style_pin_arrow_size(float value)
+{
+    ed::GetStyle().PinArrowSize = value;
+}
+
+CIMGUI_API float dne_get_style_pin_arrow_width()
+{
+    return ed::GetStyle().PinArrowWidth;
+}
+
+CIMGUI_API void dne_set_style_pin_arrow_width(float value)
+{
+    ed::GetStyle().PinArrowWidth = value;
+}
+
+CIMGUI_API float dne_get_style_group_rounding()
+{
+    return ed::GetStyle().GroupRounding;
+}
+
+CIMGUI_API void dne_set_style_group_rounding(float value)
+{
+    ed::GetStyle().GroupRounding = value;
+}
+
+CIMGUI_API float dne_get_style_group_border_width()
+{
+    return ed::GetStyle().GroupBorderWidth;
+}
+
+CIMGUI_API void dne_set_style_group_border_width(float value)
+{
+    ed::GetStyle().GroupBorderWidth = value;
+}
+
+CIMGUI_API float dne_get_style_highlight_connected_links()
+{
+    return ed::GetStyle().HighlightConnectedLinks;
+}
+
+CIMGUI_API void dne_set_style_highlight_connected_links(float value)
+{
+    ed::GetStyle().HighlightConnectedLinks = value;
+}
+
+CIMGUI_API float dne_get_style_snap_link_to_pin_dir()
+{
+    return ed::GetStyle().SnapLinkToPinDir;
+}
+
+CIMGUI_API void dne_set_style_snap_link_to_pin_dir(float value)
+{
+    ed::GetStyle().SnapLinkToPinDir = value;
+}
+
+CIMGUI_API ImVec4_c dne_get_style_color(DneStyleColor color)
+{
+    return from_imgui(ed::GetStyle().Colors[to_style_color(color)]);
+}
+
+CIMGUI_API void dne_set_style_color(DneStyleColor color, ImVec4_c value)
+{
+    ed::GetStyle().Colors[to_style_color(color)] = to_imgui(value);
 }
 
 CIMGUI_API void dne_begin(const char* id, ImVec2_c size)

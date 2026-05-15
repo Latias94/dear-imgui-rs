@@ -1,4 +1,4 @@
-use crate::{EditorConfig, sys};
+use crate::{EditorConfig, NodeEditorStyle, StyleColor, sys};
 use dear_imgui_rs::{Context as ImGuiContext, ContextAliveToken};
 use std::{ffi::c_void, marker::PhantomData, ptr, rc::Rc};
 
@@ -58,6 +58,27 @@ impl EditorContext {
 
     pub fn as_raw_native(&self) -> *mut c_void {
         unsafe { sys::dne_editor_context_raw(self.raw) }
+    }
+
+    #[doc(alias = "GetStyle")]
+    pub fn style(&self) -> NodeEditorStyle {
+        let _current = self.bind_current("EditorContext::style");
+        NodeEditorStyle::current()
+    }
+
+    pub fn set_style(&self, style: &NodeEditorStyle) {
+        let _current = self.bind_current("EditorContext::set_style");
+        style.apply();
+    }
+
+    pub fn style_color(&self, color: StyleColor) -> [f32; 4] {
+        let _current = self.bind_current("EditorContext::style_color");
+        crate::style::current_style_color(color)
+    }
+
+    pub fn set_style_color(&self, color: StyleColor, value: [f32; 4]) {
+        let _current = self.bind_current("EditorContext::set_style_color");
+        crate::style::apply_style_color(color, value);
     }
 
     pub(crate) fn assert_usable(&self, caller: &str) {
@@ -139,7 +160,8 @@ impl Drop for ImGuiContextGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LinkId, NodeEditorUiExt, NodeId, PinId, PinKind};
+    use crate::{EditorConfig, LinkId, NodeEditorUiExt, NodeId, PinId, PinKind, StyleColor};
+    use dear_imgui_rs::MouseButton;
     use std::{
         ptr,
         sync::{Mutex, OnceLock},
@@ -290,5 +312,40 @@ mod tests {
             editor.end();
         });
         imgui.render();
+    }
+
+    #[test]
+    fn config_accepts_typed_buttons_and_custom_zoom_levels() {
+        let mut config = EditorConfig::new()
+            .drag_button(MouseButton::Left)
+            .select_button(MouseButton::Right)
+            .navigate_button(MouseButton::Middle)
+            .context_menu_button(MouseButton::Extra1)
+            .custom_zoom_levels(vec![0.5, 1.0, 2.0]);
+
+        let raw = config.to_sys();
+        assert_eq!(raw.drag_button_index, MouseButton::Left as i32);
+        assert_eq!(raw.select_button_index, MouseButton::Right as i32);
+        assert_eq!(raw.navigate_button_index, MouseButton::Middle as i32);
+        assert_eq!(raw.context_menu_button_index, MouseButton::Extra1 as i32);
+        assert_eq!(raw.custom_zoom_level_count, 3);
+        assert!(!raw.custom_zoom_levels.is_null());
+    }
+
+    #[test]
+    fn style_snapshot_roundtrips_color() {
+        let _guard = test_guard();
+        let imgui = ImGuiContext::create();
+        let _editor = EditorContext::create(&imgui);
+
+        let original = _editor.style_color(StyleColor::Background);
+        let updated = [0.11, 0.22, 0.33, 0.44];
+        _editor.set_style_color(StyleColor::Background, updated);
+        assert_eq!(_editor.style_color(StyleColor::Background), updated);
+
+        let mut style = _editor.style();
+        style.set_color(StyleColor::Background, original);
+        _editor.set_style(&style);
+        assert_eq!(_editor.style_color(StyleColor::Background), original);
     }
 }

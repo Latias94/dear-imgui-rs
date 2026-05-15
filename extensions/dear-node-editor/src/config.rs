@@ -1,4 +1,5 @@
 use crate::{CanvasSizeMode, NodeId, SaveReasonFlags, sys};
+use dear_imgui_rs::MouseButton;
 use std::{
     ffi::{CString, NulError, c_char, c_void},
     panic::{AssertUnwindSafe, catch_unwind},
@@ -53,11 +54,12 @@ impl CallbackState {
 pub struct EditorConfig {
     pub(crate) settings_file: Option<CString>,
     pub(crate) callbacks: Option<Box<CallbackState>>,
+    pub(crate) custom_zoom_levels: Vec<f32>,
     pub(crate) canvas_size_mode: CanvasSizeMode,
-    pub(crate) drag_button_index: i32,
-    pub(crate) select_button_index: i32,
-    pub(crate) navigate_button_index: i32,
-    pub(crate) context_menu_button_index: i32,
+    pub(crate) drag_button: MouseButton,
+    pub(crate) select_button: MouseButton,
+    pub(crate) navigate_button: MouseButton,
+    pub(crate) context_menu_button: MouseButton,
     pub(crate) enable_smooth_zoom: bool,
     pub(crate) smooth_zoom_power: f32,
 }
@@ -67,11 +69,12 @@ impl Default for EditorConfig {
         Self {
             settings_file: None,
             callbacks: None,
+            custom_zoom_levels: Vec::new(),
             canvas_size_mode: CanvasSizeMode::FitVerticalView,
-            drag_button_index: 0,
-            select_button_index: 0,
-            navigate_button_index: 1,
-            context_menu_button_index: 1,
+            drag_button: MouseButton::Left,
+            select_button: MouseButton::Left,
+            navigate_button: MouseButton::Right,
+            context_menu_button: MouseButton::Right,
             enable_smooth_zoom: false,
             smooth_zoom_power: if cfg!(target_os = "macos") { 1.1 } else { 1.3 },
         }
@@ -103,23 +106,61 @@ impl EditorConfig {
         self
     }
 
-    pub fn drag_button_index(mut self, index: i32) -> Self {
-        self.drag_button_index = index;
+    pub fn custom_zoom_levels(mut self, levels: impl Into<Vec<f32>>) -> Self {
+        let levels = levels.into();
+        assert!(
+            levels.iter().all(|value| value.is_finite() && *value > 0.0),
+            "custom zoom levels must be positive finite values"
+        );
+        assert!(
+            levels.windows(2).all(|pair| pair[0] < pair[1]),
+            "custom zoom levels must be strictly increasing"
+        );
+        assert!(
+            levels.len() <= i32::MAX as usize,
+            "custom zoom levels exceed i32::MAX"
+        );
+        self.custom_zoom_levels = levels;
         self
     }
 
-    pub fn select_button_index(mut self, index: i32) -> Self {
-        self.select_button_index = index;
+    pub fn drag_button(mut self, button: MouseButton) -> Self {
+        self.drag_button = button;
         self
     }
 
-    pub fn navigate_button_index(mut self, index: i32) -> Self {
-        self.navigate_button_index = index;
+    pub fn select_button(mut self, button: MouseButton) -> Self {
+        self.select_button = button;
         self
     }
 
-    pub fn context_menu_button_index(mut self, index: i32) -> Self {
-        self.context_menu_button_index = index;
+    pub fn navigate_button(mut self, button: MouseButton) -> Self {
+        self.navigate_button = button;
+        self
+    }
+
+    pub fn context_menu_button(mut self, button: MouseButton) -> Self {
+        self.context_menu_button = button;
+        self
+    }
+
+    pub unsafe fn drag_button_index_unchecked(mut self, index: i32) -> Self {
+        self.drag_button = mouse_button_from_index(index);
+        self
+    }
+
+    pub unsafe fn select_button_index_unchecked(mut self, index: i32) -> Self {
+        self.select_button = mouse_button_from_index(index);
+        self
+    }
+
+    pub unsafe fn navigate_button_index_unchecked(mut self, index: i32) -> Self {
+        self.navigate_button = mouse_button_from_index(index);
+        self
+    }
+
+    pub unsafe fn context_menu_button_index_unchecked(mut self, index: i32) -> Self {
+        self.context_menu_button = mouse_button_from_index(index);
         self
     }
 
@@ -174,14 +215,31 @@ impl EditorConfig {
                 .callbacks
                 .as_deref_mut()
                 .map_or(ptr::null_mut(), |state| state as *mut _ as *mut c_void),
+            custom_zoom_levels: if self.custom_zoom_levels.is_empty() {
+                ptr::null()
+            } else {
+                self.custom_zoom_levels.as_ptr()
+            },
+            custom_zoom_level_count: self.custom_zoom_levels.len() as i32,
             canvas_size_mode: self.canvas_size_mode.raw(),
-            drag_button_index: self.drag_button_index,
-            select_button_index: self.select_button_index,
-            navigate_button_index: self.navigate_button_index,
-            context_menu_button_index: self.context_menu_button_index,
+            drag_button_index: self.drag_button as i32,
+            select_button_index: self.select_button as i32,
+            navigate_button_index: self.navigate_button as i32,
+            context_menu_button_index: self.context_menu_button as i32,
             enable_smooth_zoom: self.enable_smooth_zoom,
             smooth_zoom_power: self.smooth_zoom_power,
         }
+    }
+}
+
+fn mouse_button_from_index(index: i32) -> MouseButton {
+    match index {
+        value if value == MouseButton::Left as i32 => MouseButton::Left,
+        value if value == MouseButton::Right as i32 => MouseButton::Right,
+        value if value == MouseButton::Middle as i32 => MouseButton::Middle,
+        value if value == MouseButton::Extra1 as i32 => MouseButton::Extra1,
+        value if value == MouseButton::Extra2 as i32 => MouseButton::Extra2,
+        _ => panic!("mouse button index must be a valid Dear ImGui mouse button"),
     }
 }
 

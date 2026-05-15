@@ -116,7 +116,31 @@ pub enum StyleColor {
 }
 
 impl StyleColor {
-    pub(crate) fn raw(self) -> sys::DneStyleColor {
+    pub const COUNT: usize = sys::DNE_STYLE_COLOR_COUNT as usize;
+
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::Background,
+        Self::Grid,
+        Self::NodeBackground,
+        Self::NodeBorder,
+        Self::HoveredNodeBorder,
+        Self::SelectedNodeBorder,
+        Self::NodeSelectionRect,
+        Self::NodeSelectionRectBorder,
+        Self::HoveredLinkBorder,
+        Self::SelectedLinkBorder,
+        Self::HighlightLinkBorder,
+        Self::LinkSelectionRect,
+        Self::LinkSelectionRectBorder,
+        Self::PinRect,
+        Self::PinRectBorder,
+        Self::Flow,
+        Self::FlowMarker,
+        Self::GroupBackground,
+        Self::GroupBorder,
+    ];
+
+    pub(crate) const fn raw(self) -> sys::DneStyleColor {
         match self {
             Self::Background => sys::DNE_STYLE_COLOR_BG,
             Self::Grid => sys::DNE_STYLE_COLOR_GRID,
@@ -150,6 +174,10 @@ impl StyleColor {
             }
             CStr::from_ptr(ptr).to_str().unwrap_or("Unknown")
         }
+    }
+
+    pub const fn index(self) -> usize {
+        self.raw() as usize
     }
 }
 

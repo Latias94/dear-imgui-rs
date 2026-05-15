@@ -120,6 +120,8 @@ pub struct DneConfig {
     pub save_node_settings: DneConfigSaveNodeSettings,
     pub load_node_settings: DneConfigLoadNodeSettings,
     pub user_pointer: *mut ::std::os::raw::c_void,
+    pub custom_zoom_levels: *const f32,
+    pub custom_zoom_level_count: ::std::os::raw::c_int,
     pub canvas_size_mode: DneCanvasSizeMode,
     pub drag_button_index: ::std::os::raw::c_int,
     pub select_button_index: ::std::os::raw::c_int,
@@ -175,6 +177,174 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn dne_pop_style_var(count: ::std::os::raw::c_int);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_node_padding() -> ImVec4_c;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_node_padding(value: ImVec4_c);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_node_rounding() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_node_rounding(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_node_border_width() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_node_border_width(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_hovered_node_border_width() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_hovered_node_border_width(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_hovered_node_border_offset() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_hovered_node_border_offset(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_selected_node_border_width() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_selected_node_border_width(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_selected_node_border_offset() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_selected_node_border_offset(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_pin_rounding() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_pin_rounding(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_pin_border_width() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_pin_border_width(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_link_strength() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_link_strength(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_source_direction() -> ImVec2_c;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_source_direction(value: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_target_direction() -> ImVec2_c;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_target_direction(value: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_scroll_duration() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_scroll_duration(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_flow_marker_distance() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_flow_marker_distance(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_flow_speed() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_flow_speed(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_flow_duration() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_flow_duration(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_pivot_alignment() -> ImVec2_c;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_pivot_alignment(value: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_pivot_size() -> ImVec2_c;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_pivot_size(value: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_pivot_scale() -> ImVec2_c;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_pivot_scale(value: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_pin_corners() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_pin_corners(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_pin_radius() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_pin_radius(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_pin_arrow_size() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_pin_arrow_size(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_pin_arrow_width() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_pin_arrow_width(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_group_rounding() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_group_rounding(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_group_border_width() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_group_border_width(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_highlight_connected_links() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_highlight_connected_links(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_snap_link_to_pin_dir() -> f32;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_snap_link_to_pin_dir(value: f32);
+}
+unsafe extern "C" {
+    pub fn dne_get_style_color(color: DneStyleColor) -> ImVec4_c;
+}
+unsafe extern "C" {
+    pub fn dne_set_style_color(color: DneStyleColor, value: ImVec4_c);
 }
 unsafe extern "C" {
     pub fn dne_begin(id: *const ::std::os::raw::c_char, size: ImVec2_c);

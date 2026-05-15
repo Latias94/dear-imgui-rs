@@ -7,12 +7,14 @@
 mod config;
 mod context;
 mod frame;
+mod style;
 mod types;
 mod ui_ext;
 
 pub use config::*;
 pub use context::*;
 pub use frame::*;
+pub use style::*;
 pub use types::*;
 pub use ui_ext::*;
 
