@@ -285,9 +285,69 @@ CIMGUI_API void dne_end_pin()
     ed::EndPin();
 }
 
+CIMGUI_API void dne_pin_rect(ImVec2_c a, ImVec2_c b)
+{
+    ed::PinRect(to_imgui(a), to_imgui(b));
+}
+
+CIMGUI_API void dne_pin_pivot_rect(ImVec2_c a, ImVec2_c b)
+{
+    ed::PinPivotRect(to_imgui(a), to_imgui(b));
+}
+
+CIMGUI_API void dne_pin_pivot_size(ImVec2_c size)
+{
+    ed::PinPivotSize(to_imgui(size));
+}
+
+CIMGUI_API void dne_pin_pivot_scale(ImVec2_c scale)
+{
+    ed::PinPivotScale(to_imgui(scale));
+}
+
+CIMGUI_API void dne_pin_pivot_alignment(ImVec2_c alignment)
+{
+    ed::PinPivotAlignment(to_imgui(alignment));
+}
+
 CIMGUI_API void dne_group(ImVec2_c size)
 {
     ed::Group(to_imgui(size));
+}
+
+CIMGUI_API bool dne_begin_group_hint(uintptr_t node)
+{
+    return ed::BeginGroupHint(node_id(node));
+}
+
+CIMGUI_API ImVec2_c dne_get_group_min()
+{
+    return from_imgui(ed::GetGroupMin());
+}
+
+CIMGUI_API ImVec2_c dne_get_group_max()
+{
+    return from_imgui(ed::GetGroupMax());
+}
+
+CIMGUI_API ImDrawList* dne_get_hint_foreground_draw_list()
+{
+    return ed::GetHintForegroundDrawList();
+}
+
+CIMGUI_API ImDrawList* dne_get_hint_background_draw_list()
+{
+    return ed::GetHintBackgroundDrawList();
+}
+
+CIMGUI_API void dne_end_group_hint()
+{
+    ed::EndGroupHint();
+}
+
+CIMGUI_API ImDrawList* dne_get_node_background_draw_list(uintptr_t node)
+{
+    return ed::GetNodeBackgroundDrawList(node_id(node));
 }
 
 CIMGUI_API bool dne_link(uintptr_t link, uintptr_t start_pin, uintptr_t end_pin, ImVec4_c color, float thickness)

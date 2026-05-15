@@ -195,7 +195,43 @@ unsafe extern "C" {
     pub fn dne_end_pin();
 }
 unsafe extern "C" {
+    pub fn dne_pin_rect(a: ImVec2_c, b: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_pin_pivot_rect(a: ImVec2_c, b: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_pin_pivot_size(size: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_pin_pivot_scale(scale: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_pin_pivot_alignment(alignment: ImVec2_c);
+}
+unsafe extern "C" {
     pub fn dne_group(size: ImVec2_c);
+}
+unsafe extern "C" {
+    pub fn dne_begin_group_hint(node_id: usize) -> bool;
+}
+unsafe extern "C" {
+    pub fn dne_get_group_min() -> ImVec2_c;
+}
+unsafe extern "C" {
+    pub fn dne_get_group_max() -> ImVec2_c;
+}
+unsafe extern "C" {
+    pub fn dne_get_hint_foreground_draw_list() -> *mut ImDrawList;
+}
+unsafe extern "C" {
+    pub fn dne_get_hint_background_draw_list() -> *mut ImDrawList;
+}
+unsafe extern "C" {
+    pub fn dne_end_group_hint();
+}
+unsafe extern "C" {
+    pub fn dne_get_node_background_draw_list(node_id: usize) -> *mut ImDrawList;
 }
 unsafe extern "C" {
     pub fn dne_link(

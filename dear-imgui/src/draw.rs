@@ -374,6 +374,18 @@ impl<'ui> DrawListMut<'ui> {
         }
     }
 
+    /// Wrap a raw ImDrawList pointer for the current Dear ImGui frame.
+    ///
+    /// # Safety
+    ///
+    /// `draw_list` must be a valid mutable draw-list pointer owned by the active
+    /// Dear ImGui frame and remain valid for `'ui`. The caller must also ensure
+    /// the pointer is not independently mutated while the returned wrapper is
+    /// alive.
+    pub unsafe fn from_raw_mut(_ui: &'ui crate::Ui, draw_list: *mut sys::ImDrawList) -> Self {
+        Self::from_raw(draw_list)
+    }
+
     pub(crate) fn window(_ui: &'ui crate::Ui) -> Self {
         Self::from_raw(unsafe { sys::igGetWindowDrawList() })
     }

@@ -139,6 +139,7 @@ impl Drop for ImGuiContextGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{LinkId, NodeEditorUiExt, NodeId, PinId, PinKind};
     use std::{
         ptr,
         sync::{Mutex, OnceLock},
@@ -196,6 +197,98 @@ mod tests {
         let _editor = EditorContext::create(&imgui);
 
         imgui.frame();
+        imgui.render();
+    }
+
+    #[test]
+    fn frame_safe_api_calls_do_not_break_imgui_frame() {
+        let _guard = test_guard();
+        let mut imgui = ImGuiContext::create();
+        imgui.io_mut().set_display_size([640.0, 480.0]);
+        imgui.io_mut().set_delta_time(1.0 / 60.0);
+        let _ = imgui.font_atlas_mut().build();
+
+        let editor_context = EditorContext::create(&imgui);
+        let node_a = NodeId::new(1);
+        let node_b = NodeId::new(2);
+        let output_pin = PinId::new(11);
+        let input_pin = PinId::new(21);
+        let link = LinkId::new(100);
+
+        let ui = imgui.frame();
+        ui.window("node-editor-frame-api").build(|| {
+            let editor = ui.node_editor(&editor_context, "frame-api", [320.0, 240.0]);
+
+            assert!(!editor.is_suspended());
+            {
+                let suspension = editor.suspend();
+                assert!(editor.is_suspended());
+                suspension.resume();
+            }
+            assert!(!editor.is_suspended());
+
+            editor.set_shortcuts_enabled(false);
+            assert!(!editor.shortcuts_enabled());
+            editor.set_shortcuts_enabled(true);
+
+            editor.set_node_position(node_a, [20.0, 30.0]);
+            editor.set_node_z_position(node_a, 2.0);
+            let _ = editor.node_z_position(node_a);
+            editor.restore_node_state(node_a);
+
+            {
+                let node = editor.begin_node(node_a);
+                let pin = node.begin_pin(output_pin, PinKind::Output);
+                ui.text("out");
+                let cursor = ui.cursor_screen_pos();
+                pin.rect(cursor, [cursor[0] + 8.0, cursor[1] + 8.0]);
+                pin.pivot_rect(cursor, [cursor[0] + 8.0, cursor[1] + 8.0]);
+                pin.pivot_size([8.0, 8.0]);
+                pin.pivot_scale([1.0, 1.0]);
+                pin.pivot_alignment([0.5, 0.5]);
+                pin.end();
+                node.end();
+            }
+            {
+                let node = editor.begin_node(node_b);
+                let pin = node.begin_pin(input_pin, PinKind::Input);
+                ui.text("in");
+                pin.end();
+                node.end();
+            }
+
+            let _ = editor.begin_group_hint(node_a);
+            let _ = editor.node_background_draw_list(node_a);
+            let _ = editor.link(link, output_pin, input_pin);
+            let _ = editor.link_pins(link);
+            let _ = editor.node_has_any_links(node_a);
+            let _ = editor.pin_has_any_links(output_pin);
+            let _ = editor.pin_had_any_links(output_pin);
+
+            editor.select_node(node_a);
+            editor.add_node_to_selection(node_b);
+            let _ = editor.is_node_selected(node_a);
+            editor.deselect_node(node_a);
+            editor.select_link(link);
+            editor.add_link_to_selection(link);
+            let _ = editor.is_link_selected(link);
+            editor.deselect_link(link);
+            editor.clear_selection();
+
+            let _ = editor.has_selection_changed();
+            let _ = editor.is_active();
+            let _ = editor.is_background_clicked();
+            let _ = editor.is_background_double_clicked();
+            let _ = editor.background_click_button();
+            let _ = editor.background_double_click_button();
+            let _ = editor.screen_size();
+            let _ = editor.screen_to_canvas([10.0, 10.0]);
+            let _ = editor.canvas_to_screen([10.0, 10.0]);
+            let _ = editor.node_count();
+            let _ = editor.ordered_node_ids();
+
+            editor.end();
+        });
         imgui.render();
     }
 }

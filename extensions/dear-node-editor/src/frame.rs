@@ -2,14 +2,15 @@ use crate::{
     EditorContext, FlowDirection, LinkId, NodeId, PinId, PinKind, StyleColor, StyleVar,
     context::CurrentEditorGuard, from_vec2, sys, vec2, vec4,
 };
-use dear_imgui_rs::Ui;
-use std::{ffi::CString, marker::PhantomData};
+use dear_imgui_rs::{DrawListMut, MouseButton, Ui};
+use std::{cell::Cell, ffi::CString, marker::PhantomData};
 
 /// RAII token for an active node-editor frame.
 pub struct NodeEditorFrame<'ui> {
     _ui: &'ui Ui,
     _editor: &'ui EditorContext,
     _current_editor: CurrentEditorGuard<'ui>,
+    suspended: Cell<bool>,
     ended: bool,
 }
 
@@ -20,6 +21,7 @@ impl<'ui> NodeEditorFrame<'ui> {
         id: impl AsRef<str>,
         size: [f32; 2],
     ) -> Self {
+        assert_finite_vec2("Ui::node_editor()", "size", size);
         let current_editor = editor.bind_current("Ui::node_editor");
         let id = CString::new(id.as_ref()).expect("node editor id cannot contain NUL bytes");
         unsafe { sys::dne_begin(id.as_ptr(), vec2(size)) };
@@ -27,6 +29,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             _ui: ui,
             _editor: editor,
             _current_editor: current_editor,
+            suspended: Cell::new(false),
             ended: false,
         }
     }
@@ -58,8 +61,27 @@ impl<'ui> NodeEditorFrame<'ui> {
         }
     }
 
+    pub fn begin_group_hint<'a>(&'a self, node: NodeId) -> Option<GroupHintToken<'a>> {
+        unsafe { sys::dne_begin_group_hint(node.raw()) }.then_some(GroupHintToken {
+            ui: self._ui,
+            ended: false,
+            _scope: PhantomData,
+        })
+    }
+
+    pub fn node_background_draw_list(&self, node: NodeId) -> DrawListMut<'_> {
+        let draw_list = unsafe { sys::dne_get_node_background_draw_list(node.raw()) };
+        unsafe { DrawListMut::from_raw_mut(self._ui, draw_list.cast()) }
+    }
+
     pub fn group(&self, size: [f32; 2]) {
+        assert_non_negative_finite_vec2("NodeEditorFrame::group()", "size", size);
         unsafe { sys::dne_group(vec2(size)) };
+    }
+
+    pub fn set_group_size(&self, node: NodeId, size: [f32; 2]) {
+        assert_non_negative_finite_vec2("NodeEditorFrame::set_group_size()", "size", size);
+        unsafe { sys::dne_set_group_size(node.raw(), vec2(size)) };
     }
 
     pub fn link(&self, link: LinkId, start_pin: PinId, end_pin: PinId) -> bool {
@@ -74,10 +96,8 @@ impl<'ui> NodeEditorFrame<'ui> {
         color: [f32; 4],
         thickness: f32,
     ) -> bool {
-        assert!(
-            thickness.is_finite() && thickness >= 0.0,
-            "link thickness must be finite"
-        );
+        assert_finite_vec4("NodeEditorFrame::link_colored()", "color", color);
+        assert_non_negative_finite_f32("NodeEditorFrame::link_colored()", "thickness", thickness);
         unsafe {
             sys::dne_link(
                 link.raw(),
@@ -98,10 +118,8 @@ impl<'ui> NodeEditorFrame<'ui> {
         color: [f32; 4],
         thickness: f32,
     ) -> Option<CreateSession<'a>> {
-        assert!(
-            thickness.is_finite() && thickness >= 0.0,
-            "create thickness must be finite"
-        );
+        assert_finite_vec4("NodeEditorFrame::begin_create()", "color", color);
+        assert_non_negative_finite_f32("NodeEditorFrame::begin_create()", "thickness", thickness);
         unsafe { sys::dne_begin_create(vec4(color), thickness) }.then_some(CreateSession {
             ended: false,
             _scope: PhantomData,
@@ -127,6 +145,7 @@ impl<'ui> NodeEditorFrame<'ui> {
         color: StyleColor,
         value: [f32; 4],
     ) -> StyleColorToken<'a> {
+        assert_finite_vec4("NodeEditorFrame::push_style_color()", "value", value);
         unsafe { sys::dne_push_style_color(color.raw(), vec4(value)) };
         StyleColorToken {
             count: 1,
@@ -136,7 +155,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn push_style_var_float<'a>(&'a self, var: StyleVar, value: f32) -> StyleVarToken<'a> {
-        assert!(value.is_finite(), "style value must be finite");
+        assert_finite_f32("NodeEditorFrame::push_style_var_float()", "value", value);
         unsafe { sys::dne_push_style_var_float(var.raw(), value) };
         StyleVarToken {
             count: 1,
@@ -146,6 +165,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn push_style_var_vec2<'a>(&'a self, var: StyleVar, value: [f32; 2]) -> StyleVarToken<'a> {
+        assert_finite_vec2("NodeEditorFrame::push_style_var_vec2()", "value", value);
         unsafe { sys::dne_push_style_var_vec2(var.raw(), vec2(value)) };
         StyleVarToken {
             count: 1,
@@ -155,6 +175,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn push_style_var_vec4<'a>(&'a self, var: StyleVar, value: [f32; 4]) -> StyleVarToken<'a> {
+        assert_finite_vec4("NodeEditorFrame::push_style_var_vec4()", "value", value);
         unsafe { sys::dne_push_style_var_vec4(var.raw(), vec4(value)) };
         StyleVarToken {
             count: 1,
@@ -164,6 +185,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn set_node_position(&self, node: NodeId, position: [f32; 2]) {
+        assert_finite_vec2("NodeEditorFrame::set_node_position()", "position", position);
         unsafe { sys::dne_set_node_position(node.raw(), vec2(position)) };
     }
 
@@ -175,16 +197,63 @@ impl<'ui> NodeEditorFrame<'ui> {
         from_vec2(unsafe { sys::dne_get_node_size(node.raw()) })
     }
 
+    pub fn set_node_z_position(&self, node: NodeId, z: f32) {
+        assert_finite_f32("NodeEditorFrame::set_node_z_position()", "z", z);
+        unsafe { sys::dne_set_node_z_position(node.raw(), z) };
+    }
+
+    pub fn node_z_position(&self, node: NodeId) -> f32 {
+        unsafe { sys::dne_get_node_z_position(node.raw()) }
+    }
+
+    pub fn restore_node_state(&self, node: NodeId) {
+        unsafe { sys::dne_restore_node_state(node.raw()) };
+    }
+
     pub fn center_node_on_screen(&self, node: NodeId) {
         unsafe { sys::dne_center_node_on_screen(node.raw()) };
     }
 
     pub fn navigate_to_content(&self, duration: f32) {
+        assert_finite_f32(
+            "NodeEditorFrame::navigate_to_content()",
+            "duration",
+            duration,
+        );
         unsafe { sys::dne_navigate_to_content(duration) };
     }
 
     pub fn navigate_to_selection(&self, zoom_in: bool, duration: f32) {
+        assert_finite_f32(
+            "NodeEditorFrame::navigate_to_selection()",
+            "duration",
+            duration,
+        );
         unsafe { sys::dne_navigate_to_selection(zoom_in, duration) };
+    }
+
+    pub fn suspend<'a>(&'a self) -> SuspensionToken<'a> {
+        assert!(
+            !self.suspended.replace(true),
+            "NodeEditorFrame::suspend() cannot be called while the editor is already suspended"
+        );
+        unsafe { sys::dne_suspend() };
+        SuspensionToken {
+            suspended: &self.suspended,
+            resumed: false,
+        }
+    }
+
+    pub fn is_suspended(&self) -> bool {
+        self.suspended.get() || unsafe { sys::dne_is_suspended() }
+    }
+
+    pub fn is_active(&self) -> bool {
+        unsafe { sys::dne_is_active() }
+    }
+
+    pub fn has_selection_changed(&self) -> bool {
+        unsafe { sys::dne_has_selection_changed() }
     }
 
     pub fn selected_nodes(&self) -> Vec<NodeId> {
@@ -199,6 +268,66 @@ impl<'ui> NodeEditorFrame<'ui> {
         collect_link_ids(count, |ptr, len| unsafe {
             sys::dne_get_selected_links(ptr, len)
         })
+    }
+
+    pub fn is_node_selected(&self, node: NodeId) -> bool {
+        unsafe { sys::dne_is_node_selected(node.raw()) }
+    }
+
+    pub fn is_link_selected(&self, link: LinkId) -> bool {
+        unsafe { sys::dne_is_link_selected(link.raw()) }
+    }
+
+    pub fn clear_selection(&self) {
+        unsafe { sys::dne_clear_selection() };
+    }
+
+    pub fn select_node(&self, node: NodeId) {
+        unsafe { sys::dne_select_node(node.raw(), false) };
+    }
+
+    pub fn add_node_to_selection(&self, node: NodeId) {
+        unsafe { sys::dne_select_node(node.raw(), true) };
+    }
+
+    pub fn select_link(&self, link: LinkId) {
+        unsafe { sys::dne_select_link(link.raw(), false) };
+    }
+
+    pub fn add_link_to_selection(&self, link: LinkId) {
+        unsafe { sys::dne_select_link(link.raw(), true) };
+    }
+
+    pub fn deselect_node(&self, node: NodeId) {
+        unsafe { sys::dne_deselect_node(node.raw()) };
+    }
+
+    pub fn deselect_link(&self, link: LinkId) {
+        unsafe { sys::dne_deselect_link(link.raw()) };
+    }
+
+    pub fn delete_node(&self, node: NodeId) -> bool {
+        unsafe { sys::dne_delete_node(node.raw()) }
+    }
+
+    pub fn delete_link(&self, link: LinkId) -> bool {
+        unsafe { sys::dne_delete_link(link.raw()) }
+    }
+
+    pub fn node_has_any_links(&self, node: NodeId) -> bool {
+        unsafe { sys::dne_has_any_links_node(node.raw()) }
+    }
+
+    pub fn pin_has_any_links(&self, pin: PinId) -> bool {
+        unsafe { sys::dne_has_any_links_pin(pin.raw()) }
+    }
+
+    pub fn break_node_links(&self, node: NodeId) -> usize {
+        unsafe { sys::dne_break_links_node(node.raw()) }.max(0) as usize
+    }
+
+    pub fn break_pin_links(&self, pin: PinId) -> usize {
+        unsafe { sys::dne_break_links_pin(pin.raw()) }.max(0) as usize
     }
 
     pub fn hovered_node(&self) -> Option<NodeId> {
@@ -249,16 +378,68 @@ impl<'ui> NodeEditorFrame<'ui> {
         unsafe { sys::dne_show_background_context_menu() }
     }
 
+    pub fn set_shortcuts_enabled(&self, enabled: bool) {
+        unsafe { sys::dne_enable_shortcuts(enabled) };
+    }
+
+    pub fn shortcuts_enabled(&self) -> bool {
+        unsafe { sys::dne_are_shortcuts_enabled() }
+    }
+
     pub fn current_zoom(&self) -> f32 {
         unsafe { sys::dne_get_current_zoom() }
     }
 
+    pub fn is_background_clicked(&self) -> bool {
+        unsafe { sys::dne_is_background_clicked() }
+    }
+
+    pub fn is_background_double_clicked(&self) -> bool {
+        unsafe { sys::dne_is_background_double_clicked() }
+    }
+
+    pub fn background_click_button(&self) -> Option<MouseButton> {
+        mouse_button_from_index(unsafe { sys::dne_get_background_click_button_index() })
+    }
+
+    pub fn background_double_click_button(&self) -> Option<MouseButton> {
+        mouse_button_from_index(unsafe { sys::dne_get_background_double_click_button_index() })
+    }
+
+    pub fn link_pins(&self, link: LinkId) -> Option<(PinId, PinId)> {
+        let mut start = 0usize;
+        let mut end = 0usize;
+        unsafe { sys::dne_get_link_pins(link.raw(), &mut start, &mut end) }
+            .then_some((PinId(start), PinId(end)))
+    }
+
+    pub fn pin_had_any_links(&self, pin: PinId) -> bool {
+        unsafe { sys::dne_pin_had_any_links(pin.raw()) }
+    }
+
+    pub fn screen_size(&self) -> [f32; 2] {
+        from_vec2(unsafe { sys::dne_get_screen_size() })
+    }
+
     pub fn screen_to_canvas(&self, pos: [f32; 2]) -> [f32; 2] {
+        assert_finite_vec2("NodeEditorFrame::screen_to_canvas()", "pos", pos);
         from_vec2(unsafe { sys::dne_screen_to_canvas(vec2(pos)) })
     }
 
     pub fn canvas_to_screen(&self, pos: [f32; 2]) -> [f32; 2] {
+        assert_finite_vec2("NodeEditorFrame::canvas_to_screen()", "pos", pos);
         from_vec2(unsafe { sys::dne_canvas_to_screen(vec2(pos)) })
+    }
+
+    pub fn node_count(&self) -> usize {
+        unsafe { sys::dne_get_node_count() }.max(0) as usize
+    }
+
+    pub fn ordered_node_ids(&self) -> Vec<NodeId> {
+        let count = self.node_count();
+        collect_node_ids(count, |ptr, len| unsafe {
+            sys::dne_get_ordered_node_ids(ptr, len)
+        })
     }
 }
 
@@ -310,6 +491,31 @@ impl PinToken<'_> {
         self.end_inner();
     }
 
+    pub fn rect(&self, min: [f32; 2], max: [f32; 2]) {
+        assert_finite_rect("PinToken::rect()", min, max);
+        unsafe { sys::dne_pin_rect(vec2(min), vec2(max)) };
+    }
+
+    pub fn pivot_rect(&self, min: [f32; 2], max: [f32; 2]) {
+        assert_finite_rect("PinToken::pivot_rect()", min, max);
+        unsafe { sys::dne_pin_pivot_rect(vec2(min), vec2(max)) };
+    }
+
+    pub fn pivot_size(&self, size: [f32; 2]) {
+        assert_non_negative_finite_vec2("PinToken::pivot_size()", "size", size);
+        unsafe { sys::dne_pin_pivot_size(vec2(size)) };
+    }
+
+    pub fn pivot_scale(&self, scale: [f32; 2]) {
+        assert_finite_vec2("PinToken::pivot_scale()", "scale", scale);
+        unsafe { sys::dne_pin_pivot_scale(vec2(scale)) };
+    }
+
+    pub fn pivot_alignment(&self, alignment: [f32; 2]) {
+        assert_finite_vec2("PinToken::pivot_alignment()", "alignment", alignment);
+        unsafe { sys::dne_pin_pivot_alignment(vec2(alignment)) };
+    }
+
     fn end_inner(&mut self) {
         if !self.ended {
             unsafe { sys::dne_end_pin() };
@@ -321,6 +527,74 @@ impl PinToken<'_> {
 impl Drop for PinToken<'_> {
     fn drop(&mut self) {
         self.end_inner();
+    }
+}
+
+pub struct GroupHintToken<'a> {
+    ui: &'a Ui,
+    ended: bool,
+    _scope: PhantomData<&'a ()>,
+}
+
+impl<'a> GroupHintToken<'a> {
+    pub fn min(&self) -> [f32; 2] {
+        from_vec2(unsafe { sys::dne_get_group_min() })
+    }
+
+    pub fn max(&self) -> [f32; 2] {
+        from_vec2(unsafe { sys::dne_get_group_max() })
+    }
+
+    pub fn foreground_draw_list(&self) -> DrawListMut<'_> {
+        let draw_list = unsafe { sys::dne_get_hint_foreground_draw_list() };
+        unsafe { DrawListMut::from_raw_mut(self.ui, draw_list.cast()) }
+    }
+
+    pub fn background_draw_list(&self) -> DrawListMut<'_> {
+        let draw_list = unsafe { sys::dne_get_hint_background_draw_list() };
+        unsafe { DrawListMut::from_raw_mut(self.ui, draw_list.cast()) }
+    }
+
+    pub fn end(mut self) {
+        self.end_inner();
+    }
+
+    fn end_inner(&mut self) {
+        if !self.ended {
+            unsafe { sys::dne_end_group_hint() };
+            self.ended = true;
+        }
+    }
+}
+
+impl Drop for GroupHintToken<'_> {
+    fn drop(&mut self) {
+        self.end_inner();
+    }
+}
+
+pub struct SuspensionToken<'a> {
+    suspended: &'a Cell<bool>,
+    resumed: bool,
+}
+
+impl SuspensionToken<'_> {
+    pub fn resume(mut self) {
+        self.resume_inner();
+    }
+
+    fn resume_inner(&mut self) {
+        if !self.resumed {
+            unsafe { sys::dne_resume() };
+            self.suspended.set(false);
+            self.resumed = true;
+        }
+    }
+}
+
+impl Drop for SuspensionToken<'_> {
+    fn drop(&mut self) {
+        self.resume_inner();
     }
 }
 
@@ -337,9 +611,34 @@ impl CreateSession<'_> {
             .then_some((PinId(start), PinId(end)))
     }
 
+    pub fn query_new_link_styled(&self, color: [f32; 4], thickness: f32) -> Option<(PinId, PinId)> {
+        assert_finite_vec4("CreateSession::query_new_link_styled()", "color", color);
+        assert_non_negative_finite_f32(
+            "CreateSession::query_new_link_styled()",
+            "thickness",
+            thickness,
+        );
+        let mut start = 0usize;
+        let mut end = 0usize;
+        unsafe { sys::dne_query_new_link_styled(&mut start, &mut end, vec4(color), thickness) }
+            .then_some((PinId(start), PinId(end)))
+    }
+
     pub fn query_new_node(&self) -> Option<PinId> {
         let mut pin = 0usize;
         unsafe { sys::dne_query_new_node(&mut pin) }.then_some(PinId(pin))
+    }
+
+    pub fn query_new_node_styled(&self, color: [f32; 4], thickness: f32) -> Option<PinId> {
+        assert_finite_vec4("CreateSession::query_new_node_styled()", "color", color);
+        assert_non_negative_finite_f32(
+            "CreateSession::query_new_node_styled()",
+            "thickness",
+            thickness,
+        );
+        let mut pin = 0usize;
+        unsafe { sys::dne_query_new_node_styled(&mut pin, vec4(color), thickness) }
+            .then_some(PinId(pin))
     }
 
     pub fn accept_new_item(&self) -> bool {
@@ -347,11 +646,27 @@ impl CreateSession<'_> {
     }
 
     pub fn accept_new_item_styled(&self, color: [f32; 4], thickness: f32) -> bool {
+        assert_finite_vec4("CreateSession::accept_new_item_styled()", "color", color);
+        assert_non_negative_finite_f32(
+            "CreateSession::accept_new_item_styled()",
+            "thickness",
+            thickness,
+        );
         unsafe { sys::dne_accept_new_item_styled(vec4(color), thickness) }
     }
 
     pub fn reject_new_item(&self) {
         unsafe { sys::dne_reject_new_item() };
+    }
+
+    pub fn reject_new_item_styled(&self, color: [f32; 4], thickness: f32) {
+        assert_finite_vec4("CreateSession::reject_new_item_styled()", "color", color);
+        assert_non_negative_finite_f32(
+            "CreateSession::reject_new_item_styled()",
+            "thickness",
+            thickness,
+        );
+        unsafe { sys::dne_reject_new_item_styled(vec4(color), thickness) };
     }
 
     pub fn end(mut self) {
@@ -545,8 +860,76 @@ fn collect_ids(count: usize, f: impl FnOnce(*mut usize, i32) -> i32) -> Vec<usiz
     if count == 0 {
         return Vec::new();
     }
+    let count = count.min(i32::MAX as usize);
     let mut values = vec![0usize; count];
     let written = f(values.as_mut_ptr(), values.len() as i32).max(0) as usize;
     values.truncate(written.min(count));
     values
+}
+
+fn mouse_button_from_index(index: sys::ImGuiMouseButton) -> Option<MouseButton> {
+    match index {
+        value if value == MouseButton::Left as i32 => Some(MouseButton::Left),
+        value if value == MouseButton::Right as i32 => Some(MouseButton::Right),
+        value if value == MouseButton::Middle as i32 => Some(MouseButton::Middle),
+        value if value == MouseButton::Extra1 as i32 => Some(MouseButton::Extra1),
+        value if value == MouseButton::Extra2 as i32 => Some(MouseButton::Extra2),
+        _ => None,
+    }
+}
+
+fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    assert!(value.is_finite(), "{caller} {name} must be finite");
+}
+
+fn assert_non_negative_finite_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
+fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert!(
+        value.iter().all(|component| component.is_finite()),
+        "{caller} {name} components must be finite"
+    );
+}
+
+fn assert_finite_rect(caller: &str, min: [f32; 2], max: [f32; 2]) {
+    assert_finite_vec2(caller, "min", min);
+    assert_finite_vec2(caller, "max", max);
+    assert!(
+        min[0] <= max[0] && min[1] <= max[1],
+        "{caller} min must not exceed max"
+    );
+}
+
+fn assert_non_negative_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
+    assert_finite_vec2(caller, name, value);
+    assert!(
+        value.iter().all(|component| *component >= 0.0),
+        "{caller} {name} components must be non-negative"
+    );
+}
+
+fn assert_finite_vec4(caller: &str, name: &str, value: [f32; 4]) {
+    assert!(
+        value.iter().all(|component| component.is_finite()),
+        "{caller} {name} components must be finite"
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mouse_button_indices_map_known_imgui_buttons() {
+        assert_eq!(mouse_button_from_index(0), Some(MouseButton::Left));
+        assert_eq!(mouse_button_from_index(1), Some(MouseButton::Right));
+        assert_eq!(mouse_button_from_index(2), Some(MouseButton::Middle));
+        assert_eq!(mouse_button_from_index(3), Some(MouseButton::Extra1));
+        assert_eq!(mouse_button_from_index(4), Some(MouseButton::Extra2));
+        assert_eq!(mouse_button_from_index(-1), None);
+        assert_eq!(mouse_button_from_index(99), None);
+    }
 }

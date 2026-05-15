@@ -66,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `NodeId`, `PinId`, and `LinkId` as `uintptr_t` instead of upstream C++ helper-pointer APIs.
   - Add `node_editor_basic`, a Winit + WGPU example covering editor context creation, node/pin
     scopes, links, create/delete sessions, and selection queries.
+  - Expand `dear-node-editor` safe APIs to cover pin geometry helpers, group hints, node background
+    draw lists, selection mutation, node ordering and z-state, link/pin queries, background click
+    state, shortcut toggles, styled create/reject queries, and RAII-scoped editor suspension.
   - Keep `dear-node-editor-sys` on the same no-LLVM normal-build path as the other `*-sys`
     crates: checked-in pregenerated bindings are used by default, while LLVM/libclang is required
     only for explicit binding regeneration with `DEAR_IMGUI_RS_REGEN_BINDINGS=1 --features bindgen`.

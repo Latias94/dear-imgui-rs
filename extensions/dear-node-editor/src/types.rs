@@ -1,5 +1,6 @@
 use crate::sys;
 use bitflags::bitflags;
+use std::ffi::CStr;
 
 macro_rules! id_type {
     ($name:ident) => {
@@ -138,6 +139,18 @@ impl StyleColor {
             Self::GroupBorder => sys::DNE_STYLE_COLOR_GROUP_BORDER,
         }
     }
+
+    /// Returns the upstream style color name.
+    #[doc(alias = "GetStyleColorName")]
+    pub fn name(self) -> &'static str {
+        unsafe {
+            let ptr = sys::dne_get_style_color_name(self.raw());
+            if ptr.is_null() {
+                return "Unknown";
+            }
+            CStr::from_ptr(ptr).to_str().unwrap_or("Unknown")
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -215,5 +228,16 @@ bitflags! {
         const ADD_NODE = sys::DNE_SAVE_REASON_ADD_NODE as u32;
         const REMOVE_NODE = sys::DNE_SAVE_REASON_REMOVE_NODE as u32;
         const USER = sys::DNE_SAVE_REASON_USER as u32;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn style_color_names_are_available() {
+        assert_ne!(StyleColor::Background.name(), "Unknown");
+        assert!(!StyleColor::Background.name().is_empty());
     }
 }
