@@ -298,7 +298,8 @@ fn build_with_cc(cfg: &BuildConfig, node_editor_root: &Path, imgui_src: &Path, c
     build.include(node_editor_root.join("imgui-node-editor"));
     build.include(cfg.manifest_dir.join("shim"));
     build.define("IMGUI_USE_WCHAR32", None);
-    build.define("IMGUI_DISABLE_OBSOLETE_FUNCTIONS", Some("1"));
+    // Keep ImGui internal ABI macros in lockstep with dear-imgui-sys. imgui-node-editor includes
+    // imgui_internal.h, so local-only layout-affecting defines can corrupt the shared context.
 
     build.file(node_editor_root.join("cimnodes_editor.cpp"));
     build.file(node_editor_root.join("imgui-node-editor/imgui_node_editor.cpp"));

@@ -184,4 +184,18 @@ mod tests {
 
         unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
     }
+
+    #[test]
+    fn creating_editor_does_not_break_imgui_frame() {
+        let _guard = test_guard();
+        let mut imgui = ImGuiContext::create();
+        imgui.io_mut().set_display_size([640.0, 480.0]);
+        imgui.io_mut().set_delta_time(1.0 / 60.0);
+        let _ = imgui.font_atlas_mut().build();
+
+        let _editor = EditorContext::create(&imgui);
+
+        imgui.frame();
+        imgui.render();
+    }
 }
