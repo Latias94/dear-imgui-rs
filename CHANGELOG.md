@@ -66,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `NodeId`, `PinId`, and `LinkId` as `uintptr_t` instead of upstream C++ helper-pointer APIs.
   - Add `node_editor_basic`, a Winit + WGPU example covering editor context creation, node/pin
     scopes, links, create/delete sessions, and selection queries.
+  - Add `node_editor_showcase`, a broader Winit + WGPU example covering typed editor
+    configuration, style snapshots, draw-list helpers, group hints, selection mutation, z/order
+    queries, shortcut sessions, link/pin queries, and RAII editor suspension.
   - Expand `dear-node-editor` safe APIs to cover pin geometry helpers, group hints, node background
     draw lists, selection mutation, node ordering and z-state, link/pin queries, background click
     state, shortcut toggles, styled create/reject queries, and RAII-scoped editor suspension.

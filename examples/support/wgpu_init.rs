@@ -47,7 +47,7 @@ pub fn init_wgpu_for_window(
     let format = preferred_srgb_format(&caps);
 
     let PhysicalSize { width, height } = window.inner_size();
-    let mut config = default_surface_config(format, width.max(1), height.max(1));
+    let config = default_surface_config(format, width.max(1), height.max(1));
     surface.configure(&device, &config);
 
     Ok((device, queue, surface, config))

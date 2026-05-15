@@ -205,6 +205,11 @@ path = "node_editor_basic.rs"
 required-features = ["node-editor"]
 
 [[bin]]
+name = "node_editor_showcase"
+path = "node_editor_showcase.rs"
+required-features = ["node-editor"]
+
+[[bin]]
 name = "imguizmo_quat_basic"
 path = "imguizmo_quat_basic.rs"
 required-features = ["imguizmo-quat"]

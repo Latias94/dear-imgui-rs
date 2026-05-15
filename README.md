@@ -89,6 +89,7 @@ cargo run --bin dear_app_docking
 cargo run --bin imguizmo_basic --features imguizmo
 cargo run --bin imnodes_basic --features imnodes
 cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
+cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor
 cargo run --bin implot_basic --features implot
 cargo run --bin imguizmo_quat_basic --features imguizmo-quat
 cargo run --bin reflect_demo --features reflect

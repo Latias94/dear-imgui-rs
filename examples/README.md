@@ -22,6 +22,7 @@ Run any example with:
 - Extensions require features, for example:
   - `--features implot` for ImPlot
   - `--features imnodes` for ImNodes
+  - `--features node-editor` for imgui-node-editor / dear-node-editor
   - `--features imguizmo` for ImGuizmo
   - `--features imguizmo-quat` for ImGuIZMO.quat
   - `--features implot3d` for ImPlot3D (and, if your workspace doesn’t pre-enable add-ons on dear-app, also add `, dear-app/implot3d`)
@@ -57,10 +58,13 @@ Quick picks:
 - Reflect demo: `cargo run --bin reflect_demo --features reflect`
 - ImGui Test Engine: `cargo run --bin imgui_test_engine_basic --features test-engine`
   - Smoke test (auto-run + exit): `cargo run --bin imgui_test_engine_basic --features test-engine -- --exit-when-done --group tests`
+- dear-node-editor basic: `cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor`
+- dear-node-editor showcase: `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor`
 
 Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
 - Extensions (e.g., ImPlot): `cargo run --bin implot_basic --features implot`
   - ImNodes: `cargo run --bin imnodes_basic --features imnodes`
+  - dear-node-editor: `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor`
   - ImGuizmo: `cargo run --bin imguizmo_basic --features imguizmo`
 
 ## Structure (from easy to advanced)
@@ -122,6 +126,7 @@ This is the intended organization.
 - 03-extensions (logical group; these examples still live as top-level bins today)
   - ImPlot: `implot_basic.rs`.
   - ImNodes: `imnodes_basic.rs` with multiple tabs.
+  - dear-node-editor: `node_editor_basic.rs` for minimal usage and `node_editor_showcase.rs` for the broader safe API.
   - ImGuizmo: `imguizmo_basic.rs` + notes on camera math.
   - Reflect: `reflect_demo.rs` (struct/enum reflection + auto-generated UI).
   - ImGui Test Engine: `imgui_test_engine_basic.rs`.
@@ -143,7 +148,7 @@ This is the intended organization.
 - Docking: `02-docking/dockspace_minimal.rs`, `02-docking/game_engine_docking.rs` (+ `examples/02-docking/game_engine_docking.ini`)
 - Integration: `04-integration/wgpu_rtt_gameview.rs`, `04-integration/console_log.rs`, `04-integration/asset_browser_grid.rs`
   and `04-integration/file_dialog_native.rs`, `04-integration/file_browser_imgui.rs`
-- Extensions: `implot_basic.rs`, `imnodes_basic.rs`, `imguizmo_basic.rs`, `reflect_demo.rs`, `imgui_test_engine_basic.rs`
+- Extensions: `implot_basic.rs`, `imnodes_basic.rs`, `node_editor_basic.rs`, `node_editor_showcase.rs`, `imguizmo_basic.rs`, `reflect_demo.rs`, `imgui_test_engine_basic.rs`
 
 ### dear-app helpers
 
