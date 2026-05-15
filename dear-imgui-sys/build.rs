@@ -79,6 +79,11 @@ fn main() {
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/imgui_test_engine_hooks.cpp");
     println!("cargo:rerun-if-changed=src/platform_io_hooks.cpp");
+    println!("cargo:rerun-if-changed=src/stack_layout_shim.cpp");
+    println!("cargo:rerun-if-changed=src/stack_layout_imgui_externs.cpp.inc");
+    println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_add.cpp.inc");
+    println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_size.cpp.inc");
+    println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_size_horizontal_compat.cpp.inc");
     println!("cargo:rerun-if-changed=backend-shims/opengl3.cpp");
     println!("cargo:rerun-if-changed=backend-shims/sdlrenderer3.cpp");
     println!("cargo:rerun-if-changed=backend-shims/android.cpp");
@@ -90,6 +95,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMGUI_SYS_USE_CMAKE");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-env-changed=CARGO_NET_OFFLINE");
     println!("cargo:rerun-if-env-changed=SDL3_INCLUDE_DIR");
 
@@ -171,15 +177,12 @@ fn main() {
                 }
             }
         } else {
-            // When freetype is enabled, prefer cc path as our CMake path doesn't wire FT includes/defines yet.
-            if use_cmake_requested()
-                && !cfg!(feature = "freetype")
-                && build_with_cmake(&cfg.manifest_dir)
-            {
-                // CMake path prints link flags and search paths
-            } else {
-                build_with_cc_cfg(&cfg);
+            if use_cmake_requested() {
+                println!(
+                    "cargo:warning=IMGUI_SYS_USE_CMAKE is ignored because dear-imgui-sys applies a build-time stack-layout patch to imgui.cpp; using the cc source build."
+                );
             }
+            build_with_cc_cfg(&cfg);
         }
     } else if !linked_prebuilt && skip_cc {
         println!(
@@ -403,10 +406,14 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     let imgui_src = cfg.imgui_src();
     let mut build = new_native_cpp_build(cfg);
     build.include(&cimgui_root);
-    build.file(imgui_src.join("imgui.cpp"));
+    build.file(write_stack_layout_patched_imgui_cpp(
+        cfg,
+        &imgui_src.join("imgui.cpp"),
+    ));
     build.file(imgui_src.join("imgui_draw.cpp"));
     build.file(imgui_src.join("imgui_widgets.cpp"));
     build.file(imgui_src.join("imgui_tables.cpp"));
+    build.file(cfg.manifest_dir.join("src/stack_layout_shim.cpp"));
     // Include official demo/metrics/debug windows for native builds so symbols like
     // ImGui::ShowDemoWindow/ShowAboutWindow/ShowStyleEditor resolve.
     // This is excluded from the WASM single‑module path below.
@@ -431,6 +438,133 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     }
 
     build.compile("dear_imgui");
+}
+
+// imgui-node-editor's stack layout extension is not a standalone widget layer:
+// it also patches Dear ImGui's ItemSize() and ItemAdd() internals so regular
+// widgets can participate in BeginHorizontal/BeginVertical/Spring measurement.
+// Keep the checked-out cimgui submodule untouched and patch only the OUT_DIR
+// copy of imgui.cpp, with marker checks that fail loudly when upstream changes.
+fn write_stack_layout_patched_imgui_cpp(cfg: &BuildConfig, imgui_cpp: &Path) -> PathBuf {
+    let source = std::fs::read_to_string(imgui_cpp)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", imgui_cpp.display()));
+    let item_size_marker = "void ImGui::ItemSize(const ImVec2& size, float text_baseline_y)";
+    let item_size_pos = source.find(item_size_marker).unwrap_or_else(|| {
+        panic!(
+            "failed to patch {}: ItemSize marker not found",
+            imgui_cpp.display()
+        )
+    });
+    let item_add_marker = "bool ImGui::ItemAdd(";
+    let item_add_pos = source.find(item_add_marker).unwrap_or_else(|| {
+        panic!(
+            "failed to patch {}: ItemAdd marker not found",
+            imgui_cpp.display()
+        )
+    });
+    let status_marker = "    g.LastItemData.StatusFlags = ImGuiItemStatusFlags_None;";
+    let status_pos = source.find(status_marker).unwrap_or_else(|| {
+        panic!(
+            "failed to patch {}: LastItemData status marker not found",
+            imgui_cpp.display()
+        )
+    });
+    assert!(
+        status_pos > item_add_pos,
+        "failed to patch {}: LastItemData marker appears before ItemAdd",
+        imgui_cpp.display()
+    );
+    let horizontal_if_marker = "    if (window->DC.LayoutType == ImGuiLayoutType_Horizontal)";
+    let horizontal_if_pos = source[item_size_pos..]
+        .find(horizontal_if_marker)
+        .map(|offset| item_size_pos + offset)
+        .unwrap_or_else(|| {
+            panic!(
+                "failed to patch {}: ItemSize horizontal-layout if marker not found",
+                imgui_cpp.display()
+            )
+        });
+    let same_line_marker = "        SameLine();";
+    let horizontal_end_pos = source[horizontal_if_pos..]
+        .find(same_line_marker)
+        .map(|offset| horizontal_if_pos + offset + same_line_marker.len())
+        .unwrap_or_else(|| {
+            panic!(
+                "failed to patch {}: ItemSize horizontal-layout SameLine marker not found",
+                imgui_cpp.display()
+            )
+        });
+    if source[item_size_pos..horizontal_if_pos].find('}').is_some() {
+        panic!(
+            "failed to patch {}: ItemSize horizontal-layout marker is outside ItemSize",
+            imgui_cpp.display()
+        )
+    }
+    let skip_items_if_marker = "    if (window->SkipItems)";
+    let skip_items_if_pos = source[item_size_pos..]
+        .find(skip_items_if_marker)
+        .map(|offset| item_size_pos + offset)
+        .unwrap_or_else(|| {
+            panic!(
+                "failed to patch {}: ItemSize SkipItems marker not found",
+                imgui_cpp.display()
+            )
+        });
+    let skip_items_return_marker = "        return;";
+    let item_size_early_insert_pos = source[skip_items_if_pos..]
+        .find(skip_items_return_marker)
+        .map(|offset| skip_items_if_pos + offset + skip_items_return_marker.len())
+        .unwrap_or_else(|| {
+            panic!(
+                "failed to patch {}: ItemSize SkipItems return marker not found",
+                imgui_cpp.display()
+            )
+        });
+    if source[item_size_pos..skip_items_if_pos].find('}').is_some() {
+        panic!(
+            "failed to patch {}: ItemSize SkipItems marker is outside ItemSize",
+            imgui_cpp.display()
+        )
+    }
+
+    let extern_pos = item_size_pos.min(item_add_pos);
+    let item_add_insert_pos = status_pos + status_marker.len();
+    let extern_declarations = include_str!("src/stack_layout_imgui_externs.cpp.inc");
+    let item_size_early_branch = include_str!("src/stack_layout_imgui_item_size.cpp.inc");
+    let item_size_replacement =
+        include_str!("src/stack_layout_imgui_item_size_horizontal_compat.cpp.inc");
+    let item_add_hook = include_str!("src/stack_layout_imgui_item_add.cpp.inc");
+
+    let mut edits = vec![
+        (extern_pos, extern_pos, extern_declarations),
+        (
+            item_size_early_insert_pos,
+            item_size_early_insert_pos,
+            item_size_early_branch,
+        ),
+        (horizontal_if_pos, horizontal_end_pos, item_size_replacement),
+        (item_add_insert_pos, item_add_insert_pos, item_add_hook),
+    ];
+    edits.sort_by_key(|(start, _, _)| *start);
+
+    let mut patched = String::with_capacity(source.len() + 1800);
+    let mut cursor = 0;
+    for (start, end, replacement) in edits {
+        assert!(
+            start >= cursor,
+            "failed to patch {}: generated edits overlap",
+            imgui_cpp.display()
+        );
+        patched.push_str(&source[cursor..start]);
+        patched.push_str(replacement);
+        cursor = end;
+    }
+    patched.push_str(&source[cursor..]);
+
+    let out = cfg.out_dir.join("imgui_stack_layout_patched.cpp");
+    std::fs::write(&out, patched)
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", out.display()));
+    out
 }
 
 fn build_platform_io_hooks(cfg: &BuildConfig) {
@@ -752,6 +886,13 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
     if !prebuilt_manifest_has_feature(dir, "wchar32") {
         return false;
     }
+    // Stack layout is part of the native dear-imgui ABI used by safe
+    // `begin_horizontal`/`begin_vertical`/`spring` wrappers. Reject older
+    // prebuilts that do not include the patched ItemAdd() hook and C ABI
+    // forwarding layer.
+    if !prebuilt_manifest_has_feature(dir, "stack-layout") {
+        return false;
+    }
     // If freetype feature is enabled, only accept prebuilt if manifest declares it
     if cfg!(feature = "freetype") && !prebuilt_manifest_has_feature(dir, "freetype") {
         return false;
@@ -955,84 +1096,6 @@ fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
 }
 
 // (removed duplicate prebuilt_extract_dir_env/extract_archive_to_cache; using build_support equivalents)
-
-fn build_with_cmake(manifest_dir: &Path) -> bool {
-    let cimgui_root = manifest_dir.join("third-party/cimgui");
-    if !cimgui_root.join("CMakeLists.txt").exists() {
-        return false;
-    }
-    println!("cargo:warning=Building cimgui with CMake");
-    let mut cfg = cmake::Config::new(&cimgui_root);
-    cfg.define("IMGUI_STATIC", "ON");
-    // Profile selection (RelWithDebInfo on MSVC when cargo debug)
-    let profile = env::var("PROFILE").unwrap_or_else(|_| "release".into());
-    let cmake_profile = if cfg!(target_env = "msvc") && profile == "debug" {
-        "RelWithDebInfo"
-    } else if profile == "debug" {
-        "Debug"
-    } else {
-        "Release"
-    };
-    cfg.profile(cmake_profile);
-    cfg.define("IMGUI_WCHAR32", "ON");
-    if cfg!(target_env = "msvc") {
-        let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-        let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
-        let msvc_runtime = if use_static_crt {
-            "MultiThreaded"
-        } else {
-            "MultiThreadedDLL"
-        };
-        cfg.define("CMAKE_MSVC_RUNTIME_LIBRARY", msvc_runtime);
-    }
-    let dst = cfg.build();
-    // Gather lib dirs
-    let mut lib_dirs = vec![
-        dst.join("lib"),
-        dst.join("build"),
-        dst.clone(),
-        dst.join("build").join("RelWithDebInfo"),
-        dst.join("build").join("Release"),
-        dst.join("build").join("Debug"),
-        dst.join("RelWithDebInfo"),
-        dst.join("Release"),
-        dst.join("Debug"),
-    ];
-    let mut found = false;
-    for lib_dir in lib_dirs.drain(..) {
-        if lib_dir.exists() {
-            println!("cargo:rustc-link-search=native={}", lib_dir.display());
-            found = true;
-            #[cfg(not(target_env = "msvc"))]
-            {
-                let bare = lib_dir.join("cimgui.a");
-                let with_prefix = lib_dir.join("libcimgui.a");
-                if bare.exists() && !with_prefix.exists() {
-                    let _ = std::fs::copy(&bare, &with_prefix);
-                }
-            }
-        }
-    }
-    if !found {
-        println!("cargo:warning=Could not locate CMake lib output dir; linking may fail");
-    }
-    if cfg!(target_env = "msvc") {
-        println!("cargo:rustc-link-lib=static=cimgui");
-    } else {
-        println!("cargo:rustc-link-lib=static=:cimgui.a");
-    }
-    println!(
-        "cargo:IMGUI_INCLUDE_PATH={}",
-        cimgui_root.join("imgui").display()
-    );
-    println!(
-        "cargo:IMGUI_BACKENDS_PATH={}",
-        cimgui_root.join("imgui").join("backends").display()
-    );
-    println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
-    println!("cargo:THIRD_PARTY={}", cimgui_root.join("imgui").display());
-    true
-}
 
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
     if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {

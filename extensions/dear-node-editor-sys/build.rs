@@ -43,6 +43,16 @@ impl BuildConfig {
     }
 }
 
+fn panic_wasm_unsupported() -> ! {
+    panic!(
+        "dear-node-editor-sys is native-only in this integration phase. \
+         wasm32 support needs a complete cimnodes_editor/imgui-node-editor integration for \
+         this workspace's import-style imgui-sys-v0 WASM provider: pregenerated wasm bindings, \
+         provider exports, Emscripten source wiring, and web demo/smoke coverage. \
+         Use dear-imnodes for the current wasm node-editor path."
+    );
+}
+
 fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     let imgui_src = env::var_os("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH")
         .or_else(|| env::var_os("DEP_DEAR_IMGUI_THIRD_PARTY"))
@@ -68,7 +78,7 @@ fn generate_bindings(
     cimgui_root: &Path,
 ) {
     if cfg.target_arch == "wasm32" {
-        panic!("dear-node-editor-sys: wasm32 is not supported in the first native-only release");
+        panic_wasm_unsupported();
     }
 
     let bindings = bindgen::Builder::default()
@@ -78,15 +88,11 @@ fn generate_bindings(
                 .to_string_lossy(),
         )
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .allowlist_recursively(false)
         .allowlist_function("dne_.*")
         .allowlist_type("Dne.*")
         .allowlist_var("DNE_.*")
-        .blocklist_type("ImVec2")
-        .blocklist_type("ImVec2_c")
-        .blocklist_type("ImVec4")
-        .blocklist_type("ImVec4_c")
-        .blocklist_type("ImGuiContext")
-        .blocklist_type("ImGuiMouseButton")
+        .blocklist_type("Im.*")
         .derive_default(true)
         .derive_debug(true)
         .derive_copy(true)
@@ -350,6 +356,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_USE_PREBUILT");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
 
     if cfg.docs_rs {
         println!(
@@ -389,7 +396,7 @@ fn main() {
     }
 
     if cfg.target_arch == "wasm32" {
-        panic!("dear-node-editor-sys: wasm32 is not supported in the first native-only release");
+        panic_wasm_unsupported();
     }
 
     let bindings_ready = use_pregenerated_bindings(&cfg.out_dir);

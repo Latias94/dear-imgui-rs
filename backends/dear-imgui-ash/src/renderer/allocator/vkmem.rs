@@ -22,7 +22,7 @@ impl Allocator {
         Self { allocator }
     }
 
-    fn get_allocator(&self) -> RendererResult<MutexGuard<VkMemAllocator>> {
+    fn get_allocator(&self) -> RendererResult<MutexGuard<'_, VkMemAllocator>> {
         self.allocator.lock().map_err(|e| {
             RendererError::Allocator(format!("Failed to acquire lock on allocator: {e}"))
         })

@@ -15,6 +15,8 @@ This crate provides unsafe Rust bindings to Dear ImGui v1.92.8 (docking branch) 
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for normal builds, docs.rs, and offline environments
 - **Optional backend shim ABI**: Shared low-level backend shim modules for downstream backend crates and engine integrations
+- **Stack layout compatibility shim**: Repository-owned C ABI for the `BeginHorizontal`,
+  `BeginVertical`, and `Spring` layout helpers used by imgui-node-editor blueprint examples
 
 ## Build Strategies
 
@@ -42,16 +44,12 @@ export IMGUI_SYS_USE_PREBUILT=1
 Compile Dear ImGui and cimgui from the vendored source code:
 
 ```bash
-# Windows (automatically uses CMake if available)
-cargo build -p dear-imgui-sys
-
-# Force CMake on other platforms
-export IMGUI_SYS_USE_CMAKE=1
-cargo build -p dear-imgui-sys
-
-# Use cc crate (default on non-Windows)
 cargo build -p dear-imgui-sys
 ```
+
+Source builds currently use the `cc` crate on every platform. `IMGUI_SYS_USE_CMAKE`
+is accepted for compatibility, but the build script warns and ignores it because
+the native stack-layout ABI patches the `imgui.cpp` build copy in `OUT_DIR`.
 
 Normal source builds use the checked-in pregenerated Rust bindings and do not require libclang.
 Bindgen is only needed when regenerating bindings.
@@ -133,10 +131,10 @@ This is a low-level sys crate providing unsafe FFI bindings. Most users should u
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.12.0"
+dear-imgui-sys = "0.13.0"
 
 # Enable features as needed
-dear-imgui-sys = { version = "0.12.0", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "0.13.0", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -169,7 +167,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.12.0", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.13.0", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose modules such as:
@@ -240,6 +238,30 @@ This remains useful for backend crates such as `dear-imgui-sdl3`, which still
 own SDL3-specific build logic even though `dear-imgui-sys` now provides shared
 shims for self-contained backends such as OpenGL3.
 
+## Stack Layout Compatibility Shim
+
+`dear-imgui-sys` also builds a small repository-owned stack layout shim that
+backs the safe `dear-imgui-rs` helpers named `begin_horizontal`,
+`begin_vertical`, and `spring`.
+
+Scope notes:
+
+- Dear ImGui itself does not ship `BeginHorizontal`, `BeginVertical`, or
+  `Spring` as official public APIs.
+- The shim is provided so Rust examples can follow the blueprint-style
+  `imgui-node-editor` examples without patching the Dear ImGui submodule.
+- Native source builds patch only the generated `OUT_DIR` copy of `imgui.cpp`
+  to add the `ItemSize()` / `ItemAdd()` hooks that the upstream stack layout
+  extension needs for regular ImGui widgets to be measured correctly.
+- The implementation is derived from the MIT-licensed stack layout extension
+  vendored by `imgui-node-editor`; see
+  [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+- The Rust-facing ABI uses `dear_imgui_stack_*` symbols and is owned by this
+  crate. Downstream code should prefer the safe `dear-imgui-rs` wrappers.
+- The shim is compiled for native source/prebuilt builds. It is intentionally
+  outside the current import-style WASM provider path because
+  `dear-node-editor` is native-only.
+
 ### Cargo Metadata for Backend Authors
 
 Backend and engine integration crates can consume these cargo metadata exports
@@ -268,8 +290,8 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-rs = "0.12.0"
-   dear-imgui-sys = { version = "0.12.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-rs = "0.13.0"
+   dear-imgui-sys = { version = "0.13.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use `dear-imgui-rs` for the safe core (`Context`, IO, frame lifecycle,
@@ -339,7 +361,7 @@ Control build behavior with these environment variables:
 | `IMGUI_SYS_LIB_DIR` | Path to directory containing prebuilt static library |
 | `IMGUI_SYS_PREBUILT_URL` | Local file path or direct URL to a prebuilt library/archive (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`) |
 | `IMGUI_SYS_USE_PREBUILT` | Enable automatic download from GitHub releases (`1`, requires feature `prebuilt`) |
-| `IMGUI_SYS_USE_CMAKE` | Force CMake build instead of cc crate (`1`) |
+| `IMGUI_SYS_USE_CMAKE` | Accepted for compatibility; currently warns and uses the cc source build because stack-layout patches the `imgui.cpp` build copy |
 | `IMGUI_SYS_SKIP_CC` | Skip C/C++ compilation, use pregenerated bindings only (`1`) |
 | `IMGUI_SYS_FORCE_BUILD` | Force build from source, ignore prebuilt options (`1`) |
 | `DEAR_IMGUI_RS_REGEN_BINDINGS` | Regenerate Rust bindings with bindgen (`1`; requires `--features bindgen` and libclang) |

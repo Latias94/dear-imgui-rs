@@ -325,6 +325,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUI_ENABLE_TEST_ENGINE");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUITEST");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-env-changed=IMGUI_TEST_ENGINE_SYS_SKIP_CC");
 
     if cfg.docs_rs {

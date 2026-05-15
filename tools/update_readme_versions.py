@@ -32,7 +32,10 @@ README_FILES = [
     "backends/dear-imgui-wgpu/README.md",
     "backends/dear-imgui-glow/README.md",
     "backends/dear-imgui-winit/README.md",
+    "backends/dear-imgui-sdl3/README.md",
+    "backends/dear-imgui-ash/README.md",
     "dear-app/README.md",
+    "dear-imgui-sys/README.md",
     "extensions/dear-implot/README.md",
     "extensions/dear-imnodes/README.md",
     "extensions/dear-node-editor/README.md",
@@ -116,6 +119,16 @@ def update_readme(
     # Extract major.minor for dependency versions
     old_minor = '.'.join(old_version.split('.')[:2])
     new_minor = '.'.join(new_version.split('.')[:2])
+
+    # Pattern 0: exact release-train patch versions used in README tables and examples.
+    new_content, count0 = re.subn(
+        re.escape(old_version),
+        new_version,
+        content
+    )
+    if count0 > 0:
+        changes.append(f"Updated {count0} exact version reference(s): {old_version} -> {new_version}")
+        content = new_content
     
     # Pattern 1: Compatibility table entries like "| Crate | 0.3.x |"
     pattern1 = re.compile(

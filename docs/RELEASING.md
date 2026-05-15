@@ -13,6 +13,7 @@ Supported crates:
 - `extensions/dear-imguizmo-sys` (third-party: cimguizmo)
 - `extensions/dear-implot3d-sys` (third-party: cimplot3d)
 - `extensions/dear-imguizmo-quat-sys` (third-party: cimguizmo_quat)
+- `extensions/dear-imgui-test-engine-sys` (third-party: imgui_test_engine; native only)
 
 ## Prerequisites
 - `git`, `cargo`, and `python3` (>= 3.7) in PATH.
@@ -27,6 +28,9 @@ Key flags:
 - `--crates`: comma-separated list or `all`.
 - `--profile`: `debug` or `release` (affects target build dir only).
 - `--submodules`: `update` (update all known submodules), `auto` (update only selected crates), `skip` (don’t touch submodules).
+- `--wasm`: also regenerate the core `dear-imgui-sys` WASM pregenerated bindings.
+- `--wasm-import`: import module for WASM bindings, currently `imgui-sys-v0`.
+- `--wasm-ext`: comma-separated WASM extension bindings (`implot,implot3d,imnodes,imguizmo,imguizmo-quat`).
 - Per-submodule branches:
   - `--cimgui-branch` (default `docking_inter`)
   - `--cimplot-branch` (default `master`)
@@ -55,6 +59,14 @@ python3 tools/update_submodule_and_bindings.py \
   --cimguizmo-branch master
 ```
 
+- All known -sys crates plus current WASM pregenerated bindings, without moving submodules:
+```
+python3 tools/update_submodule_and_bindings.py \
+  --crates all --submodules skip --profile release \
+  --wasm --wasm-import imgui-sys-v0 \
+  --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
+```
+
 - Regenerate pregenerated bindings only (no submodule changes):
 ```
 python3 tools/update_submodule_and_bindings.py \
@@ -70,7 +82,7 @@ What the script does
 - Copies `target/<profile>/build/<crate>-*/out/bindings.rs` into `<crate>/src/bindings_pregenerated.rs` (adds a comment header only).
 
 ## Pre-publish checks
-Verify the 4 `-sys` crates have pregenerated bindings and build in docs mode locally:
+Verify all `-sys` crates have pregenerated bindings and build in docs mode locally:
 
 Windows (PowerShell):
 ```
@@ -79,6 +91,9 @@ $env:DOCS_RS = '1'; cargo check -p dear-implot-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imnodes-sys
 $env:DOCS_RS = '1'; cargo check -p dear-node-editor-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-sys
+$env:DOCS_RS = '1'; cargo check -p dear-implot3d-sys
+$env:DOCS_RS = '1'; cargo check -p dear-imguizmo-quat-sys
+$env:DOCS_RS = '1'; cargo check -p dear-imgui-test-engine-sys
 ```
 
 Linux/macOS:
@@ -88,6 +103,9 @@ DOCS_RS=1 cargo check -p dear-implot-sys
 DOCS_RS=1 cargo check -p dear-imnodes-sys
 DOCS_RS=1 cargo check -p dear-node-editor-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-sys
+DOCS_RS=1 cargo check -p dear-implot3d-sys
+DOCS_RS=1 cargo check -p dear-imguizmo-quat-sys
+DOCS_RS=1 cargo check -p dear-imgui-test-engine-sys
 ```
 
 These checks generate/use bindings only and won’t build/link native code.

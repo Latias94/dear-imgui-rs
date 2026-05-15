@@ -272,6 +272,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_USE_CMAKE");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
 
     // docs.rs builds: prefer pregenerated bindings and skip native build logic
     if cfg.docs_rs {

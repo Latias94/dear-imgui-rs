@@ -17,10 +17,10 @@ use winit::{
 };
 
 struct ImguiState {
-    context: Context,
-    platform: WinitPlatform,
-    renderer: WgpuRenderer,
     node_editor: EditorContext,
+    renderer: WgpuRenderer,
+    platform: WinitPlatform,
+    context: Context,
     clear_color: wgpu::Color,
     last_frame: Instant,
 }
@@ -28,15 +28,23 @@ struct ImguiState {
 #[derive(Clone, Copy)]
 struct Link {
     id: LinkId,
-    start: PinId,
-    end: PinId,
+    input: PinId,
+    output: PinId,
 }
 
 struct GraphState {
     links: Vec<Link>,
     next_link_id: usize,
-    positions_initialized: bool,
+    first_frame: bool,
 }
+
+const NODE_A: NodeId = NodeId::new(1);
+const NODE_A_INPUT: PinId = PinId::new(2);
+const NODE_A_OUTPUT: PinId = PinId::new(3);
+const NODE_B: NodeId = NodeId::new(4);
+const NODE_B_INPUT_1: PinId = PinId::new(5);
+const NODE_B_INPUT_2: PinId = PinId::new(6);
+const NODE_B_OUTPUT: PinId = PinId::new(7);
 
 struct AppWindow {
     device: wgpu::Device,
@@ -118,10 +126,10 @@ impl AppWindow {
 
         let node_editor = EditorContext::create(&context);
         let imgui = ImguiState {
-            context,
-            platform,
-            renderer,
             node_editor,
+            renderer,
+            platform,
+            context,
             clear_color: wgpu::Color {
                 r: 0.08,
                 g: 0.09,
@@ -131,20 +139,9 @@ impl AppWindow {
             last_frame: Instant::now(),
         };
         let graph = GraphState {
-            links: vec![
-                Link {
-                    id: LinkId::new(100),
-                    start: PinId::new(11),
-                    end: PinId::new(21),
-                },
-                Link {
-                    id: LinkId::new(101),
-                    start: PinId::new(23),
-                    end: PinId::new(31),
-                },
-            ],
-            next_link_id: 102,
-            positions_initialized: false,
+            links: Vec::new(),
+            next_link_id: 100,
+            first_frame: true,
         };
 
         Ok(Self {
@@ -184,7 +181,7 @@ impl AppWindow {
             .size([920.0, 620.0], Condition::FirstUseEver)
             .position([40.0, 40.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("Drag from output pins to input pins to create links.");
+                ui.text("Basic Interaction");
                 ui.same_line();
                 if ui.button("Clear Links") {
                     self.graph.links.clear();
@@ -193,22 +190,19 @@ impl AppWindow {
 
                 let editor =
                     ui.node_editor(&self.imgui.node_editor, "node_editor_basic", [0.0, 470.0]);
-                if !self.graph.positions_initialized {
-                    editor.set_node_position(NodeId::new(1), [80.0, 90.0]);
-                    editor.set_node_position(NodeId::new(2), [360.0, 110.0]);
-                    editor.set_node_position(NodeId::new(3), [650.0, 160.0]);
-                    self.graph.positions_initialized = true;
+                if self.graph.first_frame {
+                    editor.set_node_position(NODE_A, [40.0, 80.0]);
+                    editor.set_node_position(NODE_B, [320.0, 120.0]);
                 }
 
-                draw_value_node(&editor, &ui);
-                draw_multiply_node(&editor, &ui);
-                draw_output_node(&editor, &ui);
+                draw_node_a(&editor, &ui);
+                draw_node_b(&editor, &ui);
 
                 for link in &self.graph.links {
                     editor.link_colored(
                         link.id,
-                        link.start,
-                        link.end,
+                        link.output,
+                        link.input,
                         [0.37, 0.72, 0.95, 1.0],
                         2.5,
                     );
@@ -216,18 +210,19 @@ impl AppWindow {
 
                 if let Some(create) = editor.begin_create([0.30, 0.85, 0.45, 1.0], 2.0) {
                     if let Some((a, b)) = create.query_new_link() {
-                        if let Some((start, end)) = normalize_link(a, b) {
-                            if !self
+                        if let Some((output, input)) = normalize_link(a, b) {
+                            let already_exists = self
                                 .graph
                                 .links
                                 .iter()
-                                .any(|link| link.start == start && link.end == end)
-                                && create.accept_new_item()
-                            {
+                                .any(|link| link.output == output && link.input == input);
+                            if already_exists {
+                                create.reject_new_item();
+                            } else if create.accept_new_item() {
                                 self.graph.links.push(Link {
                                     id: LinkId::new(self.graph.next_link_id),
-                                    start,
-                                    end,
+                                    input,
+                                    output,
                                 });
                                 self.graph.next_link_id += 1;
                             }
@@ -250,6 +245,10 @@ impl AppWindow {
 
                 let selected_nodes = editor.selected_nodes().len();
                 let selected_links = editor.selected_links().len();
+                if self.graph.first_frame {
+                    editor.navigate_to_content(0.0);
+                    self.graph.first_frame = false;
+                }
                 editor.end();
 
                 ui.separator();
@@ -375,47 +374,40 @@ impl ApplicationHandler for App {
     }
 }
 
-fn draw_value_node(editor: &NodeEditorFrame<'_>, ui: &Ui) {
-    let node = editor.begin_node(NodeId::new(1));
-    ui.text("Value");
-    {
-        let pin = node.begin_pin(PinId::new(11), PinKind::Output);
-        ui.text("float");
-        pin.end();
-    }
-    node.end();
+fn draw_node_a(editor: &NodeEditorFrame<'_>, ui: &Ui) {
+    editor.node(NODE_A, |node| {
+        ui.text("Node A");
+        node.pin(NODE_A_INPUT, PinKind::Input, |_pin| {
+            ui.text("-> In");
+        });
+        ui.same_line();
+        node.pin(NODE_A_OUTPUT, PinKind::Output, |_pin| {
+            ui.text("Out ->");
+        });
+    });
 }
 
-fn draw_multiply_node(editor: &NodeEditorFrame<'_>, ui: &Ui) {
-    let node = editor.begin_node(NodeId::new(2));
-    ui.text("Multiply");
-    {
-        let pin = node.begin_pin(PinId::new(21), PinKind::Input);
-        ui.text("a");
-        pin.end();
-    }
-    {
-        let pin = node.begin_pin(PinId::new(22), PinKind::Input);
-        ui.text("b");
-        pin.end();
-    }
-    {
-        let pin = node.begin_pin(PinId::new(23), PinKind::Output);
-        ui.text("result");
-        pin.end();
-    }
-    node.end();
-}
+fn draw_node_b(editor: &NodeEditorFrame<'_>, ui: &Ui) {
+    editor.node(NODE_B, |node| {
+        ui.text("Node B");
 
-fn draw_output_node(editor: &NodeEditorFrame<'_>, ui: &Ui) {
-    let node = editor.begin_node(NodeId::new(3));
-    ui.text("Output");
-    {
-        let pin = node.begin_pin(PinId::new(31), PinKind::Input);
-        ui.text("color");
-        pin.end();
-    }
-    node.end();
+        let inputs = ui.begin_group();
+        node.pin(NODE_B_INPUT_1, PinKind::Input, |_pin| {
+            ui.text("-> In1");
+        });
+        node.pin(NODE_B_INPUT_2, PinKind::Input, |_pin| {
+            ui.text("-> In2");
+        });
+        inputs.end();
+
+        ui.same_line();
+
+        let outputs = ui.begin_group();
+        node.pin(NODE_B_OUTPUT, PinKind::Output, |_pin| {
+            ui.text("Out ->");
+        });
+        outputs.end();
+    });
 }
 
 fn normalize_link(a: PinId, b: PinId) -> Option<(PinId, PinId)> {
@@ -432,11 +424,11 @@ fn normalize_link(a: PinId, b: PinId) -> Option<(PinId, PinId)> {
 }
 
 fn is_input_pin(pin: PinId) -> bool {
-    matches!(pin.raw(), 21 | 22 | 31)
+    matches!(pin, NODE_A_INPUT | NODE_B_INPUT_1 | NODE_B_INPUT_2)
 }
 
 fn is_output_pin(pin: PinId) -> bool {
-    matches!(pin.raw(), 11 | 23)
+    matches!(pin, NODE_A_OUTPUT | NODE_B_OUTPUT)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

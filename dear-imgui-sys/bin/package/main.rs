@@ -101,11 +101,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //
     // We always compile with `IMGUI_USE_WCHAR32`, so this is always declared to allow the sys
     // build script to reject ABI-incompatible prebuilts.
+    // Stack layout is also always compiled into native prebuilts because the safe Rust API
+    // exposes the imgui-node-editor-compatible BeginHorizontal/BeginVertical/Spring helpers.
     //
     // Prefer explicit env override, otherwise infer from cargo feature env.
     let mut features = env::var("IMGUI_SYS_PKG_FEATURES").unwrap_or_default();
     let mut v: Vec<&'static str> = Vec::new();
     v.push("wchar32");
+    v.push("stack-layout");
     if features.is_empty() {
         if env::var("CARGO_FEATURE_FREETYPE").is_ok() {
             v.push("freetype");
@@ -122,6 +125,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect();
         if !user.iter().any(|s| s == "wchar32") {
             user.push("wchar32".to_string());
+        }
+        if !user.iter().any(|s| s == "stack-layout") {
+            user.push("stack-layout".to_string());
         }
         features = user.join(",");
     }
@@ -222,6 +228,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut tar,
         &cimgui_root.join("LICENSE"),
         "licenses/cimgui-LICENSE",
+    )?;
+    append_license_if_exists(
+        &mut tar,
+        &manifest_dir.join("THIRD_PARTY_NOTICES.md"),
+        "licenses/dear-imgui-sys-THIRD_PARTY_NOTICES.md",
     )?;
 
     // Include library

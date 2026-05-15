@@ -335,6 +335,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_USE_CMAKE");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimplot_root = cfg.manifest_dir.join("third-party/cimplot");

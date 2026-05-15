@@ -27,7 +27,8 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 
 
-# All published crates in the workspace (excluding examples and internal tools like xtask)
+# Published crates plus workspace example manifests whose path dependency
+# version constraints must follow the release train.
 WORKSPACE_CRATES = [
     "tools/build-support",
     "dear-imgui-sys",
@@ -55,6 +56,8 @@ WORKSPACE_CRATES = [
     "extensions/dear-file-browser",
     "extensions/dear-imgui-reflect-derive",
     "extensions/dear-imgui-reflect",
+    "examples",
+    "examples-wasm",
 ]
 
 
@@ -140,7 +143,7 @@ def update_cargo_toml(
     new_minor = '.'.join(new_version.split('.')[:2])
     
     pattern2 = re.compile(
-        r'(dear-[a-z0-9-]+\s*=\s*\{[^}]*version\s*=\s*["\'])' + 
+        r'((?:dear-[a-z0-9-]+|build-support)\s*=\s*\{[^}]*version\s*=\s*["\'])' +
         re.escape(old_minor) + 
         r'(["\'][^}]*\})',
         re.MULTILINE

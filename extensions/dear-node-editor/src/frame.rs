@@ -1,6 +1,6 @@
 use crate::{
-    EditorContext, FlowDirection, LinkId, NodeId, PinId, PinKind, StyleColor, StyleVar,
-    context::CurrentEditorGuard, from_vec2, sys, vec2, vec4,
+    EditorContext, FlowDirection, LinkId, NodeEditorStyle, NodeId, PinId, PinKind, StyleColor,
+    StyleVar, StyleVarType, context::CurrentEditorGuard, from_vec2, sys, vec2, vec4,
 };
 use dear_imgui_rs::{DrawListMut, MouseButton, Ui};
 use std::{cell::Cell, ffi::CString, marker::PhantomData};
@@ -53,12 +53,11 @@ impl<'ui> NodeEditorFrame<'ui> {
         }
     }
 
-    pub fn begin_pin<'a>(&'a self, pin: PinId, kind: PinKind) -> PinToken<'a> {
-        unsafe { sys::dne_begin_pin(pin.raw(), kind.raw()) };
-        PinToken {
-            ended: false,
-            _scope: PhantomData,
-        }
+    pub fn node<R>(&self, node: NodeId, f: impl FnOnce(&NodeToken<'_>) -> R) -> R {
+        let token = self.begin_node(node);
+        let result = f(&token);
+        token.end();
+        result
     }
 
     pub fn begin_group_hint<'a>(&'a self, node: NodeId) -> Option<GroupHintToken<'a>> {
@@ -72,6 +71,11 @@ impl<'ui> NodeEditorFrame<'ui> {
     pub fn node_background_draw_list(&self, node: NodeId) -> DrawListMut<'_> {
         let draw_list = unsafe { sys::dne_get_node_background_draw_list(node.raw()) };
         unsafe { DrawListMut::from_raw_mut(self._ui, draw_list.cast()) }
+    }
+
+    #[doc(alias = "GetStyle")]
+    pub fn style(&self) -> NodeEditorStyle {
+        self._editor.style()
     }
 
     pub fn group(&self, size: [f32; 2]) {
@@ -155,6 +159,11 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn push_style_var_float<'a>(&'a self, var: StyleVar, value: f32) -> StyleVarToken<'a> {
+        assert_style_var_type(
+            "NodeEditorFrame::push_style_var_float()",
+            var,
+            StyleVarType::Float,
+        );
         assert_finite_f32("NodeEditorFrame::push_style_var_float()", "value", value);
         unsafe { sys::dne_push_style_var_float(var.raw(), value) };
         StyleVarToken {
@@ -165,6 +174,11 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn push_style_var_vec2<'a>(&'a self, var: StyleVar, value: [f32; 2]) -> StyleVarToken<'a> {
+        assert_style_var_type(
+            "NodeEditorFrame::push_style_var_vec2()",
+            var,
+            StyleVarType::Vec2,
+        );
         assert_finite_vec2("NodeEditorFrame::push_style_var_vec2()", "value", value);
         unsafe { sys::dne_push_style_var_vec2(var.raw(), vec2(value)) };
         StyleVarToken {
@@ -175,6 +189,11 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn push_style_var_vec4<'a>(&'a self, var: StyleVar, value: [f32; 4]) -> StyleVarToken<'a> {
+        assert_style_var_type(
+            "NodeEditorFrame::push_style_var_vec4()",
+            var,
+            StyleVarType::Vec4,
+        );
         assert_finite_vec4("NodeEditorFrame::push_style_var_vec4()", "value", value);
         unsafe { sys::dne_push_style_var_vec4(var.raw(), vec4(value)) };
         StyleVarToken {
@@ -256,15 +275,19 @@ impl<'ui> NodeEditorFrame<'ui> {
         unsafe { sys::dne_has_selection_changed() }
     }
 
+    pub fn selected_object_count(&self) -> usize {
+        unsafe { sys::dne_get_selected_object_count() }.max(0) as usize
+    }
+
     pub fn selected_nodes(&self) -> Vec<NodeId> {
-        let count = unsafe { sys::dne_get_selected_object_count() }.max(0) as usize;
+        let count = self.selected_object_count();
         collect_node_ids(count, |ptr, len| unsafe {
             sys::dne_get_selected_nodes(ptr, len)
         })
     }
 
     pub fn selected_links(&self) -> Vec<LinkId> {
-        let count = unsafe { sys::dne_get_selected_object_count() }.max(0) as usize;
+        let count = self.selected_object_count();
         collect_link_ids(count, |ptr, len| unsafe {
             sys::dne_get_selected_links(ptr, len)
         })
@@ -461,6 +484,13 @@ impl NodeToken<'_> {
             ended: false,
             _scope: PhantomData,
         }
+    }
+
+    pub fn pin<R>(&self, pin: PinId, kind: PinKind, f: impl FnOnce(&PinToken<'_>) -> R) -> R {
+        let token = self.begin_pin(pin, kind);
+        let result = f(&token);
+        token.end();
+        result
     }
 
     pub fn end(mut self) {
@@ -761,15 +791,19 @@ impl ShortcutSession<'_> {
         unsafe { sys::dne_accept_create_node() }
     }
 
+    pub fn action_context_size(&self) -> usize {
+        unsafe { sys::dne_get_action_context_size() }.max(0) as usize
+    }
+
     pub fn action_context_nodes(&self) -> Vec<NodeId> {
-        let count = unsafe { sys::dne_get_action_context_size() }.max(0) as usize;
+        let count = self.action_context_size();
         collect_node_ids(count, |ptr, len| unsafe {
             sys::dne_get_action_context_nodes(ptr, len)
         })
     }
 
     pub fn action_context_links(&self) -> Vec<LinkId> {
-        let count = unsafe { sys::dne_get_action_context_size() }.max(0) as usize;
+        let count = self.action_context_size();
         collect_link_ids(count, |ptr, len| unsafe {
             sys::dne_get_action_context_links(ptr, len)
         })
@@ -878,6 +912,14 @@ fn mouse_button_from_index(index: sys::ImGuiMouseButton) -> Option<MouseButton> 
     }
 }
 
+fn assert_style_var_type(caller: &str, var: StyleVar, expected: StyleVarType) {
+    let actual = var.value_type();
+    assert_eq!(
+        actual, expected,
+        "{caller} expected {expected:?} style variable, got {actual:?} for {var:?}"
+    );
+}
+
 fn assert_finite_f32(caller: &str, name: &str, value: f32) {
     assert!(value.is_finite(), "{caller} {name} must be finite");
 }
@@ -931,5 +973,11 @@ mod tests {
         assert_eq!(mouse_button_from_index(4), Some(MouseButton::Extra2));
         assert_eq!(mouse_button_from_index(-1), None);
         assert_eq!(mouse_button_from_index(99), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "expected Float style variable")]
+    fn style_var_push_rejects_wrong_value_type() {
+        assert_style_var_type("test", StyleVar::NodePadding, StyleVarType::Float);
     }
 }

@@ -10,7 +10,9 @@ mod vulkan;
 
 use crate::TextureUpdateResult;
 use crate::{RendererError, RendererResult};
-use ash::{Device, Instance, vk};
+#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+use ash::Instance;
+use ash::{Device, vk};
 use dear_imgui_rs::{BackendFlags, Context};
 use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
 use std::collections::{HashMap, VecDeque};
@@ -290,7 +292,10 @@ impl AshRenderer {
         imgui: &mut Context,
         options: Option<Options>,
     ) -> RendererResult<Self> {
+        #[cfg(all(feature = "gpu-allocator", not(feature = "vk-mem")))]
         let allocator = Allocator::new(allocator);
+        #[cfg(all(feature = "gpu-allocator", feature = "vk-mem"))]
+        let allocator = Allocator::new_gpu(allocator);
         Self::init_renderer(
             device,
             allocator,
@@ -317,7 +322,10 @@ impl AshRenderer {
         imgui: &mut Context,
         options: Option<Options>,
     ) -> RendererResult<Self> {
+        #[cfg(all(feature = "vk-mem", not(feature = "gpu-allocator")))]
         let allocator = Allocator::new(allocator);
+        #[cfg(all(feature = "vk-mem", feature = "gpu-allocator"))]
+        let allocator = Allocator::new_vk_mem(allocator);
         Self::init_renderer(
             device,
             allocator,
@@ -918,6 +926,7 @@ impl AshRenderer {
         )
     }
 
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     fn cmd_draw_with_mesh(
         &mut self,
         command_buffer: vk::CommandBuffer,
@@ -1000,7 +1009,7 @@ impl AshRenderer {
             texture: Texture,
             descriptor_set: vk::DescriptorSet,
             staging_buffer: vk::Buffer,
-            staging_mem: Memory,
+            staging_mem: Option<Memory>,
             w: u32,
             h: u32,
         }
@@ -1008,7 +1017,7 @@ impl AshRenderer {
         struct PendingUpdate {
             image: vk::Image,
             staging_buffer: vk::Buffer,
-            staging_mem: Memory,
+            staging_mem: Option<Memory>,
             x: u32,
             y: u32,
             w: u32,
@@ -1062,7 +1071,7 @@ impl AshRenderer {
                     texture,
                     descriptor_set,
                     staging_buffer,
-                    staging_mem,
+                    staging_mem: Some(staging_mem),
                     w,
                     h,
                 });
@@ -1109,7 +1118,7 @@ impl AshRenderer {
                     updates.push(PendingUpdate {
                         image: existing.image,
                         staging_buffer,
-                        staging_mem,
+                        staging_mem: Some(staging_mem),
                         x,
                         y,
                         w,
@@ -1154,11 +1163,19 @@ impl AshRenderer {
 
             let mut staging: Vec<(vk::Buffer, Memory)> =
                 Vec::with_capacity(creates.len() + updates.len());
-            for c in &creates {
-                staging.push((c.staging_buffer, c.staging_mem));
+            for c in &mut creates {
+                let staging_mem = c
+                    .staging_mem
+                    .take()
+                    .expect("pending create staging memory must be consumed exactly once");
+                staging.push((c.staging_buffer, staging_mem));
             }
-            for u in &updates {
-                staging.push((u.staging_buffer, u.staging_mem));
+            for u in &mut updates {
+                let staging_mem = u
+                    .staging_mem
+                    .take()
+                    .expect("pending update staging memory must be consumed exactly once");
+                staging.push((u.staging_buffer, staging_mem));
             }
 
             self.in_flight_uploads.push_back(InFlightUpload {

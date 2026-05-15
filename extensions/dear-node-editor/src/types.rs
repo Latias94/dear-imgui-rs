@@ -212,7 +212,46 @@ pub enum StyleVar {
     SelectedNodeBorderOffset,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleVarType {
+    Float,
+    Vec2,
+    Vec4,
+}
+
 impl StyleVar {
+    pub const fn value_type(self) -> StyleVarType {
+        match self {
+            Self::NodePadding => StyleVarType::Vec4,
+            Self::SourceDirection
+            | Self::TargetDirection
+            | Self::PivotAlignment
+            | Self::PivotSize
+            | Self::PivotScale => StyleVarType::Vec2,
+            Self::NodeRounding
+            | Self::NodeBorderWidth
+            | Self::HoveredNodeBorderWidth
+            | Self::SelectedNodeBorderWidth
+            | Self::PinRounding
+            | Self::PinBorderWidth
+            | Self::LinkStrength
+            | Self::ScrollDuration
+            | Self::FlowMarkerDistance
+            | Self::FlowSpeed
+            | Self::FlowDuration
+            | Self::PinCorners
+            | Self::PinRadius
+            | Self::PinArrowSize
+            | Self::PinArrowWidth
+            | Self::GroupRounding
+            | Self::GroupBorderWidth
+            | Self::HighlightConnectedLinks
+            | Self::SnapLinkToPinDir
+            | Self::HoveredNodeBorderOffset
+            | Self::SelectedNodeBorderOffset => StyleVarType::Float,
+        }
+    }
+
     pub(crate) fn raw(self) -> sys::DneStyleVar {
         match self {
             Self::NodePadding => sys::DNE_STYLE_VAR_NODE_PADDING,
@@ -267,5 +306,20 @@ mod tests {
     fn style_color_names_are_available() {
         assert_ne!(StyleColor::Background.name(), "Unknown");
         assert!(!StyleColor::Background.name().is_empty());
+    }
+
+    #[test]
+    fn style_var_types_match_upstream_overloads() {
+        assert_eq!(StyleVar::NodePadding.value_type(), StyleVarType::Vec4);
+        assert_eq!(StyleVar::SourceDirection.value_type(), StyleVarType::Vec2);
+        assert_eq!(StyleVar::TargetDirection.value_type(), StyleVarType::Vec2);
+        assert_eq!(StyleVar::PivotAlignment.value_type(), StyleVarType::Vec2);
+        assert_eq!(StyleVar::PivotSize.value_type(), StyleVarType::Vec2);
+        assert_eq!(StyleVar::PivotScale.value_type(), StyleVarType::Vec2);
+        assert_eq!(StyleVar::LinkStrength.value_type(), StyleVarType::Float);
+        assert_eq!(
+            StyleVar::HoveredNodeBorderOffset.value_type(),
+            StyleVarType::Float
+        );
     }
 }

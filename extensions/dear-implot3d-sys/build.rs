@@ -510,6 +510,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimplot3d_root = cfg.manifest_dir.join("third-party/cimplot3d");

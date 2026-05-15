@@ -50,6 +50,24 @@ impl CallbackState {
     }
 }
 
+/// Immutable view of the configuration used to create an editor context.
+///
+/// Callback function pointers and native storage pointers are intentionally not
+/// exposed. The snapshot only reports whether a settings handler was installed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditorConfigSnapshot {
+    pub settings_file: Option<String>,
+    pub has_settings_handler: bool,
+    pub custom_zoom_levels: Vec<f32>,
+    pub canvas_size_mode: CanvasSizeMode,
+    pub drag_button: MouseButton,
+    pub select_button: MouseButton,
+    pub navigate_button: MouseButton,
+    pub context_menu_button: MouseButton,
+    pub enable_smooth_zoom: bool,
+    pub smooth_zoom_power: f32,
+}
+
 /// Configuration used when creating an editor context.
 pub struct EditorConfig {
     pub(crate) settings_file: Option<CString>,
@@ -172,6 +190,24 @@ impl EditorConfig {
         self.enable_smooth_zoom = enabled;
         self.smooth_zoom_power = power;
         self
+    }
+
+    pub fn snapshot(&self) -> EditorConfigSnapshot {
+        EditorConfigSnapshot {
+            settings_file: self
+                .settings_file
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            has_settings_handler: self.callbacks.is_some(),
+            custom_zoom_levels: self.custom_zoom_levels.clone(),
+            canvas_size_mode: self.canvas_size_mode,
+            drag_button: self.drag_button,
+            select_button: self.select_button,
+            navigate_button: self.navigate_button,
+            context_menu_button: self.context_menu_button,
+            enable_smooth_zoom: self.enable_smooth_zoom,
+            smooth_zoom_power: self.smooth_zoom_power,
+        }
     }
 
     pub(crate) fn to_sys(&mut self) -> sys::DneConfig {

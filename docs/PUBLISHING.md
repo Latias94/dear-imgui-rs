@@ -4,7 +4,7 @@ This guide explains how to publish new versions of the dear-imgui-rs workspace c
 
 ## Overview
 
-The workspace uses a **unified release train** model where all published crates share the same version number (e.g., 0.12.0). This simplifies dependency management and ensures compatibility across the ecosystem.
+The workspace uses a **unified release train** model where all published crates share the same version number (e.g., 0.13.0). This simplifies dependency management and ensures compatibility across the ecosystem.
 
 ## Prerequisites
 
@@ -44,13 +44,13 @@ Before publishing, ensure:
   - [ ] `docs/COMPATIBILITY.md` with new release train info
   - [ ] Individual crate READMEs if needed
 
-- [ ] Pregenerated bindings are up-to-date for `-sys` crates
+- [ ] Pregenerated native and WASM bindings are up-to-date for `-sys` crates
   ```bash
   # Windows PowerShell
-  python tools/update_submodule_and_bindings.py --crates all --profile release
+  python tools/update_submodule_and_bindings.py --crates all --profile release --submodules skip --wasm --wasm-import imgui-sys-v0 --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
 
   # Linux/macOS
-  python3 tools/update_submodule_and_bindings.py --crates all --profile release
+  python3 tools/update_submodule_and_bindings.py --crates all --profile release --submodules skip --wasm --wasm-import imgui-sys-v0 --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
   ```
 
 - [ ] Verify `-sys` crates build in docs.rs offline mode
@@ -63,6 +63,7 @@ Before publishing, ensure:
   $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-sys
   $env:DOCS_RS = '1'; cargo check -p dear-implot3d-sys
   $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-quat-sys
+  $env:DOCS_RS = '1'; cargo check -p dear-imgui-test-engine-sys
   
   # Linux/macOS
   DOCS_RS=1 cargo check -p dear-imgui-sys
@@ -72,6 +73,7 @@ Before publishing, ensure:
   DOCS_RS=1 cargo check -p dear-imguizmo-sys
   DOCS_RS=1 cargo check -p dear-implot3d-sys
   DOCS_RS=1 cargo check -p dear-imguizmo-quat-sys
+  DOCS_RS=1 cargo check -p dear-imgui-test-engine-sys
   ```
 
 - [ ] CI is green on all platforms

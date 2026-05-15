@@ -5,96 +5,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] - 2026-05-15
+
+This release upgrades the Dear ImGui stack, removes the normal-build dependency
+on LLVM/libclang, adds native `imgui-node-editor` bindings, and continues the
+safe API hardening work started in the previous releases. The detailed
+`v0.12.0..HEAD` history is grouped below by user-visible effect rather than by
+individual validation commit.
+
+### Highlights
+
+- Upgrade the core stack to Dear ImGui v1.92.8 (docking) and refresh the
+  extension sys crates against the same baseline.
+- Normal source builds now use checked-in pregenerated bindings by default.
+  LLVM/libclang is only needed when explicitly regenerating bindings with
+  `DEAR_IMGUI_RS_REGEN_BINDINGS=1 --features bindgen`.
+- Add native-only `dear-node-editor` / `dear-node-editor-sys` support backed by
+  `cimnodes_editor` / `imgui-node-editor`, including examples modeled after the
+  upstream basic-interaction and blueprints-style demos.
+- Add the stack layout compatibility path required by node-editor blueprints and
+  expose safe `begin_horizontal`, `begin_vertical`, and `spring` helpers.
+- Harden the safe API across texture ownership, input text buffers, draw-list
+  cloning, table/docking/widget preconditions, callback lifetimes, and
+  multi-context ownership.
+- Fix multi-context and multi-viewport backend paths so Winit/WGPU/Glow/Ash
+  state, callbacks, and teardown target the intended ImGui context.
 
 ### Breaking Changes
 
 - Core (`dear-imgui-rs`)
-  - Change user texture registration to track `OwnedTextureData` lifetimes from the safe API.
-    Raw `TextureData` registration is now available through explicit `unsafe` raw helpers.
-  - Require `&'static FontLoader` for font atlas/config loader setters so Dear ImGui never
-    stores a dangling loader pointer.
-  - Change `FontConfig::glyph_exclude_ranges(...)` to accept inclusive `(start, end)` ranges
-    matching Dear ImGui's upstream `GlyphExcludeRanges` contract.
-  - Remove infallible `TextureId` conversions into `usize` and raw pointers. Use
-    `try_as_usize()`, `try_as_ptr()`, or `try_as_mut_ptr()` when converting back from
-    Dear ImGui's 64-bit texture id representation.
-  - Remove the duplicate read-only draw-list snapshot types from `draw`; use the unified
-    `render` draw data types instead.
-  - Remove `WindowFlags::DOCK_NODE_HOST`; Dear ImGui marks it as an internal
-    `Begin`/`NewFrame` flag, so safe code should not pass it to window builders.
-  - Bind `TextCallbackData` to the input-text callback frame lifetime so safe callback
-    handlers cannot retain it after Dear ImGui returns.
-  - Change `PlatformIo::set_platform_get_window_pos{,_raw}` and
-    `set_platform_get_window_size{,_raw}` callbacks to write `ImVec2` through out-parameters
-    instead of returning it by value, matching the internal ABI-safe shim.
-  - Require typed and out-parameter-shim `PlatformIo` callback setters to be called on the
-    active context's `PlatformIo`; cross-context installation now panics instead of silently
-    splitting the C callback table and Rust callback storage across different contexts.
-  - Change `Viewport::flags()` and `Viewport::set_flags(...)` to use typed `ViewportFlags`
-    instead of raw `ImGuiViewportFlags`. Use `raw_flags()` or the unsafe
-    `set_raw_flags_unchecked(...)` escape hatch when backend code must manipulate raw bits.
-  - Extend `WindowClass` with typed viewport, tab item, and dock node override fields. Code
-    constructing `WindowClass` with struct literals should include the new fields or use
+  - User texture registration now tracks `OwnedTextureData` lifetimes from the
+    safe API. Raw `TextureData` registration moved to explicit `unsafe` raw
+    helpers.
+  - Font atlas/config loader setters require `&'static FontLoader`, and
+    `FontConfig::glyph_exclude_ranges(...)` now accepts inclusive `(start, end)`
+    ranges matching Dear ImGui's upstream contract.
+  - Infallible `TextureId` conversions into `usize` or raw pointers were
+    removed. Use `try_as_usize()`, `try_as_ptr()`, or `try_as_mut_ptr()`.
+  - The duplicate read-only draw-list snapshot types in `draw` were removed;
+    use the unified `render` draw-data types instead.
+  - `WindowFlags::DOCK_NODE_HOST` was removed because Dear ImGui treats it as an
+    internal `Begin`/`NewFrame` flag.
+  - `TextCallbackData` is now bound to the input-text callback frame lifetime so
+    callback handlers cannot retain it after Dear ImGui returns.
+  - `PlatformIo` aggregate-return callbacks now use out-parameters, and typed
+    callback setters must be installed on the active context's `PlatformIo`.
+    Cross-context installation panics instead of splitting the C callback table
+    from Rust callback storage.
+  - `Viewport::flags()` / `set_flags(...)` now use typed `ViewportFlags`.
+    Backend code that must manipulate raw bits should use `raw_flags()` or
+    `unsafe set_raw_flags_unchecked(...)`.
+  - `WindowClass` now carries typed viewport, tab item, dock node, and platform
+    icon fields. Struct literals should add the new fields or switch to
     `WindowClass::new` / `Default`.
-  - Add `WindowClass::platform_icon_data` and make `set_item_key_owner{,_with_flags}` return
-    Dear ImGui's ownership-request result, matching Dear ImGui v1.92.8.
-  - Add `DrawCmd::SetSamplerLinear` and `DrawCmd::SetSamplerNearest` for Dear ImGui's standard
-    sampler draw callbacks. Exhaustive draw-command matches should handle the new variants.
+  - `set_item_key_owner{,_with_flags}` now returns Dear ImGui's ownership-request
+    result, matching Dear ImGui v1.92.8.
+  - `DrawCmd` gained `SetSamplerLinear` and `SetSamplerNearest`; exhaustive
+    draw-command matches must handle the new variants.
 - Core (`dear-imgui-sys`)
   - Stop exposing cimgui's `ImGuiPlatformIO_Set_Platform_GetWindowPos` and
-    `ImGuiPlatformIO_Set_Platform_GetWindowSize` helpers from generated bindings. Use the
-    repository-owned `*_OutParam` wrappers instead; they do not consume
+    `ImGuiPlatformIO_Set_Platform_GetWindowSize` helpers from generated bindings.
+    Use the repository-owned `*_OutParam` wrappers instead; they do not consume
     `BackendLanguageUserData`.
 - Backends
-  - Change `dear-imgui-winit::multi_viewport::shutdown_multi_viewport_support` to take
-    `&mut Context`, matching the renderer backends and making shutdown target an explicit
-    ImGui context.
+  - Change `dear-imgui-winit::multi_viewport::shutdown_multi_viewport_support`
+    to take `&mut Context`, matching the renderer backends and making shutdown
+    target an explicit ImGui context.
 - Extensions
-  - Change `dear-implot::PlotContext::current()` to an explicit `unsafe` non-owning wrapper.
-    Code that owns an ImPlot context should use `PlotContext::create(...)`; callers that borrow
-    a raw current context must now acknowledge the raw lifetime and ownership contract.
-  - Change `dear-implot` APIs that accept arbitrary ImPlot axes to use typed `Axis` / `YAxis`
-    values instead of raw `i32` indices. Raw-axis calls remain available through explicit
-    `unsafe *_unchecked` escape hatches.
+  - Change `dear-implot::PlotContext::current()` to an explicit `unsafe`
+    non-owning wrapper. Code that owns an ImPlot context should use
+    `PlotContext::create(...)`; callers that borrow a raw current context must
+    acknowledge the raw lifetime and ownership contract.
+  - Change `dear-implot` APIs that accept arbitrary ImPlot axes to use typed
+    `Axis` / `YAxis` values instead of raw `i32` indices. Raw-axis calls remain
+    available through explicit `unsafe *_unchecked` escape hatches.
 
 ### Added
 
 - Extensions
-  - Add experimental native-only `dear-node-editor` and `dear-node-editor-sys` crates backed by
-    `cimnodes_editor` / `imgui-node-editor`, with a local `dne_*` C ABI shim that exposes
-    `NodeId`, `PinId`, and `LinkId` as `uintptr_t` instead of upstream C++ helper-pointer APIs.
-  - Add `node_editor_basic`, a Winit + WGPU example covering editor context creation, node/pin
-    scopes, links, create/delete sessions, and selection queries.
-  - Add `node_editor_showcase`, a broader Winit + WGPU example covering typed editor
-    configuration, style snapshots, draw-list helpers, group hints, selection mutation, z/order
-    queries, shortcut sessions, link/pin queries, and RAII editor suspension.
-  - Expand `dear-node-editor` safe APIs to cover pin geometry helpers, group hints, node background
-    draw lists, selection mutation, node ordering and z-state, link/pin queries, background click
-    state, shortcut toggles, styled create/reject queries, and RAII-scoped editor suspension.
-  - Add `dear-node-editor` style snapshots, style color helpers, typed mouse-button editor
-    configuration, and custom zoom level configuration.
-  - Keep `dear-node-editor-sys` on the same no-LLVM normal-build path as the other `*-sys`
-    crates: checked-in pregenerated bindings are used by default, while LLVM/libclang is required
-    only for explicit binding regeneration with `DEAR_IMGUI_RS_REGEN_BINDINGS=1 --features bindgen`.
-
-### Changed
-
+  - Add native-only `dear-node-editor` and `dear-node-editor-sys` support backed
+    by `cimnodes_editor` / `imgui-node-editor`.
+  - Add safe node-editor APIs for editor contexts, typed config/style values,
+    node/pin/link scopes, create/delete sessions, selection mutation, queries,
+    selection/action-context counts, group hints, node background draw lists,
+    shortcut toggles, styled create/reject feedback, and RAII-scoped editor
+    suspension.
+  - Add `node_editor_basic`, a compact Winit + WGPU example modeled after the
+    upstream basic-interaction example.
+  - Add `node_editor_showcase`, a blueprints-style Winit + WGPU example using
+    the stack layout helpers and a Rust `BlueprintNodeBuilder`.
+  - Expose new ImGuizmo handle/move-type queries and custom grid/axis drawing
+    helpers through `MoveType`, `GizmoUi::active_handle_type`,
+    `hovered_handle_type`, `active_move_type`, `hovered_move_type`,
+    `draw_axes`, `draw_grid_custom`, and `draw_grid_custom_color`.
+- Core (`dear-imgui-sys`)
+  - Add the native stack layout compatibility layer required by the node-editor
+    blueprints example, including repository-owned `dear_imgui_stack_*` C ABI
+    symbols and build-time `ItemSize()` / `ItemAdd()` hooks in the generated
+    `imgui.cpp` build copy.
 - Core (`dear-imgui-rs`)
-  - Upgrade the core Dear ImGui/cimgui baseline to Dear ImGui v1.92.8 (docking).
-  - Store typed `PlatformIo` callbacks per active `ImGuiContext` instead of in process-wide
-    Rust slots, while preserving the `dear-imgui-sys` out-parameter shim path for
-    `Platform_GetWindowPos`, `Platform_GetWindowSize`, and
-    `Platform_GetWindowFramebufferScale`.
-  - Align the public `PlatformIo` get-window pos/size callback shape with the
-    out-parameter shim used to cross the C++ `ImGuiPlatformIO` callback ABI safely.
-  - Add out-parameter `PlatformIo` setters for `Platform_GetWindowFramebufferScale`, matching
-    the ABI-safe shape used by the other `ImVec2` platform getters.
-  - Add out-parameter `PlatformIo` setters for `Platform_GetWindowWorkAreaInsets`, avoiding
-    direct exposure of the `ImVec4` return-by-value platform callback ABI.
-  - Track `DrawListMut` borrows per raw `ImDrawList*` on the current thread instead of using
-    process-wide locks, and resolve background/foreground draw lists against the main viewport.
-  - Make `DrawListMut::clone_output()` return `render::OwnedDrawList`.
+  - Add stack layout helpers used by the node-editor blueprints showcase:
+    `begin_horizontal`, `begin_vertical`, and `spring`.
   - Expose Dear ImGui v1.92.8 style additions:
     `StyleColor::CheckboxSelectedBg`, `StyleVar::DragDropTargetRounding`,
     `Style::drag_drop_target_rounding`, `drag_drop_target_border_size`,
@@ -105,214 +116,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `DrawCallback_ResetRenderState`, `DrawCallback_SetSamplerLinear`, and
     `DrawCallback_SetSamplerNearest`.
 
+### Changed
+
+- Workspace
+  - Refresh `dear-implot-sys`, `dear-implot3d-sys`, `dear-imnodes-sys`,
+    `dear-imguizmo-sys`, `dear-imguizmo-quat-sys`, and
+    `dear-imgui-test-engine-sys` submodules and pregenerated native/WASM
+    bindings against the Dear ImGui v1.92.8 stack.
+- Core (`dear-imgui-rs`)
+  - Upgrade the core Dear ImGui/cimgui baseline to Dear ImGui v1.92.8 (docking).
+  - Store typed `PlatformIo` callbacks per active `ImGuiContext` instead of in
+    process-wide Rust slots, while preserving the `dear-imgui-sys`
+    out-parameter shim path for aggregate-return callbacks.
+  - Track `DrawListMut` borrows per raw `ImDrawList*` on the current thread
+    instead of using process-wide locks, and resolve background/foreground draw
+    lists against the main viewport.
+  - Make `DrawListMut::clone_output()` return `render::OwnedDrawList`.
+- Core (`dear-imgui-sys`)
+  - Use checked-in pregenerated bindings by default for normal source builds, so
+    users can build without installing LLVM/libclang unless they explicitly
+    regenerate bindings. Fixes #28, thanks @dtugend.
+  - Make the `bindgen` build dependency optional behind a `bindgen` feature.
+    Binding regeneration now requires both `DEAR_IMGUI_RS_REGEN_BINDINGS=1` and
+    `--features bindgen`.
+  - Compile the stack layout compatibility hooks by default for normal native
+    builds, and reject older prebuilts unless their manifest declares
+    `features=stack-layout`.
+- Extensions
+  - Use checked-in pregenerated bindings by default for extension `*-sys` normal
+    builds, and make their `bindgen` build dependencies optional behind
+    `bindgen` features.
+  - Clarify `dear-imguizmo-quat` global static setting semantics and add
+    `GizmoQuatSettings` / `GizmoQuatSettingsToken` for temporary restoration of
+    getter-backed sensitivity, scale, flip, and reverse settings.
+- Backends
+  - Register Dear ImGui v1.92.8 standard reset/sampler draw callbacks in the
+    WGPU and Glow renderers. WGPU now keeps both linear and nearest sampler bind
+    groups; Glow switches texture filtering when sampler callbacks are
+    encountered.
+  - Route Winit multi-viewport aggregate-return callbacks through the
+    out-parameter shim path and bind setup, event routing, shutdown, and callback
+    cleanup to the provided `Context`.
+
 ### Fixed
 
 - Core (`dear-imgui-rs`)
-  - Prevent safe Rust from producing dangling FFI calls when `RegisteredUserTexture`,
-    `Context`, or `OwnedTextureData` are dropped in different orders.
-  - Validate `TextureData` creation sizes/status and prevent safe metadata setters from
-    desynchronizing texture dimensions, format, and allocated pixel storage.
-  - Keep `PlatformIo` typed callback dispatch isolated between multiple ImGui contexts.
-  - Reject cross-context `PlatformIo` typed/out-parameter callback installation so the
-    `ImGuiPlatformIO` callback table and Rust per-context callback storage cannot diverge.
-  - Keep `String`-backed `InputText` buffers valid by round-tripping through an owned byte
-    buffer and repairing invalid UTF-8 after Dear ImGui mutates the text.
-  - Stop `ImString::refresh_len()` from scanning uninitialized spare capacity when restoring
-    the logical length after C-side buffer writes.
-  - Make the default input text character filter pass characters through instead of removing
-    every character when `InputTextCallback::CHAR_FILTER` is enabled without an override.
-  - Validate input text callback cursor and selection positions before exposing them through
-    safe `TextCallbackData` accessors.
-  - Reject safe draw-list and draw-data cloning when command buffers contain user callbacks,
-    preventing duplicated opaque callback userdata pointers and possible double-free or UAF.
-  - Avoid calling `GetPlatformIO()` without a current Dear ImGui context while classifying
-    standard draw callbacks, preserving safe clone rejection for manually constructed draw lists.
-  - Validate draw-list channel split counts and always merge split channels during unwinding,
-    keeping safe `DrawListMut::channels_split` calls balanced after panic.
-  - Validate draw-list geometry/text/image inputs and `Font` runtime sizing inputs before
-    they cross FFI, rejecting non-finite coordinates, invalid radii/thickness, unsupported
-    draw flags, empty-path Bezier calls, and wrapped Bezier segment counts.
-  - Make multi-select scopes true RAII guards and validate item counts before crossing FFI,
-    keeping `BeginMultiSelect`/`EndMultiSelect` balanced when safe render callbacks panic.
-  - Add RAII table draw-channel tokens, make table channel closures unwind-safe, and validate
-    table column counts and channel preconditions before crossing FFI.
-  - Validate table setup phase, column indices, background-color targets, and required table
-    flags before calling Dear ImGui table APIs that otherwise assert or index unchecked.
-  - Reject non-independent table and table-column option bits before crossing FFI, preventing
-    raw flag operations from bypassing typed table option builders.
-  - Keep font and draw-list clip-rect stacks balanced when `with_font_and_size` or
-    `DrawListMut::with_clip_rect` callbacks panic.
-  - Add scoped draw-list texture APIs that keep Dear ImGui's draw-list texture stack balanced
-    when callbacks panic.
-  - Add scoped button-repeat APIs that keep Dear ImGui's item-flag stack balanced when
-    callbacks panic.
-  - Reject draw-list point counts, dock builder remap names, and angled table header indices
-    that cannot be represented safely across Dear ImGui FFI.
-  - Reject unsupported slider/drag flag bits and slider ranges that would trip Dear ImGui's
-    internal slider assertions before crossing FFI.
-  - Validate input text and numeric input flags before crossing FFI, rejecting unsupported
-    bits and combinations that Dear ImGui asserts on.
-  - Reject non-independent combo, tab, and popup option bits before crossing FFI, preventing
-    `from_bits_retain` from bypassing typed option builders.
-  - Reject non-independent color edit, picker, and button option bits before crossing FFI, preventing
-    raw flag operations from bypassing typed color option builders.
-  - Reject unsupported/internal window and child-window flags, invalid child auto-resize
-    combinations, and non-finite window/child geometry values before crossing FFI.
-  - Re-export child-window builder, token, and flag types so downstream code can construct
-    typed `ChildFlags` without relying on private module paths.
-  - Reject unsupported/private dock-node flags, invalid dockspace IDs, and non-finite dock
-    builder geometry before crossing FFI.
-  - Pass required remap vectors to `DockBuilder::copy_node` and `copy_dock_space`, avoiding
-    Dear ImGui assertions from null vector pointers.
-  - Keep temporary `WindowClass` storage alive across `DockSpace` FFI calls.
-  - Add missing public IO flag bits and reject unsupported `ConfigFlags`/`BackendFlags` bits
-    before storing them in `ImGuiIO`.
-  - Validate hover/focus query flags and tooltip hover-style flags before crossing FFI or storing
-    them, matching Dear ImGui's per-call `ImGuiHoveredFlags` allowed masks.
-  - Reject unsupported `ViewportFlags` bits before storing them in an `ImGuiViewport`.
-  - Expose typed `WindowClass` flag overrides and reject unsupported or overlapping masks before
-    calling `SetNextWindowClass` or `DockSpace`.
-  - Reject non-finite color packing, key repeat, mouse drag threshold, and rectangle visibility
-    inputs before crossing FFI.
-  - Reject non-finite runtime window geometry, layout, clip-rect, and scroll values, and validate
-    scroll centering ratios before they reach Dear ImGui state.
-  - Reject invalid `ImGuiIO` display, delta-time, mouse, timing, and framebuffer-scale floats
-    before they reach Dear ImGui state or input event queues.
-  - Validate persistent and stacked style values before they reach Dear ImGui state, including
-    style colors, alpha ranges, window minimum size, tessellation tolerances, directions, and
-    tree-line mode flags.
-  - Add missing public `TreeNodeFlags` aliases and draw-line bits, and align
-    `TreeNodeFlags::COLLAPSING_HEADER` with Dear ImGui's upstream flag combination.
-  - Validate color and image widget float inputs before crossing FFI, and make image builder
-    tint/border color options take effect with Dear ImGui's 1.92 `ImageWithBg` and image-border
-    style path.
-  - Validate basic widget geometry, progress fractions, invisible-button flags, selectable flags,
-    and arrow-button directions before crossing FFI.
-  - Validate legacy columns flags, widths, offsets, and percentage setters before crossing FFI,
-    and reject invalid viewport geometry/DPI/framebuffer scale values before storing them.
-  - Validate font atlas/config/runtime sizing values and table column widths before crossing FFI,
-    including Dear ImGui's requirement for glyph metric overrides to use a positive reference size.
-  - Track list clipper end state in safe Rust and reject invalid clipper counts/heights before
-    crossing FFI, preventing repeated `End`/post-end `Step` calls from reaching C++ asserts.
-  - Validate drag-and-drop payload type names, pointer/size pairs, and payload byte counts
-    before exposing them through typed safe APIs.
-  - Reject invalid scalar array component counts and plot value offsets before crossing FFI,
-    avoiding Dear ImGui assertions, negative plot indexing, and silent overflow no-ops.
-  - Validate legacy columns counts, nesting, and column indices before crossing FFI, and
-    use an RAII token for wrapped-text push/pop state.
-  - Restore the previous Dear ImGui current context after panic in internal temporary context
-    binding paths, avoiding cross-context state leaks during unwinding.
-  - Resolve `Context` IO, font atlas, backend-name, settings-filename, and `PlatformIo`
-    accessors from the receiver's `ImGuiContext*` instead of whichever context is current.
-  - Bind context-scoped style, main viewport, platform-window, font-stack, and ini settings
-    operations to the receiver context while restoring the previous current context afterward.
-  - Resolve the `Io::font_global_scale()` compatibility shim through the `ImGuiIO` owner context
-    instead of whichever context is current, so it reads and writes the matching
-    `Style::font_scale_main()` value in multi-context applications.
-  - Reject frame lifecycle calls on a non-current `Context`, preventing `frame`, `render`, or
-    `draw_data` from accidentally operating on a different active context.
-  - Resolve clipboard callbacks through the `ImGuiContext*` passed by Dear ImGui instead of
-    whichever context is currently bound, preventing cross-context clipboard backend mixups.
-  - Clear Rust typed `PlatformIo` callback storage and `Platform_GetWindowPos/Size` out-parameter
-    shim state when clearing platform handlers, and clear typed renderer callback storage when
-    clearing renderer handlers.
-  - Clear `PlatformIo` typed callback and out-parameter shim storage by the receiver
-    `PlatformIo` instead of whichever context is current, preventing stale callback dispatch after
-    clearing handlers on a non-current context.
-  - Clear receiver-owned typed `PlatformIo` callback slots when raw callback setters replace the
-    corresponding C callback, preventing stale typed trampoline dispatch after raw/typed setter
-    mixing.
-  - Generate correctly terminated glyph exclude range arrays and reject reversed or
-    out-of-range glyph ranges.
-  - Validate `TextCallbackData` buffers and byte positions before exposing Rust slices or
-    converting positions into Dear ImGui's `int` callback APIs.
+  - Expand FFI precondition validation across textures, fonts, draw lists,
+    tables, legacy columns, docking, windows, child windows, widgets, popups,
+    combos, tabs, color editors, sliders, drags, scalar arrays, drag/drop
+    payloads, IO values, style values, hover/focus flags, viewport flags, and
+    runtime geometry. Invalid values are rejected in safe Rust before reaching
+    Dear ImGui assertions or unchecked indexing paths.
+  - Keep texture registration, `Context`, and `OwnedTextureData` lifetimes tied
+    together so safe Rust cannot produce dangling texture FFI calls.
+  - Harden `String` / `ImString` input buffers and input-text callback data,
+    including invalid UTF-8 repair, initialized-length tracking, default
+    character-filter behavior, cursor/selection validation, and callback-frame
+    lifetimes.
+  - Reject safe draw-list and draw-data cloning when command buffers contain
+    user callbacks, avoiding duplicated opaque callback userdata pointers.
+  - Keep multi-select scopes, table draw channels, draw-list channels, font
+    stacks, clip-rect stacks, texture stacks, button-repeat state, wrapped text,
+    and temporary context binding paths balanced during panic unwinding.
+  - Resolve context-owned IO, font atlas, style, viewport, platform-window,
+    font-stack, ini settings, clipboard, and `PlatformIo` operations through the
+    receiver context instead of whichever context is currently bound.
+  - Reject frame lifecycle calls on a non-current `Context`, preventing
+    `frame`, `render`, or `draw_data` from accidentally operating on a different
+    active context.
+  - Clear typed `PlatformIo`, renderer callback, and out-parameter shim storage
+    from the receiver context, and clear stale typed slots when raw setters
+    replace the corresponding C callbacks.
+  - Generate correctly terminated glyph exclude range arrays and reject reversed
+    or out-of-range glyph ranges.
 - Core (`dear-imgui-sys`)
-  - Regenerate native and WASM pregenerated bindings for Dear ImGui v1.92.8 via cimgui
-    `docking_inter`.
-  - Use checked-in pregenerated bindings by default for normal source builds, so Windows/MSVC
-    users can build `dear-app` without installing LLVM/libclang while still compiling the native
-    Dear ImGui library and PlatformIO hook shim. Normal builds and installs now only need the
-    platform C++ toolchain; LLVM/libclang is required only for explicit binding regeneration.
-    Fixes #28, thanks @dtugend.
-  - Make the `bindgen` build dependency optional behind a `bindgen` feature, so normal builds
-    no longer compile `bindgen`/`clang-sys`; binding regeneration now requires both
-    `DEAR_IMGUI_RS_REGEN_BINDINGS=1` and `--features bindgen`.
-  - Route Rust-owned `Platform_GetWindowPos` / `Platform_GetWindowSize` out-parameter
-    shims through `dear-imgui-sys` storage instead of cimgui's `BackendLanguageUserData`
-    helper, avoiding collisions with language/backend userdata.
-  - Avoid unresolved `PlatformIO` out-parameter shim symbols in builds that intentionally
-    skip native C++ hook compilation, while keeping callback installation available for
-    normal native builds.
-  - Report unavailable `PlatformIO` out-parameter hooks through a capability flag and explicit
-    callback-installation panic instead of leaving raw external symbols unresolved.
+  - Regenerate native and WASM pregenerated bindings for Dear ImGui v1.92.8 via
+    cimgui `docking_inter`.
+  - Route Rust-owned `Platform_GetWindowPos` / `Platform_GetWindowSize`
+    out-parameter shims through `dear-imgui-sys` storage instead of cimgui's
+    `BackendLanguageUserData` helper, avoiding collisions with language/backend
+    userdata.
+  - Avoid unresolved `PlatformIO` out-parameter shim symbols in builds that
+    intentionally skip native C++ hook compilation, while keeping callback
+    installation available for normal native builds.
+  - Report unavailable `PlatformIO` out-parameter hooks through a capability flag
+    and explicit callback-installation panic instead of leaving raw external
+    symbols unresolved.
 - Backends
-  - Register Dear ImGui v1.92.8 standard reset/sampler draw callbacks in the WGPU and Glow
-    renderers. WGPU now keeps both linear and nearest sampler bind groups; Glow switches texture
-    filtering when sampler callbacks are encountered.
-  - Route winit multi-viewport `Platform_GetWindowFramebufferScale` through the same
-    out-parameter shim as the window position and size getters, including on Windows.
-  - Bind winit multi-viewport shutdown to the provided `Context` before destroying platform
-    windows and clearing platform callbacks, avoiding accidental cleanup of a different current
-    context.
-  - Clear winit multi-viewport work-area inset handlers through the out-parameter shim path,
-    keeping backend shutdown consistent with other aggregate-return platform callbacks.
-  - Remove obsolete winit multi-viewport `ImVec2` return-by-value getter code paths so
-    `Platform_GetWindowPos/Size` consistently use the out-parameter shim.
-  - Clear winit multi-viewport platform callbacks and out-parameter getter shims during
-    shutdown so a backend teardown does not leave stale `ImGuiPlatformIO` handlers.
-  - Make winit multi-viewport main viewport initialization idempotent and guard
-    `PlatformUserData` access so the backend does not overwrite or read another backend's data.
-  - Resolve winit IME userdata through the `ImGuiContext*` passed to `Platform_SetImeDataFn`,
-    preventing cross-context IME userdata lookups.
-  - Bind winit multi-viewport callback installation, monitor setup, main viewport setup, and
-    event routing to the provided `Context`, preventing multi-context apps from writing or reading
-    another active context's platform state.
-  - Bind WGPU multi-viewport renderer callback installation and teardown to the provided
-    `Context` in both the winit and SDL3 backends, preventing typed renderer callback storage
-    from being installed on or cleared from the wrong active context.
+  - Fix WGPU window-handle handling and SDL3 close-event behavior.
+  - Make Winit multi-viewport main viewport initialization idempotent and guard
+    `PlatformUserData` access so the backend does not overwrite or read another
+    backend's data.
+  - Resolve Winit IME userdata through the `ImGuiContext*` passed to
+    `Platform_SetImeDataFn`, preventing cross-context IME userdata lookups.
+  - Bind WGPU multi-viewport renderer callback installation and teardown to the
+    provided `Context` in both the Winit and SDL3 backends.
   - Add explicit-context WGPU render entry points and clear temporary
-    `PlatformIO.Renderer_RenderState` through RAII so draw callbacks do not see stale renderer
-    state after early render errors.
-  - Keep WGPU multi-viewport renderer state per ImGui context instead of in a process-wide slot,
-    preventing one context's viewport callbacks from using another context's renderer.
-  - Keep Glow and Ash multi-viewport renderer/global state per ImGui context instead of in
-    process-wide slots, preventing one context's viewport callbacks from using another context's
-    renderer or Vulkan handles.
+    `PlatformIO.Renderer_RenderState` through RAII so draw callbacks do not see
+    stale renderer state after early render errors.
+  - Keep WGPU, Glow, and Ash multi-viewport renderer/global state per ImGui
+    context instead of in process-wide slots.
 - Extensions
-  - Refresh `dear-implot-sys`, `dear-implot3d-sys`, `dear-imnodes-sys`, `dear-imguizmo-sys`,
-    `dear-imguizmo-quat-sys`, and `dear-imgui-test-engine-sys` submodules and pregenerated
-    native/WASM bindings against the Dear ImGui v1.92.8 stack.
-  - Expose new ImGuizmo handle/move-type queries and custom grid/axis drawing helpers through
-    `MoveType`, `GizmoUi::active_handle_type`, `hovered_handle_type`, `active_move_type`,
-    `hovered_move_type`, `draw_axes`, `draw_grid_custom`, and `draw_grid_custom_color`.
-  - Use checked-in pregenerated bindings by default for extension `*-sys` normal builds, so
-    ImPlot, ImNodes, ImPlot3D, ImGuizmo, ImGuIZMO.quat, and Test Engine users no longer need
-    LLVM/libclang unless they explicitly regenerate bindings.
-  - Make extension `*-sys` `bindgen` build dependencies optional behind `bindgen` features, so
-    normal extension builds no longer compile `bindgen`/`clang-sys`.
-  - Reject invalid `dear-implot` axis indices, non-finite plot sizes/coordinates, invalid
-    axis limits, invalid tick ranges, and invalid zoom constraints before safe Rust crosses
-    into ImPlot FFI.
-  - Require `dear-imguizmo` `IdToken` to be dropped while its original ImGui context is current,
-    preventing the token from silently switching Dear ImGui's global current context during
-    cleanup.
-  - Bind `dear-implot` `PlotUi` and `PlotToken` operations to the `PlotContext` and ImGui context
-    that created them, preventing multi-context applications from accidentally plotting through
-    whichever ImPlot context is current.
-  - Treat `dear-implot::PlotContext::current()` as non-owning so dropping the wrapper cannot
-    destroy the process current ImPlot context.
-  - Bind `dear-implot3d` per-frame plotting APIs to the `Plot3DContext` and ImGui context that
-    created them, preventing multi-context applications from accidentally plotting through
-    whichever ImPlot3D context is current.
-  - Clarify `dear-imguizmo-quat` global static setting semantics and add
-    `GizmoQuatSettings` / `GizmoQuatSettingsToken` for temporary restoration of the
-    getter-backed sensitivity, scale, flip, and reverse settings.
-  - Bind `dear-imnodes` frame/token operations to the active ImGui context and restore
-    the previous Dear ImGui and ImNodes current contexts after context/editor cleanup,
-    preventing hidden current-context switches during multi-context use.
-  - Reset `dear-imnodes` to the default editor context when `NodeEditor` is opened without
-    an explicit `EditorContext` or when the current explicit editor is dropped, preventing
-    stale editor pointers after using a custom editor.
+  - Reject invalid `dear-implot` axis indices, non-finite plot
+    sizes/coordinates, invalid axis limits, invalid tick ranges, and invalid
+    zoom constraints before safe Rust crosses into ImPlot FFI.
+  - Require `dear-imguizmo` `IdToken` to be dropped while its original ImGui
+    context is current, preventing the token from silently switching Dear
+    ImGui's global current context during cleanup.
+  - Bind `dear-implot` `PlotUi` and `PlotToken` operations to the `PlotContext`
+    and ImGui context that created them, preventing multi-context applications
+    from accidentally plotting through whichever ImPlot context is current.
+  - Treat `dear-implot::PlotContext::current()` as non-owning so dropping the
+    wrapper cannot destroy the process current ImPlot context.
+  - Bind `dear-implot3d` per-frame plotting APIs to the `Plot3DContext` and
+    ImGui context that created them, preventing multi-context applications from
+    accidentally plotting through whichever ImPlot3D context is current.
+  - Bind `dear-imnodes` frame/token operations to the active ImGui context and
+    restore the previous Dear ImGui and ImNodes current contexts after
+    context/editor cleanup, preventing hidden current-context switches during
+    multi-context use.
+  - Reset `dear-imnodes` to the default editor context when `NodeEditor` is
+    opened without an explicit `EditorContext` or when the current explicit
+    editor is dropped, preventing stale editor pointers after using a custom
+    editor.
 
 ## [0.12.0] - 2026-05-09
 

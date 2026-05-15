@@ -31,6 +31,7 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
 3. Audit the sys layer and safe layer together.
    - Compare upstream release notes and generated binding diffs against current safe wrappers.
    - Look for new functions, enums, flags, struct fields, renamed APIs, callback ABI changes, backend/platform hooks, and new style/spec fields.
+   - For Dear ImGui core bumps, re-audit the local stack layout compatibility patch: the `imgui.cpp` `ItemSize()` / `ItemAdd()` hook markers, `dear-imgui-sys/src/stack_layout_shim.cpp`, the `stack_layout_imgui_*.cpp.inc` snippets, native prebuilt manifest feature detection, and the `node_editor_showcase` blueprints layout.
    - Do not stop at raw compatibility. If upstream semantics changed, prefer a coherent safe API refactor over thin shims.
    - When Dear ImGui backends move, audit `dear-imgui-sys::backend_shim`, backend crates, and any examples that expose the changed integration path.
 

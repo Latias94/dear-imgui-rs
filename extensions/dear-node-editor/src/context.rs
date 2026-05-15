@@ -1,4 +1,4 @@
-use crate::{EditorConfig, NodeEditorStyle, StyleColor, sys};
+use crate::{EditorConfig, EditorConfigSnapshot, NodeEditorStyle, StyleColor, sys};
 use dear_imgui_rs::{Context as ImGuiContext, ContextAliveToken};
 use std::{ffi::c_void, marker::PhantomData, ptr, rc::Rc};
 
@@ -14,6 +14,7 @@ pub struct EditorContext {
     raw: *mut sys::DneEditorContext,
     imgui_ctx_raw: *mut dear_imgui_rs::sys::ImGuiContext,
     imgui_alive: ContextAliveToken,
+    config: EditorConfigSnapshot,
     _settings_file: Option<std::ffi::CString>,
     _callbacks: Option<Box<crate::config::CallbackState>>,
     _not_send_sync: PhantomData<Rc<()>>,
@@ -36,6 +37,7 @@ impl EditorContext {
     ) -> Result<Self, NodeEditorError> {
         let imgui_ctx_raw = imgui.as_raw();
         let _imgui_guard = ImGuiContextGuard::bind(imgui_ctx_raw);
+        let config_snapshot = config.snapshot();
         let raw_config = config.to_sys();
         let raw = unsafe { sys::dne_create_editor(&raw_config) };
         if raw.is_null() {
@@ -46,6 +48,7 @@ impl EditorContext {
             raw,
             imgui_ctx_raw,
             imgui_alive: imgui.alive_token(),
+            config: config_snapshot,
             _settings_file: config.settings_file.take(),
             _callbacks: config.callbacks.take(),
             _not_send_sync: PhantomData,
@@ -58,6 +61,11 @@ impl EditorContext {
 
     pub fn as_raw_native(&self) -> *mut c_void {
         unsafe { sys::dne_editor_context_raw(self.raw) }
+    }
+
+    #[doc(alias = "GetConfig")]
+    pub fn config(&self) -> &EditorConfigSnapshot {
+        &self.config
     }
 
     #[doc(alias = "GetStyle")]
@@ -114,10 +122,18 @@ impl Drop for EditorContext {
             return;
         }
 
-        if self.imgui_alive.is_alive() {
-            let _imgui_guard = ImGuiContextGuard::bind(self.imgui_ctx_raw);
-            unsafe { sys::dne_destroy_editor(self.raw) };
+        if !self.imgui_alive.is_alive() {
+            debug_assert!(
+                false,
+                "EditorContext was dropped after its owning Dear ImGui context; \
+                 declare the editor field before the Context field or drop it explicitly first"
+            );
+            self.raw = ptr::null_mut();
+            return;
         }
+
+        let _imgui_guard = ImGuiContextGuard::bind(self.imgui_ctx_raw);
+        unsafe { sys::dne_destroy_editor(self.raw) };
         self.raw = ptr::null_mut();
     }
 }
@@ -298,6 +314,7 @@ mod tests {
             editor.clear_selection();
 
             let _ = editor.has_selection_changed();
+            let _ = editor.selected_object_count();
             let _ = editor.is_active();
             let _ = editor.is_background_clicked();
             let _ = editor.is_background_double_clicked();
@@ -321,7 +338,17 @@ mod tests {
             .select_button(MouseButton::Right)
             .navigate_button(MouseButton::Middle)
             .context_menu_button(MouseButton::Extra1)
+            .smooth_zoom(true, 1.25)
             .custom_zoom_levels(vec![0.5, 1.0, 2.0]);
+
+        let snapshot = config.snapshot();
+        assert_eq!(snapshot.custom_zoom_levels, vec![0.5, 1.0, 2.0]);
+        assert_eq!(snapshot.drag_button, MouseButton::Left);
+        assert_eq!(snapshot.select_button, MouseButton::Right);
+        assert_eq!(snapshot.navigate_button, MouseButton::Middle);
+        assert_eq!(snapshot.context_menu_button, MouseButton::Extra1);
+        assert!(snapshot.enable_smooth_zoom);
+        assert_eq!(snapshot.smooth_zoom_power, 1.25);
 
         let raw = config.to_sys();
         assert_eq!(raw.drag_button_index, MouseButton::Left as i32);
@@ -330,6 +357,27 @@ mod tests {
         assert_eq!(raw.context_menu_button_index, MouseButton::Extra1 as i32);
         assert_eq!(raw.custom_zoom_level_count, 3);
         assert!(!raw.custom_zoom_levels.is_null());
+    }
+
+    #[test]
+    fn editor_exposes_creation_config_snapshot() {
+        let _guard = test_guard();
+        let imgui = ImGuiContext::create();
+        let editor = EditorContext::create_with_config(
+            &imgui,
+            EditorConfig::new()
+                .no_settings_file()
+                .canvas_size_mode(crate::CanvasSizeMode::CenterOnly)
+                .custom_zoom_levels(vec![0.75, 1.0, 1.5])
+                .smooth_zoom(true, 1.4),
+        );
+
+        let snapshot = editor.config();
+        assert_eq!(snapshot.settings_file, None);
+        assert_eq!(snapshot.canvas_size_mode, crate::CanvasSizeMode::CenterOnly);
+        assert_eq!(snapshot.custom_zoom_levels, vec![0.75, 1.0, 1.5]);
+        assert!(snapshot.enable_smooth_zoom);
+        assert_eq!(snapshot.smooth_zoom_power, 1.4);
     }
 
     #[test]

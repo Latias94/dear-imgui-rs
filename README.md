@@ -17,6 +17,9 @@
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/implot-basic.png" alt="ImPlot" width="49%"/>
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/imnodes-basic.png" alt="ImNodes" width="49%"/>
   <br/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/node-editor-showcase.png" alt="imgui-node-editor blueprints showcase" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/file_browser_imgui.png" alt="File Browser" width="49%"/>
+  <br/>
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/imguizmo-quat-basic.png" alt="ImGuizmo.Quat" width="49%"/>
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/implot3d-basic.png" alt="ImPlot3D" width="49%"/>
   <br/>
@@ -88,6 +91,7 @@ cargo run --bin dear_app_docking
 # Extension examples (using wgpu + winit directly)
 cargo run --bin imguizmo_basic --features imguizmo
 cargo run --bin imnodes_basic --features imnodes
+# imgui-node-editor: basic interaction and blueprints-style showcase
 cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
 cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor
 cargo run --bin implot_basic --features implot
@@ -148,10 +152,10 @@ cargo run --bin file_browser_imgui --features file-browser
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.12.0"
+dear-imgui-rs = "0.13.0"
 # Choose a backend + platform integration
-dear-imgui-wgpu = "0.12.0"   # or dear-imgui-glow / dear-imgui-ash
-dear-imgui-winit = "0.12.0"  # or dear-imgui-sdl3
+dear-imgui-wgpu = "0.13.0"   # or dear-imgui-glow / dear-imgui-ash
+dear-imgui-winit = "0.13.0"  # or dear-imgui-sdl3
 ```
 
 `dear-imgui-wgpu` defaults to `wgpu-29` on the current `main` branch.
@@ -160,25 +164,25 @@ If you need `wgpu = 28` compatibility for the WGPU renderer backend:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.12.0"
-dear-imgui-wgpu = { version = "0.12.0", default-features = false, features = ["wgpu-28"] }
-dear-imgui-winit = "0.12.0"
+dear-imgui-rs = "0.13.0"
+dear-imgui-wgpu = { version = "0.13.0", default-features = false, features = ["wgpu-28"] }
+dear-imgui-winit = "0.13.0"
 ```
 
 If you need `wgpu = 27` compatibility for the WGPU renderer backend:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.12.0"
-dear-imgui-wgpu = { version = "0.12.0", default-features = false, features = ["wgpu-27"] }
-dear-imgui-winit = "0.12.0"
+dear-imgui-rs = "0.13.0"
+dear-imgui-wgpu = { version = "0.13.0", default-features = false, features = ["wgpu-27"] }
+dear-imgui-winit = "0.13.0"
 ```
 
 ### Application Runner (Recommended for Quick Start)
 
 ```toml
 [dependencies]
-dear-app = "0.12.0"  # Includes dear-imgui-rs, wgpu backend, and docking support
+dear-app = "0.13.0"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```
 
 ### Apple Platform Examples
@@ -213,8 +217,8 @@ Example: low-level Android route without a dedicated Android convenience crate:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.12.0"
-dear-imgui-sys = { version = "0.12.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
+dear-imgui-rs = "0.13.0"
+dear-imgui-sys = { version = "0.13.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
 ```
 
 Recommended ownership split:
@@ -244,25 +248,25 @@ assembly.
 ```toml
 [dependencies]
 # Plotting
-dear-implot = "0.12.0"      # 2D plotting
-dear-implot3d = "0.12.0"    # 3D plotting
+dear-implot = "0.13.0"      # 2D plotting
+dear-implot3d = "0.13.0"    # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo = "0.12.0"         # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat = "0.12.0"    # Quaternion-based gizmo
+dear-imguizmo = "0.13.0"         # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = "0.13.0"    # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = "0.12.0"
-dear-node-editor = "0.12.0"  # native-only imgui-node-editor integration
+dear-imnodes = "0.13.0"
+dear-node-editor = "0.13.0"  # native-only imgui-node-editor integration
 
 # Test automation
-dear-imgui-test-engine = "0.12.0"
+dear-imgui-test-engine = "0.13.0"
 
 # File Browser
-dear-file-browser = "0.12.0"  # Native dialogs + ImGui file browser
+dear-file-browser = "0.13.0"  # Native dialogs + ImGui file browser
 
 # Reflection-based UI helpers
-dear-imgui-reflect = "0.12.0"
+dear-imgui-reflect = "0.13.0"
 ```
 
 ### Reflection-based UI (dear-imgui-reflect)
@@ -308,10 +312,11 @@ Env vars per -sys crate:
 - `<CRATE>_SYS_CACHE_DIR` — cache root for downloads/extraction
 - `<CRATE>_SYS_SKIP_CC` — skip C/C++ compilation
 - `<CRATE>_SYS_FORCE_BUILD` — force source build
-- `IMGUI_SYS_USE_CMAKE` / `IMPLOT_SYS_USE_CMAKE` — prefer CMake when available; otherwise cc
+- `IMPLOT_SYS_USE_CMAKE` — prefer CMake for `dear-implot-sys` when available; otherwise cc
+- `IMGUI_SYS_USE_CMAKE` — accepted for compatibility, but `dear-imgui-sys` currently warns and uses the cc source build because the native stack-layout ABI patches the `imgui.cpp` build copy
 - `CARGO_NET_OFFLINE=true` — forbid network; use only local packages or repo prebuilt
 
-Freetype: enable once anywhere. Turning on `freetype` in any extension (imnodes/node-editor/imguizmo/implot) propagates to `dear-imgui-sys`. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).
+Freetype: enable once anywhere. Turning on `freetype` in any extension (imnodes/node-editor/imguizmo/implot) propagates to `dear-imgui-sys`. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this). `dear-imgui-sys` prebuilts are also required to declare `features=stack-layout`, because the default native build includes the stack layout ABI used by the node-editor blueprints example.
 
 Quick examples (enable auto prebuilt download):
 
@@ -327,41 +332,41 @@ Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.12.0   | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.12.0   | Binds Dear ImGui v1.92.8 (docking branch) |
+| dear-imgui-rs   | 0.13.0   | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.13.0   | Binds Dear ImGui v1.92.8 (docking branch) |
 
 Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.12.0   | wgpu = 29/28/27   | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features). Experimental multi-viewport on native via winit/SDL3; disabled on wasm |
-| dear-imgui-glow  | 0.12.0   | glow = 0.17       | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash   | 0.12.0   | ash = 0.38        | Vulkan renderer (optional multi-viewport helpers via winit/SDL3; native only) |
-| dear-imgui-winit | 0.12.0   | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.12.0   | sdl3 = 0.17       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
+| dear-imgui-wgpu  | 0.13.0   | wgpu = 29/28/27   | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features). Experimental multi-viewport on native via winit/SDL3; disabled on wasm |
+| dear-imgui-glow  | 0.13.0   | glow = 0.17       | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash   | 0.13.0   | ash = 0.38        | Vulkan renderer (optional multi-viewport helpers via winit/SDL3; native only) |
+| dear-imgui-winit | 0.13.0   | winit = 0.30.13   | Winit platform backend         |
+| dear-imgui-sdl3  | 0.13.0   | sdl3 = 0.17       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
 
 Application Runner
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.12.0   | 0.12.0                 | App runner (docking, themes, add-ons)            |
+| dear-app  | 0.13.0   | 0.13.0                 | App runner (docking, themes, add-ons)            |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.12.0   | 0.12.0                 | dear-implot-sys 0.12.0      | 2D plotting                            |
-| dear-imnodes        | 0.12.0   | 0.12.0                 | dear-imnodes-sys 0.12.0     | Node editor                            |
-| dear-node-editor    | 0.12.0   | 0.12.0                 | dear-node-editor-sys 0.12.0 | Native imgui-node-editor integration   |
-| dear-imguizmo       | 0.12.0   | 0.12.0                 | dear-imguizmo-sys 0.12.0    | 3D gizmo + GraphEditor                 |
-| dear-file-browser   | 0.12.0   | 0.12.0                 | —                           | ImGui UI + native (rfd) backends       |
-| dear-implot3d       | 0.12.0   | 0.12.0                 | dear-implot3d-sys 0.12.0    | 3D plotting                            |
-| dear-imguizmo-quat  | 0.12.0   | 0.12.0                 | dear-imguizmo-quat-sys 0.12.0 | Quaternion gizmo                       |
-| dear-imgui-test-engine | 0.12.0 | 0.12.0                 | dear-imgui-test-engine-sys 0.12.0 | UI automation and test runner      |
-| dear-imgui-reflect  | 0.12.0   | 0.12.0                 | —                           | Reflection-based UI helpers (pure Rust)|
+| dear-implot         | 0.13.0   | 0.13.0                 | dear-implot-sys 0.13.0      | 2D plotting                            |
+| dear-imnodes        | 0.13.0   | 0.13.0                 | dear-imnodes-sys 0.13.0     | Node editor                            |
+| dear-node-editor    | 0.13.0   | 0.13.0                 | dear-node-editor-sys 0.13.0 | Native imgui-node-editor integration   |
+| dear-imguizmo       | 0.13.0   | 0.13.0                 | dear-imguizmo-sys 0.13.0    | 3D gizmo + GraphEditor                 |
+| dear-file-browser   | 0.13.0   | 0.13.0                 | —                           | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.13.0   | 0.13.0                 | dear-implot3d-sys 0.13.0    | 3D plotting                            |
+| dear-imguizmo-quat  | 0.13.0   | 0.13.0                 | dear-imguizmo-quat-sys 0.13.0 | Quaternion gizmo                       |
+| dear-imgui-test-engine | 0.13.0 | 0.13.0                 | dear-imgui-test-engine-sys 0.13.0 | UI automation and test runner      |
+| dear-imgui-reflect  | 0.13.0   | 0.13.0                 | —                           | Reflection-based UI helpers (pure Rust)|
 
 Note: if your ecosystem is pinned to `wgpu = 28` or `wgpu = 27`, you can use
-`dear-imgui-wgpu 0.12.0` with `default-features = false, features = ["wgpu-28"]` or
+`dear-imgui-wgpu 0.13.0` with `default-features = false, features = ["wgpu-28"]` or
 `default-features = false, features = ["wgpu-27"]`. `dear-app` follows the workspace default
 `wgpu = 29` path.
 
@@ -507,9 +512,12 @@ If you're working with graphics applications in Rust, you might also be interest
 This project builds upon the excellent work of several other projects:
 
 - **[Dear ImGui](https://github.com/ocornut/imgui)** by Omar Cornut - The original C++ immediate mode GUI library
+- **[cimgui](https://github.com/cimgui/cimgui)** - The C API layer used by the core Dear ImGui sys crate
 - **[imgui-rs](https://github.com/imgui-rs/imgui-rs)** - Provided the API design patterns and inspiration for the Rust binding approach
 - **[easy-imgui-rs](https://github.com/rodrigorc/easy-imgui-rs/)** by rodrigorc
 - **[imgui-wgpu-rs](https://github.com/Yatekii/imgui-wgpu-rs/)** - Provided reference implementation for WGPU backend integration
+- **[imgui-node-editor](https://github.com/thedmd/imgui-node-editor)** by Michał Cichoń - Native node editor implementation and blueprint-style example references
+- **[cimnodes_editor](https://github.com/cimgui/cimnodes_editor)** - C wrapper used for the `dear-node-editor-sys` binding layer
 
 ## License
 
@@ -517,3 +525,9 @@ Dual-licensed under either of:
 
 - Apache License, Version 2.0 (<http://www.apache.org/licenses/LICENSE-2.0>)
 - MIT license (<http://opensource.org/licenses/MIT>)
+
+Vendored third-party native projects keep their own licenses. In particular,
+`imgui-node-editor` is MIT-licensed, and the stack layout compatibility shim in
+`dear-imgui-sys` is derived from its MIT-licensed vendored stack layout
+extension. See the relevant `*-sys` README files and
+`dear-imgui-sys/THIRD_PARTY_NOTICES.md` for details.

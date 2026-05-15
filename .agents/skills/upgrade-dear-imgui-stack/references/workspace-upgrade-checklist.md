@@ -6,7 +6,7 @@ Use this file for the repository-specific parts of an ImGui-stack upgrade.
 
 | Workspace crate | Upstream / submodule | Default branch in repo/tooling | Notes |
 |---|---|---|---|
-| `dear-imgui-sys` | `cimgui` + Dear ImGui | `docking_inter` | Core ABI source. Regenerate native + WASM bindings. Audit `backend_shim` on backend/platform changes. |
+| `dear-imgui-sys` | `cimgui` + Dear ImGui | `docking_inter` | Core ABI source. Regenerate native + WASM bindings. Audit `backend_shim` on backend/platform changes. Re-audit the native stack layout `ItemSize()` / `ItemAdd()` patch and prebuilt `stack-layout` manifest feature on every core bump. |
 | `dear-implot-sys` | `cimplot` + ImPlot | `master` | Re-audit safe ImPlot wrappers when `ImPlotSpec` or item APIs change. |
 | `dear-implot3d-sys` | `cimplot3d` + ImPlot3D | `main` | Re-audit spec/item styling, mesh/image entry points, color enums. |
 | `dear-imnodes-sys` | `cimnodes` + ImNodes | `master` | Usually independent, but scan for compatibility if core types changed. |
@@ -78,6 +78,7 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
 
 2. Backend and platform impact
    - Audit `dear-imgui-sys/src/backend_shim/**` and `dear-imgui-sys/build.rs`.
+   - Re-check the stack layout patch path in `dear-imgui-sys/build.rs`, `dear-imgui-sys/src/stack_layout_shim.cpp`, and `dear-imgui-sys/src/stack_layout_imgui_*.cpp.inc`. The marker patch must still match the new upstream `imgui.cpp`, and inactive `ItemSize()` / `ItemAdd()` hot paths should remain fast.
    - Check `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-winit`, `dear-imgui-glow`, `dear-imgui-ash`.
    - If backend exposure changed, adapt public APIs and repository-local examples, including iOS / Android smoke examples when relevant.
 
@@ -148,6 +149,7 @@ $env:DOCS_RS = '1'; cargo check -p dear-imgui-test-engine-sys
 cargo check -p dear-imgui-examples --bin implot_basic --features implot
 cargo check -p dear-imgui-examples --bin implot3d_basic --features implot3d
 cargo check -p dear-imgui-examples --bin imgui_test_engine_basic --features test-engine
+cargo check -p dear-imgui-examples --bin node_editor_showcase --features node-editor
 ```
 
 If backend or mobile integration changed, also re-run the relevant repository-local iOS / Android smoke checks from CI.
