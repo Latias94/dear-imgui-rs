@@ -106,10 +106,16 @@ individual validation commit.
 - Core (`dear-imgui-rs`)
   - Add stack layout helpers used by the node-editor blueprints showcase:
     `begin_horizontal`, `begin_vertical`, and `spring`.
+  - Add RAII-scoped helpers for button-repeat and draw-list texture stacks:
+    `Ui::push_button_repeat_token`, `Ui::with_button_repeat`,
+    `DrawListMut::push_texture_token`, and `DrawListMut::with_texture`.
   - Expose Dear ImGui v1.92.8 style additions:
     `StyleColor::CheckboxSelectedBg`, `StyleVar::DragDropTargetRounding`,
     `Style::drag_drop_target_rounding`, `drag_drop_target_border_size`,
     `drag_drop_target_padding`, and `color_marker_size`.
+  - Expose additional `Style` accessors and `StyleVar` variants for scrollbar
+    padding, image borders, tab sizing/borders, angled table headers, tree-line
+    styling, separator text styling, and docking separator size.
   - Expose Dear ImGui v1.92.8 draw-list helpers `DrawListMut::add_line_h` and
     `DrawListMut::add_line_v`.
   - Expose raw `PlatformIo` accessors for standard draw callbacks:
@@ -167,6 +173,17 @@ individual validation commit.
     payloads, IO values, style values, hover/focus flags, viewport flags, and
     runtime geometry. Invalid values are rejected in safe Rust before reaching
     Dear ImGui assertions or unchecked indexing paths.
+  - Expose child-window builder, token, and `ChildFlags` through public
+    `dear_imgui_rs::*` paths so `Ui::child_window(...).child_flags(...)` is
+    usable from downstream crates. Fixes #29, thanks @CoffeeCatRailway.
+  - Add missing public `ConfigFlags`, `BackendFlags`, and `TreeNodeFlags` bits,
+    including `ConfigFlags::NO_KEYBOARD`,
+    `BackendFlags::HAS_PARENT_VIEWPORT`, tree-line flags, and span/overlap tree
+    aliases; align `TreeNodeFlags::COLLAPSING_HEADER` with Dear ImGui's
+    upstream flag combination.
+  - Make image builder tint and border colors take effect on Dear ImGui v1.92
+    by routing tinted images through `ImageWithBg` and applying temporary image
+    border style overrides.
   - Keep texture registration, `Context`, and `OwnedTextureData` lifetimes tied
     together so safe Rust cannot produce dangling texture FFI calls.
   - Harden `String` / `ImString` input buffers and input-text callback data,
