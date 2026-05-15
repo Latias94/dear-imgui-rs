@@ -369,6 +369,15 @@ fn main() {
         return;
     }
 
+    let regen_bindings = build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS");
+    if !regen_bindings && env::var("NODE_EDITOR_SYS_SKIP_CC").is_ok() {
+        if !use_pregenerated_bindings(&cfg.out_dir) {
+            panic!("NODE_EDITOR_SYS_SKIP_CC is set but no pregenerated bindings were found");
+        }
+        let _ = try_link_prebuilt_all(&cfg);
+        return;
+    }
+
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let node_editor_root = cfg.manifest_dir.join("third-party/cimnodes_editor");
 
@@ -382,16 +391,8 @@ fn main() {
         );
     }
 
-    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+    if regen_bindings {
         generate_bindings(&cfg, &node_editor_root, &imgui_src, &cimgui_root);
-        return;
-    }
-
-    if env::var("NODE_EDITOR_SYS_SKIP_CC").is_ok() {
-        if !use_pregenerated_bindings(&cfg.out_dir) {
-            panic!("NODE_EDITOR_SYS_SKIP_CC is set but no pregenerated bindings were found");
-        }
-        let _ = try_link_prebuilt_all(&cfg);
         return;
     }
 
