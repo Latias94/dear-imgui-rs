@@ -35,6 +35,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
 
       - name: Install Linux deps
         if: runner.os == 'Linux'
@@ -104,6 +106,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
 
       - name: Assert default sys crates do not pull bindgen
         shell: bash
@@ -198,6 +202,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
 
       - name: Setup MSYS2 (mingw64)
         uses: msys2/setup-msys2@v2
@@ -250,6 +256,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
 
       - name: Add armv7 target
         run: rustup target add armv7-unknown-linux-gnueabihf
@@ -282,6 +290,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
 
       - name: Add iOS targets
         run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
@@ -388,6 +398,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
 
       - name: Install LLVM (libclang) for bindgen
         uses: KyleMayes/install-llvm-action@v1

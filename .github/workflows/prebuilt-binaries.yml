@@ -79,7 +79,14 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
+          cache-bin: "false"
           key: ${{ format('{0}-{1}-{2}', matrix.target, matrix.crt || 'none', inputs.crates || 'all') }}
+
+      - name: Check Rust toolchain
+        run: |
+          rustup show
+          rustc --version
+          cargo --version
 
       - name: Install Linux deps
         if: runner.os == 'Linux'
