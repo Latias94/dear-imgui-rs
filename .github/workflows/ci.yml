@@ -69,6 +69,7 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
           IMPLOT_SYS_FORCE_BUILD: "1"
           IMNODES_SYS_FORCE_BUILD: "1"
+          NODE_EDITOR_SYS_FORCE_BUILD: "1"
           IMGUIZMO_SYS_FORCE_BUILD: "1"
 
       - name: Check dear-imgui-ash feature combos
