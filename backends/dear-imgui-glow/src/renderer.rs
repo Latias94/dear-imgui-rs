@@ -1405,8 +1405,25 @@ impl GlowRenderer {
         height: u32,
         data: &[u8],
     ) -> InitResult<()> {
-        use crate::texture::update_imgui_texture;
-        let gl_texture = update_imgui_texture(gl, texture_id, width, height, data)?;
+        use crate::texture::{update_imgui_texture, upload_texture_data};
+
+        if texture_id.is_null() {
+            return Err(InitError::Generic(
+                "TextureId must be non-null when updating a texture".to_string(),
+            ));
+        }
+
+        let gl_texture = if let Some(gl_texture) = self.texture_map().get(texture_id) {
+            let format = self
+                .texture_map()
+                .get_texture_data(texture_id)
+                .map(TextureData::format)
+                .unwrap_or(TextureFormat::RGBA32);
+            upload_texture_data(gl, gl_texture, width, height, format, data)?;
+            gl_texture
+        } else {
+            update_imgui_texture(gl, texture_id, width, height, data)?
+        };
 
         // Update the texture mapping with modern texture management
         self.texture_map_mut()
@@ -1441,8 +1458,11 @@ impl GlowRenderer {
         format: TextureFormat,
         data: &[u8],
     ) -> InitResult<TextureId> {
-        use crate::texture::create_texture_from_rgba;
-        let gl_texture = create_texture_from_rgba(gl, width, height, data)?;
+        use crate::texture::{create_texture_from_alpha, create_texture_from_rgba};
+        let gl_texture = match format {
+            TextureFormat::RGBA32 => create_texture_from_rgba(gl, width, height, data)?,
+            TextureFormat::Alpha8 => create_texture_from_alpha(gl, width, height, data)?,
+        };
         let texture_id = self.texture_map_mut().register_texture(
             gl_texture,
             width as i32,
@@ -1475,6 +1495,9 @@ mod tests {
     use dear_imgui_rs::{
         TextureData, TextureFormat, TextureId, TextureStatus, texture::TextureRect,
     };
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static LAST_BOUND_TEXTURE: AtomicU32 = AtomicU32::new(0);
 
     fn make_test_renderer() -> GlowRenderer {
         GlowRenderer {
@@ -1506,6 +1529,71 @@ mod tests {
             framebuffer_srgb: false,
             color_gamma_override: None,
             viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    fn make_fake_gl() -> glow::Context {
+        unsafe extern "system" fn fake_gl_get_string(_name: u32) -> *const u8 {
+            b"4.6\0".as_ptr()
+        }
+        unsafe extern "system" fn fake_gl_get_string_i(_name: u32, _index: u32) -> *const u8 {
+            b"\0".as_ptr()
+        }
+        unsafe extern "system" fn fake_gl_get_integer_v(pname: u32, data: *mut i32) {
+            if data.is_null() {
+                return;
+            }
+            let value = match pname {
+                glow::ACTIVE_TEXTURE => glow::TEXTURE0 as i32,
+                glow::TEXTURE_BINDING_2D => 0,
+                glow::UNPACK_ALIGNMENT => 4,
+                _ => 0,
+            };
+            unsafe {
+                *data = value;
+            }
+        }
+
+        unsafe extern "system" fn fake_gl_active_texture(_texture: u32) {}
+        unsafe extern "system" fn fake_gl_bind_texture(_target: u32, texture: u32) {
+            if texture != 0 {
+                LAST_BOUND_TEXTURE.store(texture, Ordering::SeqCst);
+            }
+        }
+        unsafe extern "system" fn fake_gl_pixel_store_i(_pname: u32, _param: i32) {}
+        unsafe extern "system" fn fake_gl_tex_image_2d(
+            _target: u32,
+            _level: i32,
+            _internalformat: i32,
+            _width: i32,
+            _height: i32,
+            _border: i32,
+            _format: u32,
+            _type_: u32,
+            _pixels: *const std::ffi::c_void,
+        ) {
+        }
+
+        unsafe {
+            glow::Context::from_loader_function(|name| {
+                let ptr = match name {
+                    "glGetString" => fake_gl_get_string as *const () as *const std::ffi::c_void,
+                    "glGetStringi" => fake_gl_get_string_i as *const () as *const std::ffi::c_void,
+                    "glGetIntegerv" => {
+                        fake_gl_get_integer_v as *const () as *const std::ffi::c_void
+                    }
+                    "glActiveTexture" => {
+                        fake_gl_active_texture as *const () as *const std::ffi::c_void
+                    }
+                    "glBindTexture" => fake_gl_bind_texture as *const () as *const std::ffi::c_void,
+                    "glPixelStorei" => {
+                        fake_gl_pixel_store_i as *const () as *const std::ffi::c_void
+                    }
+                    "glTexImage2D" => fake_gl_tex_image_2d as *const () as *const std::ffi::c_void,
+                    _ => std::ptr::null(),
+                };
+                ptr
+            })
         }
     }
 
@@ -1582,6 +1670,24 @@ mod tests {
             .expect("destroying an unknown texture should not require an owned GL context");
 
         assert_eq!(tex.status(), TextureStatus::Destroyed);
+    }
+
+    #[test]
+    fn update_texture_with_context_uses_registered_gl_texture() {
+        let mut renderer = make_test_renderer();
+        let texture_id = TextureId::from(42u64);
+        let gl_texture = glow::NativeTexture(std::num::NonZeroU32::new(99).unwrap());
+        renderer.texture_map_mut().set(texture_id, gl_texture);
+
+        LAST_BOUND_TEXTURE.store(0, Ordering::SeqCst);
+        let gl = make_fake_gl();
+        let data = [1u8, 2, 3, 4];
+
+        renderer
+            .update_texture_with_context(&gl, texture_id, 1, 1, &data)
+            .expect("update should use the registered GL texture");
+
+        assert_eq!(LAST_BOUND_TEXTURE.load(Ordering::SeqCst), 99);
     }
 }
 

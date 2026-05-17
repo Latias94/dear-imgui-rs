@@ -99,6 +99,12 @@ Extensions
     should still use the matching multi-viewport shutdown helper to uninstall callbacks and destroy
     platform windows.
 - Backend texture feedback changes on trunk:
+  - `dear-imgui-glow::GlowRenderer::update_texture(_with_context)` now updates registered renderer
+    texture-map entries by their stored OpenGL texture handle instead of treating the public
+    `TextureId` as a raw GL texture name. Non-null unregistered ids still use the legacy raw-id
+    fallback; null texture ids now return an error.
+  - `dear-imgui-glow` convenience texture registration/update handles `TextureFormat::Alpha8` by
+    expanding to RGBA, matching the draw-data texture path.
   - `dear-imgui-wgpu::TextureUpdateResult::Destroyed.apply_to(...)` now sets Dear ImGui's
     destroy-next-frame precondition before writing `TextureStatus::Destroyed`, matching the Ash
     backend helper behavior.

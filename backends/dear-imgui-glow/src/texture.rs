@@ -208,6 +208,8 @@ pub fn create_texture_from_alpha(
     height: u32,
     data: &[u8],
 ) -> InitResult<GlTexture> {
+    let rgba_data = alpha8_to_rgba(data, width, height)?;
+
     unsafe {
         let texture = gl.create_texture().map_err(InitError::CreateTexture)?;
 
@@ -222,13 +224,13 @@ pub fn create_texture_from_alpha(
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
-            glow::RED as i32,
+            glow::RGBA as i32,
             width as i32,
             height as i32,
             0,
-            glow::RED,
+            glow::RGBA,
             glow::UNSIGNED_BYTE,
-            glow::PixelUnpackData::Slice(Some(data)),
+            glow::PixelUnpackData::Slice(Some(&rgba_data)),
         );
 
         // Set texture parameters
@@ -285,6 +287,89 @@ pub fn update_texture(
         );
         gl.bind_texture(glow::TEXTURE_2D, None);
     }
+}
+
+fn alpha8_to_rgba(data: &[u8], width: u32, height: u32) -> InitResult<Vec<u8>> {
+    let expected_len = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| InitError::Generic("Texture size overflow".to_string()))?;
+    if data.len() != expected_len {
+        return Err(InitError::Generic(format!(
+            "Alpha8 texture data size mismatch: expected {} bytes, got {}",
+            expected_len,
+            data.len()
+        )));
+    }
+
+    let mut rgba = Vec::with_capacity(expected_len * 4);
+    for &alpha in data {
+        rgba.extend_from_slice(&[255, 255, 255, alpha]);
+    }
+
+    Ok(rgba)
+}
+
+pub(crate) fn upload_texture_data(
+    gl: &Context,
+    texture: GlTexture,
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+    data: &[u8],
+) -> InitResult<()> {
+    let rgba_data;
+    let data = match format {
+        TextureFormat::RGBA32 => {
+            let expected_len = (width as usize)
+                .checked_mul(height as usize)
+                .and_then(|len| len.checked_mul(4))
+                .ok_or_else(|| InitError::Generic("Texture size overflow".to_string()))?;
+            if data.len() != expected_len {
+                return Err(InitError::Generic(format!(
+                    "RGBA texture data size mismatch: expected {} bytes, got {}",
+                    expected_len,
+                    data.len()
+                )));
+            }
+            data
+        }
+        TextureFormat::Alpha8 => {
+            rgba_data = alpha8_to_rgba(data, width, height)?;
+            &rgba_data
+        }
+    };
+
+    unsafe {
+        let last_active = u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE))
+            .ok()
+            .unwrap_or(glow::TEXTURE0);
+        let last_texture = u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
+            .ok()
+            .and_then(std::num::NonZeroU32::new)
+            .map(glow::NativeTexture);
+        let last_unpack = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
+
+        gl.active_texture(glow::TEXTURE0);
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA as i32,
+            width as i32,
+            height as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(Some(data)),
+        );
+
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
+        gl.bind_texture(glow::TEXTURE_2D, last_texture);
+        gl.active_texture(last_active);
+    }
+
+    Ok(())
 }
 
 /// Update texture from ImGui texture data (similar to ImGui_ImplOpenGL3_UpdateTexture)
@@ -372,5 +457,29 @@ pub fn update_imgui_texture(
         gl.bind_texture(glow::TEXTURE_2D, last_texture);
 
         Ok(gl_texture)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alpha8_to_rgba_expands_white_rgb_and_alpha() {
+        let rgba = alpha8_to_rgba(&[0, 64, 255], 3, 1).expect("valid alpha data");
+
+        assert_eq!(
+            rgba,
+            vec![
+                255, 255, 255, 0, //
+                255, 255, 255, 64, //
+                255, 255, 255, 255,
+            ]
+        );
+    }
+
+    #[test]
+    fn alpha8_to_rgba_rejects_size_mismatch() {
+        assert!(alpha8_to_rgba(&[0, 1], 3, 1).is_err());
     }
 }
