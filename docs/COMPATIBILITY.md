@@ -87,6 +87,11 @@ Extensions
     use panics in Rust.
   - Current-context binding policy is part of the public safe API contract documented here and in
     the crate-level migration notes.
+- Backend lifecycle changes on trunk:
+  - `dear-imgui-wgpu::WgpuRenderer::shutdown()` clears renderer-owned multi-viewport state for the
+    renderer, matching `Drop`. It makes installed callbacks no-op for that renderer, but callers
+    should still use the matching multi-viewport shutdown helper to uninstall callbacks and destroy
+    platform windows.
 
 ## History
 

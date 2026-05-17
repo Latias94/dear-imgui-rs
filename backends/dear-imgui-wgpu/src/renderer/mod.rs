@@ -1019,10 +1019,30 @@ impl WgpuRenderer {
 
     /// Shutdown the renderer
     ///
-    /// This corresponds to ImGui_ImplWGPU_Shutdown in the C++ implementation
+    /// This corresponds to ImGui_ImplWGPU_Shutdown in the C++ implementation.
+    ///
+    /// If multi-viewport support was enabled, this also makes renderer callbacks no-op for this
+    /// renderer. Call the matching multi-viewport shutdown helper when you also need to uninstall
+    /// callbacks from the ImGui context and destroy platform windows.
     pub fn shutdown(&mut self) {
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        self.clear_multi_viewport_renderer_state();
         self.invalidate_device_objects().ok();
         self.backend_data = None;
+    }
+
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    fn clear_multi_viewport_renderer_state(&mut self) {
+        // Make any installed multi-viewport callbacks become a no-op if the renderer is
+        // shut down or dropped without an explicit disable/shutdown call.
+        #[cfg(feature = "multi-viewport-winit")]
+        {
+            multi_viewport::clear_for_drop(self as *mut WgpuRenderer);
+        }
+        #[cfg(feature = "multi-viewport-sdl3")]
+        {
+            multi_viewport_sdl3::clear_for_drop(self as *mut WgpuRenderer);
+        }
     }
 }
 
@@ -1047,16 +1067,7 @@ impl Default for WgpuRenderer {
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 impl Drop for WgpuRenderer {
     fn drop(&mut self) {
-        // Make any installed multi-viewport callbacks become a no-op if the
-        // renderer is dropped without an explicit disable/shutdown call.
-        #[cfg(feature = "multi-viewport-winit")]
-        {
-            multi_viewport::clear_for_drop(self as *mut WgpuRenderer);
-        }
-        #[cfg(feature = "multi-viewport-sdl3")]
-        {
-            multi_viewport_sdl3::clear_for_drop(self as *mut WgpuRenderer);
-        }
+        self.clear_multi_viewport_renderer_state();
     }
 }
 

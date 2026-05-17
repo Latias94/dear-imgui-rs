@@ -283,6 +283,31 @@ mod tests {
         drop(ctx_a);
         drop(renderer_a);
     }
+
+    #[test]
+    fn renderer_shutdown_clears_renderer_state() {
+        let mut ctx = Context::create();
+        let raw = ctx.as_raw();
+        let mut renderer = WgpuRenderer::empty();
+
+        enable(&mut renderer, &mut ctx);
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw);
+            assert!(borrow_renderer().is_some());
+        }
+
+        renderer.shutdown();
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw);
+            assert!(borrow_renderer().is_none());
+        }
+
+        disable(&mut ctx);
+        drop(ctx);
+        drop(renderer);
+    }
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
