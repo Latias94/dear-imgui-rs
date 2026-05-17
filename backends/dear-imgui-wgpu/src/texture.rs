@@ -41,9 +41,13 @@ impl TextureUpdateResult {
             TextureUpdateResult::Updated => {
                 texture_data.set_status(TextureStatus::OK);
             }
-            TextureUpdateResult::Destroyed => {
+            TextureUpdateResult::Destroyed => unsafe {
+                // ImGui's SetStatus(Destroyed) has special semantics: if WantDestroyNextFrame is
+                // false, Destroyed may translate back to WantCreate. When honoring a requested
+                // destroy, we must set WantDestroyNextFrame first.
+                (*texture_data.as_raw_mut()).WantDestroyNextFrame = true;
                 texture_data.set_status(TextureStatus::Destroyed);
-            }
+            },
             TextureUpdateResult::Failed => {
                 texture_data.set_status(TextureStatus::Destroyed);
             }
@@ -897,14 +901,13 @@ mod tests {
         assert_eq!(tex.tex_id().id(), 42);
 
         // Destroyed -> status Destroyed
-        // ImGui's ImTextureData::SetStatus has special semantics:
-        // setting Destroyed while WantDestroyNextFrame is false will immediately flip back to WantCreate.
-        // When honoring a requested destroy, WantDestroyNextFrame is expected to be true.
-        unsafe {
-            (*tex.as_raw_mut()).WantDestroyNextFrame = true;
-        }
+        // `apply_to` owns the ImTextureData status writeback, including Dear ImGui's
+        // WantDestroyNextFrame precondition.
         TextureUpdateResult::Destroyed.apply_to(&mut tex);
         assert_eq!(tex.status(), TextureStatus::Destroyed);
+        unsafe {
+            assert!((*tex.as_raw()).WantDestroyNextFrame);
+        }
 
         // Failed -> also marks Destroyed
         // In the general case (not a requested destroy), SetStatus(Destroyed) translates to WantCreate.

@@ -48,3 +48,41 @@ impl TextureUpdateResult {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dear_imgui_rs::TextureFormat;
+
+    #[test]
+    fn texture_update_result_apply_to_sets_status_and_id() {
+        let mut tex = TextureData::new();
+
+        TextureUpdateResult::Created {
+            texture_id: TextureId::from(42u64),
+        }
+        .apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::OK);
+        assert_eq!(tex.tex_id().id(), 42);
+
+        TextureUpdateResult::Updated.apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::OK);
+        assert_eq!(tex.tex_id().id(), 42);
+
+        TextureUpdateResult::Destroyed.apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::Destroyed);
+        unsafe {
+            assert!((*tex.as_raw()).WantDestroyNextFrame);
+        }
+
+        unsafe {
+            (*tex.as_raw_mut()).WantDestroyNextFrame = false;
+        }
+        tex.create(TextureFormat::RGBA32, 1, 1);
+        TextureUpdateResult::Failed.apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::WantCreate);
+
+        TextureUpdateResult::NoAction.apply_to(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::WantCreate);
+    }
+}

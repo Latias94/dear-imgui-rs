@@ -98,6 +98,10 @@ Extensions
     renderer, matching `Drop`. It makes installed callbacks no-op for that renderer, but callers
     should still use the matching multi-viewport shutdown helper to uninstall callbacks and destroy
     platform windows.
+- Backend texture feedback changes on trunk:
+  - `dear-imgui-wgpu::TextureUpdateResult::Destroyed.apply_to(...)` now sets Dear ImGui's
+    destroy-next-frame precondition before writing `TextureStatus::Destroyed`, matching the Ash
+    backend helper behavior.
 
 ## History
 

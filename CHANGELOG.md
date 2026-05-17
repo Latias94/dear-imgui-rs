@@ -57,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-wgpu`: `WgpuRenderer::shutdown()` now clears renderer-owned multi-viewport state
     for this renderer, matching `Drop` and preventing stale callbacks from borrowing a shut-down
     renderer when users forget to disable multi-viewport support first.
+  - `dear-imgui-wgpu`: `TextureUpdateResult::Destroyed.apply_to(...)` now sets Dear ImGui's
+    destroy-next-frame precondition before marking the texture destroyed, matching the Ash backend
+    helper behavior.
 - Extensions
   - `dear-imgui-test-engine`: check the bound ImGui context liveness before safe engine methods call
     into FFI, so stale context use panics in Rust instead of reaching the upstream test engine.
