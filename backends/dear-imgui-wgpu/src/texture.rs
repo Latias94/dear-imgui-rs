@@ -41,13 +41,7 @@ impl TextureUpdateResult {
             TextureUpdateResult::Updated => {
                 texture_data.set_status(TextureStatus::OK);
             }
-            TextureUpdateResult::Destroyed => unsafe {
-                // ImGui's SetStatus(Destroyed) has special semantics: if WantDestroyNextFrame is
-                // false, Destroyed may translate back to WantCreate. When honoring a requested
-                // destroy, we must set WantDestroyNextFrame first.
-                (*texture_data.as_raw_mut()).WantDestroyNextFrame = true;
-                texture_data.set_status(TextureStatus::Destroyed);
-            },
+            TextureUpdateResult::Destroyed => mark_texture_destroyed(texture_data),
             TextureUpdateResult::Failed => {
                 texture_data.set_status(TextureStatus::Destroyed);
             }
@@ -56,6 +50,16 @@ impl TextureUpdateResult {
             }
         }
     }
+}
+
+fn mark_texture_destroyed(texture_data: &mut TextureData) {
+    unsafe {
+        // ImGui's SetStatus(Destroyed) has special semantics: if WantDestroyNextFrame is false,
+        // Destroyed may translate back to WantCreate. When honoring a requested destroy, set it
+        // before writing the final status.
+        (*texture_data.as_raw_mut()).WantDestroyNextFrame = true;
+    }
+    texture_data.set_status(TextureStatus::Destroyed);
 }
 
 /// WGPU texture resource
@@ -431,19 +435,16 @@ impl WgpuTextureManager {
         texture_data: &TextureData,
         texture_id: u64,
     ) -> RendererResult<()> {
-        // For WGPU, we recreate the texture instead of updating in place
-        // This is simpler and more reliable than trying to update existing textures
+        // For WGPU, we recreate the texture instead of updating in place.
+        // Create the replacement first so a failure does not destroy the existing texture.
         if self.contains_texture(texture_id) {
-            // Remove old texture
-            self.remove_texture(texture_id);
-
-            // Create new texture
             let new_texture_id = self.create_texture_from_data(device, queue, texture_data)?;
 
-            // Move the texture to the correct ID slot if needed
+            // Move the texture to the correct ID slot if needed.
             if new_texture_id != texture_id
                 && let Some(texture) = self.remove_texture(new_texture_id)
             {
+                self.remove_texture(texture_id);
                 self.insert_texture_with_id(texture_id, texture);
             }
 
@@ -802,7 +803,7 @@ impl WgpuTextureManager {
                         self.remove_texture(internal_id);
                         self.clear_custom_sampler_for_texture(internal_id);
                         render_resources.remove_image_bind_group(internal_id);
-                        texture_data.set_status(TextureStatus::Destroyed);
+                        mark_texture_destroyed(&mut texture_data);
                     }
                 }
                 TextureStatus::OK | TextureStatus::Destroyed => {
@@ -921,6 +922,18 @@ mod tests {
         // NoAction -> leaves state unchanged
         TextureUpdateResult::NoAction.apply_to(&mut tex);
         assert_eq!(tex.status(), TextureStatus::WantCreate);
+    }
+
+    #[test]
+    fn mark_texture_destroyed_sets_destroy_next_frame_and_status() {
+        let mut tex = TextureData::new();
+        tex.create(ImFormat::RGBA32, 1, 1);
+
+        mark_texture_destroyed(&mut tex);
+        assert_eq!(tex.status(), TextureStatus::Destroyed);
+        unsafe {
+            assert!((*tex.as_raw()).WantDestroyNextFrame);
+        }
     }
 
     #[test]

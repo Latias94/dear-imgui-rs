@@ -102,6 +102,8 @@ Extensions
   - `dear-imgui-wgpu::TextureUpdateResult::Destroyed.apply_to(...)` now sets Dear ImGui's
     destroy-next-frame precondition before writing `TextureStatus::Destroyed`, matching the Ash
     backend helper behavior.
+  - `dear-imgui-wgpu` preserves the previous GPU texture mapping if full texture recreation fails
+    during an update of an existing texture.
 
 ## History
 
