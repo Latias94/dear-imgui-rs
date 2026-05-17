@@ -1897,10 +1897,10 @@ pub mod multi_viewport {
         // Without a renderer reference there is nothing useful to do here.
     }
 
-    /// Shutdown helper that clears callbacks and destroys platform windows.
+    /// Shutdown helper that destroys platform windows and clears callbacks.
     pub fn shutdown_multi_viewport_support(context: &mut Context) {
-        disable(context);
         context.destroy_platform_windows();
+        disable(context);
     }
 
     #[cfg(test)]

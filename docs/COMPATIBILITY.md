@@ -98,6 +98,10 @@ Extensions
     renderer, matching `Drop`. It makes installed callbacks no-op for that renderer, but callers
     should still use the matching multi-viewport shutdown helper to uninstall callbacks and destroy
     platform windows.
+  - Renderer multi-viewport shutdown helpers in `dear-imgui-wgpu`, `dear-imgui-ash`, and
+    `dear-imgui-glow` now destroy platform windows before uninstalling renderer callbacks. This lets
+    Dear ImGui call renderer destroy callbacks while renderer-owned per-viewport data is still
+    reachable.
 - Backend texture feedback changes on trunk:
   - `dear-imgui-glow::GlowRenderer::update_texture(_with_context)` now updates registered renderer
     texture-map entries by their stored OpenGL texture handle instead of treating the public

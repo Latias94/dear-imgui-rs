@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-glow`: registered texture updates now resolve `TextureId` through the renderer
     texture map before touching OpenGL, and the convenience registration/update path handles
     `TextureFormat::Alpha8` by expanding to RGBA.
+  - `dear-imgui-wgpu`, `dear-imgui-ash`, and `dear-imgui-glow`: multi-viewport shutdown helpers now
+    destroy platform windows before uninstalling renderer callbacks, so renderer-owned viewport
+    resources can be released by `Renderer_DestroyWindow`.
   - `dear-imgui-sdl3`: combined platform+renderer initialization now shuts down the SDL3 platform
     backend if the OpenGL3 or SDLRenderer3 renderer initialization step fails, avoiding partially
     initialized official backend state.

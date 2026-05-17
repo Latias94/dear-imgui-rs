@@ -255,10 +255,10 @@ pub fn disable(imgui_context: &mut Context) {
     remove_renderer_state_for_context(imgui_context.as_raw());
 }
 
-/// Convenience helper that disables callbacks and destroys all platform windows.
+/// Convenience helper that destroys all platform windows and disables callbacks.
 pub fn shutdown_multi_viewport_support(context: &mut Context) {
-    disable(context);
     context.destroy_platform_windows();
+    disable(context);
 }
 
 #[cfg(test)]
