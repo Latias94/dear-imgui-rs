@@ -82,6 +82,9 @@ Extensions
     `font_atlas_mut()` / `fonts()`.
   - Clipboard callback reentrancy is guarded per `ClipboardContext`, so same-context reentry fails
     closed without blocking callbacks for independent ImGui contexts.
+  - `dear-imgui-test-engine` safe methods check the bound ImGui context liveness before FFI. Drop or
+    explicitly `shutdown()` the test engine before dropping the target `Context`; stale bound-context
+    use panics in Rust.
   - Current-context binding policy is part of the public safe API contract documented here and in
     the crate-level migration notes.
 

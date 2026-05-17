@@ -1212,6 +1212,15 @@ impl ScriptTest<'_> {
 }
 
 impl TestEngine {
+    fn assert_bound_imgui_alive(&self, caller: &str) {
+        if let Some(alive) = &self.bound_imgui_alive {
+            assert!(
+                alive.is_alive(),
+                "{caller} called after the bound dear_imgui_rs::Context was dropped"
+            );
+        }
+    }
+
     /// Creates a new test engine context.
     pub fn try_create() -> ImGuiResult<Self> {
         let raw = unsafe { sys::imgui_test_engine_create_context() };
@@ -1241,10 +1250,12 @@ impl TestEngine {
     }
 
     pub fn is_bound(&self) -> bool {
+        self.assert_bound_imgui_alive("TestEngine::is_bound()");
         unsafe { sys::imgui_test_engine_is_bound(self.raw) }
     }
 
     pub fn is_started(&self) -> bool {
+        self.assert_bound_imgui_alive("TestEngine::is_started()");
         unsafe { sys::imgui_test_engine_is_started(self.raw) }
     }
 
@@ -1259,6 +1270,7 @@ impl TestEngine {
     /// Returns an error if the engine is already bound to a different context, or if the engine
     /// was previously stopped but is still bound (call `shutdown()` to detach first).
     pub fn try_start(&mut self, imgui_ctx: &Context) -> ImGuiResult<()> {
+        self.assert_bound_imgui_alive("TestEngine::try_start()");
         let ctx = imgui_ctx.as_raw();
         if ctx.is_null() {
             return Err(ImGuiError::invalid_operation(
@@ -1301,6 +1313,7 @@ impl TestEngine {
 
     /// Stops the test coroutine and exports results, but keeps the engine bound to the ImGui context.
     pub fn stop(&mut self) {
+        self.assert_bound_imgui_alive("TestEngine::stop()");
         unsafe { sys::imgui_test_engine_stop(self.raw) };
     }
 
@@ -1309,28 +1322,26 @@ impl TestEngine {
     /// This is the most ergonomic shutdown path for Rust applications: it avoids relying on drop order
     /// between `Context` and `TestEngine`.
     pub fn shutdown(&mut self) {
-        if let Some(alive) = &self.bound_imgui_alive {
-            assert!(
-                alive.is_alive(),
-                "dear-imgui-test-engine: ImGui context has been dropped"
-            );
-        }
+        self.assert_bound_imgui_alive("TestEngine::shutdown()");
         unsafe { sys::imgui_test_engine_unbind(self.raw) };
         self.bound_imgui_ctx_raw = None;
         self.bound_imgui_alive = None;
     }
 
     pub fn post_swap(&mut self) {
+        self.assert_bound_imgui_alive("TestEngine::post_swap()");
         unsafe { sys::imgui_test_engine_post_swap(self.raw) };
     }
 
     pub fn show_windows(&mut self, _ui: &Ui, opened: Option<&mut bool>) {
+        self.assert_bound_imgui_alive("TestEngine::show_windows()");
         let ptr = opened.map_or(std::ptr::null_mut(), |b| b as *mut bool);
         unsafe { sys::imgui_test_engine_show_windows(self.raw, ptr) };
     }
 
     /// Registers a small set of built-in demo tests (useful to validate integration).
     pub fn register_default_tests(&mut self) {
+        self.assert_bound_imgui_alive("TestEngine::register_default_tests()");
         unsafe { sys::imgui_test_engine_register_default_tests(self.raw) };
     }
 
@@ -1341,6 +1352,7 @@ impl TestEngine {
     where
         F: FnOnce(&mut ScriptTest<'_>) -> ImGuiResult<()>,
     {
+        self.assert_bound_imgui_alive("TestEngine::add_script_test()");
         if category.contains('\0') {
             return Err(ImGuiError::invalid_operation(
                 "add_script_test category contained interior NUL",
@@ -1371,6 +1383,7 @@ impl TestEngine {
         filter: Option<&str>,
         run_flags: RunFlags,
     ) -> ImGuiResult<()> {
+        self.assert_bound_imgui_alive("TestEngine::queue_tests()");
         if let Some(filter) = filter {
             if filter.contains('\0') {
                 return Err(ImGuiError::invalid_operation(
@@ -1408,6 +1421,7 @@ impl TestEngine {
     /// Note: upstream asserts if queried while a test is running; our sys shim
     /// intentionally avoids aborting and will count `Running` tests as "remaining".
     pub fn result_summary(&self) -> ResultSummary {
+        self.assert_bound_imgui_alive("TestEngine::result_summary()");
         let mut raw = sys::ImGuiTestEngineResultSummary_c {
             CountTested: 0,
             CountSuccess: 0,
@@ -1422,32 +1436,39 @@ impl TestEngine {
     }
 
     pub fn is_test_queue_empty(&self) -> bool {
+        self.assert_bound_imgui_alive("TestEngine::is_test_queue_empty()");
         unsafe { sys::imgui_test_engine_is_test_queue_empty(self.raw) }
     }
 
     pub fn is_running_tests(&self) -> bool {
+        self.assert_bound_imgui_alive("TestEngine::is_running_tests()");
         unsafe { sys::imgui_test_engine_is_running_tests(self.raw) }
     }
 
     pub fn is_requesting_max_app_speed(&self) -> bool {
+        self.assert_bound_imgui_alive("TestEngine::is_requesting_max_app_speed()");
         unsafe { sys::imgui_test_engine_is_requesting_max_app_speed(self.raw) }
     }
 
     pub fn try_abort_engine(&mut self) -> bool {
+        self.assert_bound_imgui_alive("TestEngine::try_abort_engine()");
         unsafe { sys::imgui_test_engine_try_abort_engine(self.raw) }
     }
 
     pub fn abort_current_test(&mut self) {
+        self.assert_bound_imgui_alive("TestEngine::abort_current_test()");
         unsafe { sys::imgui_test_engine_abort_current_test(self.raw) };
     }
 
     pub fn set_run_speed(&mut self, speed: RunSpeed) {
+        self.assert_bound_imgui_alive("TestEngine::set_run_speed()");
         unsafe {
             sys::imgui_test_engine_set_run_speed(self.raw, speed as sys::ImGuiTestEngineRunSpeed)
         };
     }
 
     pub fn set_verbose_level(&mut self, level: VerboseLevel) {
+        self.assert_bound_imgui_alive("TestEngine::set_verbose_level()");
         unsafe {
             sys::imgui_test_engine_set_verbose_level(
                 self.raw,
@@ -1457,6 +1478,7 @@ impl TestEngine {
     }
 
     pub fn set_capture_enabled(&mut self, enabled: bool) {
+        self.assert_bound_imgui_alive("TestEngine::set_capture_enabled()");
         unsafe { sys::imgui_test_engine_set_capture_enabled(self.raw, enabled) };
     }
 
@@ -1494,5 +1516,57 @@ impl Drop for TestEngine {
             unsafe { sys::imgui_test_engine_destroy_context(self.raw) };
             self.raw = std::ptr::null_mut();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_engine_methods_reject_dropped_bound_imgui_context_before_ffi() {
+        let mut ctx = Context::create();
+        let _ = ctx.font_atlas_mut().build();
+
+        let mut engine = TestEngine::create();
+        engine.start(&ctx);
+        drop(ctx);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = engine.result_summary();
+        }));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_engine_methods_remain_available_after_explicit_shutdown() {
+        let mut ctx = Context::create();
+        let _ = ctx.font_atlas_mut().build();
+
+        let mut engine = TestEngine::create();
+        engine.start(&ctx);
+        engine.shutdown();
+        drop(ctx);
+
+        assert!(!engine.is_bound());
+        let _ = engine.result_summary();
+    }
+
+    #[test]
+    fn test_engine_try_start_rejects_rebinding_after_bound_context_drop() {
+        let mut ctx_a = Context::create();
+        let _ = ctx_a.font_atlas_mut().build();
+
+        let mut engine = TestEngine::create();
+        engine.start(&ctx_a);
+        drop(ctx_a);
+
+        let ctx_b = Context::create();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = engine.try_start(&ctx_b);
+        }));
+
+        assert!(result.is_err());
     }
 }

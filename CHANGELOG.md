@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Scope clipboard callback reentrancy protection to each `ClipboardContext` instead of using a
     process-wide guard. Same-context reentry still fails closed, while callbacks for independent
     ImGui contexts no longer block each other.
+- Extensions
+  - `dear-imgui-test-engine`: check the bound ImGui context liveness before safe engine methods call
+    into FFI, so stale context use panics in Rust instead of reaching the upstream test engine.
 
 ## [0.13.0] - 2026-05-15
 
