@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions
     on drop are now UI/current-context scoped and intentionally `!Send + !Sync`.
   - ImPlot3D `Plot3DBuilder` and `Plot3DToken` now carry the originating frame lifetime.
+- Backends and utilities
+  - `dear-app::DearAppError`, `dear_imgui_wgpu::RendererError`,
+    `dear_imgui_glow::{InitError, RenderError}`, and `dear_imgui_ash::RendererError` are now
+    `#[non_exhaustive]` and include more specific variants for common startup, render, resource,
+    and invalid-state failures.
 
 ### Changed
 

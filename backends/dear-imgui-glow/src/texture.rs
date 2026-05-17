@@ -290,15 +290,18 @@ pub fn update_texture(
 }
 
 fn alpha8_to_rgba(data: &[u8], width: u32, height: u32) -> InitResult<Vec<u8>> {
-    let expected_len = (width as usize)
-        .checked_mul(height as usize)
-        .ok_or_else(|| InitError::Generic("Texture size overflow".to_string()))?;
+    let expected_len =
+        (width as usize)
+            .checked_mul(height as usize)
+            .ok_or(InitError::TextureSizeOverflow {
+                format: TextureFormat::Alpha8,
+            })?;
     if data.len() != expected_len {
-        return Err(InitError::Generic(format!(
-            "Alpha8 texture data size mismatch: expected {} bytes, got {}",
-            expected_len,
-            data.len()
-        )));
+        return Err(InitError::TextureDataSizeMismatch {
+            format: TextureFormat::Alpha8,
+            expected: expected_len,
+            actual: data.len(),
+        });
     }
 
     let mut rgba = Vec::with_capacity(expected_len * 4);
@@ -323,13 +326,15 @@ pub(crate) fn upload_texture_data(
             let expected_len = (width as usize)
                 .checked_mul(height as usize)
                 .and_then(|len| len.checked_mul(4))
-                .ok_or_else(|| InitError::Generic("Texture size overflow".to_string()))?;
+                .ok_or(InitError::TextureSizeOverflow {
+                    format: TextureFormat::RGBA32,
+                })?;
             if data.len() != expected_len {
-                return Err(InitError::Generic(format!(
-                    "RGBA texture data size mismatch: expected {} bytes, got {}",
-                    expected_len,
-                    data.len()
-                )));
+                return Err(InitError::TextureDataSizeMismatch {
+                    format: TextureFormat::RGBA32,
+                    expected: expected_len,
+                    actual: data.len(),
+                });
             }
             data
         }
@@ -430,12 +435,10 @@ pub fn update_imgui_texture(
             texture
         } else {
             // Update existing texture
-            let texture_u32 = u32::try_from(texture_id.id()).map_err(|_| {
-                InitError::Generic("TextureId is out of range for OpenGL".to_string())
-            })?;
-            let texture_nz = std::num::NonZeroU32::new(texture_u32).ok_or_else(|| {
-                InitError::Generic("TextureId must be non-zero for OpenGL".to_string())
-            })?;
+            let texture_u32 = u32::try_from(texture_id.id())
+                .map_err(|_| InitError::TextureIdOutOfRange(texture_id.id()))?;
+            let texture_nz =
+                std::num::NonZeroU32::new(texture_u32).ok_or(InitError::NullTextureId)?;
             let texture = glow::NativeTexture(texture_nz);
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             gl.tex_image_2d(

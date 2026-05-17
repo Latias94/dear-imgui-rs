@@ -967,18 +967,16 @@ impl WgpuRenderer {
                 }
 
                 let idx_len_u32 = u32::try_from(idx_buffer.len())
-                    .map_err(|_| RendererError::Generic("index buffer too large".to_string()))?;
-                global_idx_offset =
-                    global_idx_offset.checked_add(idx_len_u32).ok_or_else(|| {
-                        RendererError::Generic("index buffer offset overflow".to_string())
-                    })?;
+                    .map_err(|_| RendererError::DrawBufferTooLarge { buffer: "index" })?;
+                global_idx_offset = global_idx_offset
+                    .checked_add(idx_len_u32)
+                    .ok_or_else(|| RendererError::DrawBufferOffsetOverflow { buffer: "index" })?;
 
                 let vtx_len_i32 = i32::try_from(vtx_buffer.len())
-                    .map_err(|_| RendererError::Generic("vertex buffer too large".to_string()))?;
-                global_vtx_offset =
-                    global_vtx_offset.checked_add(vtx_len_i32).ok_or_else(|| {
-                        RendererError::Generic("vertex buffer offset overflow".to_string())
-                    })?;
+                    .map_err(|_| RendererError::DrawBufferTooLarge { buffer: "vertex" })?;
+                global_vtx_offset = global_vtx_offset
+                    .checked_add(vtx_len_i32)
+                    .ok_or_else(|| RendererError::DrawBufferOffsetOverflow { buffer: "vertex" })?;
             }
         }
 

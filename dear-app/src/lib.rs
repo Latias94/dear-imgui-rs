@@ -46,15 +46,34 @@ use dear_implot as implot;
 use dear_implot3d as implot3d;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum DearAppError {
+    #[error("event loop error: {0}")]
+    EventLoop(#[from] winit::error::EventLoopError),
+    #[error("AppBuilder::run requires an on_frame callback")]
+    MissingFrameCallback,
+    #[error("window creation failed: {0}")]
+    WindowCreation(#[source] winit::error::OsError),
+    #[error("WGPU surface creation failed: {0}")]
+    SurfaceCreation(#[source] wgpu::CreateSurfaceError),
+    #[error("no suitable WGPU adapter found: {0}")]
+    AdapterUnavailable(#[source] wgpu::RequestAdapterError),
+    #[error("WGPU device request failed: {0}")]
+    DeviceRequest(#[source] wgpu::RequestDeviceError),
+    #[error("WGPU renderer initialization failed: {0}")]
+    RendererInit(#[source] imgui_wgpu::RendererError),
+    #[error("WGPU renderer frame preparation failed: {0}")]
+    FramePrepare(#[source] imgui_wgpu::RendererError),
+    #[error("WGPU renderer draw failed: {0}")]
+    Render(#[source] imgui_wgpu::RendererError),
     #[error("WGPU surface lost")]
     SurfaceLost,
     #[error("WGPU surface outdated")]
     SurfaceOutdated,
     #[error("WGPU surface timeout")]
     SurfaceTimeout,
-    #[error("Window creation error: {0}")]
-    WindowCreation(#[from] winit::error::EventLoopError),
+    #[error("WGPU surface validation failed while acquiring the next frame")]
+    SurfaceValidation,
     #[error("Generic error: {0}")]
     Generic(String),
 }
@@ -390,7 +409,7 @@ impl AppBuilder {
         let frame_fn = self
             .on_frame
             .take()
-            .ok_or_else(|| DearAppError::Generic("on_frame not set in AppBuilder".into()))?;
+            .ok_or(DearAppError::MissingFrameCallback)?;
         run_with_callbacks(self.cfg, self.addons, self.cbs, frame_fn)
     }
 }
@@ -563,20 +582,20 @@ impl AppWindow {
                             .with_title(cfg.window_title.clone())
                             .with_inner_size(size),
                     )
-                    .map_err(|e| DearAppError::Generic(format!("Window creation failed: {e}")))?,
+                    .map_err(DearAppError::WindowCreation)?,
             )
         };
 
         let surface = instance
             .create_surface(window.clone())
-            .map_err(|e| DearAppError::Generic(format!("Failed to create surface: {e}")))?;
+            .map_err(DearAppError::SurfaceCreation)?;
 
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: cfg.wgpu.power_preference,
             compatible_surface: Some(&surface),
             force_fallback_adapter: cfg.wgpu.force_fallback_adapter,
         }))
-        .expect("No suitable GPU adapter found");
+        .map_err(DearAppError::AdapterUnavailable)?;
 
         let device_desc = wgpu::DeviceDescriptor {
             label: cfg.wgpu.device_label.as_deref(),
@@ -585,8 +604,8 @@ impl AppWindow {
             memory_hints: cfg.wgpu.memory_hints.clone(),
             ..Default::default()
         };
-        let (device, queue) = block_on(adapter.request_device(&device_desc))
-            .map_err(|e| DearAppError::Generic(format!("request_device failed: {e}")))?;
+        let (device, queue) =
+            block_on(adapter.request_device(&device_desc)).map_err(DearAppError::DeviceRequest)?;
 
         // Surface config
         let physical_size = window.inner_size();
@@ -650,7 +669,7 @@ impl AppWindow {
         let init_info =
             imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
         let mut renderer = imgui_wgpu::WgpuRenderer::new(init_info, &mut context)
-            .map_err(|e| DearAppError::Generic(format!("Failed to init renderer: {e}")))?;
+            .map_err(DearAppError::RendererInit)?;
         renderer.set_gamma_mode(imgui_wgpu::GammaMode::Auto);
 
         // Configure IO flags & docking (never enable multi-viewport here)
@@ -807,9 +826,7 @@ impl AppWindow {
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Validation => {
-                return Err(DearAppError::Generic(
-                    "surface acquisition failed with a WGPU validation error".into(),
-                ));
+                return Err(DearAppError::SurfaceValidation);
             }
         };
 
@@ -843,11 +860,11 @@ impl AppWindow {
             self.imgui
                 .renderer
                 .new_frame()
-                .map_err(|e| DearAppError::Generic(format!("new_frame failed: {e}")))?;
+                .map_err(DearAppError::FramePrepare)?;
             self.imgui
                 .renderer
                 .render_draw_data(draw_data, &mut rpass)
-                .map_err(|e| DearAppError::Generic(format!("render_draw_data failed: {e}")))?;
+                .map_err(DearAppError::Render)?;
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -1042,5 +1059,23 @@ where
                 event_loop.set_control_flow(ControlFlow::WaitUntil(next_wake));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppBuilder, DearAppError};
+
+    #[test]
+    fn app_builder_run_requires_frame_callback_without_starting_event_loop() {
+        let err = AppBuilder::new()
+            .run()
+            .expect_err("builder without on_frame should fail before event loop startup");
+
+        assert!(matches!(err, DearAppError::MissingFrameCallback));
+        assert_eq!(
+            err.to_string(),
+            "AppBuilder::run requires an on_frame callback"
+        );
     }
 }

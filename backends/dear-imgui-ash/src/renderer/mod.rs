@@ -377,7 +377,7 @@ impl AshRenderer {
     ) -> RendererResult<Self> {
         let options = options.unwrap_or_default();
         if options.in_flight_frames == 0 {
-            return Err(RendererError::Init(
+            return Err(RendererError::InvalidRenderState(
                 "Options::in_flight_frames must be >= 1".to_string(),
             ));
         }
@@ -935,7 +935,7 @@ impl AshRenderer {
         self.process_texture_requests(draw_data)?;
 
         let Some(mesh) = self.frames.next() else {
-            return Err(RendererError::Init("frames not initialized".to_string()));
+            return Err(RendererError::FrameResourcesUnavailable);
         };
         record_draw_commands(
             &self.device,

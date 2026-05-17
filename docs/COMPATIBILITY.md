@@ -109,6 +109,12 @@ Extensions
     fallback; null texture ids now return an error.
   - `dear-imgui-glow` convenience texture registration/update handles `TextureFormat::Alpha8` by
     expanding to RGBA, matching the draw-data texture path.
+  - `dear-app` now exposes structured startup/render errors instead of using generic strings for
+    missing frame callbacks, WGPU adapter/device/surface initialization, renderer construction,
+    and frame preparation/rendering failures. `DearAppError` is now `#[non_exhaustive]`.
+  - `dear-imgui-glow`, `dear-imgui-wgpu`, and `dear-imgui-ash` now use more specific error
+    variants for common invalid-state and resource failures instead of collapsing every path into
+    a generic renderer string. Their public renderer error enums are now `#[non_exhaustive]`.
   - `dear-imgui-wgpu::TextureUpdateResult::Destroyed.apply_to(...)` now sets Dear ImGui's
     destroy-next-frame precondition before writing `TextureStatus::Destroyed`, matching the Ash
     backend helper behavior.

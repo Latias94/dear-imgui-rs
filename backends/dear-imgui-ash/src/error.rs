@@ -7,6 +7,7 @@ pub type RendererResult<T> = Result<T, RendererError>;
 
 /// Errors that can occur during Vulkan renderer initialization or rendering.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RendererError {
     /// This backend is not supported on the current compilation target.
     #[error("dear-imgui-ash is not supported on this target")]
@@ -24,6 +25,14 @@ pub enum RendererError {
     /// Initialization error.
     #[error("Initialization error: {0}")]
     Init(String),
+
+    /// Renderer options or state are invalid.
+    #[error("Invalid render state: {0}")]
+    InvalidRenderState(String),
+
+    /// Draw frame resources are unavailable.
+    #[error("Frame resources are not initialized")]
+    FrameResourcesUnavailable,
 
     /// Bad texture id (no matching descriptor set).
     #[error("Bad texture id: {0}")]

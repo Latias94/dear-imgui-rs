@@ -7,6 +7,7 @@ pub type RendererResult<T> = Result<T, RendererError>;
 
 /// Errors that can occur during rendering operations
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum RendererError {
     /// Generic error with message
     #[error("Renderer error: {0}")]
@@ -23,6 +24,14 @@ pub enum RendererError {
     /// Invalid render state
     #[error("Invalid render state: {0}")]
     InvalidRenderState(String),
+
+    /// Draw buffer length exceeds renderer index ranges.
+    #[error("{buffer} draw buffer length exceeds renderer limits")]
+    DrawBufferTooLarge { buffer: &'static str },
+
+    /// Draw buffer offset overflowed while accumulating draw lists.
+    #[error("{buffer} draw buffer offset overflow")]
+    DrawBufferOffsetOverflow { buffer: &'static str },
 
     /// Buffer creation failed
     #[error("Buffer creation failed: {0}")]

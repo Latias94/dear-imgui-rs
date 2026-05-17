@@ -128,9 +128,7 @@ impl GlowRenderer {
                 let gl_rc = std::rc::Rc::new(context);
                 Self::init_internal(Some(gl_rc.clone()), &gl_rc, imgui_context, texture_map)
             }
-            None => Err(InitError::Generic(
-                "OpenGL context is required for initialization".to_string(),
-            )),
+            None => Err(InitError::MissingGlContext),
         }
     }
 
@@ -510,9 +508,7 @@ impl GlowRenderer {
             if let Some(gl) = self.gl_context.clone() {
                 self.create_device_objects(&gl)?;
             } else {
-                return Err(RenderError::Generic(
-                    "No OpenGL context available".to_string(),
-                ));
+                return Err(RenderError::MissingGlContext);
             }
         }
         Ok(())
@@ -542,12 +538,10 @@ impl GlowRenderer {
 
     /// Render Dear ImGui draw data
     pub fn render(&mut self, draw_data: &mut DrawData) -> RenderResult<()> {
-        let gl = self.gl_context.clone().ok_or_else(|| {
-            RenderError::Generic(
-                "No OpenGL context available. Use render_with_context() for externally managed contexts."
-                    .to_string(),
-            )
-        })?;
+        let gl = self
+            .gl_context
+            .clone()
+            .ok_or(RenderError::MissingGlContext)?;
 
         // Handle texture updates first, following the original Dear ImGui OpenGL3 implementation
         let mut textures = draw_data.textures_mut();
@@ -598,9 +592,14 @@ impl GlowRenderer {
         #[cfg(feature = "bind_vertex_array_support")]
         if self.gl_version.bind_vertex_array_support() {
             unsafe {
-                self.vertex_array_object = Some(gl.create_vertex_array().map_err(|err| {
-                    RenderError::Generic(format!("Error creating vertex array object: {}", err))
-                })?);
+                self.vertex_array_object =
+                    Some(
+                        gl.create_vertex_array()
+                            .map_err(|err| RenderError::CreateResource {
+                                resource: "vertex array object",
+                                error: err,
+                            })?,
+                    );
                 gl.bind_vertex_array(self.vertex_array_object);
             }
         }
@@ -785,22 +784,28 @@ impl GlowRenderer {
     /// Create OpenGL device objects (buffers, shaders, etc.)
     pub fn create_device_objects(&mut self, gl: &Context) -> RenderResult<()> {
         if self.shaders.program.is_none() {
-            self.shaders = Shaders::new(gl, self.gl_version)
-                .map_err(|e| RenderError::Generic(format!("Failed to create shaders: {:?}", e)))?;
+            self.shaders =
+                Shaders::new(gl, self.gl_version).map_err(RenderError::DeviceObjectInit)?;
         }
 
         if self.vbo_handle.is_none() {
-            self.vbo_handle = Some(
-                unsafe { gl.create_buffer() }
-                    .map_err(|e| RenderError::Generic(format!("Failed to create VBO: {}", e)))?,
-            );
+            self.vbo_handle =
+                Some(
+                    unsafe { gl.create_buffer() }.map_err(|e| RenderError::CreateResource {
+                        resource: "VBO",
+                        error: e,
+                    })?,
+                );
         }
 
         if self.ebo_handle.is_none() {
-            self.ebo_handle = Some(
-                unsafe { gl.create_buffer() }
-                    .map_err(|e| RenderError::Generic(format!("Failed to create EBO: {}", e)))?,
-            );
+            self.ebo_handle =
+                Some(
+                    unsafe { gl.create_buffer() }.map_err(|e| RenderError::CreateResource {
+                        resource: "EBO",
+                        error: e,
+                    })?,
+                );
         }
 
         self.is_destroyed = false;
@@ -1123,12 +1128,7 @@ impl GlowRenderer {
     }
 
     fn required_gl_context(gl: Option<&Context>) -> RenderResult<&Context> {
-        gl.ok_or_else(|| {
-            RenderError::Generic(
-                "No OpenGL context available. Use render_with_context() for externally managed contexts."
-                    .to_string(),
-            )
-        })
+        gl.ok_or(RenderError::MissingGlContext)
     }
 
     /// Create a new texture from ImTextureData
@@ -1155,9 +1155,12 @@ impl GlowRenderer {
                     .map(glow::NativeTexture);
                 let last_unpack = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
 
-                let gl_texture = gl.create_texture().map_err(|e| {
-                    RenderError::Generic(format!("Failed to create texture: {}", e))
-                })?;
+                let gl_texture = gl
+                    .create_texture()
+                    .map_err(|e| RenderError::CreateResource {
+                        resource: "texture",
+                        error: e,
+                    })?;
 
                 gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture));
                 gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
@@ -1387,12 +1390,7 @@ impl GlowRenderer {
         height: u32,
         data: &[u8],
     ) -> InitResult<()> {
-        let gl = self.gl_context.clone().ok_or_else(|| {
-            InitError::Generic(
-                "No OpenGL context available. Use update_texture_with_context() for externally managed contexts."
-                    .to_string(),
-            )
-        })?;
+        let gl = self.gl_context.clone().ok_or(InitError::MissingGlContext)?;
         self.update_texture_with_context(&gl, texture_id, width, height, data)
     }
 
@@ -1408,9 +1406,7 @@ impl GlowRenderer {
         use crate::texture::{update_imgui_texture, upload_texture_data};
 
         if texture_id.is_null() {
-            return Err(InitError::Generic(
-                "TextureId must be non-null when updating a texture".to_string(),
-            ));
+            return Err(InitError::NullTextureId);
         }
 
         let gl_texture = if let Some(gl_texture) = self.texture_map().get(texture_id) {
@@ -1440,12 +1436,7 @@ impl GlowRenderer {
         format: TextureFormat,
         data: &[u8],
     ) -> InitResult<TextureId> {
-        let gl = self.gl_context.clone().ok_or_else(|| {
-            InitError::Generic(
-                "No OpenGL context available. Use register_texture_with_context() for externally managed contexts."
-                    .to_string(),
-            )
-        })?;
+        let gl = self.gl_context.clone().ok_or(InitError::MissingGlContext)?;
         self.register_texture_with_context(&gl, width, height, format, data)
     }
 

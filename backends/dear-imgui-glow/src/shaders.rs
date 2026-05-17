@@ -85,16 +85,15 @@ impl Shaders {
             let attrib_location_color_gamma = gl.get_uniform_location(program, "ColorGamma");
 
             // Get attribute locations
-            let attrib_location_vtx_pos =
-                gl.get_attrib_location(program, "Position").ok_or_else(|| {
-                    InitError::Generic("Could not find Position attribute".to_string())
-                })?;
+            let attrib_location_vtx_pos = gl
+                .get_attrib_location(program, "Position")
+                .ok_or(InitError::MissingShaderAttribute("Position"))?;
             let attrib_location_vtx_uv = gl
                 .get_attrib_location(program, "UV")
-                .ok_or_else(|| InitError::Generic("Could not find UV attribute".to_string()))?;
+                .ok_or(InitError::MissingShaderAttribute("UV"))?;
             let attrib_location_vtx_color = gl
                 .get_attrib_location(program, "Color")
-                .ok_or_else(|| InitError::Generic("Could not find Color attribute".to_string()))?;
+                .ok_or(InitError::MissingShaderAttribute("Color"))?;
 
             Ok(Self {
                 program: Some(program),
