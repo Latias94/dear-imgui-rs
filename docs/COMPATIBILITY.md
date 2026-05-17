@@ -92,6 +92,8 @@ Extensions
     renderer, matching `Drop`. It makes installed callbacks no-op for that renderer, but callers
     should still use the matching multi-viewport shutdown helper to uninstall callbacks and destroy
     platform windows.
+  - `dear-imgui-sdl3` combined platform+renderer init helpers now roll back the SDL3 platform
+    backend when the renderer backend init step fails.
   - `dear-imgui-wgpu::WgpuRenderer::shutdown()` clears renderer-owned multi-viewport state for the
     renderer, matching `Drop`. It makes installed callbacks no-op for that renderer, but callers
     should still use the matching multi-viewport shutdown helper to uninstall callbacks and destroy

@@ -150,6 +150,7 @@ pub fn init_for_opengl(
             return Err(Sdl3BackendError::Sdl3InitFailed);
         }
         if !opengl3_backend::dear_imgui_backend_opengl3_init(glsl.as_ptr()) {
+            ffi::ImGui_ImplSDL3_Shutdown_Rust();
             return Err(Sdl3BackendError::OpenGlInitFailed);
         }
     }
@@ -176,6 +177,7 @@ pub fn init_for_opengl_default(
             return Err(Sdl3BackendError::Sdl3InitFailed);
         }
         if !opengl3_backend::dear_imgui_backend_opengl3_init(std::ptr::null()) {
+            ffi::ImGui_ImplSDL3_Shutdown_Rust();
             return Err(Sdl3BackendError::OpenGlInitFailed);
         }
     }
@@ -321,6 +323,7 @@ pub fn init_for_canvas(
         if !sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_init(
             sdl_renderer as *mut std::ffi::c_void,
         ) {
+            ffi::ImGui_ImplSDL3_Shutdown_Rust();
             return Err(Sdl3BackendError::Renderer3InitFailed);
         }
     }
