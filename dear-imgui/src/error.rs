@@ -144,7 +144,7 @@ pub trait ImGuiRenderer {
     fn init(&mut self) -> Result<(), Self::Error>;
 
     /// Render the current frame
-    fn render(&mut self, draw_data: &crate::render::DrawData) -> Result<(), Self::Error>;
+    fn render(&mut self, draw_data: &mut crate::render::DrawData) -> Result<(), Self::Error>;
 
     /// Handle device lost/reset scenarios
     fn device_lost(&mut self) -> Result<(), Self::Error> {

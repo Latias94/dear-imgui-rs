@@ -1,7 +1,8 @@
 //! Image widgets
 //!
 //! Draw images from a legacy `TextureId` or from modern `TextureData` handled
-//! via `DrawData::textures()`. See crate-level docs for texture management.
+//! via `DrawData::textures_mut()` by renderer backends. See crate-level docs for texture
+//! management.
 //!
 //! Quick example (image button):
 //! ```no_run
@@ -85,16 +86,16 @@ fn im_vec4(value: [f32; 4]) -> sys::ImVec4 {
 impl Ui {
     /// Creates an image widget
     #[doc(alias = "Image")]
-    pub fn image(&self, texture: impl Into<TextureRef>, size: [f32; 2]) {
+    pub fn image<'tex>(&self, texture: impl Into<TextureRef<'tex>>, size: [f32; 2]) {
         self.image_config(texture, size).build()
     }
 
     /// Creates an image button widget
     #[doc(alias = "ImageButton")]
-    pub fn image_button(
+    pub fn image_button<'tex>(
         &self,
         str_id: impl AsRef<str>,
-        texture: impl Into<TextureRef>,
+        texture: impl Into<TextureRef<'tex>>,
         size: [f32; 2],
     ) -> bool {
         self.image_button_config(str_id.as_ref(), texture, size)
@@ -102,17 +103,21 @@ impl Ui {
     }
 
     /// Creates an image builder
-    pub fn image_config(&self, texture: impl Into<TextureRef>, size: [f32; 2]) -> Image<'_> {
+    pub fn image_config<'ui, 'tex>(
+        &'ui self,
+        texture: impl Into<TextureRef<'tex>>,
+        size: [f32; 2],
+    ) -> Image<'ui, 'tex> {
         Image::new(self, texture, size)
     }
 
     /// Creates an image button builder
-    pub fn image_button_config<'ui>(
+    pub fn image_button_config<'ui, 'tex>(
         &'ui self,
         str_id: impl Into<Cow<'ui, str>>,
-        texture: impl Into<TextureRef>,
+        texture: impl Into<TextureRef<'tex>>,
         size: [f32; 2],
-    ) -> ImageButton<'ui> {
+    ) -> ImageButton<'ui, 'tex> {
         ImageButton::new(self, str_id, texture, size)
     }
 }
@@ -120,9 +125,9 @@ impl Ui {
 /// Builder for an image widget
 #[derive(Debug)]
 #[must_use]
-pub struct Image<'ui> {
+pub struct Image<'ui, 'tex> {
     _ui: &'ui Ui,
-    texture: TextureRef,
+    texture: TextureRef<'tex>,
     size: [f32; 2],
     uv0: [f32; 2],
     uv1: [f32; 2],
@@ -130,9 +135,9 @@ pub struct Image<'ui> {
     border_color: [f32; 4],
 }
 
-impl<'ui> Image<'ui> {
+impl<'ui, 'tex> Image<'ui, 'tex> {
     /// Creates a new image builder
-    pub fn new(ui: &'ui Ui, texture: impl Into<TextureRef>, size: [f32; 2]) -> Self {
+    pub fn new(ui: &'ui Ui, texture: impl Into<TextureRef<'tex>>, size: [f32; 2]) -> Self {
         Self {
             _ui: ui,
             texture: texture.into(),
@@ -253,10 +258,10 @@ impl<'ui> Image<'ui> {
 /// Builder for an image button widget
 #[derive(Debug)]
 #[must_use]
-pub struct ImageButton<'ui> {
+pub struct ImageButton<'ui, 'tex> {
     ui: &'ui Ui,
     str_id: Cow<'ui, str>,
-    texture: TextureRef,
+    texture: TextureRef<'tex>,
     size: [f32; 2],
     uv0: [f32; 2],
     uv1: [f32; 2],
@@ -264,12 +269,12 @@ pub struct ImageButton<'ui> {
     tint_color: [f32; 4],
 }
 
-impl<'ui> ImageButton<'ui> {
+impl<'ui, 'tex> ImageButton<'ui, 'tex> {
     /// Creates a new image button builder
     pub fn new(
         ui: &'ui Ui,
         str_id: impl Into<Cow<'ui, str>>,
-        texture: impl Into<TextureRef>,
+        texture: impl Into<TextureRef<'tex>>,
         size: [f32; 2],
     ) -> Self {
         Self {

@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- Core (`dear-imgui-rs`)
+  - `TextureRef` is now `TextureRef<'tex>` for managed textures. Pass `TextureId` for legacy
+    renderer-owned handles and `&mut TextureData` / `&mut OwnedTextureData` for ImGui-managed
+    textures. `&TextureData` remains usable only as the legacy TexID path.
+  - `TextureRef::from_raw(...)` is now `unsafe` because raw `ImTextureRef` may contain an arbitrary
+    managed `ImTextureData*`.
+  - `Context::render()` returns `&mut DrawData`; renderer backends should accept mutable draw data
+    and process texture feedback through `DrawData::textures_mut()`.
+  - `DrawData::textures()` and `PlatformIo::textures()` are read-only. Mutation of texture status,
+    TexID, or update rectangles requires `textures_mut()` from mutable draw data/platform IO.
+  - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
+- Extensions
+  - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions
+    on drop are now UI/current-context scoped and intentionally `!Send + !Sync`.
+  - ImPlot3D `Plot3DBuilder` and `Plot3DToken` now carry the originating frame lifetime.
+
+### Changed
+
+- Core and extension current-context binding/drop policy is documented in
+  `docs/adr/0002-current-context-binding-policy.md`.
+- `OwnedDrawData::from(&mut DrawData)` remains available as a non-thread-safe migration bridge, but
+  detached texture-request workflows should use `render::snapshot::FrameSnapshot`.
+
 ## [0.13.0] - 2026-05-15
 
 This release upgrades the Dear ImGui stack, removes the normal-build dependency

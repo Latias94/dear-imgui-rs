@@ -5,22 +5,10 @@
 
 use crate::internal::{RawCast, RawWrapper};
 use crate::sys;
-use crate::texture::TextureId;
+use crate::texture::{TextureData, TextureId};
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::slice;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-static TEXTURE_DATA_BORROWED: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn assert_texture_data_not_borrowed() {
-    if TEXTURE_DATA_BORROWED.load(Ordering::Acquire) {
-        panic!(
-            "TextureData is already mutably borrowed; \
-             do not mix DrawData::textures()/PlatformIo::textures() with DrawData::texture()/PlatformIo::texture() calls"
-        );
-    }
-}
 
 /// All draw data to render a Dear ImGui frame.
 #[repr(C)]
@@ -98,18 +86,11 @@ impl DrawData {
         unsafe { self.cmd_lists().len() }
     }
 
-    /// Returns an iterator over the textures that need to be updated
+    /// Returns a shared iterator over textures attached to this draw data.
     ///
-    /// This is used by renderer backends to process texture creation, updates, and destruction.
-    /// Each item is an `ImTextureData*` carrying a `Status` which can be one of:
-    /// - `OK`: nothing to do.
-    /// - `WantCreate`: create a GPU texture and upload all pixels.
-    /// - `WantUpdates`: upload specified `UpdateRect` regions.
-    /// - `WantDestroy`: destroy the GPU texture (may be delayed until unused).
-    /// Most of the time this list has only 1 texture and it doesn't need any update.
-    ///
-    /// Note: items returned by this iterator provide a guarded mutable view; do not store them or
-    /// hold them across iterations.
+    /// Use this for inspection, snapshotting, or read-only request collection. Renderer backends
+    /// that need to write `TexID`/`Status` after handling texture requests must use
+    /// [`Self::textures_mut`] instead.
     pub fn textures(&self) -> TextureIterator<'_> {
         unsafe {
             if self.textures.is_null() {
@@ -120,6 +101,57 @@ impl DrawData {
                     TextureIterator::new(std::ptr::null(), std::ptr::null())
                 } else {
                     TextureIterator::new(vector.data, vector.data.add(vector.size as usize))
+                }
+            }
+        }
+    }
+
+    /// Returns a mutable cursor over textures that need to be updated.
+    ///
+    /// This is used by renderer backends to process texture creation, updates, and destruction.
+    /// Each item is an `ImTextureData*` carrying a `Status` which can be one of:
+    /// - `OK`: nothing to do.
+    /// - `WantCreate`: create a GPU texture and upload all pixels.
+    /// - `WantUpdates`: upload specified `UpdateRect` regions.
+    /// - `WantDestroy`: destroy the GPU texture (may be delayed until unused).
+    /// Most of the time this list has only 1 texture and it doesn't need any update.
+    ///
+    /// The cursor intentionally does not implement [`Iterator`]. Each mutable item is borrowed
+    /// from the cursor itself, so safe Rust cannot hold one texture update guard while asking for
+    /// the next one.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_rs::render::DrawData;
+    ///
+    /// fn shared_texture_blocks_mutable_cursor(draw_data: &mut DrawData) {
+    ///     let shared = draw_data.texture(0);
+    ///     let mut textures = draw_data.textures_mut();
+    ///     let _first = textures.next();
+    ///     drop(shared);
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_rs::render::DrawData;
+    ///
+    /// fn texture_guards_cannot_overlap(draw_data: &mut DrawData) {
+    ///     let mut textures = draw_data.textures_mut();
+    ///     let first = textures.next();
+    ///     let second = textures.next();
+    ///     drop(first);
+    ///     drop(second);
+    /// }
+    /// ```
+    pub fn textures_mut(&mut self) -> TextureMutCursor<'_> {
+        unsafe {
+            if self.textures.is_null() {
+                TextureMutCursor::new(std::ptr::null_mut(), std::ptr::null_mut())
+            } else {
+                let vector = &mut *self.textures;
+                if vector.size <= 0 || vector.data.is_null() {
+                    TextureMutCursor::new(std::ptr::null_mut(), std::ptr::null_mut())
+                } else {
+                    TextureMutCursor::new(vector.data, vector.data.add(vector.size as usize))
                 }
             }
         }
@@ -144,9 +176,8 @@ impl DrawData {
     /// Get a specific texture by index
     ///
     /// Returns None if the index is out of bounds or no textures are available.
-    pub fn texture(&self, index: usize) -> Option<&crate::texture::TextureData> {
+    pub fn texture(&self, index: usize) -> Option<&TextureData> {
         unsafe {
-            assert_texture_data_not_borrowed();
             if self.textures.is_null() {
                 return None;
             }
@@ -162,16 +193,14 @@ impl DrawData {
             if texture_ptr.is_null() {
                 return None;
             }
-            Some(crate::texture::TextureData::from_raw_ref(
-                texture_ptr as *const _,
-            ))
+            Some(TextureData::from_raw_ref(texture_ptr as *const _))
         }
     }
 
     /// Get a mutable reference to a specific texture by index
     ///
     /// Returns None if the index is out of bounds or no textures are available.
-    pub fn texture_mut(&mut self, index: usize) -> Option<&mut crate::texture::TextureData> {
+    pub fn texture_mut(&mut self, index: usize) -> Option<&mut TextureData> {
         unsafe {
             if self.textures.is_null() {
                 return None;
@@ -188,7 +217,7 @@ impl DrawData {
             if texture_ptr.is_null() {
                 return None;
             }
-            Some(crate::texture::TextureData::from_raw(texture_ptr))
+            Some(TextureData::from_raw(texture_ptr))
         }
     }
     /// Get the display position as an array
@@ -617,16 +646,16 @@ const _: [(); std::mem::align_of::<sys::ImDrawIdx>()] = [(); std::mem::align_of:
 /// A container for a heap-allocated deep copy of a `DrawData` struct.
 ///
 /// Notes on thread-safety:
-/// - This type intentionally does NOT implement `Send`/`Sync` because it currently retains
-///   a pointer to the engine-managed textures list (`ImVector<ImTextureData*>`) instead of
-///   deep-copying it. That list can be mutated by the UI thread across frames.
-/// - You may move vertices/indices to another thread by extracting them into your own buffers
-///   or by implementing a custom deep copy which snapshots the textures list as well.
+/// - This type intentionally does NOT implement `Send`/`Sync`. Although draw lists are cloned,
+///   draw commands can still carry raw texture references and backend-specific assumptions.
+/// - The context-owned texture request list is not copied. Use
+///   [`crate::render::snapshot::FrameSnapshot`] when you need texture requests or thread-safe
+///   rendering data detached from the ImGui context.
 ///
 /// The underlying copy is released when this struct is dropped.
 pub struct OwnedDrawData {
     draw_data: *mut sys::ImDrawData,
-    // Prevent Send/Sync: this struct retains a pointer to a shared textures list.
+    // Keep this conservative until OwnedDrawData has a fully specified thread-safe contract.
     _no_send_sync: PhantomData<Rc<()>>,
 }
 
@@ -697,14 +726,23 @@ impl From<&DrawData> for OwnedDrawData {
                 }
             }
 
-            // Textures list is shared, do not duplicate (renderer treats it as read-only)
-            (*result).Textures = source_ptr.Textures;
+            // The texture request list belongs to the originating ImGui context. Copying the raw
+            // pointer would let a detached OwnedDrawData expose shared TextureData references while
+            // the live context mutates the same objects through PlatformIo/DrawData.
+            (*result).Textures = std::ptr::null_mut();
 
             OwnedDrawData {
                 draw_data: result,
                 _no_send_sync: PhantomData,
             }
         }
+    }
+}
+
+impl From<&mut DrawData> for OwnedDrawData {
+    /// Construct `OwnedDrawData` from mutable draw data by reborrowing it as shared draw data.
+    fn from(value: &mut DrawData) -> Self {
+        OwnedDrawData::from(&*value)
     }
 }
 
@@ -735,7 +773,7 @@ impl Drop for OwnedDrawData {
 pub struct TextureIterator<'a> {
     ptr: *const *mut sys::ImTextureData,
     end: *const *mut sys::ImTextureData,
-    _phantom: std::marker::PhantomData<&'a crate::texture::TextureData>,
+    _phantom: PhantomData<&'a TextureData>,
 }
 
 impl<'a> TextureIterator<'a> {
@@ -752,13 +790,13 @@ impl<'a> TextureIterator<'a> {
         Self {
             ptr,
             end,
-            _phantom: std::marker::PhantomData,
+            _phantom: PhantomData,
         }
     }
 }
 
 impl<'a> Iterator for TextureIterator<'a> {
-    type Item = TextureDataMut<'a>;
+    type Item = &'a TextureData;
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.ptr < self.end {
@@ -768,14 +806,52 @@ impl<'a> Iterator for TextureIterator<'a> {
                 continue;
             }
 
-            if TEXTURE_DATA_BORROWED
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_err()
-            {
-                panic!(
-                    "TextureData is already mutably borrowed; \
-                     do not hold items from DrawData::textures()/PlatformIo::textures() across iterations"
-                );
+            return Some(unsafe { TextureData::from_raw_ref(texture_ptr as *const _) });
+        }
+
+        None
+    }
+}
+
+impl<'a> std::iter::FusedIterator for TextureIterator<'a> {}
+
+/// Mutable cursor over a texture list.
+///
+/// This cursor is the mutable counterpart to [`TextureIterator`]. It is a streaming cursor rather
+/// than a standard iterator so each returned [`TextureDataMut`] is tied to the borrow of the cursor
+/// used for that single `next()` call.
+pub struct TextureMutCursor<'a> {
+    ptr: *mut *mut sys::ImTextureData,
+    end: *mut *mut sys::ImTextureData,
+    _phantom: PhantomData<&'a mut TextureData>,
+}
+
+impl<'a> TextureMutCursor<'a> {
+    /// Create a new texture cursor from raw pointers.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the pointers are valid and that the range
+    /// [ptr, end) contains valid texture data pointers. The caller must also hold the unique
+    /// mutable borrow of the owner texture list for `'a`.
+    pub(crate) unsafe fn new(
+        ptr: *mut *mut sys::ImTextureData,
+        end: *mut *mut sys::ImTextureData,
+    ) -> Self {
+        Self {
+            ptr,
+            end,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Advance to the next non-null texture.
+    pub fn next(&mut self) -> Option<TextureDataMut<'_>> {
+        while self.ptr < self.end {
+            let texture_ptr = unsafe { *self.ptr };
+            self.ptr = unsafe { self.ptr.add(1) };
+            if texture_ptr.is_null() {
+                continue;
             }
 
             return Some(TextureDataMut {
@@ -788,35 +864,26 @@ impl<'a> Iterator for TextureIterator<'a> {
     }
 }
 
-impl<'a> std::iter::FusedIterator for TextureIterator<'a> {}
-
 /// A guarded mutable view of a single `ImTextureData`.
 ///
-/// This exists because the texture list is exposed from a shared `&DrawData` reference in order to
-/// keep renderer APIs ergonomic, but the list still needs to be mutated by the backend. The guard
-/// ensures at runtime that only one mutable view is alive at a time, preventing Rust aliasing UB.
+/// The guard is created by [`TextureMutCursor::next`] and borrows the cursor for its lifetime, so
+/// safe Rust cannot hold multiple mutable texture views from the same list at the same time.
 pub struct TextureDataMut<'a> {
     raw: *mut sys::ImTextureData,
-    _phantom: PhantomData<&'a mut crate::texture::TextureData>,
-}
-
-impl Drop for TextureDataMut<'_> {
-    fn drop(&mut self) {
-        TEXTURE_DATA_BORROWED.store(false, Ordering::Release);
-    }
+    _phantom: PhantomData<&'a mut TextureData>,
 }
 
 impl std::ops::Deref for TextureDataMut<'_> {
-    type Target = crate::texture::TextureData;
+    type Target = TextureData;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &*(self.raw as *const crate::texture::TextureData) }
+        unsafe { TextureData::from_raw_ref(self.raw as *const _) }
     }
 }
 
 impl std::ops::DerefMut for TextureDataMut<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *(self.raw as *mut crate::texture::TextureData) }
+        unsafe { TextureData::from_raw(self.raw) }
     }
 }
 
@@ -829,7 +896,7 @@ mod tests {
         let mut textures_vec: crate::internal::ImVector<*mut sys::ImTextureData> =
             crate::internal::ImVector::default();
 
-        let draw_data = DrawData {
+        let mut draw_data = DrawData {
             valid: false,
             cmd_lists_count: 0,
             total_idx_count: 0,
@@ -843,6 +910,7 @@ mod tests {
         };
 
         assert_eq!(draw_data.textures().count(), 0);
+        assert!(draw_data.textures_mut().next().is_none());
         assert_eq!(draw_data.textures_count(), 0);
 
         let mut textures_vec: crate::internal::ImVector<*mut sys::ImTextureData> =
@@ -851,7 +919,7 @@ mod tests {
                 data: std::ptr::null_mut(),
                 ..crate::internal::ImVector::default()
             };
-        let draw_data = DrawData {
+        let mut draw_data = DrawData {
             valid: false,
             cmd_lists_count: 0,
             total_idx_count: 0,
@@ -864,8 +932,50 @@ mod tests {
             textures: &mut textures_vec,
         };
         assert_eq!(draw_data.textures().count(), 0);
+        assert!(draw_data.textures_mut().next().is_none());
         assert_eq!(draw_data.textures_count(), 0);
         assert!(draw_data.texture(0).is_none());
+    }
+
+    #[test]
+    fn draw_data_textures_mut_updates_one_texture_at_a_time() {
+        let mut texture = crate::texture::TextureData::new();
+        let raw_texture = texture.as_mut().as_raw_mut();
+        let mut texture_ptrs = [raw_texture];
+        let mut textures_vec = crate::internal::ImVector {
+            size: 1,
+            capacity: 1,
+            data: texture_ptrs.as_mut_ptr(),
+        };
+
+        let mut draw_data = DrawData {
+            valid: false,
+            cmd_lists_count: 0,
+            total_idx_count: 0,
+            total_vtx_count: 0,
+            cmd_lists: crate::internal::ImVector::default(),
+            display_pos: [0.0, 0.0],
+            display_size: [0.0, 0.0],
+            framebuffer_scale: [1.0, 1.0],
+            owner_viewport: std::ptr::null_mut(),
+            textures: &mut textures_vec,
+        };
+
+        assert_eq!(draw_data.textures().count(), 1);
+        assert_eq!(
+            draw_data.texture(0).unwrap().as_raw(),
+            raw_texture.cast_const()
+        );
+
+        {
+            let mut textures = draw_data.textures_mut();
+            let mut tex = textures.next().expect("one texture should be yielded");
+            tex.set_tex_id(TextureId::new(42));
+            drop(tex);
+            assert!(textures.next().is_none());
+        }
+
+        assert_eq!(draw_data.texture(0).unwrap().tex_id().id(), 42);
     }
 
     #[test]

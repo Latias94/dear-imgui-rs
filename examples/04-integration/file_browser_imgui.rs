@@ -234,7 +234,7 @@ impl AppWindow {
             .prepare_render_with_ui(&ui, &self.window);
         let draw_data = self.imgui.context.render();
         self.imgui.renderer.new_frame()?;
-        self.imgui.renderer.render(&draw_data)?;
+        self.imgui.renderer.render(draw_data)?;
         self.surface.swap_buffers(&self.context)?;
         Ok(())
     }

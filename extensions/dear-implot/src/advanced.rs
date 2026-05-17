@@ -7,6 +7,7 @@ use crate::context::PlotScopeGuard;
 use crate::{AxisFlags, YAxis, plots::PlotError, sys};
 use std::ffi::CString;
 use std::marker::PhantomData;
+use std::rc::Rc;
 
 fn validate_size(caller: &str, size: [f32; 2]) -> Result<(), PlotError> {
     if size[0].is_finite() && size[1].is_finite() {
@@ -188,6 +189,7 @@ impl<'a> SubplotGrid<'a> {
                 _row_ratios: row_ratios,
                 _col_ratios: col_ratios,
                 _phantom: PhantomData,
+                _not_send_or_sync: PhantomData,
             })
         } else {
             Err(PlotError::PlotCreationFailed(
@@ -203,6 +205,7 @@ pub struct SubplotToken<'a> {
     _row_ratios: Option<Vec<f32>>,
     _col_ratios: Option<Vec<f32>>,
     _phantom: PhantomData<&'a ()>,
+    _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
 impl<'a> SubplotToken<'a> {
@@ -399,7 +402,10 @@ impl LegendManager {
         };
 
         if success {
-            Ok(LegendToken { _label: label_cstr })
+            Ok(LegendToken {
+                _label: label_cstr,
+                _not_send_or_sync: PhantomData,
+            })
         } else {
             Err(PlotError::PlotCreationFailed(
                 "Failed to begin legend".to_string(),
@@ -440,6 +446,7 @@ bitflags::bitflags! {
 /// Token representing an active legend
 pub struct LegendToken {
     _label: CString,
+    _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
 impl LegendToken {

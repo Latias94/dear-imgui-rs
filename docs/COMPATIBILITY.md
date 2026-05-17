@@ -66,6 +66,16 @@ Extensions
 - Next release train: TBD.
 - Main branch currently reflects post-`0.13.0` development and may move independently until the next planned release is cut.
 - Current baselines after the `0.13.0` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.13`, MSRV 1.92, and the external dependency baseline described above.
+- Safe API soundness changes on trunk:
+  - `TextureRef<'tex>` carries managed texture lifetimes; raw `TextureRef::from_raw` is unsafe.
+  - `Context::render()` and renderer APIs use `&mut DrawData` so texture feedback goes through
+    `DrawData::textures_mut()`.
+  - `DrawData::textures()` / `PlatformIo::textures()` are read-only; mutable texture access requires
+    mutable draw data or platform IO.
+  - Core and extension RAII tokens that call `End`/`Pop` on drop are UI/context-bound and
+    `!Send + !Sync`.
+  - `StateStorageToken<'ui, 'storage>` binds the lifetime of both the active UI and pushed storage.
+  - Current-context binding policy is documented in `docs/adr/0002-current-context-binding-policy.md`.
 
 ## History
 

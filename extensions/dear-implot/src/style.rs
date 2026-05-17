@@ -3,7 +3,9 @@
 use crate::sys;
 use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_two};
 use std::borrow::Cow;
+use std::marker::PhantomData;
 use std::os::raw::c_char;
+use std::rc::Rc;
 
 /// Style variables that can be modified
 #[repr(i32)]
@@ -34,6 +36,7 @@ pub enum StyleVar {
 /// Token for managing style variable changes
 pub struct StyleVarToken {
     was_popped: bool,
+    _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
 impl StyleVarToken {
@@ -62,6 +65,7 @@ impl Drop for StyleVarToken {
 /// Token for managing style color changes
 pub struct StyleColorToken {
     was_popped: bool,
+    _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
 impl StyleColorToken {
@@ -187,7 +191,10 @@ pub fn push_style_var_f32(var: StyleVar, value: f32) -> StyleVarToken {
     unsafe {
         sys::ImPlot_PushStyleVar_Float(var as sys::ImPlotStyleVar, value);
     }
-    StyleVarToken { was_popped: false }
+    StyleVarToken {
+        was_popped: false,
+        _not_send_or_sync: PhantomData,
+    }
 }
 
 /// Push an integer style variable to the stack (converted to float)
@@ -195,7 +202,10 @@ pub fn push_style_var_i32(var: StyleVar, value: i32) -> StyleVarToken {
     unsafe {
         sys::ImPlot_PushStyleVar_Int(var as sys::ImPlotStyleVar, value);
     }
-    StyleVarToken { was_popped: false }
+    StyleVarToken {
+        was_popped: false,
+        _not_send_or_sync: PhantomData,
+    }
 }
 
 /// Push a Vec2 style variable to the stack
@@ -209,7 +219,10 @@ pub fn push_style_var_vec2(var: StyleVar, value: [f32; 2]) -> StyleVarToken {
             },
         );
     }
-    StyleVarToken { was_popped: false }
+    StyleVarToken {
+        was_popped: false,
+        _not_send_or_sync: PhantomData,
+    }
 }
 
 /// Push a style color to the stack
@@ -224,7 +237,10 @@ pub fn push_style_color(element: crate::PlotColorElement, color: [f32; 4]) -> St
 
         sys::ImPlot_PushStyleColor_U32(element as sys::ImPlotCol, color_u32);
     }
-    StyleColorToken { was_popped: false }
+    StyleColorToken {
+        was_popped: false,
+        _not_send_or_sync: PhantomData,
+    }
 }
 
 /// Push a colormap to the stack

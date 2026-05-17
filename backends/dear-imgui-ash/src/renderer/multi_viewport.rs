@@ -1065,8 +1065,8 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         if raw_dd.is_null() {
             return;
         }
-        let draw_data: &dear_imgui_rs::render::DrawData =
-            dear_imgui_rs::render::DrawData::from_raw(&*raw_dd);
+        let draw_data: &mut dear_imgui_rs::render::DrawData =
+            dear_imgui_rs::render::DrawData::from_raw_mut(&mut *raw_dd);
 
         let Some(data) = viewport_user_data_mut(vpm) else {
             return;

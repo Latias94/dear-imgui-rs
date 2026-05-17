@@ -398,7 +398,7 @@ impl AppWindow {
             }
         }
         self.imgui.renderer.new_frame()?;
-        self.imgui.renderer.render(&draw_data)?;
+        self.imgui.renderer.render(draw_data)?;
         self.surface.swap_buffers(&self.context)?;
         Ok(())
     }

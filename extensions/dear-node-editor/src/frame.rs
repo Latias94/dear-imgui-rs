@@ -3,7 +3,7 @@ use crate::{
     StyleVar, StyleVarType, context::CurrentEditorGuard, from_vec2, sys, vec2, vec4,
 };
 use dear_imgui_rs::{DrawListMut, MouseButton, Ui};
-use std::{cell::Cell, ffi::CString, marker::PhantomData};
+use std::{cell::Cell, ffi::CString, marker::PhantomData, rc::Rc};
 
 /// RAII token for an active node-editor frame.
 pub struct NodeEditorFrame<'ui> {
@@ -50,6 +50,7 @@ impl<'ui> NodeEditorFrame<'ui> {
         NodeToken {
             ended: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         }
     }
 
@@ -65,6 +66,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             ui: self._ui,
             ended: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         })
     }
 
@@ -127,6 +129,7 @@ impl<'ui> NodeEditorFrame<'ui> {
         unsafe { sys::dne_begin_create(vec4(color), thickness) }.then_some(CreateSession {
             ended: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         })
     }
 
@@ -134,6 +137,7 @@ impl<'ui> NodeEditorFrame<'ui> {
         unsafe { sys::dne_begin_delete() }.then_some(DeleteSession {
             ended: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         })
     }
 
@@ -141,6 +145,7 @@ impl<'ui> NodeEditorFrame<'ui> {
         unsafe { sys::dne_begin_shortcut() }.then_some(ShortcutSession {
             ended: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         })
     }
 
@@ -155,6 +160,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             count: 1,
             popped: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         }
     }
 
@@ -170,6 +176,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             count: 1,
             popped: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         }
     }
 
@@ -185,6 +192,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             count: 1,
             popped: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         }
     }
 
@@ -200,6 +208,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             count: 1,
             popped: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         }
     }
 
@@ -475,6 +484,7 @@ impl Drop for NodeEditorFrame<'_> {
 pub struct NodeToken<'a> {
     ended: bool,
     _scope: PhantomData<&'a ()>,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl NodeToken<'_> {
@@ -483,6 +493,7 @@ impl NodeToken<'_> {
         PinToken {
             ended: false,
             _scope: PhantomData,
+            _not_send_sync: PhantomData,
         }
     }
 
@@ -514,6 +525,7 @@ impl Drop for NodeToken<'_> {
 pub struct PinToken<'a> {
     ended: bool,
     _scope: PhantomData<&'a ()>,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl PinToken<'_> {
@@ -564,6 +576,7 @@ pub struct GroupHintToken<'a> {
     ui: &'a Ui,
     ended: bool,
     _scope: PhantomData<&'a ()>,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl<'a> GroupHintToken<'a> {
@@ -631,6 +644,7 @@ impl Drop for SuspensionToken<'_> {
 pub struct CreateSession<'a> {
     ended: bool,
     _scope: PhantomData<&'a ()>,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl CreateSession<'_> {
@@ -720,6 +734,7 @@ impl Drop for CreateSession<'_> {
 pub struct DeleteSession<'a> {
     ended: bool,
     _scope: PhantomData<&'a ()>,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl DeleteSession<'_> {
@@ -768,6 +783,7 @@ impl Drop for DeleteSession<'_> {
 pub struct ShortcutSession<'a> {
     ended: bool,
     _scope: PhantomData<&'a ()>,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl ShortcutSession<'_> {
@@ -831,6 +847,7 @@ pub struct StyleColorToken<'a> {
     count: i32,
     popped: bool,
     _scope: PhantomData<&'a ()>,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl StyleColorToken<'_> {
@@ -856,6 +873,7 @@ pub struct StyleVarToken<'a> {
     count: i32,
     popped: bool,
     _scope: PhantomData<&'a ()>,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl StyleVarToken<'_> {

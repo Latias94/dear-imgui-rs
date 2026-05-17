@@ -527,7 +527,7 @@ impl GlowRenderer {
     }
 
     /// Render Dear ImGui draw data
-    pub fn render(&mut self, draw_data: &DrawData) -> RenderResult<()> {
+    pub fn render(&mut self, draw_data: &mut DrawData) -> RenderResult<()> {
         let gl = self.gl_context.clone().ok_or_else(|| {
             RenderError::Generic(
                 "No OpenGL context available. Use render_with_context() for externally managed contexts."
@@ -536,23 +536,31 @@ impl GlowRenderer {
         })?;
 
         // Handle texture updates first, following the original Dear ImGui OpenGL3 implementation
-        for mut texture_data in draw_data.textures() {
+        let mut textures = draw_data.textures_mut();
+        while let Some(mut texture_data) = textures.next() {
             if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
                 self.update_texture_from_data(Some(&gl), &mut *texture_data)?;
             }
         }
+        drop(textures);
 
         self.render_internal(&gl, draw_data)
     }
 
     /// Advanced render method with external OpenGL context
-    pub fn render_with_context(&mut self, gl: &Context, draw_data: &DrawData) -> RenderResult<()> {
+    pub fn render_with_context(
+        &mut self,
+        gl: &Context,
+        draw_data: &mut DrawData,
+    ) -> RenderResult<()> {
         // Handle texture updates first
-        for mut texture_data in draw_data.textures() {
+        let mut textures = draw_data.textures_mut();
+        while let Some(mut texture_data) = textures.next() {
             if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
                 self.update_texture_from_data(Some(gl), &mut *texture_data)?;
             }
         }
+        drop(textures);
 
         self.render_internal(gl, draw_data)
     }
@@ -1948,8 +1956,8 @@ pub mod multi_viewport {
             if !vp_ref.DrawData.is_null() {
                 // Safety: DrawData pointer is owned by Dear ImGui for the duration
                 // of this callback.
-                let raw_dd: &sys::ImDrawData = unsafe { &*vp_ref.DrawData };
-                let draw_data: &DrawData = unsafe { DrawData::from_raw(raw_dd) };
+                let raw_dd: &mut sys::ImDrawData = unsafe { &mut *vp_ref.DrawData };
+                let draw_data: &mut DrawData = unsafe { DrawData::from_raw_mut(raw_dd) };
 
                 if let Err(err) = renderer.render_with_context(gl, draw_data) {
                     eprintln!("dear-imgui-glow: error rendering viewport: {:?}", err);

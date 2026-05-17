@@ -39,3 +39,31 @@ fn state_storage_helpers_no_panic() {
     ui.set_next_item_storage_id(ui.get_id("item"));
     let _ = ui.button("B");
 }
+
+#[test]
+fn state_storage_token_restores_previous_storage() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    {
+        let io = ctx.io_mut();
+        io.set_display_size([800.0, 600.0]);
+        io.set_delta_time(1.0 / 60.0);
+    }
+    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+    let ui = ctx.frame();
+    ui.window("storage restore").build(|| {
+        let original = ui.state_storage().as_raw();
+        let mut owned = imgui::OwnedStateStorage::new();
+        let replacement = owned.as_raw_mut();
+
+        {
+            let _token = ui.push_state_storage(owned.as_mut());
+            assert_eq!(ui.state_storage().as_raw(), replacement);
+        }
+
+        assert_eq!(ui.state_storage().as_raw(), original);
+    });
+}

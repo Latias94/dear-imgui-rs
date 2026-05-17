@@ -606,8 +606,8 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
             return;
         }
         // SAFETY: Dear ImGui guarantees `raw_dd` is valid during render callbacks.
-        let draw_data: &dear_imgui_rs::render::DrawData =
-            dear_imgui_rs::render::DrawData::from_raw(&*raw_dd);
+        let draw_data: &mut dear_imgui_rs::render::DrawData =
+            dear_imgui_rs::render::DrawData::from_raw_mut(&mut *raw_dd);
 
         if let Some(data) = viewport_user_data_mut(vpm) {
             let fb_w = data.config.width;
@@ -702,7 +702,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                     });
 
                     if let Err(e) = renderer.render_draw_data_with_fb_size_ex(
-                        &draw_data,
+                        draw_data,
                         &mut render_pass,
                         fb_w,
                         fb_h,

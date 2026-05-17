@@ -502,7 +502,7 @@ impl AppWindow {
             self.vk.swapchain.framebuffers[image_index as usize],
             self.vk.swapchain.extent,
             self.imgui.clear_color,
-            |cmd| self.imgui.renderer.cmd_draw(cmd, &draw_data),
+            |cmd| self.imgui.renderer.cmd_draw(cmd, draw_data),
         )?;
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];

@@ -3,7 +3,7 @@
 //! Dear ImGui provides a per-window key/value storage (`ImGuiStorage`) that is
 //! used by many widgets and can also be used by custom widgets to persist state.
 //!
-use crate::{Id, sys};
+use crate::{Id, Ui, sys};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
@@ -100,11 +100,12 @@ impl Drop for OwnedStateStorage {
 
 /// RAII token that restores the previous state storage on drop.
 #[must_use]
-pub struct StateStorageToken {
+pub struct StateStorageToken<'ui, 'storage> {
     prev: *mut sys::ImGuiStorage,
+    _marker: PhantomData<(&'ui Ui, &'storage mut sys::ImGuiStorage)>,
 }
 
-impl Drop for StateStorageToken {
+impl Drop for StateStorageToken<'_, '_> {
     fn drop(&mut self) {
         unsafe { sys::igSetStateStorage(self.prev) }
     }
@@ -119,11 +120,17 @@ impl crate::ui::Ui {
 
     /// Overrides the current state storage until the returned token is dropped.
     #[doc(alias = "SetStateStorage")]
-    pub fn push_state_storage(&self, storage: &mut sys::ImGuiStorage) -> StateStorageToken {
+    pub fn push_state_storage<'storage>(
+        &self,
+        storage: &'storage mut sys::ImGuiStorage,
+    ) -> StateStorageToken<'_, 'storage> {
         unsafe {
             let prev = sys::igGetStateStorage();
             sys::igSetStateStorage(storage as *mut sys::ImGuiStorage);
-            StateStorageToken { prev }
+            StateStorageToken {
+                prev,
+                _marker: PhantomData,
+            }
         }
     }
 

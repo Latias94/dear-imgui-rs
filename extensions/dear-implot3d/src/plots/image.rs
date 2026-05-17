@@ -2,7 +2,7 @@ use super::{Plot3D, Plot3DError};
 use crate::{Image3DFlags, Plot3DUi};
 use dear_imgui_rs::texture::TextureRef;
 
-pub struct Image3DByAxes<'a, T: Into<TextureRef> + Copy> {
+pub struct Image3DByAxes<'a, T: Into<TextureRef<'a>> + Copy> {
     pub label: &'a str,
     pub tex: T,
     pub center: [f32; 3],
@@ -14,7 +14,7 @@ pub struct Image3DByAxes<'a, T: Into<TextureRef> + Copy> {
     pub flags: Image3DFlags,
 }
 
-impl<'a, T: Into<TextureRef> + Copy> Image3DByAxes<'a, T> {
+impl<'a, T: Into<TextureRef<'a>> + Copy> Image3DByAxes<'a, T> {
     pub fn new(
         label: &'a str,
         tex: T,
@@ -65,7 +65,7 @@ impl<'a, T: Into<TextureRef> + Copy> Image3DByAxes<'a, T> {
     }
 }
 
-impl<'a, T: Into<TextureRef> + Copy> Plot3D for Image3DByAxes<'a, T> {
+impl<'a, T: Into<TextureRef<'a>> + Copy> Plot3D for Image3DByAxes<'a, T> {
     fn label(&self) -> &str {
         self.label
     }
@@ -79,7 +79,7 @@ impl<'a, T: Into<TextureRef> + Copy> Plot3D for Image3DByAxes<'a, T> {
     }
 }
 
-pub struct Image3DByCorners<'a, T: Into<TextureRef> + Copy> {
+pub struct Image3DByCorners<'a, T: Into<TextureRef<'a>> + Copy> {
     pub label: &'a str,
     pub tex: T,
     pub p0: [f32; 3],
@@ -94,7 +94,7 @@ pub struct Image3DByCorners<'a, T: Into<TextureRef> + Copy> {
     pub flags: Image3DFlags,
 }
 
-impl<'a, T: Into<TextureRef> + Copy> Image3DByCorners<'a, T> {
+impl<'a, T: Into<TextureRef<'a>> + Copy> Image3DByCorners<'a, T> {
     pub fn new(
         label: &'a str,
         tex: T,
@@ -144,7 +144,7 @@ impl<'a, T: Into<TextureRef> + Copy> Image3DByCorners<'a, T> {
     }
 }
 
-impl<'a, T: Into<TextureRef> + Copy> Plot3D for Image3DByCorners<'a, T> {
+impl<'a, T: Into<TextureRef<'a>> + Copy> Plot3D for Image3DByCorners<'a, T> {
     fn label(&self) -> &str {
         self.label
     }

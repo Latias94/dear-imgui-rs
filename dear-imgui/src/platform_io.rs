@@ -1259,12 +1259,10 @@ impl PlatformIo {
             .map(|&mut ptr| unsafe { Viewport::from_raw_mut(ptr) })
     }
 
-    /// Get an iterator over all textures managed by the platform
+    /// Get a shared iterator over all textures managed by the platform.
     ///
-    /// This is used by renderer backends during shutdown to destroy all textures.
-    ///
-    /// Note: items returned by this iterator provide a guarded mutable view; do not store them or
-    /// hold them across iterations.
+    /// Use this for inspection. Renderer backends or feedback application code that need to write
+    /// texture status or backend IDs must use [`Self::textures_mut`].
     pub fn textures(&self) -> crate::render::draw_data::TextureIterator<'_> {
         unsafe {
             let vector = &self.inner().Textures;
@@ -1276,6 +1274,28 @@ impl PlatformIo {
                 crate::render::draw_data::TextureIterator::new(std::ptr::null(), std::ptr::null())
             } else {
                 crate::render::draw_data::TextureIterator::new(vector.Data, vector.Data.add(size))
+            }
+        }
+    }
+
+    /// Get a mutable cursor over all textures managed by the platform.
+    ///
+    /// This is used on the UI thread for applying renderer feedback and during shutdown paths that
+    /// need to mutate backend texture fields.
+    pub fn textures_mut(&mut self) -> crate::render::draw_data::TextureMutCursor<'_> {
+        unsafe {
+            let vector = &mut self.inner_mut().Textures;
+            let size = match usize::try_from(vector.Size) {
+                Ok(size) => size,
+                Err(_) => 0,
+            };
+            if size == 0 || vector.Data.is_null() {
+                crate::render::draw_data::TextureMutCursor::new(
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            } else {
+                crate::render::draw_data::TextureMutCursor::new(vector.Data, vector.Data.add(size))
             }
         }
     }
@@ -1317,7 +1337,8 @@ impl PlatformIo {
         }
 
         let mut applied = 0usize;
-        for mut tex in self.textures() {
+        let mut textures = self.textures_mut();
+        while let Some(mut tex) = textures.next() {
             let uid = tex.unique_id();
             let Some(fb) = by_id.get(&uid) else { continue };
 
@@ -1342,7 +1363,6 @@ impl PlatformIo {
     /// Returns None if the index is out of bounds.
     pub fn texture(&self, index: usize) -> Option<&crate::texture::TextureData> {
         unsafe {
-            crate::render::draw_data::assert_texture_data_not_borrowed();
             let vector = &self.inner().Textures;
             let size = usize::try_from(vector.Size).ok()?;
             if size == 0 || vector.Data.is_null() {
@@ -1489,19 +1509,21 @@ mod tests {
 
         raw.Textures.Size = 0;
         raw.Textures.Data = std::ptr::null_mut();
-        let pio = PlatformIo {
+        let mut pio = PlatformIo {
             raw: UnsafeCell::new(raw),
         };
         assert_eq!(pio.textures().count(), 0);
+        assert!(pio.textures_mut().next().is_none());
         assert_eq!(pio.textures_count(), 0);
 
         let mut raw: sys::ImGuiPlatformIO = new_platform_io();
         raw.Textures.Size = 1;
         raw.Textures.Data = std::ptr::null_mut();
-        let pio = PlatformIo {
+        let mut pio = PlatformIo {
             raw: UnsafeCell::new(raw),
         };
         assert_eq!(pio.textures().count(), 0);
+        assert!(pio.textures_mut().next().is_none());
         assert_eq!(pio.textures_count(), 0);
         assert!(pio.texture(0).is_none());
     }

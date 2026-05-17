@@ -7,6 +7,7 @@
 use crate::sys;
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
+use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 fn texture_format_bytes_per_pixel(format: TextureFormat) -> i32 {
@@ -164,6 +165,9 @@ impl From<TextureId> for RawTextureId {
 /// A convenient, typed wrapper around ImGui's ImTextureRef (v1.92+)
 ///
 /// Can reference either a plain `TextureId` (legacy path) or a managed `TextureData`.
+/// Managed texture references carry the lifetime of the referenced texture data; legacy
+/// `TextureId` references can be converted into any texture-reference lifetime because they do not
+/// borrow Rust texture data.
 ///
 /// Examples
 /// - With a plain GPU handle (legacy path):
@@ -183,49 +187,90 @@ impl From<TextureId> for RawTextureId {
 /// // Fill pixels or schedule updates...
 /// ui.image(&mut *tex, [256.0, 256.0]);
 /// // The renderer backend will honor WantCreate/WantUpdates/WantDestroy
-/// // via DrawData::textures() when rendering this frame.
+/// // via DrawData::textures_mut() when rendering this frame.
 /// # }
+/// ```
+///
+/// Managed references cannot be stored beyond the texture data they point at:
+///
+/// ```compile_fail
+/// # use dear_imgui_rs::texture::{TextureData, TextureRef};
+/// let leaked: TextureRef<'static>;
+/// {
+///     let mut tex = TextureData::new();
+///     leaked = (&mut tex).into();
+/// }
+/// let _ = leaked.raw();
+/// ```
+///
+/// Raw `ImTextureRef` values can contain arbitrary managed texture pointers, so constructing this
+/// wrapper from raw data is unsafe:
+///
+/// ```compile_fail
+/// # use dear_imgui_rs::{sys, texture::TextureRef};
+/// let raw = sys::ImTextureRef {
+///     _TexData: std::ptr::null_mut(),
+///     _TexID: 0,
+/// };
+/// let _ = TextureRef::from_raw(raw);
 /// ```
 #[derive(Copy, Clone, Debug)]
 #[repr(transparent)]
-pub struct TextureRef(sys::ImTextureRef);
+pub struct TextureRef<'tex> {
+    raw: sys::ImTextureRef,
+    _marker: PhantomData<&'tex mut TextureData>,
+}
 
 // Ensure the wrapper stays layout-compatible with the sys bindings.
-const _: [(); std::mem::size_of::<sys::ImTextureRef>()] = [(); std::mem::size_of::<TextureRef>()];
-const _: [(); std::mem::align_of::<sys::ImTextureRef>()] = [(); std::mem::align_of::<TextureRef>()];
+const _: [(); std::mem::size_of::<sys::ImTextureRef>()] =
+    [(); std::mem::size_of::<TextureRef<'static>>()];
+const _: [(); std::mem::align_of::<sys::ImTextureRef>()] =
+    [(); std::mem::align_of::<TextureRef<'static>>()];
 
-impl TextureRef {
-    /// Create a texture reference from a raw ImGui texture ref
+impl<'tex> TextureRef<'tex> {
+    /// Create a texture reference from a raw ImGui texture ref.
+    ///
+    /// # Safety
+    ///
+    /// If `raw._TexData` is non-null, the caller must guarantee that it points to a valid
+    /// `ImTextureData` for the entire `'tex` lifetime and that using the resulting reference does
+    /// not violate Rust aliasing rules.
     #[inline]
-    pub fn from_raw(raw: sys::ImTextureRef) -> Self {
-        Self(raw)
+    pub unsafe fn from_raw(raw: sys::ImTextureRef) -> Self {
+        Self {
+            raw,
+            _marker: PhantomData,
+        }
     }
 
     /// Get the underlying ImGui texture ref (by value)
     #[inline]
     pub fn raw(self) -> sys::ImTextureRef {
-        self.0
+        self.raw
     }
 }
 
-impl From<TextureId> for TextureRef {
+impl<'tex> From<TextureId> for TextureRef<'tex> {
     #[inline]
     fn from(id: TextureId) -> Self {
-        TextureRef(sys::ImTextureRef {
-            _TexData: std::ptr::null_mut(),
-            _TexID: id.id() as sys::ImTextureID,
-        })
+        TextureRef {
+            raw: sys::ImTextureRef {
+                _TexData: std::ptr::null_mut(),
+                _TexID: id.id() as sys::ImTextureID,
+            },
+            _marker: PhantomData,
+        }
     }
 }
 
-impl From<u64> for TextureRef {
+impl<'tex> From<u64> for TextureRef<'tex> {
     #[inline]
     fn from(id: u64) -> Self {
         TextureRef::from(TextureId::from(id))
     }
 }
 
-impl From<&TextureData> for TextureRef {
+impl<'tex> From<&TextureData> for TextureRef<'tex> {
     #[inline]
     fn from(td: &TextureData) -> Self {
         // Safety: A shared `&TextureData` must not be used to give Dear ImGui a mutable
@@ -234,20 +279,26 @@ impl From<&TextureData> for TextureRef {
         //
         // We therefore treat `&TextureData` as a legacy reference: only forward the current
         // `TexID` value (if any). For managed textures, pass `&mut TextureData` instead.
-        TextureRef(sys::ImTextureRef {
-            _TexData: std::ptr::null_mut(),
-            _TexID: td.tex_id().id() as sys::ImTextureID,
-        })
+        TextureRef {
+            raw: sys::ImTextureRef {
+                _TexData: std::ptr::null_mut(),
+                _TexID: td.tex_id().id() as sys::ImTextureID,
+            },
+            _marker: PhantomData,
+        }
     }
 }
 
-impl From<&mut TextureData> for TextureRef {
+impl<'tex> From<&'tex mut TextureData> for TextureRef<'tex> {
     #[inline]
-    fn from(td: &mut TextureData) -> Self {
-        TextureRef(sys::ImTextureRef {
-            _TexData: td.as_raw_mut(),
-            _TexID: 0,
-        })
+    fn from(td: &'tex mut TextureData) -> Self {
+        TextureRef {
+            raw: sys::ImTextureRef {
+                _TexData: td.as_raw_mut(),
+                _TexID: 0,
+            },
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -352,7 +403,7 @@ impl From<TextureRect> for sys::ImTextureRect {
 /// This owns an `ImTextureData` instance allocated by Dear ImGui (C++) and will
 /// destroy it on drop. It dereferences to [`TextureData`] so you can call the
 /// same APIs as on borrowed texture data (e.g. items returned by
-/// `DrawData::textures()`).
+/// `DrawData::textures_mut()`).
 pub struct OwnedTextureData {
     raw: NonNull<sys::ImTextureData>,
 }
@@ -429,7 +480,7 @@ impl AsMut<TextureData> for OwnedTextureData {
 /// - Register user-created owned textures once via `Context::register_user_texture(&mut tex)`. Dear
 ///   ImGui builds `DrawData::textures()` from its internal `PlatformIO.Textures[]` list (font atlas
 ///   textures are registered by ImGui itself).
-/// - Your renderer backend iterates `DrawData::textures()` and performs the requested
+/// - Your renderer backend iterates `DrawData::textures_mut()` and performs the requested
 ///   create/update/destroy operations, then updates status to `OK`/`Destroyed`.
 /// - You can also set/get a `TexID` (e.g., GPU handle) via `set_tex_id()/tex_id()` after creation.
 ///
@@ -558,7 +609,7 @@ impl TextureData {
 
     /// Get the current texture reference for this managed texture.
     #[inline]
-    pub fn texture_ref(&mut self) -> TextureRef {
+    pub fn texture_ref(&mut self) -> TextureRef<'_> {
         unsafe { TextureRef::from_raw(sys::ImTextureData_GetTexRef(self.as_raw_mut())) }
     }
 

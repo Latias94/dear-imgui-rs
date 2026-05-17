@@ -899,7 +899,7 @@ impl AshRenderer {
     pub fn cmd_draw(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        draw_data: &dear_imgui_rs::render::DrawData,
+        draw_data: &mut dear_imgui_rs::render::DrawData,
     ) -> RendererResult<()> {
         let gamma = self.gamma();
         if !draw_data.valid() || draw_data.total_vtx_count == 0 {
@@ -930,7 +930,7 @@ impl AshRenderer {
     fn cmd_draw_with_mesh(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        draw_data: &dear_imgui_rs::render::DrawData,
+        draw_data: &mut dear_imgui_rs::render::DrawData,
         pipeline: vk::Pipeline,
         gamma: f32,
         mesh: &mut Mesh,
@@ -1002,7 +1002,7 @@ impl AshRenderer {
 
     fn process_texture_requests(
         &mut self,
-        draw_data: &dear_imgui_rs::render::DrawData,
+        draw_data: &mut dear_imgui_rs::render::DrawData,
     ) -> RendererResult<()> {
         struct PendingCreate {
             id: u64,
@@ -1027,7 +1027,8 @@ impl AshRenderer {
         let mut creates: Vec<PendingCreate> = Vec::new();
         let mut updates: Vec<PendingUpdate> = Vec::new();
 
-        for mut td in draw_data.textures() {
+        let mut textures = draw_data.textures_mut();
+        while let Some(mut td) = textures.next() {
             let status = td.status();
             let internal_id = td.tex_id().id();
             let needs_create = matches!(status, TextureStatus::WantCreate)

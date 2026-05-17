@@ -919,7 +919,7 @@ fn demo_image_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     use dear_imgui_rs::texture::TextureRef as ImgTextureRef;
 
     // Use the font atlas texture (always available) like the official demo
-    let tex_ref_opt: Option<ImgTextureRef> = unsafe {
+    let tex_ref_opt: Option<ImgTextureRef<'static>> = unsafe {
         let io = dear_imgui_rs::sys::igGetIO_Nil();
         if io.is_null() {
             None

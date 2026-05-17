@@ -58,6 +58,7 @@ pub use plots::*;
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::marker::PhantomData;
 
 fn len_i32(len: usize) -> Option<i32> {
     i32::try_from(len).ok()
@@ -481,9 +482,10 @@ impl Plot3DContextBinding {
 ///
 /// This token is returned by `Plot3DBuilder::build()` and automatically calls
 /// `ImPlot3D_EndPlot()` when it goes out of scope, ensuring proper cleanup.
-pub struct Plot3DToken {
+pub struct Plot3DToken<'ui> {
     binding: Plot3DContextBinding,
     imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
+    _lifetime: PhantomData<&'ui Ui>,
 }
 
 impl<'ui> Plot3DUi<'ui> {
@@ -537,7 +539,7 @@ impl<'ui> Plot3DUi<'ui> {
     ///     // Plot content here
     /// }
     /// ```
-    pub fn begin_plot<S: AsRef<str>>(&self, title: S) -> Plot3DBuilder {
+    pub fn begin_plot<S: AsRef<str>>(&self, title: S) -> Plot3DBuilder<'ui> {
         self.bind();
         Plot3DBuilder {
             binding: self.binding,
@@ -545,6 +547,7 @@ impl<'ui> Plot3DUi<'ui> {
             title: title.as_ref().into(),
             size: None,
             flags: Plot3DFlags::empty(),
+            _lifetime: PhantomData,
         }
     }
 
@@ -1160,7 +1163,7 @@ impl<'ui> Plot3DUi<'ui> {
     }
 }
 
-impl Drop for Plot3DToken {
+impl Drop for Plot3DToken<'_> {
     fn drop(&mut self) {
         if let Some(alive) = &self.imgui_alive {
             assert!(
@@ -1177,15 +1180,16 @@ impl Drop for Plot3DToken {
 }
 
 /// Plot builder for configuring the 3D plot
-pub struct Plot3DBuilder {
+pub struct Plot3DBuilder<'ui> {
     binding: Plot3DContextBinding,
     imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
     title: String,
     size: Option<[f32; 2]>,
     flags: Plot3DFlags,
+    _lifetime: PhantomData<&'ui Ui>,
 }
 
-impl Plot3DBuilder {
+impl<'ui> Plot3DBuilder<'ui> {
     pub fn size(mut self, size: [f32; 2]) -> Self {
         self.size = Some(size);
         self
@@ -1194,7 +1198,7 @@ impl Plot3DBuilder {
         self.flags = flags;
         self
     }
-    pub fn build(self) -> Option<Plot3DToken> {
+    pub fn build(self) -> Option<Plot3DToken<'ui>> {
         if let Some(alive) = &self.imgui_alive {
             assert!(
                 alive.is_alive(),
@@ -1227,6 +1231,7 @@ impl Plot3DBuilder {
             Some(Plot3DToken {
                 binding: self.binding,
                 imgui_alive: self.imgui_alive,
+                _lifetime: PhantomData,
             })
         } else {
             None
@@ -1525,10 +1530,11 @@ impl<'ui> Plot3DUi<'ui> {
 }
 
 /// Image by axes builder
-pub struct Image3DByAxesBuilder<'ui> {
+pub struct Image3DByAxesBuilder<'ui, 'tex> {
     _ui: &'ui Plot3DUi<'ui>,
     label: Cow<'ui, str>,
     tex_ref: sys::ImTextureRef_c,
+    _texture: PhantomData<&'tex mut dear_imgui_rs::texture::TextureData>,
     center: [f32; 3],
     axis_u: [f32; 3],
     axis_v: [f32; 3],
@@ -1540,7 +1546,7 @@ pub struct Image3DByAxesBuilder<'ui> {
     style: Plot3DItemStyle,
 }
 
-impl<'ui> Image3DByAxesBuilder<'ui> {
+impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
     pub fn uv(mut self, uv0: [f32; 2], uv1: [f32; 2]) -> Self {
         self.uv0 = uv0;
         self.uv1 = uv1;
@@ -1594,10 +1600,11 @@ impl<'ui> Image3DByAxesBuilder<'ui> {
 }
 
 /// Image by corners builder
-pub struct Image3DByCornersBuilder<'ui> {
+pub struct Image3DByCornersBuilder<'ui, 'tex> {
     _ui: &'ui Plot3DUi<'ui>,
     label: Cow<'ui, str>,
     tex_ref: sys::ImTextureRef_c,
+    _texture: PhantomData<&'tex mut dear_imgui_rs::texture::TextureData>,
     p0: [f32; 3],
     p1: [f32; 3],
     p2: [f32; 3],
@@ -1612,7 +1619,7 @@ pub struct Image3DByCornersBuilder<'ui> {
     style: Plot3DItemStyle,
 }
 
-impl<'ui> Image3DByCornersBuilder<'ui> {
+impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
     pub fn uvs(mut self, uv0: [f32; 2], uv1: [f32; 2], uv2: [f32; 2], uv3: [f32; 2]) -> Self {
         self.uv0 = uv0;
         self.uv1 = uv1;
@@ -1676,14 +1683,14 @@ impl<'ui> Image3DByCornersBuilder<'ui> {
 
 impl<'ui> Plot3DUi<'ui> {
     /// Image oriented by center and axes
-    pub fn image_by_axes<T: Into<TextureRef>>(
+    pub fn image_by_axes<'tex, T: Into<TextureRef<'tex>>>(
         &'ui self,
         label: impl Into<Cow<'ui, str>>,
         tex: T,
         center: [f32; 3],
         axis_u: [f32; 3],
         axis_v: [f32; 3],
-    ) -> Image3DByAxesBuilder<'ui> {
+    ) -> Image3DByAxesBuilder<'ui, 'tex> {
         self.bind();
         let tr = tex.into().raw();
         let tex_ref = sys::ImTextureRef_c {
@@ -1695,6 +1702,7 @@ impl<'ui> Plot3DUi<'ui> {
             _ui: self,
             label: label.into(),
             tex_ref,
+            _texture: PhantomData,
             center,
             axis_u,
             axis_v,
@@ -1708,7 +1716,7 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     /// Image by 4 corner points (p0..p3)
-    pub fn image_by_corners<T: Into<TextureRef>>(
+    pub fn image_by_corners<'tex, T: Into<TextureRef<'tex>>>(
         &'ui self,
         label: impl Into<Cow<'ui, str>>,
         tex: T,
@@ -1716,7 +1724,7 @@ impl<'ui> Plot3DUi<'ui> {
         p1: [f32; 3],
         p2: [f32; 3],
         p3: [f32; 3],
-    ) -> Image3DByCornersBuilder<'ui> {
+    ) -> Image3DByCornersBuilder<'ui, 'tex> {
         self.bind();
         let tr = tex.into().raw();
         let tex_ref = sys::ImTextureRef_c {
@@ -1728,6 +1736,7 @@ impl<'ui> Plot3DUi<'ui> {
             _ui: self,
             label: label.into(),
             tex_ref,
+            _texture: PhantomData,
             p0,
             p1,
             p2,

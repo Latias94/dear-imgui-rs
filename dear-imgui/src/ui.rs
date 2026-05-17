@@ -235,9 +235,9 @@ impl Ui {
     ///
     /// Equivalent to using `image_config(...).build_with_bg(bg, tint)` but in one call.
     #[doc(alias = "ImageWithBg")]
-    pub fn image_with_bg(
+    pub fn image_with_bg<'tex>(
         &self,
-        texture: impl Into<TextureRef>,
+        texture: impl Into<TextureRef<'tex>>,
         size: [f32; 2],
         bg_color: [f32; 4],
         tint_color: [f32; 4],

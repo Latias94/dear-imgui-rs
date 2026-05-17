@@ -679,7 +679,7 @@ impl WgpuTextureManager {
 
     /// Handle texture updates from Dear ImGui draw data
     ///
-    /// This iterates `DrawData::textures()` and applies create/update/destroy requests.
+    /// This iterates `DrawData::textures_mut()` and applies create/update/destroy requests.
     /// For `WantCreate`, we create the GPU texture, then write the generated id back into
     /// the `ImTextureData` via `set_tex_id()` and mark status `OK` (matching C++ backend).
     /// For `WantUpdates`, if a valid id is not yet assigned (first use), we create now and
@@ -688,12 +688,13 @@ impl WgpuTextureManager {
     /// subsequent draws will see the updated views.
     pub fn handle_texture_updates(
         &mut self,
-        draw_data: &dear_imgui_rs::render::DrawData,
+        draw_data: &mut dear_imgui_rs::render::DrawData,
         device: &Device,
         queue: &Queue,
         render_resources: &mut RenderResources,
     ) {
-        for mut texture_data in draw_data.textures() {
+        let mut textures = draw_data.textures_mut();
+        while let Some(mut texture_data) = textures.next() {
             let status = texture_data.status();
             let current_tex_id = texture_data.tex_id().id();
 

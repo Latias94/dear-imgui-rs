@@ -4,9 +4,9 @@
 //! following the pattern from imgui_impl_wgpu.cpp
 //!
 //! Texture Updates Flow (ImGui 1.92+)
-//! - During `Context::render()`, Dear ImGui emits a list of textures to be processed in
-//!   `DrawData::textures()` (see `dear_imgui_rs::render::DrawData::textures`). Each item is an
-//!   `ImTextureData*` with a `Status` field:
+//! - During `Context::render()`, Dear ImGui emits a list of textures to be processed with
+//!   `DrawData::textures_mut()` (see `dear_imgui_rs::render::DrawData::textures_mut`). Each item is
+//!   an `ImTextureData*` with a `Status` field:
 //!   - `WantCreate`: create a GPU texture, upload all pixels, set `TexID`, then set status `OK`.
 //!   - `WantUpdates`: upload `UpdateRect` (and any queued rects) then set `OK`.
 //!   - `WantDestroy`: schedule/destroy GPU texture; if unused for some frames, set `Destroyed`.
@@ -526,7 +526,7 @@ impl WgpuRenderer {
     /// This corresponds to ImGui_ImplWGPU_RenderDrawData in the C++ implementation
     pub fn render_draw_data(
         &mut self,
-        draw_data: &DrawData,
+        draw_data: &mut DrawData,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
@@ -550,7 +550,7 @@ impl WgpuRenderer {
 
     fn render_draw_data_ex(
         &mut self,
-        draw_data: &DrawData,
+        draw_data: &mut DrawData,
         render_pass: &mut RenderPass,
         platform_io: *mut sys::ImGuiPlatformIO,
     ) -> RendererResult<()> {
@@ -633,7 +633,7 @@ impl WgpuRenderer {
 
     pub fn render_draw_data_with_fb_size(
         &mut self,
-        draw_data: &DrawData,
+        draw_data: &mut DrawData,
         render_pass: &mut RenderPass,
         fb_width: u32,
         fb_height: u32,
@@ -678,7 +678,7 @@ impl WgpuRenderer {
     /// When `advance_frame` is `false`, we reuse the current frame resources.
     fn render_draw_data_with_fb_size_ex(
         &mut self,
-        draw_data: &DrawData,
+        draw_data: &mut DrawData,
         render_pass: &mut RenderPass,
         fb_width: u32,
         fb_height: u32,

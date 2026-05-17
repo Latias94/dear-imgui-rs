@@ -2,11 +2,22 @@
 
 use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
 use crate::{ImageFlags, ItemFlags, sys};
+use dear_imgui_rs::texture::TextureRef;
+use std::marker::PhantomData;
 
-/// Plot an image in plot coordinates using an ImTextureID
-pub struct ImagePlot<'a> {
+fn to_sys_texture_ref<'tex>(texture: impl Into<TextureRef<'tex>>) -> sys::ImTextureRef_c {
+    let texture = texture.into().raw();
+    sys::ImTextureRef_c {
+        _TexData: texture._TexData as *mut sys::ImTextureData,
+        _TexID: texture._TexID as sys::ImTextureID,
+    }
+}
+
+/// Plot an image in plot coordinates using an ImGui texture reference.
+pub struct ImagePlot<'a, 'tex> {
     label: &'a str,
-    tex_id: sys::ImTextureID,
+    tex_ref: sys::ImTextureRef_c,
+    _texture: PhantomData<&'tex mut dear_imgui_rs::texture::TextureData>,
     bounds_min: sys::ImPlotPoint,
     bounds_max: sys::ImPlotPoint,
     uv0: [f32; 2],
@@ -17,22 +28,23 @@ pub struct ImagePlot<'a> {
     item_flags: ItemFlags,
 }
 
-impl<'a> super::PlotItemStyled for ImagePlot<'a> {
+impl<'a, 'tex> super::PlotItemStyled for ImagePlot<'a, 'tex> {
     fn style_mut(&mut self) -> &mut PlotItemStyle {
         &mut self.style
     }
 }
 
-impl<'a> ImagePlot<'a> {
+impl<'a, 'tex> ImagePlot<'a, 'tex> {
     pub fn new(
         label: &'a str,
-        tex_id: sys::ImTextureID,
+        texture: impl Into<TextureRef<'tex>>,
         bounds_min: sys::ImPlotPoint,
         bounds_max: sys::ImPlotPoint,
     ) -> Self {
         Self {
             label,
-            tex_id,
+            tex_ref: to_sys_texture_ref(texture),
+            _texture: PhantomData,
             bounds_min,
             bounds_max,
             uv0: [0.0, 0.0],
@@ -69,7 +81,7 @@ impl<'a> ImagePlot<'a> {
     }
 }
 
-impl<'a> Plot for ImagePlot<'a> {
+impl<'a, 'tex> Plot for ImagePlot<'a, 'tex> {
     fn plot(&self) {
         if self.validate().is_err() {
             return;
@@ -88,10 +100,9 @@ impl<'a> Plot for ImagePlot<'a> {
             z: self.tint[2],
             w: self.tint[3],
         };
-        // Construct ImTextureRef from ImTextureID
         let tex_ref = sys::ImTextureRef_c {
-            _TexData: std::ptr::null_mut(),
-            _TexID: self.tex_id,
+            _TexData: self.tex_ref._TexData,
+            _TexID: self.tex_ref._TexID,
         };
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
@@ -120,14 +131,14 @@ impl<'a> Plot for ImagePlot<'a> {
 
 /// Convenience methods on PlotUi
 impl<'ui> crate::PlotUi<'ui> {
-    pub fn plot_image(
+    pub fn plot_image<'tex>(
         &self,
         label: &str,
-        tex_id: sys::ImTextureID,
+        texture: impl Into<TextureRef<'tex>>,
         bounds_min: sys::ImPlotPoint,
         bounds_max: sys::ImPlotPoint,
     ) -> Result<(), PlotError> {
-        let plot = ImagePlot::new(label, tex_id, bounds_min, bounds_max);
+        let plot = ImagePlot::new(label, texture, bounds_min, bounds_max);
         plot.validate()?;
         self.bind();
         plot.plot();
@@ -143,8 +154,6 @@ impl<'ui> crate::PlotUi<'ui> {
         bounds_min: sys::ImPlotPoint,
         bounds_max: sys::ImPlotPoint,
     ) -> Result<(), PlotError> {
-        // ImTextureID is ImU64 in the shared dear-imgui-sys bindings.
-        let raw: sys::ImTextureID = texture.id();
-        self.plot_image(label, raw, bounds_min, bounds_max)
+        self.plot_image(label, texture, bounds_min, bounds_max)
     }
 }

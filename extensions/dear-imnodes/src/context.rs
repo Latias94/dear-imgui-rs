@@ -92,6 +92,9 @@ impl ImGuiContextGuard {
         let prev = unsafe { imgui_sys::igGetCurrentContext() };
         let restore = prev != ctx;
         unsafe {
+            if restore {
+                imgui_sys::igSetCurrentContext(ctx);
+            }
             sys::imnodes_SetImGuiContext(ctx);
         }
         Self { prev, restore }
@@ -101,7 +104,10 @@ impl ImGuiContextGuard {
 impl Drop for ImGuiContextGuard {
     fn drop(&mut self) {
         if self.restore {
-            unsafe { imgui_sys::igSetCurrentContext(self.prev) };
+            unsafe {
+                imgui_sys::igSetCurrentContext(self.prev);
+                sys::imnodes_SetImGuiContext(self.prev);
+            };
         }
     }
 }

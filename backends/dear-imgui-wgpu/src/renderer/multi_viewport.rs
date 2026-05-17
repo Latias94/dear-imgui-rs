@@ -615,8 +615,8 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
         }
         // SAFETY: Dear ImGui guarantees that during RenderPlatformWindowsDefault, draw_data()
         // returns a valid ImDrawData pointer for each viewport being rendered.
-        let draw_data: &dear_imgui_rs::render::DrawData =
-            dear_imgui_rs::render::DrawData::from_raw(&*raw_dd);
+        let draw_data: &mut dear_imgui_rs::render::DrawData =
+            dear_imgui_rs::render::DrawData::from_raw_mut(&mut *raw_dd);
         if let Some(data) = viewport_user_data_mut(vpm) {
             // Targeted debug log: only print on size/scale change or mismatch.
             #[cfg(feature = "mv-log")]
@@ -740,7 +740,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                     // Reuse existing draw path with explicit framebuffer size override, but do
                     // not advance frame index: we already advanced it for the main window.
                     if let Err(e) = renderer.render_draw_data_with_fb_size_ex(
-                        &draw_data,
+                        draw_data,
                         &mut render_pass,
                         fb_w,
                         fb_h,

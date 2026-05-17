@@ -320,7 +320,7 @@ impl_wrapped_plot3d_item_flagged!(crate::plots::Mesh3D<'_>);
 
 impl<'a, T> Plot3DItemStyled for crate::plots::Image3DByAxes<'a, T>
 where
-    T: Into<TextureRef> + Copy,
+    T: Into<TextureRef<'a>> + Copy,
 {
     type Output = StyledPlot3D<Self>;
 
@@ -340,7 +340,7 @@ where
 
 impl<'a, T> Plot3DItemFlagged for crate::plots::Image3DByAxes<'a, T>
 where
-    T: Into<TextureRef> + Copy,
+    T: Into<TextureRef<'a>> + Copy,
 {
     type Output = StyledPlot3D<Self>;
 
@@ -360,7 +360,7 @@ where
 
 impl<'a, T> Plot3DItemStyled for crate::plots::Image3DByCorners<'a, T>
 where
-    T: Into<TextureRef> + Copy,
+    T: Into<TextureRef<'a>> + Copy,
 {
     type Output = StyledPlot3D<Self>;
 
@@ -380,7 +380,7 @@ where
 
 impl<'a, T> Plot3DItemFlagged for crate::plots::Image3DByCorners<'a, T>
 where
-    T: Into<TextureRef> + Copy,
+    T: Into<TextureRef<'a>> + Copy,
 {
     type Output = StyledPlot3D<Self>;
 
@@ -431,12 +431,12 @@ macro_rules! impl_builder_plot3d_item_flagged {
 }
 
 impl_builder_plot3d_item_styled!(crate::Surface3DBuilder<'_>);
-impl_builder_plot3d_item_styled!(crate::Image3DByAxesBuilder<'_>);
-impl_builder_plot3d_item_styled!(crate::Image3DByCornersBuilder<'_>);
+impl_builder_plot3d_item_styled!(crate::Image3DByAxesBuilder<'_, '_>);
+impl_builder_plot3d_item_styled!(crate::Image3DByCornersBuilder<'_, '_>);
 impl_builder_plot3d_item_styled!(crate::Mesh3DBuilder<'_>);
 impl_builder_plot3d_item_flagged!(crate::Surface3DBuilder<'_>);
-impl_builder_plot3d_item_flagged!(crate::Image3DByAxesBuilder<'_>);
-impl_builder_plot3d_item_flagged!(crate::Image3DByCornersBuilder<'_>);
+impl_builder_plot3d_item_flagged!(crate::Image3DByAxesBuilder<'_, '_>);
+impl_builder_plot3d_item_flagged!(crate::Image3DByCornersBuilder<'_, '_>);
 impl_builder_plot3d_item_flagged!(crate::Mesh3DBuilder<'_>);
 
 #[cfg(test)]

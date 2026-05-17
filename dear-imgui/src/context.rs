@@ -419,11 +419,14 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         f(ui)
     }
 
-    /// Renders the frame and returns a reference to the resulting draw data
+    /// Renders the frame and returns a mutable reference to the resulting draw data
     ///
     /// This finalizes the Dear ImGui frame and prepares all draw data for rendering.
     /// The returned draw data contains all the information needed to render the frame.
-    pub fn render(&mut self) -> &crate::render::DrawData {
+    ///
+    /// Renderer backends receive mutable draw data because ImGui 1.92 texture requests require
+    /// backends to write `TexID`/`Status` feedback into `ImTextureData`.
+    pub fn render(&mut self) -> &mut crate::render::DrawData {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::render()");
 
@@ -433,7 +436,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
             if dd.is_null() {
                 panic!("Context::render() returned null draw data");
             }
-            &*(dd as *const crate::render::DrawData)
+            &mut *(dd as *mut crate::render::DrawData)
         }
     }
 
@@ -451,6 +454,26 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                 None
             } else {
                 let data = &*(draw_data as *const crate::render::DrawData);
+                if data.valid() { Some(data) } else { None }
+            }
+        }
+    }
+
+    /// Gets mutable draw data for the current frame.
+    ///
+    /// This returns the draw data without calling render. Only valid after `render()` has been
+    /// called and before the next `new_frame()`. Use this when a renderer needs to process texture
+    /// updates after draw data has already been produced.
+    pub fn draw_data_mut(&mut self) -> Option<&mut crate::render::DrawData> {
+        let _guard = CTX_MUTEX.lock();
+        self.assert_current_context("Context::draw_data_mut()");
+
+        unsafe {
+            let draw_data = sys::igGetDrawData();
+            if draw_data.is_null() {
+                None
+            } else {
+                let data = &mut *(draw_data as *mut crate::render::DrawData);
                 if data.valid() { Some(data) } else { None }
             }
         }

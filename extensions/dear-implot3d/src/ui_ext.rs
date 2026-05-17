@@ -14,7 +14,7 @@ impl ImPlot3DExt for Ui {
 
 impl<'ui> Plot3DUi<'ui> {
     /// Convenience builder entry from Ui
-    pub fn plot3d<S: AsRef<str>>(&self, title: S) -> Plot3DBuilder {
+    pub fn plot3d<S: AsRef<str>>(&self, title: S) -> Plot3DBuilder<'ui> {
         self.begin_plot(title)
     }
 }

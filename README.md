@@ -73,6 +73,34 @@ let _draw_data = ctx.render();
 // Tip: For fallible creation, use `Context::try_create()`
 ```
 
+## Migration Notes
+
+The current safe API intentionally encodes more of Dear ImGui's FFI invariants in Rust types.
+Some source breaks are deliberate because preserving the old shape would keep unsound safe code
+compilable.
+
+- Texture refs now carry lifetimes: pass `TextureId` for legacy renderer-owned handles, or pass
+  `&mut TextureData` / `&mut OwnedTextureData` for ImGui-managed textures. `&TextureData` is treated
+  as the legacy TexID path only and does not pass a mutable managed `_TexData` pointer to ImGui.
+- `TextureRef::from_raw(...)` is `unsafe`. Raw `ImTextureRef` can contain an arbitrary
+  `ImTextureData*`, so callers must prove that pointer remains valid and does not violate Rust
+  aliasing.
+- `Context::render()` returns `&mut DrawData`. Renderer entry points should accept mutable draw
+  data and process texture requests with the streaming `draw_data.textures_mut()` cursor.
+- `DrawData::textures()` and `PlatformIo::textures()` are read-only. Code that updates texture
+  status, TexID, or upload rectangles must use `textures_mut()` from a mutable draw data/platform IO
+  reference.
+- `OwnedDrawData::from(&mut draw_data)` remains available as a migration bridge, but detached,
+  thread-safe rendering should use `render::snapshot::FrameSnapshot` instead of carrying live
+  context texture requests.
+- RAII scope tokens that call ImGui or extension `End`/`Pop` functions on drop are UI/context-bound
+  and intentionally `!Send + !Sync`. End/pop them on the same UI thread and context where they were
+  created.
+- `StateStorageToken<'ui, 'storage>` now borrows both the active `Ui` and the pushed storage. Keep
+  the `OwnedStateStorage` alive until the token is dropped.
+- Extension contexts follow the same rule: safe methods bind or assert against the owning current
+  ImGui/extension context, not whichever raw C context happened to be current.
+
 ## Examples
 
 ```bash

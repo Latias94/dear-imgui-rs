@@ -1153,6 +1153,7 @@ dependencies = [
  "dear-imgui-sys",
  "dear-implot3d-sys",
  "mint",
+ "static_assertions",
 ]
 
 [[package]]

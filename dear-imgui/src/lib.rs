@@ -67,7 +67,7 @@
 //! let tex_id = texture::TextureId::new(0x1234);
 //! ui.image(tex_id, [64.0, 64.0]);
 //!
-//! // 2) Managed texture (created/updated/destroyed via DrawData::textures())
+//! // 2) Managed texture (created/updated/destroyed via DrawData::textures_mut())
 //! let mut tex = texture::TextureData::new();
 //! tex.create(texture::TextureFormat::RGBA32, 256, 256);
 //! // fill pixels / request updates ...
@@ -75,18 +75,34 @@
 //! # }
 //! ```
 //!
-//! Note: `DrawData::textures()` is built from ImGui's internal `PlatformIO.Textures[]` list. If you
-//! create `OwnedTextureData` yourself (as above), call `Context::register_user_texture(&mut tex)` once
-//! to register it, otherwise renderer backends may not receive texture requests for it.
+//! `TextureRef<'tex>` carries the lifetime of managed texture data. Passing `&mut TextureData`
+//! gives ImGui a managed `ImTextureData*` for the frame; passing `TextureId` keeps the legacy
+//! value-handle path. Passing `&TextureData` is intentionally treated as legacy TexID-only access,
+//! because a shared Rust borrow must not let ImGui or a renderer mutate the underlying texture data.
 //!
-//! Lifetime note: when using `&TextureData`, ensure it remains alive through rendering of the frame.
+//! Note: `DrawData::textures()` and `DrawData::textures_mut()` are built from ImGui's internal
+//! `PlatformIO.Textures[]` list. If you create `OwnedTextureData` yourself (as above), call
+//! `Context::register_user_texture(&mut tex)` once to register it, otherwise renderer backends may
+//! not receive texture requests for it.
+//!
+//! Raw `ImTextureRef` conversion is unsafe:
+//!
+//! ```no_run
+//! # use dear_imgui_rs::{sys, texture::TextureRef};
+//! # fn demo(raw: sys::ImTextureRef) {
+//! // Safety: caller must prove any raw _TexData pointer remains valid for the chosen lifetime.
+//! let tex = unsafe { TextureRef::from_raw(raw) };
+//! let _ = tex.raw();
+//! # }
+//! ```
 //!
 //! ### Texture Management Guide
 //!
 //! - Concepts:
 //!   - `TextureId`: legacy plain handle (e.g., GL texture name, Vk descriptor).
 //!   - `TextureData`: managed CPU-side description with status flags and pixel buffer.
-//!   - `TextureRef`: a small wrapper used by widgets/drawlist, constructed from either of the above.
+//!   - `TextureRef<'tex>`: a small wrapper used by widgets/drawlist, constructed from either of
+//!     the above. Managed refs borrow texture data; legacy ids do not.
 //! - Basic flow:
 //!   1. Create `TextureData` and call `create(format, w, h)` to allocate pixels.
 //!   2. Fill/modify pixels; call `set_status(WantCreate)` for initial upload, or `WantUpdates` with
@@ -94,7 +110,7 @@
 //!      marks an update.
 //!   3. Register user-created `OwnedTextureData` once via `Context::register_user_texture(&mut tex)`.
 //!   4. Use the texture in UI via `ui.image(&mut tex, size)` or drawlist APIs.
-//!   5. In your renderer, during `render()`, iterate `DrawData::textures()` and honor the requests
+//!   5. In your renderer, during `render()`, iterate `DrawData::textures_mut()` and honor the requests
 //!      (Create/Update/Destroy), then set status back to `OK`/`Destroyed`.
 //! - Alternatives: when you already have a GPU handle, pass `TextureId` directly.
 //!
@@ -102,10 +118,13 @@
 //!
 //! When integrating a renderer backend (WGPU, OpenGL, etc.) with ImGui 1.92+:
 //! - Set `BackendFlags::RENDERER_HAS_TEXTURES` on the ImGui `Io` before building the font atlas.
-//! - Each frame, iterate `DrawData::textures()` and honor all requests:
+//! - Treat `Context::render()` as producing mutable draw data: renderer APIs should take
+//!   `&mut render::DrawData` so they can write texture feedback.
+//! - Each frame, iterate `DrawData::textures_mut()` and honor all requests:
 //!   - `WantCreate`: create a GPU texture, upload pixels, assign a non-zero TexID back to ImGui, then set status to `OK`.
 //!   - `WantUpdates`: upload pending `UpdateRect`s, then set status to `OK`.
 //!   - `WantDestroy`: delete/free the GPU texture and set status to `Destroyed`.
+//! - Use `DrawData::textures()` only for read-only inspection or snapshots.
 //! - When binding textures for draw commands, do not rely only on `DrawCmdParams.texture_id`.
 //!   With the modern system it may be `0`. Resolve the effective id at bind time using
 //!   `ImDrawCmd_GetTexID(raw_cmd)` along with your renderer state.
@@ -119,7 +138,8 @@
 //! io.backend_flags |= BackendFlags::RENDERER_HAS_TEXTURES;
 //!
 //! // 2) Per-frame: handle texture requests
-//! for tex in draw_data.textures() {
+//! let mut textures = draw_data.textures_mut();
+//! while let Some(mut tex) = textures.next() {
 //!     match tex.status() {
 //!         WantCreate => { create_gpu_tex(tex); tex.set_tex_id(id); tex.set_ok(); }
 //!         WantUpdates => { upload_rects(tex); tex.set_ok(); }
@@ -140,6 +160,25 @@
 //!     }
 //! }
 //! ```
+//!
+//! For thread-safe render work, build `render::snapshot::FrameSnapshot` from read-only draw data.
+//! `OwnedDrawData` is a conservative deep copy for draw lists and intentionally does not carry
+//! live context texture requests as a thread-safe contract.
+//!
+//! ## Safe API Migration Notes
+//!
+//! The safe layer intentionally rejects old patterns that depended on hidden C current-context or
+//! aliasing state:
+//!
+//! - Use `TextureId` for legacy handles and `&mut TextureData` for managed textures. Do not store a
+//!   managed `TextureRef<'_>` beyond the texture data it borrows.
+//! - `TextureRef::from_raw` is unsafe because raw `ImTextureRef` may carry a managed pointer.
+//! - Renderer backends should accept `&mut DrawData` and use `textures_mut()` for status/TexID
+//!   feedback. Shared `textures()` iterators are read-only.
+//! - RAII tokens for windows, stacks, popups, tables, draw-list texture stacks, and extension scopes
+//!   are UI/current-context scoped and `!Send + !Sync`. Drop them on the creating UI thread.
+//! - `Ui::push_state_storage` returns `StateStorageToken<'ui, 'storage>`, so the storage must outlive
+//!   the token that restores the previous storage.
 //!
 //! ## Colors (ImU32 ABGR)
 //!

@@ -492,7 +492,7 @@ impl AppWindow {
                 multiview_mask: None,
             });
             renderer.new_frame()?;
-            renderer.render_draw_data(&draw_data, &mut rpass)?;
+            renderer.render_draw_data(draw_data, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

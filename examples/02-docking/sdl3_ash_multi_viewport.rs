@@ -1116,7 +1116,7 @@ impl App {
                     &mut self.imgui.renderer,
                     &self.window,
                     clear_color,
-                    &draw_data,
+                    draw_data,
                 )?;
             }
 
@@ -1140,7 +1140,7 @@ fn render_main_window(
     renderer: &mut AshRenderer,
     window: &sdl3::video::Window,
     clear_color: [f32; 4],
-    draw_data: &dear_imgui_rs::render::DrawData,
+    draw_data: &mut dear_imgui_rs::render::DrawData,
 ) -> Result<(), Box<dyn Error>> {
     if vk_state.swapchain_dirty {
         vk_state

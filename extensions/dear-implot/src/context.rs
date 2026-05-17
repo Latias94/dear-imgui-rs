@@ -1052,6 +1052,7 @@ struct FormatterHolder {
 #[must_use]
 pub struct AxisFormatterToken {
     _private: (),
+    _not_send_or_sync: std::marker::PhantomData<Rc<()>>,
 }
 
 impl AxisFormatterToken {
@@ -1078,7 +1079,10 @@ impl AxisFormatterToken {
             "dear-implot: axis formatter closure must be set within an active plot"
         );
 
-        Self { _private: () }
+        Self {
+            _private: (),
+            _not_send_or_sync: std::marker::PhantomData,
+        }
     }
 }
 
@@ -1130,6 +1134,7 @@ struct TransformHolder {
 #[must_use]
 pub struct AxisTransformToken {
     _private: (),
+    _not_send_or_sync: std::marker::PhantomData<Rc<()>>,
 }
 
 impl AxisTransformToken {
@@ -1161,7 +1166,10 @@ impl AxisTransformToken {
             "dear-implot: axis transform closure must be set within an active plot"
         );
 
-        Self { _private: () }
+        Self {
+            _private: (),
+            _not_send_or_sync: std::marker::PhantomData,
+        }
     }
 }
 

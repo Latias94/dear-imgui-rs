@@ -25,3 +25,6 @@ mint = { workspace = true, optional = true }
 default = []
 mint = ["dep:mint"]
 wasm = ["dear-imgui-rs/wasm", "dear-implot3d-sys/wasm"]
+
+[dev-dependencies]
+static_assertions = "1.1"

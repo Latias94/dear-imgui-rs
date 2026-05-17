@@ -395,7 +395,7 @@ impl<'ui> Window<'ui> {
 
 /// Token representing an active window
 pub struct WindowToken<'ui> {
-    _phantom: std::marker::PhantomData<&'ui ()>,
+    _phantom: std::marker::PhantomData<&'ui Ui>,
 }
 
 impl<'ui> Drop for WindowToken<'ui> {

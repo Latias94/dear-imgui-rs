@@ -88,7 +88,7 @@ pub struct ChildWindow<'ui> {
     size: [f32; 2],
     child_flags: ChildFlags,
     flags: WindowFlags,
-    _phantom: std::marker::PhantomData<&'ui ()>,
+    _phantom: std::marker::PhantomData<&'ui Ui>,
 }
 
 impl<'ui> ChildWindow<'ui> {
@@ -180,7 +180,7 @@ impl<'ui> ChildWindow<'ui> {
 
 /// Token representing an active child window
 pub struct ChildWindowToken<'ui> {
-    _phantom: std::marker::PhantomData<&'ui ()>,
+    _phantom: std::marker::PhantomData<&'ui Ui>,
 }
 
 impl<'ui> Drop for ChildWindowToken<'ui> {
