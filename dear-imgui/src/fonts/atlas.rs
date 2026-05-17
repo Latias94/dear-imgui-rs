@@ -9,6 +9,8 @@
 
 use crate::fonts::Font;
 use crate::sys;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::{CString, c_char};
 use std::marker::PhantomData;
 use std::ptr;
@@ -92,9 +94,226 @@ pub struct FontAtlas {
     _phantom: PhantomData<*mut sys::ImFontAtlas>,
 }
 
-/// A font identifier
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct FontId(pub(crate) *const sys::ImFont);
+/// Shared view of a font atlas.
+///
+/// This type allows read-only atlas inspection without exposing safe font mutation from
+/// `Context::font_atlas()`.
+#[derive(Debug, Clone, Copy)]
+pub struct FontAtlasRef<'atlas> {
+    raw: *const sys::ImFontAtlas,
+    _phantom: PhantomData<&'atlas sys::ImFontAtlas>,
+}
+
+/// A persistent, atlas-validated font handle.
+///
+/// `FontId` can be stored in application style state and later passed to
+/// [`Ui::push_font`](crate::Ui::push_font), but it is not just a raw `ImFont*`.
+/// The handle records the originating atlas and atlas generation. Safe push
+/// APIs validate that the handle still belongs to the current context's atlas
+/// and has not been invalidated by [`FontAtlas::clear`],
+/// [`FontAtlas::clear_fonts`], or [`FontAtlas::remove_font`] before calling
+/// Dear ImGui.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub struct FontId {
+    pub(crate) raw: *mut sys::ImFont,
+    atlas: *mut sys::ImFontAtlas,
+    atlas_stamp: u64,
+    generation: u64,
+    _not_send_sync: PhantomData<Rc<()>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FontAtlasState {
+    stamp: u64,
+    generation: u64,
+}
+
+#[derive(Default)]
+struct FontAtlasStates {
+    next_stamp: u64,
+    by_atlas: HashMap<usize, FontAtlasState>,
+}
+
+thread_local! {
+    static FONT_ATLAS_STATES: RefCell<FontAtlasStates> = RefCell::new(FontAtlasStates {
+        next_stamp: 1,
+        by_atlas: HashMap::new(),
+    });
+}
+
+fn font_atlas_state(raw: *mut sys::ImFontAtlas) -> FontAtlasState {
+    assert!(!raw.is_null(), "font atlas pointer must not be null");
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let key = raw as usize;
+        if let Some(state) = states.by_atlas.get(&key).copied() {
+            return state;
+        }
+        let stamp = states.next_stamp;
+        states.next_stamp = states
+            .next_stamp
+            .checked_add(1)
+            .expect("font atlas stamp counter overflowed");
+        let state = FontAtlasState {
+            stamp,
+            generation: 0,
+        };
+        states.by_atlas.insert(key, state);
+        state
+    })
+}
+
+fn bump_font_atlas_generation(raw: *mut sys::ImFontAtlas) -> FontAtlasState {
+    assert!(!raw.is_null(), "font atlas pointer must not be null");
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let key = raw as usize;
+        let mut state = states.by_atlas.get(&key).copied().unwrap_or_else(|| {
+            let stamp = states.next_stamp;
+            states.next_stamp = states
+                .next_stamp
+                .checked_add(1)
+                .expect("font atlas stamp counter overflowed");
+            FontAtlasState {
+                stamp,
+                generation: 0,
+            }
+        });
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .expect("font atlas generation counter overflowed");
+        states.by_atlas.insert(key, state);
+        state
+    })
+}
+
+pub(crate) fn forget_font_atlas_generation(raw: *mut sys::ImFontAtlas) {
+    if raw.is_null() {
+        return;
+    }
+    FONT_ATLAS_STATES.with(|states| {
+        states.borrow_mut().by_atlas.remove(&(raw as usize));
+    });
+}
+
+fn font_atlas_contains_font(atlas: *mut sys::ImFontAtlas, font: *mut sys::ImFont) -> bool {
+    if atlas.is_null() || font.is_null() {
+        return false;
+    }
+    unsafe {
+        let fonts = &(*atlas).Fonts;
+        if fonts.Size <= 0 || fonts.Data.is_null() {
+            return false;
+        }
+        for index in 0..fonts.Size {
+            if *fonts.Data.add(index as usize) == font {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn current_context_font_atlas(caller: &str) -> *mut sys::ImFontAtlas {
+    unsafe {
+        let ctx = sys::igGetCurrentContext();
+        assert!(!ctx.is_null(), "{caller} requires an active ImGui context");
+        let io = sys::igGetIO_ContextPtr(ctx);
+        assert!(!io.is_null(), "{caller} requires a valid ImGui IO");
+        let atlas = (*io).Fonts;
+        assert!(
+            !atlas.is_null(),
+            "{caller} requires the current ImGui context to have a font atlas"
+        );
+        atlas
+    }
+}
+
+impl FontId {
+    pub(crate) fn from_raw_parts(font: *mut sys::ImFont, atlas: *mut sys::ImFontAtlas) -> Self {
+        assert!(!font.is_null(), "FontId requires a non-null ImFont pointer");
+        assert!(
+            !atlas.is_null(),
+            "FontId requires a non-null ImFontAtlas pointer"
+        );
+        let state = font_atlas_state(atlas);
+        Self {
+            raw: font,
+            atlas,
+            atlas_stamp: state.stamp,
+            generation: state.generation,
+            _not_send_sync: PhantomData,
+        }
+    }
+
+    pub(crate) unsafe fn from_font(font: *mut sys::ImFont, caller: &str) -> Self {
+        assert!(!font.is_null(), "{caller} requires a non-null font");
+        let atlas = unsafe { (*font).OwnerAtlas };
+        assert!(
+            !atlas.is_null(),
+            "{caller} requires the font to have an owning atlas"
+        );
+        Self::from_raw_parts(font, atlas)
+    }
+}
+
+pub(crate) fn validate_font_id_for_current_context(id: FontId, caller: &str) -> *mut sys::ImFont {
+    let atlas = current_context_font_atlas(caller);
+    validate_font_id_for_atlas(id, atlas, caller)
+}
+
+pub(crate) fn validate_font_for_current_context(font: &Font, caller: &str) -> *mut sys::ImFont {
+    let atlas = current_context_font_atlas(caller);
+    validate_font_for_atlas(font, atlas, caller)
+}
+
+pub(crate) fn validate_font_id_for_atlas(
+    id: FontId,
+    atlas: *mut sys::ImFontAtlas,
+    caller: &str,
+) -> *mut sys::ImFont {
+    assert!(!id.raw.is_null(), "{caller} received a null FontId");
+    assert!(
+        std::ptr::addr_eq(id.atlas.cast_const(), atlas.cast_const()),
+        "{caller} received a FontId from a different font atlas"
+    );
+    let state = font_atlas_state(atlas);
+    assert!(
+        state.stamp == id.atlas_stamp,
+        "{caller} received a FontId from a destroyed or reused font atlas"
+    );
+    assert!(
+        state.generation == id.generation,
+        "{caller} received a stale FontId invalidated by font atlas mutation"
+    );
+    assert!(
+        font_atlas_contains_font(atlas, id.raw),
+        "{caller} received a FontId that is not present in the current font atlas"
+    );
+    id.raw
+}
+
+pub(crate) fn validate_font_for_atlas(
+    font: &Font,
+    atlas: *mut sys::ImFontAtlas,
+    caller: &str,
+) -> *mut sys::ImFont {
+    let raw = font.raw();
+    assert!(!raw.is_null(), "{caller} received a null font");
+    unsafe {
+        let owner = (*raw).OwnerAtlas;
+        assert!(
+            std::ptr::addr_eq(owner.cast_const(), atlas.cast_const()),
+            "{caller} received a font from a different font atlas"
+        );
+    }
+    assert!(
+        font_atlas_contains_font(atlas, raw),
+        "{caller} received a font that is not present in the current font atlas"
+    );
+    raw
+}
 
 /// Font loader interface for custom font backends
 ///
@@ -215,6 +434,7 @@ impl SharedFontAtlas {
             if raw_atlas.is_null() {
                 panic!("ImFontAtlas_ImFontAtlas() returned null");
             }
+            font_atlas_state(raw_atlas);
             SharedFontAtlas(Rc::new(raw_atlas))
         }
     }
@@ -232,9 +452,124 @@ impl Drop for SharedFontAtlas {
             unsafe {
                 let atlas_ptr = *self.0;
                 if !atlas_ptr.is_null() {
+                    forget_font_atlas_generation(atlas_ptr);
                     sys::ImFontAtlas_destroy(atlas_ptr);
                 }
             }
+        }
+    }
+}
+
+impl<'atlas> FontAtlasRef<'atlas> {
+    pub(crate) unsafe fn from_raw(raw: *const sys::ImFontAtlas) -> Self {
+        assert!(
+            !raw.is_null(),
+            "FontAtlasRef::from_raw() requires non-null pointer"
+        );
+        font_atlas_state(raw.cast_mut());
+        Self {
+            raw,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Returns the raw ImFontAtlas pointer.
+    pub fn raw(&self) -> *const sys::ImFontAtlas {
+        self.raw
+    }
+
+    /// Gets the current font loader flags.
+    pub fn font_loader_flags(&self) -> FontLoaderFlags {
+        unsafe { FontLoaderFlags((*self.raw).FontLoaderFlags) }
+    }
+
+    /// Check if the texture is built.
+    pub fn is_built(&self) -> bool {
+        if self.raw.is_null() {
+            return false;
+        }
+        unsafe { (*self.raw).TexIsBuilt }
+    }
+
+    /// Get texture data information.
+    pub fn get_tex_data_info(&self) -> Option<(u32, u32)> {
+        if self.raw.is_null() {
+            return None;
+        }
+        unsafe {
+            if (*self.raw).TexIsBuilt {
+                let min_width = (*self.raw).TexMinWidth as u32;
+                let min_height = (*self.raw).TexMinHeight as u32;
+                Some((min_width, min_height))
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Get raw texture data pointer and dimensions.
+    ///
+    /// # Safety
+    /// The returned pointer is only valid while the FontAtlas exists and the texture is built.
+    /// The caller must ensure proper lifetime management.
+    pub unsafe fn get_tex_data_ptr(&self) -> Option<(*const u8, u32, u32)> {
+        if self.raw.is_null() {
+            return None;
+        }
+        unsafe {
+            if (*self.raw).TexIsBuilt {
+                let tex_data = (*self.raw).TexData;
+                if !tex_data.is_null() {
+                    let width = (*tex_data).Width as u32;
+                    let height = (*tex_data).Height as u32;
+                    let pixels = (*tex_data).Pixels;
+                    if !pixels.is_null() {
+                        Some((pixels, width, height))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Get texture reference for the font atlas.
+    pub fn get_tex_ref(&self) -> sys::ImTextureRef {
+        unsafe { (*self.raw).TexRef }
+    }
+
+    /// Get texture data pointer.
+    pub fn get_tex_data(&self) -> *mut sys::ImTextureData {
+        unsafe { (*self.raw).TexData }
+    }
+
+    /// Get a shared view of the atlas texture data, if available.
+    pub fn tex_data(&self) -> Option<&crate::texture::TextureData> {
+        let ptr = unsafe { (*self.raw).TexData };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(unsafe { crate::texture::TextureData::from_raw_ref(ptr) })
+        }
+    }
+
+    /// Get texture UV scale.
+    pub fn get_tex_uv_scale(&self) -> [f32; 2] {
+        unsafe {
+            let scale = (*self.raw).TexUvScale;
+            [scale.x, scale.y]
+        }
+    }
+
+    /// Get texture UV white pixel coordinates.
+    pub fn get_tex_uv_white_pixel(&self) -> [f32; 2] {
+        unsafe {
+            let pixel = (*self.raw).TexUvWhitePixel;
+            [pixel.x, pixel.y]
         }
     }
 }
@@ -247,6 +582,7 @@ impl FontAtlas {
             if raw.is_null() {
                 panic!("ImFontAtlas_ImFontAtlas() returned null");
             }
+            font_atlas_state(raw);
             Self {
                 raw,
                 owned: true,
@@ -269,6 +605,11 @@ impl FontAtlas {
     /// # Safety
     /// The caller must ensure that the pointer is valid and points to a valid ImFontAtlas
     pub(crate) unsafe fn from_raw(raw: *mut sys::ImFontAtlas) -> Self {
+        assert!(
+            !raw.is_null(),
+            "FontAtlas::from_raw() requires non-null pointer"
+        );
+        font_atlas_state(raw);
         Self {
             raw,
             owned: false,
@@ -279,6 +620,10 @@ impl FontAtlas {
     /// Returns the raw ImFontAtlas pointer
     pub fn raw(&self) -> *mut sys::ImFontAtlas {
         self.raw
+    }
+
+    pub(crate) fn font_id_for_raw(&self, font: *mut sys::ImFont) -> FontId {
+        FontId::from_raw_parts(font, self.raw)
     }
 
     /// Sets the font loader for this atlas.
@@ -349,8 +694,8 @@ impl FontAtlas {
                 if merge_mode {
                     cfg = cfg.merge_mode(true);
                 }
-                let font = self.add_font_default(Some(&cfg));
-                font.id()
+                let font_ptr = self.add_font_default(Some(&cfg)).raw();
+                self.font_id_for_raw(font_ptr)
             }
             FontSource::TtfData {
                 data,
@@ -369,10 +714,11 @@ impl FontAtlas {
                 if merge_mode {
                     cfg = cfg.merge_mode(true);
                 }
-                let font = self
+                let font_ptr = self
                     .add_font_from_memory_ttf(data, size, Some(&cfg), None)
-                    .expect("Failed to add TTF font from memory");
-                font.id()
+                    .expect("Failed to add TTF font from memory")
+                    .raw();
+                self.font_id_for_raw(font_ptr)
             }
             FontSource::CompressedTtfData {
                 data,
@@ -391,10 +737,11 @@ impl FontAtlas {
                 if merge_mode {
                     cfg = cfg.merge_mode(true);
                 }
-                let font = self
+                let font_ptr = self
                     .add_font_from_memory_compressed_ttf(data, size, Some(&cfg), None)
-                    .expect("Failed to add compressed TTF font from memory");
-                font.id()
+                    .expect("Failed to add compressed TTF font from memory")
+                    .raw();
+                self.font_id_for_raw(font_ptr)
             }
             FontSource::CompressedTtfBase85 {
                 data,
@@ -413,10 +760,11 @@ impl FontAtlas {
                 if merge_mode {
                     cfg = cfg.merge_mode(true);
                 }
-                let font = self
+                let font_ptr = self
                     .add_font_from_memory_compressed_base85_ttf(data, size, Some(&cfg), None)
-                    .expect("Failed to add base85 compressed TTF font from memory");
-                font.id()
+                    .expect("Failed to add base85 compressed TTF font from memory")
+                    .raw();
+                self.font_id_for_raw(font_ptr)
             }
             FontSource::TtfFile {
                 path,
@@ -435,10 +783,11 @@ impl FontAtlas {
                 if merge_mode {
                     cfg = cfg.merge_mode(true);
                 }
-                let font = self
+                let font_ptr = self
                     .add_font_from_file_ttf(path, size, Some(&cfg), None)
-                    .expect("Failed to add TTF font from file");
-                font.id()
+                    .expect("Failed to add TTF font from file")
+                    .raw();
+                self.font_id_for_raw(font_ptr)
             }
         }
     }
@@ -693,22 +1042,32 @@ impl FontAtlas {
         }
     }
 
-    /// Remove a font from the atlas
+    /// Remove a font from the atlas.
+    ///
+    /// Existing [`FontId`] handles from this atlas are invalidated.
     #[doc(alias = "RemoveFont")]
     pub fn remove_font(&mut self, font: &mut Font) {
-        unsafe { sys::ImFontAtlas_RemoveFont(self.raw, font.raw()) }
+        let font = validate_font_for_atlas(font, self.raw, "FontAtlas::remove_font()");
+        unsafe { sys::ImFontAtlas_RemoveFont(self.raw, font) }
+        bump_font_atlas_generation(self.raw);
     }
 
-    /// Clear all fonts and texture data
+    /// Clear all fonts and texture data.
+    ///
+    /// Existing [`FontId`] handles from this atlas are invalidated.
     #[doc(alias = "Clear")]
     pub fn clear(&mut self) {
         unsafe { sys::ImFontAtlas_Clear(self.raw) }
+        bump_font_atlas_generation(self.raw);
     }
 
-    /// Clear only the fonts (keep texture data)
+    /// Clear only the fonts (keep texture data).
+    ///
+    /// Existing [`FontId`] handles from this atlas are invalidated.
     #[doc(alias = "ClearFonts")]
     pub fn clear_fonts(&mut self) {
         unsafe { sys::ImFontAtlas_ClearFonts(self.raw) }
+        bump_font_atlas_generation(self.raw);
     }
 
     /// Clear only the texture data (keep fonts)
@@ -943,6 +1302,7 @@ impl Drop for FontAtlas {
     fn drop(&mut self) {
         if self.owned && !self.raw.is_null() {
             unsafe {
+                forget_font_atlas_generation(self.raw);
                 sys::ImFontAtlas_destroy(self.raw);
             }
         }
@@ -1426,6 +1786,62 @@ mod tests {
                 .add_font_from_memory_ttf(&[0u8; 10], 13.0, None, None)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn font_id_is_invalidated_by_clear_fonts_before_push_font_ffi() {
+        let mut ctx = crate::Context::create();
+        let font_id = {
+            let mut fonts = ctx.font_atlas_mut();
+            fonts.add_font(&[FontSource::default_font()])
+        };
+        {
+            let mut fonts = ctx.font_atlas_mut();
+            fonts.clear_fonts();
+        }
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = validate_font_id_for_current_context(font_id, "test stale FontId");
+        }));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn font_id_from_another_atlas_is_rejected_before_push_font_ffi() {
+        let mut ctx_a = crate::Context::create();
+        let font_id = {
+            let mut fonts = ctx_a.font_atlas_mut();
+            fonts.add_font(&[FontSource::default_font()])
+        };
+        let suspended_a = ctx_a.suspend();
+
+        let mut ctx_b = crate::Context::create();
+        let _ = ctx_b.font_atlas_mut().build();
+        ctx_b.io_mut().set_display_size([128.0, 128.0]);
+        ctx_b.io_mut().set_delta_time(1.0 / 60.0);
+        let ui = ctx_b.frame();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _token = ui.push_font(font_id);
+        }));
+
+        assert!(result.is_err());
+
+        drop(ctx_b);
+        drop(suspended_a);
+    }
+
+    #[test]
+    fn font_id_from_shared_atlas_is_valid_through_another_atlas_view() {
+        let shared_atlas = SharedFontAtlas::create();
+        let raw = *shared_atlas.0;
+        let font_id = {
+            let mut atlas = unsafe { FontAtlas::from_raw(raw) };
+            atlas.add_font(&[FontSource::default_font()])
+        };
+
+        let _ = validate_font_id_for_atlas(font_id, raw, "test shared FontId");
     }
 
     #[test]

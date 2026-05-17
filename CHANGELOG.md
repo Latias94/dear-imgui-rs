@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and process texture feedback through `DrawData::textures_mut()`.
   - `DrawData::textures()` and `PlatformIo::textures()` are read-only. Mutation of texture status,
     TexID, or update rectangles requires `textures_mut()` from mutable draw data/platform IO.
+  - `Context::font_atlas()` now returns read-only `FontAtlasRef<'_>`. Use `font_atlas_mut()` or
+    `fonts()` for font loading and atlas mutation.
+  - `FontId` is now an opaque, atlas-validated, `!Send + !Sync` handle instead of a simple raw
+    `ImFont*` wrapper. Existing long-lived storage remains supported, but stale or wrong-atlas
+    handles panic before safe APIs call into Dear ImGui.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions
@@ -27,8 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Core and extension current-context binding/drop policy is documented in
-  `docs/adr/0002-current-context-binding-policy.md`.
+- Core and extension current-context binding/drop policy is documented in the public compatibility
+  notes.
+- `FontAtlas::clear`, `FontAtlas::clear_fonts`, and `FontAtlas::remove_font` now invalidate
+  existing `FontId` handles from that atlas. `Ui::push_font`, `Context::push_font`,
+  `DrawListMut::add_text_with_font`, and `Ui::push_font_with_size` validate font/atlas membership
+  before entering FFI.
 - `OwnedDrawData::from(&mut DrawData)` remains available as a non-thread-safe migration bridge, but
   detached texture-request workflows should use `render::snapshot::FrameSnapshot`.
 

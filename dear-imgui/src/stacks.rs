@@ -22,7 +22,9 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics if the font atlas does not contain the given font
+    /// Panics before calling Dear ImGui if the `FontId` came from a different atlas,
+    /// was invalidated by font atlas mutation, or is no longer present in the
+    /// current context's atlas.
     ///
     /// # Examples
     ///
@@ -40,9 +42,7 @@ impl Ui {
     /// ```
     #[doc(alias = "PushFont")]
     pub fn push_font(&self, id: FontId) -> FontStackToken<'_> {
-        // For now, we'll use a simplified approach without full validation
-        // TODO: Add proper FontAtlas integration for validation
-        let font_ptr = id.0 as *mut sys::ImFont;
+        let font_ptr = crate::fonts::validate_font_id_for_current_context(id, "Ui::push_font()");
         unsafe { sys::igPushFont(font_ptr, 0.0) };
         FontStackToken::new(self)
     }

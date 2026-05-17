@@ -75,7 +75,13 @@ Extensions
   - Core and extension RAII tokens that call `End`/`Pop` on drop are UI/context-bound and
     `!Send + !Sync`.
   - `StateStorageToken<'ui, 'storage>` binds the lifetime of both the active UI and pushed storage.
-  - Current-context binding policy is documented in `docs/adr/0002-current-context-binding-policy.md`.
+  - `FontId` is an opaque, atlas-validated, `!Send + !Sync` handle. It can still be stored in
+    long-lived style state, but safe font push/draw APIs reject stale or wrong-atlas handles before
+    crossing FFI.
+  - `Context::font_atlas()` is read-only through `FontAtlasRef<'_>`; atlas mutation goes through
+    `font_atlas_mut()` / `fonts()`.
+  - Current-context binding policy is part of the public safe API contract documented here and in
+    the crate-level migration notes.
 
 ## History
 

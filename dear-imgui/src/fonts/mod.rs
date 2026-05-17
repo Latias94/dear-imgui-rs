@@ -57,7 +57,9 @@ impl Ui {
     pub fn push_font_with_size(&self, font: Option<&Font>, size: f32) {
         assert_non_negative_finite_f32("Ui::push_font_with_size()", "size", size);
         unsafe {
-            let font_ptr = font.map_or(std::ptr::null_mut(), |f| f.raw());
+            let font_ptr = font.map_or(std::ptr::null_mut(), |f| {
+                crate::fonts::validate_font_for_current_context(f, "Ui::push_font_with_size()")
+            });
             crate::sys::igPushFont(font_ptr, size);
         }
     }

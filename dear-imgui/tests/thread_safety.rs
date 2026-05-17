@@ -10,6 +10,8 @@ fn thread_safety_context_and_render_markers() {
     // Font and FontAtlas must NOT be Send/Sync
     assert_not_impl_any!(dear_imgui_rs::Font: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::FontAtlas: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::FontAtlasRef<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::FontId: Send, Sync);
 
     // OwnedDrawData must NOT be Send/Sync (retains shared textures list pointer)
     assert_not_impl_any!(dear_imgui_rs::render::draw_data::OwnedDrawData: Send, Sync);

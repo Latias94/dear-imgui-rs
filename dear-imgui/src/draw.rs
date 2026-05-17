@@ -845,7 +845,10 @@ impl<'ui> DrawListMut<'ui> {
             wrap_width,
         );
         let col = col.into();
-        let font_ptr = font.raw();
+        let font_ptr = crate::fonts::validate_font_for_current_context(
+            font,
+            "DrawListMut::add_text_with_font()",
+        );
 
         let clip_vec4 = cpu_fine_clip_rect
             .map(|r| finite_vec4("DrawListMut::add_text_with_font()", "cpu_fine_clip_rect", r));

@@ -90,6 +90,11 @@ compilable.
 - `DrawData::textures()` and `PlatformIo::textures()` are read-only. Code that updates texture
   status, TexID, or upload rectangles must use `textures_mut()` from a mutable draw data/platform IO
   reference.
+- `FontId` is still suitable for long-lived style state, but it is now validated against the active
+  font atlas before safe APIs enter FFI. `FontAtlas::clear`, `clear_fonts`, and `remove_font`
+  invalidate old font handles; `ui.push_font(old_id)` panics instead of pushing a stale `ImFont*`.
+- `Context::font_atlas()` returns read-only `FontAtlasRef<'_>`. Use `font_atlas_mut()` or `fonts()`
+  when loading, clearing, or otherwise mutating the atlas.
 - `OwnedDrawData::from(&mut draw_data)` remains available as a migration bridge, but detached,
   thread-safe rendering should use `render::snapshot::FrameSnapshot` instead of carrying live
   context texture requests.

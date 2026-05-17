@@ -14,7 +14,7 @@ use std::ptr;
 use std::rc::{Rc, Weak};
 
 use crate::clipboard::{ClipboardBackend, ClipboardContext};
-use crate::fonts::{Font, FontAtlas, SharedFontAtlas};
+use crate::fonts::{Font, FontAtlas, FontAtlasRef, SharedFontAtlas};
 use crate::io::Io;
 
 use crate::sys;
@@ -815,7 +815,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         let _guard = CTX_MUTEX.lock();
         unsafe {
             with_bound_context(self.raw, || {
-                sys::igPushFont(font.raw(), 0.0);
+                let font_ptr =
+                    crate::fonts::validate_font_for_current_context(font, "Context::push_font()");
+                sys::igPushFont(font_ptr, 0.0);
             });
         }
     }
@@ -847,8 +849,11 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         unsafe { with_bound_context(self.raw, || sys::igGetFontSize()) }
     }
 
-    /// Get the font atlas from the IO structure
-    pub fn font_atlas(&self) -> FontAtlas {
+    /// Get a read-only view of the font atlas from the IO structure.
+    ///
+    /// Use [`Context::font_atlas_mut`] or [`Context::fonts`] for loading fonts
+    /// or mutating atlas state.
+    pub fn font_atlas(&self) -> FontAtlasRef<'_> {
         let _guard = CTX_MUTEX.lock();
 
         // wasm32 import-style builds keep Dear ImGui state in a separate module
@@ -863,7 +868,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                 !atlas_ptr.is_null(),
                 "ImGui IO Fonts pointer is null on wasm; provider not initialized?"
             );
-            FontAtlas::from_raw(atlas_ptr)
+            FontAtlasRef::from_raw(atlas_ptr)
         }
 
         // Default wasm path: keep this API disabled to avoid accidental UB.
@@ -880,7 +885,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         unsafe {
             let io = self.io_ptr("Context::font_atlas()");
             let atlas_ptr = (*io).Fonts;
-            FontAtlas::from_raw(atlas_ptr)
+            FontAtlasRef::from_raw(atlas_ptr)
         }
     }
 
@@ -1080,6 +1085,12 @@ impl Drop for Context {
         unsafe {
             if !self.raw.is_null() {
                 unregister_user_textures_for_context(self.raw);
+                if self.shared_font_atlas.is_none() {
+                    let io = sys::igGetIO_ContextPtr(self.raw);
+                    if !io.is_null() {
+                        crate::fonts::forget_font_atlas_generation((*io).Fonts);
+                    }
+                }
                 crate::platform_io::clear_typed_callbacks_for_context(self.raw);
                 with_bound_context(self.raw, || {
                     crate::platform_io::clear_out_param_callbacks_for_current_context();

@@ -57,7 +57,7 @@ impl Font {
 
     /// Returns the identifier of this font
     pub fn id(&self) -> FontId {
-        FontId(self.raw() as *const sys::ImFont)
+        unsafe { FontId::from_font(self.raw(), "Font::id()") }
     }
 
     /// Returns the raw ImFont pointer

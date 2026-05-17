@@ -175,6 +175,12 @@
 //! - `TextureRef::from_raw` is unsafe because raw `ImTextureRef` may carry a managed pointer.
 //! - Renderer backends should accept `&mut DrawData` and use `textures_mut()` for status/TexID
 //!   feedback. Shared `textures()` iterators are read-only.
+//! - `FontId` is a persistent, atlas-validated handle. It may be stored in style state, but
+//!   `Ui::push_font`, `Context::push_font`, `DrawListMut::add_text_with_font`, and
+//!   `Ui::push_font_with_size` validate the active atlas before entering FFI. `FontAtlas::clear`,
+//!   `clear_fonts`, and `remove_font` invalidate existing `FontId` values from that atlas.
+//! - `Context::font_atlas()` returns read-only `FontAtlasRef<'_>`; use `font_atlas_mut()` or
+//!   `fonts()` for startup-time font loading and atlas mutation.
 //! - RAII tokens for windows, stacks, popups, tables, draw-list texture stacks, and extension scopes
 //!   are UI/current-context scoped and `!Send + !Sync`. Drop them on the creating UI thread.
 //! - `Ui::push_state_storage` returns `StateStorageToken<'ui, 'storage>`, so the storage must outlive
