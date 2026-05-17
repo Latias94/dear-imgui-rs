@@ -436,8 +436,15 @@ impl GlowRenderer {
             .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
     }
 
-    /// Destroy the renderer and free OpenGL resources
+    /// Destroy the renderer and free OpenGL resources.
+    ///
+    /// If multi-viewport support was enabled, this also makes renderer callbacks no-op for this
+    /// renderer. Call the matching multi-viewport shutdown helper when you also need to uninstall
+    /// callbacks from the ImGui context and destroy platform windows.
     pub fn destroy(&mut self, gl: &Context) {
+        #[cfg(feature = "multi-viewport")]
+        self.clear_multi_viewport_renderer_state();
+
         if self.is_destroyed {
             return;
         }
@@ -466,6 +473,13 @@ impl GlowRenderer {
         }
 
         self.is_destroyed = true;
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn clear_multi_viewport_renderer_state(&mut self) {
+        // Make any installed multi-viewport callbacks become a no-op if the renderer is
+        // explicitly destroyed or dropped without an explicit disable/shutdown call.
+        multi_viewport::clear_for_drop(self as *mut GlowRenderer);
     }
 
     /// Get a reference to the OpenGL context (if owned by the renderer)
@@ -1908,6 +1922,56 @@ pub mod multi_viewport {
             drop(ctx_a);
             drop(renderer_a);
         }
+
+        #[test]
+        fn renderer_destroy_clears_renderer_state() {
+            let mut ctx = Context::create();
+            let raw = ctx.as_raw();
+            let mut renderer = make_test_renderer();
+
+            enable(&mut renderer, &mut ctx);
+
+            unsafe {
+                sys::igSetCurrentContext(raw);
+                assert!(borrow_renderer().is_some());
+            }
+
+            unsafe extern "system" fn fake_gl_get_string(_name: u32) -> *const u8 {
+                b"4.6\0".as_ptr()
+            }
+            unsafe extern "system" fn fake_gl_get_string_i(_name: u32, _index: u32) -> *const u8 {
+                b"\0".as_ptr()
+            }
+            unsafe extern "system" fn fake_gl_get_integer_v(_name: u32, data: *mut i32) {
+                if !data.is_null() {
+                    unsafe { *data = 4 };
+                }
+            }
+
+            let gl = unsafe {
+                glow::Context::from_loader_function(|name| {
+                    if name == "glGetString" {
+                        fake_gl_get_string as *const () as *const c_void
+                    } else if name == "glGetIntegerv" {
+                        fake_gl_get_integer_v as *const () as *const c_void
+                    } else if name == "glGetStringi" {
+                        fake_gl_get_string_i as *const () as *const c_void
+                    } else {
+                        std::ptr::null()
+                    }
+                })
+            };
+            renderer.destroy(&gl);
+
+            unsafe {
+                sys::igSetCurrentContext(raw);
+                assert!(borrow_renderer().is_none());
+            }
+
+            disable(&mut ctx);
+            drop(ctx);
+            drop(renderer);
+        }
     }
 
     /// Renderer callback used by Dear ImGui for each secondary viewport.
@@ -1976,11 +2040,7 @@ impl Drop for GlowRenderer {
     fn drop(&mut self) {
         #[cfg(feature = "multi-viewport")]
         {
-            // Ensure that the multi-viewport callback cannot ever access a
-            // dropped renderer. We intentionally do not uninstall the callback
-            // from PlatformIO here (we don't have a Context), but making it a
-            // no-op is sufficient to avoid UAF.
-            multi_viewport::clear_for_drop(self as *mut GlowRenderer);
+            self.clear_multi_viewport_renderer_state();
         }
         if let Some(gl) = self.gl_context.take() {
             self.destroy_device_objects(&gl);

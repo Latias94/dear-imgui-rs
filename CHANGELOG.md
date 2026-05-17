@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     process-wide guard. Same-context reentry still fails closed, while callbacks for independent
     ImGui contexts no longer block each other.
 - Backends
+  - `dear-imgui-glow`: `GlowRenderer::destroy()` now clears renderer-owned multi-viewport state
+    for this renderer, matching `Drop` and preventing stale callbacks from borrowing a destroyed
+    renderer when users forget to disable multi-viewport support first.
   - `dear-imgui-wgpu`: `WgpuRenderer::shutdown()` now clears renderer-owned multi-viewport state
     for this renderer, matching `Drop` and preventing stale callbacks from borrowing a shut-down
     renderer when users forget to disable multi-viewport support first.
