@@ -197,6 +197,31 @@ impl TextureManager {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+struct TextureWriteback {
+    texture: *mut dear_imgui_rs::sys::ImTextureData,
+    tex_id: Option<TextureId>,
+    status: TextureStatus,
+}
+
+impl TextureWriteback {
+    fn apply(self) {
+        if self.texture.is_null() {
+            return;
+        }
+
+        unsafe {
+            if let Some(tex_id) = self.tex_id {
+                dear_imgui_rs::sys::ImTextureData_SetTexID(self.texture, tex_id.id() as _);
+            }
+            if self.status == TextureStatus::Destroyed {
+                (*self.texture).WantDestroyNextFrame = true;
+            }
+            dear_imgui_rs::sys::ImTextureData_SetStatus(self.texture, self.status.into());
+        }
+    }
+}
+
 /// Vulkan renderer for Dear ImGui using `ash`.
 ///
 /// It records rendering commands to the provided command buffer and does not submit.
@@ -1026,6 +1051,7 @@ impl AshRenderer {
 
         let mut creates: Vec<PendingCreate> = Vec::new();
         let mut updates: Vec<PendingUpdate> = Vec::new();
+        let mut writebacks: Vec<TextureWriteback> = Vec::new();
 
         let mut textures = draw_data.textures_mut();
         while let Some(mut td) = textures.next() {
@@ -1077,8 +1103,11 @@ impl AshRenderer {
                     h,
                 });
 
-                td.set_tex_id(TextureId::from(id));
-                td.set_status(TextureStatus::OK);
+                writebacks.push(TextureWriteback {
+                    texture: td.as_raw_mut(),
+                    tex_id: Some(TextureId::from(id)),
+                    status: TextureStatus::OK,
+                });
                 continue;
             }
 
@@ -1097,16 +1126,19 @@ impl AshRenderer {
 
                     let (tw, th) = (existing.width, existing.height);
                     if tw == 0 || th == 0 {
+                        td.set_status(TextureStatus::OK);
                         continue;
                     }
 
                     let rect = td.update_rect();
                     let (x, y, w, h) = clamp_rect(rect, tw, th);
                     if w == 0 || h == 0 {
+                        td.set_status(TextureStatus::OK);
                         continue;
                     }
 
                     let Some(pixels) = texture_data_to_rgba_subrect(&td, x, y, w, h) else {
+                        td.set_status(TextureStatus::OK);
                         continue;
                     };
                     let (staging_buffer, staging_mem) = create_and_fill_buffer(
@@ -1126,7 +1158,11 @@ impl AshRenderer {
                         h,
                     });
 
-                    td.set_status(TextureStatus::OK);
+                    writebacks.push(TextureWriteback {
+                        texture: td.as_raw_mut(),
+                        tex_id: None,
+                        status: TextureStatus::OK,
+                    });
                 }
                 TextureStatus::WantDestroy => {
                     let id = internal_id;
@@ -1141,6 +1177,7 @@ impl AshRenderer {
                 TextureStatus::OK | TextureStatus::Destroyed => {}
             }
         }
+        drop(textures);
 
         if !creates.is_empty() || !updates.is_empty() {
             let (command_buffer, fence) = self.submit_upload_commands(|cmd| {
@@ -1203,6 +1240,10 @@ impl AshRenderer {
                     height: c.h,
                 },
             );
+        }
+
+        for writeback in writebacks {
+            writeback.apply();
         }
 
         Ok(())
@@ -1731,5 +1772,39 @@ mod tests {
                 255, 255, 255, 255,
             ]
         );
+    }
+
+    #[test]
+    fn texture_writeback_created_sets_tex_id_and_status() {
+        let mut tex = TextureData::new();
+        tex.create(ImFormat::RGBA32, 1, 1);
+
+        TextureWriteback {
+            texture: tex.as_raw_mut(),
+            tex_id: Some(TextureId::from(7u64)),
+            status: TextureStatus::OK,
+        }
+        .apply();
+
+        assert_eq!(tex.tex_id(), TextureId::from(7u64));
+        assert_eq!(tex.status(), TextureStatus::OK);
+    }
+
+    #[test]
+    fn texture_writeback_destroyed_sets_destroy_next_frame_and_status() {
+        let mut tex = TextureData::new();
+        tex.create(ImFormat::RGBA32, 1, 1);
+
+        TextureWriteback {
+            texture: tex.as_raw_mut(),
+            tex_id: None,
+            status: TextureStatus::Destroyed,
+        }
+        .apply();
+
+        assert_eq!(tex.status(), TextureStatus::Destroyed);
+        unsafe {
+            assert!((*tex.as_raw()).WantDestroyNextFrame);
+        }
     }
 }

@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-wgpu`: full texture recreation for an existing texture now creates the replacement
     before removing the old GPU texture, so a failed upload leaves the previous texture mapping
     intact.
+  - `dear-imgui-ash`: draw-data texture processing now writes `TexID`/`OK` feedback only after
+    upload command submission succeeds, avoiding stale texture IDs after failed Vulkan uploads.
 - Extensions
   - `dear-imgui-test-engine`: check the bound ImGui context liveness before safe engine methods call
     into FFI, so stale context use panics in Rust instead of reaching the upstream test engine.

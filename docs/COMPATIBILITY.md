@@ -104,6 +104,9 @@ Extensions
     backend helper behavior.
   - `dear-imgui-wgpu` preserves the previous GPU texture mapping if full texture recreation fails
     during an update of an existing texture.
+  - `dear-imgui-ash` now defers draw-data texture `TexID`/`OK` feedback until Vulkan upload command
+    submission succeeds, so failed uploads no longer leave ImGui pointing at an unregistered texture
+    id.
 
 ## History
 

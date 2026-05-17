@@ -654,12 +654,11 @@ impl WgpuTextureManager {
                 return Ok(());
             }
 
-            // Otherwise, recreate from full data
-            self.remove_texture(texture_id);
             let new_texture_id = self.create_texture_from_data(device, queue, texture_data)?;
             if new_texture_id != texture_id
                 && let Some(texture) = self.remove_texture(new_texture_id)
             {
+                self.remove_texture(texture_id);
                 self.insert_texture_with_id(texture_id, texture);
             }
         } else {
