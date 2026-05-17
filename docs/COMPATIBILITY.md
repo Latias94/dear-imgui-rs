@@ -80,6 +80,8 @@ Extensions
     crossing FFI.
   - `Context::font_atlas()` is read-only through `FontAtlasRef<'_>`; atlas mutation goes through
     `font_atlas_mut()` / `fonts()`.
+  - Clipboard callback reentrancy is guarded per `ClipboardContext`, so same-context reentry fails
+    closed without blocking callbacks for independent ImGui contexts.
   - Current-context binding policy is part of the public safe API contract documented here and in
     the crate-level migration notes.
 

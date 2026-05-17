@@ -88,6 +88,117 @@ fn clipboard_callbacks_use_passed_context_not_current_context() {
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
+fn clipboard_reentry_into_different_context_is_allowed() {
+    let _guard = test_guard();
+
+    let mut ctx_a = imgui::Context::create();
+    let raw_a = ctx_a.as_raw();
+    ctx_a.set_clipboard_backend(TestClipboardBackend {
+        value: Arc::new(Mutex::new(Some("a".to_owned()))),
+    });
+
+    let get_a = unsafe {
+        let platform_io_a = imgui::sys::igGetPlatformIO_ContextPtr(raw_a);
+        (*platform_io_a)
+            .Platform_GetClipboardTextFn
+            .expect("clipboard getter should be installed")
+    };
+
+    let suspended_a = ctx_a.suspend();
+
+    struct CrossContextReentrantBackend {
+        other_ctx: *mut imgui::sys::ImGuiContext,
+        other_get:
+            unsafe extern "C" fn(*mut imgui::sys::ImGuiContext) -> *const std::os::raw::c_char,
+        observed: Arc<Mutex<Option<String>>>,
+    }
+
+    impl imgui::ClipboardBackend for CrossContextReentrantBackend {
+        fn get(&mut self) -> Option<String> {
+            let ptr = unsafe { (self.other_get)(self.other_ctx) };
+            if !ptr.is_null() {
+                let text = unsafe { CStr::from_ptr(ptr) }
+                    .to_string_lossy()
+                    .into_owned();
+                *self.observed.lock().unwrap() = Some(text);
+            }
+            Some("b".to_owned())
+        }
+
+        fn set(&mut self, _text: &str) {}
+    }
+
+    let mut ctx_b = imgui::Context::create();
+    let observed = Arc::new(Mutex::new(None));
+    ctx_b.set_clipboard_backend(CrossContextReentrantBackend {
+        other_ctx: raw_a,
+        other_get: get_a,
+        observed: observed.clone(),
+    });
+
+    assert_eq!(ctx_b.clipboard_text().as_deref(), Some("b"));
+    assert_eq!(observed.lock().unwrap().as_deref(), Some("a"));
+
+    drop(ctx_b);
+    drop(suspended_a);
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn clipboard_reentry_into_same_context_fails_closed() {
+    let _guard = test_guard();
+
+    struct SameContextReentrantBackend {
+        raw_ctx: *mut imgui::sys::ImGuiContext,
+        get_fn: Arc<
+            Mutex<
+                Option<
+                    unsafe extern "C" fn(
+                        *mut imgui::sys::ImGuiContext,
+                    ) -> *const std::os::raw::c_char,
+                >,
+            >,
+        >,
+        nested_was_null: Arc<Mutex<bool>>,
+    }
+
+    impl imgui::ClipboardBackend for SameContextReentrantBackend {
+        fn get(&mut self) -> Option<String> {
+            let get_fn = self
+                .get_fn
+                .lock()
+                .unwrap()
+                .expect("clipboard getter should be installed");
+            let ptr = unsafe { get_fn(self.raw_ctx) };
+            *self.nested_was_null.lock().unwrap() = ptr.is_null();
+            Some("outer".to_owned())
+        }
+
+        fn set(&mut self, _text: &str) {}
+    }
+
+    let mut ctx = imgui::Context::create();
+    let raw_ctx = ctx.as_raw();
+    let get_fn = Arc::new(Mutex::new(None));
+    let nested_was_null = Arc::new(Mutex::new(false));
+
+    ctx.set_clipboard_backend(SameContextReentrantBackend {
+        raw_ctx,
+        get_fn: get_fn.clone(),
+        nested_was_null: nested_was_null.clone(),
+    });
+
+    unsafe {
+        let platform_io = imgui::sys::igGetPlatformIO_ContextPtr(raw_ctx);
+        *get_fn.lock().unwrap() = (*platform_io).Platform_GetClipboardTextFn;
+    }
+
+    assert_eq!(ctx.clipboard_text().as_deref(), Some("outer"));
+    assert!(*nested_was_null.lock().unwrap());
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn ini_disk_helpers_no_panic() {
     let _guard = test_guard();
 

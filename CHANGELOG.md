@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `OwnedDrawData::from(&mut DrawData)` remains available as a non-thread-safe migration bridge, but
   detached texture-request workflows should use `render::snapshot::FrameSnapshot`.
 
+### Fixed
+
+- Core (`dear-imgui-rs`)
+  - Scope clipboard callback reentrancy protection to each `ClipboardContext` instead of using a
+    process-wide guard. Same-context reentry still fails closed, while callbacks for independent
+    ImGui contexts no longer block each other.
+
 ## [0.13.0] - 2026-05-15
 
 This release upgrades the Dear ImGui stack, removes the normal-build dependency

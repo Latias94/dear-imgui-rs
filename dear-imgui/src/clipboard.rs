@@ -4,31 +4,32 @@
 //! crate to hook Dear ImGui's clipboard callbacks. You can implement your own
 //! backend and pass it to the context so copy/paste works in input widgets.
 //!
+use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::fmt;
 use std::os::raw::c_char;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-static CLIPBOARD_BORROWED: AtomicBool = AtomicBool::new(false);
+struct ClipboardBorrowGuard<'a> {
+    borrowed: &'a AtomicBool,
+}
 
-struct ClipboardBorrowGuard;
-
-impl ClipboardBorrowGuard {
-    fn try_new() -> Option<Self> {
-        if CLIPBOARD_BORROWED
+impl<'a> ClipboardBorrowGuard<'a> {
+    fn try_new(borrowed: &'a AtomicBool) -> Option<Self> {
+        if borrowed
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
             return None;
         }
-        Some(Self)
+        Some(Self { borrowed })
     }
 }
 
-impl Drop for ClipboardBorrowGuard {
+impl Drop for ClipboardBorrowGuard<'_> {
     fn drop(&mut self) {
-        CLIPBOARD_BORROWED.store(false, Ordering::SeqCst);
+        self.borrowed.store(false, Ordering::SeqCst);
     }
 }
 
@@ -42,26 +43,51 @@ pub trait ClipboardBackend: 'static {
 }
 
 pub(crate) struct ClipboardContext {
-    backend: Box<dyn ClipboardBackend>,
+    borrowed: AtomicBool,
+    backend: RefCell<Box<dyn ClipboardBackend>>,
     // This is needed to keep ownership of the value when the raw C callback is called
-    last_value: CString,
+    last_value: RefCell<CString>,
 }
 
 impl ClipboardContext {
     /// Creates a new ClipboardContext
     pub fn new<T: ClipboardBackend>(backend: T) -> ClipboardContext {
         ClipboardContext {
-            backend: Box::new(backend),
-            last_value: CString::default(),
+            borrowed: AtomicBool::new(false),
+            backend: RefCell::new(Box::new(backend)),
+            last_value: RefCell::new(CString::default()),
         }
     }
 
     /// Creates a dummy clipboard context that doesn't actually interact with the system clipboard
     pub fn dummy() -> ClipboardContext {
         Self {
-            backend: Box::new(DummyClipboardBackend),
-            last_value: CString::default(),
+            borrowed: AtomicBool::new(false),
+            backend: RefCell::new(Box::new(DummyClipboardBackend)),
+            last_value: RefCell::new(CString::default()),
         }
+    }
+
+    fn try_borrow(&self) -> Option<ClipboardBorrowGuard<'_>> {
+        ClipboardBorrowGuard::try_new(&self.borrowed)
+    }
+
+    fn get(&self, _borrow: &ClipboardBorrowGuard<'_>) -> Option<String> {
+        self.backend.borrow_mut().get()
+    }
+
+    fn set(&self, _borrow: &ClipboardBorrowGuard<'_>, value: &str) {
+        self.backend.borrow_mut().set(value);
+    }
+
+    fn store_last_value(
+        &self,
+        _borrow: &ClipboardBorrowGuard<'_>,
+        value: CString,
+    ) -> *const c_char {
+        let mut last_value = self.last_value.borrow_mut();
+        *last_value = value;
+        last_value.as_ptr()
     }
 }
 
@@ -101,14 +127,14 @@ pub(crate) unsafe extern "C" fn get_clipboard_text(
         if user_data.is_null() {
             return ptr::null();
         }
-        let Some(_borrow) = ClipboardBorrowGuard::try_new() else {
+        let ctx = unsafe { &*(user_data as *const ClipboardContext) };
+        let Some(borrow) = ctx.try_borrow() else {
             return ptr::null();
         };
 
-        let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
-        match ctx.backend.get() {
+        match ctx.get(&borrow) {
             Some(text) => {
-                ctx.last_value = match CString::new(text) {
+                let last_value = match CString::new(text) {
                     Ok(v) => v,
                     Err(e) => {
                         let mut bytes = e.into_vec();
@@ -120,7 +146,7 @@ pub(crate) unsafe extern "C" fn get_clipboard_text(
                         CString::new(bytes).expect("sanitized clipboard text contained null byte")
                     }
                 };
-                ctx.last_value.as_ptr()
+                ctx.store_last_value(&borrow, last_value)
             }
             None => ptr::null(),
         }
@@ -144,17 +170,17 @@ pub(crate) unsafe extern "C" fn set_clipboard_text(
         if user_data.is_null() {
             return;
         }
-        let Some(_borrow) = ClipboardBorrowGuard::try_new() else {
+        let ctx = unsafe { &*(user_data as *const ClipboardContext) };
+        let Some(borrow) = ctx.try_borrow() else {
             return;
         };
 
-        let ctx = unsafe { &mut *(user_data as *mut ClipboardContext) };
         if text.is_null() {
-            ctx.backend.set("");
+            ctx.set(&borrow, "");
             return;
         }
         let text = unsafe { CStr::from_ptr(text) }.to_string_lossy();
-        ctx.backend.set(text.as_ref());
+        ctx.set(&borrow, text.as_ref());
     });
     result.unwrap_or_else(|_| {
         eprintln!("Clipboard setter panicked");
@@ -165,8 +191,8 @@ pub(crate) unsafe extern "C" fn set_clipboard_text(
 impl fmt::Debug for ClipboardContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClipboardContext")
-            .field("backend", &(&(*self.backend) as *const _))
-            .field("last_value", &self.last_value)
+            .field("backend", &(&**self.backend.borrow() as *const _))
+            .field("last_value", &self.last_value.borrow())
             .finish()
     }
 }

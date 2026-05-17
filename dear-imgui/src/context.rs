@@ -6,7 +6,7 @@
 //! active context at a time.
 //!
 use parking_lot::ReentrantMutex;
-use std::cell::{RefCell, UnsafeCell};
+use std::cell::RefCell;
 use std::ffi::CString;
 use std::ops::Drop;
 use std::path::PathBuf;
@@ -53,11 +53,9 @@ pub struct Context {
     log_filename: Option<CString>,
     platform_name: Option<CString>,
     renderer_name: Option<CString>,
-    // We need to box this because we hand imgui a pointer to it,
-    // and we don't want to deal with finding `clipboard_ctx`.
-    // We also put it in an UnsafeCell since we're going to give
-    // imgui a mutable pointer to it.
-    clipboard_ctx: Box<UnsafeCell<ClipboardContext>>,
+    // Boxed so the raw PlatformIO user-data pointer remains stable.
+    // Interior mutability and reentrancy guarding live inside ClipboardContext.
+    clipboard_ctx: Box<ClipboardContext>,
     ui: crate::ui::Ui,
 }
 
@@ -330,7 +328,7 @@ impl Context {
             log_filename: None,
             platform_name: None,
             renderer_name: None,
-            clipboard_ctx: Box::new(UnsafeCell::new(ClipboardContext::dummy())),
+            clipboard_ctx: Box::new(ClipboardContext::dummy()),
             ui: crate::ui::Ui::new(),
         })
     }
@@ -1053,8 +1051,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn set_clipboard_backend<T: ClipboardBackend>(&mut self, backend: T) {
         let _guard = CTX_MUTEX.lock();
 
-        let clipboard_ctx: Box<UnsafeCell<_>> =
-            Box::new(UnsafeCell::new(ClipboardContext::new(backend)));
+        let clipboard_ctx = Box::new(ClipboardContext::new(backend));
 
         // On native/desktop targets, register clipboard callbacks in ImGui PlatformIO
         // so ImGui can call back into Rust for copy/paste.
@@ -1072,7 +1069,8 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
             }
             (*platform_io).Platform_SetClipboardTextFn = Some(crate::clipboard::set_clipboard_text);
             (*platform_io).Platform_GetClipboardTextFn = Some(crate::clipboard::get_clipboard_text);
-            (*platform_io).Platform_ClipboardUserData = clipboard_ctx.get() as *mut _;
+            (*platform_io).Platform_ClipboardUserData =
+                clipboard_ctx.as_ref() as *const ClipboardContext as *mut _;
         }
 
         self.clipboard_ctx = clipboard_ctx;
@@ -1393,7 +1391,7 @@ impl SuspendedContext {
             log_filename: None,
             platform_name: None,
             renderer_name: None,
-            clipboard_ctx: Box::new(UnsafeCell::new(ClipboardContext::dummy())),
+            clipboard_ctx: Box::new(ClipboardContext::dummy()),
             ui: crate::ui::Ui::new(),
         };
 
