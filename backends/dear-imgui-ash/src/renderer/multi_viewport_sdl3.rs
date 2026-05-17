@@ -339,6 +339,28 @@ mod tests {
         }
         drop(ctx_b);
     }
+
+    #[test]
+    fn clear_for_drop_removes_renderer_state() {
+        let ctx = Context::create();
+        let raw = ctx.as_raw();
+        let mut renderer = MaybeUninit::<AshRenderer>::uninit();
+        let renderer_ptr = renderer.as_mut_ptr();
+
+        upsert_renderer_state(raw, renderer_ptr, None);
+        unsafe {
+            sys::igSetCurrentContext(raw);
+            assert!(borrow_renderer().is_some());
+        }
+
+        clear_for_drop(renderer_ptr);
+        unsafe {
+            sys::igSetCurrentContext(raw);
+            assert!(borrow_renderer().is_none());
+        }
+
+        drop(ctx);
+    }
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
