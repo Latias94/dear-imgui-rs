@@ -97,6 +97,8 @@ Extensions
     stride is explicit via `PlotDataStride::AUTO` / `Plot3DDataStride::AUTO`; zero-byte strides are
     rejected before FFI.
   - `dear-implot::SubplotGrid::new` uses `usize` row/column counts instead of raw signed counts.
+  - `dear-implot` histogram bin APIs use `HistogramBins`, `usize` concrete bin counts, or
+    `BinMethod` automatic methods instead of raw signed bin selectors.
   - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
     of a raw signed integer. Use `PlotValueOffset::new(...)` or pass `usize` directly.
   - Table freeze helpers now take `usize` frozen column/row counts instead of raw signed values.

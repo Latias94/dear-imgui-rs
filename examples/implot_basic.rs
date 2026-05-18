@@ -326,7 +326,7 @@ impl AppWindow {
                         ui.text("1D Histogram:");
                         if let Some(token) = plot_ui.begin_plot("Histogram") {
                             HistogramPlot::new("Distribution", &histogram_data)
-                                .with_bins(8)
+                                .with_bins(8usize)
                                 .density()
                                 .plot();
                             token.end();
@@ -340,7 +340,7 @@ impl AppWindow {
                             let x_hist = vec![1.0, 2.0, 3.0, 2.0, 1.0, 3.0, 2.0, 1.0];
                             let y_hist = vec![1.0, 1.0, 2.0, 3.0, 2.0, 1.0, 3.0, 2.0];
                             Histogram2DPlot::new("2D Data", &x_hist, &y_hist)
-                                .with_bins(4, 4)
+                                .with_bins(4usize, 4usize)
                                 .plot();
                             token.end();
                         }

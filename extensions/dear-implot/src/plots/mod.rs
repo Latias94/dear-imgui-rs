@@ -574,7 +574,7 @@ pub enum PlotType<'a> {
     Histogram {
         label: &'a str,
         values: &'a [f64],
-        bins: i32,
+        bins: crate::HistogramBins,
     },
     Heatmap {
         label: &'a str,
@@ -635,7 +635,7 @@ impl<'a> PlotBuilder<'a> {
             plot_type: PlotType::Histogram {
                 label,
                 values,
-                bins: crate::BinMethod::Sturges as i32,
+                bins: crate::HistogramBins::DEFAULT,
             },
         }
     }

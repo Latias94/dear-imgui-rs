@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Use `PlotDataStride::AUTO` / `Plot3DDataStride::AUTO` for the default stride.
   - `dear-implot::SubplotGrid::new` now takes `usize` row/column counts instead of raw signed
     counts.
+  - `dear-implot` histogram bin APIs now use `HistogramBins`, `usize` bin counts, or `BinMethod`
+    instead of raw signed bin selectors.
   - ImPlot3D `Plot3DBuilder` and `Plot3DToken` now carry the originating frame lifetime.
   - `dear-implot3d::Plot3DContext::current()` now exposes a non-owning current-context wrapper,
     matching the `dear-implot` current-context API shape for advanced callers.

@@ -202,14 +202,19 @@ PositionalBarPlot::new("Positioned Bars", &x_positions, &values)
 ```rust
 // 1D Histogram
 HistogramPlot::new("Distribution", &data)
-    .with_bins(20)
+    .with_bins(20usize)
     .density()
     .cumulative()
     .plot();
 
+// Automatic binning method
+HistogramPlot::new("Auto Distribution", &data)
+    .with_bins(BinMethod::Scott)
+    .plot();
+
 // 2D Histogram
 Histogram2DPlot::new("2D Distribution", &x_data, &y_data)
-    .with_bins(10, 10)
+    .with_bins(10usize, 10usize)
     .plot();
 ```
 

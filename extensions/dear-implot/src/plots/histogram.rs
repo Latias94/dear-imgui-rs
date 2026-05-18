@@ -4,14 +4,14 @@ use super::{
     Plot, PlotDataLayout, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty,
 };
 use crate::sys;
-use crate::{BinMethod, HistogramFlags, ItemFlags};
+use crate::{HistogramBins, HistogramFlags, ItemFlags};
 
 /// Builder for 1D histogram plots
 pub struct HistogramPlot<'a> {
     label: &'a str,
     values: &'a [f64],
     style: PlotItemStyle,
-    bins: i32,
+    bins: HistogramBins,
     bar_scale: f64,
     range: Option<sys::ImPlotRange>,
     flags: HistogramFlags,
@@ -31,7 +31,7 @@ impl<'a> HistogramPlot<'a> {
             label,
             values,
             style: PlotItemStyle::default(),
-            bins: BinMethod::Sturges as i32,
+            bins: HistogramBins::DEFAULT,
             bar_scale: 1.0,
             range: None, // Auto-range
             flags: HistogramFlags::NONE,
@@ -39,14 +39,9 @@ impl<'a> HistogramPlot<'a> {
         }
     }
 
-    /// Set the number of bins (positive integer) or binning method (negative value)
-    /// Common binning methods:
-    /// - ImPlotBin_Sqrt = -1
-    /// - ImPlotBin_Sturges = -2  (default)
-    /// - ImPlotBin_Rice = -3
-    /// - ImPlotBin_Scott = -4
-    pub fn with_bins(mut self, bins: i32) -> Self {
-        self.bins = bins;
+    /// Set a concrete positive bin count or automatic binning method.
+    pub fn with_bins(mut self, bins: impl Into<HistogramBins>) -> Self {
+        self.bins = bins.into();
         self
     }
 
@@ -139,7 +134,7 @@ impl<'a> Plot for HistogramPlot<'a> {
                 label_ptr,
                 self.values.as_ptr(),
                 count,
-                self.bins,
+                self.bins.raw("HistogramPlot::plot()"),
                 self.bar_scale,
                 range,
                 spec,
@@ -158,8 +153,8 @@ pub struct Histogram2DPlot<'a> {
     x_values: &'a [f64],
     y_values: &'a [f64],
     style: PlotItemStyle,
-    x_bins: i32,
-    y_bins: i32,
+    x_bins: HistogramBins,
+    y_bins: HistogramBins,
     range: Option<sys::ImPlotRect>,
     flags: HistogramFlags,
     item_flags: ItemFlags,
@@ -179,8 +174,8 @@ impl<'a> Histogram2DPlot<'a> {
             x_values,
             y_values,
             style: PlotItemStyle::default(),
-            x_bins: BinMethod::Sturges as i32,
-            y_bins: BinMethod::Sturges as i32,
+            x_bins: HistogramBins::DEFAULT,
+            y_bins: HistogramBins::DEFAULT,
             range: None, // Auto-range
             flags: HistogramFlags::NONE,
             item_flags: ItemFlags::NONE,
@@ -188,9 +183,13 @@ impl<'a> Histogram2DPlot<'a> {
     }
 
     /// Set the number of bins for both X and Y axes
-    pub fn with_bins(mut self, x_bins: i32, y_bins: i32) -> Self {
-        self.x_bins = x_bins;
-        self.y_bins = y_bins;
+    pub fn with_bins(
+        mut self,
+        x_bins: impl Into<HistogramBins>,
+        y_bins: impl Into<HistogramBins>,
+    ) -> Self {
+        self.x_bins = x_bins.into();
+        self.y_bins = y_bins.into();
         self
     }
 
@@ -280,8 +279,8 @@ impl<'a> Plot for Histogram2DPlot<'a> {
                 self.x_values.as_ptr(),
                 self.y_values.as_ptr(),
                 count,
-                self.x_bins,
-                self.y_bins,
+                self.x_bins.raw("Histogram2DPlot::plot()"),
+                self.y_bins.raw("Histogram2DPlot::plot()"),
                 range,
                 spec,
             );
@@ -309,7 +308,7 @@ impl<'ui> crate::PlotUi<'ui> {
         &self,
         label: &str,
         values: &[f64],
-        bins: i32,
+        bins: impl Into<HistogramBins>,
     ) -> Result<(), PlotError> {
         let plot = HistogramPlot::new(label, values).with_bins(bins);
         plot.validate()?;
@@ -338,13 +337,52 @@ impl<'ui> crate::PlotUi<'ui> {
         label: &str,
         x_values: &[f64],
         y_values: &[f64],
-        x_bins: i32,
-        y_bins: i32,
+        x_bins: impl Into<HistogramBins>,
+        y_bins: impl Into<HistogramBins>,
     ) -> Result<(), PlotError> {
         let plot = Histogram2DPlot::new(label, x_values, y_values).with_bins(x_bins, y_bins);
         plot.validate()?;
         self.bind();
         plot.plot();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Histogram2DPlot, HistogramPlot};
+    use crate::{BinMethod, HistogramBins};
+
+    #[test]
+    fn histogram_bins_distinguish_counts_from_methods() {
+        assert_eq!(HistogramBins::from(8usize).raw("test"), 8);
+        assert_eq!(
+            HistogramBins::from(BinMethod::Rice).raw("test"),
+            BinMethod::Rice as i32
+        );
+        assert_eq!(
+            HistogramBins::DEFAULT.raw("test"),
+            BinMethod::Sturges as i32
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "test bin count must be positive")]
+    fn histogram_bins_reject_zero_counts_before_ffi() {
+        let _ = HistogramBins::from(0usize).raw("test");
+    }
+
+    #[test]
+    #[should_panic(expected = "test bin count exceeded ImPlot's i32 range")]
+    fn histogram_bins_reject_oversized_counts_before_ffi() {
+        let _ = HistogramBins::from(i32::MAX as usize + 1).raw("test");
+    }
+
+    #[test]
+    fn histogram_builders_accept_typed_bins() {
+        let values = [1.0, 2.0, 3.0];
+        let _ = HistogramPlot::new("hist", &values).with_bins(8usize);
+        let _ = HistogramPlot::new("hist", &values).with_bins(BinMethod::Scott);
+        let _ = Histogram2DPlot::new("hist2d", &values, &values).with_bins(4usize, BinMethod::Rice);
     }
 }
