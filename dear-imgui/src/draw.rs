@@ -504,10 +504,13 @@ impl<'ui> DrawListMut<'ui> {
 impl<'ui> DrawListMut<'ui> {
     /// Split draw into multiple channels and merge automatically at the end of the closure.
     #[doc(alias = "ChannelsSplit")]
-    pub fn channels_split<F: FnOnce(&ChannelsSplit<'ui>)>(&'ui self, channels_count: u32, f: F) {
+    pub fn channels_split<F: FnOnce(&ChannelsSplit<'ui>)>(&'ui self, channels_count: usize, f: F) {
         assert!(channels_count > 0, "channels_count must be greater than 0");
-        let channels_count_i32 =
-            i32::try_from(channels_count).expect("channels_count exceeded ImGui's i32 range");
+        let channels_count_i32 = count_to_i32(
+            "DrawListMut::channels_split()",
+            "channels_count",
+            channels_count,
+        );
 
         unsafe { sys::ImDrawList_ChannelsSplit(self.draw_list, channels_count_i32) };
         let _merge_guard = ChannelsSplitMergeGuard { draw_list: self };
@@ -1514,22 +1517,25 @@ impl<'ui> DrawListMut<'ui> {
 /// Represent the drawing interface within a call to `channels_split`.
 pub struct ChannelsSplit<'ui> {
     draw_list: &'ui DrawListMut<'ui>,
-    channels_count: u32,
+    channels_count: usize,
 }
 
 impl ChannelsSplit<'_> {
     /// Change current channel. Panics if `channel_index >= channels_count`.
     #[doc(alias = "ChannelsSetCurrent")]
-    pub fn set_current(&self, channel_index: u32) {
+    pub fn set_current(&self, channel_index: usize) {
         assert!(
             channel_index < self.channels_count,
             "Channel index {} out of range {}",
             channel_index,
             self.channels_count
         );
-        unsafe {
-            sys::ImDrawList_ChannelsSetCurrent(self.draw_list.draw_list, channel_index as i32)
-        };
+        let channel_index_i32 = count_to_i32(
+            "ChannelsSplit::set_current()",
+            "channel_index",
+            channel_index,
+        );
+        unsafe { sys::ImDrawList_ChannelsSetCurrent(self.draw_list.draw_list, channel_index_i32) };
     }
 }
 
@@ -1834,6 +1840,36 @@ mod channels_tests {
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             draw_list.channels_split(0, |_| {});
+        }));
+
+        assert!(result.is_err());
+        unsafe {
+            assert_eq!((*raw_draw_list)._Splitter._Count, initial_count);
+            assert_eq!((*raw_draw_list)._Splitter._Current, initial_current);
+        }
+
+        unsafe {
+            sys::ImDrawList_destroy(raw_draw_list);
+            sys::ImDrawListSharedData_destroy(shared);
+        }
+    }
+
+    #[test]
+    fn channels_split_rejects_oversized_channel_counts() {
+        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
+        assert!(!shared.is_null());
+        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
+        assert!(!raw_draw_list.is_null());
+
+        let draw_list = DrawListMut {
+            draw_list: raw_draw_list,
+            _phantom: PhantomData,
+        };
+        let initial_count = unsafe { (*raw_draw_list)._Splitter._Count };
+        let initial_current = unsafe { (*raw_draw_list)._Splitter._Current };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.channels_split(i32::MAX as usize + 1, |_| {});
         }));
 
         assert!(result.is_err());

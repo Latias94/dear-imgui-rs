@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ListClipper` now takes `usize` item counts and returns `usize` visible indices/ranges.
   - Draw-list segment counts now use `DrawSegmentCount` / `DrawNgonSegmentCount` instead of raw
     signed `num_segments` values.
+  - Draw-list channel split helpers now use `usize` channel counts/indices instead of `u32`.
   - Draw-list low-level `prim_reserve` / `prim_unreserve` counts now use `usize` instead of raw
     signed values.
   - `Io` render/window metrics getters now return `usize` counts instead of raw signed values.
