@@ -263,13 +263,6 @@ impl<'tex> From<TextureId> for TextureRef<'tex> {
     }
 }
 
-impl<'tex> From<u64> for TextureRef<'tex> {
-    #[inline]
-    fn from(id: u64) -> Self {
-        TextureRef::from(TextureId::from(id))
-    }
-}
-
 impl<'tex> From<&TextureData> for TextureRef<'tex> {
     #[inline]
     fn from(td: &TextureData) -> Self {
@@ -856,14 +849,14 @@ pub fn get_format_bytes_per_pixel(format: TextureFormat) -> i32 {
     unsafe { sys::igImTextureDataGetFormatBytesPerPixel(format.into()) }
 }
 
-/// Create an ImTextureRef from a texture ID
+/// Create an ImTextureRef from a texture ID.
 ///
 /// This is the safe way to create an ImTextureRef for use with Dear ImGui.
 /// Use this instead of directly constructing the sys::ImTextureRef structure.
-pub fn create_texture_ref(texture_id: u64) -> sys::ImTextureRef {
+pub fn create_texture_ref(texture_id: TextureId) -> sys::ImTextureRef {
     sys::ImTextureRef {
         _TexData: std::ptr::null_mut(),
-        _TexID: texture_id,
+        _TexID: texture_id.id() as sys::ImTextureID,
     }
 }
 

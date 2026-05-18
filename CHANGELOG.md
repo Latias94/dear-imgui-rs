@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `TextureRef` is now `TextureRef<'tex>` for managed textures. Pass `TextureId` for legacy
     renderer-owned handles and `&mut TextureData` / `&mut OwnedTextureData` for ImGui-managed
     textures. `&TextureData` remains usable only as the legacy TexID path.
+  - `TextureRef` and `create_texture_ref` no longer accept raw `u64` texture ids; use `TextureId`.
   - `TextureRef::from_raw(...)` is now `unsafe` because raw `ImTextureRef` may contain an arbitrary
     managed `ImTextureData*`.
   - `Context::render()` returns `&mut DrawData`; renderer backends should accept mutable draw data
