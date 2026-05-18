@@ -611,8 +611,8 @@ fn load_header_background_texture() -> Result<texture::OwnedTextureData, Box<dyn
     let mut texture = texture::TextureData::new();
     texture.create(
         texture::TextureFormat::RGBA32,
-        i32::try_from(width).expect("header texture width fits i32"),
-        i32::try_from(height).expect("header texture height fits i32"),
+        u32::try_from(width).expect("header texture width fits u32"),
+        u32::try_from(height).expect("header texture height fits u32"),
     );
     texture.set_data(image.as_raw());
     texture.set_status(texture::TextureStatus::WantCreate);

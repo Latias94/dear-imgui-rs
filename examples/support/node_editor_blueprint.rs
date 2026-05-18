@@ -1,6 +1,6 @@
 use dear_imgui_rs::{
-    DrawCornerFlags, DrawListMut, HorizontalStackLayoutToken, IdStackToken, PolylineFlags,
-    StackLayoutId, Ui, VerticalStackLayoutToken, texture::TextureData,
+    DrawCornerFlags, DrawListMut, DrawSegmentCount, HorizontalStackLayoutToken, IdStackToken,
+    PolylineFlags, StackLayoutId, Ui, VerticalStackLayoutToken, texture::TextureData,
 };
 use dear_node_editor::{
     NodeEditorFrame, NodeId, NodeToken, PinId, PinKind, PinToken, StyleVar, StyleVarToken,
@@ -576,7 +576,12 @@ fn path_flow_icon(
     tip_round: f32,
 ) {
     draw_list.path_line_to([left, top + rounding]);
-    draw_list.path_bezier_cubic_curve_to([left, top], [left, top], [left + rounding, top], 0);
+    draw_list.path_bezier_cubic_curve_to(
+        [left, top],
+        [left, top],
+        [left + rounding, top],
+        DrawSegmentCount::AUTO,
+    );
     draw_list.path_line_to(tip_top);
     draw_list.path_line_to([
         tip_top[0] + (tip_right[0] - tip_top[0]) * tip_round,
@@ -589,7 +594,7 @@ fn path_flow_icon(
             tip_bottom[0] + (tip_right[0] - tip_bottom[0]) * tip_round,
             tip_bottom[1] + (tip_right[1] - tip_bottom[1]) * tip_round,
         ],
-        0,
+        DrawSegmentCount::AUTO,
     );
     draw_list.path_line_to(tip_bottom);
     draw_list.path_line_to([left + rounding, bottom]);
@@ -597,7 +602,7 @@ fn path_flow_icon(
         [left, bottom],
         [left, bottom],
         [left, bottom - rounding],
-        0,
+        DrawSegmentCount::AUTO,
     );
 }
 

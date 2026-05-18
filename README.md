@@ -77,7 +77,7 @@ let _draw_data = ctx.render();
 
 The current safe API intentionally encodes more of Dear ImGui's FFI invariants in Rust types.
 Some source breaks are deliberate because preserving the old shape would keep unsound safe code
-compilable.
+compilable. See `CHANGELOG.md` for the release-by-release list of affected methods.
 
 - Texture refs now carry lifetimes: pass `TextureId` for legacy renderer-owned handles, or pass
   `&mut TextureData` / `&mut OwnedTextureData` for ImGui-managed textures. `&TextureData` is treated
@@ -106,22 +106,8 @@ compilable.
   created.
 - `StateStorageToken<'ui, 'storage>` now borrows both the active `Ui` and the pushed storage. Keep
   the `OwnedStateStorage` alive until the token is dropped.
-- Table APIs no longer use raw `column_n: i32` sentinels. Use `TableColumnIndex` for real columns,
-  `TableColumnRef::Current` for current-column defaults, and the split cell/row background helpers.
-- Table row queries return typed row state: `Option<TableRowIndex>` or `TableHoveredRow`.
-- Legacy Columns APIs use `usize` counts, `OldColumnIndex` for real columns,
-  `OldColumnRef::Current` for current-column defaults, and `OldColumnOffsetRef::Trailing` for the
-  right-most offset line.
-- `ListClipper` uses Rust collection indexing types: pass `usize` counts and iterate
-  `usize` indices or `display_range()`.
-- `dear-implot::SubplotGrid::new` uses `usize` row/column counts.
-- `dear-implot` / `dear-implot3d` colormap indices/counts/sizes use `usize` at the safe Rust API
-  boundary.
-- `dear-implot` histogram bins use `usize` counts or `BinMethod`; raw negative bin sentinels are
-  no longer part of the safe API.
-- `dear-implot` heatmap row/column counts are validated before FFI; oversized `usize` counts are
-  rejected instead of truncating to ImPlot's `i32` ABI.
-- `dear-implot3d` surface grid counts use `usize` and reject oversized values before FFI.
+- Safe counts, indices, offsets, ids, and sentinel-like options use Rust semantic types instead of
+  raw signed FFI integers. Conversions into Dear ImGui's signed `int` ABI are checked before FFI.
 - Extension contexts follow the same rule: safe methods bind or assert against the owning current
   ImGui/extension context, not whichever raw C context happened to be current.
 

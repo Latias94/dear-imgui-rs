@@ -89,55 +89,11 @@ Extensions
   - `dear-imgui-test-engine` safe methods check the bound ImGui context liveness before FFI. Drop or
     explicitly `shutdown()` the test engine before dropping the target `Context`; stale bound-context
     use panics in Rust.
-  - `dear-implot` colormap helpers use typed `ColormapIndex`, `ColormapColorIndex`, and
-    `ColormapSelection` values. Keep the token returned by `push_colormap` alive instead of calling
-    `pop_colormap(count)`. Colormap indices/counts/sizes are exposed as `usize` on the safe Rust
-    side.
-  - `dear-implot` / `dear-implot3d` plot data layout APIs use typed
-    `PlotDataLayout` / `Plot3DDataLayout`, typed sample offsets, and typed byte strides. Replace raw
-    `offset, stride` pairs with `.with_offset(PlotDataOffset::samples(...))` plus
-    `.with_stride(PlotDataStride::bytes(...))`, or use the `3D` variants for ImPlot3D. Default
-    stride is explicit via `PlotDataStride::AUTO` / `Plot3DDataStride::AUTO`; zero-byte strides are
-    rejected before FFI.
-  - `dear-implot::SubplotGrid::new` uses `usize` row/column counts instead of raw signed counts.
-  - `dear-implot` histogram bin APIs use `HistogramBins`, `usize` concrete bin counts, or
-    `BinMethod` automatic methods instead of raw signed bin selectors.
-  - `dear-implot` heatmap row/column counts are checked before FFI and reject oversized `usize`
-    values instead of truncating to ImPlot's `i32` ABI.
-  - `dear-implot3d` surface grid counts use `usize` and reject oversized values before crossing the
-    ImPlot3D `i32` ABI.
-  - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
-    of a raw signed integer. Use `PlotValueOffset::new(...)` or pass `usize` directly.
-  - Table freeze helpers now take `usize` frozen column/row counts instead of raw signed values.
-  - Table column APIs use typed column values instead of raw signed sentinel integers. Use
-    `TableColumnIndex::new(...)` for real columns, `TableColumnRef::Current` for current-column
-    defaults, `TableContextMenuTarget` for context menus, and `TableHoveredColumn` for hover results.
-    Use `table_set_cell_bg_color*` / `table_set_row_bg{0,1}_color*` instead of passing
-    `TableBgTarget` plus `-1`.
-  - Table row query APIs use `Option<TableRowIndex>` / `TableHoveredRow` instead of raw signed row
-    sentinel values.
-  - Legacy Columns APIs use typed counts and selectors: `usize` for counts, `OldColumnIndex` for
-    concrete columns, `OldColumnRef::Current` for current-column defaults, and
-    `OldColumnOffsetRef::Trailing` for the right-most offset line.
-  - `ListClipper` item counts, visible display bounds, `display_range()`, and iterator items use
-    `usize`, matching Rust collection indexing.
-  - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
-  - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
-    `NodeEditor::set_alt_mouse_button` takes `MouseButton`.
-  - `dear-implot3d` style and colormap helpers use typed `Plot3DStyleVar`,
-    `Plot3DColorElement`, `Colormap`, `ColormapIndex`, and `ColormapColorIndex` values instead of
-    raw `i32` identifiers. Colormap indices/counts/sizes use `usize`. Push helpers return RAII
-    tokens, so migrate manual `pop_*` count calls to token lifetimes or `.pop()`.
-  - `dear-imgui-test-engine::TestScript::mouse_click_on_void` takes `MouseButton` instead of a raw
-    button index.
-  - `dear-imgui-test-engine` table column script helpers use typed table column indices/targets
-    instead of raw signed column indices.
-  - `dear-imgui-test-engine` script repeat/wait frame counts use `ScriptCount`; construct values
-    with `ScriptCount::new(...)` instead of passing raw signed integers.
-  - `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use `push_id(...)` and keep the returned
-    token alive for the desired scope.
+  - Safe counts, indices, ids, offsets, layout strides, and sentinel-like options use Rust semantic
+    types instead of raw signed FFI integers across core and extension crates. Conversions into C
+    `int` ABI values are checked before FFI.
   - Current-context binding policy is part of the public safe API contract documented here and in
-    the crate-level migration notes.
+    the crate-level migration notes. Detailed per-method migration notes live in `CHANGELOG.md`.
 - Backend lifecycle changes on trunk:
   - `dear-imgui-glow::GlowRenderer::destroy()` clears renderer-owned multi-viewport state for the
     renderer, matching `Drop`. It makes installed callbacks no-op for that renderer, but callers

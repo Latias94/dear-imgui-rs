@@ -25,6 +25,7 @@
 use bitflags::bitflags;
 use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 
 use crate::colors::Color;
 use crate::internal::len_i32;
@@ -52,6 +53,11 @@ fn assert_positive_f32(caller: &str, name: &str, value: f32) {
 
 fn assert_non_negative_i32(caller: &str, name: &str, value: i32) {
     assert!(value >= 0, "{caller} {name} must be non-negative");
+}
+
+fn count_to_i32(caller: &str, name: &str, value: usize) -> i32 {
+    i32::try_from(value)
+        .unwrap_or_else(|_| panic!("{caller} {name} exceeded Dear ImGui's i32 range"))
 }
 
 fn assert_finite_vec2(caller: &str, name: &str, value: sys::ImVec2) {
@@ -232,6 +238,103 @@ bitflags! {
         const ANTI_ALIASED_FILL = sys::ImDrawListFlags_AntiAliasedFill as i32;
         /// Can emit 'VtxOffset > 0' to allow large meshes
         const ALLOW_VTX_OFFSET = sys::ImDrawListFlags_AllowVtxOffset as i32;
+    }
+}
+
+/// Segment count for draw-list APIs where Dear ImGui accepts `0` as "auto".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct DrawSegmentCount(Option<NonZeroUsize>);
+
+impl DrawSegmentCount {
+    /// Let Dear ImGui choose the tessellation count.
+    pub const AUTO: Self = Self(None);
+
+    #[inline]
+    pub const fn auto() -> Self {
+        Self::AUTO
+    }
+
+    /// Create an explicit positive segment count.
+    #[inline]
+    pub const fn new(count: usize) -> Option<Self> {
+        if count > 0 && count <= i32::MAX as usize {
+            match NonZeroUsize::new(count) {
+                Some(count) => Some(Self(Some(count))),
+                None => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Create an explicit positive segment count.
+    ///
+    /// Panics if `count` is zero or exceeds Dear ImGui's `int` range.
+    #[inline]
+    pub const fn count(count: usize) -> Self {
+        match Self::new(count) {
+            Some(count) => count,
+            None => {
+                panic!(
+                    "DrawSegmentCount::count() requires a positive count within Dear ImGui's i32 range"
+                )
+            }
+        }
+    }
+
+    /// Return the explicit segment count, or `None` for automatic tessellation.
+    #[inline]
+    pub const fn get(self) -> Option<usize> {
+        match self.0 {
+            Some(count) => Some(count.get()),
+            None => None,
+        }
+    }
+
+    #[inline]
+    fn into_i32(self, caller: &str) -> i32 {
+        match self.0 {
+            Some(count) => count_to_i32(caller, "num_segments", count.get()),
+            None => 0,
+        }
+    }
+}
+
+impl From<NonZeroUsize> for DrawSegmentCount {
+    #[inline]
+    fn from(value: NonZeroUsize) -> Self {
+        Self::new(value.get()).expect("segment count exceeded Dear ImGui's i32 range")
+    }
+}
+
+/// Segment count for regular n-gon drawing. Dear ImGui requires at least three sides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DrawNgonSegmentCount(usize);
+
+impl DrawNgonSegmentCount {
+    #[inline]
+    pub fn new(count: usize) -> Option<Self> {
+        (count >= 3 && count <= i32::MAX as usize).then_some(Self(count))
+    }
+
+    #[inline]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+
+    #[inline]
+    fn into_i32(self, caller: &str) -> i32 {
+        assert!(self.0 >= 3, "{caller} num_segments must be at least 3");
+        count_to_i32(caller, "num_segments", self.0)
+    }
+}
+
+impl TryFrom<usize> for DrawNgonSegmentCount {
+    type Error = ();
+
+    #[inline]
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or(())
     }
 }
 
@@ -613,12 +716,13 @@ impl<'ui> DrawListMut<'ui> {
         radius: f32,
         a_min: f32,
         a_max: f32,
-        num_segments: i32,
+        num_segments: impl Into<DrawSegmentCount>,
     ) {
         let center_vec = finite_vec2("DrawListMut::path_arc_to()", "center", center);
         assert_non_negative_f32("DrawListMut::path_arc_to()", "radius", radius);
         assert_finite_f32("DrawListMut::path_arc_to()", "a_min", a_min);
         assert_finite_f32("DrawListMut::path_arc_to()", "a_max", a_max);
+        let num_segments = num_segments.into().into_i32("DrawListMut::path_arc_to()");
 
         unsafe {
             sys::ImDrawList_PathArcTo(
@@ -690,13 +794,16 @@ impl<'ui> DrawListMut<'ui> {
         rot: f32,
         a_min: f32,
         a_max: f32,
-        num_segments: i32,
+        num_segments: impl Into<DrawSegmentCount>,
     ) {
         let center = finite_vec2("DrawListMut::path_elliptical_arc_to()", "center", center);
         let radius = non_negative_vec2("DrawListMut::path_elliptical_arc_to()", "radius", radius);
         assert_finite_f32("DrawListMut::path_elliptical_arc_to()", "rot", rot);
         assert_finite_f32("DrawListMut::path_elliptical_arc_to()", "a_min", a_min);
         assert_finite_f32("DrawListMut::path_elliptical_arc_to()", "a_max", a_max);
+        let num_segments = num_segments
+            .into()
+            .into_i32("DrawListMut::path_elliptical_arc_to()");
 
         unsafe {
             sys::ImDrawList_PathEllipticalArcTo(
@@ -717,15 +824,13 @@ impl<'ui> DrawListMut<'ui> {
         &self,
         p2: impl Into<sys::ImVec2>,
         p3: impl Into<sys::ImVec2>,
-        num_segments: i32,
+        num_segments: impl Into<DrawSegmentCount>,
     ) {
         let p2 = finite_vec2("DrawListMut::path_bezier_quadratic_curve_to()", "p2", p2);
         let p3 = finite_vec2("DrawListMut::path_bezier_quadratic_curve_to()", "p3", p3);
-        assert_non_negative_i32(
-            "DrawListMut::path_bezier_quadratic_curve_to()",
-            "num_segments",
-            num_segments,
-        );
+        let num_segments = num_segments
+            .into()
+            .into_i32("DrawListMut::path_bezier_quadratic_curve_to()");
         assert_path_not_empty(
             self.draw_list,
             "DrawListMut::path_bezier_quadratic_curve_to()",
@@ -741,16 +846,14 @@ impl<'ui> DrawListMut<'ui> {
         p2: impl Into<sys::ImVec2>,
         p3: impl Into<sys::ImVec2>,
         p4: impl Into<sys::ImVec2>,
-        num_segments: i32,
+        num_segments: impl Into<DrawSegmentCount>,
     ) {
         let p2 = finite_vec2("DrawListMut::path_bezier_cubic_curve_to()", "p2", p2);
         let p3 = finite_vec2("DrawListMut::path_bezier_cubic_curve_to()", "p3", p3);
         let p4 = finite_vec2("DrawListMut::path_bezier_cubic_curve_to()", "p4", p4);
-        assert_non_negative_i32(
-            "DrawListMut::path_bezier_cubic_curve_to()",
-            "num_segments",
-            num_segments,
-        );
+        let num_segments = num_segments
+            .into()
+            .into_i32("DrawListMut::path_bezier_cubic_curve_to()");
         assert_path_not_empty(self.draw_list, "DrawListMut::path_bezier_cubic_curve_to()");
 
         unsafe { sys::ImDrawList_PathBezierCubicCurveTo(self.draw_list, p2, p3, p4, num_segments) }
@@ -1180,7 +1283,7 @@ impl<'ui> DrawListMut<'ui> {
         center: impl Into<sys::ImVec2>,
         radius: f32,
         col: C,
-        num_segments: i32,
+        num_segments: DrawNgonSegmentCount,
         thickness: f32,
     ) where
         C: Into<ImColor32>,
@@ -1188,6 +1291,7 @@ impl<'ui> DrawListMut<'ui> {
         let center = finite_vec2("DrawListMut::add_ngon()", "center", center);
         assert_non_negative_f32("DrawListMut::add_ngon()", "radius", radius);
         assert_positive_f32("DrawListMut::add_ngon()", "thickness", thickness);
+        let num_segments = num_segments.into_i32("DrawListMut::add_ngon()");
 
         unsafe {
             sys::ImDrawList_AddNgon(
@@ -1208,12 +1312,13 @@ impl<'ui> DrawListMut<'ui> {
         center: impl Into<sys::ImVec2>,
         radius: f32,
         col: C,
-        num_segments: i32,
+        num_segments: DrawNgonSegmentCount,
     ) where
         C: Into<ImColor32>,
     {
         let center = finite_vec2("DrawListMut::add_ngon_filled()", "center", center);
         assert_non_negative_f32("DrawListMut::add_ngon_filled()", "radius", radius);
+        let num_segments = num_segments.into_i32("DrawListMut::add_ngon_filled()");
 
         unsafe {
             sys::ImDrawList_AddNgonFilled(
@@ -1234,7 +1339,7 @@ impl<'ui> DrawListMut<'ui> {
         radius: impl Into<sys::ImVec2>,
         col: C,
         rot: f32,
-        num_segments: i32,
+        num_segments: impl Into<DrawSegmentCount>,
         thickness: f32,
     ) where
         C: Into<ImColor32>,
@@ -1243,6 +1348,7 @@ impl<'ui> DrawListMut<'ui> {
         let radius = non_negative_vec2("DrawListMut::add_ellipse()", "radius", radius);
         assert_finite_f32("DrawListMut::add_ellipse()", "rot", rot);
         assert_positive_f32("DrawListMut::add_ellipse()", "thickness", thickness);
+        let num_segments = num_segments.into().into_i32("DrawListMut::add_ellipse()");
 
         unsafe {
             sys::ImDrawList_AddEllipse(
@@ -1265,13 +1371,16 @@ impl<'ui> DrawListMut<'ui> {
         radius: impl Into<sys::ImVec2>,
         col: C,
         rot: f32,
-        num_segments: i32,
+        num_segments: impl Into<DrawSegmentCount>,
     ) where
         C: Into<ImColor32>,
     {
         let center = finite_vec2("DrawListMut::add_ellipse_filled()", "center", center);
         let radius = non_negative_vec2("DrawListMut::add_ellipse_filled()", "radius", radius);
         assert_finite_f32("DrawListMut::add_ellipse_filled()", "rot", rot);
+        let num_segments = num_segments
+            .into()
+            .into_i32("DrawListMut::add_ellipse_filled()");
 
         unsafe {
             sys::ImDrawList_AddEllipseFilled(
@@ -1294,7 +1403,7 @@ impl<'ui> DrawListMut<'ui> {
         p3: impl Into<sys::ImVec2>,
         col: C,
         thickness: f32,
-        num_segments: i32,
+        num_segments: impl Into<DrawSegmentCount>,
     ) where
         C: Into<ImColor32>,
     {
@@ -1306,11 +1415,9 @@ impl<'ui> DrawListMut<'ui> {
             "thickness",
             thickness,
         );
-        assert_non_negative_i32(
-            "DrawListMut::add_bezier_quadratic()",
-            "num_segments",
-            num_segments,
-        );
+        let num_segments = num_segments
+            .into()
+            .into_i32("DrawListMut::add_bezier_quadratic()");
 
         unsafe {
             sys::ImDrawList_AddBezierQuadratic(
@@ -1841,7 +1948,14 @@ mod draw_numeric_tests {
             );
         });
         assert_panics_without_buffer_change(&fixture, |draw_list| {
-            draw_list.add_ellipse([0.0, 0.0], [-1.0, 4.0], ImColor32::WHITE, 0.0, 0, 1.0);
+            draw_list.add_ellipse(
+                [0.0, 0.0],
+                [-1.0, 4.0],
+                ImColor32::WHITE,
+                0.0,
+                DrawSegmentCount::AUTO,
+                1.0,
+            );
         });
         assert_panics_without_buffer_change(&fixture, |draw_list| {
             draw_list.add_bezier_quadratic(
@@ -1850,7 +1964,7 @@ mod draw_numeric_tests {
                 [2.0, 0.0],
                 ImColor32::WHITE,
                 1.0,
-                -1,
+                DrawSegmentCount::count(0),
             );
         });
         assert_panics_without_buffer_change(&fixture, |draw_list| {
@@ -1890,7 +2004,7 @@ mod draw_numeric_tests {
         assert_eq!(fixture.path_size(), path_size);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            draw_list.path_arc_to([0.0, 0.0], -1.0, 0.0, 1.0, 0);
+            draw_list.path_arc_to([0.0, 0.0], -1.0, 0.0, 1.0, DrawSegmentCount::AUTO);
         }));
         assert!(result.is_err());
         assert_eq!(fixture.path_size(), path_size);
@@ -1902,7 +2016,11 @@ mod draw_numeric_tests {
         assert_eq!(fixture.path_size(), path_size);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            draw_list.path_bezier_quadratic_curve_to([2.0, 2.0], [3.0, 3.0], -1);
+            draw_list.path_bezier_quadratic_curve_to(
+                [2.0, 2.0],
+                [3.0, 3.0],
+                DrawSegmentCount::count(0),
+            );
         }));
         assert!(result.is_err());
         assert_eq!(fixture.path_size(), path_size);
@@ -1919,7 +2037,12 @@ mod draw_numeric_tests {
 
         draw_list.path_clear();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            draw_list.path_bezier_cubic_curve_to([2.0, 2.0], [3.0, 3.0], [4.0, 4.0], 0);
+            draw_list.path_bezier_cubic_curve_to(
+                [2.0, 2.0],
+                [3.0, 3.0],
+                [4.0, 4.0],
+                DrawSegmentCount::AUTO,
+            );
         }));
         assert!(result.is_err());
         assert_eq!(fixture.path_size(), 0);
@@ -1955,8 +2078,28 @@ mod draw_numeric_tests {
                     [3.0, 0.0],
                     ImColor32::WHITE,
                 )
-                .num_segments((i32::MAX as u32) + 1);
+                .num_segments(DrawSegmentCount::count(i32::MAX as usize + 1));
         });
+    }
+
+    #[test]
+    fn draw_segment_counts_reject_invalid_values_before_ffi() {
+        assert!(DrawNgonSegmentCount::new(2).is_none());
+        assert!(DrawNgonSegmentCount::new(3).is_some());
+        assert!(DrawNgonSegmentCount::new(i32::MAX as usize + 1).is_none());
+
+        assert_eq!(DrawSegmentCount::AUTO.get(), None);
+        assert_eq!(
+            DrawSegmentCount::new(3).and_then(DrawSegmentCount::get),
+            Some(3)
+        );
+        assert_eq!(DrawSegmentCount::new(0), None);
+        assert_eq!(DrawSegmentCount::new(i32::MAX as usize + 1), None);
+
+        assert!(std::panic::catch_unwind(|| DrawSegmentCount::count(0)).is_err());
+        assert!(
+            std::panic::catch_unwind(|| DrawSegmentCount::count(i32::MAX as usize + 1)).is_err()
+        );
     }
 
     #[test]
@@ -2345,7 +2488,7 @@ pub struct Circle<'ui> {
     center: [f32; 2],
     radius: f32,
     color: ImColor32,
-    num_segments: i32,
+    num_segments: DrawSegmentCount,
     thickness: f32,
     filled: bool,
     draw_list: &'ui DrawListMut<'ui>,
@@ -2366,7 +2509,7 @@ impl<'ui> Circle<'ui> {
             center: finite_vec2("Circle::new()", "center", center).into(),
             radius,
             color: color.into(),
-            num_segments: 0, // 0 = auto
+            num_segments: DrawSegmentCount::AUTO,
             thickness: 1.0,
             filled: false,
             draw_list,
@@ -2386,9 +2529,9 @@ impl<'ui> Circle<'ui> {
         self
     }
 
-    /// Set number of segments (default to 0 = auto)
-    pub fn num_segments(mut self, num_segments: i32) -> Self {
-        self.num_segments = num_segments;
+    /// Set number of segments (default is automatic tessellation).
+    pub fn num_segments(mut self, num_segments: impl Into<DrawSegmentCount>) -> Self {
+        self.num_segments = num_segments.into();
         self
     }
 
@@ -2398,6 +2541,7 @@ impl<'ui> Circle<'ui> {
             x: self.center[0],
             y: self.center[1],
         };
+        let num_segments = self.num_segments.into_i32("Circle::num_segments()");
 
         if self.filled {
             unsafe {
@@ -2406,7 +2550,7 @@ impl<'ui> Circle<'ui> {
                     center,
                     self.radius,
                     self.color.into(),
-                    self.num_segments,
+                    num_segments,
                 )
             }
         } else {
@@ -2416,7 +2560,7 @@ impl<'ui> Circle<'ui> {
                     center,
                     self.radius,
                     self.color.into(),
-                    self.num_segments,
+                    num_segments,
                     self.thickness,
                 )
             }
@@ -2434,7 +2578,7 @@ pub struct BezierCurve<'ui> {
     color: ImColor32,
     thickness: f32,
     /// If num_segments is not set, the bezier curve is auto-tessalated.
-    num_segments: Option<i32>,
+    num_segments: DrawSegmentCount,
     draw_list: &'ui DrawListMut<'ui>,
 }
 
@@ -2458,7 +2602,7 @@ impl<'ui> BezierCurve<'ui> {
             pos1: finite_vec2("BezierCurve::new()", "pos1", pos1).into(),
             color: c.into(),
             thickness: 1.0,
-            num_segments: None,
+            num_segments: DrawSegmentCount::AUTO,
             draw_list,
         }
     }
@@ -2472,10 +2616,8 @@ impl<'ui> BezierCurve<'ui> {
 
     /// Set number of segments used to draw the Bezier curve. If not set, the
     /// bezier curve is auto-tessalated.
-    pub fn num_segments(mut self, num_segments: u32) -> Self {
-        let num_segments = i32::try_from(num_segments)
-            .expect("BezierCurve::num_segments() num_segments exceeded ImGui's i32 range");
-        self.num_segments = Some(num_segments);
+    pub fn num_segments(mut self, num_segments: impl Into<DrawSegmentCount>) -> Self {
+        self.num_segments = num_segments.into();
         self
     }
 
@@ -2495,7 +2637,7 @@ impl<'ui> BezierCurve<'ui> {
                 pos1,
                 self.color.into(),
                 self.thickness,
-                self.num_segments.unwrap_or(0),
+                self.num_segments.into_i32("BezierCurve::num_segments()"),
             )
         }
     }
