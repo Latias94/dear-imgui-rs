@@ -88,6 +88,16 @@ Extensions
     explicitly `shutdown()` the test engine before dropping the target `Context`; stale bound-context
     use panics in Rust.
   - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
+  - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
+    `NodeEditor::set_alt_mouse_button` takes `MouseButton`.
+  - `dear-implot3d` style and colormap helpers use typed `Plot3DStyleVar`,
+    `Plot3DColorElement`, `Colormap`, `ColormapIndex`, and `ColormapColorIndex` values instead of
+    raw `i32` identifiers. Push helpers return RAII tokens, so migrate manual `pop_*` count calls to
+    token lifetimes or `.pop()`.
+  - `dear-imgui-test-engine::TestScript::mouse_click_on_void` takes `MouseButton` instead of a raw
+    button index.
+  - `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use `push_id(...)` and keep the returned
+    token alive for the desired scope.
   - Current-context binding policy is part of the public safe API contract documented here and in
     the crate-level migration notes.
 - Backend lifecycle changes on trunk:

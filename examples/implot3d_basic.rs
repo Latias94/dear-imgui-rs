@@ -15,11 +15,9 @@ use implot3d::*;
 use std::cell::{Cell, RefCell};
 use std::f32::consts::PI;
 
-// ImPlot3DStyleVar constants (from cimplot3d.h)
-const IMPLOT3D_STYLEVAR_LINE_WEIGHT: i32 = 0;
-const IMPLOT3D_STYLEVAR_MARKER_SIZE: i32 = 2;
-const IMPLOT3D_STYLEVAR_MARKER_WEIGHT: i32 = 3;
-const IMPLOT3D_STYLEVAR_FILL_ALPHA: i32 = 4;
+fn cmap(index: usize) -> [f32; 4] {
+    get_colormap_color(ColormapColorIndex::from_usize(index).expect("colormap index fits in i32"))
+}
 
 fn main() {
     dear_imgui_rs::logging::init_tracing_with_filter(
@@ -241,11 +239,10 @@ fn demo_scatter_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
 
     if let Some(_tok) = plot_ui.begin_plot("Scatter Plots").build() {
         Scatter3D::f32("Data 1", &xs1, &ys1, &zs1).plot(plot_ui);
-        push_style_var_f32(IMPLOT3D_STYLEVAR_FILL_ALPHA, 0.25);
-        let col1 = get_colormap_color(1);
+        let _fill_alpha = push_style_var_f32(Plot3DStyleVar::FillAlpha, 0.25);
+        let col1 = cmap(1);
         set_next_marker_style(Marker3D::Square, 6.0, col1, -1.0, col1);
         Scatter3D::f32("Data 2", &xs2, &ys2, &zs2).plot(plot_ui);
-        pop_style_var(1);
     }
 }
 
@@ -304,9 +301,9 @@ fn demo_triangle_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 
     if let Some(_tok) = plot_ui.begin_plot("Triangle Plots").build() {
         plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -0.5, 1.5, Plot3DCond::Once);
-        set_next_fill_style(get_colormap_color(0), 1.0);
-        set_next_line_style(get_colormap_color(1), 2.0);
-        let col2 = get_colormap_color(2);
+        set_next_fill_style(cmap(0), 1.0);
+        set_next_line_style(cmap(1), 2.0);
+        let col2 = cmap(2);
         set_next_marker_style(Marker3D::Square, 3.0, col2, -1.0, col2);
         Triangles3D::f32("Pyramid", &xs, &ys, &zs)
             .flags(flags)
@@ -522,13 +519,15 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     FLAGS.with(|f| f.set(flags));
 
     // Begin the plot
-    if selected_fill == 1 {
+    let _colormap = if selected_fill == 1 {
         let colormaps = [
             "Viridis", "Plasma", "Hot", "Cool", "Pink", "Jet", "Twilight", "RdBu", "BrBG", "PiYG",
             "Spectral", "Greys",
         ];
-        push_colormap_name(colormaps[sel_colormap as usize]);
-    }
+        Some(push_colormap_name(colormaps[sel_colormap as usize]))
+    } else {
+        None
+    };
 
     if let Some(_tok) = plot_ui
         .begin_plot("Surface Plots")
@@ -539,22 +538,16 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
         plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.5, 1.5, Plot3DCond::Once);
 
         // Set fill style
-        push_style_var_f32(IMPLOT3D_STYLEVAR_FILL_ALPHA, 0.8);
+        let _fill_alpha = push_style_var_f32(Plot3DStyleVar::FillAlpha, 0.8);
         if selected_fill == 0 {
             set_next_fill_style(solid_color, 1.0);
         }
 
         // Set line style
-        set_next_line_style(get_colormap_color(1), 1.0);
+        set_next_line_style(cmap(1), 1.0);
 
         // Set marker style
-        set_next_marker_style(
-            Marker3D::Square,
-            -1.0,
-            get_colormap_color(2),
-            -1.0,
-            get_colormap_color(2),
-        );
+        set_next_marker_style(Marker3D::Square, -1.0, cmap(2), -1.0, cmap(2));
 
         let x_grid: Vec<f32> = (0..N).map(|j| MIN_VAL + j as f32 * STEP).collect();
         let y_grid: Vec<f32> = (0..N).map(|i| MIN_VAL + i as f32 * STEP).collect();
@@ -570,12 +563,6 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
                 .flags(flags)
                 .plot(plot_ui);
         }
-
-        pop_style_var(1);
-    }
-
-    if selected_fill == 1 {
-        pop_colormap(1);
     }
 }
 
@@ -1052,13 +1039,7 @@ fn demo_markers_and_text(ui: &Ui, plot_ui: &Plot3DUi) {
             ys[0] = 0.0;
             xs[1] = xs[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
             ys[1] = ys[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
-            set_next_marker_style(
-                m,
-                mk_size,
-                get_colormap_color(0),
-                mk_weight,
-                get_colormap_color(0),
-            );
+            set_next_marker_style(m, mk_size, cmap(0), mk_weight, cmap(0));
             Line3D::f32(&format!("##Filled_{}", i), &xs, &ys, &zs).plot(plot_ui);
             zs[0] -= 1.0;
             zs[1] -= 1.0;
@@ -1072,13 +1053,7 @@ fn demo_markers_and_text(ui: &Ui, plot_ui: &Plot3DUi) {
         for (i, &m) in markers.iter().enumerate() {
             xs[1] = xs[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
             ys[1] = ys[0] - (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
-            set_next_marker_style(
-                m,
-                mk_size,
-                [0.0, 0.0, 0.0, 0.0],
-                mk_weight,
-                get_colormap_color(0),
-            );
+            set_next_marker_style(m, mk_size, [0.0, 0.0, 0.0, 0.0], mk_weight, cmap(0));
             Line3D::f32(&format!("##Open_{}", i), &xs, &ys, &zs).plot(plot_ui);
             zs[0] -= 1.0;
             zs[1] -= 1.0;
@@ -1133,13 +1108,7 @@ fn demo_nan_values(ui: &Ui, plot_ui: &Plot3DUi) {
     }
 
     if let Some(_tok) = plot_ui.begin_plot("##NaNValues").build() {
-        set_next_marker_style(
-            Marker3D::Square,
-            6.0,
-            get_colormap_color(0),
-            -1.0,
-            get_colormap_color(0),
-        );
+        set_next_marker_style(Marker3D::Square, 6.0, cmap(0), -1.0, cmap(0));
         Line3D::f32("Line", &xs, &ys, &zs)
             .flags(flags)
             .plot(plot_ui);
@@ -1191,21 +1160,12 @@ fn demo_custom_styles(ui: &Ui, plot_ui: &Plot3DUi) {
     if let Some(_tok) = plot_ui.begin_plot("Custom Styles").build() {
         plot_ui.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
 
-        push_style_var_f32(IMPLOT3D_STYLEVAR_LINE_WEIGHT, line_weight);
-        push_style_var_f32(IMPLOT3D_STYLEVAR_MARKER_SIZE, marker_size);
-        push_style_var_f32(IMPLOT3D_STYLEVAR_MARKER_WEIGHT, marker_weight);
-        push_style_var_f32(IMPLOT3D_STYLEVAR_FILL_ALPHA, fill_alpha);
+        let _line_weight = push_style_var_f32(Plot3DStyleVar::LineWeight, line_weight);
+        let _marker_size = push_style_var_f32(Plot3DStyleVar::MarkerSize, marker_size);
+        let _fill_alpha = push_style_var_f32(Plot3DStyleVar::FillAlpha, fill_alpha);
 
-        set_next_marker_style(
-            Marker3D::Circle,
-            -1.0,
-            get_colormap_color(0),
-            -1.0,
-            get_colormap_color(0),
-        );
+        set_next_marker_style(Marker3D::Circle, -1.0, cmap(0), marker_weight, cmap(0));
         Line3D::f32("Styled Line", &xs, &ys, &zs).plot(plot_ui);
-
-        pop_style_var(4);
     }
 }
 
@@ -1239,9 +1199,11 @@ fn demo_array_backed_item_styles(ui: &Ui, plot_ui: &Plot3DUi) {
         Color::rgb(0.28, 0.50, 0.95).to_imgui_u32(),
     ];
 
-    push_style_color_element(Plot3DColorElement::AxisBg, [0.12, 0.18, 0.28, 0.18]);
-    push_style_color_element(Plot3DColorElement::AxisBgHovered, [0.22, 0.42, 0.78, 0.28]);
-    push_style_color_element(Plot3DColorElement::AxisBgActive, [0.88, 0.50, 0.18, 0.34]);
+    let _axis_bg = push_style_color(Plot3DColorElement::AxisBg, [0.12, 0.18, 0.28, 0.18]);
+    let _axis_bg_hovered =
+        push_style_color(Plot3DColorElement::AxisBgHovered, [0.22, 0.42, 0.78, 0.28]);
+    let _axis_bg_active =
+        push_style_color(Plot3DColorElement::AxisBgActive, [0.88, 0.50, 0.18, 0.34]);
 
     if let Some(_tok) = plot_ui.begin_plot("Array-backed Item Styles").build() {
         plot_ui.setup_axes(
@@ -1275,8 +1237,6 @@ fn demo_array_backed_item_styles(ui: &Ui, plot_ui: &Plot3DUi) {
             },
         );
     }
-
-    pop_style_color(3);
 }
 
 fn demo_custom_rendering(ui: &Ui, plot_ui: &Plot3DUi) {

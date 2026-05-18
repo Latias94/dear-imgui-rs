@@ -92,7 +92,7 @@ editor.enable_multiple_select_with_shift();
 editor.emulate_three_button_mouse_with_alt();
 
 // Misc IO tweaks
-editor.set_alt_mouse_button(1);            // e.g. MouseRight
+editor.set_alt_mouse_button(MouseButton::Right);
 editor.set_auto_panning_speed(200.0);
 ```
 

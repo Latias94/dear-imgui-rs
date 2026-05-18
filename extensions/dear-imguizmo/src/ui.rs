@@ -68,12 +68,6 @@ impl<'ui> GizmoUi<'ui> {
         unsafe { sys::ImGuizmo_SetImGuiContext(self.imgui_ctx_raw) };
     }
 
-    // ID helpers to match ImGuizmo ID stack usage in demos
-    pub fn set_id(&self, id: i32) {
-        self.bind();
-        unsafe { sys::ImGuizmo_SetID(id) }
-    }
-
     pub fn set_rect(&self, x: f32, y: f32, width: f32, height: f32) {
         self.bind();
         unsafe { sys::ImGuizmo_SetRect(x, y, width, height) }

@@ -344,17 +344,13 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
-    pub fn mouse_click_on_void(&mut self, button: i32, count: i32) -> ImGuiResult<()> {
-        if button < 0 {
-            return Err(ImGuiError::invalid_operation(
-                "mouse_click_on_void button must be >= 0",
-            ));
-        }
+    pub fn mouse_click_on_void(&mut self, button: MouseButton, count: i32) -> ImGuiResult<()> {
         if count < 1 {
             return Err(ImGuiError::invalid_operation(
                 "mouse_click_on_void count must be >= 1",
             ));
         }
+        let button = button as i32;
         unsafe {
             sys::imgui_test_engine_script_mouse_click_on_void(self.script.raw, button, count)
         };

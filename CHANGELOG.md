@@ -32,8 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - ImPlot3D `Plot3DBuilder` and `Plot3DToken` now carry the originating frame lifetime.
   - `dear-implot3d::Plot3DContext::current()` now exposes a non-owning current-context wrapper,
     matching the `dear-implot` current-context API shape for advanced callers.
+  - `dear-implot3d` style and colormap helpers now use typed `Plot3DStyleVar`,
+    `Plot3DColorElement`, `Colormap`, and `ColormapColorIndex` values instead of raw `i32`
+    identifiers. Style/color/colormap push helpers return RAII tokens instead of requiring manual
+    `pop_*` count calls.
   - `dear-imnodes` node, pin, and link APIs now use `NodeId`, `PinId`, and `LinkId` instead of raw
     `i32` ids.
+  - `dear-imnodes` style-var helper methods now take typed `StyleVar` values instead of raw `i32`
+    style-var indices.
+  - `dear-imnodes::NodeEditor::set_alt_mouse_button` now takes `MouseButton` instead of a raw
+    button index.
+  - `dear-imgui-test-engine::TestScript::mouse_click_on_void` now takes `MouseButton` instead of a
+    raw `i32` button index.
+  - Deprecated `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use RAII `push_id(...)` instead.
 - Backends and utilities
   - `dear-app::DearAppError`, `dear_imgui_wgpu::RendererError`,
     `dear_imgui_glow::{InitError, RenderError}`, and `dear_imgui_ash::RendererError` are now

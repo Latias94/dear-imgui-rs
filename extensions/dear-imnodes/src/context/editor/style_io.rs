@@ -1,5 +1,6 @@
 use super::super::NodeEditor;
 use crate::sys;
+use dear_imgui_rs::MouseButton;
 use dear_imgui_rs::sys as imgui_sys;
 
 impl<'ui> NodeEditor<'ui> {
@@ -68,10 +69,10 @@ impl<'ui> NodeEditor<'ui> {
         }
     }
     /// IO tweaks
-    pub fn set_alt_mouse_button(&self, button: i32) {
+    pub fn set_alt_mouse_button(&self, button: MouseButton) {
         let io = self.io_ptr();
         unsafe {
-            (*io).AltMouseButton = button;
+            (*io).AltMouseButton = button as i32;
         }
     }
     pub fn set_auto_panning_speed(&self, speed: f32) {
