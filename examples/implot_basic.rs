@@ -242,7 +242,7 @@ impl AppWindow {
                 if let Some(tab_bar) = ui.tab_bar("PlotTabs") {
                     // Basic Plots Tab
                     if let Some(tab) = ui.tab_item("Basic Plots") {
-                        ui.columns(2, "basic_plots", true);
+                        ui.columns(2usize, "basic_plots", true);
 
                         // Line plot
                         ui.text("Line Plot:");
@@ -260,13 +260,13 @@ impl AppWindow {
                             token.end();
                         }
 
-                        ui.columns(1, "reset_basic", false); // Reset column state
+                        ui.columns(1usize, "reset_basic", false); // Reset column state
                         tab.end();
                     }
 
                     // Bar Charts Tab
                     if let Some(tab) = ui.tab_item("Bar Charts") {
-                        ui.columns(2, "bar_plots", true);
+                        ui.columns(2usize, "bar_plots", true);
 
                         // Simple bar chart
                         ui.text("Bar Chart:");
@@ -288,13 +288,13 @@ impl AppWindow {
                             token.end();
                         }
 
-                        ui.columns(1, "reset_bar", false); // Reset column state
+                        ui.columns(1usize, "reset_bar", false); // Reset column state
                         tab.end();
                     }
 
                     // Signal & Step Plots Tab
                     if let Some(tab) = ui.tab_item("Signal & Step Plots") {
-                        ui.columns(2, "signal_plots", true);
+                        ui.columns(2usize, "signal_plots", true);
 
                         // Stairs Plot
                         ui.text("Stairs Plot:");
@@ -314,13 +314,13 @@ impl AppWindow {
                             token.end();
                         }
 
-                        ui.columns(1, "reset_signal", false); // Reset column state
+                        ui.columns(1usize, "reset_signal", false); // Reset column state
                         tab.end();
                     }
 
                     // Histograms Tab
                     if let Some(tab) = ui.tab_item("Histograms") {
-                        ui.columns(2, "hist_plots", true);
+                        ui.columns(2usize, "hist_plots", true);
 
                         // 1D Histogram
                         ui.text("1D Histogram:");
@@ -345,13 +345,13 @@ impl AppWindow {
                             token.end();
                         }
 
-                        ui.columns(1, "reset_hist", false); // Reset column state
+                        ui.columns(1usize, "reset_hist", false); // Reset column state
                         tab.end();
                     }
 
                     // Advanced Plots Tab
                     if let Some(tab) = ui.tab_item("Advanced Plots") {
-                        ui.columns(2, "advanced_plots", true);
+                        ui.columns(2usize, "advanced_plots", true);
 
                         // Heatmap
                         ui.text("Heatmap:");
@@ -382,14 +382,14 @@ impl AppWindow {
                             token.end();
                         }
 
-                        ui.columns(1, "reset_advanced", false); // Reset column state
+                        ui.columns(1usize, "reset_advanced", false); // Reset column state
                         tab.end();
                     }
 
                     // New in 0.11 Tab
                     if let Some(tab) = ui.tab_item("New in 0.11") {
                         ui.text("These plots exercise the new safe wrappers added for this release.");
-                        ui.columns(2, "new_api_plots", true);
+                        ui.columns(2usize, "new_api_plots", true);
 
                         ui.text("Array-backed item styling:");
                         if let Some(token) = plot_ui.begin_plot("Array-backed Item Style") {
@@ -434,7 +434,7 @@ impl AppWindow {
                             token.end();
                         }
 
-                        ui.columns(1, "reset_new_api", false);
+                        ui.columns(1usize, "reset_new_api", false);
                         ui.text_wrapped(
                             "The pie chart example in the Error & Shaded tab also uses \
                              PieChartFlags::NO_SLICE_BORDER.",
@@ -444,7 +444,7 @@ impl AppWindow {
 
                     // Error & Shaded Plots Tab
                     if let Some(tab) = ui.tab_item("Error & Shaded") {
-                        ui.columns(2, "error_plots", true);
+                        ui.columns(2usize, "error_plots", true);
 
                         // Error bars
                         ui.text("Error Bars:");
@@ -475,13 +475,13 @@ impl AppWindow {
                             token.end();
                         }
 
-                        ui.columns(1, "reset_error", false); // Reset column state
+                        ui.columns(1usize, "reset_error", false); // Reset column state
                         tab.end();
                     }
 
                     // Utility Plots Tab
                     if let Some(tab) = ui.tab_item("Utility Plots") {
-                        ui.columns(2, "utility_plots", true);
+                        ui.columns(2usize, "utility_plots", true);
 
                         // Stems Plot
                         ui.text("Stems Plot:");
@@ -507,7 +507,7 @@ impl AppWindow {
                             token.end();
                         }
 
-                        ui.columns(1, "reset_utility", false); // Reset column state
+                        ui.columns(1usize, "reset_utility", false); // Reset column state
                         tab.end();
                     }
 

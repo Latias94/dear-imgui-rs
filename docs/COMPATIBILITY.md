@@ -106,6 +106,9 @@ Extensions
     `TableBgTarget` plus `-1`.
   - Table row query APIs use `Option<TableRowIndex>` / `TableHoveredRow` instead of raw signed row
     sentinel values.
+  - Legacy Columns APIs use typed counts and selectors: `usize` for counts, `OldColumnIndex` for
+    concrete columns, `OldColumnRef::Current` for current-column defaults, and
+    `OldColumnOffsetRef::Trailing` for the right-most offset line.
   - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
   - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
     `NodeEditor::set_alt_mouse_button` takes `MouseButton`.

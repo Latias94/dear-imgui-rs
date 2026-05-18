@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     signed row sentinel values.
   - Table background color helpers are split by target: use `table_set_cell_bg_color*` or
     `table_set_row_bg{0,1}_color*` instead of passing `TableBgTarget` plus `-1`.
+  - Legacy Columns count/index APIs now use `usize`, `OldColumnIndex`, `OldColumnRef`, and
+    `OldColumnOffsetRef` instead of raw signed counts and `-1` sentinels.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions
