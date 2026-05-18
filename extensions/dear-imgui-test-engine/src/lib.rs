@@ -9,9 +9,48 @@ use dear_imgui_rs::{
     with_scratch_txt, with_scratch_txt_two,
 };
 use dear_imgui_test_engine_sys as sys;
-use std::{marker::PhantomData, rc::Rc};
+use std::{marker::PhantomData, num::NonZeroU32, rc::Rc};
 
 pub use dear_imgui_test_engine_sys as raw;
+
+/// Positive script count or frame count for test-engine actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScriptCount(NonZeroU32);
+
+impl ScriptCount {
+    /// Create a positive script count.
+    #[inline]
+    pub const fn from_nonzero(count: NonZeroU32) -> Self {
+        Self(count)
+    }
+
+    /// Create a positive script count or frame count.
+    ///
+    /// Panics if `count` is zero or exceeds the test engine's `int` range.
+    #[inline]
+    pub const fn new(count: u32) -> Self {
+        assert!(count > 0, "ScriptCount::new() requires a non-zero count");
+        assert!(
+            count <= i32::MAX as u32,
+            "ScriptCount::new() count exceeded i32::MAX"
+        );
+        match NonZeroU32::new(count) {
+            Some(count) => Self(count),
+            None => unreachable!(),
+        }
+    }
+
+    #[inline]
+    fn raw(self) -> i32 {
+        self.0.get() as i32
+    }
+}
+
+impl From<NonZeroU32> for ScriptCount {
+    fn from(count: NonZeroU32) -> Self {
+        Self::from_nonzero(count)
+    }
+}
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,12 +334,12 @@ impl ScriptTest<'_> {
         unsafe { sys::imgui_test_engine_script_mouse_click(self.script.raw, button) };
     }
 
-    pub fn mouse_click_multi(&mut self, button: MouseButton, count: i32) -> ImGuiResult<()> {
-        if count < 1 {
-            return Err(ImGuiError::invalid_operation(
-                "mouse_click_multi count must be >= 1",
-            ));
-        }
+    pub fn mouse_click_multi(
+        &mut self,
+        button: MouseButton,
+        count: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        let count = count.into().raw();
         let button = button as i32;
         unsafe { sys::imgui_test_engine_script_mouse_click_multi(self.script.raw, button, count) };
         Ok(())
@@ -344,12 +383,12 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
-    pub fn mouse_click_on_void(&mut self, button: MouseButton, count: i32) -> ImGuiResult<()> {
-        if count < 1 {
-            return Err(ImGuiError::invalid_operation(
-                "mouse_click_on_void count must be >= 1",
-            ));
-        }
+    pub fn mouse_click_on_void(
+        &mut self,
+        button: MouseButton,
+        count: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        let count = count.into().raw();
         let button = button as i32;
         unsafe {
             sys::imgui_test_engine_script_mouse_click_on_void(self.script.raw, button, count)
@@ -375,12 +414,12 @@ impl ScriptTest<'_> {
         unsafe { sys::imgui_test_engine_script_key_up(self.script.raw, key_chord.raw()) };
     }
 
-    pub fn key_press(&mut self, key_chord: KeyChord, count: i32) -> ImGuiResult<()> {
-        if count < 1 {
-            return Err(ImGuiError::invalid_operation(
-                "key_press count must be >= 1",
-            ));
-        }
+    pub fn key_press(
+        &mut self,
+        key_chord: KeyChord,
+        count: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        let count = count.into().raw();
         unsafe { sys::imgui_test_engine_script_key_press(self.script.raw, key_chord.raw(), count) };
         Ok(())
     }
@@ -474,17 +513,17 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
-    pub fn item_hold_for_frames(&mut self, r#ref: &str, frames: i32) -> ImGuiResult<()> {
+    pub fn item_hold_for_frames(
+        &mut self,
+        r#ref: &str,
+        frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
         if r#ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
                 "item_hold_for_frames contained interior NUL",
             ));
         }
-        if frames < 1 {
-            return Err(ImGuiError::invalid_operation(
-                "item_hold_for_frames frames must be >= 1",
-            ));
-        }
+        let frames = frames.into().raw();
         with_scratch_txt(r#ref, |ptr| unsafe {
             sys::imgui_test_engine_script_item_hold_for_frames(self.script.raw, ptr, frames)
         });
@@ -1119,68 +1158,68 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
-    pub fn wait_for_item(&mut self, r#ref: &str, max_frames: i32) -> ImGuiResult<()> {
+    pub fn wait_for_item(
+        &mut self,
+        r#ref: &str,
+        max_frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
         if r#ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
                 "wait_for_item contained interior NUL",
             ));
         }
-        if max_frames < 1 {
-            return Err(ImGuiError::invalid_operation(
-                "wait_for_item max_frames must be >= 1",
-            ));
-        }
+        let max_frames = max_frames.into().raw();
         with_scratch_txt(r#ref, |ptr| unsafe {
             sys::imgui_test_engine_script_wait_for_item(self.script.raw, ptr, max_frames)
         });
         Ok(())
     }
 
-    pub fn wait_for_item_visible(&mut self, r#ref: &str, max_frames: i32) -> ImGuiResult<()> {
+    pub fn wait_for_item_visible(
+        &mut self,
+        r#ref: &str,
+        max_frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
         if r#ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
                 "wait_for_item_visible contained interior NUL",
             ));
         }
-        if max_frames < 1 {
-            return Err(ImGuiError::invalid_operation(
-                "wait_for_item_visible max_frames must be >= 1",
-            ));
-        }
+        let max_frames = max_frames.into().raw();
         with_scratch_txt(r#ref, |ptr| unsafe {
             sys::imgui_test_engine_script_wait_for_item_visible(self.script.raw, ptr, max_frames)
         });
         Ok(())
     }
 
-    pub fn wait_for_item_checked(&mut self, r#ref: &str, max_frames: i32) -> ImGuiResult<()> {
+    pub fn wait_for_item_checked(
+        &mut self,
+        r#ref: &str,
+        max_frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
         if r#ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
                 "wait_for_item_checked contained interior NUL",
             ));
         }
-        if max_frames < 1 {
-            return Err(ImGuiError::invalid_operation(
-                "wait_for_item_checked max_frames must be >= 1",
-            ));
-        }
+        let max_frames = max_frames.into().raw();
         with_scratch_txt(r#ref, |ptr| unsafe {
             sys::imgui_test_engine_script_wait_for_item_checked(self.script.raw, ptr, max_frames)
         });
         Ok(())
     }
 
-    pub fn wait_for_item_opened(&mut self, r#ref: &str, max_frames: i32) -> ImGuiResult<()> {
+    pub fn wait_for_item_opened(
+        &mut self,
+        r#ref: &str,
+        max_frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
         if r#ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
                 "wait_for_item_opened contained interior NUL",
             ));
         }
-        if max_frames < 1 {
-            return Err(ImGuiError::invalid_operation(
-                "wait_for_item_opened max_frames must be >= 1",
-            ));
-        }
+        let max_frames = max_frames.into().raw();
         with_scratch_txt(r#ref, |ptr| unsafe {
             sys::imgui_test_engine_script_wait_for_item_opened(self.script.raw, ptr, max_frames)
         });
@@ -1202,7 +1241,8 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
-    pub fn yield_frames(&mut self, frames: i32) {
+    pub fn yield_frames(&mut self, frames: impl Into<ScriptCount>) {
+        let frames = frames.into().raw();
         unsafe { sys::imgui_test_engine_script_yield(self.script.raw, frames) };
     }
 }
@@ -1518,6 +1558,13 @@ impl Drop for TestEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn script_count_rejects_zero_and_overflow_before_ffi() {
+        assert_eq!(ScriptCount::new(1).raw(), 1);
+        assert!(std::panic::catch_unwind(|| ScriptCount::new(0)).is_err());
+        assert!(std::panic::catch_unwind(|| ScriptCount::new(i32::MAX as u32 + 1)).is_err());
+    }
 
     #[test]
     fn test_engine_methods_reject_dropped_bound_imgui_context_before_ffi() {

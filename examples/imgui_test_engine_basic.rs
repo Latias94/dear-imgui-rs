@@ -198,17 +198,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             test_engine
                 .add_script_test("rust_tests", "script_smoke", |t| {
                     t.set_ref("Script Target###RustScriptTarget")?;
-                    t.wait_for_item("Click Me", 120)?;
+                    t.wait_for_item("Click Me", ScriptCount::new(120))?;
                     t.assert_item_visible("Click Me")?;
                     t.item_click("Click Me")?;
-                    t.wait_for_item_visible("Input", 120)?;
+                    t.wait_for_item_visible("Input", ScriptCount::new(120))?;
                     t.input_text_replace("Input", "hello from script", false)?;
-                    t.wait_for_item_visible("MyInt", 120)?;
+                    t.wait_for_item_visible("MyInt", ScriptCount::new(120))?;
                     t.item_input_int("MyInt", 123)?;
                     t.assert_item_read_int_eq("MyInt", 123)?;
                     t.item_check("Node/Checkbox")?;
                     t.item_uncheck("Node/Checkbox")?;
-                    t.yield_frames(2);
+                    t.yield_frames(ScriptCount::new(2));
                     Ok(())
                 })
                 .expect("Failed to register script_smoke test");

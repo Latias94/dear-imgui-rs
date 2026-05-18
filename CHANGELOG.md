@@ -52,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     button index.
   - `dear-imgui-test-engine::TestScript::mouse_click_on_void` now takes `MouseButton` instead of a
     raw `i32` button index.
+  - `dear-imgui-test-engine` script repeat/wait frame counts now use `ScriptCount` instead of raw
+    `i32` values.
   - Deprecated `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use RAII `push_id(...)` instead.
 - Backends and utilities
   - `dear-app::DearAppError`, `dear_imgui_wgpu::RendererError`,

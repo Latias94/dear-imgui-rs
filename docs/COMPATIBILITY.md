@@ -107,6 +107,8 @@ Extensions
     token lifetimes or `.pop()`.
   - `dear-imgui-test-engine::TestScript::mouse_click_on_void` takes `MouseButton` instead of a raw
     button index.
+  - `dear-imgui-test-engine` script repeat/wait frame counts use `ScriptCount`; construct values
+    with `ScriptCount::new(...)` instead of passing raw signed integers.
   - `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use `push_id(...)` and keep the returned
     token alive for the desired scope.
   - Current-context binding policy is part of the public safe API contract documented here and in
