@@ -254,6 +254,10 @@ fn assert_memory_compact_timer(caller: &str, seconds: f32) {
     );
 }
 
+fn metric_count_from_i32(caller: &str, raw: i32) -> usize {
+    usize::try_from(raw).unwrap_or_else(|_| panic!("{caller} returned a negative count"))
+}
+
 /// Settings and inputs/outputs for imgui-rs
 /// This is a transparent wrapper around ImGuiIO
 #[repr(transparent)]
@@ -516,23 +520,35 @@ impl Io {
     }
 
     /// Vertices output during last call to render
-    pub fn metrics_render_vertices(&self) -> i32 {
-        self.inner().MetricsRenderVertices
+    pub fn metrics_render_vertices(&self) -> usize {
+        metric_count_from_i32(
+            "Io::metrics_render_vertices()",
+            self.inner().MetricsRenderVertices,
+        )
     }
 
     /// Indices output during last call to render
-    pub fn metrics_render_indices(&self) -> i32 {
-        self.inner().MetricsRenderIndices
+    pub fn metrics_render_indices(&self) -> usize {
+        metric_count_from_i32(
+            "Io::metrics_render_indices()",
+            self.inner().MetricsRenderIndices,
+        )
     }
 
     /// Number of visible windows
-    pub fn metrics_render_windows(&self) -> i32 {
-        self.inner().MetricsRenderWindows
+    pub fn metrics_render_windows(&self) -> usize {
+        metric_count_from_i32(
+            "Io::metrics_render_windows()",
+            self.inner().MetricsRenderWindows,
+        )
     }
 
     /// Number of active windows
-    pub fn metrics_active_windows(&self) -> i32 {
-        self.inner().MetricsActiveWindows
+    pub fn metrics_active_windows(&self) -> usize {
+        metric_count_from_i32(
+            "Io::metrics_active_windows()",
+            self.inner().MetricsActiveWindows,
+        )
     }
 
     /// Configuration flags
@@ -1334,5 +1350,59 @@ impl Io {
         assert_display_framebuffer_scale("Io::set_display_framebuffer_scale()", scale);
         self.inner_mut().DisplayFramebufferScale.x = scale[0];
         self.inner_mut().DisplayFramebufferScale.y = scale[1];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn metrics_counts_are_usize_and_reject_negative_raw_values() {
+        let mut ctx = crate::Context::create();
+        let io = ctx.io_mut();
+
+        io.inner_mut().MetricsRenderVertices = 11;
+        io.inner_mut().MetricsRenderIndices = 22;
+        io.inner_mut().MetricsRenderWindows = 3;
+        io.inner_mut().MetricsActiveWindows = 4;
+
+        assert_eq!(io.metrics_render_vertices(), 11);
+        assert_eq!(io.metrics_render_indices(), 22);
+        assert_eq!(io.metrics_render_windows(), 3);
+        assert_eq!(io.metrics_active_windows(), 4);
+
+        io.inner_mut().MetricsRenderVertices = -1;
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = io.metrics_render_vertices();
+            }))
+            .is_err()
+        );
+
+        io.inner_mut().MetricsRenderVertices = 0;
+        io.inner_mut().MetricsRenderIndices = -1;
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = io.metrics_render_indices();
+            }))
+            .is_err()
+        );
+
+        io.inner_mut().MetricsRenderIndices = 0;
+        io.inner_mut().MetricsRenderWindows = -1;
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = io.metrics_render_windows();
+            }))
+            .is_err()
+        );
+
+        io.inner_mut().MetricsRenderWindows = 0;
+        io.inner_mut().MetricsActiveWindows = -1;
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = io.metrics_active_windows();
+            }))
+            .is_err()
+        );
     }
 }
