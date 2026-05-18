@@ -115,6 +115,8 @@ compilable.
 - `ListClipper` uses Rust collection indexing types: pass `usize` counts and iterate
   `usize` indices or `display_range()`.
 - `dear-implot::SubplotGrid::new` uses `usize` row/column counts.
+- `dear-implot` / `dear-implot3d` colormap indices/counts/sizes use `usize` at the safe Rust API
+  boundary.
 - `dear-implot` histogram bins use `usize` counts or `BinMethod`; raw negative bin sentinels are
   no longer part of the safe API.
 - `dear-implot` heatmap row/column counts are validated before FFI; oversized `usize` counts are

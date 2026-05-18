@@ -16,7 +16,7 @@ use std::cell::{Cell, RefCell};
 use std::f32::consts::PI;
 
 fn cmap(index: usize) -> [f32; 4] {
-    get_colormap_color(ColormapColorIndex::from_usize(index).expect("colormap index fits in i32"))
+    get_colormap_color(ColormapColorIndex::from(index))
 }
 
 fn main() {

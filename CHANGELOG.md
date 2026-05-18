@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     on drop are now UI/current-context scoped and intentionally `!Send + !Sync`.
   - `dear-implot` colormap helpers now use typed `ColormapIndex`, `ColormapColorIndex`, and
     `ColormapSelection` values. `push_colormap` returns an RAII token instead of requiring
-    `pop_colormap(count)`.
+    `pop_colormap(count)`. Colormap indices/counts/sizes use `usize` at the Rust API boundary.
   - `dear-implot` / `dear-implot3d` plot data layout APIs now use typed
     `PlotDataLayout` / `Plot3DDataLayout` values with typed sample offsets and byte strides.
     Use `PlotDataStride::AUTO` / `Plot3DDataStride::AUTO` for the default stride.
@@ -59,9 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-implot3d::Plot3DContext::current()` now exposes a non-owning current-context wrapper,
     matching the `dear-implot` current-context API shape for advanced callers.
   - `dear-implot3d` style and colormap helpers now use typed `Plot3DStyleVar`,
-    `Plot3DColorElement`, `Colormap`, and `ColormapColorIndex` values instead of raw `i32`
-    identifiers. Style/color/colormap push helpers return RAII tokens instead of requiring manual
-    `pop_*` count calls.
+    `Plot3DColorElement`, `Colormap`, `ColormapIndex`, and `ColormapColorIndex` values instead of
+    raw `i32` identifiers. Colormap indices/counts/sizes use `usize`, and style/color/colormap push
+    helpers return RAII tokens instead of requiring manual `pop_*` count calls.
   - `dear-implot3d` surface grid counts now use `usize` and reject values outside ImPlot3D's
     `i32` range before FFI.
   - `dear-imnodes` node, pin, and link APIs now use `NodeId`, `PinId`, and `LinkId` instead of raw

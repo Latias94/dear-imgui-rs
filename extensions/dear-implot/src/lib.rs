@@ -281,7 +281,10 @@ pub enum Colormap {
 impl Colormap {
     #[inline]
     pub const fn index(self) -> ColormapIndex {
-        ColormapIndex(self as i32)
+        match ColormapIndex::from_raw(self as i32) {
+            Some(index) => index,
+            None => panic!("built-in ImPlot colormap index must be valid"),
+        }
     }
 }
 

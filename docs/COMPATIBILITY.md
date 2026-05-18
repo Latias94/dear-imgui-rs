@@ -91,7 +91,8 @@ Extensions
     use panics in Rust.
   - `dear-implot` colormap helpers use typed `ColormapIndex`, `ColormapColorIndex`, and
     `ColormapSelection` values. Keep the token returned by `push_colormap` alive instead of calling
-    `pop_colormap(count)`.
+    `pop_colormap(count)`. Colormap indices/counts/sizes are exposed as `usize` on the safe Rust
+    side.
   - `dear-implot` / `dear-implot3d` plot data layout APIs use typed
     `PlotDataLayout` / `Plot3DDataLayout`, typed sample offsets, and typed byte strides. Replace raw
     `offset, stride` pairs with `.with_offset(PlotDataOffset::samples(...))` plus
@@ -125,8 +126,8 @@ Extensions
     `NodeEditor::set_alt_mouse_button` takes `MouseButton`.
   - `dear-implot3d` style and colormap helpers use typed `Plot3DStyleVar`,
     `Plot3DColorElement`, `Colormap`, `ColormapIndex`, and `ColormapColorIndex` values instead of
-    raw `i32` identifiers. Push helpers return RAII tokens, so migrate manual `pop_*` count calls to
-    token lifetimes or `.pop()`.
+    raw `i32` identifiers. Colormap indices/counts/sizes use `usize`. Push helpers return RAII
+    tokens, so migrate manual `pop_*` count calls to token lifetimes or `.pop()`.
   - `dear-imgui-test-engine::TestScript::mouse_click_on_void` takes `MouseButton` instead of a raw
     button index.
   - `dear-imgui-test-engine` table column script helpers use typed table column indices/targets

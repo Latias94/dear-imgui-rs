@@ -100,13 +100,27 @@ pub struct ColormapIndex(pub(crate) i32);
 
 impl ColormapIndex {
     #[inline]
-    pub const fn new(index: i32) -> Option<Self> {
-        if index >= 0 { Some(Self(index)) } else { None }
+    pub const fn new(index: usize) -> Option<Self> {
+        if index <= i32::MAX as usize {
+            Some(Self(index as i32))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub const fn get(self) -> usize {
+        self.0 as usize
     }
 
     #[inline]
     pub const fn raw(self) -> i32 {
         self.0
+    }
+
+    #[inline]
+    pub(crate) const fn from_raw(raw: i32) -> Option<Self> {
+        if raw >= 0 { Some(Self(raw)) } else { None }
     }
 }
 
@@ -114,6 +128,13 @@ impl From<Colormap> for ColormapIndex {
     #[inline]
     fn from(value: Colormap) -> Self {
         value.index()
+    }
+}
+
+impl From<usize> for ColormapIndex {
+    #[inline]
+    fn from(value: usize) -> Self {
+        Self::new(value).expect("colormap index exceeded ImPlot's i32 range")
     }
 }
 
@@ -162,8 +183,8 @@ pub struct ColormapColorIndex(i32);
 
 impl ColormapColorIndex {
     #[inline]
-    pub const fn new(index: i32) -> Option<Self> {
-        if index >= 0 { Some(Self(index)) } else { None }
+    pub const fn new(index: usize) -> Option<Self> {
+        Self::from_usize(index)
     }
 
     #[inline]
@@ -176,8 +197,20 @@ impl ColormapColorIndex {
     }
 
     #[inline]
+    pub const fn get(self) -> usize {
+        self.0 as usize
+    }
+
+    #[inline]
     pub const fn raw(self) -> i32 {
         self.0
+    }
+}
+
+impl From<usize> for ColormapColorIndex {
+    #[inline]
+    fn from(value: usize) -> Self {
+        Self::new(value).expect("colormap color index exceeded ImPlot's i32 range")
     }
 }
 
@@ -411,12 +444,20 @@ pub fn add_colormap(name: &str, colors: &[[f32; 4]], qualitative: bool) -> Color
     let index = with_scratch_txt(name, |ptr| unsafe {
         sys::ImPlot_AddColormap_Vec4Ptr(ptr, colors.as_ptr(), count, qualitative)
     });
-    ColormapIndex::new(index).expect("ImPlot returned a negative colormap index")
+    ColormapIndex::from_raw(index).expect("ImPlot returned a negative colormap index")
+}
+
+fn colormap_count_from_i32(raw: i32, caller: &str) -> usize {
+    assert!(raw >= 0, "{caller} returned a negative colormap count");
+    usize::try_from(raw).expect("non-negative colormap count must fit usize")
 }
 
 /// Return the number of available colormaps.
-pub fn colormap_count() -> i32 {
-    unsafe { sys::ImPlot_GetColormapCount() }
+pub fn colormap_count() -> usize {
+    colormap_count_from_i32(
+        unsafe { sys::ImPlot_GetColormapCount() },
+        "colormap_count()",
+    )
 }
 
 /// Return a colormap name, or an empty string if the index is invalid for the current context.
@@ -436,12 +477,15 @@ pub fn colormap_index_by_name(name: &str) -> Option<ColormapIndex> {
         return None;
     }
     let index = with_scratch_txt(name, |ptr| unsafe { sys::ImPlot_GetColormapIndex(ptr) });
-    ColormapIndex::new(index)
+    ColormapIndex::from_raw(index)
 }
 
 /// Return the number of color entries in a colormap.
-pub fn colormap_size(index: impl Into<ColormapIndex>) -> i32 {
-    unsafe { sys::ImPlot_GetColormapSize(index.into().raw()) }
+pub fn colormap_size(index: impl Into<ColormapIndex>) -> usize {
+    colormap_count_from_i32(
+        unsafe { sys::ImPlot_GetColormapSize(index.into().raw()) },
+        "colormap_size()",
+    )
 }
 
 /// Return the current default colormap stored in the ImPlot style.
@@ -451,7 +495,7 @@ pub fn get_style_colormap_index() -> Option<ColormapIndex> {
         if style.is_null() {
             return None;
         }
-        ColormapIndex::new((*style).Colormap)
+        ColormapIndex::from_raw((*style).Colormap)
     }
 }
 
@@ -459,7 +503,7 @@ pub fn get_style_colormap_index() -> Option<ColormapIndex> {
 pub fn get_style_colormap_name() -> Option<String> {
     let idx = get_style_colormap_index()?;
     let count = colormap_count();
-    if idx.raw() >= count {
+    if idx.get() >= count {
         return None;
     }
     Some(colormap_name(idx))
@@ -470,11 +514,11 @@ pub fn set_style_colormap(index: impl Into<ColormapIndex>) {
     unsafe {
         let style = sys::ImPlot_GetStyle();
         if !style.is_null() {
-            let count = sys::ImPlot_GetColormapCount();
+            let count = colormap_count();
             if count > 0 {
-                let index = index.into().raw();
-                let idx = if index >= count { count - 1 } else { index };
-                (*style).Colormap = idx;
+                let index = index.into().get();
+                let idx = index.min(count - 1);
+                (*style).Colormap = ColormapIndex::from(idx).raw();
             }
         }
     }
@@ -672,8 +716,10 @@ mod tests {
 
     #[test]
     fn colormap_indices_reject_negative_values() {
-        assert_eq!(ColormapIndex::new(-1), None);
+        assert_eq!(ColormapIndex::from_raw(-1), None);
         assert_eq!(ColormapIndex::new(0).map(ColormapIndex::raw), Some(0));
+        assert_eq!(ColormapIndex::new(0).map(ColormapIndex::get), Some(0));
+        assert_eq!(ColormapIndex::new(i32::MAX as usize + 1), None);
         assert_eq!(
             ColormapIndex::from(Colormap::Viridis).raw(),
             crate::sys::ImPlotColormap_Viridis
@@ -684,12 +730,21 @@ mod tests {
             crate::sys::ImPlotColormap_Viridis
         );
 
-        assert_eq!(ColormapColorIndex::new(-1), None);
+        assert_eq!(
+            ColormapColorIndex::new(0).map(ColormapColorIndex::get),
+            Some(0)
+        );
         assert_eq!(
             ColormapColorIndex::from_usize(i32::MAX as usize).map(ColormapColorIndex::raw),
             Some(i32::MAX)
         );
         assert_eq!(ColormapColorIndex::from_usize(i32::MAX as usize + 1), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "test returned a negative colormap count")]
+    fn colormap_count_conversion_rejects_negative_ffi_values() {
+        let _ = super::colormap_count_from_i32(-1, "test");
     }
 
     #[test]
