@@ -47,9 +47,9 @@ impl<'a> BoundEditor<'a> {
         };
     }
 
-    pub fn move_to_node(&self, node_id: i32) {
+    pub fn move_to_node(&self, node_id: crate::NodeId) {
         self.bind();
-        unsafe { sys::imnodes_EditorContextMoveToNode(node_id) };
+        unsafe { sys::imnodes_EditorContextMoveToNode(node_id.raw()) };
     }
 
     /// Save this editor's state to an INI string.

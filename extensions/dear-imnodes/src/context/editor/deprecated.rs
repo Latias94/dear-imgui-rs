@@ -17,8 +17,8 @@ impl<'ui> NodeEditor<'ui> {
         };
         if created {
             Some(crate::LinkCreated {
-                start_attr,
-                end_attr,
+                start_attr: crate::PinId::new(start_attr),
+                end_attr: crate::PinId::new(end_attr),
                 from_snap,
             })
         } else {
@@ -46,10 +46,10 @@ impl<'ui> NodeEditor<'ui> {
         };
         if created {
             Some(crate::LinkCreatedEx {
-                start_node,
-                start_attr,
-                end_node,
-                end_attr,
+                start_node: crate::NodeId::new(start_node),
+                start_attr: crate::PinId::new(start_attr),
+                end_node: crate::NodeId::new(end_node),
+                end_attr: crate::PinId::new(end_attr),
                 from_snap,
             })
         } else {
@@ -59,7 +59,7 @@ impl<'ui> NodeEditor<'ui> {
 
     /// Selection helpers
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
-    pub fn selected_nodes(&self) -> Vec<i32> {
+    pub fn selected_nodes(&self) -> Vec<crate::NodeId> {
         self.bind();
         let n = unsafe { sys::imnodes_NumSelectedNodes() };
         if n <= 0 {
@@ -67,11 +67,11 @@ impl<'ui> NodeEditor<'ui> {
         }
         let mut buf = vec![0i32; n as usize];
         unsafe { sys::imnodes_GetSelectedNodes(buf.as_mut_ptr()) };
-        buf
+        buf.into_iter().map(crate::NodeId::new).collect()
     }
 
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
-    pub fn selected_links(&self) -> Vec<i32> {
+    pub fn selected_links(&self) -> Vec<crate::LinkId> {
         self.bind();
         let n = unsafe { sys::imnodes_NumSelectedLinks() };
         if n <= 0 {
@@ -79,7 +79,7 @@ impl<'ui> NodeEditor<'ui> {
         }
         let mut buf = vec![0i32; n as usize];
         unsafe { sys::imnodes_GetSelectedLinks(buf.as_mut_ptr()) };
-        buf
+        buf.into_iter().map(crate::LinkId::new).collect()
     }
 
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
@@ -98,31 +98,31 @@ impl<'ui> NodeEditor<'ui> {
         unsafe { sys::imnodes_IsEditorHovered() }
     }
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
-    pub fn hovered_node(&self) -> Option<i32> {
+    pub fn hovered_node(&self) -> Option<crate::NodeId> {
         self.bind();
         let mut id = 0;
         if unsafe { sys::imnodes_IsNodeHovered(&mut id) } {
-            Some(id)
+            Some(crate::NodeId::new(id))
         } else {
             None
         }
     }
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
-    pub fn hovered_link(&self) -> Option<i32> {
+    pub fn hovered_link(&self) -> Option<crate::LinkId> {
         self.bind();
         let mut id = 0;
         if unsafe { sys::imnodes_IsLinkHovered(&mut id) } {
-            Some(id)
+            Some(crate::LinkId::new(id))
         } else {
             None
         }
     }
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
-    pub fn hovered_pin(&self) -> Option<i32> {
+    pub fn hovered_pin(&self) -> Option<crate::PinId> {
         self.bind();
         let mut id = 0;
         if unsafe { sys::imnodes_IsPinHovered(&mut id) } {
-            Some(id)
+            Some(crate::PinId::new(id))
         } else {
             None
         }
@@ -135,11 +135,11 @@ impl<'ui> NodeEditor<'ui> {
         unsafe { sys::imnodes_IsAttributeActive() }
     }
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
-    pub fn any_attribute_active(&self) -> Option<i32> {
+    pub fn any_attribute_active(&self) -> Option<crate::PinId> {
         self.bind();
         let mut id = 0;
         if unsafe { sys::imnodes_IsAnyAttributeActive(&mut id) } {
-            Some(id)
+            Some(crate::PinId::new(id))
         } else {
             None
         }
@@ -147,31 +147,35 @@ impl<'ui> NodeEditor<'ui> {
 
     /// Link drag/drop lifecycle
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
-    pub fn is_link_started(&self) -> Option<i32> {
+    pub fn is_link_started(&self) -> Option<crate::PinId> {
         self.bind();
         let mut id = 0;
         if unsafe { sys::imnodes_IsLinkStarted(&mut id) } {
-            Some(id)
+            Some(crate::PinId::new(id))
         } else {
             None
         }
     }
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
-    pub fn is_link_dropped(&self, including_detached: bool) -> Option<i32> {
+    pub fn is_link_dropped(&self, including_detached: bool) -> Option<crate::PinId> {
         self.bind();
         let mut id = 0;
         if unsafe { sys::imnodes_IsLinkDropped(&mut id, including_detached) } {
-            Some(id)
+            Some(crate::PinId::new(id))
         } else {
             None
         }
     }
 
     #[deprecated(note = "Call `editor.end()` and use the returned `PostEditor` handle.")]
-    pub fn is_link_destroyed(&self) -> Option<i32> {
+    pub fn is_link_destroyed(&self) -> Option<crate::LinkId> {
         self.bind();
         let mut id = 0i32;
         let destroyed = unsafe { sys::imnodes_IsLinkDestroyed(&mut id as *mut i32) };
-        if destroyed { Some(id) } else { None }
+        if destroyed {
+            Some(crate::LinkId::new(id))
+        } else {
+            None
+        }
     }
 }

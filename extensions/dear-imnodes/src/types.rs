@@ -1,5 +1,58 @@
 #![allow(clippy::unnecessary_cast)]
 use crate::sys;
+use std::fmt;
+
+macro_rules! id_type {
+    ($name:ident) => {
+        #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[repr(transparent)]
+        pub struct $name(i32);
+
+        impl $name {
+            #[inline]
+            pub const fn new(value: i32) -> Self {
+                Self(value)
+            }
+
+            #[inline]
+            pub const fn raw(self) -> i32 {
+                self.0
+            }
+
+            #[inline]
+            pub const fn is_null(self) -> bool {
+                self.0 == 0
+            }
+        }
+
+        impl From<i32> for $name {
+            #[inline]
+            fn from(value: i32) -> Self {
+                Self(value)
+            }
+        }
+
+        impl From<$name> for i32 {
+            #[inline]
+            fn from(value: $name) -> Self {
+                value.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+    };
+}
+
+id_type!(NodeId);
+id_type!(PinId);
+id_type!(LinkId);
+
+/// ImNodes calls input/output/static endpoints "attributes"; in this crate they share `PinId`.
+pub type AttributeId = PinId;
 
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -44,17 +97,17 @@ pub enum MiniMapLocation {
 /// Result of a link creation interaction
 #[derive(Copy, Clone, Debug)]
 pub struct LinkCreated {
-    pub start_attr: i32,
-    pub end_attr: i32,
+    pub start_attr: PinId,
+    pub end_attr: PinId,
     pub from_snap: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct LinkCreatedEx {
-    pub start_node: i32,
-    pub start_attr: i32,
-    pub end_node: i32,
-    pub end_attr: i32,
+    pub start_node: NodeId,
+    pub start_attr: PinId,
+    pub end_node: NodeId,
+    pub end_attr: PinId,
     pub from_snap: bool,
 }
 #[repr(i32)]

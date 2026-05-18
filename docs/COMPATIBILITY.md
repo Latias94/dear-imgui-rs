@@ -85,6 +85,7 @@ Extensions
   - `dear-imgui-test-engine` safe methods check the bound ImGui context liveness before FFI. Drop or
     explicitly `shutdown()` the test engine before dropping the target `Context`; stale bound-context
     use panics in Rust.
+  - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
   - Current-context binding policy is part of the public safe API contract documented here and in
     the crate-level migration notes.
 - Backend lifecycle changes on trunk:

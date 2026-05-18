@@ -23,7 +23,7 @@ impl<'ui> NodeEditor<'ui> {
         location: crate::MiniMapLocation,
         callback: F,
     ) where
-        F: FnMut(i32) + 'ui,
+        F: FnMut(crate::NodeId) + 'ui,
     {
         unsafe extern "C" fn trampoline(node_id: i32, user: *mut c_void) {
             if user.is_null() {
@@ -31,7 +31,7 @@ impl<'ui> NodeEditor<'ui> {
             }
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
                 let holder = &mut *(user as *mut MiniMapCallbackHolder<'_>);
-                (holder.callback)(node_id);
+                (holder.callback)(crate::NodeId::new(node_id));
             }));
             if res.is_err() {
                 eprintln!("dear-imnodes: panic in minimap callback");

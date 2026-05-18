@@ -48,20 +48,27 @@ use dear_imnodes as imnodes;
 
 // Per-frame draw
  fn draw(ui: &Ui, nodes_ctx: &imnodes::Context, editor_ctx: &imnodes::EditorContext) {
-     let nodes = ui.imnodes(nodes_ctx);
-     let editor = nodes.editor(Some(editor_ctx));
+    let nodes = ui.imnodes(nodes_ctx);
+    let editor = nodes.editor(Some(editor_ctx));
 
     // A simple node with input/output pins
-    let _n = editor.node(1).title_bar(|| ui.text("My Node"));
-    let _in = editor.input_attr(10, imnodes::PinShape::CircleFilled);
+    let node = imnodes::NodeId::new(1);
+    let input = imnodes::PinId::new(10);
+    let output = imnodes::PinId::new(11);
+    let link_id = imnodes::LinkId::new(100);
+
+    let node_token = editor.node(node);
+    node_token.title_bar(|| ui.text("My Node"));
+    let _in = editor.input_attr(input, imnodes::PinShape::CircleFilled);
     ui.text("In");
     _in.end();
-    let _out = editor.output_attr(11, imnodes::PinShape::QuadFilled);
+    let _out = editor.output_attr(output, imnodes::PinShape::QuadFilled);
     ui.text("Out");
     _out.end();
+    node_token.end();
 
      // Draw a link
-     editor.link(100, 10, 11);
+     editor.link(link_id, input, output);
 
      // Optional: Mini-map
      editor.minimap(0.25, imnodes::MiniMapLocation::TopRight);
@@ -119,8 +126,9 @@ editor.set_color(imnodes::ColorElement::GridLinePrimary, [0.6, 0.6, 0.8, 1.0]);
 
  ```rust
  // Position nodes (grid/editor/screen space helpers available)
- editor.set_node_pos_grid(1, [100.0, 120.0]);
- let size = editor.get_node_dimensions(1); // [w, h]
+ let node = imnodes::NodeId::new(1);
+ editor.set_node_pos_grid(node, [100.0, 120.0]);
+ let size = editor.get_node_dimensions(node); // [w, h]
 
  // End the editor before running post-editor queries
  let post = editor.end();

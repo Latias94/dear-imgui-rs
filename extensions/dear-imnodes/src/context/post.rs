@@ -13,16 +13,16 @@ pub struct PostEditor<'ui> {
     pub(super) _ctx: &'ui Context,
     pub(super) scope: ImNodesScope,
     pub(super) editor_hovered: bool,
-    pub(super) hovered_node: Option<i32>,
-    pub(super) hovered_link: Option<i32>,
-    pub(super) hovered_pin: Option<i32>,
+    pub(super) hovered_node: Option<crate::NodeId>,
+    pub(super) hovered_link: Option<crate::LinkId>,
+    pub(super) hovered_pin: Option<crate::PinId>,
     pub(super) link_created: Option<crate::LinkCreated>,
     pub(super) link_created_ex: Option<crate::LinkCreatedEx>,
-    pub(super) link_destroyed: Option<i32>,
-    pub(super) any_attribute_active: Option<i32>,
-    pub(super) link_started: Option<i32>,
-    pub(super) link_dropped_excluding_detached: Option<i32>,
-    pub(super) link_dropped_including_detached: Option<i32>,
+    pub(super) link_destroyed: Option<crate::LinkId>,
+    pub(super) any_attribute_active: Option<crate::PinId>,
+    pub(super) link_started: Option<crate::PinId>,
+    pub(super) link_dropped_excluding_detached: Option<crate::PinId>,
+    pub(super) link_dropped_including_detached: Option<crate::PinId>,
     pub(super) _not_send_sync: PhantomData<Rc<()>>,
 }
 
@@ -42,19 +42,19 @@ impl<'ui> NodeEditor<'ui> {
         let editor_hovered = unsafe { sys::imnodes_IsEditorHovered() };
         let mut hovered_node = 0i32;
         let hovered_node = if unsafe { sys::imnodes_IsNodeHovered(&mut hovered_node) } {
-            Some(hovered_node)
+            Some(crate::NodeId::new(hovered_node))
         } else {
             None
         };
         let mut hovered_link = 0i32;
         let hovered_link = if unsafe { sys::imnodes_IsLinkHovered(&mut hovered_link) } {
-            Some(hovered_link)
+            Some(crate::LinkId::new(hovered_link))
         } else {
             None
         };
         let mut hovered_pin = 0i32;
         let hovered_pin = if unsafe { sys::imnodes_IsPinHovered(&mut hovered_pin) } {
-            Some(hovered_pin)
+            Some(crate::PinId::new(hovered_pin))
         } else {
             None
         };
@@ -78,10 +78,10 @@ impl<'ui> NodeEditor<'ui> {
             };
             if created {
                 Some(crate::LinkCreatedEx {
-                    start_node,
-                    start_attr,
-                    end_node,
-                    end_attr,
+                    start_node: crate::NodeId::new(start_node),
+                    start_attr: crate::PinId::new(start_attr),
+                    end_node: crate::NodeId::new(end_node),
+                    end_attr: crate::PinId::new(end_attr),
                     from_snap,
                 })
             } else {
@@ -97,7 +97,7 @@ impl<'ui> NodeEditor<'ui> {
         let link_destroyed = {
             let mut id = 0i32;
             if unsafe { sys::imnodes_IsLinkDestroyed(&mut id as *mut i32) } {
-                Some(id)
+                Some(crate::LinkId::new(id))
             } else {
                 None
             }
@@ -106,7 +106,7 @@ impl<'ui> NodeEditor<'ui> {
         let any_attribute_active = {
             let mut id = 0i32;
             if unsafe { sys::imnodes_IsAnyAttributeActive(&mut id) } {
-                Some(id)
+                Some(crate::PinId::new(id))
             } else {
                 None
             }
@@ -115,7 +115,7 @@ impl<'ui> NodeEditor<'ui> {
         let link_started = {
             let mut id = 0i32;
             if unsafe { sys::imnodes_IsLinkStarted(&mut id) } {
-                Some(id)
+                Some(crate::PinId::new(id))
             } else {
                 None
             }
@@ -126,7 +126,7 @@ impl<'ui> NodeEditor<'ui> {
         let link_dropped_excluding_detached = {
             let mut id = 0i32;
             if unsafe { sys::imnodes_IsLinkDropped(&mut id, false) } {
-                Some(id)
+                Some(crate::PinId::new(id))
             } else {
                 None
             }
@@ -136,7 +136,7 @@ impl<'ui> NodeEditor<'ui> {
         } else {
             let mut id = 0i32;
             if unsafe { sys::imnodes_IsLinkDropped(&mut id, true) } {
-                Some(id)
+                Some(crate::PinId::new(id))
             } else {
                 None
             }
@@ -231,37 +231,37 @@ impl<'ui> PostEditor<'ui> {
     }
 
     /// Selection helpers per id
-    pub fn select_node(&self, node_id: i32) {
+    pub fn select_node(&self, node_id: crate::NodeId) {
         self.bind();
-        unsafe { sys::imnodes_SelectNode(node_id) }
+        unsafe { sys::imnodes_SelectNode(node_id.raw()) }
     }
 
-    pub fn clear_node_selection_of(&self, node_id: i32) {
+    pub fn clear_node_selection_of(&self, node_id: crate::NodeId) {
         self.bind();
-        unsafe { sys::imnodes_ClearNodeSelection_Int(node_id) }
+        unsafe { sys::imnodes_ClearNodeSelection_Int(node_id.raw()) }
     }
 
-    pub fn is_node_selected(&self, node_id: i32) -> bool {
+    pub fn is_node_selected(&self, node_id: crate::NodeId) -> bool {
         self.bind();
-        unsafe { sys::imnodes_IsNodeSelected(node_id) }
+        unsafe { sys::imnodes_IsNodeSelected(node_id.raw()) }
     }
 
-    pub fn select_link(&self, link_id: i32) {
+    pub fn select_link(&self, link_id: crate::LinkId) {
         self.bind();
-        unsafe { sys::imnodes_SelectLink(link_id) }
+        unsafe { sys::imnodes_SelectLink(link_id.raw()) }
     }
 
-    pub fn clear_link_selection_of(&self, link_id: i32) {
+    pub fn clear_link_selection_of(&self, link_id: crate::LinkId) {
         self.bind();
-        unsafe { sys::imnodes_ClearLinkSelection_Int(link_id) }
+        unsafe { sys::imnodes_ClearLinkSelection_Int(link_id.raw()) }
     }
 
-    pub fn is_link_selected(&self, link_id: i32) -> bool {
+    pub fn is_link_selected(&self, link_id: crate::LinkId) -> bool {
         self.bind();
-        unsafe { sys::imnodes_IsLinkSelected(link_id) }
+        unsafe { sys::imnodes_IsLinkSelected(link_id.raw()) }
     }
 
-    pub fn selected_nodes(&self) -> Vec<i32> {
+    pub fn selected_nodes(&self) -> Vec<crate::NodeId> {
         // Safety: ImNodes returns the current count of selected nodes, and
         // `GetSelectedNodes` writes exactly that many IDs into the buffer.
         self.bind();
@@ -271,10 +271,10 @@ impl<'ui> PostEditor<'ui> {
         }
         let mut buf = vec![0i32; n as usize];
         unsafe { sys::imnodes_GetSelectedNodes(buf.as_mut_ptr()) };
-        buf
+        buf.into_iter().map(crate::NodeId::new).collect()
     }
 
-    pub fn selected_links(&self) -> Vec<i32> {
+    pub fn selected_links(&self) -> Vec<crate::LinkId> {
         // Safety: ImNodes returns the current count of selected links, and
         // `GetSelectedLinks` writes exactly that many IDs into the buffer.
         self.bind();
@@ -284,7 +284,7 @@ impl<'ui> PostEditor<'ui> {
         }
         let mut buf = vec![0i32; n as usize];
         unsafe { sys::imnodes_GetSelectedLinks(buf.as_mut_ptr()) };
-        buf
+        buf.into_iter().map(crate::LinkId::new).collect()
     }
 
     pub fn clear_selection(&self) {
@@ -303,7 +303,7 @@ impl<'ui> PostEditor<'ui> {
         self.link_created_ex
     }
 
-    pub fn is_link_destroyed(&self) -> Option<i32> {
+    pub fn is_link_destroyed(&self) -> Option<crate::LinkId> {
         self.link_destroyed
     }
 
@@ -311,24 +311,24 @@ impl<'ui> PostEditor<'ui> {
         self.editor_hovered
     }
 
-    pub fn hovered_node(&self) -> Option<i32> {
+    pub fn hovered_node(&self) -> Option<crate::NodeId> {
         self.hovered_node
     }
 
-    pub fn hovered_link(&self) -> Option<i32> {
+    pub fn hovered_link(&self) -> Option<crate::LinkId> {
         self.hovered_link
     }
 
-    pub fn hovered_pin(&self) -> Option<i32> {
+    pub fn hovered_pin(&self) -> Option<crate::PinId> {
         self.hovered_pin
     }
 
     /// Set a node's position in screen space for the current editor context.
-    pub fn set_node_pos_screen(&self, node_id: i32, pos: [f32; 2]) {
+    pub fn set_node_pos_screen(&self, node_id: crate::NodeId, pos: [f32; 2]) {
         self.bind();
         unsafe {
             sys::imnodes_SetNodeScreenSpacePos(
-                node_id,
+                node_id.raw(),
                 sys::ImVec2_c {
                     x: pos[0],
                     y: pos[1],
@@ -338,11 +338,11 @@ impl<'ui> PostEditor<'ui> {
     }
 
     /// Set a node's position in grid space for the current editor context.
-    pub fn set_node_pos_grid(&self, node_id: i32, pos: [f32; 2]) {
+    pub fn set_node_pos_grid(&self, node_id: crate::NodeId, pos: [f32; 2]) {
         self.bind();
         unsafe {
             sys::imnodes_SetNodeGridSpacePos(
-                node_id,
+                node_id.raw(),
                 sys::ImVec2_c {
                     x: pos[0],
                     y: pos[1],
@@ -355,15 +355,15 @@ impl<'ui> PostEditor<'ui> {
         self.any_attribute_active.is_some()
     }
 
-    pub fn any_attribute_active(&self) -> Option<i32> {
+    pub fn any_attribute_active(&self) -> Option<crate::PinId> {
         self.any_attribute_active
     }
 
-    pub fn is_link_started(&self) -> Option<i32> {
+    pub fn is_link_started(&self) -> Option<crate::PinId> {
         self.link_started
     }
 
-    pub fn is_link_dropped(&self, including_detached: bool) -> Option<i32> {
+    pub fn is_link_dropped(&self, including_detached: bool) -> Option<crate::PinId> {
         if including_detached {
             self.link_dropped_including_detached
         } else {

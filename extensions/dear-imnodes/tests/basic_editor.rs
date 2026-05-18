@@ -27,7 +27,7 @@ fn basic_editor_smoke_test() {
     let editor_ui = ui.imnodes(&imnodes_ctx).editor(Some(&editor));
 
     // Create a trivial node (no actual widgets, just exercise Begin/End)
-    let node_id: i32 = 1;
+    let node_id = imnodes::NodeId::new(1);
     let node = editor_ui.node(node_id);
     // Normally you'd draw title and attributes here using NodeToken helpers.
     // Explicitly end the node so the borrow ends before we end the editor.

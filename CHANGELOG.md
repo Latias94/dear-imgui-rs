@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - ImPlot3D `Plot3DBuilder` and `Plot3DToken` now carry the originating frame lifetime.
   - `dear-implot3d::Plot3DContext::current()` now exposes a non-owning current-context wrapper,
     matching the `dear-implot` current-context API shape for advanced callers.
+  - `dear-imnodes` node, pin, and link APIs now use `NodeId`, `PinId`, and `LinkId` instead of raw
+    `i32` ids.
 - Backends and utilities
   - `dear-app::DearAppError`, `dear_imgui_wgpu::RendererError`,
     `dear_imgui_glow::{InitError, RenderError}`, and `dear_imgui_ash::RendererError` are now

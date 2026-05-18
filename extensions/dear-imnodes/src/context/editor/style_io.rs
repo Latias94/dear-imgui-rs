@@ -97,11 +97,11 @@ impl<'ui> NodeEditor<'ui> {
     // state save/load moved to PostEditor
 
     /// Node positions in grid space
-    pub fn set_node_pos_grid(&self, node_id: i32, pos: [f32; 2]) {
+    pub fn set_node_pos_grid(&self, node_id: crate::NodeId, pos: [f32; 2]) {
         self.bind();
         unsafe {
             sys::imnodes_SetNodeGridSpacePos(
-                node_id,
+                node_id.raw(),
                 sys::ImVec2_c {
                     x: pos[0],
                     y: pos[1],
@@ -110,9 +110,9 @@ impl<'ui> NodeEditor<'ui> {
         }
     }
 
-    pub fn get_node_pos_grid(&self, node_id: i32) -> [f32; 2] {
+    pub fn get_node_pos_grid(&self, node_id: crate::NodeId) -> [f32; 2] {
         self.bind();
-        let out = unsafe { sys::imnodes_GetNodeGridSpacePos(node_id) };
+        let out = unsafe { sys::imnodes_GetNodeGridSpacePos(node_id.raw()) };
         [out.x, out.y]
     }
 
@@ -239,11 +239,11 @@ impl<'ui> NodeEditor<'ui> {
     }
 
     /// Node positions in screen/editor space
-    pub fn set_node_pos_screen(&self, node_id: i32, pos: [f32; 2]) {
+    pub fn set_node_pos_screen(&self, node_id: crate::NodeId, pos: [f32; 2]) {
         self.bind();
         unsafe {
             sys::imnodes_SetNodeScreenSpacePos(
-                node_id,
+                node_id.raw(),
                 sys::ImVec2_c {
                     x: pos[0],
                     y: pos[1],
@@ -251,11 +251,11 @@ impl<'ui> NodeEditor<'ui> {
             )
         }
     }
-    pub fn set_node_pos_editor(&self, node_id: i32, pos: [f32; 2]) {
+    pub fn set_node_pos_editor(&self, node_id: crate::NodeId, pos: [f32; 2]) {
         self.bind();
         unsafe {
             sys::imnodes_SetNodeEditorSpacePos(
-                node_id,
+                node_id.raw(),
                 sys::ImVec2_c {
                     x: pos[0],
                     y: pos[1],
@@ -263,29 +263,29 @@ impl<'ui> NodeEditor<'ui> {
             )
         }
     }
-    pub fn get_node_pos_screen(&self, node_id: i32) -> [f32; 2] {
+    pub fn get_node_pos_screen(&self, node_id: crate::NodeId) -> [f32; 2] {
         self.bind();
-        let out = unsafe { crate::compat_ffi::imnodes_GetNodeScreenSpacePos(node_id) };
+        let out = unsafe { crate::compat_ffi::imnodes_GetNodeScreenSpacePos(node_id.raw()) };
         [out.x, out.y]
     }
-    pub fn get_node_pos_editor(&self, node_id: i32) -> [f32; 2] {
+    pub fn get_node_pos_editor(&self, node_id: crate::NodeId) -> [f32; 2] {
         self.bind();
-        let out = unsafe { crate::compat_ffi::imnodes_GetNodeEditorSpacePos(node_id) };
+        let out = unsafe { crate::compat_ffi::imnodes_GetNodeEditorSpacePos(node_id.raw()) };
         [out.x, out.y]
     }
 
     /// Node drag/size helpers
-    pub fn set_node_draggable(&self, node_id: i32, draggable: bool) {
+    pub fn set_node_draggable(&self, node_id: crate::NodeId, draggable: bool) {
         self.bind();
-        unsafe { sys::imnodes_SetNodeDraggable(node_id, draggable) }
+        unsafe { sys::imnodes_SetNodeDraggable(node_id.raw(), draggable) }
     }
-    pub fn snap_node_to_grid(&self, node_id: i32) {
+    pub fn snap_node_to_grid(&self, node_id: crate::NodeId) {
         self.bind();
-        unsafe { sys::imnodes_SnapNodeToGrid(node_id) }
+        unsafe { sys::imnodes_SnapNodeToGrid(node_id.raw()) }
     }
-    pub fn get_node_dimensions(&self, node_id: i32) -> [f32; 2] {
+    pub fn get_node_dimensions(&self, node_id: crate::NodeId) -> [f32; 2] {
         self.bind();
-        let out = unsafe { crate::compat_ffi::imnodes_GetNodeDimensions(node_id) };
+        let out = unsafe { crate::compat_ffi::imnodes_GetNodeDimensions(node_id.raw()) };
         [out.x, out.y]
     }
 }

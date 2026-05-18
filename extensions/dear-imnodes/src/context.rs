@@ -150,7 +150,7 @@ pub struct NodeEditor<'ui> {
 }
 
 struct MiniMapCallbackHolder<'a> {
-    callback: Box<dyn FnMut(i32) + 'a>,
+    callback: Box<dyn FnMut(crate::NodeId) + 'a>,
 }
 
 #[cfg(test)]
