@@ -51,10 +51,6 @@ fn assert_positive_f32(caller: &str, name: &str, value: f32) {
     assert!(value > 0.0, "{caller} {name} must be positive");
 }
 
-fn assert_non_negative_i32(caller: &str, name: &str, value: i32) {
-    assert!(value >= 0, "{caller} {name} must be non-negative");
-}
-
 fn count_to_i32(caller: &str, name: &str, value: usize) -> i32 {
     i32::try_from(value)
         .unwrap_or_else(|_| panic!("{caller} {name} exceeded Dear ImGui's i32 range"))
@@ -2103,6 +2099,24 @@ mod draw_numeric_tests {
     }
 
     #[test]
+    fn primitive_reserve_counts_reject_overflow_before_ffi() {
+        let fixture = TestDrawList::new();
+
+        assert_panics_without_buffer_change(&fixture, |draw_list| unsafe {
+            draw_list.prim_reserve(i32::MAX as usize + 1, 0);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| unsafe {
+            draw_list.prim_reserve(0, i32::MAX as usize + 1);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| unsafe {
+            draw_list.prim_unreserve(i32::MAX as usize + 1, 0);
+        });
+        assert_panics_without_buffer_change(&fixture, |draw_list| unsafe {
+            draw_list.prim_unreserve(0, i32::MAX as usize + 1);
+        });
+    }
+
+    #[test]
     fn text_and_clip_inputs_validate_before_ffi() {
         let mut ctx = crate::Context::create();
         {
@@ -2193,9 +2207,9 @@ impl<'ui> DrawListMut<'ui> {
     ///
     /// # Safety
     /// Caller must write exactly the reserved amount using `prim_write_*` and ensure valid topology.
-    pub unsafe fn prim_reserve(&self, idx_count: i32, vtx_count: i32) {
-        assert_non_negative_i32("DrawListMut::prim_reserve()", "idx_count", idx_count);
-        assert_non_negative_i32("DrawListMut::prim_reserve()", "vtx_count", vtx_count);
+    pub unsafe fn prim_reserve(&self, idx_count: usize, vtx_count: usize) {
+        let idx_count = count_to_i32("DrawListMut::prim_reserve()", "idx_count", idx_count);
+        let vtx_count = count_to_i32("DrawListMut::prim_reserve()", "vtx_count", vtx_count);
         unsafe { sys::ImDrawList_PrimReserve(self.draw_list, idx_count, vtx_count) }
     }
 
@@ -2203,9 +2217,9 @@ impl<'ui> DrawListMut<'ui> {
     ///
     /// # Safety
     /// Must match a prior call to `prim_reserve` which hasn't been fully written.
-    pub unsafe fn prim_unreserve(&self, idx_count: i32, vtx_count: i32) {
-        assert_non_negative_i32("DrawListMut::prim_unreserve()", "idx_count", idx_count);
-        assert_non_negative_i32("DrawListMut::prim_unreserve()", "vtx_count", vtx_count);
+    pub unsafe fn prim_unreserve(&self, idx_count: usize, vtx_count: usize) {
+        let idx_count = count_to_i32("DrawListMut::prim_unreserve()", "idx_count", idx_count);
+        let vtx_count = count_to_i32("DrawListMut::prim_unreserve()", "vtx_count", vtx_count);
         unsafe { sys::ImDrawList_PrimUnreserve(self.draw_list, idx_count, vtx_count) }
     }
 
