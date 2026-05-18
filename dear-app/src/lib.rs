@@ -765,7 +765,7 @@ impl AppWindow {
         if docking.enable && docking.auto_dockspace {
             let viewport = ui.main_viewport();
             // Host window always covering the main viewport
-            ui.set_next_window_viewport(Id::from(viewport.id()));
+            ui.set_next_window_viewport(viewport.id());
             let pos = viewport.pos();
             let size = viewport.size();
             // NO_BACKGROUND if passthru central node

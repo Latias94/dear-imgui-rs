@@ -1,4 +1,4 @@
-use crate::sys;
+use crate::{Id, sys};
 use std::cell::UnsafeCell;
 use std::ffi::{CStr, c_void};
 
@@ -15,6 +15,13 @@ fn assert_non_negative_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
         value[0] >= 0.0 && value[1] >= 0.0,
         "{caller} {name} must contain non-negative values"
     );
+}
+
+#[cfg(feature = "multi-viewport")]
+fn nonzero_id_raw(caller: &str, name: &str, id: Id) -> sys::ImGuiID {
+    let raw = id.raw();
+    assert!(raw != 0, "{caller} {name} must be non-zero");
+    raw
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -67,6 +74,10 @@ impl Viewport {
     /// - The viewport outlives the returned reference (e.g. it belongs to the
     ///   currently active ImGui context).
     pub(crate) unsafe fn from_raw<'a>(raw: *const sys::ImGuiViewport) -> &'a Self {
+        assert!(
+            !raw.is_null(),
+            "Viewport::from_raw() requires non-null pointer"
+        );
         unsafe { &*(raw as *const Self) }
     }
 
@@ -80,6 +91,10 @@ impl Viewport {
     ///   currently active ImGui context).
     /// - No other references (shared or mutable) to the same viewport are alive.
     pub unsafe fn from_raw_mut<'a>(raw: *mut sys::ImGuiViewport) -> &'a mut Self {
+        assert!(
+            !raw.is_null(),
+            "Viewport::from_raw_mut() requires non-null pointer"
+        );
         unsafe { &mut *(raw as *mut Self) }
     }
 
@@ -94,8 +109,8 @@ impl Viewport {
     }
 
     /// Get the viewport ID
-    pub fn id(&self) -> sys::ImGuiID {
-        self.inner().ID
+    pub fn id(&self) -> Id {
+        Id::from(self.inner().ID)
     }
 
     /// Set the viewport position
@@ -333,14 +348,17 @@ impl Viewport {
 
     /// Get the parent viewport ID
     #[cfg(feature = "multi-viewport")]
-    pub fn parent_viewport_id(&self) -> sys::ImGuiID {
-        self.inner().ParentViewportId
+    pub fn parent_viewport_id(&self) -> Option<Id> {
+        let raw = self.inner().ParentViewportId;
+        (raw != 0).then(|| Id::from(raw))
     }
 
     /// Set the parent viewport ID
     #[cfg(feature = "multi-viewport")]
-    pub fn set_parent_viewport_id(&mut self, id: sys::ImGuiID) {
-        self.inner_mut().ParentViewportId = id;
+    pub fn set_parent_viewport_id(&mut self, id: Option<Id>) {
+        self.inner_mut().ParentViewportId = id
+            .map(|id| nonzero_id_raw("Viewport::set_parent_viewport_id()", "id", id))
+            .unwrap_or(0);
     }
 
     /// Get the draw data pointer
@@ -424,6 +442,64 @@ mod tests {
             let handle = 0x1234usize as *mut c_void;
             viewport.set_platform_handle_raw(handle);
             assert_eq!(viewport.platform_handle_raw(), handle);
+
+            sys::ImGuiViewport_destroy(raw);
+        }
+    }
+
+    #[test]
+    fn viewport_ids_are_typed() {
+        let raw = new_viewport();
+        unsafe {
+            (*raw).ID = 42;
+
+            let viewport = Viewport::from_raw_mut(raw);
+            assert_eq!(viewport.id(), crate::Id::from(42u32));
+
+            sys::ImGuiViewport_destroy(raw);
+        }
+    }
+
+    #[test]
+    fn viewport_raw_constructors_reject_null_before_reference_creation() {
+        assert!(
+            std::panic::catch_unwind(|| unsafe {
+                let _ = Viewport::from_raw(std::ptr::null());
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| unsafe {
+                let _ = Viewport::from_raw_mut(std::ptr::null_mut());
+            })
+            .is_err()
+        );
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn parent_viewport_id_uses_typed_optional_id() {
+        let raw = new_viewport();
+        unsafe {
+            let viewport = Viewport::from_raw_mut(raw);
+            assert_eq!(viewport.parent_viewport_id(), None);
+
+            let parent = crate::Id::from(100u32);
+            viewport.set_parent_viewport_id(Some(parent));
+            assert_eq!(viewport.parent_viewport_id(), Some(parent));
+            assert_eq!((*raw).ParentViewportId, parent.raw());
+
+            viewport.set_parent_viewport_id(None);
+            assert_eq!(viewport.parent_viewport_id(), None);
+            assert_eq!((*raw).ParentViewportId, 0);
+
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    viewport.set_parent_viewport_id(Some(crate::Id::default()));
+                }))
+                .is_err()
+            );
+            assert_eq!(viewport.parent_viewport_id(), None);
 
             sys::ImGuiViewport_destroy(raw);
         }

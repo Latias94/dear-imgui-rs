@@ -25,7 +25,7 @@ fn more_coverage_queries_no_panic() {
     let _ = ui.is_mouse_released_with_delay(imgui::MouseButton::Left, 0.0);
     let _ = ui.calc_item_width();
 
-    let main_id = imgui::Id::from(ui.main_viewport().id());
+    let main_id = ui.main_viewport().id();
     let _ = ui.find_viewport_by_id(main_id);
     let _ = ui.find_viewport_by_platform_handle(std::ptr::null_mut());
 }

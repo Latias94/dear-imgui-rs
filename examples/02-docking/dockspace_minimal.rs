@@ -147,12 +147,12 @@ impl AppWindow {
 
         // 1) Host a fullscreen window for the DockSpace (mirrors minimal C++ docking example)
         use dear_imgui_rs::{
-            DockBuilder, DockNodeFlags, Id, SplitDirection, StyleColor, StyleVar, WindowFlags,
+            DockBuilder, DockNodeFlags, SplitDirection, StyleColor, StyleVar, WindowFlags,
         };
 
         let viewport = ui.main_viewport();
         // Ensure this window is associated with the main viewport (safe wrapper)
-        ui.set_next_window_viewport(viewport.id().into());
+        ui.set_next_window_viewport(viewport.id());
         let pos = viewport.pos();
         let size = viewport.size();
 

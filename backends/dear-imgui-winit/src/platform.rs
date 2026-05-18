@@ -381,7 +381,7 @@ impl WinitPlatform {
                         let main_viewport_id = imgui_ctx.main_viewport().id();
                         imgui_ctx
                             .io_mut()
-                            .add_mouse_viewport_event(main_viewport_id.into());
+                            .add_mouse_viewport_event(main_viewport_id);
                         // Feed absolute/screen coordinates in logical pixels, matching io.DisplaySize.
                         let scale = window.scale_factor();
                         let pos_logical = position.to_logical::<f64>(scale);

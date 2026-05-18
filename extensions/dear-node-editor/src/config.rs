@@ -162,26 +162,6 @@ impl EditorConfig {
         self
     }
 
-    pub unsafe fn drag_button_index_unchecked(mut self, index: i32) -> Self {
-        self.drag_button = mouse_button_from_index(index);
-        self
-    }
-
-    pub unsafe fn select_button_index_unchecked(mut self, index: i32) -> Self {
-        self.select_button = mouse_button_from_index(index);
-        self
-    }
-
-    pub unsafe fn navigate_button_index_unchecked(mut self, index: i32) -> Self {
-        self.navigate_button = mouse_button_from_index(index);
-        self
-    }
-
-    pub unsafe fn context_menu_button_index_unchecked(mut self, index: i32) -> Self {
-        self.context_menu_button = mouse_button_from_index(index);
-        self
-    }
-
     pub fn smooth_zoom(mut self, enabled: bool, power: f32) -> Self {
         assert!(
             power.is_finite() && power > 0.0,
@@ -265,17 +245,6 @@ impl EditorConfig {
             enable_smooth_zoom: self.enable_smooth_zoom,
             smooth_zoom_power: self.smooth_zoom_power,
         }
-    }
-}
-
-fn mouse_button_from_index(index: i32) -> MouseButton {
-    match index {
-        value if value == MouseButton::Left as i32 => MouseButton::Left,
-        value if value == MouseButton::Right as i32 => MouseButton::Right,
-        value if value == MouseButton::Middle as i32 => MouseButton::Middle,
-        value if value == MouseButton::Extra1 as i32 => MouseButton::Extra1,
-        value if value == MouseButton::Extra2 as i32 => MouseButton::Extra2,
-        _ => panic!("mouse button index must be a valid Dear ImGui mouse button"),
     }
 }
 

@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `DockNode::depth()` now returns `usize` instead of a raw signed value.
   - Docking window class IDs now use `Id`, `Option<Id>`, and `WindowClassParentViewport` instead
     of raw `ImGuiID` sentinels.
+  - `Viewport::id()` now returns `Id`, and `Viewport::parent_viewport_id()` /
+    `Viewport::set_parent_viewport_id()` now use `Option<Id>` instead of raw viewport IDs.
   - `Ui::push_focus_scope` now takes `Id` instead of raw `ImGuiID`.
   - Logging helpers now take `LogAutoOpenDepth` instead of raw `-1` auto-open-depth sentinels.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
@@ -88,12 +90,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `push_style_var_f32`, `push_style_var_vec2`, or `dear-implot3d::push_style_var_marker`.
   - `dear-implot3d` surface grid counts now use `usize` and reject values outside ImPlot3D's
     `i32` range before FFI.
+  - `dear-imguizmo::graph::GraphStyle::grid_major_every` now uses a positive typed
+    `GraphGridMajorInterval` instead of a raw `i32`.
   - `dear-imnodes` node, pin, and link APIs now use `NodeId`, `PinId`, and `LinkId` instead of raw
     `i32` ids.
   - `dear-imnodes` style-var helper methods now take typed `StyleVar` values instead of raw `i32`
     style-var indices.
   - `dear-imnodes::NodeEditor::set_alt_mouse_button` now takes `MouseButton` instead of a raw
     button index.
+  - `dear-node-editor::EditorConfig` no longer exposes the raw unchecked mouse-button index
+    escape hatches; use the typed `MouseButton` setters.
   - `dear-imgui-test-engine::TestScript::mouse_click_on_void` now takes `MouseButton` instead of a
     raw `i32` button index.
   - `dear-imgui-test-engine` table column script helpers now take typed table column indices/targets
@@ -147,6 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Scope clipboard callback reentrancy protection to each `ClipboardContext` instead of using a
     process-wide guard. Same-context reentry still fails closed, while callbacks for independent
     ImGui contexts no longer block each other.
+  - `Viewport::from_raw()` and `Viewport::from_raw_mut()` now assert non-null pointers before
+    forming references.
 - Backends
   - `dear-imgui-glow`: `GlowRenderer::destroy()` now clears renderer-owned multi-viewport state
     for this renderer, matching `Drop` and preventing stale callbacks from borrowing a destroyed

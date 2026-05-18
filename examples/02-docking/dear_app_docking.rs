@@ -140,7 +140,7 @@ fn main() {
 
             // Fullscreen host window with dockspace
             let viewport = ui.main_viewport();
-            ui.set_next_window_viewport(Id::from(viewport.id()));
+            ui.set_next_window_viewport(viewport.id());
             let pos = viewport.pos();
             let size = viewport.size();
 
