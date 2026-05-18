@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps history and upgrade guidance.
+This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
 For Apple-specific integration notes and the repository-owned iOS example
 paths, see `docs/workstreams/apple-platform-support.md`.

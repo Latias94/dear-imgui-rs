@@ -2,6 +2,7 @@
 
 use crate::{Axis, XAxis, YAxis, compat_ffi, sys};
 use dear_imgui_rs::with_scratch_txt;
+use std::fmt;
 
 fn assert_finite_f32(caller: &str, name: &str, value: f32) {
     assert!(value.is_finite(), "{caller} {name} must be finite");
@@ -415,6 +416,48 @@ pub struct DragResult {
     pub held: bool,
 }
 
+/// Stable identity for ImPlot drag point/line helpers.
+///
+/// This wraps the upstream `int id` parameter so safe Rust callers do not
+/// confuse tool identities with coordinates, counts, or other signed values.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct DragToolId(i32);
+
+impl DragToolId {
+    /// Create a drag tool identity from a raw signed id.
+    #[inline]
+    pub const fn new(id: i32) -> Self {
+        Self(id)
+    }
+
+    /// Return the raw `int` value expected by the ImPlot FFI.
+    #[inline]
+    pub const fn raw(self) -> i32 {
+        self.0
+    }
+}
+
+impl From<i32> for DragToolId {
+    #[inline]
+    fn from(value: i32) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<DragToolId> for i32 {
+    #[inline]
+    fn from(value: DragToolId) -> Self {
+        value.raw()
+    }
+}
+
+impl fmt::Display for DragToolId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 fn color4(rgba: [f32; 4]) -> sys::ImVec4_c {
     sys::ImVec4_c {
         x: rgba[0],
@@ -426,7 +469,7 @@ fn color4(rgba: [f32; 4]) -> sys::ImVec4_c {
 
 /// Draggable point with result flags
 pub fn drag_point(
-    id: i32,
+    id: DragToolId,
     x: &mut f64,
     y: &mut f64,
     color: [f32; 4],
@@ -438,7 +481,7 @@ pub fn drag_point(
     let mut held = false;
     let changed = unsafe {
         sys::ImPlot_DragPoint(
-            id,
+            id.raw(),
             x as *mut f64,
             y as *mut f64,
             color4(color),
@@ -459,7 +502,7 @@ pub fn drag_point(
 
 /// Draggable vertical line at x
 pub fn drag_line_x(
-    id: i32,
+    id: DragToolId,
     x: &mut f64,
     color: [f32; 4],
     thickness: f32,
@@ -470,7 +513,7 @@ pub fn drag_line_x(
     let mut held = false;
     let changed = unsafe {
         sys::ImPlot_DragLineX(
-            id,
+            id.raw(),
             x as *mut f64,
             color4(color),
             thickness,
@@ -490,7 +533,7 @@ pub fn drag_line_x(
 
 /// Draggable horizontal line at y
 pub fn drag_line_y(
-    id: i32,
+    id: DragToolId,
     y: &mut f64,
     color: [f32; 4],
     thickness: f32,
@@ -501,7 +544,7 @@ pub fn drag_line_y(
     let mut held = false;
     let changed = unsafe {
         sys::ImPlot_DragLineY(
-            id,
+            id.raw(),
             y as *mut f64,
             color4(color),
             thickness,
@@ -516,5 +559,21 @@ pub fn drag_line_y(
         clicked,
         hovered,
         held,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DragToolId;
+
+    #[test]
+    fn drag_tool_id_round_trips_raw_values() {
+        let id = DragToolId::new(-7);
+        assert_eq!(id.raw(), -7);
+        assert_eq!(i32::from(id), -7);
+
+        let other = DragToolId::from(120482);
+        assert_eq!(other.raw(), 120482);
+        assert_eq!(other.to_string(), "120482");
     }
 }

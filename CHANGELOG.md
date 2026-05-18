@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     instead of raw signed bin selectors.
   - `dear-implot` / `dear-implot3d` range-based axis tick helpers now take `usize` tick counts
     instead of raw signed `i32` values.
+  - `dear-implot` drag point/line helpers now take `DragToolId` instead of raw `i32` ids.
   - `dear-implot` heatmap row/column counts are checked before FFI and reject values outside
     ImPlot's `i32` range.
   - ImPlot3D `Plot3DBuilder` and `Plot3DToken` now carry the originating frame lifetime.
