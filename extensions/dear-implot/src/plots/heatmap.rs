@@ -6,13 +6,46 @@ use super::{
 use crate::{HeatmapFlags, ItemFlags, sys};
 use dear_imgui_rs::with_scratch_txt_two;
 
+fn validate_grid_counts(
+    caller: &str,
+    rows: usize,
+    cols: usize,
+    values_len: usize,
+) -> Result<(), PlotError> {
+    if rows == 0 || cols == 0 {
+        return Err(PlotError::InvalidData(
+            "Rows and columns must be positive".to_string(),
+        ));
+    }
+
+    let expected_size = rows
+        .checked_mul(cols)
+        .ok_or_else(|| PlotError::InvalidData(format!("{caller} rows * cols overflowed usize")))?;
+    let _ = heatmap_count_to_i32(caller, "rows", rows)?;
+    let _ = heatmap_count_to_i32(caller, "cols", cols)?;
+
+    if values_len != expected_size {
+        return Err(PlotError::DataLengthMismatch {
+            x_len: expected_size,
+            y_len: values_len,
+        });
+    }
+
+    Ok(())
+}
+
+fn heatmap_count_to_i32(caller: &str, name: &str, value: usize) -> Result<i32, PlotError> {
+    i32::try_from(value)
+        .map_err(|_| PlotError::InvalidData(format!("{caller} {name} exceeded ImPlot's i32 range")))
+}
+
 /// Builder for heatmap plots with extensive customization options
 pub struct HeatmapPlot<'a> {
     label: &'a str,
     values: &'a [f64],
     style: PlotItemStyle,
-    rows: i32,
-    cols: i32,
+    rows: usize,
+    cols: usize,
     scale_min: f64,
     scale_max: f64,
     label_fmt: Option<&'a str>,
@@ -41,8 +74,8 @@ impl<'a> HeatmapPlot<'a> {
             label,
             values,
             style: PlotItemStyle::default(),
-            rows: rows as i32,
-            cols: cols as i32,
+            rows,
+            cols,
             scale_min: 0.0,
             scale_max: 0.0, // Auto-scale when both are 0
             label_fmt: Some("%.1f"),
@@ -106,21 +139,12 @@ impl<'a> HeatmapPlot<'a> {
             return Err(PlotError::EmptyData);
         }
 
-        let expected_size = (self.rows * self.cols) as usize;
-        if self.values.len() != expected_size {
-            return Err(PlotError::DataLengthMismatch {
-                x_len: expected_size,
-                y_len: self.values.len(),
-            });
-        }
-
-        if self.rows <= 0 || self.cols <= 0 {
-            return Err(PlotError::InvalidData(
-                "Rows and columns must be positive".to_string(),
-            ));
-        }
-
-        Ok(())
+        validate_grid_counts(
+            "HeatmapPlot::validate()",
+            self.rows,
+            self.cols,
+            self.values.len(),
+        )
     }
 }
 
@@ -129,6 +153,12 @@ impl<'a> Plot for HeatmapPlot<'a> {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
+        let Ok(rows) = heatmap_count_to_i32("HeatmapPlot::plot()", "rows", self.rows) else {
+            return;
+        };
+        let Ok(cols) = heatmap_count_to_i32("HeatmapPlot::plot()", "cols", self.cols) else {
+            return;
+        };
         let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
         match label_fmt {
             Some(label_fmt) => {
@@ -146,8 +176,8 @@ impl<'a> Plot for HeatmapPlot<'a> {
                     sys::ImPlot_PlotHeatmap_doublePtr(
                         label_ptr,
                         self.values.as_ptr(),
-                        self.rows,
-                        self.cols,
+                        rows,
+                        cols,
                         self.scale_min,
                         self.scale_max,
                         label_fmt_ptr,
@@ -166,8 +196,8 @@ impl<'a> Plot for HeatmapPlot<'a> {
                 sys::ImPlot_PlotHeatmap_doublePtr(
                     label_ptr,
                     self.values.as_ptr(),
-                    self.rows,
-                    self.cols,
+                    rows,
+                    cols,
                     self.scale_min,
                     self.scale_max,
                     std::ptr::null(),
@@ -189,8 +219,8 @@ pub struct HeatmapPlotF32<'a> {
     label: &'a str,
     values: &'a [f32],
     style: PlotItemStyle,
-    rows: i32,
-    cols: i32,
+    rows: usize,
+    cols: usize,
     scale_min: f64,
     scale_max: f64,
     label_fmt: Option<&'a str>,
@@ -213,8 +243,8 @@ impl<'a> HeatmapPlotF32<'a> {
             label,
             values,
             style: PlotItemStyle::default(),
-            rows: rows as i32,
-            cols: cols as i32,
+            rows,
+            cols,
             scale_min: 0.0,
             scale_max: 0.0,
             label_fmt: Some("%.1f"),
@@ -269,21 +299,12 @@ impl<'a> HeatmapPlotF32<'a> {
             return Err(PlotError::EmptyData);
         }
 
-        let expected_size = (self.rows * self.cols) as usize;
-        if self.values.len() != expected_size {
-            return Err(PlotError::DataLengthMismatch {
-                x_len: expected_size,
-                y_len: self.values.len(),
-            });
-        }
-
-        if self.rows <= 0 || self.cols <= 0 {
-            return Err(PlotError::InvalidData(
-                "Rows and columns must be positive".to_string(),
-            ));
-        }
-
-        Ok(())
+        validate_grid_counts(
+            "HeatmapPlotF32::validate()",
+            self.rows,
+            self.cols,
+            self.values.len(),
+        )
     }
 }
 
@@ -292,6 +313,12 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
         if self.validate().is_err() {
             return;
         }
+        let Ok(rows) = heatmap_count_to_i32("HeatmapPlotF32::plot()", "rows", self.rows) else {
+            return;
+        };
+        let Ok(cols) = heatmap_count_to_i32("HeatmapPlotF32::plot()", "cols", self.cols) else {
+            return;
+        };
         let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
         match label_fmt {
             Some(label_fmt) => {
@@ -309,8 +336,8 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                     sys::ImPlot_PlotHeatmap_FloatPtr(
                         label_ptr,
                         self.values.as_ptr(),
-                        self.rows,
-                        self.cols,
+                        rows,
+                        cols,
                         self.scale_min,
                         self.scale_max,
                         label_fmt_ptr,
@@ -329,8 +356,8 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                 sys::ImPlot_PlotHeatmap_FloatPtr(
                     label_ptr,
                     self.values.as_ptr(),
-                    self.rows,
-                    self.cols,
+                    rows,
+                    cols,
                     self.scale_min,
                     self.scale_max,
                     std::ptr::null(),
@@ -398,5 +425,54 @@ impl<'ui> crate::PlotUi<'ui> {
         self.bind();
         plot.plot();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HeatmapPlot, HeatmapPlotF32};
+    use crate::PlotError;
+
+    fn invalid_data_message(err: PlotError) -> String {
+        match err {
+            PlotError::InvalidData(message) => message,
+            other => panic!("expected invalid data error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn heatmap_rejects_zero_counts_before_ffi() {
+        let values = [1.0];
+        let err = HeatmapPlot::new("heat", &values, 0, 1)
+            .validate()
+            .expect_err("zero row count must be rejected");
+        assert!(invalid_data_message(err).contains("Rows and columns must be positive"));
+    }
+
+    #[test]
+    fn heatmap_rejects_count_multiplication_overflow_before_ffi() {
+        let values = [1.0];
+        let err = HeatmapPlot::new("heat", &values, usize::MAX, 2)
+            .validate()
+            .expect_err("overflowing grid size must be rejected");
+        assert!(invalid_data_message(err).contains("rows * cols overflowed"));
+    }
+
+    #[test]
+    fn heatmap_rejects_i32_count_overflow_before_ffi() {
+        let values = [1.0];
+        let err = HeatmapPlot::new("heat", &values, i32::MAX as usize + 1, 1)
+            .validate()
+            .expect_err("oversized row count must be rejected");
+        assert!(invalid_data_message(err).contains("rows exceeded ImPlot's i32 range"));
+    }
+
+    #[test]
+    fn heatmap_f32_uses_checked_grid_counts() {
+        let values = [1.0f32];
+        let err = HeatmapPlotF32::new("heat", &values, 1, i32::MAX as usize + 1)
+            .validate()
+            .expect_err("oversized column count must be rejected");
+        assert!(invalid_data_message(err).contains("cols exceeded ImPlot's i32 range"));
     }
 }

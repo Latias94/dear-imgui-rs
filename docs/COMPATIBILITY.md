@@ -99,6 +99,8 @@ Extensions
   - `dear-implot::SubplotGrid::new` uses `usize` row/column counts instead of raw signed counts.
   - `dear-implot` histogram bin APIs use `HistogramBins`, `usize` concrete bin counts, or
     `BinMethod` automatic methods instead of raw signed bin selectors.
+  - `dear-implot` heatmap row/column counts are checked before FFI and reject oversized `usize`
+    values instead of truncating to ImPlot's `i32` ABI.
   - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
     of a raw signed integer. Use `PlotValueOffset::new(...)` or pass `usize` directly.
   - Table freeze helpers now take `usize` frozen column/row counts instead of raw signed values.
