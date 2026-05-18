@@ -74,6 +74,10 @@ fn checked_texture_byte_len_if_valid(
     ))
 }
 
+fn non_negative_texture_count_from_i32(caller: &str, raw: i32) -> usize {
+    usize::try_from(raw).unwrap_or_else(|_| panic!("{caller} returned a negative count"))
+}
+
 /// Simple texture ID for backward compatibility
 ///
 /// This is a simple wrapper around u64 that can be used to identify textures.
@@ -643,8 +647,11 @@ impl TextureData {
     }
 
     /// Get the number of unused frames
-    pub fn unused_frames(&self) -> i32 {
-        self.inner().UnusedFrames
+    pub fn unused_frames(&self) -> usize {
+        non_negative_texture_count_from_i32(
+            "TextureData::unused_frames()",
+            self.inner().UnusedFrames,
+        )
     }
 
     /// Get the reference count
@@ -993,6 +1000,25 @@ mod tests {
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 texture.set_format(TextureFormat::Alpha8);
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn unused_frames_is_a_checked_usize_count() {
+        let mut texture = TextureData::new();
+        unsafe {
+            (*texture.as_raw_mut()).UnusedFrames = 7;
+        }
+        assert_eq!(texture.unused_frames(), 7);
+
+        unsafe {
+            (*texture.as_raw_mut()).UnusedFrames = -1;
+        }
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = texture.unused_frames();
             }))
             .is_err()
         );

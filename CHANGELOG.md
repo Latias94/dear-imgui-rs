@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Draw-list low-level `prim_reserve` / `prim_unreserve` counts now use `usize` instead of raw
     signed values.
   - `Io` render/window metrics getters now return `usize` counts instead of raw signed values.
+  - UI key/mouse/frame-count helpers, texture unused-frame counts, and font-atlas bake discard
+    frame counts now use `usize`.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions

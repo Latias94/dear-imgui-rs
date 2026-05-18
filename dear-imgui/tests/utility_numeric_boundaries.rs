@@ -27,7 +27,9 @@ fn utility_float_inputs_reject_non_finite_values_before_ffi() {
     let _ = ui.get_color_u32_with_alpha(imgui::StyleColor::Text, 0.5);
     let _ = ui.get_color_u32_from_rgba([1.5, -1.0, 0.0, 1.0]);
     let _ = ui.get_color_u32_from_packed(0xFFFF_FFFF, 0.25);
-    let _ = ui.get_key_pressed_amount(imgui::Key::A, 0.25, 0.05);
+    let _: usize = ui.get_key_pressed_amount(imgui::Key::A, 0.25, 0.05);
+    let _: usize = ui.get_mouse_clicked_count(imgui::MouseButton::Left);
+    let _: usize = ui.frame_count();
     let _ = ui.get_mouse_drag_delta(imgui::MouseButton::Left, -1.0);
 
     macro_rules! assert_panics {

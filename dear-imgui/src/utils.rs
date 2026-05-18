@@ -8,6 +8,10 @@ use crate::input::{Key, MouseButton};
 use crate::{StyleColor, sys};
 use bitflags::bitflags;
 
+fn non_negative_count_from_i32(caller: &str, raw: i32) -> usize {
+    usize::try_from(raw).unwrap_or_else(|_| panic!("{caller} returned a negative count"))
+}
+
 bitflags! {
     /// Flags for hovering detection
     #[repr(transparent)]
@@ -221,10 +225,12 @@ impl crate::ui::Ui {
 
     /// Returns the number of times the key was pressed in the current frame
     #[doc(alias = "GetKeyPressedAmount")]
-    pub fn get_key_pressed_amount(&self, key: Key, repeat_delay: f32, rate: f32) -> i32 {
+    pub fn get_key_pressed_amount(&self, key: Key, repeat_delay: f32, rate: f32) -> usize {
         assert_finite_f32("Ui::get_key_pressed_amount()", "repeat_delay", repeat_delay);
         assert_finite_f32("Ui::get_key_pressed_amount()", "rate", rate);
-        unsafe { sys::igGetKeyPressedAmount(key.into(), repeat_delay, rate) }
+        non_negative_count_from_i32("Ui::get_key_pressed_amount()", unsafe {
+            sys::igGetKeyPressedAmount(key.into(), repeat_delay, rate)
+        })
     }
 
     /// Returns the name of a key
@@ -242,8 +248,10 @@ impl crate::ui::Ui {
 
     /// Returns the number of times the mouse button was clicked in the current frame
     #[doc(alias = "GetMouseClickedCount")]
-    pub fn get_mouse_clicked_count(&self, button: MouseButton) -> i32 {
-        unsafe { sys::igGetMouseClickedCount(button.into()) }
+    pub fn get_mouse_clicked_count(&self, button: MouseButton) -> usize {
+        non_negative_count_from_i32("Ui::get_mouse_clicked_count()", unsafe {
+            sys::igGetMouseClickedCount(button.into())
+        })
     }
 
     /// Returns the mouse position in screen coordinates
@@ -302,8 +310,8 @@ impl crate::ui::Ui {
 
     /// Get global imgui frame count. Incremented by 1 every frame.
     #[doc(alias = "GetFrameCount")]
-    pub fn frame_count(&self) -> i32 {
-        unsafe { sys::igGetFrameCount() }
+    pub fn frame_count(&self) -> usize {
+        non_negative_count_from_i32("Ui::frame_count()", unsafe { sys::igGetFrameCount() })
     }
 
     /// Returns the width of an item based on the current layout state.
@@ -582,5 +590,19 @@ impl crate::ui::Ui {
     #[doc(alias = "SetNextItemAllowOverlap")]
     pub fn set_next_item_allow_overlap(&self) {
         unsafe { sys::igSetNextItemAllowOverlap() };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn non_negative_count_conversion_rejects_negative_values() {
+        assert_eq!(super::non_negative_count_from_i32("test", 7), 7);
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = super::non_negative_count_from_i32("test", -1);
+            })
+            .is_err()
+        );
     }
 }

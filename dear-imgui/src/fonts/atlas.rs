@@ -43,6 +43,11 @@ fn assert_non_negative_i8(caller: &str, name: &str, value: i8) {
     assert!(value >= 0, "{caller} {name} must be non-negative");
 }
 
+fn frame_count_to_i32(caller: &str, name: &str, value: usize) -> i32 {
+    i32::try_from(value)
+        .unwrap_or_else(|_| panic!("{caller} {name} exceeded Dear ImGui's i32 range"))
+}
+
 fn validate_font_size_pixels(caller: &str, name: &str, size_pixels: f32) -> f32 {
     assert_non_negative_f32(caller, name, size_pixels);
     size_pixels
@@ -1157,10 +1162,12 @@ impl FontAtlas {
     /// - Only call this when the atlas is not locked (typically before `Context::frame()`).
     /// - No-op if the atlas builder hasn't been created yet.
     #[doc(alias = "ImFontAtlasBuildDiscardBakes")]
-    pub fn discard_bakes(&mut self, unused_frames: i32) {
+    pub fn discard_bakes(&mut self, unused_frames: usize) {
         if self.raw.is_null() {
             return;
         }
+        let unused_frames =
+            frame_count_to_i32("FontAtlas::discard_bakes()", "unused_frames", unused_frames);
         unsafe {
             if (*self.raw).Builder.is_null() {
                 return;
@@ -1735,6 +1742,19 @@ mod tests {
         assert_eq!(cfg.raw.SizePixels, 0.0);
         assert_eq!(cfg.raw.GlyphExtraAdvanceX, -1.0);
         assert_eq!(cfg.raw.RasterizerMultiply, 256.0);
+    }
+
+    #[test]
+    fn discard_bakes_checks_unused_frame_count_before_ffi() {
+        let mut atlas = FontAtlas::new();
+
+        atlas.discard_bakes(0);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                atlas.discard_bakes(i32::MAX as usize + 1);
+            }))
+            .is_err()
+        );
     }
 
     #[test]
