@@ -7,13 +7,9 @@ use crate::render::draw_data::{
     DrawData, DrawIdx, DrawList, DrawVert, StandardDrawCallback, classify_standard_draw_callback,
 };
 use crate::sys;
+pub use crate::texture::ManagedTextureId;
 use crate::texture::{TextureFormat, TextureId, TextureRect, TextureStatus};
 use thiserror::Error;
-
-/// A stable identifier for ImGui-managed textures (`ImTextureData.UniqueID`).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-#[repr(transparent)]
-pub struct ManagedTextureId(pub i32);
 
 /// How a draw command binds its texture.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -249,7 +245,7 @@ fn snapshot_texture_binding(tex_ref: sys::ImTextureRef) -> TextureBinding {
 
     if !tex_ref._TexData.is_null() {
         let unique_id = unsafe { (*tex_ref._TexData).UniqueID };
-        return TextureBinding::Managed(ManagedTextureId(unique_id));
+        return TextureBinding::Managed(ManagedTextureId::from_raw(unique_id));
     }
 
     TextureBinding::Legacy(TextureId::null())
@@ -264,7 +260,7 @@ fn snapshot_texture_requests(draw_data: &DrawData) -> Result<Vec<TextureRequest>
             continue;
         }
 
-        let id = ManagedTextureId(tex.unique_id());
+        let id = tex.unique_id();
         let raw_width = tex.raw_width_i32();
         let raw_height = tex.raw_height_i32();
         let raw_bpp = tex.raw_bytes_per_pixel_i32();

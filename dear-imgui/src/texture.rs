@@ -182,6 +182,22 @@ impl From<TextureId> for RawTextureId {
     }
 }
 
+/// Stable identifier for an ImGui-managed texture.
+///
+/// This wraps Dear ImGui's `ImTextureData::UniqueID`. It is intended for correlating detached
+/// texture requests with renderer feedback, not as a renderer texture handle. Use [`TextureId`] for
+/// backend-owned GPU texture identifiers.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[repr(transparent)]
+pub struct ManagedTextureId(i32);
+
+impl ManagedTextureId {
+    #[inline]
+    pub(crate) const fn from_raw(raw: i32) -> Self {
+        Self(raw)
+    }
+}
+
 /// A convenient, typed wrapper around ImGui's ImTextureRef (v1.92+)
 ///
 /// Can reference either a plain `TextureId` (legacy path) or a managed `TextureData`.
@@ -570,9 +586,9 @@ impl TextureData {
         self.raw.get()
     }
 
-    /// Get the unique ID of this texture (for debugging)
-    pub fn unique_id(&self) -> i32 {
-        self.inner().UniqueID
+    /// Get this managed texture's stable ImGui identity.
+    pub fn unique_id(&self) -> ManagedTextureId {
+        ManagedTextureId::from_raw(self.inner().UniqueID)
     }
 
     /// Get the current status of this texture
@@ -1022,6 +1038,20 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn managed_texture_id_is_a_typed_texture_identity() {
+        let mut texture = TextureData::new();
+        unsafe {
+            (*texture.as_raw_mut()).UniqueID = 42;
+        }
+
+        let id: ManagedTextureId = texture.unique_id();
+        let snapshot_id: crate::render::snapshot::ManagedTextureId = id;
+
+        assert_eq!(id, ManagedTextureId::from_raw(42));
+        assert_eq!(snapshot_id, id);
     }
 
     #[test]

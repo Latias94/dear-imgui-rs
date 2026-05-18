@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     managed `ImTextureData*`.
   - `TextureData` dimensions now use `u32`, and byte counts/pitches use `usize`; oversized values
     are checked before entering Dear ImGui's signed `int` ABI.
+  - `TextureData::unique_id()` and threaded snapshot texture request/feedback IDs now use opaque
+    `ManagedTextureId` values instead of raw `i32` values.
   - `Context::render()` returns `&mut DrawData`; renderer backends should accept mutable draw data
     and process texture feedback through `DrawData::textures_mut()`.
   - `DrawData::textures()` and `PlatformIo::textures()` are read-only. Mutation of texture status,

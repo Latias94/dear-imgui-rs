@@ -1330,10 +1330,12 @@ impl PlatformIo {
             return 0;
         }
 
-        let mut by_id: std::collections::HashMap<i32, crate::render::snapshot::TextureFeedback> =
-            std::collections::HashMap::with_capacity(feedback.len());
+        let mut by_id: std::collections::HashMap<
+            crate::texture::ManagedTextureId,
+            crate::render::snapshot::TextureFeedback,
+        > = std::collections::HashMap::with_capacity(feedback.len());
         for &fb in feedback {
-            by_id.insert(fb.id.0, fb);
+            by_id.insert(fb.id, fb);
         }
 
         let mut applied = 0usize;
@@ -1526,6 +1528,35 @@ mod tests {
         assert!(pio.textures_mut().next().is_none());
         assert_eq!(pio.textures_count(), 0);
         assert!(pio.texture(0).is_none());
+    }
+
+    #[test]
+    fn apply_texture_feedback_matches_typed_managed_texture_ids() {
+        let mut texture = crate::texture::TextureData::new();
+        unsafe {
+            (*texture.as_raw_mut()).UniqueID = 314;
+        }
+        texture.set_status(crate::texture::TextureStatus::WantCreate);
+        let id = texture.unique_id();
+
+        let mut texture_ptr = texture.as_mut().as_raw_mut();
+        let mut raw: sys::ImGuiPlatformIO = new_platform_io();
+        raw.Textures.Size = 1;
+        raw.Textures.Capacity = 1;
+        raw.Textures.Data = &mut texture_ptr;
+
+        let mut pio = PlatformIo {
+            raw: UnsafeCell::new(raw),
+        };
+        let applied = pio.apply_texture_feedback(&[crate::render::snapshot::TextureFeedback {
+            id,
+            status: crate::texture::TextureStatus::OK,
+            tex_id: Some(crate::texture::TextureId::new(99)),
+        }]);
+
+        assert_eq!(applied, 1);
+        assert_eq!(texture.status(), crate::texture::TextureStatus::OK);
+        assert_eq!(texture.tex_id(), crate::texture::TextureId::new(99));
     }
 
     #[test]
