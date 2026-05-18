@@ -52,6 +52,44 @@ impl From<NonZeroU32> for ScriptCount {
     }
 }
 
+/// Optional non-negative limit for batch item actions.
+///
+/// The upstream test engine uses `-1` to mean "no limit". This type keeps that
+/// sentinel out of the safe Rust API while still allowing bounded depths/passes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScriptLimit(Option<u32>);
+
+impl ScriptLimit {
+    /// No limit.
+    pub const ALL: Self = Self(None);
+
+    /// Create a non-negative limit.
+    ///
+    /// Panics if `limit` exceeds the test engine's `int` range.
+    #[inline]
+    pub const fn new(limit: u32) -> Self {
+        assert!(
+            limit <= i32::MAX as u32,
+            "ScriptLimit::new() limit exceeded i32::MAX"
+        );
+        Self(Some(limit))
+    }
+
+    #[inline]
+    fn raw(self) -> i32 {
+        match self.0 {
+            Some(limit) => limit as i32,
+            None => -1,
+        }
+    }
+}
+
+impl From<u32> for ScriptLimit {
+    fn from(limit: u32) -> Self {
+        Self::new(limit)
+    }
+}
+
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunSpeed {
@@ -744,24 +782,38 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
-    pub fn item_open_all(&mut self, parent_ref: &str, depth: i32, passes: i32) -> ImGuiResult<()> {
+    pub fn item_open_all(
+        &mut self,
+        parent_ref: &str,
+        depth: impl Into<ScriptLimit>,
+        passes: impl Into<ScriptLimit>,
+    ) -> ImGuiResult<()> {
         if parent_ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
                 "item_open_all parent_ref contained interior NUL",
             ));
         }
+        let depth = depth.into().raw();
+        let passes = passes.into().raw();
         with_scratch_txt(parent_ref, |ptr| unsafe {
             sys::imgui_test_engine_script_item_open_all(self.script.raw, ptr, depth, passes)
         });
         Ok(())
     }
 
-    pub fn item_close_all(&mut self, parent_ref: &str, depth: i32, passes: i32) -> ImGuiResult<()> {
+    pub fn item_close_all(
+        &mut self,
+        parent_ref: &str,
+        depth: impl Into<ScriptLimit>,
+        passes: impl Into<ScriptLimit>,
+    ) -> ImGuiResult<()> {
         if parent_ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
                 "item_close_all parent_ref contained interior NUL",
             ));
         }
+        let depth = depth.into().raw();
+        let passes = passes.into().raw();
         with_scratch_txt(parent_ref, |ptr| unsafe {
             sys::imgui_test_engine_script_item_close_all(self.script.raw, ptr, depth, passes)
         });
@@ -1582,6 +1634,14 @@ mod tests {
         assert_eq!(ScriptCount::new(1).raw(), 1);
         assert!(std::panic::catch_unwind(|| ScriptCount::new(0)).is_err());
         assert!(std::panic::catch_unwind(|| ScriptCount::new(i32::MAX as u32 + 1)).is_err());
+    }
+
+    #[test]
+    fn script_limit_preserves_all_sentinel_and_rejects_overflow() {
+        assert_eq!(ScriptLimit::ALL.raw(), -1);
+        assert_eq!(ScriptLimit::new(0).raw(), 0);
+        assert_eq!(ScriptLimit::new(3).raw(), 3);
+        assert!(std::panic::catch_unwind(|| ScriptLimit::new(i32::MAX as u32 + 1)).is_err());
     }
 
     #[test]

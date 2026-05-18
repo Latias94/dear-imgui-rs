@@ -84,6 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     instead of raw signed column indices.
   - `dear-imgui-test-engine` script repeat/wait frame counts now use `ScriptCount` instead of raw
     `i32` values.
+  - `dear-imgui-test-engine` `item_open_all` / `item_close_all` depth and pass limits now use
+    `ScriptLimit` instead of raw `-1` sentinels.
   - Deprecated `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use RAII `push_id(...)` instead.
 - Backends and utilities
   - `dear-app::DearAppError`, `dear_imgui_wgpu::RendererError`,
