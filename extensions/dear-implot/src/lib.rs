@@ -235,41 +235,54 @@ pub enum Marker {
 }
 
 /// Colorable plot elements
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PlotColorElement {
-    FrameBg = sys::ImPlotCol_FrameBg as u32,
-    PlotBg = sys::ImPlotCol_PlotBg as u32,
-    PlotBorder = sys::ImPlotCol_PlotBorder as u32,
-    LegendBg = sys::ImPlotCol_LegendBg as u32,
-    LegendBorder = sys::ImPlotCol_LegendBorder as u32,
-    LegendText = sys::ImPlotCol_LegendText as u32,
-    TitleText = sys::ImPlotCol_TitleText as u32,
-    InlayText = sys::ImPlotCol_InlayText as u32,
-    AxisText = sys::ImPlotCol_AxisText as u32,
-    AxisGrid = sys::ImPlotCol_AxisGrid as u32,
-    AxisTick = sys::ImPlotCol_AxisTick as u32,
-    AxisBg = sys::ImPlotCol_AxisBg as u32,
-    AxisBgHovered = sys::ImPlotCol_AxisBgHovered as u32,
-    AxisBgActive = sys::ImPlotCol_AxisBgActive as u32,
-    Selection = sys::ImPlotCol_Selection as u32,
-    Crosshairs = sys::ImPlotCol_Crosshairs as u32,
+    FrameBg = sys::ImPlotCol_FrameBg as i32,
+    PlotBg = sys::ImPlotCol_PlotBg as i32,
+    PlotBorder = sys::ImPlotCol_PlotBorder as i32,
+    LegendBg = sys::ImPlotCol_LegendBg as i32,
+    LegendBorder = sys::ImPlotCol_LegendBorder as i32,
+    LegendText = sys::ImPlotCol_LegendText as i32,
+    TitleText = sys::ImPlotCol_TitleText as i32,
+    InlayText = sys::ImPlotCol_InlayText as i32,
+    AxisText = sys::ImPlotCol_AxisText as i32,
+    AxisGrid = sys::ImPlotCol_AxisGrid as i32,
+    AxisTick = sys::ImPlotCol_AxisTick as i32,
+    AxisBg = sys::ImPlotCol_AxisBg as i32,
+    AxisBgHovered = sys::ImPlotCol_AxisBgHovered as i32,
+    AxisBgActive = sys::ImPlotCol_AxisBgActive as i32,
+    Selection = sys::ImPlotCol_Selection as i32,
+    Crosshairs = sys::ImPlotCol_Crosshairs as i32,
 }
 
 /// Built-in colormaps
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Colormap {
-    Deep = sys::ImPlotColormap_Deep as u32,
-    Dark = sys::ImPlotColormap_Dark as u32,
-    Pastel = sys::ImPlotColormap_Pastel as u32,
-    Paired = sys::ImPlotColormap_Paired as u32,
-    Viridis = sys::ImPlotColormap_Viridis as u32,
-    Plasma = sys::ImPlotColormap_Plasma as u32,
-    Hot = sys::ImPlotColormap_Hot as u32,
-    Cool = sys::ImPlotColormap_Cool as u32,
-    Pink = sys::ImPlotColormap_Pink as u32,
-    Jet = sys::ImPlotColormap_Jet as u32,
+    Deep = sys::ImPlotColormap_Deep as i32,
+    Dark = sys::ImPlotColormap_Dark as i32,
+    Pastel = sys::ImPlotColormap_Pastel as i32,
+    Paired = sys::ImPlotColormap_Paired as i32,
+    Viridis = sys::ImPlotColormap_Viridis as i32,
+    Plasma = sys::ImPlotColormap_Plasma as i32,
+    Hot = sys::ImPlotColormap_Hot as i32,
+    Cool = sys::ImPlotColormap_Cool as i32,
+    Pink = sys::ImPlotColormap_Pink as i32,
+    Jet = sys::ImPlotColormap_Jet as i32,
+    Twilight = sys::ImPlotColormap_Twilight as i32,
+    RdBu = sys::ImPlotColormap_RdBu as i32,
+    BrBG = sys::ImPlotColormap_BrBG as i32,
+    PiYG = sys::ImPlotColormap_PiYG as i32,
+    Spectral = sys::ImPlotColormap_Spectral as i32,
+    Greys = sys::ImPlotColormap_Greys as i32,
+}
+
+impl Colormap {
+    #[inline]
+    pub const fn index(self) -> ColormapIndex {
+        ColormapIndex(self as i32)
+    }
 }
 
 /// Plot location for legends, labels, etc.

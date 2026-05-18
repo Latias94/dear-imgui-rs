@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extensions
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions
     on drop are now UI/current-context scoped and intentionally `!Send + !Sync`.
+  - `dear-implot` colormap helpers now use typed `ColormapIndex`, `ColormapColorIndex`, and
+    `ColormapSelection` values. `push_colormap` returns an RAII token instead of requiring
+    `pop_colormap(count)`.
   - ImPlot3D `Plot3DBuilder` and `Plot3DToken` now carry the originating frame lifetime.
   - `dear-implot3d::Plot3DContext::current()` now exposes a non-owning current-context wrapper,
     matching the `dear-implot` current-context API shape for advanced callers.

@@ -87,6 +87,9 @@ Extensions
   - `dear-imgui-test-engine` safe methods check the bound ImGui context liveness before FFI. Drop or
     explicitly `shutdown()` the test engine before dropping the target `Context`; stale bound-context
     use panics in Rust.
+  - `dear-implot` colormap helpers use typed `ColormapIndex`, `ColormapColorIndex`, and
+    `ColormapSelection` values. Keep the token returned by `push_colormap` alive instead of calling
+    `pop_colormap(count)`.
   - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
   - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
     `NodeEditor::set_alt_mouse_button` takes `MouseButton`.
