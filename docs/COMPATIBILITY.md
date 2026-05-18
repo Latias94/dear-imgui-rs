@@ -98,6 +98,7 @@ Extensions
     rejected before FFI.
   - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
     of a raw signed integer. Use `PlotValueOffset::new(...)` or pass `usize` directly.
+  - Table freeze helpers now take `usize` frozen column/row counts instead of raw signed values.
   - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
   - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
     `NodeEditor::set_alt_mouse_button` takes `MouseButton`.

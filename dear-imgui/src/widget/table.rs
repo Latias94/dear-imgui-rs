@@ -64,6 +64,11 @@ fn table_column_count_to_i32(column_count: usize) -> i32 {
     i32::try_from(column_count).expect("table column_count exceeded ImGui's i32 range")
 }
 
+fn table_freeze_count_to_i32(caller: &str, name: &str, count: usize, max: usize) -> i32 {
+    assert!(count < max, "{caller} {name} must be less than {max}");
+    i32::try_from(count).expect("table freeze count exceeded ImGui's i32 range")
+}
+
 fn current_table() -> *mut sys::ImGuiTable {
     unsafe { sys::igGetCurrentTable() }
 }
@@ -462,15 +467,19 @@ impl Ui {
 
     /// Freeze columns/rows so they stay visible when scrolling.
     #[doc(alias = "TableSetupScrollFreeze")]
-    pub fn table_setup_scroll_freeze(&self, frozen_cols: i32, frozen_rows: i32) {
+    pub fn table_setup_scroll_freeze(&self, frozen_cols: usize, frozen_rows: usize) {
         assert_table_setup_phase("Ui::table_setup_scroll_freeze()");
-        assert!(
-            (0..TABLE_MAX_COLUMNS as i32).contains(&frozen_cols),
-            "Ui::table_setup_scroll_freeze() frozen_cols must be in 0..{TABLE_MAX_COLUMNS}"
+        let frozen_cols = table_freeze_count_to_i32(
+            "Ui::table_setup_scroll_freeze()",
+            "frozen_cols",
+            frozen_cols,
+            TABLE_MAX_COLUMNS,
         );
-        assert!(
-            (0..128).contains(&frozen_rows),
-            "Ui::table_setup_scroll_freeze() frozen_rows must be in 0..128"
+        let frozen_rows = table_freeze_count_to_i32(
+            "Ui::table_setup_scroll_freeze()",
+            "frozen_rows",
+            frozen_rows,
+            128,
         );
         unsafe { sys::igTableSetupScrollFreeze(frozen_cols, frozen_rows) }
     }
@@ -1207,6 +1216,28 @@ mod tests {
     }
 
     #[test]
+    fn table_freeze_counts_reject_out_of_range_values_before_ffi() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        let _ = ui.window("table_freeze_bounds").build(|| {
+            let _table = ui.begin_table("table", 2).unwrap();
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_setup_scroll_freeze(TABLE_MAX_COLUMNS, 0);
+                }))
+                .is_err()
+            );
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.table_setup_scroll_freeze(1, 128);
+                }))
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
     fn table_set_column_width_rejects_invalid_widths_before_ffi() {
         let mut ctx = setup_context();
 
@@ -1326,7 +1357,7 @@ pub struct TableBuilder<'ui> {
     inner_width: f32,
     columns: Vec<TableColumnSetup<Cow<'ui, str>>>,
     use_headers: bool,
-    freeze: Option<(i32, i32)>,
+    freeze: Option<(usize, usize)>,
 }
 
 impl<'ui> TableBuilder<'ui> {
@@ -1370,7 +1401,7 @@ impl<'ui> TableBuilder<'ui> {
     }
 
     /// Freeze columns/rows so they stay visible when scrolling
-    pub fn freeze(mut self, frozen_cols: i32, frozen_rows: i32) -> Self {
+    pub fn freeze(mut self, frozen_cols: usize, frozen_rows: usize) -> Self {
         self.freeze = Some((frozen_cols, frozen_rows));
         self
     }
