@@ -18,9 +18,9 @@ pub struct DrawData {
     /// Number of DrawList to render.
     cmd_lists_count: i32,
     /// For convenience, sum of all draw list index buffer sizes.
-    pub total_idx_count: i32,
+    total_idx_count: i32,
     /// For convenience, sum of all draw list vertex buffer sizes.
-    pub total_vtx_count: i32,
+    total_vtx_count: i32,
     // Array of DrawList.
     cmd_lists: crate::internal::ImVector<*mut sys::ImDrawList>,
     /// Upper-left position of the viewport to render.
@@ -48,6 +48,10 @@ const _: [(); std::mem::size_of::<sys::ImDrawData>()] = [(); std::mem::size_of::
 const _: [(); std::mem::align_of::<sys::ImDrawData>()] = [(); std::mem::align_of::<DrawData>()];
 
 unsafe impl RawCast<sys::ImDrawData> for DrawData {}
+
+fn total_count_from_i32(caller: &str, raw: i32) -> usize {
+    usize::try_from(raw).unwrap_or_else(|_| panic!("{caller} returned a negative count"))
+}
 
 impl RawWrapper for DrawData {
     type Raw = sys::ImDrawData;
@@ -84,6 +88,18 @@ impl DrawData {
     #[inline]
     pub fn draw_lists_count(&self) -> usize {
         unsafe { self.cmd_lists().len() }
+    }
+
+    /// Returns the total number of index-buffer elements across all draw lists.
+    #[inline]
+    pub fn total_idx_count(&self) -> usize {
+        total_count_from_i32("DrawData::total_idx_count()", self.total_idx_count)
+    }
+
+    /// Returns the total number of vertex-buffer elements across all draw lists.
+    #[inline]
+    pub fn total_vtx_count(&self) -> usize {
+        total_count_from_i32("DrawData::total_vtx_count()", self.total_vtx_count)
     }
 
     /// Returns a shared iterator over textures attached to this draw data.
@@ -890,6 +906,42 @@ impl std::ops::DerefMut for TextureDataMut<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn empty_draw_data(total_idx_count: i32, total_vtx_count: i32) -> DrawData {
+        DrawData {
+            valid: false,
+            cmd_lists_count: 0,
+            total_idx_count,
+            total_vtx_count,
+            cmd_lists: crate::internal::ImVector::default(),
+            display_pos: [0.0, 0.0],
+            display_size: [0.0, 0.0],
+            framebuffer_scale: [1.0, 1.0],
+            owner_viewport: std::ptr::null_mut(),
+            textures: std::ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn draw_data_counts_are_checked_usize_counts() {
+        let draw_data = empty_draw_data(7, 11);
+        let total_idx_count: usize = draw_data.total_idx_count();
+        let total_vtx_count: usize = draw_data.total_vtx_count();
+        assert_eq!(total_idx_count, 7);
+        assert_eq!(total_vtx_count, 11);
+
+        let negative_idx_count = empty_draw_data(-1, 0);
+        assert!(
+            std::panic::catch_unwind(|| negative_idx_count.total_idx_count()).is_err(),
+            "negative raw index counts must not cross the safe API boundary"
+        );
+
+        let negative_vtx_count = empty_draw_data(0, -1);
+        assert!(
+            std::panic::catch_unwind(|| negative_vtx_count.total_vtx_count()).is_err(),
+            "negative raw vertex counts must not cross the safe API boundary"
+        );
+    }
 
     #[test]
     fn draw_data_textures_empty_is_safe() {

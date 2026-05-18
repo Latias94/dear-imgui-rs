@@ -1,5 +1,7 @@
 use dear_app::{AppBuilder, Theme};
-use dear_imgui_test_engine::{RunFlags, RunSpeed, TestEngine, TestGroup, VerboseLevel};
+use dear_imgui_test_engine::{
+    RunFlags, RunSpeed, ScriptCount, TestEngine, TestGroup, VerboseLevel,
+};
 use std::{cell::RefCell, rc::Rc};
 
 #[derive(Debug, Default)]
@@ -310,7 +312,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Try to shut down cleanly before exiting the process.
                     engine.stop();
                     let summary = engine.result_summary();
-                    let failures = summary.count_tested - summary.count_success;
+                    let failures = summary.count_tested.saturating_sub(summary.count_success);
                     engine.shutdown();
 
                     if too_many_frames {

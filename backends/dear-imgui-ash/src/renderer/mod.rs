@@ -1162,7 +1162,7 @@ impl AshRenderer {
         draw_data: &mut dear_imgui_rs::render::DrawData,
     ) -> RendererResult<()> {
         let gamma = self.gamma();
-        if !draw_data.valid() || draw_data.total_vtx_count == 0 {
+        if !draw_data.valid() || draw_data.total_vtx_count() == 0 {
             return Ok(());
         }
 
@@ -1195,7 +1195,7 @@ impl AshRenderer {
         gamma: f32,
         mesh: &mut Mesh,
     ) -> RendererResult<()> {
-        if !draw_data.valid() || draw_data.total_vtx_count == 0 {
+        if !draw_data.valid() || draw_data.total_vtx_count() == 0 {
             return Ok(());
         }
 
@@ -1697,7 +1697,7 @@ impl Mesh {
 fn create_vertices(
     draw_data: &dear_imgui_rs::render::DrawData,
 ) -> Vec<dear_imgui_rs::render::DrawVert> {
-    let vertex_count = draw_data.total_vtx_count as usize;
+    let vertex_count = draw_data.total_vtx_count();
     let mut vertices = Vec::with_capacity(vertex_count);
     for draw_list in draw_data.draw_lists() {
         vertices.extend_from_slice(draw_list.vtx_buffer());
@@ -1708,7 +1708,7 @@ fn create_vertices(
 fn create_indices(
     draw_data: &dear_imgui_rs::render::DrawData,
 ) -> Vec<dear_imgui_rs::render::DrawIdx> {
-    let index_count = draw_data.total_idx_count as usize;
+    let index_count = draw_data.total_idx_count();
     let mut indices = Vec::with_capacity(index_count);
     for draw_list in draw_data.draw_lists() {
         indices.extend_from_slice(draw_list.idx_buffer());

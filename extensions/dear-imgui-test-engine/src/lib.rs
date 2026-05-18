@@ -143,9 +143,23 @@ bitflags! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ResultSummary {
-    pub count_tested: i32,
-    pub count_success: i32,
-    pub count_in_queue: i32,
+    pub count_tested: usize,
+    pub count_success: usize,
+    pub count_in_queue: usize,
+}
+
+fn result_count_from_i32(caller: &str, raw: i32) -> usize {
+    usize::try_from(raw).unwrap_or_else(|_| panic!("{caller} returned a negative count"))
+}
+
+impl ResultSummary {
+    fn from_raw(count_tested: i32, count_success: i32, count_in_queue: i32) -> Self {
+        Self {
+            count_tested: result_count_from_i32("ResultSummary::count_tested", count_tested),
+            count_success: result_count_from_i32("ResultSummary::count_success", count_success),
+            count_in_queue: result_count_from_i32("ResultSummary::count_in_queue", count_in_queue),
+        }
+    }
 }
 
 /// Dear ImGui Test Engine context.
@@ -1534,11 +1548,7 @@ impl TestEngine {
             CountInQueue: 0,
         };
         unsafe { sys::imgui_test_engine_get_result_summary(self.raw, &mut raw) };
-        ResultSummary {
-            count_tested: raw.CountTested,
-            count_success: raw.CountSuccess,
-            count_in_queue: raw.CountInQueue,
-        }
+        ResultSummary::from_raw(raw.CountTested, raw.CountSuccess, raw.CountInQueue)
     }
 
     pub fn is_test_queue_empty(&self) -> bool {
@@ -1628,6 +1638,31 @@ impl Drop for TestEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn result_summary_counts_are_checked_usize_counts() {
+        let summary = ResultSummary::from_raw(3, 2, 1);
+        let count_tested: usize = summary.count_tested;
+        let count_success: usize = summary.count_success;
+        let count_in_queue: usize = summary.count_in_queue;
+
+        assert_eq!(count_tested, 3);
+        assert_eq!(count_success, 2);
+        assert_eq!(count_in_queue, 1);
+
+        assert!(
+            std::panic::catch_unwind(|| ResultSummary::from_raw(-1, 0, 0)).is_err(),
+            "negative tested counts must not cross the safe API boundary"
+        );
+        assert!(
+            std::panic::catch_unwind(|| ResultSummary::from_raw(0, -1, 0)).is_err(),
+            "negative success counts must not cross the safe API boundary"
+        );
+        assert!(
+            std::panic::catch_unwind(|| ResultSummary::from_raw(0, 0, -1)).is_err(),
+            "negative queue counts must not cross the safe API boundary"
+        );
+    }
 
     #[test]
     fn script_count_rejects_zero_and_overflow_before_ffi() {

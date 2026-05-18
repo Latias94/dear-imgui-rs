@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Draw-list low-level `prim_reserve` / `prim_unreserve` counts now use `usize` instead of raw
     signed values.
   - `Io` render/window metrics getters now return `usize` counts instead of raw signed values.
+  - `DrawData` total index/vertex counts now use checked `usize` getters instead of public raw
+    signed fields.
   - UI key/mouse/frame-count helpers, texture unused-frame counts, and font-atlas bake discard
     frame counts now use `usize`.
   - `DockNode::depth()` now returns `usize` instead of a raw signed value.
@@ -86,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `i32` values.
   - `dear-imgui-test-engine` `item_open_all` / `item_close_all` depth and pass limits now use
     `ScriptLimit` instead of raw `-1` sentinels.
+  - `dear-imgui-test-engine::ResultSummary` count fields now use `usize` instead of raw signed
+    values.
   - Deprecated `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use RAII `push_id(...)` instead.
 - Backends and utilities
   - `dear-app::DearAppError`, `dear_imgui_wgpu::RendererError`,
