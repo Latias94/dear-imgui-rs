@@ -294,10 +294,15 @@ pub fn push_style_var_f32(var: Plot3DStyleVar, val: f32) -> StyleVarToken {
     }
 }
 
-/// Push a style variable (int variant)
+/// Push the default marker style variable.
 #[inline]
-pub fn push_style_var_i32(var: Plot3DStyleVar, val: i32) -> StyleVarToken {
-    unsafe { sys::ImPlot3D_PushStyleVar_Int(var as sys::ImPlot3DStyleVar, val) }
+pub fn push_style_var_marker(marker: Marker3D) -> StyleVarToken {
+    unsafe {
+        sys::ImPlot3D_PushStyleVar_Int(
+            Plot3DStyleVar::Marker as sys::ImPlot3DStyleVar,
+            marker as sys::ImPlot3DMarker,
+        )
+    }
     StyleVarToken {
         was_popped: false,
         _not_send_or_sync: PhantomData,

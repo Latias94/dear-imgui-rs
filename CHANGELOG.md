@@ -73,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Plot3DColorElement`, `Colormap`, `ColormapIndex`, and `ColormapColorIndex` values instead of
     raw `i32` identifiers. Colormap indices/counts/sizes use `usize`, and style/color/colormap push
     helpers return RAII tokens instead of requiring manual `pop_*` count calls.
+  - `dear-implot` / `dear-implot3d` no longer expose raw `push_style_var_i32` helpers. Use
+    `push_style_var_f32`, `push_style_var_vec2`, or `dear-implot3d::push_style_var_marker`.
   - `dear-implot3d` surface grid counts now use `usize` and reject values outside ImPlot3D's
     `i32` range before FFI.
   - `dear-imnodes` node, pin, and link APIs now use `NodeId`, `PinId`, and `LinkId` instead of raw
@@ -107,8 +109,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Core and extension current-context binding/drop policy is documented in the public compatibility
-  notes.
+- Core and extension current-context binding/drop policy now follows the safe API compatibility
+  policy described in `docs/COMPATIBILITY.md`; per-method migration details live in this changelog.
 - `FontAtlas::clear`, `FontAtlas::clear_fonts`, and `FontAtlas::remove_font` now invalidate
   existing `FontId` handles from that atlas. `Ui::push_font`, `Context::push_font`,
   `DrawListMut::add_text_with_font`, and `Ui::push_font_with_size` validate font/atlas membership

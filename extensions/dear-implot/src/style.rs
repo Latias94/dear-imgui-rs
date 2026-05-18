@@ -350,17 +350,6 @@ pub fn push_style_var_f32(var: StyleVar, value: f32) -> StyleVarToken {
     }
 }
 
-/// Push an integer style variable to the stack (converted to float)
-pub fn push_style_var_i32(var: StyleVar, value: i32) -> StyleVarToken {
-    unsafe {
-        sys::ImPlot_PushStyleVar_Int(var as sys::ImPlotStyleVar, value);
-    }
-    StyleVarToken {
-        was_popped: false,
-        _not_send_or_sync: PhantomData,
-    }
-}
-
 /// Push a Vec2 style variable to the stack
 pub fn push_style_var_vec2(var: StyleVar, value: [f32; 2]) -> StyleVarToken {
     unsafe {
