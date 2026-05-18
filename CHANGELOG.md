@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Io` render/window metrics getters now return `usize` counts instead of raw signed values.
   - UI key/mouse/frame-count helpers, texture unused-frame counts, and font-atlas bake discard
     frame counts now use `usize`.
+  - `DockNode::depth()` now returns `usize` instead of a raw signed value.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions

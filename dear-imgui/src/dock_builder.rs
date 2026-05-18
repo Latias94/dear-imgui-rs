@@ -89,6 +89,10 @@ fn assert_existing_dock_node(caller: &str, node_id: Id) {
     assert!(!node.is_null(), "{caller} requires an existing dock node");
 }
 
+fn dock_node_depth_from_i32(raw: i32) -> usize {
+    usize::try_from(raw).expect("Dear ImGui returned a negative dock node depth")
+}
+
 unsafe fn free_imgui_id_vector(vector: &mut sys::ImVector_ImGuiID) {
     if !vector.Data.is_null() {
         unsafe {
@@ -164,8 +168,10 @@ impl<'ui> DockNode<'ui> {
     }
 
     /// Returns the depth of this node within the dock tree
-    pub fn depth(&self) -> i32 {
-        unsafe { sys::igDockNodeGetDepth(self.raw as *const sys::ImGuiDockNode) as i32 }
+    pub fn depth(&self) -> usize {
+        dock_node_depth_from_i32(unsafe {
+            sys::igDockNodeGetDepth(self.raw as *const sys::ImGuiDockNode) as i32
+        })
     }
 
     /// Returns the menu button ID for this node
@@ -657,8 +663,20 @@ impl DockBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::DockBuilder;
+    use super::{DockBuilder, dock_node_depth_from_i32};
     use crate::Id;
+
+    #[test]
+    fn dock_node_depth_rejects_negative_raw_values() {
+        assert_eq!(dock_node_depth_from_i32(0), 0);
+        assert_eq!(dock_node_depth_from_i32(3), 3);
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = dock_node_depth_from_i32(-1);
+            })
+            .is_err()
+        );
+    }
 
     #[test]
     fn copy_dock_space_with_window_remap_rejects_interior_nul_names() {
