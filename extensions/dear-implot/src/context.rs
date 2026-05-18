@@ -43,8 +43,10 @@ fn assert_axis_zoom_range(caller: &str, min: f64, max: f64) {
     assert!(min <= max, "{caller} min must be <= max");
 }
 
-fn assert_positive_tick_count(caller: &str, n_ticks: i32) {
+fn axis_tick_count_to_i32(caller: &str, n_ticks: usize) -> i32 {
     assert!(n_ticks > 0, "{caller} n_ticks must be positive");
+    i32::try_from(n_ticks)
+        .unwrap_or_else(|_| panic!("{caller} n_ticks exceeded ImPlot's i32 range"))
 }
 
 /// ImPlot context that manages the plotting state
@@ -753,18 +755,15 @@ impl<'ui> PlotUi<'ui> {
         axis: XAxis,
         v_min: f64,
         v_max: f64,
-        n_ticks: i32,
+        n_ticks: usize,
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
         assert_axis_limit_range("PlotUi::setup_x_axis_ticks_range()", v_min, v_max);
-        assert_positive_tick_count("PlotUi::setup_x_axis_ticks_range()", n_ticks);
+        let n_ticks_i32 = axis_tick_count_to_i32("PlotUi::setup_x_axis_ticks_range()", n_ticks);
         self.bind();
         if let Some(labels) = labels {
-            let Ok(ticks_usize) = usize::try_from(n_ticks) else {
-                return;
-            };
-            if labels.len() != ticks_usize {
+            if labels.len() != n_ticks {
                 return;
             }
             let cleaned: Vec<&str> = labels
@@ -776,7 +775,7 @@ impl<'ui> PlotUi<'ui> {
                     axis as sys::ImAxis,
                     v_min,
                     v_max,
-                    n_ticks,
+                    n_ticks_i32,
                     ptrs.as_ptr() as *const *const c_char,
                     keep_default,
                 )
@@ -787,7 +786,7 @@ impl<'ui> PlotUi<'ui> {
                     axis as sys::ImAxis,
                     v_min,
                     v_max,
-                    n_ticks,
+                    n_ticks_i32,
                     std::ptr::null(),
                     keep_default,
                 )
@@ -803,18 +802,15 @@ impl<'ui> PlotUi<'ui> {
         axis: YAxis,
         v_min: f64,
         v_max: f64,
-        n_ticks: i32,
+        n_ticks: usize,
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
         assert_axis_limit_range("PlotUi::setup_y_axis_ticks_range()", v_min, v_max);
-        assert_positive_tick_count("PlotUi::setup_y_axis_ticks_range()", n_ticks);
+        let n_ticks_i32 = axis_tick_count_to_i32("PlotUi::setup_y_axis_ticks_range()", n_ticks);
         self.bind();
         if let Some(labels) = labels {
-            let Ok(ticks_usize) = usize::try_from(n_ticks) else {
-                return;
-            };
-            if labels.len() != ticks_usize {
+            if labels.len() != n_ticks {
                 return;
             }
             let cleaned: Vec<&str> = labels
@@ -826,7 +822,7 @@ impl<'ui> PlotUi<'ui> {
                     axis as sys::ImAxis,
                     v_min,
                     v_max,
-                    n_ticks,
+                    n_ticks_i32,
                     ptrs.as_ptr() as *const *const c_char,
                     keep_default,
                 )
@@ -837,7 +833,7 @@ impl<'ui> PlotUi<'ui> {
                     axis as sys::ImAxis,
                     v_min,
                     v_max,
-                    n_ticks,
+                    n_ticks_i32,
                     std::ptr::null(),
                     keep_default,
                 )
@@ -1263,7 +1259,7 @@ impl<'ui> Drop for PlotToken<'ui> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PlotContext, sys};
+    use super::{PlotContext, axis_tick_count_to_i32, sys};
     use crate::{Axis, PlotCond, XAxis, YAxis};
     use dear_imgui_rs::{BackendFlags, Context};
     use std::sync::{Mutex, OnceLock};
@@ -1278,6 +1274,24 @@ mod tests {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
         io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+    }
+
+    #[test]
+    fn axis_ticks_range_count_is_checked_before_ffi() {
+        assert_eq!(axis_tick_count_to_i32("test", 1), 1);
+        assert_eq!(axis_tick_count_to_i32("test", i32::MAX as usize), i32::MAX);
+
+        assert!(
+            std::panic::catch_unwind(|| axis_tick_count_to_i32("test", 0)).is_err(),
+            "zero tick counts must not cross the safe API boundary"
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                axis_tick_count_to_i32("test", i32::MAX as usize + 1);
+            })
+            .is_err(),
+            "oversized tick counts must not cross the safe API boundary"
+        );
     }
 
     #[test]

@@ -64,6 +64,12 @@ fn len_i32(len: usize) -> Option<i32> {
     i32::try_from(len).ok()
 }
 
+fn axis_tick_count_to_i32(caller: &str, count: usize) -> i32 {
+    assert!(count > 0, "{caller} n_ticks must be positive");
+    i32::try_from(count)
+        .unwrap_or_else(|_| panic!("{caller} n_ticks exceeded ImPlot3D's i32 range"))
+}
+
 fn surface_count_to_i32(count: usize) -> Option<i32> {
     let count = i32::try_from(count).ok()?;
     (count > 0).then_some(count)
@@ -1981,13 +1987,17 @@ impl<'ui> Plot3DUi<'ui> {
         axis: Axis3D,
         v_min: f64,
         v_max: f64,
-        n_ticks: i32,
+        n_ticks: usize,
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        let n_ticks_i32 = axis_tick_count_to_i32("Plot3DUi::setup_axis_ticks_range()", n_ticks);
         self.bind();
         debug_before_setup();
         if let Some(lbls) = labels {
+            if lbls.len() != n_ticks {
+                return;
+            }
             let cleaned: Vec<&str> = lbls
                 .iter()
                 .map(|&s| if s.contains('\0') { "" } else { s })
@@ -1997,7 +2007,7 @@ impl<'ui> Plot3DUi<'ui> {
                     axis as i32,
                     v_min,
                     v_max,
-                    n_ticks,
+                    n_ticks_i32,
                     ptrs.as_ptr(),
                     keep_default,
                 )
@@ -2008,7 +2018,7 @@ impl<'ui> Plot3DUi<'ui> {
                     axis as i32,
                     v_min,
                     v_max,
-                    n_ticks,
+                    n_ticks_i32,
                     std::ptr::null(),
                     keep_default,
                 )
@@ -2179,8 +2189,8 @@ impl<'ui> Plot3DUi<'ui> {
 #[cfg(test)]
 mod layout_tests {
     use super::{
-        Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, plot3d_spec_from,
-        surface_count_to_i32,
+        Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, axis_tick_count_to_i32,
+        plot3d_spec_from, surface_count_to_i32,
     };
 
     #[test]
@@ -2211,6 +2221,24 @@ mod layout_tests {
         assert_eq!(surface_count_to_i32(0), None);
         assert_eq!(surface_count_to_i32(i32::MAX as usize), Some(i32::MAX));
         assert_eq!(surface_count_to_i32(i32::MAX as usize + 1), None);
+    }
+
+    #[test]
+    fn axis_ticks_range_count_is_checked_before_ffi() {
+        assert_eq!(axis_tick_count_to_i32("test", 1), 1);
+        assert_eq!(axis_tick_count_to_i32("test", i32::MAX as usize), i32::MAX);
+
+        assert!(
+            std::panic::catch_unwind(|| axis_tick_count_to_i32("test", 0)).is_err(),
+            "zero tick counts must not cross the safe API boundary"
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                axis_tick_count_to_i32("test", i32::MAX as usize + 1);
+            })
+            .is_err(),
+            "oversized tick counts must not cross the safe API boundary"
+        );
     }
 }
 
