@@ -291,10 +291,10 @@ impl AppWindow {
                     // Log viewport
                     ui.child_window("log_view").size([0.0, 0.0]).build(&ui, || {
                         let should_scroll = self.autoscroll && (ui.scroll_y() >= ui.scroll_max_y());
-                        let total = self.filtered.len() as i32;
+                        let total = self.filtered.len();
                         let clipper = ListClipper::new(total).begin(&ui).iter();
                         for i in clipper {
-                            let idx = self.filtered[i as usize];
+                            let idx = self.filtered[i];
                             let e = &self.logs[idx];
                             // One item per line using Selectable (gives a valid ID for context menu)
                             let line_display = format!("[{}] {}", e.lvl.label(), e.msg);

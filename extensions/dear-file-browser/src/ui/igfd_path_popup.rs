@@ -93,15 +93,10 @@ fn draw_igfd_path_table_popup(
         );
         ui.table_headers_row();
 
-        let items_count = i32::try_from(dirs.len()).unwrap_or(i32::MAX);
-        let clipper = dear_imgui_rs::ListClipper::new(items_count)
+        let clipper = dear_imgui_rs::ListClipper::new(dirs.len())
             .items_height(ui.text_line_height_with_spacing())
             .begin(ui);
-        for i in clipper.iter() {
-            let idx = i as usize;
-            if idx >= dirs.len() {
-                continue;
-            }
+        for idx in clipper.iter() {
             let e = &dirs[idx];
             let style = state
                 .ui

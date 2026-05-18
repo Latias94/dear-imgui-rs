@@ -444,15 +444,10 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
         };
 
         if use_clipper {
-            let items_count = i32::try_from(g.places.len()).unwrap_or(i32::MAX);
-            let clipper = dear_imgui_rs::ListClipper::new(items_count)
+            let clipper = dear_imgui_rs::ListClipper::new(g.places.len())
                 .items_height(ui.text_line_height_with_spacing())
                 .begin(ui);
-            for i in clipper.iter() {
-                let pi = i as usize;
-                if pi >= g.places.len() {
-                    continue;
-                }
+            for pi in clipper.iter() {
                 let p = &g.places[pi];
                 draw_place_row(
                     ui,

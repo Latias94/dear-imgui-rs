@@ -4,9 +4,20 @@
 //! lists by only processing visible items.
 //!
 use std::marker::PhantomData;
+use std::ops::Range;
 
 use crate::Ui;
 use crate::sys;
+
+fn items_count_to_i32(items_count: usize, caller: &str) -> i32 {
+    i32::try_from(items_count)
+        .unwrap_or_else(|_| panic!("{caller} items_count exceeded Dear ImGui's i32 range"))
+}
+
+fn display_index_from_i32(index: i32, caller: &str) -> usize {
+    assert!(index >= 0, "{caller} returned a negative display index");
+    usize::try_from(index).expect("non-negative display index must fit usize")
+}
 
 /// Used to render only the visible items when displaying a
 /// long list of items in a scrollable area.
@@ -21,13 +32,13 @@ use crate::sys;
 /// of each item being cheaply calculated. The current rust
 /// bindings only works with a fixed height for all items.
 pub struct ListClipper {
-    items_count: i32,
+    items_count: usize,
     items_height: f32,
 }
 
 impl ListClipper {
     /// Begins configuring a list clipper.
-    pub const fn new(items_count: i32) -> Self {
+    pub const fn new(items_count: usize) -> Self {
         ListClipper {
             items_count,
             items_height: -1.0,
@@ -42,19 +53,16 @@ impl ListClipper {
 
     pub fn begin(self, ui: &Ui) -> ListClipperToken<'_> {
         assert!(
-            self.items_count >= 0,
-            "ListClipper::begin() items_count must be non-negative"
-        );
-        assert!(
             self.items_height.is_finite(),
             "ListClipper::begin() items_height must be finite"
         );
+        let items_count = items_count_to_i32(self.items_count, "ListClipper::begin()");
         unsafe {
             let ptr = sys::ImGuiListClipper_ImGuiListClipper();
             if ptr.is_null() {
                 panic!("ImGuiListClipper_ImGuiListClipper() returned null");
             }
-            sys::ImGuiListClipper_Begin(ptr, self.items_count, self.items_height);
+            sys::ImGuiListClipper_Begin(ptr, items_count, self.items_height);
             ListClipperToken::new(ui, ptr)
         }
     }
@@ -83,7 +91,7 @@ impl<'ui> ListClipperToken<'ui> {
     /// Progress the list clipper.
     ///
     /// If this returns returns `true` then the you can loop between
-    /// between `clipper.display_start() .. clipper.display_end()`.
+    /// between `clipper.display_range()`.
     /// If this returns false, you must stop calling this method.
     ///
     /// Calling step again after it returns `false` will cause imgui
@@ -113,13 +121,24 @@ impl<'ui> ListClipperToken<'ui> {
     }
 
     /// First item to call, updated each call to `step`
-    pub fn display_start(&self) -> i32 {
-        unsafe { (*self.list_clipper).DisplayStart }
+    pub fn display_start(&self) -> usize {
+        display_index_from_i32(
+            unsafe { (*self.list_clipper).DisplayStart },
+            "ListClipperToken::display_start()",
+        )
     }
 
     /// End of items to call (exclusive), updated each call to `step`
-    pub fn display_end(&self) -> i32 {
-        unsafe { (*self.list_clipper).DisplayEnd }
+    pub fn display_end(&self) -> usize {
+        display_index_from_i32(
+            unsafe { (*self.list_clipper).DisplayEnd },
+            "ListClipperToken::display_end()",
+        )
+    }
+
+    /// Visible item range for the current step.
+    pub fn display_range(&self) -> Range<usize> {
+        self.display_start()..self.display_end()
     }
 
     /// Get an iterator which outputs all visible indexes. This is the
@@ -186,25 +205,52 @@ mod tests {
         ui.window("list_clipper_invalid_inputs").build(|| {
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _clipper = ListClipper::new(-1).begin(ui);
+                    let _clipper = ListClipper::new(usize::MAX).begin(ui);
                 }))
                 .is_err()
             );
 
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _clipper = ListClipper::new(1).items_height(f32::NAN).begin(ui);
+                    let _clipper = ListClipper::new(1usize).items_height(f32::NAN).begin(ui);
                 }))
                 .is_err()
             );
         });
+    }
+
+    #[test]
+    fn iterator_and_display_range_use_usize_indices() {
+        let mut ctx = setup_context();
+        ctx.io_mut().set_display_size([512.0, 512.0]);
+        let ui = ctx.frame();
+
+        ui.window("list_clipper_usize_indices")
+            .size([256.0, 256.0], crate::Condition::Always)
+            .build(|| {
+                let mut clipper = ListClipper::new(3usize).items_height(1.0).begin(ui);
+                while clipper.step() {
+                    for index in clipper.display_range() {
+                        let _: usize = index;
+                        ui.text(format!("row {index}"));
+                    }
+                }
+
+                let indices: Vec<usize> = ListClipper::new(3usize)
+                    .items_height(1.0)
+                    .begin(ui)
+                    .iter()
+                    .inspect(|index| ui.text(format!("row {index}")))
+                    .collect();
+                assert_eq!(indices, vec![0, 1, 2]);
+            });
     }
 }
 
 pub struct ListClipperIterator<'ui> {
     list_clipper: ListClipperToken<'ui>,
     exhausted: bool,
-    last_value: Option<i32>,
+    last_value: Option<usize>,
 }
 
 impl<'ui> ListClipperIterator<'ui> {
@@ -218,54 +264,46 @@ impl<'ui> ListClipperIterator<'ui> {
 }
 
 impl Iterator for ListClipperIterator<'_> {
-    type Item = i32;
+    type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(lv) = self.last_value {
-            // Currently iterating a chunk (returning all values
-            // between display_start and display_end)
-            let next_value = lv + 1;
+        loop {
+            if let Some(value) = self.last_value {
+                let next_value = value + 1;
 
-            if lv >= self.list_clipper.display_end() - 1 {
-                // If we reach the end of the current chunk, clear
-                // last_value so we call step below
-                self.last_value = None;
-            } else {
-                // Otherwise just increment it
-                self.last_value = Some(next_value);
+                if next_value >= self.list_clipper.display_end() {
+                    self.last_value = None;
+                } else {
+                    self.last_value = Some(next_value);
+                }
+
+                return Some(value);
             }
-        }
-
-        if let Some(lv) = self.last_value {
-            // Next item within current step's chunk
-            Some(lv)
-        } else {
-            // Start iterating a new chunk
 
             if self.exhausted {
                 // If the clipper is exhausted, don't call step again!
-                None
-            } else {
-                // Advance the clipper
-                let ret = self.list_clipper.step();
-                if !ret {
-                    self.exhausted = true;
-                    None
-                } else {
-                    // Setup iteration for this step's chunk
-                    let start = self.list_clipper.display_start();
-                    let end = self.list_clipper.display_end();
+                return None;
+            }
 
-                    if start == end {
-                        // Somewhat special case: if a single item, we
-                        // don't store the last_value so we call
-                        // step() again next iteration
-                        self.last_value = None;
-                    } else {
-                        self.last_value = Some(start);
-                    }
-                    Some(start)
+            // Advance the clipper
+            let ret = self.list_clipper.step();
+            if !ret {
+                self.exhausted = true;
+                return None;
+            }
+
+            // Setup iteration for this step's chunk
+            let start = self.list_clipper.display_start();
+            let end = self.list_clipper.display_end();
+
+            if start < end {
+                let next_value = start + 1;
+                if next_value < end {
+                    self.last_value = Some(next_value);
                 }
+                return Some(start);
+            } else {
+                self.last_value = None;
             }
         }
     }

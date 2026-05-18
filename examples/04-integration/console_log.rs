@@ -345,12 +345,12 @@ impl AppWindow {
                                 visible.push(i);
                             }
                         }
-                        let mut clipper = dear_imgui_rs::ListClipper::new(visible.len() as i32)
+                        let mut clipper = dear_imgui_rs::ListClipper::new(visible.len())
                             .items_height(ui.text_line_height_with_spacing())
                             .begin(&ui);
                         while clipper.step() {
-                            for row in clipper.display_start()..clipper.display_end() {
-                                let idx = visible[row as usize];
+                            for row in clipper.display_range() {
+                                let idx = visible[row];
                                 let line = self.console.logs[idx].fmt_line(self.console.start);
                                 let label = format!("{}##{idx}", line);
                                 ui.selectable_config(&label)

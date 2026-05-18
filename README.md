@@ -109,6 +109,8 @@ compilable.
 - Legacy Columns APIs use `usize` counts, `OldColumnIndex` for real columns,
   `OldColumnRef::Current` for current-column defaults, and `OldColumnOffsetRef::Trailing` for the
   right-most offset line.
+- `ListClipper` uses Rust collection indexing types: pass `usize` counts and iterate
+  `usize` indices or `display_range()`.
 - Extension contexts follow the same rule: safe methods bind or assert against the owning current
   ImGui/extension context, not whichever raw C context happened to be current.
 

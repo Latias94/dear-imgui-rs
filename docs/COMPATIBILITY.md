@@ -109,6 +109,8 @@ Extensions
   - Legacy Columns APIs use typed counts and selectors: `usize` for counts, `OldColumnIndex` for
     concrete columns, `OldColumnRef::Current` for current-column defaults, and
     `OldColumnOffsetRef::Trailing` for the right-most offset line.
+  - `ListClipper` item counts, visible display bounds, `display_range()`, and iterator items use
+    `usize`, matching Rust collection indexing.
   - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
   - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
     `NodeEditor::set_alt_mouse_button` takes `MouseButton`.
