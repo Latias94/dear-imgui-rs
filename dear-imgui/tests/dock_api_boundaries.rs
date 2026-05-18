@@ -173,7 +173,8 @@ fn window_class_rejects_invalid_flag_overrides_before_ffi() {
 
     let ui = ctx.frame();
     let raw_unknown = imgui::ViewportFlags::from_bits_retain(1 << 14);
-    let unsupported_class = imgui::WindowClass::new(1).viewport_flags_override_set(raw_unknown);
+    let unsupported_class =
+        imgui::WindowClass::new(imgui::Id::from(1u32)).viewport_flags_override_set(raw_unknown);
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             ui.set_next_window_class(&unsupported_class);
@@ -181,10 +182,11 @@ fn window_class_rejects_invalid_flag_overrides_before_ffi() {
         .is_err()
     );
 
-    let overlapping_class = imgui::WindowClass::new(2).viewport_flags_overrides(
-        imgui::ViewportFlags::NO_DECORATION,
-        imgui::ViewportFlags::NO_DECORATION,
-    );
+    let overlapping_class = imgui::WindowClass::new(imgui::Id::from(2u32))
+        .viewport_flags_overrides(
+            imgui::ViewportFlags::NO_DECORATION,
+            imgui::ViewportFlags::NO_DECORATION,
+        );
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             ui.set_next_window_class(&overlapping_class);
@@ -194,8 +196,8 @@ fn window_class_rejects_invalid_flag_overrides_before_ffi() {
 
     let private_tab_button =
         imgui::TabItemFlags::from_bits_retain(imgui::sys::ImGuiTabItemFlags_Button as i32);
-    let invalid_tab_class =
-        imgui::WindowClass::new(3).tab_item_flags_override_set(private_tab_button);
+    let invalid_tab_class = imgui::WindowClass::new(imgui::Id::from(3u32))
+        .tab_item_flags_override_set(private_tab_button);
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             ui.set_next_window_class(&invalid_tab_class);
@@ -205,8 +207,8 @@ fn window_class_rejects_invalid_flag_overrides_before_ffi() {
 
     let private_dock_flag =
         imgui::DockNodeFlags::from_bits_retain(imgui::sys::ImGuiDockNodeFlags_HiddenTabBar);
-    let invalid_dock_class =
-        imgui::WindowClass::new(4).dock_node_flags_override_set(private_dock_flag);
+    let invalid_dock_class = imgui::WindowClass::new(imgui::Id::from(4u32))
+        .dock_node_flags_override_set(private_dock_flag);
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             ui.set_next_window_class(&invalid_dock_class);
@@ -218,7 +220,7 @@ fn window_class_rejects_invalid_flag_overrides_before_ffi() {
     let valid_tab_options = imgui::TabItemOptions::new()
         .flags(imgui::TabItemFlags::NO_REORDER)
         .placement(imgui::TabItemPlacement::Leading);
-    let valid_class = imgui::WindowClass::new(5)
+    let valid_class = imgui::WindowClass::new(imgui::Id::from(5u32))
         .viewport_flags_overrides(
             imgui::ViewportFlags::NO_DECORATION,
             imgui::ViewportFlags::NO_TASK_BAR_ICON,

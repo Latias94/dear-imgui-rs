@@ -70,6 +70,13 @@ pub(crate) fn assert_nonzero_id(caller: &str, name: &str, id: Id) {
     assert!(id.raw() != 0, "{caller} {name} must be non-zero");
 }
 
+fn optional_nonzero_id_raw(caller: &str, name: &str, id: Option<Id>) -> sys::ImGuiID {
+    id.map_or(0, |id| {
+        assert_nonzero_id(caller, name, id);
+        id.raw()
+    })
+}
+
 pub(crate) fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
     assert!(
         value[0].is_finite() && value[1].is_finite(),
@@ -85,15 +92,45 @@ pub(crate) fn assert_positive_finite_vec2(caller: &str, name: &str, value: [f32;
     );
 }
 
+/// Parent viewport policy for a docking window class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WindowClassParentViewport {
+    /// Use Dear ImGui's default parent viewport behavior.
+    Default,
+    /// Request the platform backend to avoid parent-child platform windows.
+    NoParent,
+    /// Request a specific parent viewport.
+    Parent(Id),
+}
+
+impl Default for WindowClassParentViewport {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+impl WindowClassParentViewport {
+    fn raw(self, caller: &str) -> sys::ImGuiID {
+        match self {
+            Self::Default => !0,
+            Self::NoParent => 0,
+            Self::Parent(id) => {
+                assert_nonzero_id(caller, "parent_viewport_id", id);
+                id.raw()
+            }
+        }
+    }
+}
+
 /// Window class for docking configuration
 #[derive(Debug, Clone)]
 pub struct WindowClass {
-    /// User data. 0 = Default class (unclassed). Windows of different classes cannot be docked with each others.
-    pub class_id: sys::ImGuiID,
-    /// Hint for the platform backend. -1: use default. 0: request platform backend to not parent the platform. != 0: request platform backend to create a parent<>child relationship between the platform windows.
-    pub parent_viewport_id: sys::ImGuiID,
+    /// User class ID. `None` means the default unclassed window class.
+    pub class_id: Option<Id>,
+    /// Hint for the platform backend parent viewport behavior.
+    pub parent_viewport: WindowClassParentViewport,
     /// ID of parent window for shortcut focus route evaluation
-    pub focus_route_parent_window_id: sys::ImGuiID,
+    pub focus_route_parent_window_id: Option<Id>,
     /// Viewport flags to set when a window of this class owns a viewport.
     pub viewport_flags_override_set: crate::ViewportFlags,
     /// Viewport flags to clear when a window of this class owns a viewport.
@@ -116,9 +153,9 @@ pub struct WindowClass {
 impl Default for WindowClass {
     fn default() -> Self {
         Self {
-            class_id: 0,
-            parent_viewport_id: !0, // -1 as u32
-            focus_route_parent_window_id: 0,
+            class_id: None,
+            parent_viewport: WindowClassParentViewport::Default,
+            focus_route_parent_window_id: None,
             viewport_flags_override_set: crate::ViewportFlags::NONE,
             viewport_flags_override_clear: crate::ViewportFlags::NONE,
             tab_item_flags_override_set: crate::widget::TabItemOptions::new(),
@@ -132,22 +169,37 @@ impl Default for WindowClass {
 
 impl WindowClass {
     /// Creates a new window class with the specified class ID
-    pub fn new(class_id: sys::ImGuiID) -> Self {
+    pub fn new(class_id: Id) -> Self {
+        assert_nonzero_id("WindowClass::new()", "class_id", class_id);
         Self {
-            class_id,
+            class_id: Some(class_id),
             ..Default::default()
         }
     }
 
-    /// Sets the parent viewport ID
-    pub fn parent_viewport_id(mut self, id: sys::ImGuiID) -> Self {
-        self.parent_viewport_id = id;
+    /// Sets the parent viewport policy.
+    pub fn parent_viewport(mut self, parent: WindowClassParentViewport) -> Self {
+        self.parent_viewport = parent;
+        self
+    }
+
+    /// Requests the platform backend to avoid parenting this class's platform windows.
+    pub fn no_parent_viewport(mut self) -> Self {
+        self.parent_viewport = WindowClassParentViewport::NoParent;
+        self
+    }
+
+    /// Requests a specific parent viewport ID.
+    pub fn parent_viewport_id(mut self, id: Id) -> Self {
+        assert_nonzero_id("WindowClass::parent_viewport_id()", "id", id);
+        self.parent_viewport = WindowClassParentViewport::Parent(id);
         self
     }
 
     /// Sets the focus route parent window ID
-    pub fn focus_route_parent_window_id(mut self, id: sys::ImGuiID) -> Self {
-        self.focus_route_parent_window_id = id;
+    pub fn focus_route_parent_window_id(mut self, id: Id) -> Self {
+        assert_nonzero_id("WindowClass::focus_route_parent_window_id()", "id", id);
+        self.focus_route_parent_window_id = Some(id);
         self
     }
 
@@ -232,9 +284,13 @@ impl WindowClass {
     fn to_imgui(&self, caller: &str) -> sys::ImGuiWindowClass {
         self.validate(caller);
         sys::ImGuiWindowClass {
-            ClassId: self.class_id,
-            ParentViewportId: self.parent_viewport_id,
-            FocusRouteParentWindowId: self.focus_route_parent_window_id,
+            ClassId: optional_nonzero_id_raw(caller, "class_id", self.class_id),
+            ParentViewportId: self.parent_viewport.raw(caller),
+            FocusRouteParentWindowId: optional_nonzero_id_raw(
+                caller,
+                "focus_route_parent_window_id",
+                self.focus_route_parent_window_id,
+            ),
             ViewportFlagsOverrideSet: self.viewport_flags_override_set.bits(),
             ViewportFlagsOverrideClear: self.viewport_flags_override_clear.bits(),
             TabItemFlagsOverrideSet: self.tab_item_flags_override_set.bits(),
@@ -341,7 +397,7 @@ impl Ui {
     ///     dockspace_id,
     ///     [800.0, 600.0],
     ///     DockNodeFlags::NO_DOCKING_SPLIT,
-    ///     Some(&WindowClass::new(1))
+    ///     Some(&WindowClass::new(Id::from(1u32)))
     /// );
     /// ```
     #[doc(alias = "DockSpace")]
@@ -467,7 +523,7 @@ impl Ui {
     /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
-    /// let window_class = WindowClass::new(1).docking_always_tab_bar(true);
+    /// let window_class = WindowClass::new(Id::from(1u32)).docking_always_tab_bar(true);
     /// ui.set_next_window_class(&window_class);
     /// ui.window("Classed Window").build(|| {
     ///     ui.text("This window has a custom class!");

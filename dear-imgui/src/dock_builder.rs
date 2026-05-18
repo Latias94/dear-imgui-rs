@@ -175,8 +175,12 @@ impl<'ui> DockNode<'ui> {
     }
 
     /// Returns the menu button ID for this node
-    pub fn window_menu_button_id(&self) -> sys::ImGuiID {
-        unsafe { sys::igDockNodeGetWindowMenuButtonId(self.raw as *const sys::ImGuiDockNode) }
+    pub fn window_menu_button_id(&self) -> crate::Id {
+        unsafe {
+            crate::Id::from(sys::igDockNodeGetWindowMenuButtonId(
+                self.raw as *const sys::ImGuiDockNode,
+            ))
+        }
     }
 
     /// Returns the root node of this dock tree

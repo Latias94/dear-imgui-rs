@@ -17,11 +17,11 @@ fn test_docking_basic_functions() {
     let flags = DockNodeFlags::NO_DOCKING_SPLIT | DockNodeFlags::AUTO_HIDE_TAB_BAR;
     println!("Created dock node flags: {:?}", flags);
 
-    let window_class = WindowClass::new(1)
+    let window_class = WindowClass::new(Id::from(1u32))
         .docking_always_tab_bar(true)
         .docking_allow_unclassed(false);
     println!(
-        "Created window class with class_id: {}",
+        "Created window class with class_id: {:?}",
         window_class.class_id
     );
 
@@ -53,9 +53,12 @@ fn test_window_class() {
 
     // Test default window class
     let default_class = WindowClass::default();
-    assert_eq!(default_class.class_id, 0);
-    assert_eq!(default_class.parent_viewport_id, !0); // -1 as u32
-    assert_eq!(default_class.focus_route_parent_window_id, 0);
+    assert_eq!(default_class.class_id, None);
+    assert_eq!(
+        default_class.parent_viewport,
+        WindowClassParentViewport::Default
+    );
+    assert_eq!(default_class.focus_route_parent_window_id, None);
     assert_eq!(
         default_class.viewport_flags_override_set,
         ViewportFlags::NONE
@@ -80,9 +83,12 @@ fn test_window_class() {
     let tab_options = TabItemOptions::new()
         .flags(TabItemFlags::NO_REORDER)
         .placement(TabItemPlacement::Trailing);
-    let custom_class = WindowClass::new(42)
-        .parent_viewport_id(100)
-        .focus_route_parent_window_id(200)
+    let class_id = Id::from(42u32);
+    let parent_viewport_id = Id::from(100u32);
+    let focus_parent_id = Id::from(200u32);
+    let custom_class = WindowClass::new(class_id)
+        .parent_viewport_id(parent_viewport_id)
+        .focus_route_parent_window_id(focus_parent_id)
         .viewport_flags_override_set(ViewportFlags::NO_DECORATION)
         .viewport_flags_override_clear(ViewportFlags::NO_TASK_BAR_ICON)
         .tab_item_flags_override_set(tab_options)
@@ -90,9 +96,15 @@ fn test_window_class() {
         .docking_always_tab_bar(true)
         .docking_allow_unclassed(false);
 
-    assert_eq!(custom_class.class_id, 42);
-    assert_eq!(custom_class.parent_viewport_id, 100);
-    assert_eq!(custom_class.focus_route_parent_window_id, 200);
+    assert_eq!(custom_class.class_id, Some(class_id));
+    assert_eq!(
+        custom_class.parent_viewport,
+        WindowClassParentViewport::Parent(parent_viewport_id)
+    );
+    assert_eq!(
+        custom_class.focus_route_parent_window_id,
+        Some(focus_parent_id)
+    );
     assert_eq!(
         custom_class.viewport_flags_override_set,
         ViewportFlags::NO_DECORATION
@@ -158,7 +170,7 @@ fn test_docking_integration() {
     // We don't actually call ImGui functions to avoid crashes
 
     // Create window class for tools
-    let tool_class = WindowClass::new(1)
+    let tool_class = WindowClass::new(Id::from(1u32))
         .docking_always_tab_bar(true)
         .docking_allow_unclassed(false);
 
@@ -167,7 +179,7 @@ fn test_docking_integration() {
     let panel_flags = DockNodeFlags::NO_RESIZE | DockNodeFlags::NO_UNDOCKING;
 
     println!("Created docking integration components:");
-    println!("  Tool window class ID: {}", tool_class.class_id);
+    println!("  Tool window class ID: {:?}", tool_class.class_id);
     println!("  Dockspace flags: {:?}", dockspace_flags);
     println!("  Panel flags: {:?}", panel_flags);
     println!("  Split directions available: Left, Right, Up, Down");

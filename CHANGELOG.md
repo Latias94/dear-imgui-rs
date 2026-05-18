@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - UI key/mouse/frame-count helpers, texture unused-frame counts, and font-atlas bake discard
     frame counts now use `usize`.
   - `DockNode::depth()` now returns `usize` instead of a raw signed value.
+  - Docking window class IDs now use `Id`, `Option<Id>`, and `WindowClassParentViewport` instead
+    of raw `ImGuiID` sentinels.
   - Logging helpers now take `LogAutoOpenDepth` instead of raw `-1` auto-open-depth sentinels.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
