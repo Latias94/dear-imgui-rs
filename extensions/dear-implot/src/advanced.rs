@@ -19,14 +19,15 @@ fn validate_size(caller: &str, size: [f32; 2]) -> Result<(), PlotError> {
     }
 }
 
-fn validate_positive_count(caller: &str, name: &str, value: i32) -> Result<(), PlotError> {
-    if value > 0 {
-        Ok(())
-    } else {
-        Err(PlotError::InvalidData(format!(
+fn count_to_i32(caller: &str, name: &str, value: usize) -> Result<i32, PlotError> {
+    if value == 0 {
+        return Err(PlotError::InvalidData(format!(
             "{caller} {name} must be positive"
-        )))
+        )));
     }
+
+    i32::try_from(value)
+        .map_err(|_| PlotError::InvalidData(format!("{caller} {name} exceeded ImPlot's i32 range")))
 }
 
 fn validate_ratios(caller: &str, name: &str, ratios: &[f32]) -> Result<(), PlotError> {
@@ -52,8 +53,8 @@ fn validate_range(caller: &str, min: f64, max: f64) -> Result<(), PlotError> {
 /// Multi-plot layout manager for creating subplot grids
 pub struct SubplotGrid<'a> {
     title: &'a str,
-    rows: i32,
-    cols: i32,
+    rows: usize,
+    cols: usize,
     size: Option<[f32; 2]>,
     flags: SubplotFlags,
     row_ratios: Option<Vec<f32>>,
@@ -78,7 +79,7 @@ bitflags::bitflags! {
 
 impl<'a> SubplotGrid<'a> {
     /// Create a new subplot grid
-    pub fn new(title: &'a str, rows: i32, cols: i32) -> Self {
+    pub fn new(title: &'a str, rows: usize, cols: usize) -> Self {
         Self {
             title,
             rows,
@@ -124,8 +125,8 @@ impl<'a> SubplotGrid<'a> {
 
     /// Begin the subplot grid and return a token
     pub fn begin(self) -> Result<SubplotToken<'a>, PlotError> {
-        validate_positive_count("SubplotGrid::begin()", "rows", self.rows)?;
-        validate_positive_count("SubplotGrid::begin()", "cols", self.cols)?;
+        let rows = count_to_i32("SubplotGrid::begin()", "rows", self.rows)?;
+        let cols = count_to_i32("SubplotGrid::begin()", "cols", self.cols)?;
         let title_cstr =
             CString::new(self.title).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
@@ -141,23 +142,19 @@ impl<'a> SubplotGrid<'a> {
         let mut row_ratios = self.row_ratios;
         let mut col_ratios = self.col_ratios;
         if let Some(row_ratios) = &row_ratios {
-            let rows = usize::try_from(self.rows).map_err(|_| {
-                PlotError::InvalidData("SubplotGrid::begin() rows out of range".to_string())
-            })?;
-            if row_ratios.len() != rows {
+            if row_ratios.len() != self.rows {
                 return Err(PlotError::InvalidData(format!(
-                    "SubplotGrid::begin() row_ratios length must equal rows ({rows})"
+                    "SubplotGrid::begin() row_ratios length must equal rows ({})",
+                    self.rows
                 )));
             }
             validate_ratios("SubplotGrid::begin()", "row_ratios", row_ratios)?;
         }
         if let Some(col_ratios) = &col_ratios {
-            let cols = usize::try_from(self.cols).map_err(|_| {
-                PlotError::InvalidData("SubplotGrid::begin() cols out of range".to_string())
-            })?;
-            if col_ratios.len() != cols {
+            if col_ratios.len() != self.cols {
                 return Err(PlotError::InvalidData(format!(
-                    "SubplotGrid::begin() col_ratios length must equal cols ({cols})"
+                    "SubplotGrid::begin() col_ratios length must equal cols ({})",
+                    self.cols
                 )));
             }
             validate_ratios("SubplotGrid::begin()", "col_ratios", col_ratios)?;
@@ -174,8 +171,8 @@ impl<'a> SubplotGrid<'a> {
         let success = unsafe {
             sys::ImPlot_BeginSubplots(
                 title_cstr.as_ptr(),
-                self.rows,
-                self.cols,
+                rows,
+                cols,
                 size_vec,
                 self.flags.bits() as i32,
                 row_ratios_ptr,
@@ -461,5 +458,73 @@ impl Drop for LegendToken {
         unsafe {
             sys::ImPlot_EndLegendPopup();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PlotError, SubplotGrid};
+    use crate::PlotContext;
+    use std::sync::{Mutex, OnceLock};
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn setup_context() -> (dear_imgui_rs::Context, PlotContext) {
+        let mut imgui = dear_imgui_rs::Context::create();
+        let _ = imgui.font_atlas_mut().build();
+        imgui.io_mut().set_display_size([256.0, 256.0]);
+        imgui.io_mut().set_delta_time(1.0 / 60.0);
+        let plot = PlotContext::create(&imgui);
+        (imgui, plot)
+    }
+
+    fn invalid_data_message(err: PlotError) -> String {
+        match err {
+            PlotError::InvalidData(message) => message,
+            other => panic!("expected invalid data error, got {other:?}"),
+        }
+    }
+
+    fn expect_invalid_data(result: Result<super::SubplotToken<'_>, PlotError>) -> String {
+        match result {
+            Err(err) => invalid_data_message(err),
+            Ok(_) => panic!("expected SubplotGrid::begin() to reject invalid input"),
+        }
+    }
+
+    #[test]
+    fn subplot_grid_rejects_invalid_counts_before_ffi() {
+        let _guard = test_guard();
+        let (mut imgui, _plot) = setup_context();
+        let _ui = imgui.frame();
+
+        let rows = expect_invalid_data(SubplotGrid::new("bad_rows", 0, 1).begin());
+        assert!(rows.contains("rows must be positive"));
+
+        let cols = expect_invalid_data(SubplotGrid::new("bad_cols", 1, 0).begin());
+        assert!(cols.contains("cols must be positive"));
+
+        let overflow = expect_invalid_data(
+            SubplotGrid::new("too_many_rows", i32::MAX as usize + 1, 1).begin(),
+        );
+        assert!(overflow.contains("rows exceeded"));
+    }
+
+    #[test]
+    fn subplot_grid_ratio_lengths_follow_usize_counts() {
+        let _guard = test_guard();
+        let (mut imgui, _plot) = setup_context();
+        let _ui = imgui.frame();
+
+        let err = expect_invalid_data(
+            SubplotGrid::new("bad_ratios", 2usize, 1usize)
+                .with_row_ratios(&[1.0])
+                .begin(),
+        );
+
+        assert!(err.contains("row_ratios length must equal rows (2)"));
     }
 }

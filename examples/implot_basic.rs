@@ -550,7 +550,7 @@ impl AppWindow {
 
                 // Subplot example (commented out as it requires additional bindings)
                 ui.text("Subplots (Future Feature):");
-                ui.text_disabled("SubplotGrid::new(\"Grid\", 2, 2).begin()");
+                ui.text_disabled("SubplotGrid::new(\"Grid\", 2usize, 2usize).begin()");
                 ui.text_disabled("  // Multiple plots in grid layout");
                 ui.text_disabled("  // Each subplot can have different plot types");
                 ui.separator();

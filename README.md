@@ -111,6 +111,7 @@ compilable.
   right-most offset line.
 - `ListClipper` uses Rust collection indexing types: pass `usize` counts and iterate
   `usize` indices or `display_range()`.
+- `dear-implot::SubplotGrid::new` uses `usize` row/column counts.
 - Extension contexts follow the same rule: safe methods bind or assert against the owning current
   ImGui/extension context, not whichever raw C context happened to be current.
 

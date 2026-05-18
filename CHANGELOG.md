@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-implot` / `dear-implot3d` plot data layout APIs now use typed
     `PlotDataLayout` / `Plot3DDataLayout` values with typed sample offsets and byte strides.
     Use `PlotDataStride::AUTO` / `Plot3DDataStride::AUTO` for the default stride.
+  - `dear-implot::SubplotGrid::new` now takes `usize` row/column counts instead of raw signed
+    counts.
   - ImPlot3D `Plot3DBuilder` and `Plot3DToken` now carry the originating frame lifetime.
   - `dear-implot3d::Plot3DContext::current()` now exposes a non-owning current-context wrapper,
     matching the `dear-implot` current-context API shape for advanced callers.

@@ -266,7 +266,7 @@ ShadedBetweenPlot::new("Between", &x_data, &y1_data, &y2_data)
 ### Subplots
 
 ```rust
-if let Ok(token) = SubplotGrid::new("My Subplots", 2, 2)
+if let Ok(token) = SubplotGrid::new("My Subplots", 2usize, 2usize)
     .with_size([800.0, 600.0])
     .with_flags(SubplotFlags::NONE)
     .begin() {

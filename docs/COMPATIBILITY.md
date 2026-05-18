@@ -96,6 +96,7 @@ Extensions
     `.with_stride(PlotDataStride::bytes(...))`, or use the `3D` variants for ImPlot3D. Default
     stride is explicit via `PlotDataStride::AUTO` / `Plot3DDataStride::AUTO`; zero-byte strides are
     rejected before FFI.
+  - `dear-implot::SubplotGrid::new` uses `usize` row/column counts instead of raw signed counts.
   - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
     of a raw signed integer. Use `PlotValueOffset::new(...)` or pass `usize` directly.
   - Table freeze helpers now take `usize` frozen column/row counts instead of raw signed values.
