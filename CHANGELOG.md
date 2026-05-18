@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
     of raw `i32`.
   - Table freeze helpers now take `usize` frozen column/row counts instead of raw `i32` values.
+  - Table column APIs now use `TableColumnIndex`, `TableColumnRef`, `TableHoveredColumn`, and
+    `TableContextMenuTarget` instead of raw `column_n: i32` sentinel values.
+  - Table background color helpers are split by target: use `table_set_cell_bg_color*` or
+    `table_set_row_bg{0,1}_color*` instead of passing `TableBgTarget` plus `-1`.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions
@@ -53,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     button index.
   - `dear-imgui-test-engine::TestScript::mouse_click_on_void` now takes `MouseButton` instead of a
     raw `i32` button index.
+  - `dear-imgui-test-engine` table column script helpers now take typed table column indices/targets
+    instead of raw signed column indices.
   - `dear-imgui-test-engine` script repeat/wait frame counts now use `ScriptCount` instead of raw
     `i32` values.
   - Deprecated `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use RAII `push_id(...)` instead.

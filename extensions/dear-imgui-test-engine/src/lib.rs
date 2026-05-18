@@ -5,8 +5,8 @@
 
 use bitflags::bitflags;
 use dear_imgui_rs::{
-    Context, ContextAliveToken, ImGuiError, ImGuiResult, KeyChord, KeyMods, MouseButton, Ui,
-    with_scratch_txt, with_scratch_txt_two,
+    Context, ContextAliveToken, ImGuiError, ImGuiResult, KeyChord, KeyMods, MouseButton,
+    TableColumnIndex, TableColumnRef, Ui, with_scratch_txt, with_scratch_txt_two,
 };
 use dear_imgui_test_engine_sys as sys;
 use std::{marker::PhantomData, num::NonZeroU32, rc::Rc};
@@ -796,12 +796,24 @@ impl ScriptTest<'_> {
         Ok(())
     }
 
-    pub fn table_open_context_menu(&mut self, table_ref: &str, column_n: i32) -> ImGuiResult<()> {
+    pub fn table_open_context_menu(
+        &mut self,
+        table_ref: &str,
+        column: impl Into<TableColumnRef>,
+    ) -> ImGuiResult<()> {
         if table_ref.contains('\0') {
             return Err(ImGuiError::invalid_operation(
                 "table_open_context_menu table_ref contained interior NUL",
             ));
         }
+        let column_n = match column.into() {
+            TableColumnRef::Current => -1,
+            TableColumnRef::Index(index) => index.get().try_into().map_err(|_| {
+                ImGuiError::invalid_operation(
+                    "table_open_context_menu column index exceeded i32::MAX",
+                )
+            })?,
+        };
         with_scratch_txt(table_ref, |ptr| unsafe {
             sys::imgui_test_engine_script_table_open_context_menu(self.script.raw, ptr, column_n)
         });
@@ -811,7 +823,7 @@ impl ScriptTest<'_> {
     pub fn table_set_column_enabled(
         &mut self,
         table_ref: &str,
-        column_n: i32,
+        column: impl Into<TableColumnIndex>,
         enabled: bool,
     ) -> ImGuiResult<()> {
         if table_ref.contains('\0') {
@@ -819,6 +831,9 @@ impl ScriptTest<'_> {
                 "table_set_column_enabled table_ref contained interior NUL",
             ));
         }
+        let column_n = column.into().get().try_into().map_err(|_| {
+            ImGuiError::invalid_operation("table_set_column_enabled column index exceeded i32::MAX")
+        })?;
         with_scratch_txt(table_ref, |ptr| unsafe {
             sys::imgui_test_engine_script_table_set_column_enabled(
                 self.script.raw,
@@ -860,7 +875,7 @@ impl ScriptTest<'_> {
     pub fn table_resize_column(
         &mut self,
         table_ref: &str,
-        column_n: i32,
+        column: impl Into<TableColumnIndex>,
         width: f32,
     ) -> ImGuiResult<()> {
         if table_ref.contains('\0') {
@@ -873,6 +888,9 @@ impl ScriptTest<'_> {
                 "table_resize_column requires a finite non-negative value",
             ));
         }
+        let column_n = column.into().get().try_into().map_err(|_| {
+            ImGuiError::invalid_operation("table_resize_column column index exceeded i32::MAX")
+        })?;
         with_scratch_txt(table_ref, |ptr| unsafe {
             sys::imgui_test_engine_script_table_resize_column(self.script.raw, ptr, column_n, width)
         });

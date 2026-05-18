@@ -2,6 +2,7 @@ use crate::core::FileFilter;
 use crate::dialog_state::{
     FileDialogState, FileListColumnsConfig, FileListDataColumn, HeaderStyle,
 };
+use dear_imgui_rs::TableColumnIndex;
 use dear_imgui_rs::sys;
 
 fn data_column_label(column: FileListDataColumn) -> &'static str {
@@ -159,10 +160,10 @@ pub(in crate::ui) fn move_column_order_down(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::ui) struct ListColumnLayout {
     pub(in crate::ui) data_columns: Vec<FileListDataColumn>,
-    pub(in crate::ui) name: i16,
-    pub(in crate::ui) extension: Option<i16>,
-    pub(in crate::ui) size: Option<i16>,
-    pub(in crate::ui) modified: Option<i16>,
+    pub(in crate::ui) name: TableColumnIndex,
+    pub(in crate::ui) extension: Option<TableColumnIndex>,
+    pub(in crate::ui) size: Option<TableColumnIndex>,
+    pub(in crate::ui) modified: Option<TableColumnIndex>,
 }
 
 pub(in crate::ui) fn list_column_layout(
@@ -180,7 +181,7 @@ pub(in crate::ui) fn list_column_layout(
         }
     }
 
-    let mut index: i16 = if show_preview { 1 } else { 0 };
+    let mut index = if show_preview { 1 } else { 0 };
     let mut name = None;
     let mut extension = None;
     let mut size = None;
@@ -188,10 +189,10 @@ pub(in crate::ui) fn list_column_layout(
 
     for column in &data_columns {
         match column {
-            FileListDataColumn::Name => name = Some(index),
-            FileListDataColumn::Extension => extension = Some(index),
-            FileListDataColumn::Size => size = Some(index),
-            FileListDataColumn::Modified => modified = Some(index),
+            FileListDataColumn::Name => name = Some(TableColumnIndex::new(index)),
+            FileListDataColumn::Extension => extension = Some(TableColumnIndex::new(index)),
+            FileListDataColumn::Size => size = Some(TableColumnIndex::new(index)),
+            FileListDataColumn::Modified => modified = Some(TableColumnIndex::new(index)),
         }
         index += 1;
     }
@@ -288,12 +289,15 @@ pub(super) fn resolved_data_column_weight(
     )
 }
 
-fn table_column_stretch_weight(table: *const sys::ImGuiTable, column_index: i16) -> Option<f32> {
-    if table.is_null() || column_index < 0 {
+fn table_column_stretch_weight(
+    table: *const sys::ImGuiTable,
+    column_index: TableColumnIndex,
+) -> Option<f32> {
+    if table.is_null() {
         return None;
     }
     let columns_count = unsafe { (*table).ColumnsCount.max(0) as usize };
-    let index = column_index as usize;
+    let index = column_index.get();
     if index >= columns_count {
         return None;
     }
@@ -313,7 +317,7 @@ fn table_column_stretch_weight(table: *const sys::ImGuiTable, column_index: i16)
 
 fn table_data_column_for_index(
     layout: &ListColumnLayout,
-    column_index: i16,
+    column_index: TableColumnIndex,
 ) -> Option<FileListDataColumn> {
     if column_index == layout.name {
         return Some(FileListDataColumn::Name);
@@ -373,8 +377,7 @@ fn table_data_columns_by_display_order(
 
     let mut ordered = Vec::with_capacity(layout.data_columns.len());
     for index in 0..columns_count {
-        let index_i16 = index as i16;
-        let Some(column) = table_data_column_for_index(layout, index_i16) else {
+        let Some(column) = table_data_column_for_index(layout, TableColumnIndex::new(index)) else {
             continue;
         };
         let display_order = unsafe { (*columns_ptr.add(index)).DisplayOrder };
@@ -415,7 +418,7 @@ pub(super) fn sync_runtime_column_weights_from_table(
     }
 
     if show_preview {
-        if let Some(weight) = table_column_stretch_weight(table, 0) {
+        if let Some(weight) = table_column_stretch_weight(table, TableColumnIndex::ZERO) {
             config.weight_overrides.preview = Some(weight);
         }
     }

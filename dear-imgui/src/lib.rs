@@ -196,7 +196,7 @@
 //! # fn demo(ui: &Ui) {
 //! // Pack RGBA floats to ImGui ABGR (ImU32)
 //! let abgr = Color::rgb(1.0, 0.0, 0.0).to_imgui_u32();
-//! ui.table_set_bg_color_u32(TableBgTarget::CellBg, abgr, -1);
+//! ui.table_set_cell_bg_color_u32(abgr, TableColumnRef::Current);
 //! # }
 //! ```
 //!

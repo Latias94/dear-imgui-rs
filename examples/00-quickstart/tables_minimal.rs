@@ -164,13 +164,21 @@ impl AppWindow {
             if let Some(s) = specs.iter().next() {
                 // Sort by first spec only for minimal demo
                 match (s.column_index, s.sort_direction) {
-                    (0, SortDirection::Ascending) => rows.sort_by(|a, b| a.name.cmp(&b.name)),
-                    (0, SortDirection::Descending) => rows.sort_by(|a, b| b.name.cmp(&a.name)),
-                    (1, SortDirection::Ascending) => rows.sort_by(|a, b| a.qty.cmp(&b.qty)),
-                    (1, SortDirection::Descending) => rows.sort_by(|a, b| b.qty.cmp(&a.qty)),
-                    (2, SortDirection::Ascending) => rows
+                    (i, SortDirection::Ascending) if i == 0 => {
+                        rows.sort_by(|a, b| a.name.cmp(&b.name))
+                    }
+                    (i, SortDirection::Descending) if i == 0 => {
+                        rows.sort_by(|a, b| b.name.cmp(&a.name))
+                    }
+                    (i, SortDirection::Ascending) if i == 1 => {
+                        rows.sort_by(|a, b| a.qty.cmp(&b.qty))
+                    }
+                    (i, SortDirection::Descending) if i == 1 => {
+                        rows.sort_by(|a, b| b.qty.cmp(&a.qty))
+                    }
+                    (i, SortDirection::Ascending) if i == 2 => rows
                         .sort_by(|a, b| a.price.partial_cmp(&b.price).unwrap_or(Ordering::Equal)),
-                    (2, SortDirection::Descending) => rows
+                    (i, SortDirection::Descending) if i == 2 => rows
                         .sort_by(|a, b| b.price.partial_cmp(&a.price).unwrap_or(Ordering::Equal)),
                     _ => {}
                 }

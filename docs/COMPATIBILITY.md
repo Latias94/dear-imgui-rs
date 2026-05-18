@@ -99,6 +99,11 @@ Extensions
   - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
     of a raw signed integer. Use `PlotValueOffset::new(...)` or pass `usize` directly.
   - Table freeze helpers now take `usize` frozen column/row counts instead of raw signed values.
+  - Table column APIs use typed column values instead of raw signed sentinel integers. Use
+    `TableColumnIndex::new(...)` for real columns, `TableColumnRef::Current` for current-column
+    defaults, `TableContextMenuTarget` for context menus, and `TableHoveredColumn` for hover results.
+    Use `table_set_cell_bg_color*` / `table_set_row_bg{0,1}_color*` instead of passing
+    `TableBgTarget` plus `-1`.
   - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
   - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
     `NodeEditor::set_alt_mouse_button` takes `MouseButton`.
@@ -108,6 +113,8 @@ Extensions
     token lifetimes or `.pop()`.
   - `dear-imgui-test-engine::TestScript::mouse_click_on_void` takes `MouseButton` instead of a raw
     button index.
+  - `dear-imgui-test-engine` table column script helpers use typed table column indices/targets
+    instead of raw signed column indices.
   - `dear-imgui-test-engine` script repeat/wait frame counts use `ScriptCount`; construct values
     with `ScriptCount::new(...)` instead of passing raw signed integers.
   - `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use `push_id(...)` and keep the returned

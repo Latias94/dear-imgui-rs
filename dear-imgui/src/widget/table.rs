@@ -52,6 +52,174 @@ use std::ffi::CStr;
 
 const TABLE_MAX_COLUMNS: usize = 512;
 
+/// Concrete zero-based table column index.
+///
+/// This represents a real table column only. Dear ImGui's `-1` current/default
+/// sentinel is represented by [`TableColumnRef::Current`] instead.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TableColumnIndex(usize);
+
+impl TableColumnIndex {
+    /// The first table column.
+    pub const ZERO: Self = Self(0);
+
+    /// Create a table column index from a Rust `usize`.
+    #[inline]
+    pub const fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Return the zero-based Rust index.
+    #[inline]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+
+    #[inline]
+    pub(crate) fn into_i32(self, caller: &str) -> i32 {
+        i32::try_from(self.0).unwrap_or_else(|_| {
+            panic!("{caller} column index exceeded Dear ImGui's i32 range");
+        })
+    }
+
+    #[inline]
+    fn into_imgui_column_idx(self, caller: &str) -> sys::ImGuiTableColumnIdx {
+        sys::ImGuiTableColumnIdx::try_from(self.0).unwrap_or_else(|_| {
+            panic!("{caller} column index exceeded Dear ImGui's ImGuiTableColumnIdx range");
+        })
+    }
+
+    #[inline]
+    pub(crate) fn from_imgui_column_idx(raw: sys::ImGuiTableColumnIdx, caller: &str) -> Self {
+        assert!(raw >= 0, "{caller} returned a negative table column index");
+        Self(
+            usize::try_from(raw)
+                .expect("non-negative Dear ImGui table column index must fit usize"),
+        )
+    }
+
+    #[inline]
+    fn from_i32(raw: i32, caller: &str) -> Self {
+        assert!(raw >= 0, "{caller} returned a negative table column index");
+        Self(usize::try_from(raw).expect("non-negative table column index must fit usize"))
+    }
+}
+
+impl From<usize> for TableColumnIndex {
+    #[inline]
+    fn from(index: usize) -> Self {
+        Self::new(index)
+    }
+}
+
+impl From<TableColumnIndex> for usize {
+    #[inline]
+    fn from(index: TableColumnIndex) -> Self {
+        index.get()
+    }
+}
+
+impl PartialEq<usize> for TableColumnIndex {
+    #[inline]
+    fn eq(&self, other: &usize) -> bool {
+        self.get() == *other
+    }
+}
+
+impl PartialEq<TableColumnIndex> for usize {
+    #[inline]
+    fn eq(&self, other: &TableColumnIndex) -> bool {
+        *self == other.get()
+    }
+}
+
+/// Table column selector for APIs that accept Dear ImGui's current-column sentinel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum TableColumnRef {
+    /// Use the table's current column.
+    #[default]
+    Current,
+    /// Use a concrete table column index.
+    Index(TableColumnIndex),
+}
+
+impl TableColumnRef {
+    /// Current table column.
+    pub const CURRENT: Self = Self::Current;
+
+    /// Select a concrete table column.
+    #[inline]
+    pub const fn index(index: TableColumnIndex) -> Self {
+        Self::Index(index)
+    }
+}
+
+impl From<TableColumnIndex> for TableColumnRef {
+    #[inline]
+    fn from(index: TableColumnIndex) -> Self {
+        Self::Index(index)
+    }
+}
+
+impl From<usize> for TableColumnRef {
+    #[inline]
+    fn from(index: usize) -> Self {
+        Self::Index(TableColumnIndex::new(index))
+    }
+}
+
+/// Result of [`Ui::table_get_hovered_column`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum TableHoveredColumn {
+    /// The table is not hovered.
+    None,
+    /// A concrete table column is hovered.
+    Column(TableColumnIndex),
+    /// The unused space after the right-most visible column is hovered.
+    UnusedSpace,
+}
+
+impl TableHoveredColumn {
+    /// Return the hovered concrete column, if any.
+    #[inline]
+    pub const fn column(self) -> Option<TableColumnIndex> {
+        match self {
+            Self::Column(index) => Some(index),
+            Self::None | Self::UnusedSpace => None,
+        }
+    }
+}
+
+/// Target column for opening a table context menu.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum TableContextMenuTarget {
+    /// Use Dear ImGui's default: current column when inside a column, otherwise table-level.
+    #[default]
+    CurrentColumn,
+    /// Open the context menu for a concrete column.
+    Column(TableColumnIndex),
+    /// Force a table-level context menu even when a column is current.
+    Table,
+}
+
+impl From<TableColumnIndex> for TableContextMenuTarget {
+    #[inline]
+    fn from(index: TableColumnIndex) -> Self {
+        Self::Column(index)
+    }
+}
+
+impl From<usize> for TableContextMenuTarget {
+    #[inline]
+    fn from(index: usize) -> Self {
+        Self::Column(TableColumnIndex::new(index))
+    }
+}
+
 fn table_column_count_to_i32(column_count: usize) -> i32 {
     assert!(
         column_count > 0,
@@ -87,7 +255,7 @@ fn assert_current_table(caller: &str) -> *mut sys::ImGuiTable {
     table
 }
 
-fn assert_valid_table_column_in(table: *mut sys::ImGuiTable, column_n: i32, caller: &str) {
+fn assert_valid_table_column_raw_in(table: *mut sys::ImGuiTable, column_n: i32, caller: &str) {
     let column_count = unsafe { (*table).ColumnsCount };
     assert!(
         (0..column_count).contains(&column_n),
@@ -95,9 +263,19 @@ fn assert_valid_table_column_in(table: *mut sys::ImGuiTable, column_n: i32, call
     );
 }
 
-fn assert_valid_table_column(column_n: i32, caller: &str) {
+fn assert_valid_table_column_in(
+    table: *mut sys::ImGuiTable,
+    column: TableColumnIndex,
+    caller: &str,
+) -> i32 {
+    let column_n = column.into_i32(caller);
+    assert_valid_table_column_raw_in(table, column_n, caller);
+    column_n
+}
+
+fn assert_valid_table_column(column: TableColumnIndex, caller: &str) -> i32 {
     let table = assert_current_table(caller);
-    assert_valid_table_column_in(table, column_n, caller);
+    assert_valid_table_column_in(table, column, caller)
 }
 
 fn assert_non_negative_finite_f32(caller: &str, name: &str, value: f32) {
@@ -105,14 +283,13 @@ fn assert_non_negative_finite_f32(caller: &str, name: &str, value: f32) {
     assert!(value >= 0.0, "{caller} {name} must be non-negative");
 }
 
-fn resolve_table_column(column_n: i32, caller: &str) -> i32 {
+fn resolve_table_column(column: TableColumnRef, caller: &str) -> i32 {
     let table = assert_current_table(caller);
-    let column_n = if column_n < 0 {
-        unsafe { (*table).CurrentColumn }
-    } else {
-        column_n
+    let column_n = match column {
+        TableColumnRef::Current => unsafe { (*table).CurrentColumn },
+        TableColumnRef::Index(index) => index.into_i32(caller),
     };
-    assert_valid_table_column_in(table, column_n, caller);
+    assert_valid_table_column_raw_in(table, column_n, caller);
     column_n
 }
 
@@ -446,9 +623,11 @@ impl Ui {
     }
 
     /// Append into the specified column
-    pub fn table_set_column_index(&self, column_n: i32) -> bool {
+    pub fn table_set_column_index(&self, column: impl Into<TableColumnIndex>) -> bool {
+        let column = column.into();
+        let column_n = column.into_i32("Ui::table_set_column_index()");
         if let Some(table) = current_table_if_any() {
-            assert_valid_table_column_in(table, column_n, "Ui::table_set_column_index()");
+            assert_valid_table_column_raw_in(table, column_n, "Ui::table_set_column_index()");
         }
         unsafe { sys::igTableSetColumnIndex(column_n) }
     }
@@ -494,14 +673,16 @@ impl Ui {
 
     /// Return columns count.
     #[doc(alias = "TableGetColumnCount")]
-    pub fn table_get_column_count(&self) -> i32 {
-        unsafe { sys::igTableGetColumnCount() }
+    pub fn table_get_column_count(&self) -> usize {
+        usize::try_from(unsafe { sys::igTableGetColumnCount() })
+            .expect("Dear ImGui returned a negative table column count")
     }
 
-    /// Return current column index.
+    /// Return current column index, or `None` when no table cell is current.
     #[doc(alias = "TableGetColumnIndex")]
-    pub fn table_get_column_index(&self) -> i32 {
-        unsafe { sys::igTableGetColumnIndex() }
+    pub fn table_get_column_index(&self) -> Option<TableColumnIndex> {
+        let raw = unsafe { sys::igTableGetColumnIndex() };
+        (raw >= 0).then(|| TableColumnIndex::from_i32(raw, "Ui::table_get_column_index()"))
     }
 
     /// Return current row index.
@@ -512,9 +693,14 @@ impl Ui {
 
     /// Return the name of a column by index.
     #[doc(alias = "TableGetColumnName")]
-    pub fn table_get_column_name(&self, column_n: i32) -> &str {
+    pub fn table_get_column_name(&self, column: impl Into<TableColumnRef>) -> &str {
+        let column = column.into();
+        let column_n = match column {
+            TableColumnRef::Current => -1,
+            TableColumnRef::Index(index) => index.into_i32("Ui::table_get_column_name()"),
+        };
         if current_table_if_any().is_some() {
-            resolve_table_column(column_n, "Ui::table_get_column_name()");
+            resolve_table_column(column, "Ui::table_get_column_name()");
         }
         unsafe {
             let ptr = sys::igTableGetColumnName_Int(column_n);
@@ -528,17 +714,24 @@ impl Ui {
 
     /// Return the flags of a column by index.
     #[doc(alias = "TableGetColumnFlags")]
-    pub fn table_get_column_flags(&self, column_n: i32) -> TableColumnStateFlags {
+    pub fn table_get_column_flags(
+        &self,
+        column: impl Into<TableColumnRef>,
+    ) -> TableColumnStateFlags {
+        let column = column.into();
+        let column_n = match column {
+            TableColumnRef::Current => -1,
+            TableColumnRef::Index(index) => index.into_i32("Ui::table_get_column_flags()"),
+        };
         if let Some(table) = current_table_if_any() {
             let column_count = unsafe { (*table).ColumnsCount };
-            let resolved_column = if column_n < 0 {
-                unsafe { (*table).CurrentColumn }
-            } else {
-                column_n
+            let resolved_column = match column {
+                TableColumnRef::Current => unsafe { (*table).CurrentColumn },
+                TableColumnRef::Index(_) => column_n,
             };
             assert!(
-                (0..=column_count).contains(&resolved_column),
-                "Ui::table_get_column_flags() column index {column_n} is outside the allowed range -1/current or 0..={column_count}"
+                (0..column_count).contains(&resolved_column),
+                "Ui::table_get_column_flags() column index {resolved_column} is outside the current table column range 0..{column_count}"
             );
         }
         unsafe { TableColumnStateFlags::from_bits_truncate(sys::igTableGetColumnFlags(column_n)) }
@@ -546,23 +739,41 @@ impl Ui {
 
     /// Enable/disable a column by index.
     #[doc(alias = "TableSetColumnEnabled")]
-    pub fn table_set_column_enabled(&self, column_n: i32, enabled: bool) {
+    pub fn table_set_column_enabled(&self, column: impl Into<TableColumnRef>, enabled: bool) {
         assert_current_table_has_flags(TableFlags::HIDEABLE, "Ui::table_set_column_enabled()");
-        resolve_table_column(column_n, "Ui::table_set_column_enabled()");
+        let column = column.into();
+        let column_n = match column {
+            TableColumnRef::Current => -1,
+            TableColumnRef::Index(index) => index.into_i32("Ui::table_set_column_enabled()"),
+        };
+        resolve_table_column(column, "Ui::table_set_column_enabled()");
         unsafe { sys::igTableSetColumnEnabled(column_n, enabled) }
     }
 
     /// Return hovered column index, or -1 when none.
     #[doc(alias = "TableGetHoveredColumn")]
-    pub fn table_get_hovered_column(&self) -> i32 {
-        unsafe { sys::igTableGetHoveredColumn() }
+    pub fn table_get_hovered_column(&self) -> TableHoveredColumn {
+        let raw = unsafe { sys::igTableGetHoveredColumn() };
+        if raw < 0 {
+            return TableHoveredColumn::None;
+        }
+        if let Some(table) = current_table_if_any() {
+            let column_count = unsafe { (*table).ColumnsCount };
+            if raw == column_count {
+                return TableHoveredColumn::UnusedSpace;
+            }
+        }
+        TableHoveredColumn::Column(TableColumnIndex::from_i32(
+            raw,
+            "Ui::table_get_hovered_column()",
+        ))
     }
 
     /// Set column width (for fixed-width columns).
     #[doc(alias = "TableSetColumnWidth")]
-    pub fn table_set_column_width(&self, column_n: i32, width: f32) {
+    pub fn table_set_column_width(&self, column: impl Into<TableColumnIndex>, width: f32) {
         assert_table_column_width_phase("Ui::table_set_column_width()");
-        assert_valid_table_column(column_n, "Ui::table_set_column_width()");
+        let column_n = assert_valid_table_column(column.into(), "Ui::table_set_column_width()");
         assert_non_negative_finite_f32("Ui::table_set_column_width()", "width", width);
         unsafe { sys::igTableSetColumnWidth(column_n, width) }
     }
@@ -572,28 +783,47 @@ impl Ui {
     /// Color must be an ImGui-packed ImU32 in ABGR order (IM_COL32).
     /// Use `crate::colors::Color::to_imgui_u32()` to convert RGBA floats.
     #[doc(alias = "TableSetBgColor")]
-    pub fn table_set_bg_color_u32(&self, target: TableBgTarget, color: u32, column_n: i32) {
-        assert_current_table_row("Ui::table_set_bg_color_u32()");
-        match target {
-            TableBgTarget::None => panic!("Ui::table_set_bg_color_u32() target cannot be None"),
-            TableBgTarget::CellBg => {
-                resolve_table_column(column_n, "Ui::table_set_bg_color_u32()");
-            }
-            TableBgTarget::RowBg0 | TableBgTarget::RowBg1 => {
-                assert!(
-                    column_n == -1,
-                    "Ui::table_set_bg_color_u32() row background targets require column_n == -1"
-                );
-            }
-        }
-        unsafe { sys::igTableSetBgColor(target as i32, color, column_n) }
+    pub fn table_set_cell_bg_color_u32(&self, color: u32, column: impl Into<TableColumnRef>) {
+        let column = column.into();
+        assert_current_table_row("Ui::table_set_cell_bg_color_u32()");
+        let column_n = match column {
+            TableColumnRef::Current => -1,
+            TableColumnRef::Index(index) => index.into_i32("Ui::table_set_cell_bg_color_u32()"),
+        };
+        resolve_table_column(column, "Ui::table_set_cell_bg_color_u32()");
+        unsafe { sys::igTableSetBgColor(TableBgTarget::CellBg as i32, color, column_n) }
     }
 
-    /// Set a table background color target using RGBA color (0..=1 floats).
-    pub fn table_set_bg_color(&self, target: TableBgTarget, rgba: [f32; 4], column_n: i32) {
-        // Pack to ImGui's ABGR layout.
+    /// Set a table cell background color using RGBA color (0..=1 floats).
+    pub fn table_set_cell_bg_color(&self, rgba: [f32; 4], column: impl Into<TableColumnRef>) {
         let col = crate::colors::Color::from_array(rgba).to_imgui_u32();
-        self.table_set_bg_color_u32(target, col, column_n);
+        self.table_set_cell_bg_color_u32(col, column);
+    }
+
+    /// Set the first row background color for the current table row.
+    #[doc(alias = "TableSetBgColor")]
+    pub fn table_set_row_bg0_color_u32(&self, color: u32) {
+        assert_current_table_row("Ui::table_set_row_bg0_color_u32()");
+        unsafe { sys::igTableSetBgColor(TableBgTarget::RowBg0 as i32, color, -1) }
+    }
+
+    /// Set the first row background color using RGBA color (0..=1 floats).
+    pub fn table_set_row_bg0_color(&self, rgba: [f32; 4]) {
+        let col = crate::colors::Color::from_array(rgba).to_imgui_u32();
+        self.table_set_row_bg0_color_u32(col);
+    }
+
+    /// Set the second row background color for the current table row.
+    #[doc(alias = "TableSetBgColor")]
+    pub fn table_set_row_bg1_color_u32(&self, color: u32) {
+        assert_current_table_row("Ui::table_set_row_bg1_color_u32()");
+        unsafe { sys::igTableSetBgColor(TableBgTarget::RowBg1 as i32, color, -1) }
+    }
+
+    /// Set the second row background color using RGBA color (0..=1 floats).
+    pub fn table_set_row_bg1_color(&self, rgba: [f32; 4]) {
+        let col = crate::colors::Color::from_array(rgba).to_imgui_u32();
+        self.table_set_row_bg1_color_u32(col);
     }
 
     /// Return hovered row index, or -1 when none.
@@ -612,11 +842,12 @@ impl Ui {
     #[doc(alias = "TableSetColumnSortDirection")]
     pub fn table_set_column_sort_direction(
         &self,
-        column_n: i32,
+        column: impl Into<TableColumnIndex>,
         dir: SortDirection,
         append_to_sort_specs: bool,
     ) {
-        assert_valid_table_column(column_n, "Ui::table_set_column_sort_direction()");
+        let column_n =
+            assert_valid_table_column(column.into(), "Ui::table_set_column_sort_direction()");
         unsafe { sys::igTableSetColumnSortDirection(column_n, dir.into(), append_to_sort_specs) }
     }
 
@@ -709,7 +940,7 @@ impl From<SortDirection> for sys::ImGuiSortDirection {
 #[derive(Copy, Clone, Debug)]
 pub struct TableColumnSortSpec {
     pub column_user_id: u32,
-    pub column_index: i16,
+    pub column_index: TableColumnIndex,
     pub sort_order: i16,
     pub sort_direction: SortDirection,
 }
@@ -789,7 +1020,10 @@ impl<'a> Iterator for TableSortSpecsIter<'a> {
             };
             Some(TableColumnSortSpec {
                 column_user_id: spec.ColumnUserID,
-                column_index: spec.ColumnIndex,
+                column_index: TableColumnIndex::from_imgui_column_idx(
+                    spec.ColumnIndex,
+                    "TableSortSpecsIter::next()",
+                ),
                 sort_order: spec.SortOrder,
                 sort_direction: dir,
             })
@@ -882,7 +1116,7 @@ impl Drop for TableColumnChannelToken<'_> {
 /// Safe description of a single angled header cell.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct TableHeaderData {
-    pub index: i16,
+    pub index: TableColumnIndex,
     pub text_color: ImColor32,
     pub bg_color0: ImColor32,
     pub bg_color1: ImColor32,
@@ -890,13 +1124,13 @@ pub struct TableHeaderData {
 
 impl TableHeaderData {
     pub fn new(
-        index: i16,
+        index: impl Into<TableColumnIndex>,
         text_color: ImColor32,
         bg_color0: ImColor32,
         bg_color1: ImColor32,
     ) -> Self {
         Self {
-            index,
+            index: index.into(),
             text_color,
             bg_color0,
             bg_color1,
@@ -945,11 +1179,13 @@ impl Ui {
         for h in headers {
             assert_valid_table_column_in(
                 table,
-                i32::from(h.index),
+                h.index,
                 "Ui::table_angled_headers_row_ex_with_data()",
             );
             data.push(sys::ImGuiTableHeaderData {
-                Index: h.index as sys::ImGuiTableColumnIdx,
+                Index: h
+                    .index
+                    .into_imgui_column_idx("Ui::table_angled_headers_row_ex_with_data()"),
                 TextColor: u32::from(h.text_color),
                 BgColor0: u32::from(h.bg_color0),
                 BgColor1: u32::from(h.bg_color1),
@@ -976,8 +1212,8 @@ impl Ui {
 
     /// Push column draw channel for the given column index and return a token to pop it.
     #[doc(alias = "TablePushColumnChannel")]
-    pub fn table_push_column_channel(&self, column_n: i32) {
-        assert_valid_table_column(column_n, "Ui::table_push_column_channel()");
+    pub fn table_push_column_channel(&self, column: impl Into<TableColumnIndex>) {
+        let column_n = assert_valid_table_column(column.into(), "Ui::table_push_column_channel()");
         unsafe { sys::igTablePushColumnChannel(column_n) }
     }
 
@@ -999,8 +1235,11 @@ impl Ui {
     /// Push column draw channel for the given column index and return a token to pop it.
     #[must_use = "dropping the token pops the table column draw channel immediately"]
     #[doc(alias = "TablePushColumnChannel")]
-    pub fn table_column_channel(&self, column_n: i32) -> TableColumnChannelToken<'_> {
-        self.table_push_column_channel(column_n);
+    pub fn table_column_channel(
+        &self,
+        column: impl Into<TableColumnIndex>,
+    ) -> TableColumnChannelToken<'_> {
+        self.table_push_column_channel(column);
         TableColumnChannelToken::new(self)
     }
 
@@ -1011,15 +1250,30 @@ impl Ui {
     }
 
     /// Run a closure after pushing a table column channel (auto-pop on return).
-    pub fn with_table_column_channel<R>(&self, column_n: i32, f: impl FnOnce() -> R) -> R {
-        let _token = self.table_column_channel(column_n);
+    pub fn with_table_column_channel<R>(
+        &self,
+        column: impl Into<TableColumnIndex>,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        let _token = self.table_column_channel(column);
         f()
     }
 
-    /// Open the table context menu for a given column (use -1 for current/default).
+    /// Open the table context menu for the current/default column.
     #[doc(alias = "TableOpenContextMenu")]
-    pub fn table_open_context_menu(&self, column_n: Option<i32>) {
-        unsafe { sys::igTableOpenContextMenu(column_n.unwrap_or(-1)) }
+    pub fn table_open_context_menu(&self, target: impl Into<TableContextMenuTarget>) {
+        let target = target.into();
+        let column_n = match target {
+            TableContextMenuTarget::CurrentColumn => -1,
+            TableContextMenuTarget::Column(index) => {
+                index.into_i32("Ui::table_open_context_menu()")
+            }
+            TableContextMenuTarget::Table => {
+                let table = assert_current_table("Ui::table_open_context_menu()");
+                unsafe { (*table).ColumnsCount }
+            }
+        };
+        unsafe { sys::igTableOpenContextMenu(column_n) }
     }
 }
 
@@ -1108,12 +1362,6 @@ mod tests {
             ui.table_next_row();
             assert!(ui.table_set_column_index(0));
 
-            assert!(
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _token = ui.table_column_channel(-1);
-                }))
-                .is_err()
-            );
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let _token = ui.table_column_channel(2);
@@ -1278,7 +1526,7 @@ mod tests {
     }
 
     #[test]
-    fn table_bg_color_validates_target_and_column_before_ffi() {
+    fn table_bg_color_helpers_validate_column_before_ffi() {
         let mut ctx = setup_context();
 
         let ui = ctx.frame();
@@ -1287,21 +1535,13 @@ mod tests {
             ui.table_next_row();
             assert!(ui.table_set_column_index(0));
 
+            ui.table_set_cell_bg_color_u32(0, TableColumnRef::Current);
+            ui.table_set_row_bg0_color_u32(0);
+            ui.table_set_row_bg1_color_u32(0);
+
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    ui.table_set_bg_color_u32(TableBgTarget::None, 0, -1);
-                }))
-                .is_err()
-            );
-            assert!(
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    ui.table_set_bg_color_u32(TableBgTarget::CellBg, 0, 2);
-                }))
-                .is_err()
-            );
-            assert!(
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    ui.table_set_bg_color_u32(TableBgTarget::RowBg0, 0, 0);
+                    ui.table_set_cell_bg_color_u32(0, 2);
                 }))
                 .is_err()
             );
@@ -1318,18 +1558,6 @@ mod tests {
             ui.table_setup_column("one", TableColumnFlags::ANGLED_HEADER, None, 0);
             ui.table_setup_column("two", TableColumnFlags::ANGLED_HEADER, None, 0);
 
-            assert!(
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let invalid = [TableHeaderData::new(
-                        -1,
-                        ImColor32::WHITE,
-                        ImColor32::BLACK,
-                        ImColor32::BLACK,
-                    )];
-                    ui.table_angled_headers_row_ex_with_data(0, 0.0, 0.0, &invalid);
-                }))
-                .is_err()
-            );
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let invalid = [TableHeaderData::new(
