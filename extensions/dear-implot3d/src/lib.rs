@@ -64,6 +64,11 @@ fn len_i32(len: usize) -> Option<i32> {
     i32::try_from(len).ok()
 }
 
+fn surface_count_to_i32(count: usize) -> Option<i32> {
+    let count = i32::try_from(count).ok()?;
+    (count > 0).then_some(count)
+}
+
 const IMPLOT3D_AUTO: i32 = -1;
 
 thread_local! {
@@ -1528,6 +1533,12 @@ impl<'ui> Plot3DUi<'ui> {
         debug_before_plot();
         let x_count = xs.len();
         let y_count = ys.len();
+        let Some(x_count_i32) = surface_count_to_i32(x_count) else {
+            return;
+        };
+        let Some(y_count_i32) = surface_count_to_i32(y_count) else {
+            return;
+        };
         let expected = match x_count.checked_mul(y_count) {
             Some(v) => v,
             None => return,
@@ -1558,8 +1569,8 @@ impl<'ui> Plot3DUi<'ui> {
                 xs_flat.as_ptr(),
                 ys_flat.as_ptr(),
                 zs.as_ptr(),
-                x_count as i32,
-                y_count as i32,
+                x_count_i32,
+                y_count_i32,
                 scale_min,
                 scale_max,
                 spec,
@@ -1577,8 +1588,8 @@ impl<'ui> Plot3DUi<'ui> {
         xs_flat: &[f32],
         ys_flat: &[f32],
         zs: &[f32],
-        x_count: i32,
-        y_count: i32,
+        x_count: usize,
+        y_count: usize,
         scale_min: f64,
         scale_max: f64,
         flags: Surface3DFlags,
@@ -1586,10 +1597,15 @@ impl<'ui> Plot3DUi<'ui> {
     ) {
         self.bind();
         debug_before_plot();
-        if x_count <= 0 || y_count <= 0 {
+        let Some(x_count_i32) = surface_count_to_i32(x_count) else {
             return;
-        }
-        let expected = (x_count as usize).saturating_mul(y_count as usize);
+        };
+        let Some(y_count_i32) = surface_count_to_i32(y_count) else {
+            return;
+        };
+        let Some(expected) = x_count.checked_mul(y_count) else {
+            return;
+        };
         if xs_flat.len() != expected || ys_flat.len() != expected || zs.len() != expected {
             return;
         }
@@ -1604,8 +1620,8 @@ impl<'ui> Plot3DUi<'ui> {
                 xs_flat.as_ptr(),
                 ys_flat.as_ptr(),
                 zs.as_ptr(),
-                x_count,
-                y_count,
+                x_count_i32,
+                y_count_i32,
                 scale_min,
                 scale_max,
                 spec,
@@ -2162,7 +2178,10 @@ impl<'ui> Plot3DUi<'ui> {
 
 #[cfg(test)]
 mod layout_tests {
-    use super::{Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, plot3d_spec_from};
+    use super::{
+        Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, plot3d_spec_from,
+        surface_count_to_i32,
+    };
 
     #[test]
     fn data_layout_allows_signed_sample_offsets() {
@@ -2184,6 +2203,14 @@ mod layout_tests {
     #[should_panic(expected = "requires a non-zero stride")]
     fn zero_data_stride_panics_before_ffi() {
         let _ = Plot3DDataStride::bytes(0);
+    }
+
+    #[test]
+    fn surface_count_checks_implot3d_i32_range() {
+        assert_eq!(surface_count_to_i32(1), Some(1));
+        assert_eq!(surface_count_to_i32(0), None);
+        assert_eq!(surface_count_to_i32(i32::MAX as usize), Some(i32::MAX));
+        assert_eq!(surface_count_to_i32(i32::MAX as usize + 1), None);
     }
 }
 

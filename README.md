@@ -119,6 +119,7 @@ compilable.
   no longer part of the safe API.
 - `dear-implot` heatmap row/column counts are validated before FFI; oversized `usize` counts are
   rejected instead of truncating to ImPlot's `i32` ABI.
+- `dear-implot3d` surface grid counts use `usize` and reject oversized values before FFI.
 - Extension contexts follow the same rule: safe methods bind or assert against the owning current
   ImGui/extension context, not whichever raw C context happened to be current.
 

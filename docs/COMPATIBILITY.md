@@ -103,6 +103,8 @@ Extensions
     `BinMethod` automatic methods instead of raw signed bin selectors.
   - `dear-implot` heatmap row/column counts are checked before FFI and reject oversized `usize`
     values instead of truncating to ImPlot's `i32` ABI.
+  - `dear-implot3d` surface grid counts use `usize` and reject oversized values before crossing the
+    ImPlot3D `i32` ABI.
   - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
     of a raw signed integer. Use `PlotValueOffset::new(...)` or pass `usize` directly.
   - Table freeze helpers now take `usize` frozen column/row counts instead of raw signed values.

@@ -62,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Plot3DColorElement`, `Colormap`, and `ColormapColorIndex` values instead of raw `i32`
     identifiers. Style/color/colormap push helpers return RAII tokens instead of requiring manual
     `pop_*` count calls.
+  - `dear-implot3d` surface grid counts now use `usize` and reject values outside ImPlot3D's
+    `i32` range before FFI.
   - `dear-imnodes` node, pin, and link APIs now use `NodeId`, `PinId`, and `LinkId` instead of raw
     `i32` ids.
   - `dear-imnodes` style-var helper methods now take typed `StyleVar` values instead of raw `i32`
