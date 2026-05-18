@@ -1,4 +1,4 @@
-use dear_imgui_rs::Ui;
+use dear_imgui_rs::{Id, Ui};
 use dear_imgui_sys as imgui_sys;
 use dear_imguizmo_sys as sys;
 
@@ -501,27 +501,29 @@ impl<'ui> GizmoUi<'ui> {
         self.push_id(GuizmoId::Bytes(bytes))
     }
     /// Obtain a hashed ID value following ImGuizmo's ID scheme.
-    pub fn get_id_str(&self, id: &str) -> imgui_sys::ImGuiID {
+    pub fn get_id_str(&self, id: &str) -> Id {
         self.bind();
         assert!(!id.contains('\0'), "string contained NUL");
-        dear_imgui_rs::with_scratch_txt(id, |ptr| unsafe { sys::ImGuizmo_GetID_Str(ptr) })
+        Id::from(dear_imgui_rs::with_scratch_txt(id, |ptr| unsafe {
+            sys::ImGuizmo_GetID_Str(ptr)
+        }))
     }
     /// Obtain a hashed ID value using a non-NUL-terminated byte slice (ImGuizmo `str_begin/str_end` form).
-    pub fn get_id_bytes(&self, bytes: &[u8]) -> imgui_sys::ImGuiID {
+    pub fn get_id_bytes(&self, bytes: &[u8]) -> Id {
         self.bind();
         let range = bytes.as_ptr_range();
-        unsafe {
+        Id::from(unsafe {
             sys::ImGuizmo_GetID_StrStr(
                 range.start as *const std::os::raw::c_char,
                 range.end as *const std::os::raw::c_char,
             )
-        }
+        })
     }
 
     /// Obtain a hashed ID from a pointer following ImGuizmo's ID scheme.
-    pub fn get_id_ptr<T>(&self, ptr: *const T) -> imgui_sys::ImGuiID {
+    pub fn get_id_ptr<T>(&self, ptr: *const T) -> Id {
         self.bind();
-        unsafe { sys::ImGuizmo_GetID_Ptr(ptr as *const std::ffi::c_void) }
+        Id::from(unsafe { sys::ImGuizmo_GetID_Ptr(ptr as *const std::ffi::c_void) })
     }
 
     /// Access ImGuizmo global style through a safe wrapper bound to this UI lifetime.
@@ -645,5 +647,41 @@ mod tests {
         assert!(
             message.contains("IdToken must be dropped with the currently-active ImGui context")
         );
+    }
+
+    #[test]
+    fn get_id_helpers_return_typed_imgui_ids() {
+        let _guard = test_guard();
+        let mut imgui = Context::create();
+        prepare_imgui(&mut imgui);
+
+        let ptr_value = 1234_u32;
+        {
+            let ui = imgui.frame();
+            let giz = ui.guizmo();
+
+            let str_id = giz.get_id_str("typed-id");
+            let expected_str = dear_imgui_rs::with_scratch_txt("typed-id", |ptr| unsafe {
+                sys::ImGuizmo_GetID_Str(ptr)
+            });
+            assert_eq!(str_id.raw(), expected_str);
+
+            let bytes = b"typed-id";
+            let bytes_id = giz.get_id_bytes(bytes);
+            let range = bytes.as_ptr_range();
+            let expected_bytes = unsafe {
+                sys::ImGuizmo_GetID_StrStr(
+                    range.start.cast::<std::os::raw::c_char>(),
+                    range.end.cast::<std::os::raw::c_char>(),
+                )
+            };
+            assert_eq!(bytes_id.raw(), expected_bytes);
+
+            let ptr_id = giz.get_id_ptr(&ptr_value);
+            let expected_ptr =
+                unsafe { sys::ImGuizmo_GetID_Ptr((&ptr_value as *const u32).cast()) };
+            assert_eq!(ptr_id.raw(), expected_ptr);
+        }
+        let _ = imgui.render();
     }
 }

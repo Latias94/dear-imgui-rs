@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `DockNode::depth()` now returns `usize` instead of a raw signed value.
   - Docking window class IDs now use `Id`, `Option<Id>`, and `WindowClassParentViewport` instead
     of raw `ImGuiID` sentinels.
+  - `Ui::push_focus_scope` now takes `Id` instead of raw `ImGuiID`.
   - Logging helpers now take `LogAutoOpenDepth` instead of raw `-1` auto-open-depth sentinels.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
@@ -104,6 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-test-engine::ResultSummary` count fields now use `usize` instead of raw signed
     values.
   - Deprecated `dear-imguizmo::GizmoUi::set_id(i32)` was removed; use RAII `push_id(...)` instead.
+  - `dear-imguizmo::GizmoUi::get_id_*` helpers now return `dear_imgui_rs::Id` instead of raw
+    `ImGuiID`.
 - Backends and utilities
   - `dear-app::DearAppError`, `dear_imgui_wgpu::RendererError`,
     `dear_imgui_glow::{InitError, RenderError}`, and `dear_imgui_ash::RendererError` are now

@@ -464,8 +464,8 @@ impl Ui {
     ///
     /// Returns a `FocusScopeToken` which will pop the focus scope when dropped.
     #[doc(alias = "PushFocusScope")]
-    pub fn push_focus_scope(&self, id: sys::ImGuiID) -> FocusScopeToken<'_> {
-        unsafe { sys::igPushFocusScope(id) };
+    pub fn push_focus_scope(&self, id: crate::Id) -> FocusScopeToken<'_> {
+        unsafe { sys::igPushFocusScope(id.raw()) };
         FocusScopeToken::new(self)
     }
 }
