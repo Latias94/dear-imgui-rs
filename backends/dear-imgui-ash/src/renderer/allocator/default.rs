@@ -52,16 +52,34 @@ impl Allocate for Allocator {
         let buffer = unsafe { device.create_buffer(&buffer_info, None)? };
 
         let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
-        let mem_type = self.find_memory_type(
+        let mem_type = match self.find_memory_type(
             mem_requirements,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
+        ) {
+            Ok(mem_type) => mem_type,
+            Err(err) => {
+                unsafe { device.destroy_buffer(buffer, None) };
+                return Err(err);
+            }
+        };
 
         let alloc_info = vk::MemoryAllocateInfo::default()
             .allocation_size(mem_requirements.size)
             .memory_type_index(mem_type);
-        let memory = unsafe { device.allocate_memory(&alloc_info, None)? };
-        unsafe { device.bind_buffer_memory(buffer, memory, 0)? };
+        let memory = match unsafe { device.allocate_memory(&alloc_info, None) } {
+            Ok(memory) => memory,
+            Err(err) => {
+                unsafe { device.destroy_buffer(buffer, None) };
+                return Err(err.into());
+            }
+        };
+        if let Err(err) = unsafe { device.bind_buffer_memory(buffer, memory, 0) } {
+            unsafe {
+                device.free_memory(memory, None);
+                device.destroy_buffer(buffer, None);
+            }
+            return Err(err.into());
+        }
 
         Ok((buffer, memory))
     }
@@ -95,16 +113,31 @@ impl Allocate for Allocator {
         let image = unsafe { device.create_image(&image_info, None)? };
         let mem_requirements = unsafe { device.get_image_memory_requirements(image) };
         let mem_type_index =
-            self.find_memory_type(mem_requirements, vk::MemoryPropertyFlags::DEVICE_LOCAL)?;
+            match self.find_memory_type(mem_requirements, vk::MemoryPropertyFlags::DEVICE_LOCAL) {
+                Ok(mem_type_index) => mem_type_index,
+                Err(err) => {
+                    unsafe { device.destroy_image(image, None) };
+                    return Err(err);
+                }
+            };
 
         let alloc_info = vk::MemoryAllocateInfo::default()
             .allocation_size(mem_requirements.size)
             .memory_type_index(mem_type_index);
-        let memory = unsafe {
-            let mem = device.allocate_memory(&alloc_info, None)?;
-            device.bind_image_memory(image, mem, 0)?;
-            mem
+        let memory = match unsafe { device.allocate_memory(&alloc_info, None) } {
+            Ok(memory) => memory,
+            Err(err) => {
+                unsafe { device.destroy_image(image, None) };
+                return Err(err.into());
+            }
         };
+        if let Err(err) = unsafe { device.bind_image_memory(image, memory, 0) } {
+            unsafe {
+                device.free_memory(memory, None);
+                device.destroy_image(image, None);
+            }
+            return Err(err.into());
+        }
 
         Ok((image, memory))
     }

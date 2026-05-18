@@ -102,6 +102,10 @@ Extensions
     `dear-imgui-glow` now destroy platform windows before uninstalling renderer callbacks. This lets
     Dear ImGui call renderer destroy callbacks while renderer-owned per-viewport data is still
     reachable.
+  - `dear-imgui-ash` Winit and SDL3 multi-viewport swapchain recreation keeps the old swapchain
+    resources alive until the replacement swapchain, image views, and framebuffers are fully
+    created. Failed resize or present recovery no longer leaves the secondary viewport in a
+    partially destroyed state.
 - Backend texture feedback changes on trunk:
   - `dear-imgui-glow::GlowRenderer::update_texture(_with_context)` now updates registered renderer
     texture-map entries by their stored OpenGL texture handle instead of treating the public
@@ -123,6 +127,9 @@ Extensions
   - `dear-imgui-ash` now defers draw-data texture `TexID`/`OK` feedback until Vulkan upload command
     submission succeeds, so failed uploads no longer leave ImGui pointing at an unregistered texture
     id.
+  - `dear-imgui-ash` now keeps existing textures and mesh buffers until Vulkan replacement resources
+    are created and uploaded successfully, and cleans up partially-created Vulkan resources on
+    allocation or upload setup failure.
 
 ## History
 

@@ -129,7 +129,14 @@ pub fn create_vulkan_pipeline(
     let vertex_module = unsafe { device.create_shader_module(&vertex_create_info, None)? };
 
     let fragment_create_info = vk::ShaderModuleCreateInfo::default().code(FRAG_SPV);
-    let fragment_module = unsafe { device.create_shader_module(&fragment_create_info, None)? };
+    let fragment_module = match unsafe { device.create_shader_module(&fragment_create_info, None) }
+    {
+        Ok(fragment_module) => fragment_module,
+        Err(err) => {
+            unsafe { device.destroy_shader_module(vertex_module, None) };
+            return Err(err.into());
+        }
+    };
 
     let shader_states_infos = [
         vk::PipelineShaderStageCreateInfo::default()
@@ -244,14 +251,35 @@ pub fn create_vulkan_pipeline(
     #[cfg(feature = "dynamic-rendering")]
     let pipeline_info = pipeline_info.push_next(&mut rendering_info);
 
-    let pipeline = unsafe {
-        device
-            .create_graphics_pipelines(
-                vk::PipelineCache::null(),
-                std::slice::from_ref(&pipeline_info),
-                None,
-            )
-            .map_err(|e| e.1)?[0]
+    let pipeline = match unsafe {
+        device.create_graphics_pipelines(
+            vk::PipelineCache::null(),
+            std::slice::from_ref(&pipeline_info),
+            None,
+        )
+    } {
+        Ok(mut pipelines) => match pipelines.pop() {
+            Some(pipeline) => pipeline,
+            None => {
+                unsafe {
+                    device.destroy_shader_module(vertex_module, None);
+                    device.destroy_shader_module(fragment_module, None);
+                }
+                return Err(RendererError::Init(
+                    "Vulkan pipeline creation returned no pipelines".into(),
+                ));
+            }
+        },
+        Err((pipelines, err)) => {
+            for pipeline in pipelines {
+                unsafe { device.destroy_pipeline(pipeline, None) };
+            }
+            unsafe {
+                device.destroy_shader_module(vertex_module, None);
+                device.destroy_shader_module(fragment_module, None);
+            }
+            return Err(err.into());
+        }
     };
 
     unsafe {
@@ -291,7 +319,10 @@ pub fn create_vulkan_descriptor_set(
         let allocate_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(descriptor_pool)
             .set_layouts(&set_layouts);
-        unsafe { device.allocate_descriptor_sets(&allocate_info)?[0] }
+        let mut sets = unsafe { device.allocate_descriptor_sets(&allocate_info)? };
+        sets.pop().ok_or_else(|| {
+            RendererError::Init("Vulkan descriptor set allocation returned no sets".into())
+        })?
     };
 
     unsafe {
@@ -319,7 +350,10 @@ pub(crate) fn create_and_fill_buffer<T: Copy>(
 ) -> RendererResult<(vk::Buffer, Memory)> {
     let size = std::mem::size_of_val(data);
     let (buffer, mut memory) = allocator.create_buffer(device, size, usage)?;
-    allocator.update_buffer(device, &mut memory, data)?;
+    if let Err(err) = allocator.update_buffer(device, &mut memory, data) {
+        let _ = allocator.destroy_buffer(device, buffer, memory);
+        return Err(err);
+    }
     Ok((buffer, memory))
 }
 
@@ -340,17 +374,37 @@ pub(crate) fn execute_one_time_commands<R, F: FnOnce(vk::CommandBuffer) -> R>(
 
     let begin_info =
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-    unsafe { device.begin_command_buffer(command_buffer, &begin_info)? };
+    if let Err(err) = unsafe { device.begin_command_buffer(command_buffer, &begin_info) } {
+        unsafe { device.free_command_buffers(pool, &command_buffers) };
+        return Err(err.into());
+    }
 
     let executor_result = executor(command_buffer);
 
-    unsafe { device.end_command_buffer(command_buffer)? };
+    if let Err(err) = unsafe { device.end_command_buffer(command_buffer) } {
+        unsafe { device.free_command_buffers(pool, &command_buffers) };
+        return Err(err.into());
+    }
 
     let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
     unsafe {
-        let fence = device.create_fence(&vk::FenceCreateInfo::default(), None)?;
-        device.queue_submit(queue, &[submit_info], fence)?;
-        device.wait_for_fences(&[fence], true, u64::MAX)?;
+        let fence = match device.create_fence(&vk::FenceCreateInfo::default(), None) {
+            Ok(fence) => fence,
+            Err(err) => {
+                device.free_command_buffers(pool, &command_buffers);
+                return Err(err.into());
+            }
+        };
+        if let Err(err) = device.queue_submit(queue, &[submit_info], fence) {
+            device.destroy_fence(fence, None);
+            device.free_command_buffers(pool, &command_buffers);
+            return Err(err.into());
+        }
+        if let Err(err) = device.wait_for_fences(&[fence], true, u64::MAX) {
+            device.destroy_fence(fence, None);
+            device.free_command_buffers(pool, &command_buffers);
+            return Err(err.into());
+        }
         device.destroy_fence(fence, None);
         device.free_command_buffers(pool, &command_buffers);
     }
@@ -375,8 +429,6 @@ impl Texture {
         format: vk::Format,
         pixels_rgba: &[u8],
     ) -> RendererResult<(Self, vk::Buffer, Memory)> {
-        let (image, image_mem) = allocator.create_image(device, width, height, format)?;
-
         let expected = (width as usize)
             .checked_mul(height as usize)
             .and_then(|v| v.checked_mul(4))
@@ -387,12 +439,20 @@ impl Texture {
             ));
         }
 
-        let (buffer, buffer_mem) = create_and_fill_buffer(
+        let (image, image_mem) = allocator.create_image(device, width, height, format)?;
+
+        let (buffer, buffer_mem) = match create_and_fill_buffer(
             device,
             allocator,
             &pixels_rgba[..expected],
             vk::BufferUsageFlags::TRANSFER_SRC,
-        )?;
+        ) {
+            Ok(staging) => staging,
+            Err(err) => {
+                let _ = allocator.destroy_image(device, image, image_mem);
+                return Err(err);
+            }
+        };
 
         let image_view = {
             let create_info = vk::ImageViewCreateInfo::default()
@@ -406,7 +466,14 @@ impl Texture {
                     base_array_layer: 0,
                     layer_count: 1,
                 });
-            unsafe { device.create_image_view(&create_info, None)? }
+            match unsafe { device.create_image_view(&create_info, None) } {
+                Ok(image_view) => image_view,
+                Err(err) => {
+                    let _ = allocator.destroy_buffer(device, buffer, buffer_mem);
+                    let _ = allocator.destroy_image(device, image, image_mem);
+                    return Err(err.into());
+                }
+            }
         };
 
         let sampler = {
@@ -426,7 +493,15 @@ impl Texture {
                 .mip_lod_bias(0.0)
                 .min_lod(0.0)
                 .max_lod(1.0);
-            unsafe { device.create_sampler(&sampler_info, None)? }
+            match unsafe { device.create_sampler(&sampler_info, None) } {
+                Ok(sampler) => sampler,
+                Err(err) => {
+                    unsafe { device.destroy_image_view(image_view, None) };
+                    let _ = allocator.destroy_buffer(device, buffer, buffer_mem);
+                    let _ = allocator.destroy_image(device, image, image_mem);
+                    return Err(err.into());
+                }
+            }
         };
 
         Ok((
@@ -439,6 +514,14 @@ impl Texture {
             buffer,
             buffer_mem,
         ))
+    }
+
+    pub fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
+        unsafe {
+            device.destroy_sampler(self.sampler, None);
+            device.destroy_image_view(self.image_view, None);
+        }
+        allocator.destroy_image(device, self.image, self.image_mem)
     }
 
     pub fn upload(

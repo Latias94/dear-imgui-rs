@@ -222,6 +222,65 @@ impl TextureWriteback {
     }
 }
 
+struct PendingTextureCreate {
+    id: u64,
+    texture: Texture,
+    descriptor_set: vk::DescriptorSet,
+    staging_buffer: vk::Buffer,
+    staging_mem: Option<Memory>,
+    w: u32,
+    h: u32,
+}
+
+impl PendingTextureCreate {
+    fn into_vulkan_texture(mut self) -> (u64, VulkanTexture, vk::Buffer, Memory) {
+        let staging_mem = self
+            .staging_mem
+            .take()
+            .expect("pending create staging memory must be consumed exactly once");
+        let Texture {
+            image,
+            image_mem,
+            image_view,
+            sampler,
+        } = self.texture;
+        (
+            self.id,
+            VulkanTexture {
+                image,
+                image_mem,
+                image_view,
+                sampler,
+                descriptor_set: self.descriptor_set,
+                width: self.w,
+                height: self.h,
+            },
+            self.staging_buffer,
+            staging_mem,
+        )
+    }
+}
+
+struct PendingTextureUpdate {
+    image: vk::Image,
+    staging_buffer: vk::Buffer,
+    staging_mem: Option<Memory>,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+impl PendingTextureUpdate {
+    fn into_staging(mut self) -> (vk::Buffer, Memory) {
+        let staging_mem = self
+            .staging_mem
+            .take()
+            .expect("pending update staging memory must be consumed exactly once");
+        (self.staging_buffer, staging_mem)
+    }
+}
+
 /// Vulkan renderer for Dear ImGui using `ash`.
 ///
 /// It records rendering commands to the provided command buffer and does not submit.
@@ -383,8 +442,14 @@ impl AshRenderer {
         }
 
         let descriptor_set_layout = create_vulkan_descriptor_set_layout(&device)?;
-        let pipeline_layout = create_vulkan_pipeline_layout(&device, descriptor_set_layout)?;
-        let pipeline = create_vulkan_pipeline(
+        let pipeline_layout = match create_vulkan_pipeline_layout(&device, descriptor_set_layout) {
+            Ok(pipeline_layout) => pipeline_layout,
+            Err(err) => {
+                unsafe { device.destroy_descriptor_set_layout(descriptor_set_layout, None) };
+                return Err(err);
+            }
+        };
+        let pipeline = match create_vulkan_pipeline(
             &device,
             pipeline_layout,
             #[cfg(not(feature = "dynamic-rendering"))]
@@ -392,8 +457,27 @@ impl AshRenderer {
             #[cfg(feature = "dynamic-rendering")]
             dynamic_rendering,
             options,
-        )?;
-        let descriptor_pool = create_vulkan_descriptor_pool(&device, options.max_textures)?;
+        ) {
+            Ok(pipeline) => pipeline,
+            Err(err) => {
+                unsafe {
+                    device.destroy_pipeline_layout(pipeline_layout, None);
+                    device.destroy_descriptor_set_layout(descriptor_set_layout, None);
+                }
+                return Err(err);
+            }
+        };
+        let descriptor_pool = match create_vulkan_descriptor_pool(&device, options.max_textures) {
+            Ok(descriptor_pool) => descriptor_pool,
+            Err(err) => {
+                unsafe {
+                    device.destroy_pipeline(pipeline, None);
+                    device.destroy_pipeline_layout(pipeline_layout, None);
+                    device.destroy_descriptor_set_layout(descriptor_set_layout, None);
+                }
+                return Err(err);
+            }
+        };
 
         let mut renderer = Self {
             device,
@@ -416,8 +500,8 @@ impl AshRenderer {
             viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
         };
 
-        renderer.configure_imgui_context(imgui);
         renderer.default_texture_id = renderer.create_default_texture()?;
+        renderer.configure_imgui_context(imgui);
         Ok(renderer)
     }
 
@@ -572,6 +656,10 @@ impl AshRenderer {
                 } else {
                     self.textures.allocate_id()
                 };
+                let replacing_existing = self.textures.textures.contains_key(&id);
+                if replacing_existing {
+                    self.wait_for_pending_uploads()?;
+                }
 
                 let (w, h) = (texture_data.width() as u32, texture_data.height() as u32);
                 if w == 0 || h == 0 {
@@ -590,17 +678,44 @@ impl AshRenderer {
                     &pixels,
                 )?;
 
-                let descriptor_set = create_vulkan_descriptor_set(
+                let descriptor_set = match create_vulkan_descriptor_set(
                     &self.device,
                     self.descriptor_set_layout,
                     self.descriptor_pool,
                     texture.image_view,
                     texture.sampler,
-                )?;
+                ) {
+                    Ok(descriptor_set) => descriptor_set,
+                    Err(err) => {
+                        let _ = self.allocator.destroy_buffer(
+                            &self.device,
+                            staging_buffer,
+                            staging_mem,
+                        );
+                        let _ = texture.destroy(&self.device, &mut self.allocator);
+                        return Err(err);
+                    }
+                };
 
-                let (command_buffer, fence) = self.submit_upload_commands(|cmd| {
+                let (command_buffer, fence) = match self.submit_upload_commands(|cmd| {
                     texture.upload(&self.device, cmd, staging_buffer, w, h);
-                })?;
+                }) {
+                    Ok(upload) => upload,
+                    Err(err) => {
+                        unsafe {
+                            let _ = self
+                                .device
+                                .free_descriptor_sets(self.descriptor_pool, &[descriptor_set]);
+                        }
+                        let _ = self.allocator.destroy_buffer(
+                            &self.device,
+                            staging_buffer,
+                            staging_mem,
+                        );
+                        let _ = texture.destroy(&self.device, &mut self.allocator);
+                        return Err(err);
+                    }
+                };
 
                 self.in_flight_uploads.push_back(InFlightUpload {
                     fence,
@@ -656,7 +771,7 @@ impl AshRenderer {
                     vk::BufferUsageFlags::TRANSFER_SRC,
                 )?;
 
-                let (command_buffer, fence) = self.submit_upload_commands(|cmd| {
+                let (command_buffer, fence) = match self.submit_upload_commands(|cmd| {
                     upload_rgba_subrect_to_image(
                         &self.device,
                         cmd,
@@ -667,7 +782,17 @@ impl AshRenderer {
                         w,
                         h,
                     );
-                })?;
+                }) {
+                    Ok(upload) => upload,
+                    Err(err) => {
+                        let _ = self.allocator.destroy_buffer(
+                            &self.device,
+                            staging_buffer,
+                            staging_mem,
+                        );
+                        return Err(err);
+                    }
+                };
 
                 self.in_flight_uploads.push_back(InFlightUpload {
                     fence,
@@ -679,6 +804,9 @@ impl AshRenderer {
             }
             TextureStatus::WantDestroy => {
                 let id = texture_data.tex_id().id();
+                if self.textures.textures.contains_key(&id) {
+                    self.wait_for_pending_uploads()?;
+                }
                 if let Some(tex) = self.textures.textures.remove(&id) {
                     tex.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
                 }
@@ -700,6 +828,10 @@ impl AshRenderer {
         } else {
             self.textures.allocate_id()
         };
+        let replacing_existing = self.textures.textures.contains_key(&id);
+        if replacing_existing {
+            self.wait_for_pending_uploads()?;
+        }
 
         let (w, h) = (texture_data.width() as u32, texture_data.height() as u32);
         if w == 0 || h == 0 {
@@ -718,17 +850,40 @@ impl AshRenderer {
             &pixels,
         )?;
 
-        let descriptor_set = create_vulkan_descriptor_set(
+        let descriptor_set = match create_vulkan_descriptor_set(
             &self.device,
             self.descriptor_set_layout,
             self.descriptor_pool,
             texture.image_view,
             texture.sampler,
-        )?;
+        ) {
+            Ok(descriptor_set) => descriptor_set,
+            Err(err) => {
+                let _ = self
+                    .allocator
+                    .destroy_buffer(&self.device, staging_buffer, staging_mem);
+                let _ = texture.destroy(&self.device, &mut self.allocator);
+                return Err(err);
+            }
+        };
 
-        let (command_buffer, fence) = self.submit_upload_commands(|cmd| {
+        let (command_buffer, fence) = match self.submit_upload_commands(|cmd| {
             texture.upload(&self.device, cmd, staging_buffer, w, h);
-        })?;
+        }) {
+            Ok(upload) => upload,
+            Err(err) => {
+                unsafe {
+                    let _ = self
+                        .device
+                        .free_descriptor_sets(self.descriptor_pool, &[descriptor_set]);
+                }
+                let _ = self
+                    .allocator
+                    .destroy_buffer(&self.device, staging_buffer, staging_mem);
+                let _ = texture.destroy(&self.device, &mut self.allocator);
+                return Err(err);
+            }
+        };
 
         self.in_flight_uploads.push_back(InFlightUpload {
             fence,
@@ -820,7 +975,7 @@ impl AshRenderer {
         #[cfg(not(feature = "dynamic-rendering"))]
         let render_pass = create_viewport_render_pass(&self.device, format)?;
 
-        let pipeline = create_vulkan_pipeline(
+        let pipeline = match create_vulkan_pipeline(
             &self.device,
             self.pipeline_layout,
             #[cfg(not(feature = "dynamic-rendering"))]
@@ -831,7 +986,16 @@ impl AshRenderer {
                 depth_attachment_format: None,
             },
             options,
-        )?;
+        ) {
+            Ok(pipeline) => pipeline,
+            Err(err) => {
+                #[cfg(not(feature = "dynamic-rendering"))]
+                unsafe {
+                    self.device.destroy_render_pass(render_pass, None);
+                }
+                return Err(err);
+            }
+        };
 
         let vp = ViewportPipeline {
             pipeline,
@@ -858,28 +1022,89 @@ impl AshRenderer {
         unsafe {
             let begin_info = vk::CommandBufferBeginInfo::default()
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-            self.device
-                .begin_command_buffer(command_buffer, &begin_info)?;
+            if let Err(err) = self
+                .device
+                .begin_command_buffer(command_buffer, &begin_info)
+            {
+                self.device
+                    .free_command_buffers(self.command_pool, &[command_buffer]);
+                return Err(err.into());
+            }
         }
 
         record(command_buffer);
 
         unsafe {
-            self.device.end_command_buffer(command_buffer)?;
+            if let Err(err) = self.device.end_command_buffer(command_buffer) {
+                self.device
+                    .free_command_buffers(self.command_pool, &[command_buffer]);
+                return Err(err.into());
+            }
         }
 
         let fence = unsafe {
-            self.device
-                .create_fence(&vk::FenceCreateInfo::default(), None)?
+            match self
+                .device
+                .create_fence(&vk::FenceCreateInfo::default(), None)
+            {
+                Ok(fence) => fence,
+                Err(err) => {
+                    self.device
+                        .free_command_buffers(self.command_pool, &[command_buffer]);
+                    return Err(err.into());
+                }
+            }
         };
         let submit_info =
             vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&command_buffer));
         unsafe {
-            self.device
-                .queue_submit(self.queue, std::slice::from_ref(&submit_info), fence)?;
+            if let Err(err) =
+                self.device
+                    .queue_submit(self.queue, std::slice::from_ref(&submit_info), fence)
+            {
+                self.device.destroy_fence(fence, None);
+                self.device
+                    .free_command_buffers(self.command_pool, &[command_buffer]);
+                return Err(err.into());
+            }
         }
 
         Ok((command_buffer, fence))
+    }
+
+    fn discard_pending_texture_create(&mut self, mut pending: PendingTextureCreate) {
+        unsafe {
+            let _ = self
+                .device
+                .free_descriptor_sets(self.descriptor_pool, &[pending.descriptor_set]);
+        }
+        if let Some(staging_mem) = pending.staging_mem.take() {
+            let _ =
+                self.allocator
+                    .destroy_buffer(&self.device, pending.staging_buffer, staging_mem);
+        }
+        let _ = pending.texture.destroy(&self.device, &mut self.allocator);
+    }
+
+    fn discard_pending_texture_update(&mut self, mut pending: PendingTextureUpdate) {
+        if let Some(staging_mem) = pending.staging_mem.take() {
+            let _ =
+                self.allocator
+                    .destroy_buffer(&self.device, pending.staging_buffer, staging_mem);
+        }
+    }
+
+    fn discard_pending_texture_work(
+        &mut self,
+        creates: Vec<PendingTextureCreate>,
+        updates: Vec<PendingTextureUpdate>,
+    ) {
+        for create in creates {
+            self.discard_pending_texture_create(create);
+        }
+        for update in updates {
+            self.discard_pending_texture_update(update);
+        }
     }
 
     fn reap_completed_uploads(&mut self) -> RendererResult<()> {
@@ -914,6 +1139,16 @@ impl AshRenderer {
             }
         }
         Ok(())
+    }
+
+    fn wait_for_pending_uploads(&mut self) -> RendererResult<()> {
+        for upload in &self.in_flight_uploads {
+            unsafe {
+                self.device
+                    .wait_for_fences(&[upload.fence], true, u64::MAX)?;
+            }
+        }
+        self.reap_all_uploads()
     }
 
     /// Record draw commands into `command_buffer`.
@@ -994,20 +1229,39 @@ impl AshRenderer {
             &pixels,
         )?;
 
-        execute_one_time_commands(&self.device, self.queue, self.command_pool, |cmd| {
-            texture.upload(&self.device, cmd, staging_buffer, 1, 1);
-        })?;
+        if let Err(err) =
+            execute_one_time_commands(&self.device, self.queue, self.command_pool, |cmd| {
+                texture.upload(&self.device, cmd, staging_buffer, 1, 1);
+            })
+        {
+            let _ = self
+                .allocator
+                .destroy_buffer(&self.device, staging_buffer, staging_mem);
+            let _ = texture.destroy(&self.device, &mut self.allocator);
+            return Err(err);
+        }
 
-        self.allocator
-            .destroy_buffer(&self.device, staging_buffer, staging_mem)?;
+        if let Err(err) = self
+            .allocator
+            .destroy_buffer(&self.device, staging_buffer, staging_mem)
+        {
+            let _ = texture.destroy(&self.device, &mut self.allocator);
+            return Err(err);
+        }
 
-        let descriptor_set = create_vulkan_descriptor_set(
+        let descriptor_set = match create_vulkan_descriptor_set(
             &self.device,
             self.descriptor_set_layout,
             self.descriptor_pool,
             texture.image_view,
             texture.sampler,
-        )?;
+        ) {
+            Ok(descriptor_set) => descriptor_set,
+            Err(err) => {
+                let _ = texture.destroy(&self.device, &mut self.allocator);
+                return Err(err);
+            }
+        };
 
         self.textures.textures.insert(
             texture_id,
@@ -1029,28 +1283,8 @@ impl AshRenderer {
         &mut self,
         draw_data: &mut dear_imgui_rs::render::DrawData,
     ) -> RendererResult<()> {
-        struct PendingCreate {
-            id: u64,
-            texture: Texture,
-            descriptor_set: vk::DescriptorSet,
-            staging_buffer: vk::Buffer,
-            staging_mem: Option<Memory>,
-            w: u32,
-            h: u32,
-        }
-
-        struct PendingUpdate {
-            image: vk::Image,
-            staging_buffer: vk::Buffer,
-            staging_mem: Option<Memory>,
-            x: u32,
-            y: u32,
-            w: u32,
-            h: u32,
-        }
-
-        let mut creates: Vec<PendingCreate> = Vec::new();
-        let mut updates: Vec<PendingUpdate> = Vec::new();
+        let mut creates: Vec<PendingTextureCreate> = Vec::new();
+        let mut updates: Vec<PendingTextureUpdate> = Vec::new();
         let mut writebacks: Vec<TextureWriteback> = Vec::new();
 
         let mut textures = draw_data.textures_mut();
@@ -1067,6 +1301,10 @@ impl AshRenderer {
                 } else {
                     internal_id
                 };
+                let replacing_existing = self.textures.textures.contains_key(&id);
+                if replacing_existing {
+                    self.wait_for_pending_uploads()?;
+                }
 
                 let (w, h) = (td.width() as u32, td.height() as u32);
                 if w == 0 || h == 0 {
@@ -1076,24 +1314,42 @@ impl AshRenderer {
                     continue;
                 };
 
-                let (texture, staging_buffer, staging_mem) = Texture::create(
+                let (texture, staging_buffer, staging_mem) = match Texture::create(
                     &self.device,
                     &mut self.allocator,
                     w,
                     h,
                     self.options.texture_format,
                     &pixels,
-                )?;
+                ) {
+                    Ok(texture) => texture,
+                    Err(err) => {
+                        self.discard_pending_texture_work(creates, updates);
+                        return Err(err);
+                    }
+                };
 
-                let descriptor_set = create_vulkan_descriptor_set(
+                let descriptor_set = match create_vulkan_descriptor_set(
                     &self.device,
                     self.descriptor_set_layout,
                     self.descriptor_pool,
                     texture.image_view,
                     texture.sampler,
-                )?;
+                ) {
+                    Ok(descriptor_set) => descriptor_set,
+                    Err(err) => {
+                        let _ = self.allocator.destroy_buffer(
+                            &self.device,
+                            staging_buffer,
+                            staging_mem,
+                        );
+                        let _ = texture.destroy(&self.device, &mut self.allocator);
+                        self.discard_pending_texture_work(creates, updates);
+                        return Err(err);
+                    }
+                };
 
-                creates.push(PendingCreate {
+                creates.push(PendingTextureCreate {
                     id,
                     texture,
                     descriptor_set,
@@ -1124,7 +1380,7 @@ impl AshRenderer {
                         continue;
                     };
 
-                    let (tw, th) = (existing.width, existing.height);
+                    let (tw, th, image) = (existing.width, existing.height, existing.image);
                     if tw == 0 || th == 0 {
                         td.set_status(TextureStatus::OK);
                         continue;
@@ -1141,15 +1397,21 @@ impl AshRenderer {
                         td.set_status(TextureStatus::OK);
                         continue;
                     };
-                    let (staging_buffer, staging_mem) = create_and_fill_buffer(
+                    let (staging_buffer, staging_mem) = match create_and_fill_buffer(
                         &self.device,
                         &mut self.allocator,
                         &pixels,
                         vk::BufferUsageFlags::TRANSFER_SRC,
-                    )?;
+                    ) {
+                        Ok(staging) => staging,
+                        Err(err) => {
+                            self.discard_pending_texture_work(creates, updates);
+                            return Err(err);
+                        }
+                    };
 
-                    updates.push(PendingUpdate {
-                        image: existing.image,
+                    updates.push(PendingTextureUpdate {
+                        image,
                         staging_buffer,
                         staging_mem: Some(staging_mem),
                         x,
@@ -1166,6 +1428,12 @@ impl AshRenderer {
                 }
                 TextureStatus::WantDestroy => {
                     let id = internal_id;
+                    if self.textures.textures.contains_key(&id) {
+                        if let Err(err) = self.wait_for_pending_uploads() {
+                            self.discard_pending_texture_work(creates, updates);
+                            return Err(err);
+                        }
+                    }
                     if let Some(tex) = self.textures.textures.remove(&id) {
                         tex.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
                     }
@@ -1180,7 +1448,7 @@ impl AshRenderer {
         drop(textures);
 
         if !creates.is_empty() || !updates.is_empty() {
-            let (command_buffer, fence) = self.submit_upload_commands(|cmd| {
+            let (command_buffer, fence) = match self.submit_upload_commands(|cmd| {
                 for c in &creates {
                     c.texture
                         .upload(&self.device, cmd, c.staging_buffer, c.w, c.h);
@@ -1197,23 +1465,24 @@ impl AshRenderer {
                         u.h,
                     );
                 }
-            })?;
+            }) {
+                Ok(upload) => upload,
+                Err(err) => {
+                    self.discard_pending_texture_work(creates, updates);
+                    return Err(err);
+                }
+            };
 
             let mut staging: Vec<(vk::Buffer, Memory)> =
                 Vec::with_capacity(creates.len() + updates.len());
-            for c in &mut creates {
-                let staging_mem = c
-                    .staging_mem
-                    .take()
-                    .expect("pending create staging memory must be consumed exactly once");
-                staging.push((c.staging_buffer, staging_mem));
+            let mut created_textures: Vec<(u64, VulkanTexture)> = Vec::with_capacity(creates.len());
+            for c in creates {
+                let (id, texture, staging_buffer, staging_mem) = c.into_vulkan_texture();
+                staging.push((staging_buffer, staging_mem));
+                created_textures.push((id, texture));
             }
-            for u in &mut updates {
-                let staging_mem = u
-                    .staging_mem
-                    .take()
-                    .expect("pending update staging memory must be consumed exactly once");
-                staging.push((u.staging_buffer, staging_mem));
+            for u in updates {
+                staging.push(u.into_staging());
             }
 
             self.in_flight_uploads.push_back(InFlightUpload {
@@ -1221,25 +1490,13 @@ impl AshRenderer {
                 command_buffer,
                 staging,
             });
-        }
 
-        for c in creates {
-            if let Some(old) = self.textures.textures.remove(&c.id) {
-                old.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+            for (id, texture) in created_textures {
+                if let Some(old) = self.textures.textures.remove(&id) {
+                    old.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+                }
+                self.textures.textures.insert(id, texture);
             }
-
-            self.textures.textures.insert(
-                c.id,
-                VulkanTexture {
-                    image: c.texture.image,
-                    image_mem: c.texture.image_mem,
-                    image_view: c.texture.image_view,
-                    sampler: c.texture.sampler,
-                    descriptor_set: c.descriptor_set,
-                    width: c.w,
-                    height: c.h,
-                },
-            );
         }
 
         for writeback in writebacks {
@@ -1357,47 +1614,68 @@ impl Mesh {
         draw_data: &dear_imgui_rs::render::DrawData,
     ) -> RendererResult<()> {
         let vertices = create_vertices(draw_data);
-        if vertices.len() > self.vertex_capacity {
-            if self.vertices != vk::Buffer::null() {
-                if let Some(mem) = self.vertices_mem.take() {
-                    allocator.destroy_buffer(device, self.vertices, mem)?;
-                }
-            }
-            let size = vertices
-                .len()
-                .checked_mul(std::mem::size_of::<dear_imgui_rs::render::DrawVert>())
-                .ok_or_else(|| RendererError::Allocator("vertex buffer size overflow".into()))?;
-            let (buffer, mem) =
-                allocator.create_buffer(device, size, vk::BufferUsageFlags::VERTEX_BUFFER)?;
-            self.vertices = buffer;
-            self.vertices_mem = Some(mem);
-            self.vertex_capacity = vertices.len();
-        }
-        if let Some(mem) = self.vertices_mem.as_mut() {
-            allocator.update_buffer(device, mem, &vertices)?;
-        }
+        Self::update_gpu_buffer(
+            device,
+            allocator,
+            &mut self.vertices,
+            &mut self.vertices_mem,
+            &mut self.vertex_capacity,
+            &vertices,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            "vertex buffer size overflow",
+        )?;
 
         let indices = create_indices(draw_data);
-        if indices.len() > self.index_capacity {
-            if self.indices != vk::Buffer::null() {
-                if let Some(mem) = self.indices_mem.take() {
-                    allocator.destroy_buffer(device, self.indices, mem)?;
-                }
-            }
-            let size = indices
+        Self::update_gpu_buffer(
+            device,
+            allocator,
+            &mut self.indices,
+            &mut self.indices_mem,
+            &mut self.index_capacity,
+            &indices,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            "index buffer size overflow",
+        )?;
+
+        Ok(())
+    }
+
+    fn update_gpu_buffer<T: Copy>(
+        device: &Device,
+        allocator: &mut Allocator,
+        buffer: &mut vk::Buffer,
+        memory: &mut Option<Memory>,
+        capacity: &mut usize,
+        data: &[T],
+        usage: vk::BufferUsageFlags,
+        overflow_message: &'static str,
+    ) -> RendererResult<()> {
+        if data.len() > *capacity {
+            let size = data
                 .len()
-                .checked_mul(std::mem::size_of::<dear_imgui_rs::render::DrawIdx>())
-                .ok_or_else(|| RendererError::Allocator("index buffer size overflow".into()))?;
-            let (buffer, mem) =
-                allocator.create_buffer(device, size, vk::BufferUsageFlags::INDEX_BUFFER)?;
-            self.indices = buffer;
-            self.indices_mem = Some(mem);
-            self.index_capacity = indices.len();
-        }
-        if let Some(mem) = self.indices_mem.as_mut() {
-            allocator.update_buffer(device, mem, &indices)?;
+                .checked_mul(std::mem::size_of::<T>())
+                .ok_or_else(|| RendererError::Allocator(overflow_message.into()))?;
+            let (new_buffer, mut new_mem) = allocator.create_buffer(device, size, usage)?;
+            if let Err(err) = allocator.update_buffer(device, &mut new_mem, data) {
+                let _ = allocator.destroy_buffer(device, new_buffer, new_mem);
+                return Err(err);
+            }
+
+            let old_buffer = std::mem::replace(buffer, new_buffer);
+            let old_mem = memory.replace(new_mem);
+            *capacity = data.len();
+
+            if old_buffer != vk::Buffer::null()
+                && let Some(old_mem) = old_mem
+            {
+                allocator.destroy_buffer(device, old_buffer, old_mem)?;
+            }
+            return Ok(());
         }
 
+        if let Some(mem) = memory.as_mut() {
+            allocator.update_buffer(device, mem, data)?;
+        }
         Ok(())
     }
 

@@ -509,16 +509,51 @@ fn create_frame_sync(device: &Device, command_pool: vk::CommandPool) -> Renderer
     let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
     let image_available = unsafe { device.create_semaphore(&semaphore_info, None)? };
-    let render_finished = unsafe { device.create_semaphore(&semaphore_info, None)? };
-    let fence = unsafe { device.create_fence(&fence_info, None)? };
+    let render_finished = match unsafe { device.create_semaphore(&semaphore_info, None) } {
+        Ok(render_finished) => render_finished,
+        Err(err) => {
+            unsafe { device.destroy_semaphore(image_available, None) };
+            return Err(err.into());
+        }
+    };
+    let fence = match unsafe { device.create_fence(&fence_info, None) } {
+        Ok(fence) => fence,
+        Err(err) => {
+            unsafe {
+                device.destroy_semaphore(render_finished, None);
+                device.destroy_semaphore(image_available, None);
+            }
+            return Err(err.into());
+        }
+    };
 
-    let command_buffer = unsafe {
+    let mut command_buffers = match unsafe {
         device.allocate_command_buffers(
             &vk::CommandBufferAllocateInfo::default()
                 .command_pool(command_pool)
                 .level(vk::CommandBufferLevel::PRIMARY)
                 .command_buffer_count(1),
-        )?[0]
+        )
+    } {
+        Ok(command_buffers) => command_buffers,
+        Err(err) => {
+            unsafe {
+                device.destroy_fence(fence, None);
+                device.destroy_semaphore(render_finished, None);
+                device.destroy_semaphore(image_available, None);
+            }
+            return Err(err.into());
+        }
+    };
+    let Some(command_buffer) = command_buffers.pop() else {
+        unsafe {
+            device.destroy_fence(fence, None);
+            device.destroy_semaphore(render_finished, None);
+            device.destroy_semaphore(image_available, None);
+        }
+        return Err(RendererError::Init(
+            "Vulkan command buffer allocation returned no buffers".into(),
+        ));
     };
 
     Ok(FrameSync {
@@ -527,6 +562,35 @@ fn create_frame_sync(device: &Device, command_pool: vk::CommandPool) -> Renderer
         image_available,
         render_finished,
     })
+}
+
+fn destroy_frame_syncs(device: &Device, command_pool: vk::CommandPool, frames: Vec<FrameSync>) {
+    unsafe {
+        for frame in frames {
+            device.destroy_semaphore(frame.image_available, None);
+            device.destroy_semaphore(frame.render_finished, None);
+            device.destroy_fence(frame.fence, None);
+            device.free_command_buffers(command_pool, &[frame.command_buffer]);
+        }
+    }
+}
+
+fn create_frame_syncs(
+    device: &Device,
+    command_pool: vk::CommandPool,
+    count: usize,
+) -> RendererResult<Vec<FrameSync>> {
+    let mut frames = Vec::with_capacity(count);
+    for _ in 0..count {
+        match create_frame_sync(device, command_pool) {
+            Ok(frame) => frames.push(frame),
+            Err(err) => {
+                destroy_frame_syncs(device, command_pool, frames);
+                return Err(err);
+            }
+        }
+    }
+    Ok(frames)
 }
 
 fn recreate_swapchain(
@@ -538,19 +602,6 @@ fn recreate_swapchain(
 ) -> RendererResult<()> {
     unsafe {
         let _ = renderer.device.device_wait_idle();
-    }
-
-    #[cfg(not(feature = "dynamic-rendering"))]
-    for fb in data.framebuffers.drain(..) {
-        unsafe { renderer.device.destroy_framebuffer(fb, None) };
-    }
-
-    for view in data.image_views.drain(..) {
-        unsafe { renderer.device.destroy_image_view(view, None) };
-    }
-    unsafe {
-        data.swapchain_loader
-            .destroy_swapchain(data.swapchain, None);
     }
 
     let caps = unsafe {
@@ -603,7 +654,8 @@ fn recreate_swapchain(
         .pre_transform(caps.current_transform)
         .composite_alpha(composite_alpha)
         .present_mode(present_mode)
-        .clipped(true);
+        .clipped(true)
+        .old_swapchain(data.swapchain);
 
     let queue_family_indices = [
         global.graphics_queue_family_index,
@@ -618,10 +670,19 @@ fn recreate_swapchain(
     }
 
     let swapchain = unsafe { data.swapchain_loader.create_swapchain(&sci, None)? };
-    let images = unsafe { data.swapchain_loader.get_swapchain_images(swapchain)? };
+    let images = match unsafe { data.swapchain_loader.get_swapchain_images(swapchain) } {
+        Ok(images) => images,
+        Err(err) => {
+            unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
+            return Err(err.into());
+        }
+    };
 
     // Ensure pipeline exists for this format (per-format support).
-    let _ = renderer.viewport_pipeline(surface_format.format)?;
+    if let Err(err) = renderer.viewport_pipeline(surface_format.format) {
+        unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
+        return Err(err);
+    }
 
     let mut image_views = Vec::with_capacity(images.len());
     for &image in &images {
@@ -636,18 +697,34 @@ fn recreate_swapchain(
                 base_array_layer: 0,
                 layer_count: 1,
             });
-        let view = unsafe { renderer.device.create_image_view(&create_info, None)? };
+        let view = match unsafe { renderer.device.create_image_view(&create_info, None) } {
+            Ok(view) => view,
+            Err(err) => {
+                for view in image_views.drain(..) {
+                    unsafe { renderer.device.destroy_image_view(view, None) };
+                }
+                unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
+                return Err(err.into());
+            }
+        };
         image_views.push(view);
     }
 
     #[cfg(not(feature = "dynamic-rendering"))]
-    {
-        let rp = renderer
-            .viewport_pipeline(surface_format.format)?
-            .render_pass;
+    let framebuffers = {
+        let rp = match renderer.viewport_pipeline(surface_format.format) {
+            Ok(vp) => vp.render_pass,
+            Err(err) => {
+                for view in image_views.drain(..) {
+                    unsafe { renderer.device.destroy_image_view(view, None) };
+                }
+                unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
+                return Err(err);
+            }
+        };
         let mut framebuffers = Vec::with_capacity(image_views.len());
         for &view in &image_views {
-            let fb = unsafe {
+            let fb = match unsafe {
                 renderer.device.create_framebuffer(
                     &vk::FramebufferCreateInfo::default()
                         .render_pass(rp)
@@ -656,16 +733,30 @@ fn recreate_swapchain(
                         .height(extent.height)
                         .layers(1),
                     None,
-                )?
+                )
+            } {
+                Ok(fb) => fb,
+                Err(err) => {
+                    for fb in framebuffers.drain(..) {
+                        unsafe { renderer.device.destroy_framebuffer(fb, None) };
+                    }
+                    for view in image_views.drain(..) {
+                        unsafe { renderer.device.destroy_image_view(view, None) };
+                    }
+                    unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
+                    return Err(err.into());
+                }
             };
             framebuffers.push(fb);
         }
-        data.framebuffers = framebuffers;
-    }
+        framebuffers
+    };
 
-    data.swapchain = swapchain;
+    #[cfg(not(feature = "dynamic-rendering"))]
+    let old_framebuffers = std::mem::replace(&mut data.framebuffers, framebuffers);
+    let old_image_views = std::mem::replace(&mut data.image_views, image_views);
+    let old_swapchain = std::mem::replace(&mut data.swapchain, swapchain);
     data.images = images;
-    data.image_views = image_views;
     #[cfg(feature = "dynamic-rendering")]
     {
         data.image_layouts = vec![vk::ImageLayout::UNDEFINED; data.images.len()];
@@ -674,6 +765,17 @@ fn recreate_swapchain(
     data.extent = extent;
     data.images_in_flight = vec![vk::Fence::null(); data.images.len()];
     data.pending_present = None;
+
+    unsafe {
+        #[cfg(not(feature = "dynamic-rendering"))]
+        for fb in old_framebuffers {
+            renderer.device.destroy_framebuffer(fb, None);
+        }
+        for view in old_image_views {
+            renderer.device.destroy_image_view(view, None);
+        }
+        data.swapchain_loader.destroy_swapchain(old_swapchain, None);
+    }
     Ok(())
 }
 
@@ -837,7 +939,12 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
             }
         };
 
-        let _ = renderer.viewport_pipeline(surface_format.format);
+        if let Err(e) = renderer.viewport_pipeline(surface_format.format) {
+            eprintln!("[ash-mv] create viewport pipeline error: {e:?}");
+            swapchain_loader.destroy_swapchain(swapchain, None);
+            surface_loader.destroy_surface(surface, None);
+            return;
+        }
 
         let mut image_views = Vec::with_capacity(images.len());
         for &image in &images {
@@ -928,26 +1035,24 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
                     return;
                 }
             };
-        let frames = (0..global.in_flight_frames)
-            .map(|_| create_frame_sync(&renderer.device, command_pool))
-            .collect::<RendererResult<Vec<_>>>();
-        let frames = match frames {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("[ash-mv] create frame sync error: {e:?}");
-                #[cfg(not(feature = "dynamic-rendering"))]
-                for fb in framebuffers.iter().copied() {
-                    renderer.device.destroy_framebuffer(fb, None);
+        let frames =
+            match create_frame_syncs(&renderer.device, command_pool, global.in_flight_frames) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("[ash-mv] create frame sync error: {e:?}");
+                    #[cfg(not(feature = "dynamic-rendering"))]
+                    for fb in framebuffers.iter().copied() {
+                        renderer.device.destroy_framebuffer(fb, None);
+                    }
+                    for v in image_views.drain(..) {
+                        renderer.device.destroy_image_view(v, None);
+                    }
+                    renderer.device.destroy_command_pool(command_pool, None);
+                    swapchain_loader.destroy_swapchain(swapchain, None);
+                    surface_loader.destroy_surface(surface, None);
+                    return;
                 }
-                for v in image_views.drain(..) {
-                    renderer.device.destroy_image_view(v, None);
-                }
-                renderer.device.destroy_command_pool(command_pool, None);
-                swapchain_loader.destroy_swapchain(swapchain, None);
-                surface_loader.destroy_surface(surface, None);
-                return;
-            }
-        };
+            };
 
         let image_count = images.len();
         let data = ViewportAshData {

@@ -76,6 +76,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     intact.
   - `dear-imgui-ash`: draw-data texture processing now writes `TexID`/`OK` feedback only after
     upload command submission succeeds, avoiding stale texture IDs after failed Vulkan uploads.
+  - `dear-imgui-ash`: Vulkan allocation and upload setup paths now clean up partially-created
+    shader modules, pipelines, textures, staging buffers, descriptor sets, fences, command buffers,
+    and allocator resources on failure. Existing textures and mesh buffers are kept until
+    replacements are ready.
+  - `dear-imgui-ash`: Winit and SDL3 multi-viewport swapchain recreation now builds replacement
+    swapchain resources before destroying the old viewport resources, so failed resize or present
+    recovery leaves the previous viewport state intact.
 - Extensions
   - `dear-imgui-test-engine`: check the bound ImGui context liveness before safe engine methods call
     into FFI, so stale context use panics in Rust instead of reaching the upstream test engine.

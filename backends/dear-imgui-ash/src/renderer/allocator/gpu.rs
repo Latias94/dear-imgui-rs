@@ -46,16 +46,34 @@ impl Allocate for Allocator {
         let buffer = unsafe { device.create_buffer(&buffer_info, None)? };
         let requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
 
-        let mut allocator = self.get_allocator()?;
-        let allocation = allocator.allocate(&AllocationCreateDesc {
+        let mut allocator = match self.get_allocator() {
+            Ok(allocator) => allocator,
+            Err(err) => {
+                unsafe { device.destroy_buffer(buffer, None) };
+                return Err(err);
+            }
+        };
+        let allocation = match allocator.allocate(&AllocationCreateDesc {
             name: "",
             requirements,
             location: MemoryLocation::CpuToGpu,
             linear: true,
             allocation_scheme: AllocationScheme::GpuAllocatorManaged,
-        })?;
+        }) {
+            Ok(allocation) => allocation,
+            Err(err) => {
+                unsafe { device.destroy_buffer(buffer, None) };
+                return Err(err.into());
+            }
+        };
 
-        unsafe { device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset())? };
+        if let Err(err) =
+            unsafe { device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()) }
+        {
+            let _ = allocator.free(allocation);
+            unsafe { device.destroy_buffer(buffer, None) };
+            return Err(err.into());
+        }
         Ok((buffer, allocation))
     }
 
@@ -88,16 +106,34 @@ impl Allocate for Allocator {
         let image = unsafe { device.create_image(&image_info, None)? };
         let requirements = unsafe { device.get_image_memory_requirements(image) };
 
-        let mut allocator = self.get_allocator()?;
-        let allocation = allocator.allocate(&AllocationCreateDesc {
+        let mut allocator = match self.get_allocator() {
+            Ok(allocator) => allocator,
+            Err(err) => {
+                unsafe { device.destroy_image(image, None) };
+                return Err(err);
+            }
+        };
+        let allocation = match allocator.allocate(&AllocationCreateDesc {
             name: "",
             requirements,
             location: MemoryLocation::GpuOnly,
             linear: true,
             allocation_scheme: AllocationScheme::GpuAllocatorManaged,
-        })?;
+        }) {
+            Ok(allocation) => allocation,
+            Err(err) => {
+                unsafe { device.destroy_image(image, None) };
+                return Err(err.into());
+            }
+        };
 
-        unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset())? };
+        if let Err(err) =
+            unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset()) }
+        {
+            let _ = allocator.free(allocation);
+            unsafe { device.destroy_image(image, None) };
+            return Err(err.into());
+        }
         Ok((image, allocation))
     }
 
@@ -107,9 +143,9 @@ impl Allocate for Allocator {
         buffer: vk::Buffer,
         memory: Self::Memory,
     ) -> RendererResult<()> {
+        unsafe { device.destroy_buffer(buffer, None) };
         let mut allocator = self.get_allocator()?;
         allocator.free(memory)?;
-        unsafe { device.destroy_buffer(buffer, None) };
         Ok(())
     }
 
@@ -119,9 +155,9 @@ impl Allocate for Allocator {
         image: vk::Image,
         memory: Self::Memory,
     ) -> RendererResult<()> {
+        unsafe { device.destroy_image(image, None) };
         let mut allocator = self.get_allocator()?;
         allocator.free(memory)?;
-        unsafe { device.destroy_image(image, None) };
         Ok(())
     }
 
