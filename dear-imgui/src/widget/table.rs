@@ -182,6 +182,83 @@ pub enum TableHoveredColumn {
     UnusedSpace,
 }
 
+/// Concrete zero-based table row index.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TableRowIndex(usize);
+
+impl TableRowIndex {
+    /// The first table row.
+    pub const ZERO: Self = Self(0);
+
+    /// Create a table row index from a Rust `usize`.
+    #[inline]
+    pub const fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Return the zero-based Rust index.
+    #[inline]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+
+    #[inline]
+    fn from_i32(raw: i32, caller: &str) -> Self {
+        assert!(raw >= 0, "{caller} returned a negative table row index");
+        Self(usize::try_from(raw).expect("non-negative table row index must fit usize"))
+    }
+}
+
+impl From<usize> for TableRowIndex {
+    #[inline]
+    fn from(index: usize) -> Self {
+        Self::new(index)
+    }
+}
+
+impl From<TableRowIndex> for usize {
+    #[inline]
+    fn from(index: TableRowIndex) -> Self {
+        index.get()
+    }
+}
+
+impl PartialEq<usize> for TableRowIndex {
+    #[inline]
+    fn eq(&self, other: &usize) -> bool {
+        self.get() == *other
+    }
+}
+
+impl PartialEq<TableRowIndex> for usize {
+    #[inline]
+    fn eq(&self, other: &TableRowIndex) -> bool {
+        *self == other.get()
+    }
+}
+
+/// Result of [`Ui::table_get_hovered_row`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum TableHoveredRow {
+    /// The table is not hovered.
+    None,
+    /// A table row index is hovered.
+    Row(TableRowIndex),
+}
+
+impl TableHoveredRow {
+    /// Return the hovered concrete row, if any.
+    #[inline]
+    pub const fn row(self) -> Option<TableRowIndex> {
+        match self {
+            Self::Row(index) => Some(index),
+            Self::None => None,
+        }
+    }
+}
+
 impl TableHoveredColumn {
     /// Return the hovered concrete column, if any.
     #[inline]
@@ -681,14 +758,17 @@ impl Ui {
     /// Return current column index, or `None` when no table cell is current.
     #[doc(alias = "TableGetColumnIndex")]
     pub fn table_get_column_index(&self) -> Option<TableColumnIndex> {
+        current_table_if_any()?;
         let raw = unsafe { sys::igTableGetColumnIndex() };
         (raw >= 0).then(|| TableColumnIndex::from_i32(raw, "Ui::table_get_column_index()"))
     }
 
-    /// Return current row index.
+    /// Return current row index, or `None` when no table row is current.
     #[doc(alias = "TableGetRowIndex")]
-    pub fn table_get_row_index(&self) -> i32 {
-        unsafe { sys::igTableGetRowIndex() }
+    pub fn table_get_row_index(&self) -> Option<TableRowIndex> {
+        current_table_if_any()?;
+        let raw = unsafe { sys::igTableGetRowIndex() };
+        (raw >= 0).then(|| TableRowIndex::from_i32(raw, "Ui::table_get_row_index()"))
     }
 
     /// Return the name of a column by index.
@@ -826,10 +906,17 @@ impl Ui {
         self.table_set_row_bg1_color_u32(col);
     }
 
-    /// Return hovered row index, or -1 when none.
+    /// Return hovered row from the previous frame.
     #[doc(alias = "TableGetHoveredRow")]
-    pub fn table_get_hovered_row(&self) -> i32 {
-        unsafe { sys::igTableGetHoveredRow() }
+    pub fn table_get_hovered_row(&self) -> TableHoveredRow {
+        if current_table_if_any().is_none() {
+            return TableHoveredRow::None;
+        }
+        let raw = unsafe { sys::igTableGetHoveredRow() };
+        if raw < 0 {
+            return TableHoveredRow::None;
+        }
+        TableHoveredRow::Row(TableRowIndex::from_i32(raw, "Ui::table_get_hovered_row()"))
     }
 
     /// Header row height in pixels.
@@ -1350,6 +1437,29 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn table_index_queries_return_none_without_current_table_or_cell() {
+        let mut ctx = setup_context();
+
+        let ui = ctx.frame();
+        assert_eq!(ui.table_get_column_index(), None);
+        assert_eq!(ui.table_get_row_index(), None);
+        assert_eq!(ui.table_get_hovered_row(), TableHoveredRow::None);
+
+        let _ = ui.window("table_index_queries").build(|| {
+            let _table = ui.begin_table("table", 2).unwrap();
+            assert_eq!(ui.table_get_column_index(), None);
+            assert_eq!(ui.table_get_row_index(), None);
+
+            ui.table_next_row();
+            assert_eq!(ui.table_get_row_index(), Some(TableRowIndex::ZERO));
+            assert_eq!(ui.table_get_column_index(), None);
+
+            assert!(ui.table_set_column_index(0));
+            assert_eq!(ui.table_get_column_index(), Some(TableColumnIndex::ZERO));
+        });
     }
 
     #[test]

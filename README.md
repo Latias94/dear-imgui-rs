@@ -105,6 +105,7 @@ compilable.
   the `OwnedStateStorage` alive until the token is dropped.
 - Table APIs no longer use raw `column_n: i32` sentinels. Use `TableColumnIndex` for real columns,
   `TableColumnRef::Current` for current-column defaults, and the split cell/row background helpers.
+- Table row queries return typed row state: `Option<TableRowIndex>` or `TableHoveredRow`.
 - Extension contexts follow the same rule: safe methods bind or assert against the owning current
   ImGui/extension context, not whichever raw C context happened to be current.
 

@@ -104,6 +104,8 @@ Extensions
     defaults, `TableContextMenuTarget` for context menus, and `TableHoveredColumn` for hover results.
     Use `table_set_cell_bg_color*` / `table_set_row_bg{0,1}_color*` instead of passing
     `TableBgTarget` plus `-1`.
+  - Table row query APIs use `Option<TableRowIndex>` / `TableHoveredRow` instead of raw signed row
+    sentinel values.
   - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
   - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
     `NodeEditor::set_alt_mouse_button` takes `MouseButton`.
