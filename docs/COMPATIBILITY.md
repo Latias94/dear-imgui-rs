@@ -119,6 +119,8 @@ Extensions
   - `dear-app` now exposes structured startup/render errors instead of using generic strings for
     missing frame callbacks, WGPU adapter/device/surface initialization, renderer construction,
     and frame preparation/rendering failures. `DearAppError` is now `#[non_exhaustive]`.
+  - `dear-app::GpuApi` texture registration/update/removal methods use `TextureId` instead of raw
+    `u64` ids.
   - `dear-imgui-glow`, `dear-imgui-wgpu`, and `dear-imgui-ash` now use more specific error
     variants for common invalid-state and resource failures instead of collapsing every path into
     a generic renderer string. Their public renderer error enums are now `#[non_exhaustive]`.

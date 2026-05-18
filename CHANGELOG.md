@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `*mut ImDrawData` instead of `*const ImDrawData`, matching the official Dear ImGui backend
     signatures and texture-feedback mutation model.
   - `dear-imgui-sdl3::{render,canvas_render}` now take `&mut DrawData` instead of `&DrawData`.
+  - `dear-app::GpuApi` texture registration now returns and accepts `TextureId` instead of raw
+    `u64` ids.
 
 ### Changed
 

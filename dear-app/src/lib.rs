@@ -19,7 +19,7 @@
 //! }
 //! ```
 use dear_imgui_rs as imgui;
-use dear_imgui_rs::{ConfigFlags, DockFlags, Id, WindowFlags};
+use dear_imgui_rs::{ConfigFlags, DockFlags, Id, TextureId, WindowFlags};
 use dear_imgui_wgpu as imgui_wgpu;
 use dear_imgui_winit as imgui_winit;
 use pollster::block_on;
@@ -507,17 +507,22 @@ impl<'a> GpuApi<'a> {
     pub fn queue(&self) -> &wgpu::Queue {
         self.queue
     }
-    /// Register an external texture + view and obtain an ImGui TextureId (u64)
-    pub fn register_texture(&mut self, texture: &wgpu::Texture, view: &wgpu::TextureView) -> u64 {
-        self.renderer.register_external_texture(texture, view)
+    /// Register an external texture + view and obtain an ImGui texture id.
+    pub fn register_texture(
+        &mut self,
+        texture: &wgpu::Texture,
+        view: &wgpu::TextureView,
+    ) -> TextureId {
+        TextureId::from(self.renderer.register_external_texture(texture, view))
     }
     /// Update the view for an existing registered texture
-    pub fn update_texture_view(&mut self, tex_id: u64, view: &wgpu::TextureView) -> bool {
-        self.renderer.update_external_texture_view(tex_id, view)
+    pub fn update_texture_view(&mut self, tex_id: TextureId, view: &wgpu::TextureView) -> bool {
+        self.renderer
+            .update_external_texture_view(tex_id.id(), view)
     }
     /// Unregister a previously registered texture
-    pub fn unregister_texture(&mut self, tex_id: u64) {
-        self.renderer.unregister_texture(tex_id)
+    pub fn unregister_texture(&mut self, tex_id: TextureId) {
+        self.renderer.unregister_texture(tex_id.id())
     }
     /// Optional: directly drive managed TextureData create/update without waiting for draw pass
     pub fn update_texture_data(

@@ -22,7 +22,7 @@ struct TexDemoState {
     ext_size: (u32, u32),
     ext_tex: Option<wgpu_rs::Texture>,
     ext_view: Option<wgpu_rs::TextureView>,
-    ext_tex_id: Option<u64>,
+    ext_tex_id: Option<TextureId>,
 }
 
 impl TexDemoState {
@@ -303,8 +303,7 @@ fn main() {
                     ui.separator();
                     ui.text("External GPU Texture (legacy TextureId path):");
                     if let Some(tex_id) = state.ext_tex_id {
-                        let tid = TextureId::from(tex_id);
-                        ui.image(tid, [256.0, 256.0]);
+                        ui.image(tex_id, [256.0, 256.0]);
                     }
                     ui.separator();
                     if ui.button("Reload Image") {
