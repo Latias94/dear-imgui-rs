@@ -322,7 +322,8 @@ pub fn show_metrics_window_with_flag(p_open: &mut bool) {
 pub struct Plot3DContext {
     raw: *mut sys::ImPlot3DContext,
     imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
-    imgui_alive: dear_imgui_rs::ContextAliveToken,
+    imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
+    owns_context: bool,
 }
 
 impl Plot3DContext {
@@ -331,7 +332,7 @@ impl Plot3DContext {
     /// This should be called once after creating your ImGui context.
     pub fn try_create(imgui: &Context) -> dear_imgui_rs::ImGuiResult<Self> {
         let imgui_ctx_raw = imgui.as_raw();
-        let imgui_alive = imgui.alive_token();
+        let imgui_alive = Some(imgui.alive_token());
         assert_eq!(
             unsafe { imgui_sys::igGetCurrentContext() },
             imgui_ctx_raw,
@@ -351,6 +352,7 @@ impl Plot3DContext {
                 raw: ctx,
                 imgui_ctx_raw,
                 imgui_alive,
+                owns_context: true,
             })
         }
     }
@@ -360,20 +362,33 @@ impl Plot3DContext {
         Self::try_create(imgui).expect("Failed to create ImPlot3D context")
     }
 
+    /// Get the current ImPlot3D context as a non-owning raw-context wrapper.
+    ///
+    /// Returns None if no context is current.
+    ///
+    /// # Safety
+    ///
+    /// The returned value does not own the current ImPlot3D context and cannot prove that the
+    /// associated ImGui context remains alive. The caller must ensure the raw ImPlot3D and ImGui
+    /// contexts outlive the returned wrapper and are used on the same thread/context stack.
+    pub unsafe fn current() -> Option<Self> {
+        let raw = unsafe { sys::ImPlot3D_GetCurrentContext() };
+        if raw.is_null() {
+            None
+        } else {
+            Some(Self {
+                raw,
+                imgui_ctx_raw: unsafe { imgui_sys::igGetCurrentContext() },
+                imgui_alive: None,
+                owns_context: false,
+            })
+        }
+    }
+
     /// Set this context as the current ImPlot3D context.
     pub fn set_as_current(&self) {
-        assert!(
-            self.imgui_alive.is_alive(),
-            "dear-implot3d: ImGui context has been dropped"
-        );
-        assert_eq!(
-            unsafe { imgui_sys::igGetCurrentContext() },
-            self.imgui_ctx_raw,
-            "dear-implot3d: Plot3DContext must be used with the currently-active ImGui context"
-        );
-        unsafe {
-            sys::ImPlot3D_SetCurrentContext(self.raw);
-        }
+        self.assert_imgui_alive();
+        self.binding().bind();
     }
 
     /// Get a raw pointer to the current ImPlot3D style
@@ -382,6 +397,16 @@ impl Plot3DContext {
     /// Prefer using the safe style functions in the `style` module.
     pub fn raw_style_mut() -> *mut sys::ImPlot3DStyle {
         unsafe { sys::ImPlot3D_GetStyle() }
+    }
+
+    /// Get the raw ImPlot3D context pointer.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the pointer is used safely and not stored beyond the lifetime of
+    /// this context wrapper.
+    pub unsafe fn raw(&self) -> *mut sys::ImPlot3DContext {
+        self.raw
     }
 
     /// Get a per-frame plotting interface
@@ -396,21 +421,39 @@ impl Plot3DContext {
                 plot_ctx_raw: self.raw,
                 imgui_ctx_raw: self.imgui_ctx_raw,
             },
-            imgui_alive: Some(self.imgui_alive.clone()),
+            imgui_alive: self.imgui_alive.clone(),
+        }
+    }
+
+    fn assert_imgui_alive(&self) {
+        if let Some(alive) = &self.imgui_alive {
+            assert!(
+                alive.is_alive(),
+                "dear-implot3d: ImGui context has been dropped"
+            );
+        }
+    }
+
+    fn binding(&self) -> Plot3DContextBinding {
+        Plot3DContextBinding {
+            plot_ctx_raw: self.raw,
+            imgui_ctx_raw: self.imgui_ctx_raw,
         }
     }
 }
 
 impl Drop for Plot3DContext {
     fn drop(&mut self) {
-        if self.raw.is_null() {
+        if !self.owns_context || self.raw.is_null() {
             return;
         }
 
-        if !self.imgui_alive.is_alive() {
-            // Avoid calling into ImGui allocators after the context has been dropped.
-            // Best-effort: leak the Plot3D context instead of risking UB.
-            return;
+        if let Some(alive) = &self.imgui_alive {
+            if !alive.is_alive() {
+                // Avoid calling into ImGui allocators after the context has been dropped.
+                // Best-effort: leak the Plot3D context instead of risking UB.
+                return;
+            }
         }
 
         unsafe {
@@ -1230,7 +1273,7 @@ impl<'ui> Plot3DBuilder<'ui> {
             debug_begin_plot();
             Some(Plot3DToken {
                 binding: self.binding,
-                imgui_alive: self.imgui_alive,
+                imgui_alive: self.imgui_alive.clone(),
                 _lifetime: PhantomData,
             })
         } else {
@@ -2082,6 +2125,7 @@ impl<'ui> Plot3DUi<'ui> {
 mod tests {
     use super::{Context, Plot3DContext, Plot3DContextBinding, sys};
     use std::mem::{align_of, size_of};
+    use std::ptr;
     use std::sync::{Mutex, OnceLock};
 
     fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -2113,6 +2157,28 @@ mod tests {
         .bind();
 
         assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, raw_a);
+    }
+
+    #[test]
+    fn plot3d_current_returns_none_without_current_context() {
+        let _guard = test_guard();
+        let _imgui = Context::create();
+
+        unsafe { sys::ImPlot3D_SetCurrentContext(ptr::null_mut()) };
+        assert!(unsafe { Plot3DContext::current() }.is_none());
+    }
+
+    #[test]
+    fn plot3d_current_wrapper_reports_current_context() {
+        let _guard = test_guard();
+        let imgui = Context::create();
+        let plot = Plot3DContext::create(&imgui);
+        let raw = plot.raw;
+
+        let current =
+            unsafe { Plot3DContext::current() }.expect("expected current ImPlot3D context");
+
+        assert_eq!(unsafe { current.raw() }, raw);
     }
 
     #[test]
