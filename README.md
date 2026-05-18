@@ -85,6 +85,9 @@ compilable.
 - `TextureRef::from_raw(...)` is `unsafe`. Raw `ImTextureRef` can contain an arbitrary
   `ImTextureData*`, so callers must prove that pointer remains valid and does not violate Rust
   aliasing.
+- `TextureData::create`, texture dimension getters, pitches, and format byte counts now use
+  `u32`/`usize` Rust size types; oversized values are rejected before Dear ImGui's signed `int`
+  ABI.
 - `Context::render()` returns `&mut DrawData`. Renderer entry points should accept mutable draw
   data and process texture requests with the streaming `draw_data.textures_mut()` cursor.
 - `DrawData::textures()` and `PlatformIo::textures()` are read-only. Code that updates texture

@@ -47,6 +47,10 @@ pub enum InitError {
     #[error("{format:?} texture size overflow")]
     TextureSizeOverflow { format: TextureFormat },
 
+    /// Texture dimensions do not fit OpenGL's signed size parameters.
+    #[error("Texture {dimension} is out of range for OpenGL: {value}")]
+    TextureDimensionOutOfRange { dimension: &'static str, value: u32 },
+
     /// Texture byte length does not match the expected size for the format.
     #[error("{format:?} texture data size mismatch: expected {expected} bytes, got {actual}")]
     TextureDataSizeMismatch {

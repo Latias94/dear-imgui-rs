@@ -126,13 +126,13 @@ impl WgpuTextureManager {
         rect: dear_imgui_rs::texture::TextureRect,
     ) -> Option<Vec<u8>> {
         let pixels = texture_data.pixels()?;
-        let tex_w = texture_data.width() as usize;
-        let tex_h = texture_data.height() as usize;
+        let tex_w = usize::try_from(texture_data.width()).ok()?;
+        let tex_h = usize::try_from(texture_data.height()).ok()?;
         if tex_w == 0 || tex_h == 0 {
             return None;
         }
 
-        let bpp = texture_data.bytes_per_pixel() as usize;
+        let bpp = texture_data.bytes_per_pixel();
         let (rx, ry, rw, rh) = (
             rect.x as usize,
             rect.y as usize,
@@ -147,7 +147,7 @@ impl WgpuTextureManager {
         let rw = rw.min(tex_w.saturating_sub(rx));
         let rh = rh.min(tex_h.saturating_sub(ry));
 
-        let mut out = vec![0u8; rw * rh * 4];
+        let mut out = vec![0u8; rw.checked_mul(rh)?.checked_mul(4)?];
         match texture_data.format() {
             ImGuiTextureFormat::RGBA32 => {
                 for row in 0..rh {
@@ -480,8 +480,8 @@ impl WgpuTextureManager {
         queue: &Queue,
         texture_data: &TextureData,
     ) -> RendererResult<u64> {
-        let width = texture_data.width() as u32;
-        let height = texture_data.height() as u32;
+        let width = texture_data.width();
+        let height = texture_data.height();
         let format = texture_data.format();
 
         let pixels = texture_data
@@ -493,10 +493,17 @@ impl WgpuTextureManager {
         let (wgpu_format, converted_data, _bytes_per_pixel) = match format {
             ImGuiTextureFormat::RGBA32 => {
                 // RGBA32 maps directly to RGBA8Unorm (matches C++ implementation)
-                if pixels.len() != (width * height * 4) as usize {
+                let expected_len = usize::try_from(width)
+                    .ok()
+                    .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
+                    .and_then(|px| px.checked_mul(4))
+                    .ok_or_else(|| {
+                        RendererError::BadTexture("RGBA32 texture size overflow".to_string())
+                    })?;
+                if pixels.len() != expected_len {
                     return Err(RendererError::BadTexture(format!(
                         "RGBA32 texture data size mismatch: expected {} bytes, got {}",
-                        width * height * 4,
+                        expected_len,
                         pixels.len()
                     )));
                 }
@@ -505,10 +512,16 @@ impl WgpuTextureManager {
             ImGuiTextureFormat::Alpha8 => {
                 // Convert Alpha8 to RGBA32 for WGPU (white RGB + original alpha)
                 // This ensures compatibility with the standard RGBA8Unorm format
-                if pixels.len() != (width * height) as usize {
+                let expected_len = usize::try_from(width)
+                    .ok()
+                    .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
+                    .ok_or_else(|| {
+                        RendererError::BadTexture("Alpha8 texture size overflow".to_string())
+                    })?;
+                if pixels.len() != expected_len {
                     return Err(RendererError::BadTexture(format!(
                         "Alpha8 texture data size mismatch: expected {} bytes, got {}",
-                        width * height,
+                        expected_len,
                         pixels.len()
                     )));
                 }
@@ -544,7 +557,13 @@ impl WgpuTextureManager {
         });
 
         // Validate texture data size before upload
-        let expected_size = (width * height * 4) as usize; // Always RGBA after conversion
+        let expected_size = usize::try_from(width)
+            .ok()
+            .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
+            .and_then(|px| px.checked_mul(4))
+            .ok_or_else(|| {
+                RendererError::BadTexture("Converted texture size overflow".to_string())
+            })?; // Always RGBA after conversion
         if converted_data.len() != expected_size {
             return Err(RendererError::BadTexture(format!(
                 "Converted texture data size mismatch: expected {} bytes, got {}",

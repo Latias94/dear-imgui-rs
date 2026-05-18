@@ -10,14 +10,29 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
-fn texture_format_bytes_per_pixel(format: TextureFormat) -> i32 {
+fn texture_format_bytes_per_pixel(format: TextureFormat) -> usize {
     match format {
         TextureFormat::RGBA32 => 4,
         TextureFormat::Alpha8 => 1,
     }
 }
 
-fn checked_texture_byte_len(caller: &str, width: i32, height: i32, bytes_per_pixel: i32) -> usize {
+fn texture_format_bytes_per_pixel_i32(format: TextureFormat) -> i32 {
+    i32::try_from(texture_format_bytes_per_pixel(format))
+        .expect("texture format bytes per pixel exceeded i32 range")
+}
+
+fn checked_texture_dimension_to_i32(caller: &str, name: &str, value: u32) -> i32 {
+    assert!(value > 0, "{caller} {name} must be positive");
+    i32::try_from(value).unwrap_or_else(|_| panic!("{caller} {name} exceeded i32 range"))
+}
+
+fn checked_texture_byte_len(
+    caller: &str,
+    width: u32,
+    height: u32,
+    bytes_per_pixel: usize,
+) -> usize {
     assert!(width > 0, "{caller} width must be positive");
     assert!(height > 0, "{caller} height must be positive");
     assert!(
@@ -27,8 +42,6 @@ fn checked_texture_byte_len(caller: &str, width: i32, height: i32, bytes_per_pix
 
     let width = usize::try_from(width).expect("positive width must fit usize");
     let height = usize::try_from(height).expect("positive height must fit usize");
-    let bytes_per_pixel =
-        usize::try_from(bytes_per_pixel).expect("positive bytes_per_pixel must fit usize");
 
     let size = width
         .checked_mul(height)
@@ -50,6 +63,9 @@ fn checked_texture_byte_len_if_valid(
     if width <= 0 || height <= 0 || bytes_per_pixel <= 0 {
         return None;
     }
+    let width = u32::try_from(width).ok()?;
+    let height = u32::try_from(height).ok()?;
+    let bytes_per_pixel = usize::try_from(bytes_per_pixel).ok()?;
     Some(checked_texture_byte_len(
         caller,
         width,
@@ -612,18 +628,18 @@ impl TextureData {
     }
 
     /// Get the texture width
-    pub fn width(&self) -> i32 {
-        self.inner().Width
+    pub fn width(&self) -> u32 {
+        u32::try_from(self.raw_width_i32()).unwrap_or(0)
     }
 
     /// Get the texture height
-    pub fn height(&self) -> i32 {
-        self.inner().Height
+    pub fn height(&self) -> u32 {
+        u32::try_from(self.raw_height_i32()).unwrap_or(0)
     }
 
     /// Get the bytes per pixel
-    pub fn bytes_per_pixel(&self) -> i32 {
-        self.inner().BytesPerPixel
+    pub fn bytes_per_pixel(&self) -> usize {
+        usize::try_from(self.raw_bytes_per_pixel_i32()).unwrap_or(0)
     }
 
     /// Get the number of unused frames
@@ -693,33 +709,28 @@ impl TextureData {
     /// Get the pixel data at a specific position
     ///
     /// Returns None if no pixel data is available or coordinates are out of bounds.
-    pub fn pixels_at(&self, x: i32, y: i32) -> Option<&[u8]> {
+    pub fn pixels_at(&self, x: u32, y: u32) -> Option<&[u8]> {
         let raw = self.inner();
-        let width = raw.Width;
-        let height = raw.Height;
-        let bytes_per_pixel = raw.BytesPerPixel;
-        if raw.Pixels.is_null()
-            || width <= 0
-            || height <= 0
-            || bytes_per_pixel <= 0
-            || x < 0
-            || y < 0
-            || x >= width
-            || y >= height
-        {
+        let width = u32::try_from(raw.Width).ok()?;
+        let height = u32::try_from(raw.Height).ok()?;
+        let bytes_per_pixel = usize::try_from(raw.BytesPerPixel).ok()?;
+        if raw.Pixels.is_null() || width == 0 || height == 0 || bytes_per_pixel == 0 {
+            return None;
+        }
+        if x >= width || y >= height {
             None
         } else {
-            let width_usize = width as usize;
-            let x_usize = x as usize;
-            let y_usize = y as usize;
-            let bpp_usize = bytes_per_pixel as usize;
+            let width_usize = usize::try_from(width).ok()?;
+            let height_usize = usize::try_from(height).ok()?;
+            let x_usize = usize::try_from(x).ok()?;
+            let y_usize = usize::try_from(y).ok()?;
 
             let total_size = width_usize
-                .checked_mul(height as usize)?
-                .checked_mul(bpp_usize)?;
+                .checked_mul(height_usize)?
+                .checked_mul(bytes_per_pixel)?;
 
             let offset_px = y_usize.checked_mul(width_usize)?.checked_add(x_usize)?;
-            let offset_bytes = offset_px.checked_mul(bpp_usize)?;
+            let offset_bytes = offset_px.checked_mul(bytes_per_pixel)?;
             let remaining_size = total_size.checked_sub(offset_bytes)?;
 
             unsafe {
@@ -730,27 +741,30 @@ impl TextureData {
     }
 
     /// Get the pitch (bytes per row)
-    pub fn pitch(&self) -> i32 {
+    pub fn pitch(&self) -> usize {
         let width = self.width();
         let bytes_per_pixel = self.bytes_per_pixel();
-        if width <= 0 || bytes_per_pixel <= 0 {
+        if width == 0 || bytes_per_pixel == 0 {
             return 0;
         }
-        width
+        usize::try_from(width)
+            .expect("TextureData::pitch() width must fit usize")
             .checked_mul(bytes_per_pixel)
-            .expect("TextureData::pitch() byte pitch overflowed i32")
+            .expect("TextureData::pitch() byte pitch overflowed usize")
     }
 
     /// Create a new texture with the specified format and dimensions
     ///
     /// This allocates pixel data and sets the status to WantCreate.
-    pub fn create(&mut self, format: TextureFormat, width: i32, height: i32) {
+    pub fn create(&mut self, format: TextureFormat, width: u32, height: u32) {
         assert!(
             self.status() == TextureStatus::Destroyed,
             "TextureData::create() requires Destroyed texture status"
         );
         let bytes_per_pixel = texture_format_bytes_per_pixel(format);
         let _ = checked_texture_byte_len("TextureData::create()", width, height, bytes_per_pixel);
+        let width = checked_texture_dimension_to_i32("TextureData::create()", "width", width);
+        let height = checked_texture_dimension_to_i32("TextureData::create()", "height", height);
 
         unsafe {
             sys::ImTextureData_Create(self.as_raw_mut(), format.into(), width, height);
@@ -840,13 +854,25 @@ impl TextureData {
         self.assert_metadata_mutation_allowed("TextureData::set_format()");
         let raw = self.inner_mut();
         raw.Format = format.into();
-        raw.BytesPerPixel = texture_format_bytes_per_pixel(format);
+        raw.BytesPerPixel = texture_format_bytes_per_pixel_i32(format);
+    }
+
+    pub(crate) fn raw_width_i32(&self) -> i32 {
+        self.inner().Width
+    }
+
+    pub(crate) fn raw_height_i32(&self) -> i32 {
+        self.inner().Height
+    }
+
+    pub(crate) fn raw_bytes_per_pixel_i32(&self) -> i32 {
+        self.inner().BytesPerPixel
     }
 }
 
 /// Get the number of bytes per pixel for a texture format
-pub fn get_format_bytes_per_pixel(format: TextureFormat) -> i32 {
-    unsafe { sys::igImTextureDataGetFormatBytesPerPixel(format.into()) }
+pub fn get_format_bytes_per_pixel(format: TextureFormat) -> usize {
+    texture_format_bytes_per_pixel(format)
 }
 
 /// Create an ImTextureRef from a texture ID.
@@ -909,13 +935,13 @@ mod tests {
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                texture.create(TextureFormat::RGBA32, -1, 1);
+                texture.create(TextureFormat::RGBA32, i32::MAX as u32 + 1, 1);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                texture.create(TextureFormat::RGBA32, i32::MAX, 2);
+                texture.create(TextureFormat::RGBA32, i32::MAX as u32, 2);
             }))
             .is_err()
         );

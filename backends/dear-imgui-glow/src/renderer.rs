@@ -15,7 +15,7 @@ use crate::{
     gl_debug_message,
     shaders::Shaders,
     state::GlStateBackup,
-    texture::{SimpleTextureMap, TextureMap},
+    texture::{SimpleTextureMap, TextureMap, checked_gl_texture_size, gl_texture_size_i32},
     versions::GlVersion,
 };
 
@@ -268,6 +268,7 @@ impl GlowRenderer {
                 let px_ptr = (*tex).Pixels as *const u8;
 
                 if !px_ptr.is_null() && width > 0 && height > 0 {
+                    let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
                     // Prepare pixel buffer as RGBA8
                     let rgba_pixels: Option<Vec<u8>> = match bpp {
                         4 => (width as usize)
@@ -308,8 +309,8 @@ impl GlowRenderer {
                             glow::TEXTURE_2D,
                             0,
                             glow::RGBA as i32,
-                            width as i32,
-                            height as i32,
+                            width_i32,
+                            height_i32,
                             0,
                             glow::RGBA,
                             glow::UNSIGNED_BYTE,
@@ -341,8 +342,8 @@ impl GlowRenderer {
                         // Register in our texture map and push TexID back to Dear ImGui
                         let tex_id = texture_map.register_texture(
                             gl_texture,
-                            width as i32,
-                            height as i32,
+                            width,
+                            height,
                             TextureFormat::RGBA32,
                         );
                         fonts.set_texture_id(tex_id);
@@ -1049,13 +1050,13 @@ impl GlowRenderer {
         rect: dear_imgui_rs::texture::TextureRect,
     ) -> Option<Vec<u8>> {
         let pixels = texture_data.pixels()?;
-        let tex_w = texture_data.width() as usize;
-        let tex_h = texture_data.height() as usize;
+        let tex_w = usize::try_from(texture_data.width()).ok()?;
+        let tex_h = usize::try_from(texture_data.height()).ok()?;
         if tex_w == 0 || tex_h == 0 {
             return None;
         }
 
-        let bpp = texture_data.bytes_per_pixel() as usize;
+        let bpp = texture_data.bytes_per_pixel();
         let (rx, ry, rw, rh) = (
             rect.x as usize,
             rect.y as usize,
@@ -1069,7 +1070,7 @@ impl GlowRenderer {
         let rw = rw.min(tex_w.saturating_sub(rx));
         let rh = rh.min(tex_h.saturating_sub(ry));
 
-        let mut out = vec![0u8; rw * rh * 4];
+        let mut out = vec![0u8; rw.checked_mul(rh)?.checked_mul(4)?];
         match texture_data.format() {
             dear_imgui_rs::TextureFormat::RGBA32 => {
                 for row in 0..rh {
@@ -1138,8 +1139,10 @@ impl GlowRenderer {
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
         let is_font_atlas = self.is_font_atlas_texture(texture_data);
-        let width = texture_data.width() as u32;
-        let height = texture_data.height() as u32;
+        let width = texture_data.width();
+        let height = texture_data.height();
+        let (width_i32, height_i32) =
+            checked_gl_texture_size(width, height).map_err(RenderError::DeviceObjectInit)?;
         let format = texture_data.format();
 
         if let Some(pixels) = texture_data.pixels() {
@@ -1194,8 +1197,8 @@ impl GlowRenderer {
                             glow::TEXTURE_2D,
                             0,
                             glow::RGBA as i32,
-                            width as i32,
-                            height as i32,
+                            width_i32,
+                            height_i32,
                             0,
                             glow::RGBA,
                             glow::UNSIGNED_BYTE,
@@ -1206,7 +1209,19 @@ impl GlowRenderer {
                         // NOTE(opt): Could use GL RED + TEXTURE_SWIZZLE to avoid 4x expansion when
                         // GL 3.3+/GLES3.0+/ARB_texture_swizzle is available. See note in prepare_font_atlas().
                         // Convert Alpha8 to RGBA32 for OpenGL
-                        let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
+                        let mut rgba_data = Vec::with_capacity(
+                            usize::try_from(width)
+                                .ok()
+                                .and_then(|w| {
+                                    usize::try_from(height).ok().and_then(|h| w.checked_mul(h))
+                                })
+                                .and_then(|px| px.checked_mul(4))
+                                .ok_or_else(|| {
+                                    RenderError::InvalidTexture(
+                                        "Alpha8 texture size overflow".to_string(),
+                                    )
+                                })?,
+                        );
                         for &alpha in pixels {
                             rgba_data.push(255); // R
                             rgba_data.push(255); // G
@@ -1218,8 +1233,8 @@ impl GlowRenderer {
                             glow::TEXTURE_2D,
                             0,
                             glow::RGBA as i32,
-                            width as i32,
-                            height as i32,
+                            width_i32,
+                            height_i32,
                             0,
                             glow::RGBA,
                             glow::UNSIGNED_BYTE,
@@ -1235,12 +1250,9 @@ impl GlowRenderer {
                 gl_texture
             };
             // Register texture and set ID back to Dear ImGui
-            let tex_id = self.texture_map_mut().register_texture(
-                gl_texture,
-                width as i32,
-                height as i32,
-                format,
-            );
+            let tex_id = self
+                .texture_map_mut()
+                .register_texture(gl_texture, width, height, format);
             texture_data.set_tex_id(tex_id);
             texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
             if is_font_atlas {
@@ -1319,6 +1331,10 @@ impl GlowRenderer {
             let ry = rect.y as u32;
             let rw = rect.w as u32;
             let rh = rect.h as u32;
+            let rx_i32 = gl_texture_size_i32("x", rx).map_err(RenderError::DeviceObjectInit)?;
+            let ry_i32 = gl_texture_size_i32("y", ry).map_err(RenderError::DeviceObjectInit)?;
+            let (rw_i32, rh_i32) =
+                checked_gl_texture_size(rw, rh).map_err(RenderError::DeviceObjectInit)?;
 
             let Some(sub_rgba) = Self::convert_subrect_to_rgba(texture_data, rect) else {
                 continue;
@@ -1328,10 +1344,10 @@ impl GlowRenderer {
                 gl.tex_sub_image_2d(
                     glow::TEXTURE_2D,
                     0,
-                    rx as i32,
-                    ry as i32,
-                    rw as i32,
-                    rh as i32,
+                    rx_i32,
+                    ry_i32,
+                    rw_i32,
+                    rh_i32,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
                     glow::PixelUnpackData::Slice(Some(&sub_rgba)),
@@ -1423,7 +1439,7 @@ impl GlowRenderer {
 
         // Update the texture mapping with modern texture management
         self.texture_map_mut()
-            .update_texture(texture_id, gl_texture, width as i32, height as i32);
+            .update_texture(texture_id, gl_texture, width, height);
 
         Ok(())
     }
@@ -1454,12 +1470,9 @@ impl GlowRenderer {
             TextureFormat::RGBA32 => create_texture_from_rgba(gl, width, height, data)?,
             TextureFormat::Alpha8 => create_texture_from_alpha(gl, width, height, data)?,
         };
-        let texture_id = self.texture_map_mut().register_texture(
-            gl_texture,
-            width as i32,
-            height as i32,
-            format,
-        );
+        let texture_id = self
+            .texture_map_mut()
+            .register_texture(gl_texture, width, height, format);
 
         Ok(texture_id)
     }

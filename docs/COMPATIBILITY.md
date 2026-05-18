@@ -70,6 +70,8 @@ Extensions
   - `TextureRef<'tex>` carries managed texture lifetimes; raw `TextureRef::from_raw` is unsafe.
   - Legacy texture references use `TextureId`; raw `u64` texture ids are no longer accepted by
     `TextureRef` or `create_texture_ref`.
+  - `TextureData` dimensions use `u32`, while byte counts and pitches use `usize`; conversions into
+    Dear ImGui's signed `int` ABI are checked before FFI.
   - `Context::render()` and renderer APIs use `&mut DrawData` so texture feedback goes through
     `DrawData::textures_mut()`.
   - `DrawData::textures()` / `PlatformIo::textures()` are read-only; mutable texture access requires
@@ -167,6 +169,8 @@ Extensions
     and frame preparation/rendering failures. `DearAppError` is now `#[non_exhaustive]`.
   - `dear-app::GpuApi` texture registration/update/removal methods use `TextureId` instead of raw
     `u64` ids.
+  - `dear-imgui-glow::TextureMap` texture registration/update dimensions use `u32` instead of raw
+    signed integers.
   - `dear-imgui-glow`, `dear-imgui-wgpu`, and `dear-imgui-ash` now use more specific error
     variants for common invalid-state and resource failures instead of collapsing every path into
     a generic renderer string. Their public renderer error enums are now `#[non_exhaustive]`.

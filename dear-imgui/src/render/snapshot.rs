@@ -132,15 +132,15 @@ pub struct TextureFeedback {
 pub enum TextureOp {
     Create {
         format: TextureFormat,
-        width: i32,
-        height: i32,
-        row_pitch: i32,
+        width: u32,
+        height: u32,
+        row_pitch: usize,
         pixels: Vec<u8>,
     },
     Update {
         format: TextureFormat,
-        width: i32,
-        height: i32,
+        width: u32,
+        height: u32,
         rects: Vec<TextureUploadRect>,
     },
     Destroy,
@@ -150,7 +150,7 @@ pub enum TextureOp {
 #[derive(Clone, Debug)]
 pub struct TextureUploadRect {
     pub rect: TextureRect,
-    pub row_pitch: i32,
+    pub row_pitch: usize,
     pub data: Vec<u8>,
 }
 
@@ -265,17 +265,33 @@ fn snapshot_texture_requests(draw_data: &DrawData) -> Result<Vec<TextureRequest>
         }
 
         let id = ManagedTextureId(tex.unique_id());
-        let width = tex.width();
-        let height = tex.height();
-        let bpp = tex.bytes_per_pixel();
-        if width <= 0 || height <= 0 || bpp <= 0 {
+        let raw_width = tex.raw_width_i32();
+        let raw_height = tex.raw_height_i32();
+        let raw_bpp = tex.raw_bytes_per_pixel_i32();
+        let Some(width) = u32::try_from(raw_width).ok().filter(|value| *value > 0) else {
             return Err(SnapshotError::TextureInvalidLayout {
                 id,
-                width,
-                height,
-                bpp,
+                width: raw_width,
+                height: raw_height,
+                bpp: raw_bpp,
             });
-        }
+        };
+        let Some(height) = u32::try_from(raw_height).ok().filter(|value| *value > 0) else {
+            return Err(SnapshotError::TextureInvalidLayout {
+                id,
+                width: raw_width,
+                height: raw_height,
+                bpp: raw_bpp,
+            });
+        };
+        let Some(bpp) = usize::try_from(raw_bpp).ok().filter(|value| *value > 0) else {
+            return Err(SnapshotError::TextureInvalidLayout {
+                id,
+                width: raw_width,
+                height: raw_height,
+                bpp: raw_bpp,
+            });
+        };
         let format = tex.format();
 
         match status {
@@ -286,21 +302,21 @@ fn snapshot_texture_requests(draw_data: &DrawData) -> Result<Vec<TextureRequest>
                 let expected = usize::try_from(width)
                     .ok()
                     .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
-                    .and_then(|px| usize::try_from(bpp).ok().and_then(|b| px.checked_mul(b)));
+                    .and_then(|px| px.checked_mul(bpp));
                 let Some(expected) = expected else {
                     return Err(SnapshotError::TextureInvalidLayout {
                         id,
-                        width,
-                        height,
-                        bpp,
+                        width: raw_width,
+                        height: raw_height,
+                        bpp: raw_bpp,
                     });
                 };
                 if pixels.len() < expected {
                     return Err(SnapshotError::TextureInvalidLayout {
                         id,
-                        width,
-                        height,
-                        bpp,
+                        width: raw_width,
+                        height: raw_height,
+                        bpp: raw_bpp,
                     });
                 }
                 out.push(TextureRequest {
@@ -309,7 +325,15 @@ fn snapshot_texture_requests(draw_data: &DrawData) -> Result<Vec<TextureRequest>
                         format,
                         width,
                         height,
-                        row_pitch: width.saturating_mul(bpp),
+                        row_pitch: usize::try_from(width)
+                            .ok()
+                            .and_then(|w| w.checked_mul(bpp))
+                            .ok_or(SnapshotError::TextureInvalidLayout {
+                                id,
+                                width: raw_width,
+                                height: raw_height,
+                                bpp: raw_bpp,
+                            })?,
                         pixels: pixels[..expected].to_vec(),
                     },
                 });
@@ -321,21 +345,21 @@ fn snapshot_texture_requests(draw_data: &DrawData) -> Result<Vec<TextureRequest>
                 let expected = usize::try_from(width)
                     .ok()
                     .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
-                    .and_then(|px| usize::try_from(bpp).ok().and_then(|b| px.checked_mul(b)));
+                    .and_then(|px| px.checked_mul(bpp));
                 let Some(expected) = expected else {
                     return Err(SnapshotError::TextureInvalidLayout {
                         id,
-                        width,
-                        height,
-                        bpp,
+                        width: raw_width,
+                        height: raw_height,
+                        bpp: raw_bpp,
                     });
                 };
                 if pixels.len() < expected {
                     return Err(SnapshotError::TextureInvalidLayout {
                         id,
-                        width,
-                        height,
-                        bpp,
+                        width: raw_width,
+                        height: raw_height,
+                        bpp: raw_bpp,
                     });
                 }
 
@@ -348,8 +372,8 @@ fn snapshot_texture_requests(draw_data: &DrawData) -> Result<Vec<TextureRequest>
                         rects.push(TextureRect {
                             x: 0,
                             y: 0,
-                            w: width.min(u16::MAX as i32) as u16,
-                            h: height.min(u16::MAX as i32) as u16,
+                            w: width.min(u16::MAX as u32) as u16,
+                            h: height.min(u16::MAX as u32) as u16,
                         });
                     }
                 }
@@ -384,14 +408,13 @@ fn snapshot_texture_requests(draw_data: &DrawData) -> Result<Vec<TextureRequest>
 
 fn copy_texture_rect(
     pixels: &[u8],
-    width: i32,
-    height: i32,
-    bpp: i32,
+    width: u32,
+    height: u32,
+    bpp: usize,
     rect: TextureRect,
 ) -> Option<TextureUploadRect> {
     let width = usize::try_from(width).ok()?;
     let height = usize::try_from(height).ok()?;
-    let bpp = usize::try_from(bpp).ok()?;
     if width == 0 || height == 0 || bpp == 0 {
         return None;
     }
@@ -439,7 +462,7 @@ fn copy_texture_rect(
             w: rect_w.min(u16::MAX as usize) as u16,
             h: rect_h.min(u16::MAX as usize) as u16,
         },
-        row_pitch: rect_row_pitch.min(i32::MAX as usize) as i32,
+        row_pitch: rect_row_pitch,
         data: out,
     })
 }

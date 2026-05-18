@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `TextureRef` and `create_texture_ref` no longer accept raw `u64` texture ids; use `TextureId`.
   - `TextureRef::from_raw(...)` is now `unsafe` because raw `ImTextureRef` may contain an arbitrary
     managed `ImTextureData*`.
+  - `TextureData` dimensions now use `u32`, and byte counts/pitches use `usize`; oversized values
+    are checked before entering Dear ImGui's signed `int` ABI.
   - `Context::render()` returns `&mut DrawData`; renderer backends should accept mutable draw data
     and process texture feedback through `DrawData::textures_mut()`.
   - `DrawData::textures()` and `PlatformIo::textures()` are read-only. Mutation of texture status,
@@ -84,6 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-sdl3::{render,canvas_render}` now take `&mut DrawData` instead of `&DrawData`.
   - `dear-app::GpuApi` texture registration now returns and accepts `TextureId` instead of raw
     `u64` ids.
+  - `dear-imgui-glow::TextureMap` texture registration/update dimensions now use `u32`.
 
 ### Changed
 

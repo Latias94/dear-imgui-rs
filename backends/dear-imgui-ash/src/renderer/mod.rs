@@ -661,7 +661,7 @@ impl AshRenderer {
                     self.wait_for_pending_uploads()?;
                 }
 
-                let (w, h) = (texture_data.width() as u32, texture_data.height() as u32);
+                let (w, h) = (texture_data.width(), texture_data.height());
                 if w == 0 || h == 0 {
                     return Ok(TextureUpdateResult::Failed);
                 }
@@ -833,7 +833,7 @@ impl AshRenderer {
             self.wait_for_pending_uploads()?;
         }
 
-        let (w, h) = (texture_data.width() as u32, texture_data.height() as u32);
+        let (w, h) = (texture_data.width(), texture_data.height());
         if w == 0 || h == 0 {
             return Ok(TextureUpdateResult::Failed);
         }
@@ -1306,7 +1306,7 @@ impl AshRenderer {
                     self.wait_for_pending_uploads()?;
                 }
 
-                let (w, h) = (td.width() as u32, td.height() as u32);
+                let (w, h) = (td.width(), td.height());
                 if w == 0 || h == 0 {
                     continue;
                 }
@@ -1897,8 +1897,8 @@ fn resolve_effective_texture_id(
 }
 
 fn texture_data_to_rgba_full(td: &TextureData) -> Option<Vec<u8>> {
-    let w = td.width() as u32;
-    let h = td.height() as u32;
+    let w = td.width();
+    let h = td.height();
     if w == 0 || h == 0 {
         return None;
     }
@@ -1913,8 +1913,8 @@ fn texture_data_to_rgba_subrect(
     h: u32,
 ) -> Option<Vec<u8>> {
     let pixels = td.pixels()?;
-    let tex_w = td.width() as usize;
-    let tex_h = td.height() as usize;
+    let tex_w = usize::try_from(td.width()).ok()?;
+    let tex_h = usize::try_from(td.height()).ok()?;
     if tex_w == 0 || tex_h == 0 {
         return None;
     }
@@ -1925,7 +1925,7 @@ fn texture_data_to_rgba_subrect(
     }
     let w = w.min(tex_w.saturating_sub(x));
     let h = h.min(tex_h.saturating_sub(y));
-    let bpp = td.bytes_per_pixel() as usize;
+    let bpp = td.bytes_per_pixel();
 
     let mut out = vec![0u8; w.checked_mul(h)?.checked_mul(4)?];
     match td.format() {

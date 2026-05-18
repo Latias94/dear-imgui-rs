@@ -5,6 +5,17 @@ use dear_imgui_rs::{OwnedTextureData, TextureData, TextureFormat, TextureId, Tex
 use glow::{Context, HasContext};
 use std::collections::HashMap;
 
+pub(crate) fn gl_texture_size_i32(dimension: &'static str, value: u32) -> InitResult<i32> {
+    i32::try_from(value).map_err(|_| InitError::TextureDimensionOutOfRange { dimension, value })
+}
+
+pub(crate) fn checked_gl_texture_size(width: u32, height: u32) -> InitResult<(i32, i32)> {
+    Ok((
+        gl_texture_size_i32("width", width)?,
+        gl_texture_size_i32("height", height)?,
+    ))
+}
+
 /// Trait for managing texture mappings with modern Dear ImGui texture system
 pub trait TextureMap {
     /// Get the OpenGL texture for a Dear ImGui texture ID
@@ -23,8 +34,8 @@ pub trait TextureMap {
     fn register_texture(
         &mut self,
         gl_texture: GlTexture,
-        width: i32,
-        height: i32,
+        width: u32,
+        height: u32,
         format: TextureFormat,
     ) -> TextureId;
 
@@ -33,8 +44,8 @@ pub trait TextureMap {
         &mut self,
         texture_id: TextureId,
         gl_texture: GlTexture,
-        width: i32,
-        height: i32,
+        width: u32,
+        height: u32,
     );
 
     /// Get texture data from Dear ImGui's texture management system
@@ -75,8 +86,8 @@ impl TextureMap for SimpleTextureMap {
     fn register_texture(
         &mut self,
         gl_texture: GlTexture,
-        width: i32,
-        height: i32,
+        width: u32,
+        height: u32,
         format: TextureFormat,
     ) -> TextureId {
         self.next_id += 1;
@@ -97,8 +108,8 @@ impl TextureMap for SimpleTextureMap {
         &mut self,
         texture_id: TextureId,
         gl_texture: GlTexture,
-        _width: i32,
-        _height: i32,
+        _width: u32,
+        _height: u32,
     ) {
         self.textures.insert(texture_id, gl_texture);
 
@@ -157,6 +168,7 @@ pub fn create_texture_from_rgba(
     height: u32,
     data: &[u8],
 ) -> InitResult<GlTexture> {
+    let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
     unsafe {
         let texture = gl.create_texture().map_err(InitError::CreateTexture)?;
 
@@ -165,8 +177,8 @@ pub fn create_texture_from_rgba(
             glow::TEXTURE_2D,
             0,
             glow::RGBA as i32,
-            width as i32,
-            height as i32,
+            width_i32,
+            height_i32,
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
@@ -208,6 +220,7 @@ pub fn create_texture_from_alpha(
     height: u32,
     data: &[u8],
 ) -> InitResult<GlTexture> {
+    let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
     let rgba_data = alpha8_to_rgba(data, width, height)?;
 
     unsafe {
@@ -225,8 +238,8 @@ pub fn create_texture_from_alpha(
             glow::TEXTURE_2D,
             0,
             glow::RGBA as i32,
-            width as i32,
-            height as i32,
+            width_i32,
+            height_i32,
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
@@ -271,22 +284,26 @@ pub fn update_texture(
     height: u32,
     data: &[u8],
     format: u32,
-) {
+) -> InitResult<()> {
+    let x = gl_texture_size_i32("x", x)?;
+    let y = gl_texture_size_i32("y", y)?;
+    let (width, height) = checked_gl_texture_size(width, height)?;
     unsafe {
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
         gl.tex_sub_image_2d(
             glow::TEXTURE_2D,
             0,
-            x as i32,
-            y as i32,
-            width as i32,
-            height as i32,
+            x,
+            y,
+            width,
+            height,
             format,
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(Some(data)),
         );
         gl.bind_texture(glow::TEXTURE_2D, None);
     }
+    Ok(())
 }
 
 fn alpha8_to_rgba(data: &[u8], width: u32, height: u32) -> InitResult<Vec<u8>> {
@@ -320,6 +337,7 @@ pub(crate) fn upload_texture_data(
     format: TextureFormat,
     data: &[u8],
 ) -> InitResult<()> {
+    let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
     let rgba_data;
     let data = match format {
         TextureFormat::RGBA32 => {
@@ -361,8 +379,8 @@ pub(crate) fn upload_texture_data(
             glow::TEXTURE_2D,
             0,
             glow::RGBA as i32,
-            width as i32,
-            height as i32,
+            width_i32,
+            height_i32,
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
@@ -385,6 +403,7 @@ pub fn update_imgui_texture(
     height: u32,
     data: &[u8],
 ) -> InitResult<GlTexture> {
+    let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
     unsafe {
         // Backup current texture binding
         let last_texture = u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
@@ -424,8 +443,8 @@ pub fn update_imgui_texture(
                 glow::TEXTURE_2D,
                 0,
                 glow::RGBA as i32,
-                width as i32,
-                height as i32,
+                width_i32,
+                height_i32,
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
@@ -445,8 +464,8 @@ pub fn update_imgui_texture(
                 glow::TEXTURE_2D,
                 0,
                 glow::RGBA as i32,
-                width as i32,
-                height as i32,
+                width_i32,
+                height_i32,
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,

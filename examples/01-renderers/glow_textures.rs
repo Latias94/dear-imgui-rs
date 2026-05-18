@@ -66,7 +66,7 @@ impl TextureDemo {
             self.user_image_texture = Some(tex);
             // We can infer size from the registered texture using the backend's inspection API
             if let Some(t) = renderer.get_texture_data(tex) {
-                self.user_image_size = Some((t.width() as u32, t.height() as u32));
+                self.user_image_size = Some((t.width(), t.height()));
             }
         }
 
@@ -131,7 +131,7 @@ impl TextureDemo {
             .and_then(|r| r.with_guessed_format())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         {
-            Ok(mut r) => match r.decode() {
+            Ok(r) => match r.decode() {
                 Ok(img) => {
                     let rgba = img.to_rgba8();
                     let (w, h) = rgba.dimensions();
