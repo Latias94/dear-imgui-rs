@@ -1,4 +1,5 @@
 use dear_imgui_rs as imgui;
+use imgui::LogAutoOpenDepth;
 use std::sync::{Mutex, OnceLock};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -21,14 +22,14 @@ fn log_and_popup_helpers_no_panic() {
 
     let ui = ctx.frame();
 
-    ui.log_to_tty(-1);
-    ui.log_to_clipboard(-1);
+    ui.log_to_tty(LogAutoOpenDepth::DEFAULT);
+    ui.log_to_clipboard(LogAutoOpenDepth::DEFAULT);
     ui.log_buttons();
     ui.log_finish();
 
     let log_path =
         std::env::temp_dir().join(format!("dear-imgui-rs-test-log-{}.txt", std::process::id()));
-    let _ = ui.log_to_file(-1, &log_path);
+    let _ = ui.log_to_file(LogAutoOpenDepth::DEFAULT, &log_path);
     ui.log_finish();
     let _ = std::fs::remove_file(log_path);
 

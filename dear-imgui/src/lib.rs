@@ -333,7 +333,7 @@ pub use self::string::*;
 pub use self::style::*;
 pub use self::ui::*;
 // Re-export utility flags/types for convenience
-pub use self::utils::{FocusedFlags, HoveredFlags};
+pub use self::utils::{FocusedFlags, HoveredFlags, LogAutoOpenDepth};
 
 // Utility modules
 pub use self::list_clipper::*;
