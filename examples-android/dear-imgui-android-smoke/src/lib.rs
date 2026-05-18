@@ -511,7 +511,7 @@ impl SmokeApp {
                 );
                 glClear(GL_COLOR_BUFFER_BIT);
                 opengl3_backend::dear_imgui_backend_opengl3_render_draw_data(
-                    draw_data as *const DrawData as *const ImDrawData,
+                    draw_data as *mut DrawData as *mut ImDrawData,
                 );
             }
         }

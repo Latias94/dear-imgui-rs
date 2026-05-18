@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `dear_imgui_glow::{InitError, RenderError}`, and `dear_imgui_ash::RendererError` are now
     `#[non_exhaustive]` and include more specific variants for common startup, render, resource,
     and invalid-state failures.
+  - `dear-imgui-sys::backend_shim::{dx11,opengl3,sdlrenderer3}` render entry points now take
+    `*mut ImDrawData` instead of `*const ImDrawData`, matching the official Dear ImGui backend
+    signatures and texture-feedback mutation model.
+  - `dear-imgui-sdl3::{render,canvas_render}` now take `&mut DrawData` instead of `&DrawData`.
 
 ### Changed
 
@@ -45,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before entering FFI.
 - `OwnedDrawData::from(&mut DrawData)` remains available as a non-thread-safe migration bridge, but
   detached texture-request workflows should use `render::snapshot::FrameSnapshot`.
+- `dear-imgui-sdl3` manual init/new-frame/shutdown helpers now bind the provided `Context` before
+  calling the official SDL3 backend. For new code, prefer the RAII backend owner types.
+
+### Added
+
+- Backends
+  - `dear-imgui-sdl3` now provides `Sdl3PlatformBackend`, `Sdl3OpenGl3Backend`, and
+    `Sdl3RendererBackend` owner types that pair official backend initialization and shutdown,
+    bind per-frame/event/device calls to the captured `Context`, and skip drop-time FFI if the
+    context has already been destroyed.
 
 ### Fixed
 
@@ -65,6 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-sdl3`: combined platform+renderer initialization now shuts down the SDL3 platform
     backend if the OpenGL3 or SDLRenderer3 renderer initialization step fails, avoiding partially
     initialized official backend state.
+  - `dear-imgui-sys::backend_shim` raw modules now document native-handle, current-context,
+    call-ordering, and mutability requirements for official backend shims.
   - `dear-imgui-wgpu`: `WgpuRenderer::shutdown()` now clears renderer-owned multi-viewport state
     for this renderer, matching `Drop` and preventing stale callbacks from borrowing a shut-down
     renderer when users forget to disable multi-viewport support first.

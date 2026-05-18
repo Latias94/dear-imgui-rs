@@ -33,7 +33,7 @@ Backends
 | dear-imgui-glow   | 0.13.0  | glow = 0.17            | OpenGL renderer (winit/glutin) |
 | dear-imgui-ash    | 0.13.0  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
 | dear-imgui-winit  | 0.13.0  | winit = 0.30.13        | Winit platform backend |
-| dear-imgui-sdl3   | 0.13.0  | sdl3 = 0.17, sdl3-sys  | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
+| dear-imgui-sdl3   | 0.13.0  | sdl3 = 0.18, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3/SDLRenderer3 shims |
 
 Utilities
 
@@ -94,6 +94,9 @@ Extensions
     platform windows.
   - `dear-imgui-sdl3` combined platform+renderer init helpers now roll back the SDL3 platform
     backend when the renderer backend init step fails.
+  - `dear-imgui-sdl3` now provides `Sdl3PlatformBackend`, `Sdl3OpenGl3Backend`, and
+    `Sdl3RendererBackend` RAII owners that bind backend calls to the captured `Context` and
+    shut down official backend state on drop.
   - `dear-imgui-wgpu::WgpuRenderer::shutdown()` clears renderer-owned multi-viewport state for the
     renderer, matching `Drop`. It makes installed callbacks no-op for that renderer, but callers
     should still use the matching multi-viewport shutdown helper to uninstall callbacks and destroy
@@ -130,6 +133,9 @@ Extensions
   - `dear-imgui-ash` now keeps existing textures and mesh buffers until Vulkan replacement resources
     are created and uploaded successfully, and cleans up partially-created Vulkan resources on
     allocation or upload setup failure.
+  - `dear-imgui-sys::backend_shim::{dx11,opengl3,sdlrenderer3}` render entry points and
+    `dear-imgui-sdl3` official renderer helpers now take mutable draw data, matching Dear ImGui
+    1.92 texture feedback semantics.
 
 ## History
 

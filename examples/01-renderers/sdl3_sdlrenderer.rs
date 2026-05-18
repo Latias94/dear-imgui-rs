@@ -6,7 +6,7 @@
 use std::error::Error;
 
 use dear_imgui_rs::{Condition, Context};
-use dear_imgui_sdl3 as imgui_sdl3_backend;
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3RendererBackend};
 
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     imgui.set_ini_filename(None::<String>)?;
     imgui.set_log_filename(None::<String>)?;
 
-    imgui_sdl3_backend::init_for_canvas(&mut imgui, canvas.window(), &canvas)?;
+    let mut sdl3_backend = Sdl3RendererBackend::init(&mut imgui, canvas.window(), &canvas)?;
 
     let mut show_demo = false;
     let mut show_debug = false;
@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         //input
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-            if imgui_sdl3_backend::process_sys_event(&raw) {
+            if sdl3_backend.process_event(&mut imgui, &raw) {
                 //event was processed by imgui... we coudlshortcut the loop here
             }
             let event = Event::from_ll(raw);
@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        imgui_sdl3_backend::canvas_new_frame(&mut imgui);
+        sdl3_backend.new_frame(&mut imgui);
         let ui = imgui.frame();
 
         ui.window("SDL3 + IMGUI")
@@ -102,14 +102,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         //update/render
         let draw_data = imgui.render();
-        imgui_sdl3_backend::canvas_render(&draw_data, &canvas);
+        sdl3_backend.render(draw_data, &canvas);
 
         canvas.present();
     }
-
-    println!("Shutting down...");
-    //make sure we shutdown imgui context before we exit!
-    imgui_sdl3_backend::shutdown_for_canvas(&mut imgui);
 
     Ok(())
 }

@@ -17,8 +17,8 @@ void dear_imgui_backend_sdlrenderer3_new_frame() {
     ImGui_ImplSDLRenderer3_NewFrame();
 }
 
-void dear_imgui_backend_sdlrenderer3_render_draw_data(const ImDrawData* draw_data, void* renderer) {
-    ImGui_ImplSDLRenderer3_RenderDrawData(const_cast<ImDrawData*>(draw_data), static_cast<SDL_Renderer*>(renderer));
+void dear_imgui_backend_sdlrenderer3_render_draw_data(ImDrawData* draw_data, void* renderer) {
+    ImGui_ImplSDLRenderer3_RenderDrawData(draw_data, static_cast<SDL_Renderer*>(renderer));
 }
 
 void dear_imgui_backend_sdlrenderer3_create_device_objects() {

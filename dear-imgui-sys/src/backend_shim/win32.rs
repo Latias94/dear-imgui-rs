@@ -1,3 +1,16 @@
+//! Low-level Win32 platform backend shim.
+//!
+//! This module wraps the repository-owned C shim around Dear ImGui's official
+//! `imgui_impl_win32` backend.
+//!
+//! # Safety
+//!
+//! Callers must provide valid Win32 `HWND` / message handles, keep the intended
+//! Dear ImGui context current, and pair init/new-frame/message/shutdown calls in
+//! the order required by the official backend. The DPI helpers forward directly
+//! to upstream Win32 backend functions and require the corresponding raw Win32
+//! handles to be valid for the duration of each call.
+
 use std::ffi::c_void;
 
 pub type Hwnd = *mut c_void;

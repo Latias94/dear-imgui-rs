@@ -13,7 +13,7 @@ use std::error::Error;
 use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context, TextureId};
-use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3OpenGl3Backend};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::video::{GLProfile, SwapInterval, WindowPos};
@@ -87,9 +87,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Initialize SDL3 + OpenGL3 backends (C++ side).
-    imgui_sdl3_backend::init_for_opengl(&mut imgui, &window, &gl_context, "#version 150")?;
+    let mut sdl3_backend =
+        Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")?;
     // Let the backend merge all connected gamepads instead of only the first one.
-    imgui_sdl3_backend::set_gamepad_mode(GamepadMode::AutoAll);
+    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll);
 
     // Basic style scaling using the window's display scale.
     let window_scale = window.display_scale();
@@ -104,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // 1) Pump events: low-level SDL_Event for ImGui backend + high-level Event for us.
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
             // Feed the official SDL3 backend.
-            let _ = imgui_sdl3_backend::process_sys_event(&raw);
+            let _ = sdl3_backend.process_event(&mut imgui, &raw);
 
             // Convert to high-level Event for our own logic.
             let event = Event::from_ll(raw);
@@ -130,7 +131,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         imgui.io_mut().set_delta_time(dt);
 
         // 3) Start a new ImGui frame.
-        imgui_sdl3_backend::new_frame(&mut imgui);
+        sdl3_backend.new_frame(&mut imgui);
         let ui = imgui.frame();
 
         // Create a dockspace over the main viewport so there is always content.
@@ -171,7 +172,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
-        imgui_sdl3_backend::render(draw_data);
+        sdl3_backend.render(draw_data);
 
         // 5) Optionally render additional platform windows when multi-viewport is enabled.
         if ENABLE_VIEWPORTS {
@@ -187,7 +188,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.gl_swap_window();
     }
 
-    imgui_sdl3_backend::shutdown_for_opengl(&mut imgui);
     Ok(())
 }
 
@@ -232,7 +232,7 @@ unsafe fn create_game_texture(gl: &glow::Context) -> glow::Texture {
     }
 
     // Create and upload the texture.
-    let tex = gl.create_texture().expect("failed to create GL texture");
+    let tex = unsafe { gl.create_texture() }.expect("failed to create GL texture");
     unsafe {
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
         gl.tex_parameter_i32(

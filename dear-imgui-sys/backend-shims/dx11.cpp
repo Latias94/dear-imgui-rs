@@ -18,8 +18,8 @@ void dear_imgui_backend_dx11_new_frame() {
     ImGui_ImplDX11_NewFrame();
 }
 
-void dear_imgui_backend_dx11_render_draw_data(const ImDrawData* draw_data) {
-    ImGui_ImplDX11_RenderDrawData(const_cast<ImDrawData*>(draw_data));
+void dear_imgui_backend_dx11_render_draw_data(ImDrawData* draw_data) {
+    ImGui_ImplDX11_RenderDrawData(draw_data);
 }
 
 bool dear_imgui_backend_dx11_create_device_objects() {

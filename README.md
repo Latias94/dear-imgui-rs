@@ -376,7 +376,7 @@ Backends
 | dear-imgui-glow  | 0.13.0   | glow = 0.17       | OpenGL renderer (winit/glutin) |
 | dear-imgui-ash   | 0.13.0   | ash = 0.38        | Vulkan renderer (optional multi-viewport helpers via winit/SDL3; native only) |
 | dear-imgui-winit | 0.13.0   | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.13.0   | sdl3 = 0.17       | SDL3 platform backend (C++ imgui_impl_sdl3/GL3) |
+| dear-imgui-sdl3  | 0.13.0   | sdl3 = 0.18       | SDL3 platform backend with optional official OpenGL3/SDLRenderer3 shims |
 
 Application Runner
 

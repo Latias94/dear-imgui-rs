@@ -15,8 +15,8 @@ void dear_imgui_backend_opengl3_new_frame() {
     ImGui_ImplOpenGL3_NewFrame();
 }
 
-void dear_imgui_backend_opengl3_render_draw_data(const ImDrawData* draw_data) {
-    ImGui_ImplOpenGL3_RenderDrawData(const_cast<ImDrawData*>(draw_data));
+void dear_imgui_backend_opengl3_render_draw_data(ImDrawData* draw_data) {
+    ImGui_ImplOpenGL3_RenderDrawData(draw_data);
 }
 
 bool dear_imgui_backend_opengl3_create_device_objects() {

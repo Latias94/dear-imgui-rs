@@ -3,6 +3,13 @@
 //! This module wraps the repository-owned C shim around Dear ImGui's official
 //! `imgui_impl_android` backend.
 //!
+//! # Safety
+//!
+//! Callers must provide valid `ANativeWindow*` and `AInputEvent*` pointers, keep
+//! the intended Dear ImGui context current, and pair init/new-frame/input/shutdown
+//! calls in the order required by the official backend. Android activity, EGL /
+//! GLES context creation, and APK packaging remain owned by the application.
+//!
 //! Typical usage:
 //!
 //! - initialize with an `ANativeWindow*`
