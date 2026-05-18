@@ -1,6 +1,9 @@
 //! Bar plot implementation
 
-use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
+use super::{
+    Plot, PlotDataLayout, PlotDataOffset, PlotDataStride, PlotError, PlotItemStyle,
+    plot_spec_with_style, with_plot_str_or_empty,
+};
 use crate::{BarsFlags, ItemFlags, sys};
 
 /// Builder for bar plots with customization options
@@ -12,8 +15,7 @@ pub struct BarPlot<'a> {
     shift: f64,
     flags: BarsFlags,
     item_flags: ItemFlags,
-    offset: i32,
-    stride: i32,
+    layout: PlotDataLayout,
 }
 
 impl<'a> super::PlotItemStyled for BarPlot<'a> {
@@ -33,8 +35,7 @@ impl<'a> BarPlot<'a> {
             shift: 0.0,
             flags: BarsFlags::NONE,
             item_flags: ItemFlags::NONE,
-            offset: 0,
-            stride: std::mem::size_of::<f64>() as i32,
+            layout: PlotDataLayout::DEFAULT,
         }
     }
 
@@ -68,15 +69,21 @@ impl<'a> BarPlot<'a> {
         self
     }
 
-    /// Set data offset for partial plotting
-    pub fn with_offset(mut self, offset: i32) -> Self {
-        self.offset = offset;
+    /// Set the data layout used to read values.
+    pub fn with_data_layout(mut self, layout: PlotDataLayout) -> Self {
+        self.layout = layout;
         self
     }
 
-    /// Set data stride for non-contiguous data
-    pub fn with_stride(mut self, stride: i32) -> Self {
-        self.stride = stride;
+    /// Set the sample-index offset used to read values.
+    pub fn with_offset(mut self, offset: PlotDataOffset) -> Self {
+        self.layout = self.layout.with_offset(offset);
+        self
+    }
+
+    /// Set the byte stride used to read values.
+    pub fn with_stride(mut self, stride: PlotDataStride) -> Self {
+        self.layout = self.layout.with_stride(stride);
         self
     }
 
@@ -103,8 +110,7 @@ impl<'a> Plot for BarPlot<'a> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                self.offset,
-                self.stride,
+                self.layout,
             );
             sys::ImPlot_PlotBars_doublePtrInt(
                 label_ptr,
@@ -196,8 +202,7 @@ impl<'a> Plot for PositionalBarPlot<'a> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                std::mem::size_of::<f64>() as i32,
+                PlotDataLayout::DEFAULT,
             );
             sys::ImPlot_PlotBars_doublePtrdoublePtr(
                 label_ptr,

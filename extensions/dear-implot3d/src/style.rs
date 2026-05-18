@@ -554,7 +554,13 @@ mod tests {
                 .with_marker_sizes(&marker_sizes)
                 .with_marker_fill_colors(&marker_fill_colors),
             || {
-                let spec = crate::plot3d_spec_from(9, 2, 24);
+                let spec = crate::plot3d_spec_from(
+                    9,
+                    crate::Plot3DDataLayout::new(
+                        crate::Plot3DDataOffset::samples(2),
+                        crate::Plot3DDataStride::bytes(24),
+                    ),
+                );
                 assert_eq!(spec.Flags, 9);
                 assert_eq!(spec.Offset, 2);
                 assert_eq!(spec.Stride, 24);
@@ -564,7 +570,7 @@ mod tests {
             },
         );
 
-        let spec = crate::plot3d_spec_from(0, 0, -1);
+        let spec = crate::plot3d_spec_from(0, crate::Plot3DDataLayout::DEFAULT);
         assert!(spec.LineColors.is_null());
         assert!(spec.MarkerSizes.is_null());
         assert!(spec.MarkerFillColors.is_null());
@@ -579,7 +585,7 @@ mod tests {
             || {},
         );
 
-        let spec = crate::plot3d_spec_from(0, 0, -1);
+        let spec = crate::plot3d_spec_from(0, crate::Plot3DDataLayout::DEFAULT);
         assert!(spec.FillColors.is_null());
     }
 }

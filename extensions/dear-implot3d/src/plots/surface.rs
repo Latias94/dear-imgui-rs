@@ -1,5 +1,5 @@
 use super::{Plot3D, Plot3DError};
-use crate::{Plot3DUi, Surface3DFlags};
+use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, Plot3DUi, Surface3DFlags};
 
 pub struct Surface3D<'a> {
     pub label: &'a str,
@@ -9,8 +9,7 @@ pub struct Surface3D<'a> {
     pub scale_min: f64,
     pub scale_max: f64,
     pub flags: Surface3DFlags,
-    pub offset: i32,
-    pub stride: i32,
+    pub layout: Plot3DDataLayout,
 }
 
 impl<'a> Surface3D<'a> {
@@ -23,8 +22,7 @@ impl<'a> Surface3D<'a> {
             scale_min: f64::NAN,
             scale_max: f64::NAN,
             flags: Surface3DFlags::NONE,
-            offset: 0,
-            stride: 0,
+            layout: Plot3DDataLayout::DEFAULT,
         }
     }
     pub fn scale(mut self, min: f64, max: f64) -> Self {
@@ -36,12 +34,16 @@ impl<'a> Surface3D<'a> {
         self.flags = flags;
         self
     }
-    pub fn offset(mut self, o: i32) -> Self {
-        self.offset = o;
+    pub fn data_layout(mut self, layout: Plot3DDataLayout) -> Self {
+        self.layout = layout;
         self
     }
-    pub fn stride(mut self, s: i32) -> Self {
-        self.stride = s;
+    pub fn offset(mut self, offset: Plot3DDataOffset) -> Self {
+        self.layout = self.layout.with_offset(offset);
+        self
+    }
+    pub fn stride(mut self, stride: Plot3DDataStride) -> Self {
+        self.layout = self.layout.with_stride(stride);
         self
     }
 }
@@ -75,8 +77,7 @@ impl<'a> Plot3D for Surface3D<'a> {
             self.scale_min,
             self.scale_max,
             self.flags,
-            self.offset,
-            self.stride,
+            self.layout,
         );
         Ok(())
     }

@@ -1,6 +1,8 @@
 //! Histogram plot implementation
 
-use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
+use super::{
+    Plot, PlotDataLayout, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty,
+};
 use crate::sys;
 use crate::{BinMethod, HistogramFlags, ItemFlags};
 
@@ -131,8 +133,7 @@ impl<'a> Plot for HistogramPlot<'a> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                crate::IMPLOT_AUTO,
+                PlotDataLayout::DEFAULT,
             );
             sys::ImPlot_PlotHistogram_doublePtr(
                 label_ptr,
@@ -272,8 +273,7 @@ impl<'a> Plot for Histogram2DPlot<'a> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                crate::IMPLOT_AUTO,
+                PlotDataLayout::DEFAULT,
             );
             sys::ImPlot_PlotHistogram2D_doublePtr(
                 label_ptr,

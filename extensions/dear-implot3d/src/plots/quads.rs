@@ -1,5 +1,5 @@
 use super::{Plot3D, Plot3DError, validate_lengths, validate_multiple, validate_nonempty};
-use crate::{Plot3DUi, Quad3DFlags};
+use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, Plot3DUi, Quad3DFlags};
 
 pub struct Quads3D<'a> {
     pub label: &'a str,
@@ -10,8 +10,7 @@ pub struct Quads3D<'a> {
     pub ys_f64: Option<&'a [f64]>,
     pub zs_f64: Option<&'a [f64]>,
     pub flags: Quad3DFlags,
-    pub offset: i32,
-    pub stride: i32,
+    pub layout: Plot3DDataLayout,
     pub points_f32: Option<&'a [[f32; 3]]>,
     pub points_f64: Option<&'a [[f64; 3]]>,
 }
@@ -27,8 +26,7 @@ impl<'a> Quads3D<'a> {
             ys_f64: None,
             zs_f64: None,
             flags: Quad3DFlags::NONE,
-            offset: 0,
-            stride: 0,
+            layout: Plot3DDataLayout::DEFAULT,
             points_f32: None,
             points_f64: None,
         }
@@ -43,8 +41,7 @@ impl<'a> Quads3D<'a> {
             ys_f64: Some(ys),
             zs_f64: Some(zs),
             flags: Quad3DFlags::NONE,
-            offset: 0,
-            stride: 0,
+            layout: Plot3DDataLayout::DEFAULT,
             points_f32: None,
             points_f64: None,
         }
@@ -59,8 +56,7 @@ impl<'a> Quads3D<'a> {
             ys_f64: None,
             zs_f64: None,
             flags: Quad3DFlags::NONE,
-            offset: 0,
-            stride: 0,
+            layout: Plot3DDataLayout::DEFAULT,
             points_f32: Some(pts),
             points_f64: None,
         }
@@ -75,8 +71,7 @@ impl<'a> Quads3D<'a> {
             ys_f64: None,
             zs_f64: None,
             flags: Quad3DFlags::NONE,
-            offset: 0,
-            stride: 0,
+            layout: Plot3DDataLayout::DEFAULT,
             points_f32: None,
             points_f64: Some(pts),
         }
@@ -85,12 +80,16 @@ impl<'a> Quads3D<'a> {
         self.flags = flags;
         self
     }
-    pub fn offset(mut self, o: i32) -> Self {
-        self.offset = o;
+    pub fn data_layout(mut self, layout: Plot3DDataLayout) -> Self {
+        self.layout = layout;
         self
     }
-    pub fn stride(mut self, s: i32) -> Self {
-        self.stride = s;
+    pub fn offset(mut self, offset: Plot3DDataOffset) -> Self {
+        self.layout = self.layout.with_offset(offset);
+        self
+    }
+    pub fn stride(mut self, stride: Plot3DDataStride) -> Self {
+        self.layout = self.layout.with_stride(stride);
         self
     }
 }
@@ -133,7 +132,7 @@ impl<'a> Plot3D for Quads3D<'a> {
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
             validate_multiple(x.len(), 4, "quads")?;
-            ui.plot_quads_f32_raw(self.label, x, y, z, self.flags, self.offset, self.stride);
+            ui.plot_quads_f32_raw(self.label, x, y, z, self.flags, self.layout);
             return Ok(());
         }
         if let (Some(x), Some(y), Some(z)) = (self.xs_f64, self.ys_f64, self.zs_f64) {
@@ -141,7 +140,7 @@ impl<'a> Plot3D for Quads3D<'a> {
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
             validate_multiple(x.len(), 4, "quads")?;
-            ui.plot_quads_f64_raw(self.label, x, y, z, self.flags, self.offset, self.stride);
+            ui.plot_quads_f64_raw(self.label, x, y, z, self.flags, self.layout);
             return Ok(());
         }
         Err(Plot3DError::EmptyData)

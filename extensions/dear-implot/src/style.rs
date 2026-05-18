@@ -668,6 +668,7 @@ mod tests {
         Colormap, ColormapColorIndex, ColormapIndex, ColormapSelection, PlotItemArrayStyle,
         with_next_plot_item_array_style,
     };
+    use crate::plots::{PlotDataLayout, PlotDataOffset, PlotDataStride};
 
     #[test]
     fn colormap_indices_reject_negative_values() {
@@ -709,7 +710,9 @@ mod tests {
                 .with_fill_colors(&fill_colors)
                 .with_marker_sizes(&marker_sizes),
             || {
-                let spec = crate::plots::plot_spec_from(7, 3, 16);
+                let layout =
+                    PlotDataLayout::new(PlotDataOffset::samples(3), PlotDataStride::bytes(16));
+                let spec = crate::plots::plot_spec_from(7, layout);
                 assert_eq!(spec.Flags, 7);
                 assert_eq!(spec.Offset, 3);
                 assert_eq!(spec.Stride, 16);
@@ -719,7 +722,7 @@ mod tests {
             },
         );
 
-        let spec = crate::plots::plot_spec_from(0, 0, crate::IMPLOT_AUTO);
+        let spec = crate::plots::plot_spec_from(0, PlotDataLayout::DEFAULT);
         assert!(spec.LineColors.is_null());
         assert!(spec.FillColors.is_null());
         assert!(spec.MarkerSizes.is_null());
@@ -734,7 +737,7 @@ mod tests {
             || {},
         );
 
-        let spec = crate::plots::plot_spec_from(0, 0, crate::IMPLOT_AUTO);
+        let spec = crate::plots::plot_spec_from(0, PlotDataLayout::DEFAULT);
         assert!(spec.LineColors.is_null());
     }
 }

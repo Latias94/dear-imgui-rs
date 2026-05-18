@@ -1,6 +1,8 @@
 //! Heatmap plot implementation
 
-use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
+use super::{
+    Plot, PlotDataLayout, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty,
+};
 use crate::{HeatmapFlags, ItemFlags, sys};
 use dear_imgui_rs::with_scratch_txt_two;
 
@@ -139,8 +141,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
                     let spec = plot_spec_with_style(
                         self.style,
                         self.flags.bits() | self.item_flags.bits(),
-                        0,
-                        crate::IMPLOT_AUTO,
+                        PlotDataLayout::DEFAULT,
                     );
                     sys::ImPlot_PlotHeatmap_doublePtr(
                         label_ptr,
@@ -160,8 +161,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
                 let spec = plot_spec_with_style(
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
-                    0,
-                    crate::IMPLOT_AUTO,
+                    PlotDataLayout::DEFAULT,
                 );
                 sys::ImPlot_PlotHeatmap_doublePtr(
                     label_ptr,
@@ -304,8 +304,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                     let spec = plot_spec_with_style(
                         self.style,
                         self.flags.bits() | self.item_flags.bits(),
-                        0,
-                        crate::IMPLOT_AUTO,
+                        PlotDataLayout::DEFAULT,
                     );
                     sys::ImPlot_PlotHeatmap_FloatPtr(
                         label_ptr,
@@ -325,8 +324,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                 let spec = plot_spec_with_style(
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
-                    0,
-                    crate::IMPLOT_AUTO,
+                    PlotDataLayout::DEFAULT,
                 );
                 sys::ImPlot_PlotHeatmap_FloatPtr(
                     label_ptr,

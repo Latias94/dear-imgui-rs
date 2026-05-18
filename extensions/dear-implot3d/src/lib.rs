@@ -70,6 +70,117 @@ thread_local! {
     static NEXT_PLOT3D_SPEC: RefCell<Option<sys::ImPlot3DSpec_c>> = RefCell::new(None);
 }
 
+/// Sample-index offset used by ImPlot3D item data access.
+///
+/// ImPlot3D intentionally allows negative and out-of-range offsets for circular
+/// buffers, so this is a signed sample offset rather than a Rust slice index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Plot3DDataOffset(i32);
+
+impl Plot3DDataOffset {
+    /// No data offset.
+    pub const ZERO: Self = Self(0);
+
+    /// Create a sample-index offset.
+    #[inline]
+    pub const fn samples(offset: i32) -> Self {
+        Self(offset)
+    }
+
+    #[inline]
+    pub(crate) const fn raw(self) -> i32 {
+        self.0
+    }
+}
+
+/// Byte stride used by ImPlot3D item data access.
+///
+/// Use [`Plot3DDataStride::AUTO`] for contiguous data of the plotted value type,
+/// or [`Plot3DDataStride::bytes`] for interleaved/custom layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Plot3DDataStride(i32);
+
+impl Plot3DDataStride {
+    /// Let ImPlot3D use `sizeof(T)` for the plotted value type.
+    pub const AUTO: Self = Self(IMPLOT3D_AUTO);
+
+    /// Create a byte stride.
+    ///
+    /// Panics if `bytes` is zero or exceeds ImPlot3D's `int` range.
+    #[inline]
+    pub fn bytes(bytes: usize) -> Self {
+        assert!(
+            bytes > 0,
+            "Plot3DDataStride::bytes() requires a non-zero stride"
+        );
+        let bytes = i32::try_from(bytes)
+            .expect("Plot3DDataStride::bytes() stride exceeded ImPlot3D's int range");
+        Self(bytes)
+    }
+
+    /// Create the contiguous byte stride for `T`.
+    #[inline]
+    pub fn for_type<T>() -> Self {
+        Self::bytes(std::mem::size_of::<T>())
+    }
+
+    #[inline]
+    pub(crate) const fn raw(self) -> i32 {
+        self.0
+    }
+}
+
+impl Default for Plot3DDataStride {
+    fn default() -> Self {
+        Self::AUTO
+    }
+}
+
+/// Data layout used by ImPlot3D item builders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Plot3DDataLayout {
+    offset: Plot3DDataOffset,
+    stride: Plot3DDataStride,
+}
+
+impl Plot3DDataLayout {
+    /// Contiguous data starting at sample offset zero.
+    pub const DEFAULT: Self = Self {
+        offset: Plot3DDataOffset::ZERO,
+        stride: Plot3DDataStride::AUTO,
+    };
+
+    /// Create a data layout from a sample offset and byte stride.
+    #[inline]
+    pub const fn new(offset: Plot3DDataOffset, stride: Plot3DDataStride) -> Self {
+        Self { offset, stride }
+    }
+
+    /// Create a data layout with a different sample offset.
+    #[inline]
+    pub const fn with_offset(mut self, offset: Plot3DDataOffset) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Create a data layout with a different byte stride.
+    #[inline]
+    pub const fn with_stride(mut self, stride: Plot3DDataStride) -> Self {
+        self.stride = stride;
+        self
+    }
+
+    #[inline]
+    pub(crate) const fn raw_offset(self) -> i32 {
+        self.offset.raw()
+    }
+
+    #[inline]
+    pub(crate) const fn raw_stride(self) -> i32 {
+        self.stride.raw()
+    }
+}
+
 pub(crate) fn update_next_plot3d_spec(f: impl FnOnce(&mut sys::ImPlot3DSpec_c)) {
     NEXT_PLOT3D_SPEC.with(|cell| {
         let mut guard = cell.borrow_mut();
@@ -117,11 +228,11 @@ fn default_plot3d_spec() -> sys::ImPlot3DSpec_c {
     }
 }
 
-fn plot3d_spec_from(flags: u32, offset: i32, stride: i32) -> sys::ImPlot3DSpec_c {
+fn plot3d_spec_from(flags: u32, layout: Plot3DDataLayout) -> sys::ImPlot3DSpec_c {
     let mut spec = take_next_plot3d_spec().unwrap_or_else(default_plot3d_spec);
     spec.Flags = ((spec.Flags as u32) | flags) as sys::ImPlot3DItemFlags;
-    spec.Offset = offset;
-    spec.Stride = stride;
+    spec.Offset = layout.raw_offset();
+    spec.Stride = layout.raw_stride();
     spec
 }
 
@@ -637,9 +748,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = std::mem::size_of::<f32>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
             sys::ImPlot3D_PlotLine_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -651,7 +761,7 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    /// Raw line plot (f32) with offset/stride
+    /// Line plot (f32) with an explicit data layout.
     pub fn plot_line_f32_raw<S: AsRef<str>>(
         &self,
         label: S,
@@ -659,8 +769,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &[f32],
         zs: &[f32],
         flags: Line3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
@@ -673,13 +782,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f32>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotLine_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -711,9 +815,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = std::mem::size_of::<f64>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
             sys::ImPlot3D_PlotLine_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -725,7 +828,7 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    /// Raw line plot (f64) with offset/stride
+    /// Line plot (f64) with an explicit data layout.
     pub fn plot_line_f64_raw<S: AsRef<str>>(
         &self,
         label: S,
@@ -733,8 +836,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &[f64],
         zs: &[f64],
         flags: Line3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
@@ -747,13 +849,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f64>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotLine_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -785,9 +882,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = std::mem::size_of::<f32>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
             sys::ImPlot3D_PlotScatter_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -799,7 +895,7 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    /// Raw scatter plot (f32) with offset/stride
+    /// Scatter plot (f32) with an explicit data layout.
     pub fn plot_scatter_f32_raw<S: AsRef<str>>(
         &self,
         label: S,
@@ -807,8 +903,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &[f32],
         zs: &[f32],
         flags: Scatter3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
@@ -821,13 +916,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f32>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotScatter_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -859,9 +949,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = std::mem::size_of::<f64>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
             sys::ImPlot3D_PlotScatter_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -873,7 +962,7 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    /// Raw scatter plot (f64) with offset/stride
+    /// Scatter plot (f64) with an explicit data layout.
     pub fn plot_scatter_f64_raw<S: AsRef<str>>(
         &self,
         label: S,
@@ -881,8 +970,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &[f64],
         zs: &[f64],
         flags: Scatter3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
@@ -895,13 +983,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f64>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotScatter_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -933,9 +1016,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = std::mem::size_of::<f32>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
             sys::ImPlot3D_PlotTriangle_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -954,8 +1036,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &[f32],
         zs: &[f32],
         flags: Triangle3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
@@ -968,13 +1049,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f32>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotTriangle_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -1006,9 +1082,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = std::mem::size_of::<f32>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
             sys::ImPlot3D_PlotQuad_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -1027,8 +1102,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &[f32],
         zs: &[f32],
         flags: Quad3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
@@ -1041,13 +1115,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f32>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotQuad_FloatPtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -1079,9 +1148,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = std::mem::size_of::<f64>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
             sys::ImPlot3D_PlotTriangle_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -1100,8 +1168,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &[f64],
         zs: &[f64],
         flags: Triangle3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
@@ -1114,13 +1181,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f64>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotTriangle_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -1152,9 +1214,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = std::mem::size_of::<f64>() as i32;
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), 0, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
             sys::ImPlot3D_PlotQuad_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -1173,8 +1234,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &[f64],
         zs: &[f64],
         flags: Quad3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
@@ -1187,13 +1247,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f64>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotQuad_doublePtr(
                 label_ptr,
                 xs.as_ptr(),
@@ -1416,8 +1471,7 @@ impl<'ui> Surface3DBuilder<'ui> {
             let spec = plot3d_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                std::mem::size_of::<f32>() as i32,
+                Plot3DDataLayout::DEFAULT,
             );
             sys::ImPlot3D_PlotSurface_FloatPtr(
                 label_ptr,
@@ -1458,7 +1512,7 @@ impl<'ui> Plot3DUi<'ui> {
         }
     }
 
-    /// Raw surface plot (f32) with offset/stride
+    /// Raw surface plot (f32) with an explicit data layout.
     pub fn surface_f32_raw<S: AsRef<str>>(
         &self,
         label: S,
@@ -1468,8 +1522,7 @@ impl<'ui> Plot3DUi<'ui> {
         scale_min: f64,
         scale_max: f64,
         flags: Surface3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         debug_before_plot();
@@ -1498,13 +1551,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f32>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotSurface_FloatPtr(
                 label_ptr,
                 xs_flat.as_ptr(),
@@ -1534,8 +1582,7 @@ impl<'ui> Plot3DUi<'ui> {
         scale_min: f64,
         scale_max: f64,
         flags: Surface3DFlags,
-        offset: i32,
-        stride: i32,
+        layout: Plot3DDataLayout,
     ) {
         self.bind();
         debug_before_plot();
@@ -1550,13 +1597,8 @@ impl<'ui> Plot3DUi<'ui> {
         if label.contains('\0') {
             return;
         }
-        let stride_bytes = if stride == 0 {
-            std::mem::size_of::<f32>() as i32
-        } else {
-            stride
-        };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), offset, stride_bytes);
+            let spec = plot3d_spec_from(flags.bits(), layout);
             sys::ImPlot3D_PlotSurface_FloatPtr(
                 label_ptr,
                 xs_flat.as_ptr(),
@@ -1612,8 +1654,7 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
             let spec = plot3d_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                IMPLOT3D_AUTO,
+                Plot3DDataLayout::DEFAULT,
             );
             sys::ImPlot3D_PlotImage_Vec2(
                 label_ptr,
@@ -1687,8 +1728,7 @@ impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
             let spec = plot3d_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                IMPLOT3D_AUTO,
+                Plot3DDataLayout::DEFAULT,
             );
             sys::ImPlot3D_PlotImage_Plot3DPoint(
                 label_ptr,
@@ -2083,8 +2123,7 @@ impl<'ui> Mesh3DBuilder<'ui> {
             let spec = plot3d_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                std::mem::size_of::<f32>() as i32,
+                Plot3DDataLayout::DEFAULT,
             );
             sys::ImPlot3D_PlotMesh_FloatPtr(
                 label_ptr,
@@ -2118,6 +2157,33 @@ impl<'ui> Plot3DUi<'ui> {
             item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::{Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, plot3d_spec_from};
+
+    #[test]
+    fn data_layout_allows_signed_sample_offsets() {
+        let layout = Plot3DDataLayout::DEFAULT.with_offset(Plot3DDataOffset::samples(-8));
+        let spec = plot3d_spec_from(0, layout);
+        assert_eq!(spec.Offset, -8);
+        assert_eq!(spec.Stride, super::IMPLOT3D_AUTO);
+    }
+
+    #[test]
+    fn data_stride_bytes_are_positive() {
+        let stride = Plot3DDataStride::bytes(16);
+        let layout = Plot3DDataLayout::DEFAULT.with_stride(stride);
+        let spec = plot3d_spec_from(0, layout);
+        assert_eq!(spec.Stride, 16);
+    }
+
+    #[test]
+    #[should_panic(expected = "requires a non-zero stride")]
+    fn zero_data_stride_panics_before_ffi() {
+        let _ = Plot3DDataStride::bytes(0);
     }
 }
 

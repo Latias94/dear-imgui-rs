@@ -49,6 +49,117 @@ thread_local! {
     static NEXT_PLOT_SPEC: RefCell<Option<sys::ImPlotSpec_c>> = RefCell::new(None);
 }
 
+/// Sample-index offset used by ImPlot item data access.
+///
+/// ImPlot intentionally allows negative and out-of-range offsets for circular
+/// buffers, so this is a signed sample offset rather than a Rust slice index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlotDataOffset(i32);
+
+impl PlotDataOffset {
+    /// No data offset.
+    pub const ZERO: Self = Self(0);
+
+    /// Create a sample-index offset.
+    #[inline]
+    pub const fn samples(offset: i32) -> Self {
+        Self(offset)
+    }
+
+    #[inline]
+    pub(crate) const fn raw(self) -> i32 {
+        self.0
+    }
+}
+
+/// Byte stride used by ImPlot item data access.
+///
+/// Use [`PlotDataStride::AUTO`] for contiguous data of the plotted value type,
+/// or [`PlotDataStride::bytes`] for interleaved/custom layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlotDataStride(i32);
+
+impl PlotDataStride {
+    /// Let ImPlot use `sizeof(T)` for the plotted value type.
+    pub const AUTO: Self = Self(crate::IMPLOT_AUTO);
+
+    /// Create a byte stride.
+    ///
+    /// Panics if `bytes` is zero or exceeds ImPlot's `int` range.
+    #[inline]
+    pub fn bytes(bytes: usize) -> Self {
+        assert!(
+            bytes > 0,
+            "PlotDataStride::bytes() requires a non-zero stride"
+        );
+        let bytes = i32::try_from(bytes)
+            .expect("PlotDataStride::bytes() stride exceeded ImPlot's int range");
+        Self(bytes)
+    }
+
+    /// Create the contiguous byte stride for `T`.
+    #[inline]
+    pub fn for_type<T>() -> Self {
+        Self::bytes(std::mem::size_of::<T>())
+    }
+
+    #[inline]
+    pub(crate) const fn raw(self) -> i32 {
+        self.0
+    }
+}
+
+impl Default for PlotDataStride {
+    fn default() -> Self {
+        Self::AUTO
+    }
+}
+
+/// Data layout used by ImPlot item builders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlotDataLayout {
+    offset: PlotDataOffset,
+    stride: PlotDataStride,
+}
+
+impl PlotDataLayout {
+    /// Contiguous data starting at sample offset zero.
+    pub const DEFAULT: Self = Self {
+        offset: PlotDataOffset::ZERO,
+        stride: PlotDataStride::AUTO,
+    };
+
+    /// Create a data layout from a sample offset and byte stride.
+    #[inline]
+    pub const fn new(offset: PlotDataOffset, stride: PlotDataStride) -> Self {
+        Self { offset, stride }
+    }
+
+    /// Create a data layout with a different sample offset.
+    #[inline]
+    pub const fn with_offset(mut self, offset: PlotDataOffset) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Create a data layout with a different byte stride.
+    #[inline]
+    pub const fn with_stride(mut self, stride: PlotDataStride) -> Self {
+        self.stride = stride;
+        self
+    }
+
+    #[inline]
+    pub(crate) const fn raw_offset(self) -> i32 {
+        self.offset.raw()
+    }
+
+    #[inline]
+    pub(crate) const fn raw_stride(self) -> i32 {
+        self.stride.raw()
+    }
+}
+
 fn color4(rgba: [f32; 4]) -> sys::ImVec4_c {
     sys::ImVec4_c {
         x: rgba[0],
@@ -393,23 +504,49 @@ pub(crate) fn set_next_plot_spec(spec: Option<sys::ImPlotSpec_c>) {
     })
 }
 
-pub(crate) fn plot_spec_from(flags: u32, offset: i32, stride: i32) -> sys::ImPlotSpec_c {
+pub(crate) fn plot_spec_from(flags: u32, layout: PlotDataLayout) -> sys::ImPlotSpec_c {
     let mut spec = take_next_plot_spec().unwrap_or_else(default_plot_spec);
     spec.Flags = flags as sys::ImPlotItemFlags;
-    spec.Offset = offset;
-    spec.Stride = stride;
+    spec.Offset = layout.raw_offset();
+    spec.Stride = layout.raw_stride();
     spec
 }
 
 pub(crate) fn plot_spec_with_style(
     style: PlotItemStyle,
     flags: u32,
-    offset: i32,
-    stride: i32,
+    layout: PlotDataLayout,
 ) -> sys::ImPlotSpec_c {
-    let mut spec = plot_spec_from(flags, offset, stride);
+    let mut spec = plot_spec_from(flags, layout);
     style.apply_to_spec(&mut spec);
     spec
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::{PlotDataLayout, PlotDataOffset, PlotDataStride, plot_spec_from};
+
+    #[test]
+    fn data_layout_allows_signed_sample_offsets() {
+        let layout = PlotDataLayout::DEFAULT.with_offset(PlotDataOffset::samples(-8));
+        let spec = plot_spec_from(0, layout);
+        assert_eq!(spec.Offset, -8);
+        assert_eq!(spec.Stride, crate::IMPLOT_AUTO);
+    }
+
+    #[test]
+    fn data_stride_bytes_are_positive() {
+        let stride = PlotDataStride::bytes(16);
+        let layout = PlotDataLayout::DEFAULT.with_stride(stride);
+        let spec = plot_spec_from(0, layout);
+        assert_eq!(spec.Stride, 16);
+    }
+
+    #[test]
+    #[should_panic(expected = "requires a non-zero stride")]
+    fn zero_data_stride_panics_before_ffi() {
+        let _ = PlotDataStride::bytes(0);
+    }
 }
 
 /// Universal plot builder that can create any plot type

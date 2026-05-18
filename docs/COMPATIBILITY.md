@@ -90,6 +90,12 @@ Extensions
   - `dear-implot` colormap helpers use typed `ColormapIndex`, `ColormapColorIndex`, and
     `ColormapSelection` values. Keep the token returned by `push_colormap` alive instead of calling
     `pop_colormap(count)`.
+  - `dear-implot` / `dear-implot3d` plot data layout APIs use typed
+    `PlotDataLayout` / `Plot3DDataLayout`, typed sample offsets, and typed byte strides. Replace raw
+    `offset, stride` pairs with `.with_offset(PlotDataOffset::samples(...))` plus
+    `.with_stride(PlotDataStride::bytes(...))`, or use the `3D` variants for ImPlot3D. Default
+    stride is explicit via `PlotDataStride::AUTO` / `Plot3DDataStride::AUTO`; zero-byte strides are
+    rejected before FFI.
   - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
   - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
     `NodeEditor::set_alt_mouse_button` takes `MouseButton`.

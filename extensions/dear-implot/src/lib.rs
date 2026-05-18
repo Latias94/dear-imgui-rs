@@ -109,7 +109,7 @@ pub use utils::*;
 
 // Re-export new modular plot types for convenience
 pub use plots::{
-    Plot, PlotData, PlotError,
+    Plot, PlotData, PlotDataLayout, PlotDataOffset, PlotDataStride, PlotError,
     bar::{BarPlot, PositionalBarPlot},
     error_bars::{AsymmetricErrorBarsPlot, ErrorBarsPlot, SimpleErrorBarsPlot},
     heatmap::{HeatmapPlot, HeatmapPlotF32},

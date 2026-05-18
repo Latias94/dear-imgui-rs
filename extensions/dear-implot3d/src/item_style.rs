@@ -1,5 +1,5 @@
 use crate::plots::Plot3D;
-use crate::sys;
+use crate::{Plot3DDataLayout, sys};
 use dear_imgui_rs::texture::TextureRef;
 
 fn color4(rgba: [f32; 4]) -> sys::ImVec4_c {
@@ -109,10 +109,9 @@ impl Plot3DItemStyle {
 pub(crate) fn plot3d_spec_with_style(
     style: Plot3DItemStyle,
     flags: u32,
-    offset: i32,
-    stride: i32,
+    layout: Plot3DDataLayout,
 ) -> sys::ImPlot3DSpec_c {
-    let mut spec = crate::plot3d_spec_from(flags, offset, stride);
+    let mut spec = crate::plot3d_spec_from(flags, layout);
     style.apply_to_spec(&mut spec);
     spec
 }
@@ -443,7 +442,8 @@ impl_builder_plot3d_item_flagged!(crate::Mesh3DBuilder<'_>);
 mod tests {
     use super::{Plot3DItemStyle, plot3d_spec_with_style, with_scoped_next_plot3d_spec};
     use crate::{
-        Item3DFlags, Marker3D, default_plot3d_spec, set_next_plot3d_spec, take_next_plot3d_spec,
+        Item3DFlags, Marker3D, Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride,
+        default_plot3d_spec, set_next_plot3d_spec, take_next_plot3d_spec,
     };
 
     #[test]
@@ -458,7 +458,9 @@ mod tests {
             .with_marker_line_color([0.9, 0.1, 0.2, 1.0])
             .with_marker_fill_color([0.3, 0.4, 0.5, 0.6]);
 
-        let spec = plot3d_spec_with_style(style, 0, 7, 16);
+        let layout =
+            Plot3DDataLayout::new(Plot3DDataOffset::samples(7), Plot3DDataStride::bytes(16));
+        let spec = plot3d_spec_with_style(style, 0, layout);
 
         assert_eq!(spec.LineColor.x, 0.1);
         assert_eq!(spec.LineColor.y, 0.2);
@@ -514,7 +516,13 @@ mod tests {
                 .with_line_weight(3.0)
                 .with_marker(Marker3D::Auto),
             Item3DFlags::NO_LEGEND,
-            || crate::plot3d_spec_from(0, 5, 12),
+            || {
+                let layout = Plot3DDataLayout::new(
+                    Plot3DDataOffset::samples(5),
+                    Plot3DDataStride::bytes(12),
+                );
+                crate::plot3d_spec_from(0, layout)
+            },
         );
 
         assert_eq!(consumed.FillAlpha, 0.25);
@@ -533,7 +541,12 @@ mod tests {
         let consumed = with_scoped_next_plot3d_spec(
             Plot3DItemStyle::default(),
             Item3DFlags::NO_LEGEND,
-            || crate::plot3d_spec_from(crate::Line3DFlags::SEGMENTS.bits(), 0, 4),
+            || {
+                crate::plot3d_spec_from(
+                    crate::Line3DFlags::SEGMENTS.bits(),
+                    Plot3DDataLayout::DEFAULT.with_stride(Plot3DDataStride::bytes(4)),
+                )
+            },
         );
 
         assert_eq!(

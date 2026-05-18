@@ -1,8 +1,8 @@
 //! Polygon plot implementation
 
 use super::{
-    Plot, PlotError, PlotItemStyle, plot_spec_with_style, validate_data_lengths,
-    with_plot_str_or_empty,
+    Plot, PlotDataLayout, PlotDataOffset, PlotDataStride, PlotError, PlotItemStyle,
+    plot_spec_with_style, validate_data_lengths, with_plot_str_or_empty,
 };
 use crate::{ItemFlags, PolygonFlags, sys};
 
@@ -14,8 +14,7 @@ pub struct PolygonPlot<'a> {
     style: PlotItemStyle,
     flags: PolygonFlags,
     item_flags: ItemFlags,
-    offset: i32,
-    stride: i32,
+    layout: PlotDataLayout,
 }
 
 impl<'a> super::PlotItemStyled for PolygonPlot<'a> {
@@ -34,8 +33,7 @@ impl<'a> PolygonPlot<'a> {
             style: PlotItemStyle::default(),
             flags: PolygonFlags::NONE,
             item_flags: ItemFlags::NONE,
-            offset: 0,
-            stride: std::mem::size_of::<f64>() as i32,
+            layout: PlotDataLayout::DEFAULT,
         }
     }
 
@@ -81,15 +79,21 @@ impl<'a> PolygonPlot<'a> {
         self
     }
 
-    /// Set data offset for partial plotting.
-    pub fn with_offset(mut self, offset: i32) -> Self {
-        self.offset = offset;
+    /// Set the data layout used to read polygon vertices.
+    pub fn with_data_layout(mut self, layout: PlotDataLayout) -> Self {
+        self.layout = layout;
         self
     }
 
-    /// Set data stride for non-contiguous data.
-    pub fn with_stride(mut self, stride: i32) -> Self {
-        self.stride = stride;
+    /// Set the sample-index offset used to read polygon vertices.
+    pub fn with_offset(mut self, offset: PlotDataOffset) -> Self {
+        self.layout = self.layout.with_offset(offset);
+        self
+    }
+
+    /// Set the byte stride used to read polygon vertices.
+    pub fn with_stride(mut self, stride: PlotDataStride) -> Self {
+        self.layout = self.layout.with_stride(stride);
         self
     }
 
@@ -112,8 +116,7 @@ impl<'a> Plot for PolygonPlot<'a> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                self.offset,
-                self.stride,
+                self.layout,
             );
             sys::ImPlot_PlotPolygon_doublePtr(
                 label_ptr,

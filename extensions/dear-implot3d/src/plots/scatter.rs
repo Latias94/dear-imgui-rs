@@ -1,5 +1,5 @@
 use super::{Plot3D, Plot3DError, validate_lengths, validate_nonempty};
-use crate::{Plot3DUi, Scatter3DFlags};
+use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, Plot3DUi, Scatter3DFlags};
 
 pub struct Scatter3D<'a> {
     pub label: &'a str,
@@ -10,8 +10,7 @@ pub struct Scatter3D<'a> {
     pub ys_f64: Option<&'a [f64]>,
     pub zs_f64: Option<&'a [f64]>,
     pub flags: Scatter3DFlags,
-    pub offset: i32,
-    pub stride: i32,
+    pub layout: Plot3DDataLayout,
 }
 
 impl<'a> Scatter3D<'a> {
@@ -25,8 +24,7 @@ impl<'a> Scatter3D<'a> {
             ys_f64: None,
             zs_f64: None,
             flags: Scatter3DFlags::NONE,
-            offset: 0,
-            stride: 0,
+            layout: Plot3DDataLayout::DEFAULT,
         }
     }
     pub fn f64(label: &'a str, xs: &'a [f64], ys: &'a [f64], zs: &'a [f64]) -> Self {
@@ -39,20 +37,23 @@ impl<'a> Scatter3D<'a> {
             ys_f64: Some(ys),
             zs_f64: Some(zs),
             flags: Scatter3DFlags::NONE,
-            offset: 0,
-            stride: 0,
+            layout: Plot3DDataLayout::DEFAULT,
         }
     }
     pub fn flags(mut self, flags: Scatter3DFlags) -> Self {
         self.flags = flags;
         self
     }
-    pub fn offset(mut self, o: i32) -> Self {
-        self.offset = o;
+    pub fn data_layout(mut self, layout: Plot3DDataLayout) -> Self {
+        self.layout = layout;
         self
     }
-    pub fn stride(mut self, s: i32) -> Self {
-        self.stride = s;
+    pub fn offset(mut self, offset: Plot3DDataOffset) -> Self {
+        self.layout = self.layout.with_offset(offset);
+        self
+    }
+    pub fn stride(mut self, stride: Plot3DDataStride) -> Self {
+        self.layout = self.layout.with_stride(stride);
         self
     }
 }
@@ -66,13 +67,13 @@ impl<'a> Plot3D for Scatter3D<'a> {
             validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
-            ui.plot_scatter_f32_raw(self.label, x, y, z, self.flags, self.offset, self.stride);
+            ui.plot_scatter_f32_raw(self.label, x, y, z, self.flags, self.layout);
             Ok(())
         } else if let (Some(x), Some(y), Some(z)) = (self.xs_f64, self.ys_f64, self.zs_f64) {
             validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
-            ui.plot_scatter_f64_raw(self.label, x, y, z, self.flags, self.offset, self.stride);
+            ui.plot_scatter_f64_raw(self.label, x, y, z, self.flags, self.layout);
             Ok(())
         } else {
             Err(Plot3DError::EmptyData)

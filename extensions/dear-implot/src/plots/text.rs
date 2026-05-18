@@ -1,7 +1,8 @@
 //! Text plot implementation
 
 use super::{
-    PlotData, PlotError, PlotItemStyle, PlotItemStyled, plot_spec_with_style, with_plot_str,
+    PlotData, PlotDataLayout, PlotError, PlotItemStyle, PlotItemStyled, plot_spec_with_style,
+    with_plot_str,
 };
 use crate::{ItemFlags, TextFlags, sys};
 
@@ -88,8 +89,7 @@ impl<'a> TextPlot<'a> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                crate::IMPLOT_AUTO,
+                PlotDataLayout::DEFAULT,
             );
             sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
         });
@@ -307,8 +307,7 @@ impl FormattedTextPlot {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                crate::IMPLOT_AUTO,
+                PlotDataLayout::DEFAULT,
             );
             sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
         });

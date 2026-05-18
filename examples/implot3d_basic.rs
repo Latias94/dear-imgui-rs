@@ -725,8 +725,8 @@ fn demo_realtime_plots(ui: &Ui, plot_ui: &Plot3DUi) {
                             &ys.data,
                             &zs.data,
                             Line3DFlags::NONE,
-                            xs.offset as i32,
-                            0,
+                            Plot3DDataLayout::DEFAULT
+                                .with_offset(Plot3DDataOffset::samples(xs.offset as i32)),
                         );
                     }
                 });

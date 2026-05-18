@@ -1,6 +1,9 @@
 //! Pie chart plot implementation
 
-use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_slice_with_opt};
+use super::{
+    Plot, PlotDataLayout, PlotError, PlotItemStyle, plot_spec_with_style,
+    with_plot_str_slice_with_opt,
+};
 use crate::{ItemFlags, PieChartFlags, sys};
 
 /// Builder for pie chart plots
@@ -147,8 +150,7 @@ impl<'a> Plot for PieChartPlot<'a> {
                 let spec = plot_spec_with_style(
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
-                    0,
-                    crate::IMPLOT_AUTO,
+                    PlotDataLayout::DEFAULT,
                 );
                 sys::ImPlot_PlotPieChart_doublePtrStr(
                     label_ptrs.as_ptr(),
@@ -305,8 +307,7 @@ impl<'a> Plot for PieChartPlotF32<'a> {
                 let spec = plot_spec_with_style(
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
-                    0,
-                    crate::IMPLOT_AUTO,
+                    PlotDataLayout::DEFAULT,
                 );
                 sys::ImPlot_PlotPieChart_FloatPtrStr(
                     label_ptrs.as_ptr(),

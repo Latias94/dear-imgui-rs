@@ -1,6 +1,8 @@
 //! Image plot implementation
 
-use super::{Plot, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty};
+use super::{
+    Plot, PlotDataLayout, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty,
+};
 use crate::{ImageFlags, ItemFlags, sys};
 use dear_imgui_rs::texture::TextureRef;
 use std::marker::PhantomData;
@@ -108,8 +110,7 @@ impl<'a, 'tex> Plot for ImagePlot<'a, 'tex> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                crate::IMPLOT_AUTO,
+                PlotDataLayout::DEFAULT,
             );
             sys::ImPlot_PlotImage(
                 label_ptr,

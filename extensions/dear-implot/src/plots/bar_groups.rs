@@ -1,6 +1,8 @@
 //! Bar groups plot implementation
 
-use super::{PlotData, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_slice};
+use super::{
+    PlotData, PlotDataLayout, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_slice,
+};
 use crate::{BarGroupsFlags, ItemFlags, sys};
 
 /// Builder for bar groups plots with extensive customization options
@@ -123,8 +125,7 @@ impl<'a> BarGroupsPlot<'a> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                crate::IMPLOT_AUTO,
+                PlotDataLayout::DEFAULT,
             );
             sys::ImPlot_PlotBarGroups_doublePtr(
                 label_ptrs.as_ptr(),
@@ -263,8 +264,7 @@ impl<'a> BarGroupsPlotF32<'a> {
             let spec = plot_spec_with_style(
                 self.style,
                 self.flags.bits() | self.item_flags.bits(),
-                0,
-                crate::IMPLOT_AUTO,
+                PlotDataLayout::DEFAULT,
             );
             sys::ImPlot_PlotBarGroups_FloatPtr(
                 label_ptrs.as_ptr(),
