@@ -1,4 +1,4 @@
-use dear_imgui_rs as imgui;
+use dear_imgui_rs::{self as imgui, PlotValueOffset};
 use std::sync::{Mutex, OnceLock};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -27,32 +27,15 @@ fn plot_widgets_validate_value_offsets() {
         ui.plot_lines("empty_lines", &empty);
         ui.plot_histogram("empty_histogram", &empty);
         ui.plot_lines_config("offset_lines", &values)
-            .values_offset(2)
+            .values_offset(2usize)
             .build();
         ui.plot_histogram_config("offset_histogram", &values)
-            .values_offset(2)
+            .values_offset(PlotValueOffset::new(2))
             .build();
-
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.plot_lines_config("negative_lines", &values)
-                    .values_offset(-1)
-                    .build();
-            }))
-            .is_err()
-        );
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.plot_histogram_config("negative_histogram", &values)
-                    .values_offset(-1)
-                    .build();
-            }))
-            .is_err()
-        );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 ui.plot_lines_config("too_large_lines", &values)
-                    .values_offset(values.len() as i32)
+                    .values_offset(values.len())
                     .build();
             }))
             .is_err()
@@ -60,7 +43,15 @@ fn plot_widgets_validate_value_offsets() {
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 ui.plot_histogram_config("too_large_histogram", &values)
-                    .values_offset(values.len() as i32)
+                    .values_offset(values.len())
+                    .build();
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ui.plot_lines_config("overflow_lines", &values)
+                    .values_offset(PlotValueOffset::new(i32::MAX as usize + 1))
                     .build();
             }))
             .is_err()

@@ -96,6 +96,8 @@ Extensions
     `.with_stride(PlotDataStride::bytes(...))`, or use the `3D` variants for ImPlot3D. Default
     stride is explicit via `PlotDataStride::AUTO` / `Plot3DDataStride::AUTO`; zero-byte strides are
     rejected before FFI.
+  - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
+    of a raw signed integer. Use `PlotValueOffset::new(...)` or pass `usize` directly.
   - `dear-imnodes` node, pin, and link APIs use typed `NodeId`, `PinId`, and `LinkId` handles.
   - `dear-imnodes` style-var helpers take typed `StyleVar` values, and
     `NodeEditor::set_alt_mouse_button` takes `MouseButton`.

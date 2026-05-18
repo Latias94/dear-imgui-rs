@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `FontId` is now an opaque, atlas-validated, `!Send + !Sync` handle instead of a simple raw
     `ImFont*` wrapper. Existing long-lived storage remains supported, but stale or wrong-atlas
     handles panic before safe APIs call into Dear ImGui.
+  - `PlotLines` / `PlotHistogram` `values_offset(...)` now takes `usize`/`PlotValueOffset` instead
+    of raw `i32`.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions

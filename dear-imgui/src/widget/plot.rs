@@ -47,13 +47,46 @@ impl Ui {
 }
 
 /// Builder for a plot lines widget
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlotValueOffset(usize);
+
+impl PlotValueOffset {
+    /// First value in the slice.
+    pub const ZERO: Self = Self(0);
+
+    /// Create a value offset from a Rust slice index.
+    #[inline]
+    pub const fn new(offset: usize) -> Self {
+        Self(offset)
+    }
+
+    #[inline]
+    pub(crate) fn into_i32(self, caller: &str, value_count: i32) -> i32 {
+        let offset = i32::try_from(self.0).unwrap_or_else(|_| {
+            panic!("{caller} values_offset supports at most i32::MAX");
+        });
+        assert!(
+            value_count == 0 || offset < value_count,
+            "{caller} values_offset must be less than values.len()"
+        );
+        offset
+    }
+}
+
+impl From<usize> for PlotValueOffset {
+    fn from(offset: usize) -> Self {
+        Self::new(offset)
+    }
+}
+
+/// Builder for a plot lines widget
 #[derive(Debug)]
 #[must_use]
 pub struct PlotLines<'ui, 'p> {
     ui: &'ui Ui,
     label: Cow<'ui, str>,
     values: &'p [f32],
-    values_offset: i32,
+    values_offset: PlotValueOffset,
     overlay_text: Option<Cow<'ui, str>>,
     scale_min: f32,
     scale_max: f32,
@@ -67,7 +100,7 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
             ui,
             label: label.into(),
             values,
-            values_offset: 0,
+            values_offset: PlotValueOffset::ZERO,
             overlay_text: None,
             scale_min: f32::MAX,
             scale_max: f32::MAX,
@@ -76,8 +109,8 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
     }
 
     /// Sets the offset for the values array
-    pub fn values_offset(mut self, offset: i32) -> Self {
-        self.values_offset = offset;
+    pub fn values_offset(mut self, offset: impl Into<PlotValueOffset>) -> Self {
+        self.values_offset = offset.into();
         self
     }
 
@@ -108,14 +141,7 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
     /// Builds the plot lines widget
     pub fn build(self) {
         let count = plot_value_count_i32("PlotLines::build()", self.values.len());
-        assert!(
-            self.values_offset >= 0,
-            "PlotLines::build() values_offset must be non-negative"
-        );
-        assert!(
-            count == 0 || self.values_offset < count,
-            "PlotLines::build() values_offset must be less than values.len()"
-        );
+        let values_offset = self.values_offset.into_i32("PlotLines::build()", count);
         let (label_ptr, overlay_ptr) = self
             .ui
             .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());
@@ -126,7 +152,7 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
                 label_ptr,
                 self.values.as_ptr(),
                 count,
-                self.values_offset,
+                values_offset,
                 overlay_ptr,
                 self.scale_min,
                 self.scale_max,
@@ -144,7 +170,7 @@ pub struct PlotHistogram<'ui, 'p> {
     ui: &'ui Ui,
     label: Cow<'ui, str>,
     values: &'p [f32],
-    values_offset: i32,
+    values_offset: PlotValueOffset,
     overlay_text: Option<Cow<'ui, str>>,
     scale_min: f32,
     scale_max: f32,
@@ -158,7 +184,7 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
             ui,
             label: label.into(),
             values,
-            values_offset: 0,
+            values_offset: PlotValueOffset::ZERO,
             overlay_text: None,
             scale_min: f32::MAX,
             scale_max: f32::MAX,
@@ -167,8 +193,8 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
     }
 
     /// Sets the offset for the values array
-    pub fn values_offset(mut self, offset: i32) -> Self {
-        self.values_offset = offset;
+    pub fn values_offset(mut self, offset: impl Into<PlotValueOffset>) -> Self {
+        self.values_offset = offset.into();
         self
     }
 
@@ -199,14 +225,7 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
     /// Builds the plot histogram widget
     pub fn build(self) {
         let count = plot_value_count_i32("PlotHistogram::build()", self.values.len());
-        assert!(
-            self.values_offset >= 0,
-            "PlotHistogram::build() values_offset must be non-negative"
-        );
-        assert!(
-            count == 0 || self.values_offset < count,
-            "PlotHistogram::build() values_offset must be less than values.len()"
-        );
+        let values_offset = self.values_offset.into_i32("PlotHistogram::build()", count);
         let (label_ptr, overlay_ptr) = self
             .ui
             .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());
@@ -217,7 +236,7 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
                 label_ptr,
                 self.values.as_ptr(),
                 count,
-                self.values_offset,
+                values_offset,
                 overlay_ptr,
                 self.scale_min,
                 self.scale_max,
