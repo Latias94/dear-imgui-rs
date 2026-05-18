@@ -66,87 +66,17 @@ Extensions
 - Next release train: TBD.
 - Main branch currently reflects post-`0.13.0` development and may move independently until the next planned release is cut.
 - Current baselines after the `0.13.0` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.13`, MSRV 1.92, and the external dependency baseline described above.
-- Safe API soundness changes on trunk:
-  - `TextureRef<'tex>` carries managed texture lifetimes; raw `TextureRef::from_raw` is unsafe.
-  - Legacy texture references use `TextureId`; raw `u64` texture ids are no longer accepted by
-    `TextureRef` or `create_texture_ref`.
-  - `TextureData` dimensions use `u32`, while byte counts and pitches use `usize`; conversions into
-    Dear ImGui's signed `int` ABI are checked before FFI.
-  - `Context::render()` and renderer APIs use `&mut DrawData` so texture feedback goes through
-    `DrawData::textures_mut()`.
-  - `DrawData::textures()` / `PlatformIo::textures()` are read-only; mutable texture access requires
-    mutable draw data or platform IO.
-  - Core and extension RAII tokens that call `End`/`Pop` on drop are UI/context-bound and
-    `!Send + !Sync`.
-  - `StateStorageToken<'ui, 'storage>` binds the lifetime of both the active UI and pushed storage.
-  - `FontId` is an opaque, atlas-validated, `!Send + !Sync` handle. It can still be stored in
-    long-lived style state, but safe font push/draw APIs reject stale or wrong-atlas handles before
-    crossing FFI.
-  - `Context::font_atlas()` is read-only through `FontAtlasRef<'_>`; atlas mutation goes through
-    `font_atlas_mut()` / `fonts()`.
-  - Clipboard callback reentrancy is guarded per `ClipboardContext`, so same-context reentry fails
-    closed without blocking callbacks for independent ImGui contexts.
-  - `dear-imgui-test-engine` safe methods check the bound ImGui context liveness before FFI. Drop or
-    explicitly `shutdown()` the test engine before dropping the target `Context`; stale bound-context
-    use panics in Rust.
-  - Safe counts, indices, ids, offsets, layout strides, and sentinel-like options use Rust semantic
-    types instead of raw signed FFI integers across core and extension crates. Conversions into C
-    `int` ABI values are checked before FFI.
-  - Current-context binding policy is part of the public safe API contract documented here and in
-    the crate-level migration notes. Detailed per-method migration notes live in `CHANGELOG.md`.
-- Backend lifecycle changes on trunk:
-  - `dear-imgui-glow::GlowRenderer::destroy()` clears renderer-owned multi-viewport state for the
-    renderer, matching `Drop`. It makes installed callbacks no-op for that renderer, but callers
-    should still use the matching multi-viewport shutdown helper to uninstall callbacks and destroy
-    platform windows.
-  - `dear-imgui-sdl3` combined platform+renderer init helpers now roll back the SDL3 platform
-    backend when the renderer backend init step fails.
-  - `dear-imgui-sdl3` now provides `Sdl3PlatformBackend`, `Sdl3OpenGl3Backend`, and
-    `Sdl3RendererBackend` RAII owners that bind backend calls to the captured `Context` and
-    shut down official backend state on drop.
-  - `dear-imgui-wgpu::WgpuRenderer::shutdown()` clears renderer-owned multi-viewport state for the
-    renderer, matching `Drop`. It makes installed callbacks no-op for that renderer, but callers
-    should still use the matching multi-viewport shutdown helper to uninstall callbacks and destroy
-    platform windows.
-  - Renderer multi-viewport shutdown helpers in `dear-imgui-wgpu`, `dear-imgui-ash`, and
-    `dear-imgui-glow` now destroy platform windows before uninstalling renderer callbacks. This lets
-    Dear ImGui call renderer destroy callbacks while renderer-owned per-viewport data is still
-    reachable.
-  - `dear-imgui-ash` Winit and SDL3 multi-viewport swapchain recreation keeps the old swapchain
-    resources alive until the replacement swapchain, image views, and framebuffers are fully
-    created. Failed resize or present recovery no longer leaves the secondary viewport in a
-    partially destroyed state.
-- Backend texture feedback changes on trunk:
-  - `dear-imgui-glow::GlowRenderer::update_texture(_with_context)` now updates registered renderer
-    texture-map entries by their stored OpenGL texture handle instead of treating the public
-    `TextureId` as a raw GL texture name. Non-null unregistered ids still use the legacy raw-id
-    fallback; null texture ids now return an error.
-  - `dear-imgui-glow` convenience texture registration/update handles `TextureFormat::Alpha8` by
-    expanding to RGBA, matching the draw-data texture path.
-  - `dear-app` now exposes structured startup/render errors instead of using generic strings for
-    missing frame callbacks, WGPU adapter/device/surface initialization, renderer construction,
-    and frame preparation/rendering failures. `DearAppError` is now `#[non_exhaustive]`.
-  - `dear-app::GpuApi` texture registration/update/removal methods use `TextureId` instead of raw
-    `u64` ids.
-  - `dear-imgui-glow::TextureMap` texture registration/update dimensions use `u32` instead of raw
-    signed integers.
-  - `dear-imgui-glow`, `dear-imgui-wgpu`, and `dear-imgui-ash` now use more specific error
-    variants for common invalid-state and resource failures instead of collapsing every path into
-    a generic renderer string. Their public renderer error enums are now `#[non_exhaustive]`.
-  - `dear-imgui-wgpu::TextureUpdateResult::Destroyed.apply_to(...)` now sets Dear ImGui's
-    destroy-next-frame precondition before writing `TextureStatus::Destroyed`, matching the Ash
-    backend helper behavior.
-  - `dear-imgui-wgpu` preserves the previous GPU texture mapping if full texture recreation fails
-    during an update of an existing texture.
-  - `dear-imgui-ash` now defers draw-data texture `TexID`/`OK` feedback until Vulkan upload command
-    submission succeeds, so failed uploads no longer leave ImGui pointing at an unregistered texture
-    id.
-  - `dear-imgui-ash` now keeps existing textures and mesh buffers until Vulkan replacement resources
-    are created and uploaded successfully, and cleans up partially-created Vulkan resources on
-    allocation or upload setup failure.
-  - `dear-imgui-sys::backend_shim::{dx11,opengl3,sdlrenderer3}` render entry points and
-    `dear-imgui-sdl3` official renderer helpers now take mutable draw data, matching Dear ImGui
-    1.92 texture feedback semantics.
+- Main-branch compatibility policy:
+  - Detailed post-`0.13.0` source breaks live in `CHANGELOG.md`; this file tracks the broader
+    compatibility contract.
+  - The safe Rust API may intentionally break source compatibility when raw FFI values would
+    otherwise expose stale handles, unchecked sizes, invalid sentinels, wrong-context access, or
+    other states that should remain outside safe Rust.
+  - Raw `*-sys` crates and explicitly unsafe/raw escape hatches stay close to upstream ABI. Safe
+    wrapper APIs prefer Rust semantic types, bound lifetimes, typed handles, and checked conversions.
+  - Backend crates may break independently when external renderer/windowing dependencies require it.
+    Texture feedback, multi-viewport lifecycle, and renderer ownership behavior follow Dear ImGui
+    upstream backend contracts.
 
 ## History
 

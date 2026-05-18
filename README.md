@@ -75,41 +75,13 @@ let _draw_data = ctx.render();
 
 ## Migration Notes
 
-The current safe API intentionally encodes more of Dear ImGui's FFI invariants in Rust types.
-Some source breaks are deliberate because preserving the old shape would keep unsound safe code
-compilable. See `CHANGELOG.md` for the release-by-release list of affected methods.
+The README focuses on current supported usage. For source-breaking migrations between releases,
+read `CHANGELOG.md`; for release-train, dependency, MSRV, and backend compatibility baselines, see
+`docs/COMPATIBILITY.md`.
 
-- Texture refs now carry lifetimes: pass `TextureId` for legacy renderer-owned handles, or pass
-  `&mut TextureData` / `&mut OwnedTextureData` for ImGui-managed textures. `&TextureData` is treated
-  as the legacy TexID path only and does not pass a mutable managed `_TexData` pointer to ImGui.
-- `TextureRef::from_raw(...)` is `unsafe`. Raw `ImTextureRef` can contain an arbitrary
-  `ImTextureData*`, so callers must prove that pointer remains valid and does not violate Rust
-  aliasing.
-- `TextureData::create`, texture dimension getters, pitches, and format byte counts now use
-  `u32`/`usize` Rust size types; oversized values are rejected before Dear ImGui's signed `int`
-  ABI.
-- `Context::render()` returns `&mut DrawData`. Renderer entry points should accept mutable draw
-  data and process texture requests with the streaming `draw_data.textures_mut()` cursor.
-- `DrawData::textures()` and `PlatformIo::textures()` are read-only. Code that updates texture
-  status, TexID, or upload rectangles must use `textures_mut()` from a mutable draw data/platform IO
-  reference.
-- `FontId` is still suitable for long-lived style state, but it is now validated against the active
-  font atlas before safe APIs enter FFI. `FontAtlas::clear`, `clear_fonts`, and `remove_font`
-  invalidate old font handles; `ui.push_font(old_id)` panics instead of pushing a stale `ImFont*`.
-- `Context::font_atlas()` returns read-only `FontAtlasRef<'_>`. Use `font_atlas_mut()` or `fonts()`
-  when loading, clearing, or otherwise mutating the atlas.
-- `OwnedDrawData::from(&mut draw_data)` remains available as a migration bridge, but detached,
-  thread-safe rendering should use `render::snapshot::FrameSnapshot` instead of carrying live
-  context texture requests.
-- RAII scope tokens that call ImGui or extension `End`/`Pop` functions on drop are UI/context-bound
-  and intentionally `!Send + !Sync`. End/pop them on the same UI thread and context where they were
-  created.
-- `StateStorageToken<'ui, 'storage>` now borrows both the active `Ui` and the pushed storage. Keep
-  the `OwnedStateStorage` alive until the token is dropped.
-- Safe counts, indices, offsets, ids, and sentinel-like options use Rust semantic types instead of
-  raw signed FFI integers. Conversions into Dear ImGui's signed `int` ABI are checked before FFI.
-- Extension contexts follow the same rule: safe methods bind or assert against the owning current
-  ImGui/extension context, not whichever raw C context happened to be current.
+The safe API intentionally encodes Dear ImGui FFI invariants in Rust types. Source breaks are
+accepted when the previous safe wrapper shape could preserve stale handles, unchecked sizes,
+invalid sentinels, wrong-context access, or other states that should remain outside safe Rust.
 
 ## Examples
 
