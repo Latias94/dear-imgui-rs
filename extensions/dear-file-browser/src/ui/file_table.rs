@@ -314,7 +314,7 @@ fn draw_file_table_view(
     }
 
     // Table
-    use dear_imgui_rs::{SortDirection, TableColumnFlags, TableFlags, TableSizingPolicy};
+    use dear_imgui_rs::{Id, SortDirection, TableColumnFlags, TableFlags, TableSizingPolicy};
     let flags = TableFlags::RESIZABLE
         | TableFlags::REORDERABLE
         | TableFlags::ROW_BG
@@ -358,7 +358,6 @@ fn draw_file_table_view(
             FileListDataColumn::Name => table
                 .column("Name")
                 .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
-                .user_id(0)
                 .weight(resolved_data_column_weight(
                     columns_config,
                     *column,
@@ -370,7 +369,7 @@ fn draw_file_table_view(
             FileListDataColumn::Extension => table
                 .column(ext_label)
                 .flags(TableColumnFlags::PREFER_SORT_ASCENDING)
-                .user_id(1)
+                .user_id(Id::from(1u32))
                 .weight(resolved_data_column_weight(
                     columns_config,
                     *column,
@@ -382,7 +381,7 @@ fn draw_file_table_view(
             FileListDataColumn::Size => table
                 .column("Size")
                 .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
-                .user_id(2)
+                .user_id(Id::from(2u32))
                 .weight(resolved_data_column_weight(
                     columns_config,
                     *column,
@@ -394,7 +393,7 @@ fn draw_file_table_view(
             FileListDataColumn::Modified => table
                 .column("Modified")
                 .flags(TableColumnFlags::PREFER_SORT_DESCENDING)
-                .user_id(3)
+                .user_id(Id::from(3u32))
                 .weight(resolved_data_column_weight(
                     columns_config,
                     *column,

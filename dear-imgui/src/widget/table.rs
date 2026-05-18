@@ -39,12 +39,12 @@
 )]
 use crate::draw::ImColor32;
 use crate::internal::len_i32;
-use crate::sys;
 use crate::ui::Ui;
 use crate::widget::{
     TableColumnFlags, TableColumnIndent, TableColumnStateFlags, TableColumnWidth, TableFlags,
     TableOptions, TableSizingPolicy,
 };
+use crate::{Id, sys};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -416,6 +416,22 @@ fn assert_current_table_row(caller: &str) {
     );
 }
 
+fn assert_explicit_user_id(id: Id, caller: &str) -> Id {
+    assert!(
+        id.raw() != 0,
+        "{caller} user_id must be non-zero; use None for automatic user id"
+    );
+    id
+}
+
+fn optional_user_id_raw(user_id: Option<Id>, caller: &str) -> sys::ImGuiID {
+    user_id.map_or(0, |id| assert_explicit_user_id(id, caller).raw())
+}
+
+fn optional_user_id_from_raw(user_id: sys::ImGuiID) -> Option<Id> {
+    (user_id != 0).then(|| Id::from(user_id))
+}
+
 /// Table column setup information
 #[derive(Clone, Debug)]
 pub struct TableColumnSetup<Name> {
@@ -423,7 +439,7 @@ pub struct TableColumnSetup<Name> {
     pub flags: TableColumnFlags,
     pub width: Option<TableColumnWidth>,
     pub indent: Option<TableColumnIndent>,
-    pub user_id: u32,
+    pub user_id: Option<Id>,
 }
 
 impl<Name> TableColumnSetup<Name> {
@@ -434,7 +450,7 @@ impl<Name> TableColumnSetup<Name> {
             flags: TableColumnFlags::NONE,
             width: None,
             indent: None,
-            user_id: 0,
+            user_id: None,
         }
     }
 
@@ -473,8 +489,8 @@ impl<Name> TableColumnSetup<Name> {
     }
 
     /// Sets the user ID
-    pub fn user_id(mut self, id: u32) -> Self {
-        self.user_id = id;
+    pub fn user_id(mut self, id: Id) -> Self {
+        self.user_id = Some(assert_explicit_user_id(id, "TableColumnSetup::user_id()"));
         self
     }
 }
@@ -624,7 +640,7 @@ impl Ui {
         label: impl AsRef<str>,
         flags: TableColumnFlags,
         width: Option<TableColumnWidth>,
-        user_id: u32,
+        user_id: Option<Id>,
     ) {
         self.table_setup_column_with_indent(label, flags, width, None, user_id);
     }
@@ -636,7 +652,7 @@ impl Ui {
         flags: TableColumnFlags,
         width: Option<TableColumnWidth>,
         indent: Option<TableColumnIndent>,
-        user_id: u32,
+        user_id: Option<Id>,
     ) {
         let table = assert_current_table("Ui::table_setup_column_with_indent()");
         assert!(
@@ -654,6 +670,7 @@ impl Ui {
         let raw_flags = flags.bits()
             | width.map_or(0, TableColumnWidth::raw_flags)
             | indent.map_or(0, TableColumnIndent::raw_flags);
+        let user_id = optional_user_id_raw(user_id, "Ui::table_setup_column_with_indent()");
         unsafe {
             sys::igTableSetupColumn(label_ptr, raw_flags, init_width_or_weight, user_id);
         }
@@ -665,7 +682,7 @@ impl Ui {
         label: impl AsRef<str>,
         flags: TableColumnFlags,
         width: f32,
-        user_id: u32,
+        user_id: Option<Id>,
     ) {
         self.table_setup_column(label, flags, Some(TableColumnWidth::Fixed(width)), user_id);
     }
@@ -676,7 +693,7 @@ impl Ui {
         label: impl AsRef<str>,
         flags: TableColumnFlags,
         weight: f32,
-        user_id: u32,
+        user_id: Option<Id>,
     ) {
         self.table_setup_column(
             label,
@@ -1026,7 +1043,7 @@ impl From<SortDirection> for sys::ImGuiSortDirection {
 /// One column sort spec.
 #[derive(Copy, Clone, Debug)]
 pub struct TableColumnSortSpec {
-    pub column_user_id: u32,
+    pub column_user_id: Option<Id>,
     pub column_index: TableColumnIndex,
     pub sort_order: i16,
     pub sort_direction: SortDirection,
@@ -1106,7 +1123,7 @@ impl<'a> Iterator for TableSortSpecsIter<'a> {
                 SortDirection::None
             };
             Some(TableColumnSortSpec {
-                column_user_id: spec.ColumnUserID,
+                column_user_id: optional_user_id_from_raw(spec.ColumnUserID),
                 column_index: TableColumnIndex::from_imgui_column_idx(
                     spec.ColumnIndex,
                     "TableSortSpecsIter::next()",
@@ -1386,6 +1403,21 @@ mod tests {
         ctx
     }
 
+    #[test]
+    fn table_user_ids_hide_zero_sentinel() {
+        let id = crate::Id::from(7u32);
+        assert_eq!(optional_user_id_raw(None, "test"), 0);
+        assert_eq!(optional_user_id_raw(Some(id), "test"), id.raw());
+        assert_eq!(optional_user_id_from_raw(0), None);
+        assert_eq!(optional_user_id_from_raw(id.raw()), Some(id));
+
+        assert!(
+            std::panic::catch_unwind(|| optional_user_id_raw(Some(crate::Id::default()), "test"))
+                .is_err(),
+            "explicit zero user ids must not cross the safe API boundary"
+        );
+    }
+
     unsafe fn current_table_draw_channel() -> i32 {
         let table = assert_current_table("current_table_draw_channel()");
         let draw_list = unsafe { (*(*table).InnerWindow).DrawList };
@@ -1548,11 +1580,11 @@ mod tests {
         let ui = ctx.frame();
         let _ = ui.window("table_setup_preconditions").build(|| {
             let _table = ui.begin_table("table", 1).unwrap();
-            ui.table_setup_column("one", TableColumnFlags::NONE, None, 0);
+            ui.table_setup_column("one", TableColumnFlags::NONE, None, None);
 
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    ui.table_setup_column("two", TableColumnFlags::NONE, None, 0);
+                    ui.table_setup_column("two", TableColumnFlags::NONE, None, None);
                 }))
                 .is_err()
             );
@@ -1665,8 +1697,8 @@ mod tests {
         let ui = ctx.frame();
         let _ = ui.window("table_angled_header_invalid").build(|| {
             let _table = ui.begin_table("table", 2).unwrap();
-            ui.table_setup_column("one", TableColumnFlags::ANGLED_HEADER, None, 0);
-            ui.table_setup_column("two", TableColumnFlags::ANGLED_HEADER, None, 0);
+            ui.table_setup_column("one", TableColumnFlags::ANGLED_HEADER, None, None);
+            ui.table_setup_column("two", TableColumnFlags::ANGLED_HEADER, None, None);
 
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1836,7 +1868,7 @@ pub struct ColumnBuilder<'ui> {
     flags: TableColumnFlags,
     width: Option<TableColumnWidth>,
     indent: Option<TableColumnIndent>,
-    user_id: u32,
+    user_id: Option<Id>,
 }
 
 impl<'ui> ColumnBuilder<'ui> {
@@ -1847,7 +1879,7 @@ impl<'ui> ColumnBuilder<'ui> {
             flags: TableColumnFlags::NONE,
             width: None,
             indent: None,
-            user_id: 0,
+            user_id: None,
         }
     }
 
@@ -1896,8 +1928,8 @@ impl<'ui> ColumnBuilder<'ui> {
     }
 
     /// Set user id for this column.
-    pub fn user_id(mut self, id: u32) -> Self {
-        self.user_id = id;
+    pub fn user_id(mut self, id: Id) -> Self {
+        self.user_id = Some(assert_explicit_user_id(id, "ColumnBuilder::user_id()"));
         self
     }
 

@@ -280,7 +280,7 @@ where
                             "",
                             imgui::TableColumnFlags::NONE,
                             min_width,
-                            0,
+                            None,
                         );
                     }
                 }

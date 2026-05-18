@@ -89,7 +89,7 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
 
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.table_setup_column("width in flags", width_in_flags, None, 0);
+                ui.table_setup_column("width in flags", width_in_flags, None, None);
             }))
             .is_err()
         );
@@ -100,20 +100,20 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
                     indent_in_flags,
                     None,
                     None,
-                    0,
+                    None,
                 );
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.table_setup_column("status in flags", status_in_flags, None, 0);
+                ui.table_setup_column("status in flags", status_in_flags, None, None);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.table_setup_column("private in flags", private_in_flags, None, 0);
+                ui.table_setup_column("private in flags", private_in_flags, None, None);
             }))
             .is_err()
         );
@@ -123,7 +123,7 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
                     "nan width",
                     imgui::TableColumnFlags::NONE,
                     f32::NAN,
-                    0,
+                    None,
                 );
             }))
             .is_err()
@@ -136,7 +136,7 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
                 | imgui::TableColumnFlags::DEFAULT_SORT,
             Some(imgui::TableColumnWidth::Fixed(48.0)),
             Some(imgui::TableColumnIndent::Disable),
-            0,
+            None,
         );
     });
 }

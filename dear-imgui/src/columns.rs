@@ -10,8 +10,8 @@
     clippy::as_conversions,
     clippy::unnecessary_cast
 )]
-use crate::Ui;
 use crate::sys;
+use crate::{Id, Ui};
 use bitflags::bitflags;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -460,9 +460,9 @@ impl Ui {
 
     /// Get columns ID for the given string ID and count.
     #[doc(alias = "GetColumnsID")]
-    pub fn get_columns_id(&self, str_id: impl AsRef<str>, count: usize) -> u32 {
+    pub fn get_columns_id(&self, str_id: impl AsRef<str>, count: usize) -> Id {
         let count = columns_count_to_i32(count, "Ui::get_columns_id()");
-        unsafe { sys::igGetColumnsID(self.scratch_txt(str_id), count) }
+        unsafe { Id::from(sys::igGetColumnsID(self.scratch_txt(str_id), count)) }
     }
 
     // ============================================================================
