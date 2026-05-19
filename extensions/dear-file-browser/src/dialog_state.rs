@@ -539,14 +539,13 @@ pub(crate) enum PlacesEditMode {
     RemoveGroupConfirm,
 }
 
-/// UI-only state for hosting a [`FileDialogCore`] in Dear ImGui.
+/// Caller-facing configuration for the in-UI file dialog.
 ///
-/// This struct contains transient UI state (visibility, focus requests, text
-/// buffers) and does not affect the core selection/navigation semantics.
+/// This Module Interface contains durable UI knobs that callers may configure before or during a
+/// frame. Transient buffers, focus requests, modal state, and operation jobs stay in
+/// [`FileDialogUiState`].
 #[derive(Debug)]
-pub struct FileDialogUiState {
-    /// Whether to draw the dialog (show/hide). Prefer [`FileDialogState::open`]/[`FileDialogState::close`].
-    pub visible: bool,
+pub struct FileDialogUiConfig {
     /// Header layout style.
     pub header_style: HeaderStyle,
     /// Layout style for the dialog UI.
@@ -565,11 +564,6 @@ pub struct FileDialogUiState {
     pub file_list_columns: FileListColumnsConfig,
     /// Path bar style (editable text input vs breadcrumb-style composer).
     pub path_bar_style: PathBarStyle,
-    /// When `true` (and `path_bar_style` is [`PathBarStyle::Breadcrumbs`]), show the editable path
-    /// text input instead of the breadcrumb composer.
-    ///
-    /// This mimics IGFD's path composer "Edit" toggle behavior.
-    pub path_input_mode: bool,
     /// Enable quick parallel directory selection popups when clicking breadcrumb separators.
     ///
     /// This mimics IGFD's "quick path selection" feature in the path composer.
@@ -582,6 +576,161 @@ pub struct FileDialogUiState {
     pub empty_hint_color: [f32; 4],
     /// Custom static hint message when entries list is empty; if None, a default message is built.
     pub empty_hint_static_message: Option<String>,
+    /// Whether to show and allow the "New Folder" action.
+    pub new_folder_enabled: bool,
+    /// Optional font mapping used by file style `font_token`.
+    pub file_style_fonts: std::collections::HashMap<String, FontId>,
+    /// Style registry used to decorate the file list (icons/colors/tooltips).
+    pub file_styles: FileStyleRegistry,
+    /// Enable thumbnails in the file list (adds a Preview column).
+    pub thumbnails_enabled: bool,
+    /// Thumbnail preview size in pixels.
+    pub thumbnail_size: [f32; 2],
+    /// Enable "type-to-select" behavior in the file list (IGFD-style).
+    pub type_select_enabled: bool,
+    /// Timeout after which the type-to-select buffer resets.
+    pub type_select_timeout: Duration,
+    /// Whether to render a custom pane region (when a pane is provided by the caller).
+    pub custom_pane_enabled: bool,
+    /// Dock position for the custom pane.
+    pub custom_pane_dock: CustomPaneDock,
+    /// Height of the custom pane region (in pixels).
+    pub custom_pane_height: f32,
+    /// Width of the custom pane region when right-docked (in pixels).
+    pub custom_pane_width: f32,
+}
+
+impl Default for FileDialogUiConfig {
+    fn default() -> Self {
+        Self {
+            header_style: HeaderStyle::ToolbarAndAddress,
+            layout: LayoutStyle::Standard,
+            validation_buttons: ValidationButtonsConfig::default(),
+            toolbar: ToolbarConfig::default(),
+            places_pane_shown: true,
+            places_pane_width: 150.0,
+            file_list_view: FileListViewMode::default(),
+            file_list_columns: FileListColumnsConfig::default(),
+            path_bar_style: PathBarStyle::TextInput,
+            breadcrumbs_quick_select: true,
+            breadcrumbs_max_segments: 6,
+            empty_hint_enabled: true,
+            empty_hint_color: [0.7, 0.7, 0.7, 1.0],
+            empty_hint_static_message: None,
+            new_folder_enabled: true,
+            file_style_fonts: std::collections::HashMap::new(),
+            file_styles: FileStyleRegistry::default(),
+            thumbnails_enabled: false,
+            thumbnail_size: [32.0, 32.0],
+            type_select_enabled: true,
+            type_select_timeout: Duration::from_millis(750),
+            custom_pane_enabled: true,
+            custom_pane_dock: CustomPaneDock::default(),
+            custom_pane_height: 120.0,
+            custom_pane_width: 250.0,
+        }
+    }
+}
+
+impl FileDialogUiConfig {
+    /// Applies an "IGFD classic" configuration preset (opt-in).
+    ///
+    /// This tunes durable UI knobs to feel closer to ImGuiFileDialog (IGFD) while staying
+    /// Rust-first.
+    pub fn apply_igfd_classic_preset(&mut self) {
+        self.header_style = HeaderStyle::IgfdClassic;
+        self.layout = LayoutStyle::Standard;
+        self.places_pane_shown = true;
+        self.places_pane_width = 150.0;
+        self.file_list_view = FileListViewMode::List;
+        self.thumbnails_enabled = false;
+        self.toolbar.density = ToolbarDensity::Compact;
+        self.path_bar_style = PathBarStyle::Breadcrumbs;
+        self.breadcrumbs_quick_select = true;
+
+        if self.file_styles.rules.is_empty() && self.file_styles.callback.is_none() {
+            self.file_styles = crate::file_style::FileStyleRegistry::igfd_ascii_preset();
+        }
+
+        self.file_list_columns.show_preview = false;
+        self.file_list_columns.show_extension = false;
+        self.file_list_columns.show_size = true;
+        self.file_list_columns.show_modified = true;
+        self.file_list_columns.order = [
+            FileListDataColumn::Name,
+            FileListDataColumn::Extension,
+            FileListDataColumn::Size,
+            FileListDataColumn::Modified,
+        ];
+
+        self.custom_pane_enabled = true;
+        self.custom_pane_dock = CustomPaneDock::Right;
+        self.custom_pane_width = 250.0;
+        self.custom_pane_height = 120.0;
+
+        self.validation_buttons.align = ValidationButtonsAlign::Right;
+        self.validation_buttons.order = ValidationButtonsOrder::CancelConfirm;
+        self.validation_buttons.confirm_label = Some("OK".to_string());
+        self.validation_buttons.cancel_label = Some("Cancel".to_string());
+        self.validation_buttons.button_width = None;
+        self.validation_buttons.confirm_width = None;
+        self.validation_buttons.cancel_width = None;
+    }
+}
+
+/// Transient per-frame/runtime state owned by the Dear ImGui adapter.
+///
+/// These fields are implementation details of the UI renderer. They are intentionally separated
+/// from [`FileDialogUiConfig`] so caller-facing configuration has a narrow, durable surface.
+#[derive(Debug, Default)]
+pub(crate) struct FileDialogUiRuntime {
+    /// Accumulated IGFD-style type-to-select prefix.
+    pub(crate) type_select_buffer: String,
+    /// Last keypress timestamp used to expire the type-to-select prefix.
+    pub(crate) type_select_last_input: Option<std::time::Instant>,
+}
+
+/// Modal and operation state owned by the Dear ImGui adapter.
+///
+/// Operation state changes while the UI is driving an action. Keeping it behind this internal seam
+/// prevents one-off operation buffers from becoming caller-facing configuration.
+#[derive(Debug, Default)]
+pub(crate) struct FileDialogOperationState {
+    /// State for the "New Folder" inline editor/modal.
+    pub(crate) new_folder: NewFolderOperationState,
+}
+
+/// Runtime state for the "New Folder" operation.
+#[derive(Debug, Default)]
+pub(crate) struct NewFolderOperationState {
+    /// Whether the inline editor is active (toolbar-local, IGFD-like).
+    pub(crate) inline_active: bool,
+    /// Open the modal on next frame.
+    pub(crate) open_next: bool,
+    /// Folder name input buffer.
+    pub(crate) name: String,
+    /// Focus the input on next frame.
+    pub(crate) focus_next: bool,
+    /// Error string shown inside the inline editor/modal.
+    pub(crate) error: Option<String>,
+}
+
+/// UI-only state for hosting a [`FileDialogCore`] in Dear ImGui.
+///
+/// This struct contains transient UI state (visibility, focus requests, text buffers) and owns the
+/// caller-facing [`FileDialogUiConfig`]. It does not affect the core selection/navigation
+/// semantics.
+#[derive(Debug)]
+pub struct FileDialogUiState {
+    /// Whether to draw the dialog (show/hide). Prefer [`FileDialogState::open`]/[`FileDialogState::close`].
+    pub visible: bool,
+    /// Caller-facing UI configuration.
+    pub config: FileDialogUiConfig,
+    /// When `true` (and `path_bar_style` is [`PathBarStyle::Breadcrumbs`]), show the editable path
+    /// text input instead of the breadcrumb composer.
+    ///
+    /// This mimics IGFD's path composer "Edit" toggle behavior.
+    pub path_input_mode: bool,
     /// Whether the path input is currently being edited (best-effort; updated by UI).
     ///
     /// This is UI-only state and should not be treated as a stable API contract.
@@ -600,18 +749,10 @@ pub struct FileDialogUiState {
     pub focus_search_next: bool,
     /// Error string to display in UI (non-fatal).
     pub ui_error: Option<String>,
-    /// Whether to show and allow the "New Folder" action.
-    pub new_folder_enabled: bool,
-    /// Whether the "New Folder" inline editor is active (toolbar-local, IGFD-like).
-    pub new_folder_inline_active: bool,
-    /// Open the "New Folder" modal on next frame.
-    pub new_folder_open_next: bool,
-    /// New folder name buffer (used by the "New Folder" modal).
-    pub new_folder_name: String,
-    /// Focus the new folder input on next frame.
-    pub new_folder_focus_next: bool,
-    /// Error string shown inside the "New Folder" modal.
-    pub new_folder_error: Option<String>,
+    /// Transient runtime state owned by the UI renderer.
+    pub(crate) runtime: FileDialogUiRuntime,
+    /// Modal/operation state owned by the UI renderer.
+    pub(crate) operations: FileDialogOperationState,
     /// Open the "Rename" modal on next frame.
     pub rename_open_next: bool,
     /// Focus the rename input on next frame.
@@ -632,34 +773,14 @@ pub struct FileDialogUiState {
     pub delete_error: Option<String>,
     /// Clipboard state for copy/cut/paste operations.
     pub clipboard: Option<FileClipboard>,
-    /// Optional font mapping used by file style `font_token`.
-    pub file_style_fonts: std::collections::HashMap<String, FontId>,
     /// In-progress paste job state.
     pub(crate) paste_job: Option<PendingPasteJob>,
     /// Open the paste conflict modal on next frame.
     pub(crate) paste_conflict_open_next: bool,
     /// Reveal (scroll to) a specific entry id on the next draw, then clear.
     pub(crate) reveal_id_next: Option<EntryId>,
-    /// Style registry used to decorate the file list (icons/colors/tooltips).
-    pub file_styles: FileStyleRegistry,
-    /// Enable thumbnails in the file list (adds a Preview column).
-    pub thumbnails_enabled: bool,
-    /// Thumbnail preview size in pixels.
-    pub thumbnail_size: [f32; 2],
     /// Thumbnail cache (requests + LRU).
     pub thumbnails: ThumbnailCache,
-    /// Enable "type-to-select" behavior in the file list (IGFD-style).
-    pub type_select_enabled: bool,
-    /// Timeout after which the type-to-select buffer resets.
-    pub type_select_timeout: Duration,
-    /// Whether to render a custom pane region (when a pane is provided by the caller).
-    pub custom_pane_enabled: bool,
-    /// Dock position for the custom pane.
-    pub custom_pane_dock: CustomPaneDock,
-    /// Height of the custom pane region (in pixels).
-    pub custom_pane_height: f32,
-    /// Width of the custom pane region when right-docked (in pixels).
-    pub custom_pane_width: f32,
 
     /// Places modal mode (export/import).
     pub(crate) places_io_mode: PlacesIoMode,
@@ -691,8 +812,6 @@ pub struct FileDialogUiState {
     /// Place path buffer (add/edit place).
     pub(crate) places_edit_place_path: String,
 
-    pub(crate) type_select_buffer: String,
-    pub(crate) type_select_last_input: Option<std::time::Instant>,
     /// UI-only selection inside the places pane: (group_label, place_path).
     pub(crate) places_selected: Option<(String, PathBuf)>,
 
@@ -725,21 +844,8 @@ impl Default for FileDialogUiState {
     fn default() -> Self {
         Self {
             visible: true,
-            header_style: HeaderStyle::ToolbarAndAddress,
-            layout: LayoutStyle::Standard,
-            validation_buttons: ValidationButtonsConfig::default(),
-            toolbar: ToolbarConfig::default(),
-            places_pane_shown: true,
-            places_pane_width: 150.0,
-            file_list_view: FileListViewMode::default(),
-            file_list_columns: FileListColumnsConfig::default(),
-            path_bar_style: PathBarStyle::TextInput,
+            config: FileDialogUiConfig::default(),
             path_input_mode: false,
-            breadcrumbs_quick_select: true,
-            breadcrumbs_max_segments: 6,
-            empty_hint_enabled: true,
-            empty_hint_color: [0.7, 0.7, 0.7, 1.0],
-            empty_hint_static_message: None,
             path_edit: false,
             path_edit_buffer: String::new(),
             path_edit_last_cwd: String::new(),
@@ -751,12 +857,8 @@ impl Default for FileDialogUiState {
             focus_path_edit_next: false,
             focus_search_next: false,
             ui_error: None,
-            new_folder_enabled: true,
-            new_folder_inline_active: false,
-            new_folder_open_next: false,
-            new_folder_name: String::new(),
-            new_folder_focus_next: false,
-            new_folder_error: None,
+            runtime: FileDialogUiRuntime::default(),
+            operations: FileDialogOperationState::default(),
             rename_open_next: false,
             rename_focus_next: false,
             rename_target_id: None,
@@ -767,20 +869,10 @@ impl Default for FileDialogUiState {
             delete_recursive: false,
             delete_error: None,
             clipboard: None,
-            file_style_fonts: std::collections::HashMap::new(),
             paste_job: None,
             paste_conflict_open_next: false,
             reveal_id_next: None,
-            file_styles: FileStyleRegistry::default(),
-            thumbnails_enabled: false,
-            thumbnail_size: [32.0, 32.0],
             thumbnails: ThumbnailCache::new(ThumbnailCacheConfig::default()),
-            type_select_enabled: true,
-            type_select_timeout: Duration::from_millis(750),
-            custom_pane_enabled: true,
-            custom_pane_dock: CustomPaneDock::default(),
-            custom_pane_height: 120.0,
-            custom_pane_width: 250.0,
             places_io_mode: PlacesIoMode::Export,
             places_io_buffer: String::new(),
             places_io_open_next: false,
@@ -795,8 +887,6 @@ impl Default for FileDialogUiState {
             places_edit_place_from_path: None,
             places_edit_place_label: String::new(),
             places_edit_place_path: String::new(),
-            type_select_buffer: String::new(),
-            type_select_last_input: None,
             places_selected: None,
             places_inline_edit: None,
             places_inline_edit_buffer: String::new(),
@@ -819,45 +909,9 @@ impl FileDialogUiState {
     /// - right-docked custom pane (when provided) with a splitter-resizable width,
     /// - dialog-style button row aligned to the right.
     pub fn apply_igfd_classic_preset(&mut self) {
-        self.header_style = HeaderStyle::IgfdClassic;
-        self.layout = LayoutStyle::Standard;
-        self.places_pane_shown = true;
-        self.places_pane_width = 150.0;
-        self.file_list_view = FileListViewMode::List;
-        self.thumbnails_enabled = false;
-        self.toolbar.density = ToolbarDensity::Compact;
-        self.path_bar_style = PathBarStyle::Breadcrumbs;
+        self.config.apply_igfd_classic_preset();
         self.path_input_mode = false;
         self.breadcrumbs_scroll_to_end_next = true;
-        self.breadcrumbs_quick_select = true;
-
-        if self.file_styles.rules.is_empty() && self.file_styles.callback.is_none() {
-            self.file_styles = crate::file_style::FileStyleRegistry::igfd_ascii_preset();
-        }
-
-        self.file_list_columns.show_preview = false;
-        self.file_list_columns.show_extension = false;
-        self.file_list_columns.show_size = true;
-        self.file_list_columns.show_modified = true;
-        self.file_list_columns.order = [
-            FileListDataColumn::Name,
-            FileListDataColumn::Extension,
-            FileListDataColumn::Size,
-            FileListDataColumn::Modified,
-        ];
-
-        self.custom_pane_enabled = true;
-        self.custom_pane_dock = CustomPaneDock::Right;
-        self.custom_pane_width = 250.0;
-        self.custom_pane_height = 120.0;
-
-        self.validation_buttons.align = ValidationButtonsAlign::Right;
-        self.validation_buttons.order = ValidationButtonsOrder::CancelConfirm;
-        self.validation_buttons.confirm_label = Some("OK".to_string());
-        self.validation_buttons.cancel_label = Some("Cancel".to_string());
-        self.validation_buttons.button_width = None;
-        self.validation_buttons.confirm_width = None;
-        self.validation_buttons.cancel_width = None;
     }
 }
 
@@ -996,16 +1050,16 @@ mod tests {
         let mut state = FileDialogState::new(DialogMode::OpenFile);
         state.apply_igfd_classic_preset();
 
-        assert_eq!(state.ui.layout, LayoutStyle::Standard);
-        assert_eq!(state.ui.file_list_view, FileListViewMode::List);
-        assert_eq!(state.ui.custom_pane_dock, CustomPaneDock::Right);
-        assert!(!state.ui.file_list_columns.show_extension);
+        assert_eq!(state.ui.config.layout, LayoutStyle::Standard);
+        assert_eq!(state.ui.config.file_list_view, FileListViewMode::List);
+        assert_eq!(state.ui.config.custom_pane_dock, CustomPaneDock::Right);
+        assert!(!state.ui.config.file_list_columns.show_extension);
         assert_eq!(
-            state.ui.validation_buttons.align,
+            state.ui.config.validation_buttons.align,
             ValidationButtonsAlign::Right
         );
         assert_eq!(
-            state.ui.validation_buttons.order,
+            state.ui.config.validation_buttons.order,
             ValidationButtonsOrder::CancelConfirm
         );
         assert_eq!(state.core.click_action, ClickAction::Navigate);
@@ -1037,10 +1091,55 @@ mod tests {
     }
 
     #[test]
-    fn default_type_select_timeout_uses_duration() {
+    fn ui_config_defaults_own_caller_facing_ui_knobs() {
         let state = FileDialogUiState::default();
 
-        assert_eq!(state.type_select_timeout, Duration::from_millis(750));
+        assert_eq!(state.config.header_style, HeaderStyle::ToolbarAndAddress);
+        assert_eq!(state.config.layout, LayoutStyle::Standard);
+        assert_eq!(state.config.file_list_view, FileListViewMode::default());
+        assert_eq!(state.config.path_bar_style, PathBarStyle::TextInput);
+        assert!(state.config.breadcrumbs_quick_select);
+        assert_eq!(state.config.type_select_timeout, Duration::from_millis(750));
+        assert!(!state.config.thumbnails_enabled);
+        assert_eq!(state.config.thumbnail_size, [32.0, 32.0]);
+    }
+
+    #[test]
+    fn ui_config_igfd_classic_preset_updates_config_without_runtime_buffers() {
+        let mut state = FileDialogUiState::default();
+        state.path_edit_buffer = "keep-runtime-buffer".to_string();
+        state.path_input_mode = true;
+
+        state.apply_igfd_classic_preset();
+
+        assert_eq!(state.config.header_style, HeaderStyle::IgfdClassic);
+        assert_eq!(state.config.layout, LayoutStyle::Standard);
+        assert_eq!(state.config.file_list_view, FileListViewMode::List);
+        assert_eq!(state.config.toolbar.density, ToolbarDensity::Compact);
+        assert_eq!(state.config.path_bar_style, PathBarStyle::Breadcrumbs);
+        assert_eq!(state.config.custom_pane_dock, CustomPaneDock::Right);
+        assert!(!state.config.file_list_columns.show_extension);
+        assert_eq!(
+            state.config.validation_buttons.align,
+            ValidationButtonsAlign::Right
+        );
+        assert_eq!(state.path_edit_buffer, "keep-runtime-buffer");
+        assert!(!state.path_input_mode);
+    }
+
+    #[test]
+    fn ui_runtime_and_operation_state_are_internal_to_ui_state() {
+        let state = FileDialogUiState::default();
+
+        assert!(state.config.new_folder_enabled);
+        assert!(state.config.type_select_enabled);
+        assert!(state.runtime.type_select_buffer.is_empty());
+        assert!(state.runtime.type_select_last_input.is_none());
+        assert!(!state.operations.new_folder.inline_active);
+        assert!(!state.operations.new_folder.open_next);
+        assert!(state.operations.new_folder.name.is_empty());
+        assert!(!state.operations.new_folder.focus_next);
+        assert!(state.operations.new_folder.error.is_none());
     }
 
     #[test]

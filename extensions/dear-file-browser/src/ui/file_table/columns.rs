@@ -15,7 +15,7 @@ fn data_column_label(column: FileListDataColumn) -> &'static str {
 }
 
 pub(in crate::ui) fn extension_ui_label(state: &FileDialogState) -> &'static str {
-    if matches!(state.ui.header_style, HeaderStyle::IgfdClassic) {
+    if matches!(state.ui.config.header_style, HeaderStyle::IgfdClassic) {
         "Type"
     } else {
         "Ext"

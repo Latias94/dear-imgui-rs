@@ -90,7 +90,7 @@ pub(super) fn draw_file_table(
     request_confirm: &mut bool,
     thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) {
-    match state.ui.file_list_view {
+    match state.ui.config.file_list_view {
         FileListViewMode::List => draw_file_table_view(
             ui,
             state,
@@ -101,7 +101,7 @@ pub(super) fn draw_file_table(
             false,
         ),
         FileListViewMode::ThumbnailsList => {
-            state.ui.thumbnails_enabled = true;
+            state.ui.config.thumbnails_enabled = true;
             draw_file_table_view(
                 ui,
                 state,
@@ -210,19 +210,19 @@ fn draw_file_list_window_context_menu(
         return;
     }
 
-    if state.ui.new_folder_enabled {
+    if state.ui.config.new_folder_enabled {
         if ui.menu_item_enabled_selected("New Folder", None::<&str>, false, true) {
-            match state.ui.layout {
+            match state.ui.config.layout {
                 LayoutStyle::Standard => {
-                    state.ui.new_folder_inline_active = true;
+                    state.ui.operations.new_folder.inline_active = true;
                 }
                 LayoutStyle::Minimal => {
-                    state.ui.new_folder_open_next = true;
+                    state.ui.operations.new_folder.open_next = true;
                 }
             }
-            state.ui.new_folder_name.clear();
-            state.ui.new_folder_error = None;
-            state.ui.new_folder_focus_next = true;
+            state.ui.operations.new_folder.name.clear();
+            state.ui.operations.new_folder.error = None;
+            state.ui.operations.new_folder.focus_next = true;
             ui.close_current_popup();
             return;
         }
@@ -230,9 +230,12 @@ fn draw_file_list_window_context_menu(
 
     ui.separator();
 
-    let list_active = matches!(state.ui.file_list_view, FileListViewMode::List);
-    let thumbs_active = matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList);
-    let grid_active = matches!(state.ui.file_list_view, FileListViewMode::Grid);
+    let list_active = matches!(state.ui.config.file_list_view, FileListViewMode::List);
+    let thumbs_active = matches!(
+        state.ui.config.file_list_view,
+        FileListViewMode::ThumbnailsList
+    );
+    let grid_active = matches!(state.ui.config.file_list_view, FileListViewMode::Grid);
 
     if let Some(_menu) = ui.begin_menu("View") {
         if ui.menu_item_enabled_selected("File List", None::<&str>, list_active, true) {
@@ -260,7 +263,7 @@ fn draw_file_list_window_context_menu(
         }
 
         if matches!(
-            state.ui.file_list_view,
+            state.ui.config.file_list_view,
             FileListViewMode::List | FileListViewMode::ThumbnailsList
         ) {
             ui.separator();
@@ -309,7 +312,7 @@ fn draw_file_table_view(
     force_preview: bool,
 ) {
     state.core.rescan_if_needed(fs);
-    if state.ui.thumbnails_enabled {
+    if state.ui.config.thumbnails_enabled {
         state.ui.thumbnails.advance_frame();
     }
 
@@ -322,14 +325,14 @@ fn draw_file_table_view(
         | TableFlags::BORDERS_OUTER
         | TableFlags::SCROLL_Y
         | TableFlags::SORTABLE; // enable built-in header sorting
-    let columns_config = &state.ui.file_list_columns;
+    let columns_config = &state.ui.config.file_list_columns;
     let show_preview =
-        state.ui.thumbnails_enabled && (columns_config.show_preview || force_preview);
+        state.ui.config.thumbnails_enabled && (columns_config.show_preview || force_preview);
     let show_size = columns_config.show_size;
     let show_modified = columns_config.show_modified;
     let layout = list_column_layout_impl(show_preview, columns_config);
     let has_thumbnail_backend = thumbnails_backend.is_some();
-    let type_dots_to_extract = if matches!(state.ui.header_style, HeaderStyle::IgfdClassic) {
+    let type_dots_to_extract = if matches!(state.ui.config.header_style, HeaderStyle::IgfdClassic) {
         igfd_type_dots_to_extract(state.core.active_filter())
     } else {
         1
@@ -411,12 +414,12 @@ fn draw_file_table_view(
         // Apply ImGui sort specs (single primary sort)
         if let Some(mut specs) = ui.table_get_sort_specs() {
             if specs.is_dirty() {
-                let extension_sort_by = if matches!(state.ui.header_style, HeaderStyle::IgfdClassic)
-                {
-                    SortBy::Type
-                } else {
-                    SortBy::Extension
-                };
+                let extension_sort_by =
+                    if matches!(state.ui.config.header_style, HeaderStyle::IgfdClassic) {
+                        SortBy::Type
+                    } else {
+                        SortBy::Extension
+                    };
                 if let Some(s) = specs.iter().next() {
                     let (by, asc) = match (s.column_index, s.sort_direction) {
                         (i, SortDirection::Ascending) if i == layout.name => (SortBy::Name, true),
@@ -484,7 +487,7 @@ fn draw_file_table_view(
                     modifiers,
                 });
             }
-            if state.ui.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
+            if state.ui.config.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
                 handle_type_select(ui, state);
             }
         }
@@ -492,14 +495,14 @@ fn draw_file_table_view(
         // Clone the entry list so we can mutate `state.core` while iterating (selection, navigation).
         let entries: Vec<DirEntry> = state.core.entries().to_vec();
         if entries.is_empty() {
-            if state.ui.empty_hint_enabled {
+            if state.ui.config.empty_hint_enabled {
                 ui.table_next_row();
                 if show_preview {
                     ui.table_next_column();
                     ui.text("");
                 }
                 ui.table_next_column();
-                let msg = if let Some(custom) = &state.ui.empty_hint_static_message {
+                let msg = if let Some(custom) = &state.ui.config.empty_hint_static_message {
                     custom.clone()
                 } else {
                     let filter_label = state
@@ -520,7 +523,7 @@ fn draw_file_table_view(
                         )
                     }
                 };
-                ui.text_colored(state.ui.empty_hint_color, msg);
+                ui.text_colored(state.ui.config.empty_hint_color, msg);
             }
             return;
         }
@@ -595,7 +598,7 @@ fn draw_file_table_view(
                     FileListDataColumn::Extension => {
                         if e.is_dir {
                             ui.text("");
-                        } else if matches!(state.ui.header_style, HeaderStyle::IgfdClassic) {
+                        } else if matches!(state.ui.config.header_style, HeaderStyle::IgfdClassic) {
                             ui.text(type_extension_by_dot_count(&e.name, type_dots_to_extract));
                         } else if let Some(i) = e.name.find('.') {
                             ui.text(&e.name[i..]);
@@ -633,17 +636,17 @@ fn draw_file_table_view(
             draw_file_list_window_context_menu(ui, state, fs, has_thumbnail_backend);
         }
 
-        sync_runtime_column_order_from_table(&layout, &mut state.ui.file_list_columns);
+        sync_runtime_column_order_from_table(&layout, &mut state.ui.config.file_list_columns);
 
         sync_runtime_column_weights_from_table(
             show_preview,
             &layout,
-            &mut state.ui.file_list_columns,
+            &mut state.ui.config.file_list_columns,
         );
     });
 
     let mut thumbnails_backend = thumbnails_backend;
-    if state.ui.thumbnails_enabled {
+    if state.ui.config.thumbnails_enabled {
         if let Some(backend) = thumbnails_backend.as_deref_mut() {
             state.ui.thumbnails.maintain(backend);
         }
@@ -660,7 +663,7 @@ fn draw_file_grid_view(
 ) {
     state.core.rescan_if_needed(fs);
     let has_thumbnail_backend = thumbnails_backend.is_some();
-    if state.ui.thumbnails_enabled {
+    if state.ui.config.thumbnails_enabled {
         state.ui.thumbnails.advance_frame();
     }
 
@@ -670,18 +673,19 @@ fn draw_file_grid_view(
 
     let entries: Vec<DirEntry> = state.core.entries().to_vec();
     if entries.is_empty() {
-        if state.ui.empty_hint_enabled {
+        if state.ui.config.empty_hint_enabled {
             let msg = state
                 .ui
+                .config
                 .empty_hint_static_message
                 .clone()
                 .unwrap_or_else(|| "No matching entries.".to_string());
-            ui.text_colored(state.ui.empty_hint_color, msg);
+            ui.text_colored(state.ui.config.empty_hint_color, msg);
         }
         return;
     }
 
-    let thumb = state.ui.thumbnail_size;
+    let thumb = state.ui.config.thumbnail_size;
     let style = ui.clone_style();
     let frame_pad = style.frame_padding();
     let pad_x = frame_pad[0].max(4.0);
@@ -761,7 +765,7 @@ fn draw_file_grid_view(
                         modifiers,
                     });
                 }
-                if state.ui.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
+                if state.ui.config.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
                     handle_type_select(ui, state);
                 }
             }
@@ -802,7 +806,7 @@ fn draw_file_grid_view(
                         state.ui.reveal_id_next = None;
                     }
 
-                    if state.ui.thumbnails_enabled && !e.is_dir {
+                    if state.ui.config.thumbnails_enabled && !e.is_dir {
                         let max_size_u32 = [thumb[0].max(1.0) as u32, thumb[1].max(1.0) as u32];
                         if let Some(tex) = state.ui.thumbnails.texture_id(&e.path) {
                             dl.add_image(
@@ -923,7 +927,7 @@ fn draw_file_grid_view(
         });
 
     let mut thumbnails_backend = thumbnails_backend;
-    if state.ui.thumbnails_enabled {
+    if state.ui.config.thumbnails_enabled {
         if let Some(backend) = thumbnails_backend.as_deref_mut() {
             state.ui.thumbnails.maintain(backend);
         }
@@ -937,10 +941,10 @@ fn draw_thumbnail_cell(ui: &Ui, state: &mut FileDialogState, e: &DirEntry) {
     }
 
     let max_size_u32 = [
-        state.ui.thumbnail_size[0].max(1.0) as u32,
-        state.ui.thumbnail_size[1].max(1.0) as u32,
+        state.ui.config.thumbnail_size[0].max(1.0) as u32,
+        state.ui.config.thumbnail_size[1].max(1.0) as u32,
     ];
-    let size = state.ui.thumbnail_size;
+    let size = state.ui.config.thumbnail_size;
 
     if let Some(tex) = state.ui.thumbnails.texture_id(&e.path) {
         ui.image(tex, size);
@@ -960,14 +964,14 @@ fn draw_thumbnail_cell(ui: &Ui, state: &mut FileDialogState, e: &DirEntry) {
 }
 
 fn handle_type_select(ui: &Ui, state: &mut FileDialogState) {
-    if !state.ui.type_select_enabled {
+    if !state.ui.config.type_select_enabled {
         return;
     }
     let now = Instant::now();
-    let timeout = state.ui.type_select_timeout;
-    if let Some(last) = state.ui.type_select_last_input {
+    let timeout = state.ui.config.type_select_timeout;
+    if let Some(last) = state.ui.runtime.type_select_last_input {
         if now.duration_since(last) > timeout {
-            state.ui.type_select_buffer.clear();
+            state.ui.runtime.type_select_buffer.clear();
         }
     }
 
@@ -977,10 +981,14 @@ fn handle_type_select(ui: &Ui, state: &mut FileDialogState) {
     if ch.is_whitespace() {
         return;
     }
-    state.ui.type_select_buffer.push(ch.to_ascii_lowercase());
-    state.ui.type_select_last_input = Some(now);
+    state
+        .ui
+        .runtime
+        .type_select_buffer
+        .push(ch.to_ascii_lowercase());
+    state.ui.runtime.type_select_last_input = Some(now);
     let _ = state.core.handle_event(CoreEvent::SelectByPrefix(
-        state.ui.type_select_buffer.clone(),
+        state.ui.runtime.type_select_buffer.clone(),
     ));
 }
 

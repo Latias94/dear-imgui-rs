@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-file-browser` scan request/batch/status generations now use `ScanGeneration`,
     type-to-select timeout config uses `Duration`, and thumbnail frame counters return
     `ThumbnailFrameIndex` instead of raw integers.
+  - `dear-file-browser` caller-facing UI configuration now lives in
+    `FileDialogUiState::config` / `FileDialogUiConfig`; update direct `state.ui.*` config field
+    access such as `state.ui.file_list_view`, `state.ui.toolbar`, `state.ui.thumbnails_enabled`,
+    and `state.ui.file_list_columns` to `state.ui.config.*`. The new-folder operation buffers and
+    type-to-select runtime buffer are internal UI implementation state.
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions
     on drop are now UI/current-context scoped and intentionally `!Send + !Sync`.
   - `dear-implot` colormap helpers now use typed `ColormapIndex`, `ColormapColorIndex`, and

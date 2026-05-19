@@ -102,15 +102,15 @@ impl AppWindow {
             let filter =
                 dear_file_browser::FileFilter::from(("Images", &["png", "jpg", "jpeg"][..]));
             st.core.set_filters(vec![filter]);
-            st.ui.file_list_view = FileListViewMode::ThumbnailsList;
-            st.ui.thumbnails_enabled = true;
-            st.ui.file_list_columns.show_preview = true;
-            st.ui.toolbar.density = ToolbarDensity::Compact;
-            st.ui.toolbar.icons.mode = ToolbarIconMode::IconAndText;
-            st.ui.toolbar.icons.refresh = Some("⟳".to_string());
-            st.ui.toolbar.icons.new_folder = Some("+".to_string());
-            st.ui.toolbar.icons.columns = Some("≡".to_string());
-            st.ui.toolbar.icons.options = Some("⚙".to_string());
+            st.ui.config.file_list_view = FileListViewMode::ThumbnailsList;
+            st.ui.config.thumbnails_enabled = true;
+            st.ui.config.file_list_columns.show_preview = true;
+            st.ui.config.toolbar.density = ToolbarDensity::Compact;
+            st.ui.config.toolbar.icons.mode = ToolbarIconMode::IconAndText;
+            st.ui.config.toolbar.icons.refresh = Some("⟳".to_string());
+            st.ui.config.toolbar.icons.new_folder = Some("+".to_string());
+            st.ui.config.toolbar.icons.columns = Some("≡".to_string());
+            st.ui.config.toolbar.icons.options = Some("⚙".to_string());
 
             // Curated places: keep System, add a few handy bookmarks.
             if let Ok(pwd) = std::env::current_dir() {
@@ -259,8 +259,8 @@ impl ThumbnailRenderer for GlowThumbnailRenderer<'_> {
         .map_err(|e| format!("{e}"))?;
         Ok(self.texture_map.register_texture(
             gl_tex,
-            image.width as i32,
-            image.height as i32,
+            image.width,
+            image.height,
             dear_imgui_rs::TextureFormat::RGBA32,
         ))
     }

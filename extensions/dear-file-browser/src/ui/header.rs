@@ -71,10 +71,10 @@ pub(super) fn draw_chrome(
     fs: &dyn FileSystem,
     has_thumbnail_backend: bool,
 ) {
-    let show_tooltips = state.ui.toolbar.show_tooltips;
-    let icon_mode = state.ui.toolbar.icons.mode;
+    let show_tooltips = state.ui.config.toolbar.show_tooltips;
+    let icon_mode = state.ui.config.toolbar.icons.mode;
     let chrome_style = ui.clone_style();
-    let (scale, min) = match state.ui.toolbar.density {
+    let (scale, min) = match state.ui.config.toolbar.density {
         ToolbarDensity::Normal => (1.0, 0.0),
         ToolbarDensity::Compact => (0.82, 1.0),
         ToolbarDensity::Spacious => (1.18, 0.0),
@@ -91,27 +91,27 @@ pub(super) fn draw_chrome(
         chrome_style.item_inner_spacing(),
     )));
 
-    let header_style = state.ui.header_style;
+    let header_style = state.ui.config.header_style;
     if matches!(header_style, HeaderStyle::ToolbarAndAddress) {
         // Top toolbar: Back/Forward/Up/Refresh, view, sort, etc.
         let can_back = state.core.can_navigate_back();
         let can_forward = state.core.can_navigate_forward();
 
-        let places_active =
-            matches!(state.ui.layout, LayoutStyle::Standard) && state.ui.places_pane_shown;
+        let places_active = matches!(state.ui.config.layout, LayoutStyle::Standard)
+            && state.ui.config.places_pane_shown;
         if toolbar_toggle_button(
             ui,
             "toolbar_places",
             "Places",
-            state.ui.toolbar.icons.places.as_deref(),
+            state.ui.config.toolbar.icons.places.as_deref(),
             icon_mode,
             show_tooltips,
             "Places",
             places_active,
         ) {
-            match state.ui.layout {
+            match state.ui.config.layout {
                 LayoutStyle::Standard => {
-                    state.ui.places_pane_shown = !state.ui.places_pane_shown;
+                    state.ui.config.places_pane_shown = !state.ui.config.places_pane_shown;
                 }
                 LayoutStyle::Minimal => {
                     ui.open_popup("##fb_places_popup");
@@ -151,7 +151,7 @@ pub(super) fn draw_chrome(
             ui,
             "toolbar_refresh",
             "Refresh",
-            state.ui.toolbar.icons.refresh.as_deref(),
+            state.ui.config.toolbar.icons.refresh.as_deref(),
             icon_mode,
             show_tooltips,
             "Refresh (F5)",
@@ -159,39 +159,43 @@ pub(super) fn draw_chrome(
             let _ = state.core.handle_event(CoreEvent::Refresh);
         }
         ui.same_line();
-        if state.ui.new_folder_enabled {
+        if state.ui.config.new_folder_enabled {
             if toolbar_button(
                 ui,
                 "toolbar_new_folder",
                 "New Folder",
-                state.ui.toolbar.icons.new_folder.as_deref(),
+                state.ui.config.toolbar.icons.new_folder.as_deref(),
                 icon_mode,
                 show_tooltips,
                 "New folder",
             ) {
-                match state.ui.layout {
+                match state.ui.config.layout {
                     LayoutStyle::Standard => {
-                        state.ui.new_folder_inline_active = true;
+                        state.ui.operations.new_folder.inline_active = true;
                     }
                     LayoutStyle::Minimal => {
-                        state.ui.new_folder_open_next = true;
+                        state.ui.operations.new_folder.open_next = true;
                     }
                 }
-                state.ui.new_folder_name.clear();
-                state.ui.new_folder_error = None;
-                state.ui.new_folder_focus_next = true;
+                state.ui.operations.new_folder.name.clear();
+                state.ui.operations.new_folder.error = None;
+                state.ui.operations.new_folder.focus_next = true;
             }
             ui.same_line();
 
-            if matches!(state.ui.layout, LayoutStyle::Standard) && state.ui.new_folder_inline_active
+            if matches!(state.ui.config.layout, LayoutStyle::Standard)
+                && state.ui.operations.new_folder.inline_active
             {
                 ui.set_next_item_width(160.0);
-                if state.ui.new_folder_focus_next {
+                if state.ui.operations.new_folder.focus_next {
                     ui.set_keyboard_focus_here();
-                    state.ui.new_folder_focus_next = false;
+                    state.ui.operations.new_folder.focus_next = false;
                 }
                 let submitted = ui
-                    .input_text("##new_folder_inline", &mut state.ui.new_folder_name)
+                    .input_text(
+                        "##new_folder_inline",
+                        &mut state.ui.operations.new_folder.name,
+                    )
                     .hint("New folder...")
                     .enter_returns_true(true)
                     .build();
@@ -204,18 +208,18 @@ pub(super) fn draw_chrome(
                     || (input_active && ui.is_key_pressed(Key::Escape));
 
                 if cancel {
-                    state.ui.new_folder_inline_active = false;
-                    state.ui.new_folder_error = None;
-                    state.ui.new_folder_name.clear();
+                    state.ui.operations.new_folder.inline_active = false;
+                    state.ui.operations.new_folder.error = None;
+                    state.ui.operations.new_folder.name.clear();
                 }
 
                 if ok || submitted {
                     if super::popups::try_create_new_folder_in_cwd(state, fs) {
-                        state.ui.new_folder_inline_active = false;
+                        state.ui.operations.new_folder.inline_active = false;
                     }
                 }
 
-                if let Some(err) = &state.ui.new_folder_error {
+                if let Some(err) = &state.ui.operations.new_folder.error {
                     ui.same_line();
                     ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
                 }
@@ -225,10 +229,13 @@ pub(super) fn draw_chrome(
         }
         ui.separator_vertical();
         ui.same_line();
-        if matches!(state.ui.toolbar.density, ToolbarDensity::Compact) {
-            let list_active = matches!(state.ui.file_list_view, FileListViewMode::List);
-            let thumbs_active = matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList);
-            let grid_active = matches!(state.ui.file_list_view, FileListViewMode::Grid);
+        if matches!(state.ui.config.toolbar.density, ToolbarDensity::Compact) {
+            let list_active = matches!(state.ui.config.file_list_view, FileListViewMode::List);
+            let thumbs_active = matches!(
+                state.ui.config.file_list_view,
+                FileListViewMode::ThumbnailsList
+            );
+            let grid_active = matches!(state.ui.config.file_list_view, FileListViewMode::Grid);
 
             if toolbar_toggle_button(
                 ui,
@@ -285,7 +292,7 @@ pub(super) fn draw_chrome(
         } else {
             ui.text("View:");
             ui.same_line();
-            let view_preview = match state.ui.file_list_view {
+            let view_preview = match state.ui.config.file_list_view {
                 FileListViewMode::List => "List",
                 FileListViewMode::ThumbnailsList => "Thumbs",
                 FileListViewMode::Grid => "Grid",
@@ -293,7 +300,10 @@ pub(super) fn draw_chrome(
             if let Some(_c) = ui.begin_combo("##view_mode", view_preview) {
                 if ui
                     .selectable_config("List")
-                    .selected(matches!(state.ui.file_list_view, FileListViewMode::List))
+                    .selected(matches!(
+                        state.ui.config.file_list_view,
+                        FileListViewMode::List
+                    ))
                     .build()
                 {
                     apply_file_list_view_from_ui(
@@ -305,7 +315,7 @@ pub(super) fn draw_chrome(
                 if ui
                     .selectable_config("Thumbs")
                     .selected(matches!(
-                        state.ui.file_list_view,
+                        state.ui.config.file_list_view,
                         FileListViewMode::ThumbnailsList
                     ))
                     .disabled(!has_thumbnail_backend)
@@ -319,7 +329,10 @@ pub(super) fn draw_chrome(
                 }
                 if ui
                     .selectable_config("Grid")
-                    .selected(matches!(state.ui.file_list_view, FileListViewMode::Grid))
+                    .selected(matches!(
+                        state.ui.config.file_list_view,
+                        FileListViewMode::Grid
+                    ))
                     .disabled(!has_thumbnail_backend)
                     .build()
                 {
@@ -333,13 +346,13 @@ pub(super) fn draw_chrome(
         }
 
         if matches!(
-            state.ui.file_list_view,
+            state.ui.config.file_list_view,
             FileListViewMode::ThumbnailsList | FileListViewMode::Grid
         ) {
-            state.ui.thumbnails_enabled = true;
+            state.ui.config.thumbnails_enabled = true;
         }
 
-        if matches!(state.ui.file_list_view, FileListViewMode::Grid) {
+        if matches!(state.ui.config.file_list_view, FileListViewMode::Grid) {
             ui.same_line();
             ui.text("Sort:");
             ui.same_line();
@@ -394,7 +407,7 @@ pub(super) fn draw_chrome(
         }
 
         if matches!(
-            state.ui.file_list_view,
+            state.ui.config.file_list_view,
             FileListViewMode::List | FileListViewMode::ThumbnailsList
         ) {
             ui.same_line();
@@ -402,7 +415,7 @@ pub(super) fn draw_chrome(
                 ui,
                 "toolbar_columns",
                 "Columns",
-                state.ui.toolbar.icons.columns.as_deref(),
+                state.ui.config.toolbar.icons.columns.as_deref(),
                 icon_mode,
                 show_tooltips,
                 "Columns",
@@ -415,7 +428,7 @@ pub(super) fn draw_chrome(
             ui,
             "toolbar_options",
             "Options",
-            state.ui.toolbar.icons.options.as_deref(),
+            state.ui.config.toolbar.icons.options.as_deref(),
             icon_mode,
             show_tooltips,
             "Options",
@@ -430,21 +443,21 @@ pub(super) fn draw_chrome(
     }
 
     if matches!(header_style, HeaderStyle::IgfdClassic) {
-        let places_active =
-            matches!(state.ui.layout, LayoutStyle::Standard) && state.ui.places_pane_shown;
+        let places_active = matches!(state.ui.config.layout, LayoutStyle::Standard)
+            && state.ui.config.places_pane_shown;
         if toolbar_toggle_button(
             ui,
             "toolbar_places",
             "Places",
-            state.ui.toolbar.icons.places.as_deref(),
+            state.ui.config.toolbar.icons.places.as_deref(),
             icon_mode,
             show_tooltips,
             "Places",
             places_active,
         ) {
-            match state.ui.layout {
+            match state.ui.config.layout {
                 LayoutStyle::Standard => {
-                    state.ui.places_pane_shown = !state.ui.places_pane_shown;
+                    state.ui.config.places_pane_shown = !state.ui.config.places_pane_shown;
                 }
                 LayoutStyle::Minimal => {
                     ui.open_popup("##fb_places_popup");
@@ -453,39 +466,43 @@ pub(super) fn draw_chrome(
         }
         ui.same_line();
 
-        if state.ui.new_folder_enabled {
+        if state.ui.config.new_folder_enabled {
             if toolbar_button(
                 ui,
                 "toolbar_new_folder",
                 "New Folder",
-                state.ui.toolbar.icons.new_folder.as_deref(),
+                state.ui.config.toolbar.icons.new_folder.as_deref(),
                 icon_mode,
                 show_tooltips,
                 "New folder",
             ) {
-                match state.ui.layout {
+                match state.ui.config.layout {
                     LayoutStyle::Standard => {
-                        state.ui.new_folder_inline_active = true;
+                        state.ui.operations.new_folder.inline_active = true;
                     }
                     LayoutStyle::Minimal => {
-                        state.ui.new_folder_open_next = true;
+                        state.ui.operations.new_folder.open_next = true;
                     }
                 }
-                state.ui.new_folder_name.clear();
-                state.ui.new_folder_error = None;
-                state.ui.new_folder_focus_next = true;
+                state.ui.operations.new_folder.name.clear();
+                state.ui.operations.new_folder.error = None;
+                state.ui.operations.new_folder.focus_next = true;
             }
             ui.same_line();
 
-            if matches!(state.ui.layout, LayoutStyle::Standard) && state.ui.new_folder_inline_active
+            if matches!(state.ui.config.layout, LayoutStyle::Standard)
+                && state.ui.operations.new_folder.inline_active
             {
                 ui.set_next_item_width(160.0);
-                if state.ui.new_folder_focus_next {
+                if state.ui.operations.new_folder.focus_next {
                     ui.set_keyboard_focus_here();
-                    state.ui.new_folder_focus_next = false;
+                    state.ui.operations.new_folder.focus_next = false;
                 }
                 let submitted = ui
-                    .input_text("##new_folder_inline", &mut state.ui.new_folder_name)
+                    .input_text(
+                        "##new_folder_inline",
+                        &mut state.ui.operations.new_folder.name,
+                    )
                     .hint("New folder...")
                     .enter_returns_true(true)
                     .build();
@@ -498,18 +515,18 @@ pub(super) fn draw_chrome(
                     || (input_active && ui.is_key_pressed(Key::Escape));
 
                 if cancel {
-                    state.ui.new_folder_inline_active = false;
-                    state.ui.new_folder_error = None;
-                    state.ui.new_folder_name.clear();
+                    state.ui.operations.new_folder.inline_active = false;
+                    state.ui.operations.new_folder.error = None;
+                    state.ui.operations.new_folder.name.clear();
                 }
 
                 if ok || submitted {
                     if super::popups::try_create_new_folder_in_cwd(state, fs) {
-                        state.ui.new_folder_inline_active = false;
+                        state.ui.operations.new_folder.inline_active = false;
                     }
                 }
 
-                if let Some(err) = &state.ui.new_folder_error {
+                if let Some(err) = &state.ui.operations.new_folder.error {
                     ui.same_line();
                     ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
                 }
@@ -534,7 +551,7 @@ pub(super) fn draw_chrome(
     if state.ui.path_edit_last_cwd != cwd_s && !state.ui.path_input_mode {
         state.ui.path_edit_last_cwd = cwd_s.clone();
         state.ui.path_edit_buffer = cwd_s.clone();
-        if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+        if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
             state.ui.breadcrumbs_scroll_to_end_next = true;
         }
     } else if state.ui.path_edit_last_cwd.is_empty() {
@@ -542,12 +559,12 @@ pub(super) fn draw_chrome(
         if state.ui.path_edit_buffer.trim().is_empty() {
             state.ui.path_edit_buffer = cwd_s.clone();
         }
-        if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+        if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
             state.ui.breadcrumbs_scroll_to_end_next = true;
         }
     }
 
-    let breadcrumbs_mode = state.ui.path_bar_style == PathBarStyle::Breadcrumbs;
+    let breadcrumbs_mode = state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs;
     let is_igfd_classic = matches!(header_style, HeaderStyle::IgfdClassic);
     let show_breadcrumb_composer = breadcrumbs_mode && !state.ui.path_input_mode;
 
@@ -810,8 +827,8 @@ pub(super) fn draw_chrome(
             let crumbs_total_w = path_bar::estimate_breadcrumbs_total_width(
                 ui,
                 &state.core.cwd,
-                state.ui.breadcrumbs_max_segments,
-                state.ui.breadcrumbs_quick_select,
+                state.ui.config.breadcrumbs_max_segments,
+                state.ui.config.breadcrumbs_quick_select,
             );
             let visible_w = (content_max[0] - content_min[0]).max(0.0);
             let start_x = if crumbs_total_w > visible_w {
@@ -827,7 +844,7 @@ pub(super) fn draw_chrome(
                     ui,
                     state,
                     fs,
-                    state.ui.breadcrumbs_max_segments,
+                    state.ui.config.breadcrumbs_max_segments,
                     false,
                     false,
                 ) {
@@ -856,9 +873,12 @@ pub(super) fn draw_chrome(
     }
 
     if matches!(header_style, HeaderStyle::IgfdClassic) {
-        let list_active = matches!(state.ui.file_list_view, FileListViewMode::List);
-        let thumbs_active = matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList);
-        let grid_active = matches!(state.ui.file_list_view, FileListViewMode::Grid);
+        let list_active = matches!(state.ui.config.file_list_view, FileListViewMode::List);
+        let thumbs_active = matches!(
+            state.ui.config.file_list_view,
+            FileListViewMode::ThumbnailsList
+        );
+        let grid_active = matches!(state.ui.config.file_list_view, FileListViewMode::Grid);
 
         if toolbar_toggle_button(
             ui,
@@ -909,9 +929,9 @@ pub(super) fn draw_chrome(
             }
         }
         if has_thumbnail_backend
-            && state.ui.thumbnails_enabled
+            && state.ui.config.thumbnails_enabled
             && matches!(
-                state.ui.file_list_view,
+                state.ui.config.file_list_view,
                 FileListViewMode::ThumbnailsList | FileListViewMode::Grid
             )
         {
@@ -952,7 +972,7 @@ pub(super) fn draw_chrome(
             ui,
             state,
             fs,
-            state.ui.breadcrumbs_max_segments,
+            state.ui.config.breadcrumbs_max_segments,
             true,
             false,
         ) {

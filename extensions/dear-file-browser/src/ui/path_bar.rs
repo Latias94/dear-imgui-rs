@@ -451,7 +451,7 @@ pub(super) fn draw_breadcrumbs(
                 state.ui.path_edit = true;
                 state.ui.path_edit_buffer = path.display().to_string();
                 state.ui.focus_path_edit_next = true;
-                if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                     state.ui.path_input_mode = true;
                 }
             }
@@ -468,7 +468,7 @@ pub(super) fn draw_breadcrumbs(
                 if is_root_crumb {
                     continue;
                 }
-                if state.ui.breadcrumbs_quick_select {
+                if state.ui.config.breadcrumbs_quick_select {
                     if ui.small_button(sep_label) {
                         state.ui.breadcrumb_quick_parent = Some(path.clone());
                         ui.open_popup("##igfd_path_popup");
@@ -477,7 +477,7 @@ pub(super) fn draw_breadcrumbs(
                         state.ui.path_edit = true;
                         state.ui.path_edit_buffer = path.display().to_string();
                         state.ui.focus_path_edit_next = true;
-                        if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                        if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                             state.ui.path_input_mode = true;
                         }
                     }
@@ -498,7 +498,7 @@ pub(super) fn draw_breadcrumbs(
                 state.ui.path_edit = true;
                 state.ui.path_edit_buffer = path.display().to_string();
                 state.ui.focus_path_edit_next = true;
-                if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                     state.ui.path_input_mode = true;
                 }
             }
@@ -507,7 +507,7 @@ pub(super) fn draw_breadcrumbs(
             }
             ui.same_line();
             if label != sep_label {
-                if state.ui.breadcrumbs_quick_select {
+                if state.ui.config.breadcrumbs_quick_select {
                     if ui.small_button(sep_label) {
                         state.ui.breadcrumb_quick_parent = Some(path.clone());
                         ui.open_popup("##igfd_path_popup");
@@ -516,7 +516,7 @@ pub(super) fn draw_breadcrumbs(
                         state.ui.path_edit = true;
                         state.ui.path_edit_buffer = path.display().to_string();
                         state.ui.focus_path_edit_next = true;
-                        if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                        if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                             state.ui.path_input_mode = true;
                         }
                     }
@@ -557,7 +557,7 @@ pub(super) fn draw_breadcrumbs(
         let tail = max_segments - 2;
         let start_tail = n.saturating_sub(tail);
         if let Some((_, parent)) = crumbs.get(start_tail.saturating_sub(1)) {
-            if state.ui.breadcrumbs_quick_select {
+            if state.ui.config.breadcrumbs_quick_select {
                 if ui.small_button(sep_label) {
                     state.ui.breadcrumb_quick_parent = Some(parent.clone());
                     ui.open_popup("##igfd_path_popup");
@@ -566,7 +566,7 @@ pub(super) fn draw_breadcrumbs(
                     state.ui.path_edit = true;
                     state.ui.path_edit_buffer = parent.display().to_string();
                     state.ui.focus_path_edit_next = true;
-                    if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                    if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                         state.ui.path_input_mode = true;
                     }
                 }
@@ -590,7 +590,7 @@ pub(super) fn draw_breadcrumbs(
                 state.ui.path_edit = true;
                 state.ui.path_edit_buffer = path.display().to_string();
                 state.ui.focus_path_edit_next = true;
-                if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                     state.ui.path_input_mode = true;
                 }
             }
@@ -603,7 +603,7 @@ pub(super) fn draw_breadcrumbs(
             }
             ui.same_line();
             if i + 1 < n {
-                if state.ui.breadcrumbs_quick_select {
+                if state.ui.config.breadcrumbs_quick_select {
                     if ui.small_button(sep_label) {
                         state.ui.breadcrumb_quick_parent = Some(path.clone());
                         ui.open_popup("##igfd_path_popup");
@@ -612,7 +612,7 @@ pub(super) fn draw_breadcrumbs(
                         state.ui.path_edit = true;
                         state.ui.path_edit_buffer = path.display().to_string();
                         state.ui.focus_path_edit_next = true;
-                        if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+                        if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                             state.ui.path_input_mode = true;
                         }
                     }

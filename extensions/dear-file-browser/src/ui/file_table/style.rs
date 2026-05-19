@@ -22,11 +22,11 @@ pub(super) fn style_visual_for_entry(state: &mut FileDialogState, e: &DirEntry) 
     } else {
         EntryKind::File
     };
-    let style = state.ui.file_styles.style_for_owned(&e.name, kind);
+    let style = state.ui.config.file_styles.style_for_owned(&e.name, kind);
     let font_id = style
         .as_ref()
         .and_then(|s| s.font_token.as_deref())
-        .and_then(|token| state.ui.file_style_fonts.get(token).copied());
+        .and_then(|token| state.ui.config.file_style_fonts.get(token).copied());
 
     StyleVisual {
         text_color: style.as_ref().and_then(|s| s.text_color),

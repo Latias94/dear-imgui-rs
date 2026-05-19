@@ -13,14 +13,14 @@ use super::file_table;
 pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
     const POPUP_ID: &str = "New Folder";
 
-    if !state.ui.new_folder_enabled {
-        state.ui.new_folder_open_next = false;
-        state.ui.new_folder_error = None;
+    if !state.ui.config.new_folder_enabled {
+        state.ui.operations.new_folder.open_next = false;
+        state.ui.operations.new_folder.error = None;
         return;
     }
 
-    if state.ui.new_folder_open_next {
-        state.ui.new_folder_open_next = false;
+    if state.ui.operations.new_folder.open_next {
+        state.ui.operations.new_folder.open_next = false;
         if !ui.is_popup_open(POPUP_ID) {
             ui.open_popup(POPUP_ID);
         }
@@ -31,17 +31,18 @@ pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &d
         ui.text_disabled(state.core.cwd.display().to_string());
         ui.separator();
 
-        if state.ui.new_folder_focus_next {
+        if state.ui.operations.new_folder.focus_next {
             ui.set_keyboard_focus_here();
-            state.ui.new_folder_focus_next = false;
+            state.ui.operations.new_folder.focus_next = false;
         }
-        ui.input_text("Name", &mut state.ui.new_folder_name).build();
+        ui.input_text("Name", &mut state.ui.operations.new_folder.name)
+            .build();
 
         let create = ui.button("Create");
         ui.same_line();
         let cancel = ui.button("Cancel");
         if cancel {
-            state.ui.new_folder_error = None;
+            state.ui.operations.new_folder.error = None;
             ui.close_current_popup();
         }
 
@@ -51,7 +52,7 @@ pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &d
             }
         }
 
-        if let Some(err) = &state.ui.new_folder_error {
+        if let Some(err) = &state.ui.operations.new_folder.error {
             ui.separator();
             ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
         }
@@ -62,8 +63,8 @@ pub(super) fn try_create_new_folder_in_cwd(
     state: &mut FileDialogState,
     fs: &dyn FileSystem,
 ) -> bool {
-    state.ui.new_folder_error = None;
-    let name = state.ui.new_folder_name.trim();
+    state.ui.operations.new_folder.error = None;
+    let name = state.ui.operations.new_folder.name.trim();
     let invalid = name.is_empty()
         || name == "."
         || name == ".."
@@ -71,7 +72,7 @@ pub(super) fn try_create_new_folder_in_cwd(
         || name.contains('\\')
         || name.contains('\0');
     if invalid {
-        state.ui.new_folder_error = Some("Invalid folder name".into());
+        state.ui.operations.new_folder.error = Some("Invalid folder name".into());
         return false;
     }
 
@@ -79,7 +80,7 @@ pub(super) fn try_create_new_folder_in_cwd(
     let path = state.core.cwd.join(&name);
     match fs.create_dir(&path) {
         Ok(()) => {
-            state.ui.new_folder_name.clear();
+            state.ui.operations.new_folder.name.clear();
             let id = EntryId::from_path(&path);
             state.core.focus_and_select_by_id(id);
             state.ui.reveal_id_next = Some(id);
@@ -87,7 +88,8 @@ pub(super) fn try_create_new_folder_in_cwd(
             true
         }
         Err(e) => {
-            state.ui.new_folder_error = Some(format!("Failed to create '{}': {}", name, e));
+            state.ui.operations.new_folder.error =
+                Some(format!("Failed to create '{}': {}", name, e));
             false
         }
     }
@@ -99,21 +101,24 @@ pub(super) fn draw_columns_popup(
     has_thumbnail_backend: bool,
 ) {
     if let Some(_popup) = ui.begin_popup("##fb_columns_popup") {
-        match state.ui.file_list_view {
+        match state.ui.config.file_list_view {
             FileListViewMode::List => {
-                let mut enabled = state.ui.thumbnails_enabled;
+                let mut enabled = state.ui.config.thumbnails_enabled;
                 {
                     let _disabled = ui.begin_disabled_with_cond(!has_thumbnail_backend);
                     if ui.checkbox("Enable thumbnails", &mut enabled) {
-                        state.ui.thumbnails_enabled = enabled;
+                        state.ui.config.thumbnails_enabled = enabled;
                     }
                 }
                 if !has_thumbnail_backend {
                     ui.same_line();
                     ui.text_disabled("No thumbnail backend");
                 }
-                if state.ui.thumbnails_enabled && has_thumbnail_backend {
-                    ui.checkbox("Preview", &mut state.ui.file_list_columns.show_preview);
+                if state.ui.config.thumbnails_enabled && has_thumbnail_backend {
+                    ui.checkbox(
+                        "Preview",
+                        &mut state.ui.config.file_list_columns.show_preview,
+                    );
                 } else if has_thumbnail_backend {
                     ui.text_disabled("Preview (enable thumbnails)");
                 } else {
@@ -127,40 +132,49 @@ pub(super) fn draw_columns_popup(
         }
         ui.checkbox(
             file_table::extension_ui_label(state),
-            &mut state.ui.file_list_columns.show_extension,
+            &mut state.ui.config.file_list_columns.show_extension,
         );
-        ui.checkbox("Size", &mut state.ui.file_list_columns.show_size);
-        ui.checkbox("Modified", &mut state.ui.file_list_columns.show_modified);
+        ui.checkbox("Size", &mut state.ui.config.file_list_columns.show_size);
+        ui.checkbox(
+            "Modified",
+            &mut state.ui.config.file_list_columns.show_modified,
+        );
 
         ui.separator();
         if ui.small_button("Compact") {
-            if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
+            if matches!(
+                state.ui.config.file_list_view,
+                FileListViewMode::ThumbnailsList
+            ) {
                 file_table::apply_compact_column_layout_keep_preview(
-                    &mut state.ui.file_list_columns,
+                    &mut state.ui.config.file_list_columns,
                 );
             } else {
-                file_table::apply_compact_column_layout(&mut state.ui.file_list_columns);
+                file_table::apply_compact_column_layout(&mut state.ui.config.file_list_columns);
             }
         }
         ui.same_line();
         if ui.small_button("Balanced") {
-            if matches!(state.ui.file_list_view, FileListViewMode::ThumbnailsList) {
+            if matches!(
+                state.ui.config.file_list_view,
+                FileListViewMode::ThumbnailsList
+            ) {
                 file_table::apply_balanced_column_layout_keep_preview(
-                    &mut state.ui.file_list_columns,
+                    &mut state.ui.config.file_list_columns,
                 );
             } else {
-                file_table::apply_balanced_column_layout(&mut state.ui.file_list_columns);
+                file_table::apply_balanced_column_layout(&mut state.ui.config.file_list_columns);
             }
         }
 
         ui.separator();
         ui.text("Order:");
-        let mut order = state.ui.file_list_columns.normalized_order();
+        let mut order = state.ui.config.file_list_columns.normalized_order();
         let mut changed = false;
         for index in 0..order.len() {
             let column = order[index];
             let mut label = file_table::data_column_label_for_state(state, column).to_string();
-            if !file_table::is_data_column_visible(&state.ui.file_list_columns, column) {
+            if !file_table::is_data_column_visible(&state.ui.config.file_list_columns, column) {
                 label.push_str(" (hidden)");
             }
             ui.text(label);
@@ -174,11 +188,11 @@ pub(super) fn draw_columns_popup(
             }
         }
         if changed {
-            state.ui.file_list_columns.order = order;
+            state.ui.config.file_list_columns.order = order;
         }
 
         if ui.small_button("Reset columns") {
-            state.ui.file_list_columns = FileListColumnsConfig::default();
+            state.ui.config.file_list_columns = FileListColumnsConfig::default();
         }
 
         ui.separator();
@@ -211,9 +225,9 @@ pub(super) fn draw_options_popup(
         if ui.checkbox("DblClick confirm", &mut dbl) {
             state.core.double_click = dbl;
         }
-        let mut quick = state.ui.breadcrumbs_quick_select;
+        let mut quick = state.ui.config.breadcrumbs_quick_select;
         if ui.checkbox("Quick path select", &mut quick) {
-            state.ui.breadcrumbs_quick_select = quick;
+            state.ui.config.breadcrumbs_quick_select = quick;
         }
         let mut show_hidden = state.core.show_hidden;
         if ui.checkbox("Show hidden", &mut show_hidden) {
@@ -224,15 +238,15 @@ pub(super) fn draw_options_popup(
         ui.text("Size:");
         ui.same_line();
         if ui.small_button("S##thumb_size") {
-            state.ui.thumbnail_size = [20.0, 20.0];
+            state.ui.config.thumbnail_size = [20.0, 20.0];
         }
         ui.same_line();
         if ui.small_button("M##thumb_size") {
-            state.ui.thumbnail_size = [32.0, 32.0];
+            state.ui.config.thumbnail_size = [32.0, 32.0];
         }
         ui.same_line();
         if ui.small_button("L##thumb_size") {
-            state.ui.thumbnail_size = [48.0, 48.0];
+            state.ui.config.thumbnail_size = [48.0, 48.0];
         }
         if !has_thumbnail_backend {
             ui.same_line();

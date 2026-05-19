@@ -20,7 +20,7 @@ fn subtle_separator(ui: &Ui) {
 }
 
 pub(super) fn draw_minimal_places_popup(ui: &Ui, state: &mut FileDialogState) {
-    if !matches!(state.ui.layout, LayoutStyle::Minimal) {
+    if !matches!(state.ui.config.layout, LayoutStyle::Minimal) {
         return;
     }
     if let Some(_popup) = ui.begin_popup("##fb_places_popup") {

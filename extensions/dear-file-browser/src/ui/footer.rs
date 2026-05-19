@@ -141,7 +141,7 @@ pub(super) fn draw_footer(
         let ctrl = ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl);
         let alt = ui.is_key_down(Key::LeftAlt) || ui.is_key_down(Key::RightAlt);
         if ctrl && ui.is_key_pressed(Key::L) {
-            if state.ui.path_bar_style == PathBarStyle::Breadcrumbs {
+            if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                 state.ui.path_input_mode = true;
             }
             state.ui.path_edit = true;
@@ -237,7 +237,7 @@ fn validation_buttons_layout(ui: &Ui, state: &FileDialogState) -> (String, Strin
         DialogMode::PickFolder => "Select",
         DialogMode::SaveFile => "Save",
     };
-    let cfg = &state.ui.validation_buttons;
+    let cfg = &state.ui.config.validation_buttons;
     let confirm_label = cfg
         .confirm_label
         .as_deref()
@@ -337,7 +337,7 @@ fn draw_validation_buttons_row(
         DialogMode::PickFolder => "Select",
         DialogMode::SaveFile => "Save",
     };
-    let cfg = &state.ui.validation_buttons;
+    let cfg = &state.ui.config.validation_buttons;
     let confirm_label = cfg.confirm_label.as_deref().unwrap_or(default_confirm);
     let cancel_label = cfg.cancel_label.as_deref().unwrap_or("Cancel");
 

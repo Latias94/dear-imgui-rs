@@ -56,10 +56,11 @@ pub use dialog_manager::{DialogId, DialogManager};
 pub use dialog_state::FileListViewMode;
 #[cfg(feature = "imgui")]
 pub use dialog_state::{
-    ClipboardOp, CustomPaneDock, FileClipboard, FileDialogState, FileDialogUiState,
-    FileListColumnWeightOverrides, FileListColumnsConfig, FileListColumnsDeserializeError,
-    FileListDataColumn, HeaderStyle, PathBarStyle, ToolbarConfig, ToolbarDensity, ToolbarIconMode,
-    ToolbarIcons, ValidationButtonsAlign, ValidationButtonsConfig, ValidationButtonsOrder,
+    ClipboardOp, CustomPaneDock, FileClipboard, FileDialogState, FileDialogUiConfig,
+    FileDialogUiState, FileListColumnWeightOverrides, FileListColumnsConfig,
+    FileListColumnsDeserializeError, FileListDataColumn, HeaderStyle, PathBarStyle, ToolbarConfig,
+    ToolbarDensity, ToolbarIconMode, ToolbarIcons, ValidationButtonsAlign, ValidationButtonsConfig,
+    ValidationButtonsOrder,
 };
 #[cfg(feature = "imgui")]
 pub use file_style::FileStyleCallback;

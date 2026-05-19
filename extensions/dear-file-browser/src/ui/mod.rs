@@ -321,9 +321,9 @@ fn draw_contents_with_fs_and_hooks(
         .footer_height_last
         .max(footer::estimate_footer_height(ui, state));
     let content_h = (avail[1] - footer_h).max(0.0);
-    match state.ui.layout {
+    match state.ui.config.layout {
         LayoutStyle::Standard => {
-            if state.ui.places_pane_shown {
+            if state.ui.config.places_pane_shown {
                 const MIN_PLACES_W: f32 = 120.0;
                 const MIN_FILE_LIST_W: f32 = 180.0;
 
@@ -331,7 +331,7 @@ fn draw_contents_with_fs_and_hooks(
                 let spacing_x = ui.clone_style().item_spacing()[0];
                 let max_places_w =
                     (avail[0] - MIN_FILE_LIST_W - splitter_w - spacing_x * 2.0).max(0.0);
-                let mut places_w = state.ui.places_pane_width.clamp(0.0, max_places_w);
+                let mut places_w = state.ui.config.places_pane_width.clamp(0.0, max_places_w);
                 if max_places_w >= MIN_PLACES_W {
                     places_w = places_w.clamp(MIN_PLACES_W, max_places_w);
                 }
@@ -356,7 +356,7 @@ fn draw_contents_with_fs_and_hooks(
                 if ui.is_item_active() {
                     let dx = ui.io().mouse_delta()[0];
                     let new_w = (places_w + dx).clamp(0.0, max_places_w);
-                    state.ui.places_pane_width = if max_places_w >= MIN_PLACES_W {
+                    state.ui.config.places_pane_width = if max_places_w >= MIN_PLACES_W {
                         new_w.clamp(MIN_PLACES_W, max_places_w)
                     } else {
                         new_w
@@ -368,8 +368,8 @@ fn draw_contents_with_fs_and_hooks(
                     .size([file_w, content_h])
                     .build(ui, || {
                         let inner = ui.content_region_avail();
-                        let show_pane =
-                            state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
+                        let show_pane = state.ui.config.custom_pane_enabled
+                            && custom_pane.as_deref_mut().is_some();
                         if !show_pane {
                             file_table::draw_file_table(
                                 ui,
@@ -382,12 +382,15 @@ fn draw_contents_with_fs_and_hooks(
                             return;
                         }
 
-                        match state.ui.custom_pane_dock {
+                        match state.ui.config.custom_pane_dock {
                             CustomPaneDock::Bottom => {
                                 let style = ui.clone_style();
                                 let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
-                                let pane_h =
-                                    state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
+                                let pane_h = state
+                                    .ui
+                                    .config
+                                    .custom_pane_height
+                                    .clamp(0.0, inner[1].max(0.0));
                                 let mut table_h = inner[1];
                                 if pane_h > 0.0 {
                                     table_h = (table_h - pane_h - sep_h).max(0.0);
@@ -403,7 +406,7 @@ fn draw_contents_with_fs_and_hooks(
                                 );
 
                                 if let Some(pane) = custom_pane.as_deref_mut() {
-                                    if state.ui.custom_pane_enabled && pane_h > 0.0 {
+                                    if state.ui.config.custom_pane_enabled && pane_h > 0.0 {
                                         ui.separator();
                                         ui.child_window("custom_pane")
                                             .size([inner[0], pane_h])
@@ -436,7 +439,8 @@ fn draw_contents_with_fs_and_hooks(
 
                                 let splitter_w = splitter_width(ui);
                                 let max_pane_w = (inner[0] - MIN_TABLE_W - splitter_w).max(0.0);
-                                let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
+                                let mut pane_w =
+                                    state.ui.config.custom_pane_width.clamp(0.0, max_pane_w);
                                 if max_pane_w >= MIN_PANE_W {
                                     pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
                                 }
@@ -464,7 +468,8 @@ fn draw_contents_with_fs_and_hooks(
                                 if ui.is_item_active() {
                                     let dx = ui.io().mouse_delta()[0];
                                     let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
-                                    state.ui.custom_pane_width = if max_pane_w >= MIN_PANE_W {
+                                    state.ui.config.custom_pane_width = if max_pane_w >= MIN_PANE_W
+                                    {
                                         new_w.clamp(MIN_PANE_W, max_pane_w)
                                     } else {
                                         new_w
@@ -504,8 +509,8 @@ fn draw_contents_with_fs_and_hooks(
                     .size([avail[0], content_h])
                     .build(ui, || {
                         let inner = ui.content_region_avail();
-                        let show_pane =
-                            state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
+                        let show_pane = state.ui.config.custom_pane_enabled
+                            && custom_pane.as_deref_mut().is_some();
                         if !show_pane {
                             file_table::draw_file_table(
                                 ui,
@@ -518,12 +523,15 @@ fn draw_contents_with_fs_and_hooks(
                             return;
                         }
 
-                        match state.ui.custom_pane_dock {
+                        match state.ui.config.custom_pane_dock {
                             CustomPaneDock::Bottom => {
                                 let style = ui.clone_style();
                                 let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
-                                let pane_h =
-                                    state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
+                                let pane_h = state
+                                    .ui
+                                    .config
+                                    .custom_pane_height
+                                    .clamp(0.0, inner[1].max(0.0));
                                 let mut table_h = inner[1];
                                 if pane_h > 0.0 {
                                     table_h = (table_h - pane_h - sep_h).max(0.0);
@@ -539,7 +547,7 @@ fn draw_contents_with_fs_and_hooks(
                                 );
 
                                 if let Some(pane) = custom_pane.as_deref_mut() {
-                                    if state.ui.custom_pane_enabled && pane_h > 0.0 {
+                                    if state.ui.config.custom_pane_enabled && pane_h > 0.0 {
                                         ui.separator();
                                         ui.child_window("custom_pane")
                                             .size([inner[0], pane_h])
@@ -572,7 +580,8 @@ fn draw_contents_with_fs_and_hooks(
 
                                 let splitter_w = splitter_width(ui);
                                 let max_pane_w = (inner[0] - MIN_TABLE_W - splitter_w).max(0.0);
-                                let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
+                                let mut pane_w =
+                                    state.ui.config.custom_pane_width.clamp(0.0, max_pane_w);
                                 if max_pane_w >= MIN_PANE_W {
                                     pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
                                 }
@@ -600,7 +609,8 @@ fn draw_contents_with_fs_and_hooks(
                                 if ui.is_item_active() {
                                     let dx = ui.io().mouse_delta()[0];
                                     let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
-                                    state.ui.custom_pane_width = if max_pane_w >= MIN_PANE_W {
+                                    state.ui.config.custom_pane_width = if max_pane_w >= MIN_PANE_W
+                                    {
                                         new_w.clamp(MIN_PANE_W, max_pane_w)
                                     } else {
                                         new_w
@@ -643,7 +653,7 @@ fn draw_contents_with_fs_and_hooks(
                 .build(ui, || {
                     let inner = ui.content_region_avail();
                     let show_pane =
-                        state.ui.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
+                        state.ui.config.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
                     if !show_pane {
                         file_table::draw_file_table(
                             ui,
@@ -656,11 +666,15 @@ fn draw_contents_with_fs_and_hooks(
                         return;
                     }
 
-                    match state.ui.custom_pane_dock {
+                    match state.ui.config.custom_pane_dock {
                         CustomPaneDock::Bottom => {
                             let style = ui.clone_style();
                             let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
-                            let pane_h = state.ui.custom_pane_height.clamp(0.0, inner[1].max(0.0));
+                            let pane_h = state
+                                .ui
+                                .config
+                                .custom_pane_height
+                                .clamp(0.0, inner[1].max(0.0));
                             let mut table_h = inner[1];
                             if pane_h > 0.0 {
                                 table_h = (table_h - pane_h - sep_h).max(0.0);
@@ -676,7 +690,7 @@ fn draw_contents_with_fs_and_hooks(
                             );
 
                             if let Some(pane) = custom_pane.as_deref_mut() {
-                                if state.ui.custom_pane_enabled && pane_h > 0.0 {
+                                if state.ui.config.custom_pane_enabled && pane_h > 0.0 {
                                     ui.separator();
                                     ui.child_window("custom_pane")
                                         .size([inner[0], pane_h])
@@ -709,7 +723,8 @@ fn draw_contents_with_fs_and_hooks(
 
                             let splitter_w = splitter_width(ui);
                             let max_pane_w = (inner[0] - MIN_TABLE_W - splitter_w).max(0.0);
-                            let mut pane_w = state.ui.custom_pane_width.clamp(0.0, max_pane_w);
+                            let mut pane_w =
+                                state.ui.config.custom_pane_width.clamp(0.0, max_pane_w);
                             if max_pane_w >= MIN_PANE_W {
                                 pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
                             }
@@ -737,7 +752,7 @@ fn draw_contents_with_fs_and_hooks(
                             if ui.is_item_active() {
                                 let dx = ui.io().mouse_delta()[0];
                                 let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
-                                state.ui.custom_pane_width = if max_pane_w >= MIN_PANE_W {
+                                state.ui.config.custom_pane_width = if max_pane_w >= MIN_PANE_W {
                                     new_w.clamp(MIN_PANE_W, max_pane_w)
                                 } else {
                                     new_w
@@ -812,24 +827,24 @@ pub(in crate::ui) fn apply_file_list_view_from_ui(
 ) -> bool {
     match view {
         FileListViewMode::List => {
-            state.ui.file_list_view = FileListViewMode::List;
+            state.ui.config.file_list_view = FileListViewMode::List;
             true
         }
         FileListViewMode::ThumbnailsList => {
             if !has_thumbnail_backend {
                 return false;
             }
-            state.ui.file_list_view = FileListViewMode::ThumbnailsList;
-            state.ui.thumbnails_enabled = true;
-            state.ui.file_list_columns.show_preview = true;
+            state.ui.config.file_list_view = FileListViewMode::ThumbnailsList;
+            state.ui.config.thumbnails_enabled = true;
+            state.ui.config.file_list_columns.show_preview = true;
             true
         }
         FileListViewMode::Grid => {
             if !has_thumbnail_backend {
                 return false;
             }
-            state.ui.file_list_view = FileListViewMode::Grid;
-            state.ui.thumbnails_enabled = true;
+            state.ui.config.file_list_view = FileListViewMode::Grid;
+            state.ui.config.thumbnails_enabled = true;
             true
         }
     }
@@ -1091,66 +1106,69 @@ mod tests {
     #[test]
     fn apply_file_list_view_from_ui_rejects_thumbnail_views_without_backend() {
         let mut state = FileDialogState::new(DialogMode::OpenFile);
-        state.ui.file_list_view = FileListViewMode::List;
-        state.ui.thumbnails_enabled = false;
-        state.ui.file_list_columns.show_preview = false;
+        state.ui.config.file_list_view = FileListViewMode::List;
+        state.ui.config.thumbnails_enabled = false;
+        state.ui.config.file_list_columns.show_preview = false;
 
         assert!(!apply_file_list_view_from_ui(
             &mut state,
             FileListViewMode::ThumbnailsList,
             false
         ));
-        assert_eq!(state.ui.file_list_view, FileListViewMode::List);
-        assert!(!state.ui.thumbnails_enabled);
-        assert!(!state.ui.file_list_columns.show_preview);
+        assert_eq!(state.ui.config.file_list_view, FileListViewMode::List);
+        assert!(!state.ui.config.thumbnails_enabled);
+        assert!(!state.ui.config.file_list_columns.show_preview);
 
         assert!(!apply_file_list_view_from_ui(
             &mut state,
             FileListViewMode::Grid,
             false
         ));
-        assert_eq!(state.ui.file_list_view, FileListViewMode::List);
-        assert!(!state.ui.thumbnails_enabled);
+        assert_eq!(state.ui.config.file_list_view, FileListViewMode::List);
+        assert!(!state.ui.config.thumbnails_enabled);
     }
 
     #[test]
     fn apply_file_list_view_from_ui_enables_thumbnail_state_with_backend() {
         let mut state = FileDialogState::new(DialogMode::OpenFile);
-        state.ui.file_list_columns.show_preview = false;
+        state.ui.config.file_list_columns.show_preview = false;
 
         assert!(apply_file_list_view_from_ui(
             &mut state,
             FileListViewMode::ThumbnailsList,
             true
         ));
-        assert_eq!(state.ui.file_list_view, FileListViewMode::ThumbnailsList);
-        assert!(state.ui.thumbnails_enabled);
-        assert!(state.ui.file_list_columns.show_preview);
+        assert_eq!(
+            state.ui.config.file_list_view,
+            FileListViewMode::ThumbnailsList
+        );
+        assert!(state.ui.config.thumbnails_enabled);
+        assert!(state.ui.config.file_list_columns.show_preview);
 
-        state.ui.file_list_columns.show_preview = false;
+        state.ui.config.file_list_columns.show_preview = false;
         assert!(apply_file_list_view_from_ui(
             &mut state,
             FileListViewMode::Grid,
             true
         ));
-        assert_eq!(state.ui.file_list_view, FileListViewMode::Grid);
-        assert!(state.ui.thumbnails_enabled);
-        assert!(!state.ui.file_list_columns.show_preview);
+        assert_eq!(state.ui.config.file_list_view, FileListViewMode::Grid);
+        assert!(state.ui.config.thumbnails_enabled);
+        assert!(!state.ui.config.file_list_columns.show_preview);
     }
 
     #[test]
     fn apply_file_list_view_from_ui_keeps_list_view_available() {
         let mut state = FileDialogState::new(DialogMode::OpenFile);
-        state.ui.file_list_view = FileListViewMode::Grid;
-        state.ui.thumbnails_enabled = true;
+        state.ui.config.file_list_view = FileListViewMode::Grid;
+        state.ui.config.thumbnails_enabled = true;
 
         assert!(apply_file_list_view_from_ui(
             &mut state,
             FileListViewMode::List,
             false
         ));
-        assert_eq!(state.ui.file_list_view, FileListViewMode::List);
-        assert!(state.ui.thumbnails_enabled);
+        assert_eq!(state.ui.config.file_list_view, FileListViewMode::List);
+        assert!(state.ui.config.thumbnails_enabled);
     }
 
     #[test]

@@ -100,6 +100,7 @@ fn draw_igfd_path_table_popup(
             let e = &dirs[idx];
             let style = state
                 .ui
+                .config
                 .file_styles
                 .style_for_owned(&e.name, EntryKind::Dir);
             let mut label = e.name.as_str().to_string();
