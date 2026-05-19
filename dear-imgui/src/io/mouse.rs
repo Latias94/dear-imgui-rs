@@ -1,4 +1,11 @@
+use crate::input::MouseButton;
 use crate::io::{Io, assert_finite_f32, assert_finite_vec2};
+
+const MOUSE_BUTTON_COUNT: usize = 5;
+
+fn mouse_button_index(button: MouseButton) -> usize {
+    button as i32 as usize
+}
 
 impl Io {
     /// Mouse position, in pixels
@@ -35,30 +42,48 @@ impl Io {
         self.inner_mut().MouseWheelH = wheel_h;
     }
 
-    /// Check if a mouse button is down
-    pub fn mouse_down(&self, button: usize) -> bool {
-        if button < 5 {
+    /// Check if a mouse button is down.
+    pub fn mouse_down(&self, button: MouseButton) -> bool {
+        self.mouse_down_raw_index(mouse_button_index(button))
+    }
+
+    /// Check if a raw mouse button index is down.
+    ///
+    /// This is an explicit escape hatch for low-level adapters that need to
+    /// inspect Dear ImGui's raw `MouseDown` array. Out-of-range indices return
+    /// `false`, matching the previous `mouse_down(usize)` behavior.
+    pub fn mouse_down_raw_index(&self, button: usize) -> bool {
+        if button < MOUSE_BUTTON_COUNT {
             self.inner().MouseDown[button]
         } else {
             false
         }
     }
 
-    /// Check if a mouse button is down (typed).
-    pub fn mouse_down_button(&self, button: crate::input::MouseButton) -> bool {
-        self.mouse_down(button as i32 as usize)
+    /// Check if a mouse button is down.
+    pub fn mouse_down_button(&self, button: MouseButton) -> bool {
+        self.mouse_down(button)
     }
 
-    /// Set mouse button state
-    pub fn set_mouse_down(&mut self, button: usize, down: bool) {
-        if button < 5 {
+    /// Set mouse button state.
+    pub fn set_mouse_down(&mut self, button: MouseButton, down: bool) {
+        self.set_mouse_down_raw_index(mouse_button_index(button), down);
+    }
+
+    /// Set a raw mouse button index state.
+    ///
+    /// This is an explicit escape hatch for low-level adapters that need to
+    /// write Dear ImGui's raw `MouseDown` array. Out-of-range indices are
+    /// ignored, matching the previous `set_mouse_down(usize, bool)` behavior.
+    pub fn set_mouse_down_raw_index(&mut self, button: usize, down: bool) {
+        if button < MOUSE_BUTTON_COUNT {
             self.inner_mut().MouseDown[button] = down;
         }
     }
 
-    /// Set mouse button state (typed).
-    pub fn set_mouse_down_button(&mut self, button: crate::input::MouseButton, down: bool) {
-        self.set_mouse_down(button as i32 as usize, down);
+    /// Set mouse button state.
+    pub fn set_mouse_down_button(&mut self, button: MouseButton, down: bool) {
+        self.set_mouse_down(button, down);
     }
 
     /// Check if imgui wants to capture mouse input

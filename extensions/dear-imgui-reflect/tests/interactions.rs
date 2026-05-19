@@ -99,7 +99,7 @@ fn imgui_small_button_click_can_be_simulated() {
             });
         assert!(!pressed, "unexpected press on mouse-down frame");
         assert!(hovered);
-        assert!(ui.io().mouse_down_button(MouseButton::Left));
+        assert!(ui.io().mouse_down(MouseButton::Left));
     }
     ctx.render();
 
@@ -119,7 +119,7 @@ fn imgui_small_button_click_can_be_simulated() {
                 hovered = ui.is_item_hovered();
             });
         assert!(hovered);
-        assert!(!ui.io().mouse_down_button(MouseButton::Left));
+        assert!(!ui.io().mouse_down(MouseButton::Left));
         assert!(pressed, "expected click on mouse-up frame");
     }
     ctx.render();

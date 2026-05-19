@@ -134,6 +134,38 @@ fn io_mouse_inputs_allow_finite_sentinel_values_but_reject_non_finite() {
 }
 
 #[test]
+fn io_mouse_button_state_uses_typed_buttons_and_preserves_raw_index_escape_hatch() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    let io = ctx.io_mut();
+
+    for button in [
+        imgui::MouseButton::Left,
+        imgui::MouseButton::Right,
+        imgui::MouseButton::Middle,
+        imgui::MouseButton::Extra1,
+        imgui::MouseButton::Extra2,
+    ] {
+        assert!(!io.mouse_down(button));
+        io.set_mouse_down(button, true);
+        assert!(io.mouse_down(button));
+        assert!(io.mouse_down_raw_index(button as i32 as usize));
+        io.set_mouse_down(button, false);
+        assert!(!io.mouse_down(button));
+    }
+
+    io.set_mouse_down_raw_index(3, true);
+    assert!(io.mouse_down(imgui::MouseButton::Extra1));
+    io.set_mouse_down_raw_index(3, false);
+    assert!(!io.mouse_down(imgui::MouseButton::Extra1));
+
+    assert!(!io.mouse_down_raw_index(5));
+    io.set_mouse_down_raw_index(5, true);
+    assert!(!io.mouse_down_raw_index(5));
+}
+
+#[test]
 fn io_config_floats_reject_invalid_values_before_storing() {
     let _guard = test_guard();
 

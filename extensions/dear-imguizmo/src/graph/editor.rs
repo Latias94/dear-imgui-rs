@@ -346,9 +346,9 @@ fn draw_core<'ui, 'h>(
     let io = ui.io();
     let mouse = io.mouse_pos();
     let mouse_delta = [mouse[0] - view.last_mouse[0], mouse[1] - view.last_mouse[1]];
-    let left_down = io.mouse_down(0);
-    let middle_down = io.mouse_down(2);
-    let right_down = io.mouse_down(1);
+    let left_down = io.mouse_down(MouseButton::Left);
+    let middle_down = io.mouse_down(MouseButton::Middle);
+    let right_down = io.mouse_down(MouseButton::Right);
     let ctrl = ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl);
     let shift = ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift);
     let left_clicked = ui.is_mouse_clicked(MouseButton::Left);
