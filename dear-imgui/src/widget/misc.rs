@@ -27,6 +27,20 @@ fn validate_invisible_button_flags(caller: &str, flags: ButtonFlags) {
     );
 }
 
+fn validate_invisible_button_options(caller: &str, options: InvisibleButtonOptions) {
+    validate_invisible_button_flags(caller, options.flags);
+    let unsupported_buttons =
+        options.mouse_buttons.bits() & !InvisibleButtonMouseButtons::all().bits();
+    assert!(
+        unsupported_buttons == 0,
+        "{caller} received unsupported ImGuiButtonFlags mouse-button bits: 0x{unsupported_buttons:X}"
+    );
+    assert!(
+        !options.mouse_buttons.is_empty(),
+        "{caller} requires at least one invisible-button mouse button"
+    );
+}
+
 fn validate_arrow_direction(caller: &str, dir: crate::Direction) {
     assert!(
         matches!(
@@ -41,7 +55,10 @@ fn validate_arrow_direction(caller: &str, dir: crate::Direction) {
 }
 
 bitflags::bitflags! {
-    /// Flags for invisible buttons
+    /// Independent flags for invisible buttons.
+    ///
+    /// Mouse-button selection is represented separately by
+    /// [`InvisibleButtonMouseButtons`] / [`InvisibleButtonOptions`].
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct ButtonFlags: i32 {
@@ -51,12 +68,104 @@ bitflags::bitflags! {
         const ALLOW_OVERLAP = sys::ImGuiButtonFlags_AllowOverlap as i32;
         /// Keep navigation/tabbing enabled for this invisible button.
         const ENABLE_NAV = sys::ImGuiButtonFlags_EnableNav as i32;
-        /// React on left mouse button
-        const MOUSE_BUTTON_LEFT = sys::ImGuiButtonFlags_MouseButtonLeft as i32;
-        /// React on right mouse button
-        const MOUSE_BUTTON_RIGHT = sys::ImGuiButtonFlags_MouseButtonRight as i32;
-        /// React on middle mouse button
-        const MOUSE_BUTTON_MIDDLE = sys::ImGuiButtonFlags_MouseButtonMiddle as i32;
+    }
+}
+
+bitflags::bitflags! {
+    /// Mouse buttons accepted by invisible buttons.
+    #[repr(transparent)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct InvisibleButtonMouseButtons: i32 {
+        /// React on left mouse button.
+        const LEFT = sys::ImGuiButtonFlags_MouseButtonLeft as i32;
+        /// React on right mouse button.
+        const RIGHT = sys::ImGuiButtonFlags_MouseButtonRight as i32;
+        /// React on middle mouse button.
+        const MIDDLE = sys::ImGuiButtonFlags_MouseButtonMiddle as i32;
+    }
+}
+
+impl Default for InvisibleButtonMouseButtons {
+    fn default() -> Self {
+        Self::LEFT
+    }
+}
+
+impl From<crate::MouseButton> for InvisibleButtonMouseButtons {
+    fn from(button: crate::MouseButton) -> Self {
+        match button {
+            crate::MouseButton::Left => Self::LEFT,
+            crate::MouseButton::Right => Self::RIGHT,
+            crate::MouseButton::Middle => Self::MIDDLE,
+            crate::MouseButton::Extra1 | crate::MouseButton::Extra2 => {
+                panic!("Dear ImGui invisible buttons only support left, right, and middle buttons")
+            }
+        }
+    }
+}
+
+/// Complete options accepted by `InvisibleButton()`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct InvisibleButtonOptions {
+    pub flags: ButtonFlags,
+    pub mouse_buttons: InvisibleButtonMouseButtons,
+}
+
+impl InvisibleButtonOptions {
+    pub const fn new() -> Self {
+        Self {
+            flags: ButtonFlags::NONE,
+            mouse_buttons: InvisibleButtonMouseButtons::LEFT,
+        }
+    }
+
+    pub fn flags(mut self, flags: ButtonFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn mouse_buttons(mut self, buttons: InvisibleButtonMouseButtons) -> Self {
+        self.mouse_buttons = buttons;
+        self
+    }
+
+    pub fn mouse_button(mut self, button: crate::MouseButton) -> Self {
+        self.mouse_buttons = button.into();
+        self
+    }
+
+    /// Returns the raw `ImGuiButtonFlags` bits assembled for `InvisibleButton()`.
+    pub fn bits(self) -> i32 {
+        self.raw()
+    }
+
+    #[inline]
+    pub(crate) fn raw(self) -> i32 {
+        self.flags.bits() | self.mouse_buttons.bits()
+    }
+}
+
+impl Default for InvisibleButtonOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<ButtonFlags> for InvisibleButtonOptions {
+    fn from(flags: ButtonFlags) -> Self {
+        Self::new().flags(flags)
+    }
+}
+
+impl From<InvisibleButtonMouseButtons> for InvisibleButtonOptions {
+    fn from(buttons: InvisibleButtonMouseButtons) -> Self {
+        Self::new().mouse_buttons(buttons)
+    }
+}
+
+impl From<crate::MouseButton> for InvisibleButtonOptions {
+    fn from(button: crate::MouseButton) -> Self {
+        Self::new().mouse_button(button)
     }
 }
 
@@ -98,7 +207,10 @@ impl Ui {
         self.invisible_button_flags(str_id, size, crate::widget::ButtonFlags::NONE)
     }
 
-    /// Creates an invisible button with flags
+    /// Creates an invisible button with independent flags.
+    ///
+    /// Use [`Self::invisible_button_options`] to choose a mouse button other
+    /// than the default left button.
     #[doc(alias = "InvisibleButton")]
     pub fn invisible_button_flags(
         &self,
@@ -107,11 +219,33 @@ impl Ui {
         flags: crate::widget::ButtonFlags,
     ) -> bool {
         validate_invisible_button_flags("Ui::invisible_button_flags()", flags);
+        self.invisible_button_raw(str_id, size, flags.bits())
+    }
+
+    /// Creates an invisible button with complete options.
+    #[doc(alias = "InvisibleButton")]
+    pub fn invisible_button_options(
+        &self,
+        str_id: impl AsRef<str>,
+        size: impl Into<[f32; 2]>,
+        options: impl Into<crate::widget::InvisibleButtonOptions>,
+    ) -> bool {
+        let options = options.into();
+        validate_invisible_button_options("Ui::invisible_button_options()", options);
+        self.invisible_button_raw(str_id, size, options.raw())
+    }
+
+    fn invisible_button_raw(
+        &self,
+        str_id: impl AsRef<str>,
+        size: impl Into<[f32; 2]>,
+        flags: i32,
+    ) -> bool {
         let id_ptr = self.scratch_txt(str_id);
         let size = size.into();
-        assert_finite_vec2("Ui::invisible_button_flags()", "size", size);
+        assert_finite_vec2("Ui::invisible_button()", "size", size);
         let size_vec: sys::ImVec2 = size.into();
-        unsafe { sys::igInvisibleButton(id_ptr, size_vec, flags.bits()) }
+        unsafe { sys::igInvisibleButton(id_ptr, size_vec, flags) }
     }
 
     /// Creates an arrow button

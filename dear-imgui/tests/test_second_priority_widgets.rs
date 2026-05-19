@@ -23,6 +23,14 @@ fn test_api_types_exist() {
     // Hover flags
     let _hover_flags = ItemHoveredFlags::ALLOW_WHEN_DISABLED;
 
+    // Invisible button options
+    let _button_flags = ButtonFlags::ENABLE_NAV;
+    let _invisible_mouse_buttons =
+        InvisibleButtonMouseButtons::LEFT | InvisibleButtonMouseButtons::RIGHT;
+    let _invisible_options = InvisibleButtonOptions::new()
+        .flags(_button_flags)
+        .mouse_buttons(_invisible_mouse_buttons);
+
     // Mouse button
     let _button = MouseButton::Left;
 

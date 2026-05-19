@@ -34,9 +34,17 @@ fn button_and_invisible_button_validate_geometry_and_flags_before_ffi() {
         let _ = ui.invisible_button_flags(
             "nav invisible button",
             [0.0, 0.0],
-            imgui::ButtonFlags::ENABLE_NAV
-                | imgui::ButtonFlags::MOUSE_BUTTON_LEFT
-                | imgui::ButtonFlags::MOUSE_BUTTON_RIGHT,
+            imgui::ButtonFlags::ENABLE_NAV | imgui::ButtonFlags::ALLOW_OVERLAP,
+        );
+        let _ = ui.invisible_button_options(
+            "multi-button invisible button",
+            [0.0, 0.0],
+            imgui::InvisibleButtonOptions::new()
+                .flags(imgui::ButtonFlags::ENABLE_NAV)
+                .mouse_buttons(
+                    imgui::InvisibleButtonMouseButtons::LEFT
+                        | imgui::InvisibleButtonMouseButtons::RIGHT,
+                ),
         );
 
         assert_panics!({
@@ -54,6 +62,38 @@ fn button_and_invisible_button_validate_geometry_and_flags_before_ffi() {
                 "private invisible flag",
                 [1.0, 1.0],
                 private_button_flag,
+            );
+        });
+
+        assert_panics!({
+            let mouse_button_in_flags =
+                imgui::ButtonFlags::from_bits_retain(imgui::sys::ImGuiButtonFlags_MouseButtonLeft);
+            let _ = ui.invisible_button_flags(
+                "mouse button in independent flags",
+                [1.0, 1.0],
+                mouse_button_in_flags,
+            );
+        });
+
+        assert_panics!({
+            let independent_flag_in_mouse_buttons =
+                imgui::InvisibleButtonMouseButtons::from_bits_retain(
+                    imgui::sys::ImGuiButtonFlags_AllowOverlap,
+                );
+            let _ = ui.invisible_button_options(
+                "independent flag in mouse buttons",
+                [1.0, 1.0],
+                imgui::InvisibleButtonOptions::new()
+                    .mouse_buttons(independent_flag_in_mouse_buttons),
+            );
+        });
+
+        assert_panics!({
+            let _ = ui.invisible_button_options(
+                "no invisible mouse button",
+                [1.0, 1.0],
+                imgui::InvisibleButtonOptions::new()
+                    .mouse_buttons(imgui::InvisibleButtonMouseButtons::empty()),
             );
         });
     });

@@ -69,6 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     defaults now use `TooltipHoveredFlags`.
   - `Io::mouse_down` and `Io::set_mouse_down` now take `MouseButton` instead of raw `usize`
     indices. Use `mouse_down_raw_index` / `set_mouse_down_raw_index` for explicit raw access.
+  - `ButtonFlags` for `Ui::invisible_button_flags` now contains only independent behavior flags.
+    Use `InvisibleButtonOptions` and `InvisibleButtonMouseButtons` to select right/middle or
+    multiple mouse buttons for invisible buttons.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - `dear-file-browser` scan request/batch/status generations now use `ScanGeneration`,
