@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `InputTextFlags`, multiline text inputs now use `InputTextMultilineFlags`, and numeric
     input/scalar builders now use `InputScalarFlags`. The resize callback bit is crate-owned
     plumbing and is no longer accepted as a public input flag.
+  - Popup flags are split by call-site domain: popup open helpers now use `PopupOpenFlags`,
+    context popup helpers/options now use `PopupContextFlags`, and popup-open query helpers now
+    use `PopupQueryFlags`.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - `dear-file-browser` scan request/batch/status generations now use `ScanGeneration`,

@@ -303,9 +303,18 @@ fn popup_context_options_keep_mouse_buttons_out_of_flags() {
         | imgui::sys::ImGuiPopupFlags_MouseButtonRight
         | imgui::sys::ImGuiPopupFlags_MouseButtonMiddle;
 
+    assert!(!imgui::PopupContextFlags::all().intersects(
+        imgui::PopupContextFlags::from_bits_retain(mouse_button_bits)
+    ));
     assert!(
-        !imgui::PopupFlags::all()
-            .intersects(imgui::PopupFlags::from_bits_retain(mouse_button_bits))
+        !imgui::PopupOpenFlags::all().intersects(imgui::PopupOpenFlags::from_bits_retain(
+            imgui::sys::ImGuiPopupFlags_AnyPopupId
+        ))
+    );
+    assert!(
+        !imgui::PopupQueryFlags::all().intersects(imgui::PopupQueryFlags::from_bits_retain(
+            imgui::sys::ImGuiPopupFlags_NoReopen
+        ))
     );
     assert_eq!(
         imgui::PopupContextOptions::new().bits(),

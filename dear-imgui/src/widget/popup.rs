@@ -16,6 +16,6 @@ mod tokens;
 mod ui;
 
 pub use context::{PopupContextMouseButton, PopupContextOptions};
-pub use flags::PopupFlags;
+pub use flags::{PopupContextFlags, PopupOpenFlags, PopupQueryFlags};
 pub use modal::ModalPopup;
 pub use tokens::{ModalPopupToken, PopupToken};

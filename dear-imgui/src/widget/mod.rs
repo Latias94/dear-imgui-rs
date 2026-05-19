@@ -51,7 +51,7 @@ pub mod tooltip;
 pub mod tree;
 
 // Re-export important types
-pub use popup::PopupFlags;
+pub use popup::{PopupContextFlags, PopupOpenFlags, PopupQueryFlags};
 pub use table::{TableBgTarget, TableBuilder, TableColumnSetup};
 
 // Widget implementations

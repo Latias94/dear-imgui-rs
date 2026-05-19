@@ -3,8 +3,8 @@ use crate::ui::Ui;
 use crate::window::{WindowFlags, validate_window_flags};
 
 use super::context::PopupContextOptions;
-use super::flags::{validate_popup_flags, validate_popup_query_flags};
-use super::{ModalPopup, ModalPopupToken, PopupFlags, PopupToken};
+use super::flags::{validate_popup_open_flags, validate_popup_query_flags};
+use super::{ModalPopup, ModalPopupToken, PopupOpenFlags, PopupQueryFlags, PopupToken};
 
 /// # Popup Widgets
 impl Ui {
@@ -21,15 +21,15 @@ impl Ui {
     #[doc(alias = "OpenPopup")]
     pub fn open_popup(&self, str_id: impl AsRef<str>) {
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::igOpenPopup_Str(str_id_ptr, PopupFlags::NONE.bits()) }
+        unsafe { sys::igOpenPopup_Str(str_id_ptr, PopupOpenFlags::NONE.raw()) }
     }
 
     /// Instructs ImGui that a popup is open with flags.
     #[doc(alias = "OpenPopup")]
-    pub fn open_popup_with_flags(&self, str_id: impl AsRef<str>, flags: PopupFlags) {
-        validate_popup_flags("Ui::open_popup_with_flags()", flags);
+    pub fn open_popup_with_flags(&self, str_id: impl AsRef<str>, flags: PopupOpenFlags) {
+        validate_popup_open_flags("Ui::open_popup_with_flags()", flags);
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::igOpenPopup_Str(str_id_ptr, flags.bits()) }
+        unsafe { sys::igOpenPopup_Str(str_id_ptr, flags.raw()) }
     }
 
     /// Opens a popup when the last item is clicked (typically right-click).
@@ -188,15 +188,19 @@ impl Ui {
     #[doc(alias = "IsPopupOpen")]
     pub fn is_popup_open(&self, str_id: impl AsRef<str>) -> bool {
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::igIsPopupOpen_Str(str_id_ptr, PopupFlags::NONE.bits()) }
+        unsafe { sys::igIsPopupOpen_Str(str_id_ptr, PopupQueryFlags::NONE.raw()) }
     }
 
     /// Returns true if the popup is open with flags.
     #[doc(alias = "IsPopupOpen")]
-    pub fn is_popup_open_with_flags(&self, str_id: impl AsRef<str>, flags: PopupFlags) -> bool {
+    pub fn is_popup_open_with_flags(
+        &self,
+        str_id: impl AsRef<str>,
+        flags: PopupQueryFlags,
+    ) -> bool {
         validate_popup_query_flags("Ui::is_popup_open_with_flags()", flags);
         let str_id_ptr = self.scratch_txt(str_id);
-        unsafe { sys::igIsPopupOpen_Str(str_id_ptr, flags.bits()) }
+        unsafe { sys::igIsPopupOpen_Str(str_id_ptr, flags.raw()) }
     }
 
     /// Begin a popup context menu for the last item.

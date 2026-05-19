@@ -20,7 +20,9 @@ fn test_api_types_exist() {
     let _scalar_flags = InputScalarFlags::READ_ONLY | InputScalarFlags::PARSE_EMPTY_REF_VAL;
 
     // Popup flags
-    let _popup_flags = PopupFlags::NO_OPEN_OVER_EXISTING_POPUP;
+    let _popup_open_flags = PopupOpenFlags::NO_OPEN_OVER_EXISTING_POPUP;
+    let _popup_context_flags = PopupContextFlags::NO_OPEN_OVER_ITEMS;
+    let _popup_query_flags = PopupQueryFlags::ANY_POPUP;
 
     // Hover flags
     let _hover_flags = ItemHoveredFlags::ALLOW_WHEN_DISABLED;

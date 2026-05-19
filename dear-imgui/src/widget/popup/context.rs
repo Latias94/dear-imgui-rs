@@ -1,7 +1,7 @@
 use crate::{MouseButton, sys};
 
-use super::PopupFlags;
-use super::flags::validate_popup_flags;
+use super::PopupContextFlags;
+use super::flags::validate_popup_context_flags;
 
 /// Single mouse button used by popup context helpers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -45,19 +45,19 @@ impl From<MouseButton> for PopupContextMouseButton {
 /// single mouse button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PopupContextOptions {
-    pub flags: PopupFlags,
+    pub flags: PopupContextFlags,
     pub mouse_button: PopupContextMouseButton,
 }
 
 impl PopupContextOptions {
     pub const fn new() -> Self {
         Self {
-            flags: PopupFlags::NONE,
+            flags: PopupContextFlags::NONE,
             mouse_button: PopupContextMouseButton::Right,
         }
     }
 
-    pub fn flags(mut self, flags: PopupFlags) -> Self {
+    pub fn flags(mut self, flags: PopupContextFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -73,15 +73,15 @@ impl PopupContextOptions {
 
     #[inline]
     pub(crate) fn raw(self) -> i32 {
-        self.flags.bits() | self.mouse_button.raw()
+        self.flags.raw() | self.mouse_button.raw()
     }
 
     #[inline]
     pub(super) fn validate(self, caller: &str) {
-        validate_popup_flags(caller, self.flags);
+        validate_popup_context_flags(caller, self.flags);
         assert!(
             self.flags.bits() & (sys::ImGuiPopupFlags_MouseButtonMask_ as i32) == 0,
-            "{caller} received non-independent ImGuiPopupFlags mouse-button bits"
+            "{caller} received non-independent PopupContextFlags mouse-button bits"
         );
     }
 }
@@ -92,8 +92,8 @@ impl Default for PopupContextOptions {
     }
 }
 
-impl From<PopupFlags> for PopupContextOptions {
-    fn from(flags: PopupFlags) -> Self {
+impl From<PopupContextFlags> for PopupContextOptions {
+    fn from(flags: PopupContextFlags) -> Self {
         Self::new().flags(flags)
     }
 }

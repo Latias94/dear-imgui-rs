@@ -140,27 +140,45 @@ fn popup_options_reject_mouse_button_bits_in_flags_before_ffi() {
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();
-    let mouse_button_in_flags =
-        imgui::PopupFlags::from_bits_retain(imgui::sys::ImGuiPopupFlags_MouseButtonLeft);
-    let legacy_popup_flags =
-        imgui::PopupFlags::from_bits_retain(imgui::sys::ImGuiPopupFlags_InvalidMask_);
+    let query_flag_in_open =
+        imgui::PopupOpenFlags::from_bits_retain(imgui::sys::ImGuiPopupFlags_AnyPopupId);
+    let context_flag_in_open =
+        imgui::PopupOpenFlags::from_bits_retain(imgui::sys::ImGuiPopupFlags_NoOpenOverItems);
+    let mouse_button_in_context =
+        imgui::PopupContextFlags::from_bits_retain(imgui::sys::ImGuiPopupFlags_MouseButtonLeft);
+    let legacy_popup_context =
+        imgui::PopupContextFlags::from_bits_retain(imgui::sys::ImGuiPopupFlags_InvalidMask_);
+    let open_flag_in_query =
+        imgui::PopupQueryFlags::from_bits_retain(imgui::sys::ImGuiPopupFlags_NoReopen);
 
     let _ = ui.window("Popup flags").build(|| {
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.open_popup_with_flags("legacy popup", legacy_popup_flags);
+                ui.open_popup_with_flags("query flag in open popup", query_flag_in_open);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.open_popup_on_item_click_with_flags(None, mouse_button_in_flags);
+                ui.open_popup_with_flags("context flag in open popup", context_flag_in_open);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = ui.begin_popup_context_item_with_flags(None, mouse_button_in_flags);
+                ui.open_popup_on_item_click_with_flags(None, mouse_button_in_context);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.begin_popup_context_item_with_flags(None, legacy_popup_context);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.is_popup_open_with_flags("popup", open_flag_in_query);
             }))
             .is_err()
         );
@@ -168,7 +186,9 @@ fn popup_options_reject_mouse_button_bits_in_flags_before_ffi() {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _ = ui.is_popup_open_with_flags(
                     "popup",
-                    imgui::PopupFlags::from_bits_retain(imgui::sys::ImGuiPopupFlags_AnyPopupLevel),
+                    imgui::PopupQueryFlags::from_bits_retain(
+                        imgui::sys::ImGuiPopupFlags_AnyPopupLevel,
+                    ),
                 );
             }))
             .is_err()
@@ -178,6 +198,6 @@ fn popup_options_reject_mouse_button_bits_in_flags_before_ffi() {
             Some("typed popup"),
             imgui::PopupContextOptions::new().mouse_button(imgui::PopupContextMouseButton::Left),
         );
-        let _ = ui.is_popup_open_with_flags("popup", imgui::PopupFlags::ANY_POPUP);
+        let _ = ui.is_popup_open_with_flags("popup", imgui::PopupQueryFlags::ANY_POPUP);
     });
 }
