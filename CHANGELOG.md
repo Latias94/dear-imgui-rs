@@ -70,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     access such as `state.ui.file_list_view`, `state.ui.toolbar`, `state.ui.thumbnails_enabled`,
     and `state.ui.file_list_columns` to `state.ui.config.*`. The new-folder operation buffers and
     type-to-select runtime buffer are internal UI implementation state.
+  - `dear-file-browser` transient path/footer/breadcrumb/search/error state and modal operation
+    buffers for rename, delete, paste, and places are now internal `FileDialogUiRuntime` /
+    `FileDialogOperationState` fields instead of top-level `FileDialogUiState` fields.
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions
     on drop are now UI/current-context scoped and intentionally `!Send + !Sync`.
   - `dear-implot` colormap helpers now use typed `ColormapIndex`, `ColormapColorIndex`, and

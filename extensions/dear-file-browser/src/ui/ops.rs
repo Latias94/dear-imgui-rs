@@ -36,11 +36,11 @@ pub(super) fn open_rename_modal_from_selection(state: &mut FileDialogState) {
     else {
         return;
     };
-    state.ui.rename_target_id = Some(rename_target_id);
-    state.ui.rename_to = rename_to;
-    state.ui.rename_error = None;
-    state.ui.rename_open_next = true;
-    state.ui.rename_focus_next = true;
+    state.ui.operations.rename.target_id = Some(rename_target_id);
+    state.ui.operations.rename.to = rename_to;
+    state.ui.operations.rename.error = None;
+    state.ui.operations.rename.open_next = true;
+    state.ui.operations.rename.focus_next = true;
 }
 
 pub(super) fn open_delete_modal_from_selection(state: &mut FileDialogState) {
@@ -48,9 +48,9 @@ pub(super) fn open_delete_modal_from_selection(state: &mut FileDialogState) {
     if delete_target_ids.is_empty() {
         return;
     }
-    state.ui.delete_target_ids = delete_target_ids;
-    state.ui.delete_error = None;
-    state.ui.delete_open_next = true;
+    state.ui.operations.delete.target_ids = delete_target_ids;
+    state.ui.operations.delete.error = None;
+    state.ui.operations.delete.open_next = true;
 }
 pub(super) fn clipboard_set_from_selection(state: &mut FileDialogState, op: ClipboardOp) {
     if !state.core.has_selection() {
@@ -61,18 +61,18 @@ pub(super) fn clipboard_set_from_selection(state: &mut FileDialogState, op: Clip
     if sources.is_empty() {
         return;
     }
-    state.ui.clipboard = Some(FileClipboard { op, sources });
+    state.ui.operations.paste.clipboard = Some(FileClipboard { op, sources });
 }
 
 pub(super) fn start_paste_into_cwd(state: &mut FileDialogState) {
-    let Some(clipboard) = state.ui.clipboard.clone() else {
+    let Some(clipboard) = state.ui.operations.paste.clipboard.clone() else {
         return;
     };
     if clipboard.sources.is_empty() {
         return;
     }
 
-    state.ui.paste_job = Some(PendingPasteJob {
+    state.ui.operations.paste.job = Some(PendingPasteJob {
         clipboard,
         dest_dir: state.core.cwd.clone(),
         next_index: 0,
@@ -84,7 +84,7 @@ pub(super) fn start_paste_into_cwd(state: &mut FileDialogState) {
 }
 
 fn try_complete_paste_job(state: &mut FileDialogState) {
-    let Some(job) = state.ui.paste_job.take() else {
+    let Some(job) = state.ui.operations.paste.job.take() else {
         return;
     };
     if job.created.is_empty() {
@@ -100,15 +100,15 @@ fn try_complete_paste_job(state: &mut FileDialogState) {
         .collect::<Vec<_>>();
     let reveal_id = selected_ids.first().copied();
     state.core.replace_selection_by_ids(selected_ids);
-    state.ui.reveal_id_next = reveal_id;
+    state.ui.operations.reveal_id_next = reveal_id;
 
     if matches!(job.clipboard.op, ClipboardOp::Cut) {
-        state.ui.clipboard = None;
+        state.ui.operations.paste.clipboard = None;
     }
 }
 
 fn step_paste_job(state: &mut FileDialogState, fs: &dyn FileSystem) -> Result<bool, String> {
-    let Some(job) = state.ui.paste_job.as_mut() else {
+    let Some(job) = state.ui.operations.paste.job.as_mut() else {
         return Ok(false);
     };
 
@@ -160,7 +160,7 @@ fn step_paste_job(state: &mut FileDialogState, fs: &dyn FileSystem) -> Result<bo
                     dest,
                     apply_to_all: false,
                 });
-                state.ui.paste_conflict_open_next = true;
+                state.ui.operations.paste.conflict_open_next = true;
                 return Ok(false);
             }
         }

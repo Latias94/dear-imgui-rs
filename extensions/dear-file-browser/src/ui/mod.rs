@@ -318,7 +318,9 @@ fn draw_contents_with_fs_and_hooks(
     let avail = ui.content_region_avail();
     let footer_h = state
         .ui
-        .footer_height_last
+        .runtime
+        .footer
+        .height_last
         .max(footer::estimate_footer_height(ui, state));
     let content_h = (avail[1] - footer_h).max(0.0);
     match state.ui.config.layout {
@@ -1437,10 +1439,10 @@ mod tests {
 
         open_rename_modal_from_selection(&mut state);
 
-        assert_eq!(state.ui.rename_target_id, Some(id));
-        assert_eq!(state.ui.rename_to, "a.txt");
-        assert!(state.ui.rename_open_next);
-        assert!(state.ui.rename_focus_next);
+        assert_eq!(state.ui.operations.rename.target_id, Some(id));
+        assert_eq!(state.ui.operations.rename.to, "a.txt");
+        assert!(state.ui.operations.rename.open_next);
+        assert!(state.ui.operations.rename.focus_next);
     }
 
     #[test]
@@ -1451,9 +1453,9 @@ mod tests {
 
         open_rename_modal_from_selection(&mut state);
 
-        assert_eq!(state.ui.rename_target_id, None);
-        assert!(state.ui.rename_to.is_empty());
-        assert!(!state.ui.rename_open_next);
+        assert_eq!(state.ui.operations.rename.target_id, None);
+        assert!(state.ui.operations.rename.to.is_empty());
+        assert!(!state.ui.operations.rename.open_next);
     }
 
     #[test]
@@ -1484,7 +1486,24 @@ mod tests {
 
         open_delete_modal_from_selection(&mut state);
 
-        assert_eq!(state.ui.delete_target_ids, vec![b, a]);
-        assert!(state.ui.delete_open_next);
+        assert_eq!(state.ui.operations.delete.target_ids, vec![b, a]);
+        assert!(state.ui.operations.delete.open_next);
+    }
+
+    #[test]
+    fn operation_state_defaults_keep_modal_jobs_internal() {
+        let state = FileDialogState::new(DialogMode::OpenFiles);
+
+        assert!(state.ui.operations.rename.target_id.is_none());
+        assert!(!state.ui.operations.rename.open_next);
+        assert!(state.ui.operations.rename.to.is_empty());
+        assert!(state.ui.operations.delete.target_ids.is_empty());
+        assert!(!state.ui.operations.delete.open_next);
+        assert!(state.ui.operations.paste.clipboard.is_none());
+        assert!(state.ui.operations.paste.job.is_none());
+        assert!(!state.ui.operations.paste.conflict_open_next);
+        assert!(state.ui.operations.places.io.buffer.is_empty());
+        assert!(state.ui.operations.places.edit.group.is_empty());
+        assert!(state.ui.operations.places.inline_edit.target.is_none());
     }
 }

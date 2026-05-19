@@ -51,12 +51,12 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
             ui.close_current_popup();
         }
         if ui.menu_item("+ Group...") {
-            state.ui.places_edit_mode = crate::dialog_state::PlacesEditMode::AddGroup;
-            state.ui.places_edit_group.clear();
-            state.ui.places_edit_group_from = None;
-            state.ui.places_edit_error = None;
-            state.ui.places_edit_open_next = true;
-            state.ui.places_edit_focus_next = true;
+            state.ui.operations.places.edit.mode = crate::dialog_state::PlacesEditMode::AddGroup;
+            state.ui.operations.places.edit.group.clear();
+            state.ui.operations.places.edit.group_from = None;
+            state.ui.operations.places.edit.error = None;
+            state.ui.operations.places.edit.open_next = true;
+            state.ui.operations.places.edit.focus_next = true;
             ui.close_current_popup();
         }
         ui.separator();
@@ -66,23 +66,23 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
         }
         ui.separator();
         if ui.menu_item("Export...") {
-            state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Export;
-            state.ui.places_io_buffer =
+            state.ui.operations.places.io.mode = crate::dialog_state::PlacesIoMode::Export;
+            state.ui.operations.places.io.buffer =
                 state
                     .core
                     .places
                     .serialize_compact(crate::PlacesSerializeOptions {
-                        include_code_places: state.ui.places_io_include_code,
+                        include_code_places: state.ui.operations.places.io.include_code,
                     });
-            state.ui.places_io_error = None;
-            state.ui.places_io_open_next = true;
+            state.ui.operations.places.io.error = None;
+            state.ui.operations.places.io.open_next = true;
             ui.close_current_popup();
         }
         if ui.menu_item("Import...") {
-            state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Import;
-            state.ui.places_io_buffer.clear();
-            state.ui.places_io_error = None;
-            state.ui.places_io_open_next = true;
+            state.ui.operations.places.io.mode = crate::dialog_state::PlacesIoMode::Import;
+            state.ui.operations.places.io.buffer.clear();
+            state.ui.operations.places.io.error = None;
+            state.ui.operations.places.io.open_next = true;
             ui.close_current_popup();
         }
     }
@@ -100,22 +100,35 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
         let is_system = g.label == Places::SYSTEM_GROUP;
         let is_reserved = is_system || g.label == Places::BOOKMARKS_GROUP;
 
-        let selected_path = state.ui.places_selected.as_ref().and_then(|(group, path)| {
-            if group == &g.label {
-                Some(path.clone())
-            } else {
-                None
-            }
-        });
+        let selected_path =
+            state
+                .ui
+                .operations
+                .places
+                .selected
+                .as_ref()
+                .and_then(|(group, path)| {
+                    if group == &g.label {
+                        Some(path.clone())
+                    } else {
+                        None
+                    }
+                });
 
         let is_editing_this_group = state
             .ui
-            .places_inline_edit
+            .operations
+            .places
+            .inline_edit
+            .target
             .as_ref()
             .is_some_and(|(group, _)| group == &g.label);
         let editing_path = state
             .ui
-            .places_inline_edit
+            .operations
+            .places
+            .inline_edit
+            .target
             .as_ref()
             .and_then(|(group, path)| {
                 if group == &g.label {
@@ -229,15 +242,18 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
                                 remove_place = Some((g.label.clone(), sel.clone()));
                                 if state
                                     .ui
-                                    .places_inline_edit
+                                    .operations
+                                    .places
+                                    .inline_edit
+                                    .target
                                     .as_ref()
                                     .is_some_and(|(group, path)| group == &g.label && *path == sel)
                                 {
-                                    state.ui.places_inline_edit = None;
-                                    state.ui.places_inline_edit_buffer.clear();
-                                    state.ui.places_inline_edit_focus_next = false;
+                                    state.ui.operations.places.inline_edit.target = None;
+                                    state.ui.operations.places.inline_edit.buffer.clear();
+                                    state.ui.operations.places.inline_edit.focus_next = false;
                                 }
-                                state.ui.places_selected = None;
+                                state.ui.operations.places.selected = None;
                             }
                         }
                     }
@@ -247,8 +263,15 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
         if is_editing_this_group {
             let esc = ui.is_key_pressed(Key::Escape);
             ui.new_line();
-            let can_commit =
-                editing_path.is_some() && !state.ui.places_inline_edit_buffer.trim().is_empty();
+            let can_commit = editing_path.is_some()
+                && !state
+                    .ui
+                    .operations
+                    .places
+                    .inline_edit
+                    .buffer
+                    .trim()
+                    .is_empty();
             let btn = ui.frame_height();
             let spacing_x = ui.clone_style().item_spacing()[0];
             let avail_w = ui.content_region_avail_width().max(0.0);
@@ -265,15 +288,15 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
             }
 
             ui.same_line();
-            if state.ui.places_inline_edit_focus_next {
+            if state.ui.operations.places.inline_edit.focus_next {
                 ui.set_keyboard_focus_here();
-                state.ui.places_inline_edit_focus_next = false;
+                state.ui.operations.places.inline_edit.focus_next = false;
             }
             ui.set_next_item_width(input_w);
             let submitted = ui
                 .input_text(
                     "##places_inline_edit",
-                    &mut state.ui.places_inline_edit_buffer,
+                    &mut state.ui.operations.places.inline_edit.buffer,
                 )
                 .auto_select_all(true)
                 .enter_returns_true(true)
@@ -286,21 +309,21 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
                 || esc;
 
             if cancel_clicked {
-                state.ui.places_inline_edit = None;
-                state.ui.places_inline_edit_buffer.clear();
-                state.ui.places_inline_edit_focus_next = false;
+                state.ui.operations.places.inline_edit.target = None;
+                state.ui.operations.places.inline_edit.buffer.clear();
+                state.ui.operations.places.inline_edit.focus_next = false;
             } else if (ok_clicked || submitted) && can_commit {
                 if let Some(from_path) = editing_path.as_ref() {
                     let _ = state.core.places.edit_place_by_path(
                         &g.label,
                         from_path,
-                        state.ui.places_inline_edit_buffer.clone(),
-                        from_path.clone(),
+                        state.ui.operations.places.inline_edit.buffer.clone(),
+                        from_path.to_path_buf(),
                     );
                 }
-                state.ui.places_inline_edit = None;
-                state.ui.places_inline_edit_buffer.clear();
-                state.ui.places_inline_edit_focus_next = false;
+                state.ui.operations.places.inline_edit.target = None;
+                state.ui.operations.places.inline_edit.buffer.clear();
+                state.ui.operations.places.inline_edit.focus_next = false;
             }
         }
 
@@ -350,16 +373,21 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
             let selected = state.core.cwd == p.path
                 || state
                     .ui
-                    .places_selected
+                    .operations
+                    .places
+                    .selected
                     .as_ref()
                     .is_some_and(|(group, path)| group == &g.label && path == &p.path);
 
             let display_label = state
                 .ui
-                .places_inline_edit
+                .operations
+                .places
+                .inline_edit
+                .target
                 .as_ref()
                 .is_some_and(|(group, path)| group == &g.label && path == &p.path)
-                .then(|| state.ui.places_inline_edit_buffer.as_str())
+                .then(|| state.ui.operations.places.inline_edit.buffer.as_str())
                 .unwrap_or(p.label.as_str());
 
             // Render the row label as a full-width selectable, then overlay a compact edit
@@ -380,7 +408,10 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
             if editable {
                 let is_editing = state
                     .ui
-                    .places_inline_edit
+                    .operations
+                    .places
+                    .inline_edit
+                    .target
                     .as_ref()
                     .is_some_and(|(group, path)| group == &g.label && path == &p.path);
                 let show_edit = row_hovered || selected || is_editing;
@@ -397,26 +428,31 @@ pub(super) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> Option<P
                         .size([w, frame_h])
                         .build()
                     {
-                        state.ui.places_selected = Some((g.label.clone(), p.path.clone()));
-                        state.ui.places_inline_edit = Some((g.label.clone(), p.path.clone()));
-                        state.ui.places_inline_edit_buffer = p.label.clone();
-                        state.ui.places_inline_edit_focus_next = true;
+                        state.ui.operations.places.selected =
+                            Some((g.label.clone(), p.path.clone()));
+                        state.ui.operations.places.inline_edit.target =
+                            Some((g.label.clone(), p.path.clone()));
+                        state.ui.operations.places.inline_edit.buffer = p.label.clone();
+                        state.ui.operations.places.inline_edit.focus_next = true;
                     }
                 }
             }
             ui.set_cursor_pos(after);
 
             if clicked {
-                state.ui.places_selected = Some((g.label.clone(), p.path.clone()));
+                state.ui.operations.places.selected = Some((g.label.clone(), p.path.clone()));
                 if state
                     .ui
-                    .places_inline_edit
+                    .operations
+                    .places
+                    .inline_edit
+                    .target
                     .as_ref()
                     .is_some_and(|(group, path)| group == &g.label && path != &p.path)
                 {
-                    state.ui.places_inline_edit = None;
-                    state.ui.places_inline_edit_buffer.clear();
-                    state.ui.places_inline_edit_focus_next = false;
+                    state.ui.operations.places.inline_edit.target = None;
+                    state.ui.operations.places.inline_edit.buffer.clear();
+                    state.ui.operations.places.inline_edit.focus_next = false;
                 }
             }
             if row_hovered && ui.is_mouse_double_clicked(MouseButton::Left) {
@@ -551,64 +587,65 @@ impl PlacesEditRequest {
     }
 
     fn apply_to_state(self, ui: &mut crate::FileDialogUiState) {
-        ui.places_edit_mode = self.mode;
-        ui.places_edit_group = self.group;
-        ui.places_edit_group_from = self.group_from;
-        ui.places_edit_place_from_path = self.place_from_path;
-        ui.places_edit_place_label = self.place_label;
-        ui.places_edit_place_path = self.place_path;
-        ui.places_edit_error = None;
-        ui.places_edit_open_next = true;
-        ui.places_edit_focus_next = self.focus;
+        ui.operations.places.edit.mode = self.mode;
+        ui.operations.places.edit.group = self.group;
+        ui.operations.places.edit.group_from = self.group_from;
+        ui.operations.places.edit.place_from_path = self.place_from_path;
+        ui.operations.places.edit.place_label = self.place_label;
+        ui.operations.places.edit.place_path = self.place_path;
+        ui.operations.places.edit.error = None;
+        ui.operations.places.edit.open_next = true;
+        ui.operations.places.edit.focus_next = self.focus;
     }
 }
 
 pub(super) fn draw_places_io_modal(ui: &Ui, state: &mut FileDialogState) {
-    if state.ui.places_io_open_next {
+    if state.ui.operations.places.io.open_next {
         ui.open_popup("Places");
-        state.ui.places_io_open_next = false;
+        state.ui.operations.places.io.open_next = false;
     }
 
     if let Some(_popup) = ui.begin_modal_popup("Places") {
-        let is_export = state.ui.places_io_mode == crate::dialog_state::PlacesIoMode::Export;
+        let is_export =
+            state.ui.operations.places.io.mode == crate::dialog_state::PlacesIoMode::Export;
 
         ui.text("Places persistence (compact format)");
         ui.separator();
 
         if ui.button("Export") {
-            state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Export;
-            state.ui.places_io_buffer =
+            state.ui.operations.places.io.mode = crate::dialog_state::PlacesIoMode::Export;
+            state.ui.operations.places.io.buffer =
                 state
                     .core
                     .places
                     .serialize_compact(crate::PlacesSerializeOptions {
-                        include_code_places: state.ui.places_io_include_code,
+                        include_code_places: state.ui.operations.places.io.include_code,
                     });
-            state.ui.places_io_error = None;
+            state.ui.operations.places.io.error = None;
         }
         ui.same_line();
         if ui.button("Import") {
-            state.ui.places_io_mode = crate::dialog_state::PlacesIoMode::Import;
-            state.ui.places_io_error = None;
+            state.ui.operations.places.io.mode = crate::dialog_state::PlacesIoMode::Import;
+            state.ui.operations.places.io.error = None;
         }
         ui.same_line();
         if ui.button("Close") {
             ui.close_current_popup();
-            state.ui.places_io_error = None;
+            state.ui.operations.places.io.error = None;
         }
 
         ui.separator();
 
         if is_export {
-            let mut include_code = state.ui.places_io_include_code;
+            let mut include_code = state.ui.operations.places.io.include_code;
             if ui.checkbox("Include code places", &mut include_code) {
-                state.ui.places_io_include_code = include_code;
-                state.ui.places_io_buffer =
+                state.ui.operations.places.io.include_code = include_code;
+                state.ui.operations.places.io.buffer =
                     state
                         .core
                         .places
                         .serialize_compact(crate::PlacesSerializeOptions {
-                            include_code_places: state.ui.places_io_include_code,
+                            include_code_places: state.ui.operations.places.io.include_code,
                         });
             }
         }
@@ -616,27 +653,35 @@ pub(super) fn draw_places_io_modal(ui: &Ui, state: &mut FileDialogState) {
         let avail = ui.content_region_avail();
         let size = [avail[0].max(200.0), (avail[1] - 95.0).max(120.0)];
         if is_export {
-            ui.input_text_multiline("##places_export", &mut state.ui.places_io_buffer, size)
-                .read_only(true)
-                .build();
+            ui.input_text_multiline(
+                "##places_export",
+                &mut state.ui.operations.places.io.buffer,
+                size,
+            )
+            .read_only(true)
+            .build();
         } else {
-            ui.input_text_multiline("##places_import", &mut state.ui.places_io_buffer, size)
-                .build();
+            ui.input_text_multiline(
+                "##places_import",
+                &mut state.ui.operations.places.io.buffer,
+                size,
+            )
+            .build();
 
             if ui.button("Replace") {
-                match Places::deserialize_compact(&state.ui.places_io_buffer) {
+                match Places::deserialize_compact(&state.ui.operations.places.io.buffer) {
                     Ok(p) => {
                         state.core.places = p;
-                        state.ui.places_io_error = None;
+                        state.ui.operations.places.io.error = None;
                     }
                     Err(e) => {
-                        state.ui.places_io_error = Some(e.to_string());
+                        state.ui.operations.places.io.error = Some(e.to_string());
                     }
                 }
             }
             ui.same_line();
             if ui.button("Merge") {
-                match Places::deserialize_compact(&state.ui.places_io_buffer) {
+                match Places::deserialize_compact(&state.ui.operations.places.io.buffer) {
                     Ok(p) => {
                         state.core.places.merge_from(
                             p,
@@ -644,16 +689,16 @@ pub(super) fn draw_places_io_modal(ui: &Ui, state: &mut FileDialogState) {
                                 overwrite_group_metadata: true,
                             },
                         );
-                        state.ui.places_io_error = None;
+                        state.ui.operations.places.io.error = None;
                     }
                     Err(e) => {
-                        state.ui.places_io_error = Some(e.to_string());
+                        state.ui.operations.places.io.error = Some(e.to_string());
                     }
                 }
             }
         }
 
-        if let Some(err) = &state.ui.places_io_error {
+        if let Some(err) = &state.ui.operations.places.io.error {
             ui.separator();
             ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
         }
@@ -662,9 +707,9 @@ pub(super) fn draw_places_io_modal(ui: &Ui, state: &mut FileDialogState) {
 
 pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
     const POPUP_ID: &str = "Edit Places";
-    if state.ui.places_edit_open_next {
+    if state.ui.operations.places.edit.open_next {
         ui.open_popup(POPUP_ID);
-        state.ui.places_edit_open_next = false;
+        state.ui.operations.places.edit.open_next = false;
     }
 
     let Some(_popup) = ui.begin_modal_popup(POPUP_ID) else {
@@ -672,35 +717,35 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
     };
 
     use crate::dialog_state::PlacesEditMode;
-    let mode = state.ui.places_edit_mode;
+    let mode = state.ui.operations.places.edit.mode;
     match mode {
         PlacesEditMode::AddGroup => {
             ui.text("Create a new places group:");
             ui.separator();
-            if state.ui.places_edit_focus_next {
+            if state.ui.operations.places.edit.focus_next {
                 ui.set_keyboard_focus_here();
-                state.ui.places_edit_focus_next = false;
+                state.ui.operations.places.edit.focus_next = false;
             }
-            ui.input_text("Group", &mut state.ui.places_edit_group)
+            ui.input_text("Group", &mut state.ui.operations.places.edit.group)
                 .build();
 
             let create = ui.button("Create");
             ui.same_line();
             let cancel = ui.button("Cancel");
             if cancel {
-                state.ui.places_edit_error = None;
+                state.ui.operations.places.edit.error = None;
                 ui.close_current_popup();
                 return;
             }
             if create {
-                state.ui.places_edit_error = None;
-                let label = state.ui.places_edit_group.trim();
+                state.ui.operations.places.edit.error = None;
+                let label = state.ui.operations.places.edit.group.trim();
                 if label.is_empty() {
-                    state.ui.places_edit_error = Some("Group name is empty".into());
+                    state.ui.operations.places.edit.error = Some("Group name is empty".into());
                 } else if label == Places::SYSTEM_GROUP || label == Places::BOOKMARKS_GROUP {
-                    state.ui.places_edit_error = Some("Group name is reserved".into());
+                    state.ui.operations.places.edit.error = Some("Group name is reserved".into());
                 } else if state.core.places.groups.iter().any(|g| g.label == label) {
-                    state.ui.places_edit_error = Some("Group already exists".into());
+                    state.ui.operations.places.edit.error = Some("Group already exists".into());
                 } else {
                     state.core.places.add_group(label.to_string());
                     ui.close_current_popup();
@@ -708,7 +753,7 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
             }
         }
         PlacesEditMode::RenameGroup => {
-            let Some(from) = state.ui.places_edit_group_from.clone() else {
+            let Some(from) = state.ui.operations.places.edit.group_from.clone() else {
                 ui.text_disabled("Missing source group.");
                 if ui.button("Close") {
                     ui.close_current_popup();
@@ -718,40 +763,45 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
             ui.text("Rename group:");
             ui.text_disabled(&from);
             ui.separator();
-            if state.ui.places_edit_focus_next {
+            if state.ui.operations.places.edit.focus_next {
                 ui.set_keyboard_focus_here();
-                state.ui.places_edit_focus_next = false;
+                state.ui.operations.places.edit.focus_next = false;
             }
-            ui.input_text("To", &mut state.ui.places_edit_group).build();
+            ui.input_text("To", &mut state.ui.operations.places.edit.group)
+                .build();
 
             let rename = ui.button("Rename");
             ui.same_line();
             let cancel = ui.button("Cancel");
             if cancel {
-                state.ui.places_edit_error = None;
+                state.ui.operations.places.edit.error = None;
                 ui.close_current_popup();
                 return;
             }
             if rename {
-                state.ui.places_edit_error = None;
-                let to = state.ui.places_edit_group.trim();
+                state.ui.operations.places.edit.error = None;
+                let to = state.ui.operations.places.edit.group.trim();
                 if to.is_empty() {
-                    state.ui.places_edit_error = Some("Target group name is empty".into());
+                    state.ui.operations.places.edit.error =
+                        Some("Target group name is empty".into());
                 } else if to == Places::SYSTEM_GROUP || to == Places::BOOKMARKS_GROUP {
-                    state.ui.places_edit_error = Some("Target group name is reserved".into());
+                    state.ui.operations.places.edit.error =
+                        Some("Target group name is reserved".into());
                 } else if to == from.as_str() {
-                    state.ui.places_edit_error = Some("Target group name is unchanged".into());
+                    state.ui.operations.places.edit.error =
+                        Some("Target group name is unchanged".into());
                 } else if state.core.places.groups.iter().any(|g| g.label == to) {
-                    state.ui.places_edit_error = Some("Target group already exists".into());
+                    state.ui.operations.places.edit.error =
+                        Some("Target group already exists".into());
                 } else if !state.core.places.rename_group(&from, to.to_string()) {
-                    state.ui.places_edit_error = Some("Group not found".into());
+                    state.ui.operations.places.edit.error = Some("Group not found".into());
                 } else {
                     ui.close_current_popup();
                 }
             }
         }
         PlacesEditMode::RemoveGroupConfirm => {
-            let Some(group) = state.ui.places_edit_group_from.clone() else {
+            let Some(group) = state.ui.operations.places.edit.group_from.clone() else {
                 ui.text_disabled("Missing group.");
                 if ui.button("Close") {
                     ui.close_current_popup();
@@ -777,16 +827,17 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
             ui.same_line();
             let cancel = ui.button("Cancel");
             if cancel {
-                state.ui.places_edit_error = None;
+                state.ui.operations.places.edit.error = None;
                 ui.close_current_popup();
                 return;
             }
             if remove {
-                state.ui.places_edit_error = None;
+                state.ui.operations.places.edit.error = None;
                 if group == Places::SYSTEM_GROUP || group == Places::BOOKMARKS_GROUP {
-                    state.ui.places_edit_error = Some("Cannot remove reserved group".into());
+                    state.ui.operations.places.edit.error =
+                        Some("Cannot remove reserved group".into());
                 } else if !state.core.places.remove_group(&group) {
-                    state.ui.places_edit_error = Some("Group not found".into());
+                    state.ui.operations.places.edit.error = Some("Group not found".into());
                 } else {
                     ui.close_current_popup();
                 }
@@ -794,18 +845,18 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
         }
         PlacesEditMode::AddPlace | PlacesEditMode::EditPlace => {
             let is_add = mode == PlacesEditMode::AddPlace;
-            let group = state.ui.places_edit_group.clone();
+            let group = state.ui.operations.places.edit.group.clone();
             ui.text(if is_add { "Add place:" } else { "Edit place:" });
             ui.text_disabled(&group);
             ui.separator();
 
-            if state.ui.places_edit_focus_next {
+            if state.ui.operations.places.edit.focus_next {
                 ui.set_keyboard_focus_here();
-                state.ui.places_edit_focus_next = false;
+                state.ui.operations.places.edit.focus_next = false;
             }
-            ui.input_text("Label", &mut state.ui.places_edit_place_label)
+            ui.input_text("Label", &mut state.ui.operations.places.edit.place_label)
                 .build();
-            ui.input_text("Path", &mut state.ui.places_edit_place_path)
+            ui.input_text("Path", &mut state.ui.operations.places.edit.place_path)
                 .build();
 
             let ok_label = if is_add { "Add" } else { "Save" };
@@ -813,25 +864,32 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
             ui.same_line();
             let cancel = ui.button("Cancel");
             if cancel {
-                state.ui.places_edit_error = None;
+                state.ui.operations.places.edit.error = None;
                 ui.close_current_popup();
                 return;
             }
 
             if ok {
-                state.ui.places_edit_error = None;
-                let path_s = state.ui.places_edit_place_path.trim();
+                state.ui.operations.places.edit.error = None;
+                let path_s = state.ui.operations.places.edit.place_path.trim();
                 if path_s.is_empty() {
-                    state.ui.places_edit_error = Some("Path is empty".into());
+                    state.ui.operations.places.edit.error = Some("Path is empty".into());
                 } else {
                     let raw = PathBuf::from(path_s);
                     let p = fs.canonicalize(&raw).unwrap_or(raw);
                     let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
                     if !is_dir {
-                        state.ui.places_edit_error =
+                        state.ui.operations.places.edit.error =
                             Some("Path does not exist or is not a directory".into());
                     } else {
-                        let mut label = state.ui.places_edit_place_label.trim().to_string();
+                        let mut label = state
+                            .ui
+                            .operations
+                            .places
+                            .edit
+                            .place_label
+                            .trim()
+                            .to_string();
                         if label.is_empty() {
                             label = p
                                 .file_name()
@@ -850,7 +908,7 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
                             .map(|g| g.places.clone())
                             .unwrap_or_default();
 
-                        let from_path = state.ui.places_edit_place_from_path.clone();
+                        let from_path = state.ui.operations.places.edit.place_from_path.clone();
                         let is_duplicate = group_places.iter().any(|x| {
                             if let Some(from) = &from_path {
                                 if x.path == *from {
@@ -860,7 +918,7 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
                             x.path == p
                         });
                         if is_duplicate {
-                            state.ui.places_edit_error =
+                            state.ui.operations.places.edit.error =
                                 Some("Place already exists in group".into());
                         } else if is_add {
                             state
@@ -870,7 +928,8 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
                             ui.close_current_popup();
                         } else {
                             let Some(from_path) = from_path else {
-                                state.ui.places_edit_error = Some("Missing source place".into());
+                                state.ui.operations.places.edit.error =
+                                    Some("Missing source place".into());
                                 return;
                             };
                             if !state
@@ -878,7 +937,8 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
                                 .places
                                 .edit_place_by_path(&group, &from_path, label, p)
                             {
-                                state.ui.places_edit_error = Some("Place not found".into());
+                                state.ui.operations.places.edit.error =
+                                    Some("Place not found".into());
                             } else {
                                 ui.close_current_popup();
                             }
@@ -889,7 +949,7 @@ pub(super) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState, fs: &
         }
     }
 
-    if let Some(err) = &state.ui.places_edit_error {
+    if let Some(err) = &state.ui.operations.places.edit.error {
         ui.separator();
         ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
     }

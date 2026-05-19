@@ -51,12 +51,13 @@ pub(super) fn draw_footer(
         state.core.mode,
         DialogMode::OpenFile | DialogMode::OpenFiles | DialogMode::PickFolder
     ) {
-        if state.ui.footer_file_name_buffer.trim().is_empty()
-            || state.ui.footer_file_name_buffer == state.ui.footer_file_name_last_display
+        if state.ui.runtime.footer.file_name_buffer.trim().is_empty()
+            || state.ui.runtime.footer.file_name_buffer
+                == state.ui.runtime.footer.file_name_last_display
         {
-            state.ui.footer_file_name_buffer = footer_display.clone();
+            state.ui.runtime.footer.file_name_buffer = footer_display.clone();
         }
-        state.ui.footer_file_name_last_display = footer_display.clone();
+        state.ui.runtime.footer.file_name_last_display = footer_display.clone();
     }
 
     let reserved_w = buttons_group_w
@@ -74,11 +75,17 @@ pub(super) fn draw_footer(
             .enter_returns_true(true)
             .build(),
         DialogMode::OpenFile | DialogMode::OpenFiles => ui
-            .input_text("##footer_file_name", &mut state.ui.footer_file_name_buffer)
+            .input_text(
+                "##footer_file_name",
+                &mut state.ui.runtime.footer.file_name_buffer,
+            )
             .enter_returns_true(true)
             .build(),
         DialogMode::PickFolder => ui
-            .input_text("##footer_file_name", &mut state.ui.footer_file_name_buffer)
+            .input_text(
+                "##footer_file_name",
+                &mut state.ui.runtime.footer.file_name_buffer,
+            )
             .read_only(true)
             .enter_returns_true(true)
             .build(),
@@ -88,7 +95,7 @@ pub(super) fn draw_footer(
         *request_confirm = match state.core.mode {
             DialogMode::SaveFile => !state.core.save_name.trim().is_empty(),
             DialogMode::OpenFile | DialogMode::OpenFiles => {
-                !state.ui.footer_file_name_buffer.trim().is_empty()
+                !state.ui.runtime.footer.file_name_buffer.trim().is_empty()
             }
             DialogMode::PickFolder => false,
         };
@@ -142,14 +149,14 @@ pub(super) fn draw_footer(
         let alt = ui.is_key_down(Key::LeftAlt) || ui.is_key_down(Key::RightAlt);
         if ctrl && ui.is_key_pressed(Key::L) {
             if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-                state.ui.path_input_mode = true;
+                state.ui.runtime.path.input_mode = true;
             }
-            state.ui.path_edit = true;
-            state.ui.path_edit_buffer = state.core.cwd.display().to_string();
-            state.ui.focus_path_edit_next = true;
+            state.ui.runtime.path.edit = true;
+            state.ui.runtime.path.buffer = state.core.cwd.display().to_string();
+            state.ui.runtime.path.focus_next = true;
         }
         if ctrl && ui.is_key_pressed(Key::F) {
-            state.ui.focus_search_next = true;
+            state.ui.runtime.focus_search_next = true;
         }
         if !ui.io().want_capture_keyboard() && ui.is_key_pressed(Key::Backspace) {
             let _ = state.core.handle_event(CoreEvent::NavigateUp);
@@ -163,7 +170,10 @@ pub(super) fn draw_footer(
         if !ui.io().want_text_input() && ui.is_key_pressed(Key::F5) {
             let _ = state.core.handle_event(CoreEvent::Refresh);
         }
-        if !state.ui.path_edit && !ui.io().want_text_input() && ui.is_key_pressed(Key::Enter) {
+        if !state.ui.runtime.path.edit
+            && !ui.io().want_text_input()
+            && ui.is_key_pressed(Key::Enter)
+        {
             *request_confirm |= matches!(
                 state.core.handle_event(CoreEvent::ActivateFocused),
                 CoreEventOutcome::RequestConfirm
@@ -183,35 +193,35 @@ pub(super) fn draw_footer(
     if cancel {
         state.core.cancel();
     } else if *request_confirm {
-        state.ui.ui_error = None;
+        state.ui.runtime.error = None;
         let typed_footer_name = match state.core.mode {
             DialogMode::OpenFile | DialogMode::OpenFiles => {
-                Some(state.ui.footer_file_name_buffer.as_str())
+                Some(state.ui.runtime.footer.file_name_buffer.as_str())
             }
             _ => None,
         };
         let can_confirm = confirm_gate.can_confirm && core_can_confirm(state);
         if can_confirm {
             if let Err(e) = state.core.confirm(fs, &confirm_gate, typed_footer_name) {
-                state.ui.ui_error = Some(e.to_string());
+                state.ui.runtime.error = Some(e.to_string());
             }
         }
     }
 
     draw_confirm_overwrite_modal(ui, state);
 
-    if let Some(err) = &state.ui.ui_error {
+    if let Some(err) = &state.ui.runtime.error {
         ui.separator();
         ui.text_colored([1.0, 0.3, 0.3, 1.0], format!("Error: {err}"));
     }
 
     // Update measured footer height for the next frame's content sizing.
-    state.ui.footer_height_last = (ui.cursor_pos_y() - footer_start_y).max(0.0);
+    state.ui.runtime.footer.height_last = (ui.cursor_pos_y() - footer_start_y).max(0.0);
 }
 
 pub(super) fn estimate_footer_height(ui: &Ui, _state: &FileDialogState) -> f32 {
     // We keep this derived from current style metrics to avoid hard-coded pixel constants.
-    // The actual value is measured each frame and stored in `state.ui.footer_height_last`.
+    // The actual value is measured each frame and stored in `state.ui.runtime.footer.height_last`.
     let style = ui.clone_style();
     let row_h = ui
         .frame_height_with_spacing()
@@ -402,7 +412,8 @@ fn core_can_confirm(state: &FileDialogState) -> bool {
     match state.core.mode {
         DialogMode::SaveFile => !state.core.save_name.trim().is_empty(),
         DialogMode::OpenFile | DialogMode::OpenFiles => {
-            state.core.has_selection() || !state.ui.footer_file_name_buffer.trim().is_empty()
+            state.core.has_selection()
+                || !state.ui.runtime.footer.file_name_buffer.trim().is_empty()
         }
         DialogMode::PickFolder => true,
     }

@@ -684,10 +684,67 @@ impl FileDialogUiConfig {
 /// from [`FileDialogUiConfig`] so caller-facing configuration has a narrow, durable surface.
 #[derive(Debug, Default)]
 pub(crate) struct FileDialogUiRuntime {
+    /// Address/path editor runtime state.
+    pub(crate) path: PathUiRuntime,
+    /// Last cwd observed while the dialog was opened.
+    pub(crate) opened_cwd: Option<PathBuf>,
+    /// Focus search on next frame (Ctrl+F).
+    pub(crate) focus_search_next: bool,
+    /// Error string to display in UI (non-fatal).
+    pub(crate) error: Option<String>,
     /// Accumulated IGFD-style type-to-select prefix.
     pub(crate) type_select_buffer: String,
     /// Last keypress timestamp used to expire the type-to-select prefix.
     pub(crate) type_select_last_input: Option<std::time::Instant>,
+    /// Breadcrumb runtime state.
+    pub(crate) breadcrumb: BreadcrumbUiRuntime,
+    /// Footer runtime state.
+    pub(crate) footer: FooterUiRuntime,
+}
+
+/// Runtime state for the address/path editor.
+#[derive(Debug, Default)]
+pub(crate) struct PathUiRuntime {
+    /// When `true` (and `path_bar_style` is [`PathBarStyle::Breadcrumbs`]), show the editable path
+    /// text input instead of the breadcrumb composer.
+    ///
+    /// This mimics IGFD's path composer "Edit" toggle behavior.
+    pub(crate) input_mode: bool,
+    /// Whether the path input is currently being edited (best-effort; updated by UI).
+    pub(crate) edit: bool,
+    /// Path input buffer (editable "address bar").
+    pub(crate) buffer: String,
+    pub(crate) last_cwd: String,
+    pub(crate) history_index: Option<usize>,
+    pub(crate) history_saved_buffer: Option<String>,
+    pub(crate) programmatic_edit: bool,
+    /// Focus path edit on next frame.
+    pub(crate) focus_next: bool,
+}
+
+/// Runtime state for the breadcrumb composer and quick-select popup.
+#[derive(Debug, Default)]
+pub(crate) struct BreadcrumbUiRuntime {
+    pub(crate) scroll_to_end_next: bool,
+    /// Current parent dir for the breadcrumb quick-select popup.
+    pub(crate) quick_parent: Option<PathBuf>,
+}
+
+/// Runtime state for the footer area.
+#[derive(Debug, Default)]
+pub(crate) struct FooterUiRuntime {
+    /// Last measured footer height (in window coordinates), used to size the content region
+    /// without hard-coded constants. Updated each frame after drawing the footer.
+    pub(crate) height_last: f32,
+    /// UI buffer for the footer "File/Folder" input.
+    ///
+    /// - SaveFile uses `core.save_name` instead.
+    /// - OpenFile/OpenFiles can be typed to open a file by name/path (IGFD-style).
+    /// - PickFolder currently uses this for display only.
+    pub(crate) file_name_buffer: String,
+    /// The last auto-generated display string for the footer input, used to keep the field
+    /// synced to selection unless the user edits it.
+    pub(crate) file_name_last_display: String,
 }
 
 /// Modal and operation state owned by the Dear ImGui adapter.
@@ -698,6 +755,16 @@ pub(crate) struct FileDialogUiRuntime {
 pub(crate) struct FileDialogOperationState {
     /// State for the "New Folder" inline editor/modal.
     pub(crate) new_folder: NewFolderOperationState,
+    /// State for the rename modal.
+    pub(crate) rename: RenameOperationState,
+    /// State for the delete confirmation modal.
+    pub(crate) delete: DeleteOperationState,
+    /// State for copy/cut/paste operations.
+    pub(crate) paste: PasteOperationState,
+    /// State for places import/export/edit UI.
+    pub(crate) places: PlacesOperationState,
+    /// Reveal (scroll to) a specific entry id on the next draw, then clear.
+    pub(crate) reveal_id_next: Option<EntryId>,
 }
 
 /// Runtime state for the "New Folder" operation.
@@ -715,6 +782,95 @@ pub(crate) struct NewFolderOperationState {
     pub(crate) error: Option<String>,
 }
 
+/// Runtime state for the rename operation.
+#[derive(Debug, Default)]
+pub(crate) struct RenameOperationState {
+    /// Open the modal on next frame.
+    pub(crate) open_next: bool,
+    /// Focus the input on next frame.
+    pub(crate) focus_next: bool,
+    /// Target entry id.
+    pub(crate) target_id: Option<EntryId>,
+    /// Rename target buffer.
+    pub(crate) to: String,
+    /// Error string shown inside the rename modal.
+    pub(crate) error: Option<String>,
+}
+
+/// Runtime state for the delete operation.
+#[derive(Debug, Default)]
+pub(crate) struct DeleteOperationState {
+    /// Open the confirmation modal on next frame.
+    pub(crate) open_next: bool,
+    /// Pending delete target ids.
+    pub(crate) target_ids: Vec<EntryId>,
+    /// Whether directory deletion should be recursive (`remove_dir_all`) instead of requiring empty directories.
+    pub(crate) recursive: bool,
+    /// Error string shown inside the delete modal.
+    pub(crate) error: Option<String>,
+}
+
+/// Runtime state for the in-dialog clipboard and paste operation.
+#[derive(Debug, Default)]
+pub(crate) struct PasteOperationState {
+    /// Clipboard state for copy/cut/paste operations.
+    pub(crate) clipboard: Option<FileClipboard>,
+    /// In-progress paste job state.
+    pub(crate) job: Option<PendingPasteJob>,
+    /// Open the paste conflict modal on next frame.
+    pub(crate) conflict_open_next: bool,
+}
+
+/// Runtime state for places import/export, edit modals, and inline edit.
+#[derive(Debug, Default)]
+pub(crate) struct PlacesOperationState {
+    pub(crate) io: PlacesIoOperationState,
+    pub(crate) edit: PlacesEditOperationState,
+    /// UI-only selection inside the places pane: (group_label, place_path).
+    pub(crate) selected: Option<(String, PathBuf)>,
+    pub(crate) inline_edit: PlacesInlineEditState,
+}
+
+/// Runtime state for the places import/export modal.
+#[derive(Debug, Default)]
+pub(crate) struct PlacesIoOperationState {
+    pub(crate) mode: PlacesIoMode,
+    pub(crate) buffer: String,
+    pub(crate) open_next: bool,
+    pub(crate) include_code: bool,
+    pub(crate) error: Option<String>,
+}
+
+/// Runtime state for the places edit modal.
+#[derive(Debug, Default)]
+pub(crate) struct PlacesEditOperationState {
+    pub(crate) mode: PlacesEditMode,
+    pub(crate) open_next: bool,
+    pub(crate) focus_next: bool,
+    pub(crate) error: Option<String>,
+    /// Target group label (add/edit place, rename/remove group).
+    pub(crate) group: String,
+    /// Source group label (rename/remove group).
+    pub(crate) group_from: Option<String>,
+    /// Source place path for editing (stable identity).
+    pub(crate) place_from_path: Option<PathBuf>,
+    /// Place label buffer (add/edit place).
+    pub(crate) place_label: String,
+    /// Place path buffer (add/edit place).
+    pub(crate) place_path: String,
+}
+
+/// Runtime state for inline place-label editing.
+#[derive(Debug, Default)]
+pub(crate) struct PlacesInlineEditState {
+    /// Inline edit (IGFD-like) target for place labels: (group_label, place_path).
+    pub(crate) target: Option<(String, PathBuf)>,
+    /// Inline edit buffer for the selected place label.
+    pub(crate) buffer: String,
+    /// Focus the inline edit input on next frame.
+    pub(crate) focus_next: bool,
+}
+
 /// UI-only state for hosting a [`FileDialogCore`] in Dear ImGui.
 ///
 /// This struct contains transient UI state (visibility, focus requests, text buffers) and owns the
@@ -726,118 +882,12 @@ pub struct FileDialogUiState {
     pub visible: bool,
     /// Caller-facing UI configuration.
     pub config: FileDialogUiConfig,
-    /// When `true` (and `path_bar_style` is [`PathBarStyle::Breadcrumbs`]), show the editable path
-    /// text input instead of the breadcrumb composer.
-    ///
-    /// This mimics IGFD's path composer "Edit" toggle behavior.
-    pub path_input_mode: bool,
-    /// Whether the path input is currently being edited (best-effort; updated by UI).
-    ///
-    /// This is UI-only state and should not be treated as a stable API contract.
-    pub path_edit: bool,
-    /// Path input buffer (editable "address bar").
-    pub path_edit_buffer: String,
-    pub(crate) path_edit_last_cwd: String,
-    pub(crate) breadcrumbs_scroll_to_end_next: bool,
-    pub(crate) opened_cwd: Option<PathBuf>,
-    pub(crate) path_history_index: Option<usize>,
-    pub(crate) path_history_saved_buffer: Option<String>,
-    pub(crate) path_bar_programmatic_edit: bool,
-    /// Focus path edit on next frame.
-    pub focus_path_edit_next: bool,
-    /// Focus search on next frame (Ctrl+F).
-    pub focus_search_next: bool,
-    /// Error string to display in UI (non-fatal).
-    pub ui_error: Option<String>,
     /// Transient runtime state owned by the UI renderer.
     pub(crate) runtime: FileDialogUiRuntime,
     /// Modal/operation state owned by the UI renderer.
     pub(crate) operations: FileDialogOperationState,
-    /// Open the "Rename" modal on next frame.
-    pub rename_open_next: bool,
-    /// Focus the rename input on next frame.
-    pub rename_focus_next: bool,
-    /// Rename target entry id.
-    pub rename_target_id: Option<EntryId>,
-    /// Rename "to" buffer.
-    pub rename_to: String,
-    /// Error string shown inside the rename modal.
-    pub rename_error: Option<String>,
-    /// Open the "Delete" confirmation modal on next frame.
-    pub delete_open_next: bool,
-    /// Pending delete target ids.
-    pub delete_target_ids: Vec<EntryId>,
-    /// Whether directory deletion should be recursive (`remove_dir_all`) instead of requiring empty directories.
-    pub delete_recursive: bool,
-    /// Error string shown inside the delete modal.
-    pub delete_error: Option<String>,
-    /// Clipboard state for copy/cut/paste operations.
-    pub clipboard: Option<FileClipboard>,
-    /// In-progress paste job state.
-    pub(crate) paste_job: Option<PendingPasteJob>,
-    /// Open the paste conflict modal on next frame.
-    pub(crate) paste_conflict_open_next: bool,
-    /// Reveal (scroll to) a specific entry id on the next draw, then clear.
-    pub(crate) reveal_id_next: Option<EntryId>,
     /// Thumbnail cache (requests + LRU).
     pub thumbnails: ThumbnailCache,
-
-    /// Places modal mode (export/import).
-    pub(crate) places_io_mode: PlacesIoMode,
-    /// Places modal text buffer.
-    pub(crate) places_io_buffer: String,
-    /// Open the places modal on next frame.
-    pub(crate) places_io_open_next: bool,
-    /// Whether export should include code-defined places.
-    pub(crate) places_io_include_code: bool,
-    /// Error string shown inside the places modal.
-    pub(crate) places_io_error: Option<String>,
-
-    /// Places edit modal mode.
-    pub(crate) places_edit_mode: PlacesEditMode,
-    /// Open the places edit modal on next frame.
-    pub(crate) places_edit_open_next: bool,
-    /// Focus the first input in the places edit modal on next frame.
-    pub(crate) places_edit_focus_next: bool,
-    /// Error string shown inside the places edit modal.
-    pub(crate) places_edit_error: Option<String>,
-    /// Target group label (add/edit place, rename/remove group).
-    pub(crate) places_edit_group: String,
-    /// Source group label (rename/remove group).
-    pub(crate) places_edit_group_from: Option<String>,
-    /// Source place path for editing (stable identity).
-    pub(crate) places_edit_place_from_path: Option<PathBuf>,
-    /// Place label buffer (add/edit place).
-    pub(crate) places_edit_place_label: String,
-    /// Place path buffer (add/edit place).
-    pub(crate) places_edit_place_path: String,
-
-    /// UI-only selection inside the places pane: (group_label, place_path).
-    pub(crate) places_selected: Option<(String, PathBuf)>,
-
-    /// Inline edit (IGFD-like) state for place labels: (group_label, place_path).
-    pub(crate) places_inline_edit: Option<(String, PathBuf)>,
-    /// Inline edit buffer for the selected place label.
-    pub(crate) places_inline_edit_buffer: String,
-    /// Focus the inline edit input on next frame.
-    pub(crate) places_inline_edit_focus_next: bool,
-
-    /// Current parent dir for the breadcrumb quick-select popup.
-    pub(crate) breadcrumb_quick_parent: Option<PathBuf>,
-
-    /// Last measured footer height (in window coordinates), used to size the content region
-    /// without hard-coded constants. Updated each frame after drawing the footer.
-    pub(crate) footer_height_last: f32,
-
-    /// UI buffer for the footer "File/Folder" input.
-    ///
-    /// - SaveFile uses `core.save_name` instead.
-    /// - OpenFile/OpenFiles can be typed to open a file by name/path (IGFD-style).
-    /// - PickFolder currently uses this for display only.
-    pub(crate) footer_file_name_buffer: String,
-    /// The last auto-generated display string for the footer input, used to keep the field
-    /// synced to selection unless the user edits it.
-    pub(crate) footer_file_name_last_display: String,
 }
 
 impl Default for FileDialogUiState {
@@ -845,56 +895,9 @@ impl Default for FileDialogUiState {
         Self {
             visible: true,
             config: FileDialogUiConfig::default(),
-            path_input_mode: false,
-            path_edit: false,
-            path_edit_buffer: String::new(),
-            path_edit_last_cwd: String::new(),
-            breadcrumbs_scroll_to_end_next: false,
-            opened_cwd: None,
-            path_history_index: None,
-            path_history_saved_buffer: None,
-            path_bar_programmatic_edit: false,
-            focus_path_edit_next: false,
-            focus_search_next: false,
-            ui_error: None,
             runtime: FileDialogUiRuntime::default(),
             operations: FileDialogOperationState::default(),
-            rename_open_next: false,
-            rename_focus_next: false,
-            rename_target_id: None,
-            rename_to: String::new(),
-            rename_error: None,
-            delete_open_next: false,
-            delete_target_ids: Vec::new(),
-            delete_recursive: false,
-            delete_error: None,
-            clipboard: None,
-            paste_job: None,
-            paste_conflict_open_next: false,
-            reveal_id_next: None,
             thumbnails: ThumbnailCache::new(ThumbnailCacheConfig::default()),
-            places_io_mode: PlacesIoMode::Export,
-            places_io_buffer: String::new(),
-            places_io_open_next: false,
-            places_io_include_code: false,
-            places_io_error: None,
-            places_edit_mode: PlacesEditMode::default(),
-            places_edit_open_next: false,
-            places_edit_focus_next: false,
-            places_edit_error: None,
-            places_edit_group: String::new(),
-            places_edit_group_from: None,
-            places_edit_place_from_path: None,
-            places_edit_place_label: String::new(),
-            places_edit_place_path: String::new(),
-            places_selected: None,
-            places_inline_edit: None,
-            places_inline_edit_buffer: String::new(),
-            places_inline_edit_focus_next: false,
-            breadcrumb_quick_parent: None,
-            footer_height_last: 0.0,
-            footer_file_name_buffer: String::new(),
-            footer_file_name_last_display: String::new(),
         }
     }
 }
@@ -910,8 +913,8 @@ impl FileDialogUiState {
     /// - dialog-style button row aligned to the right.
     pub fn apply_igfd_classic_preset(&mut self) {
         self.config.apply_igfd_classic_preset();
-        self.path_input_mode = false;
-        self.breadcrumbs_scroll_to_end_next = true;
+        self.runtime.path.input_mode = false;
+        self.runtime.breadcrumb.scroll_to_end_next = true;
     }
 }
 
@@ -970,7 +973,7 @@ impl FileDialogState {
     /// This mirrors IGFD's `OpenDialog` step before `Display`.
     pub fn open(&mut self) {
         self.ui.visible = true;
-        self.ui.opened_cwd = Some(self.core.cwd.clone());
+        self.ui.runtime.opened_cwd = Some(self.core.cwd.clone());
     }
 
     /// Reopens the dialog.
@@ -1107,8 +1110,8 @@ mod tests {
     #[test]
     fn ui_config_igfd_classic_preset_updates_config_without_runtime_buffers() {
         let mut state = FileDialogUiState::default();
-        state.path_edit_buffer = "keep-runtime-buffer".to_string();
-        state.path_input_mode = true;
+        state.runtime.path.buffer = "keep-runtime-buffer".to_string();
+        state.runtime.path.input_mode = true;
 
         state.apply_igfd_classic_preset();
 
@@ -1123,8 +1126,9 @@ mod tests {
             state.config.validation_buttons.align,
             ValidationButtonsAlign::Right
         );
-        assert_eq!(state.path_edit_buffer, "keep-runtime-buffer");
-        assert!(!state.path_input_mode);
+        assert_eq!(state.runtime.path.buffer, "keep-runtime-buffer");
+        assert!(!state.runtime.path.input_mode);
+        assert!(state.runtime.breadcrumb.scroll_to_end_next);
     }
 
     #[test]
@@ -1140,6 +1144,28 @@ mod tests {
         assert!(state.operations.new_folder.name.is_empty());
         assert!(!state.operations.new_folder.focus_next);
         assert!(state.operations.new_folder.error.is_none());
+        assert!(!state.runtime.path.input_mode);
+        assert!(!state.runtime.path.edit);
+        assert!(state.runtime.path.buffer.is_empty());
+        assert!(state.runtime.path.history_index.is_none());
+        assert!(state.runtime.path.history_saved_buffer.is_none());
+        assert!(!state.runtime.focus_search_next);
+        assert!(state.runtime.error.is_none());
+        assert!(state.runtime.breadcrumb.quick_parent.is_none());
+        assert_eq!(state.runtime.footer.height_last, 0.0);
+        assert!(state.runtime.footer.file_name_buffer.is_empty());
+        assert!(state.operations.rename.target_id.is_none());
+        assert!(!state.operations.rename.open_next);
+        assert!(state.operations.rename.to.is_empty());
+        assert!(state.operations.delete.target_ids.is_empty());
+        assert!(!state.operations.delete.open_next);
+        assert!(state.operations.paste.clipboard.is_none());
+        assert!(state.operations.paste.job.is_none());
+        assert!(!state.operations.paste.conflict_open_next);
+        assert!(state.operations.reveal_id_next.is_none());
+        assert!(state.operations.places.io.buffer.is_empty());
+        assert!(state.operations.places.selected.is_none());
+        assert!(state.operations.places.inline_edit.target.is_none());
     }
 
     #[test]

@@ -548,25 +548,25 @@ pub(super) fn draw_chrome(
         ui.new_line();
     }
     let cwd_s = state.core.cwd.display().to_string();
-    if state.ui.path_edit_last_cwd != cwd_s && !state.ui.path_input_mode {
-        state.ui.path_edit_last_cwd = cwd_s.clone();
-        state.ui.path_edit_buffer = cwd_s.clone();
+    if state.ui.runtime.path.last_cwd != cwd_s && !state.ui.runtime.path.input_mode {
+        state.ui.runtime.path.last_cwd = cwd_s.clone();
+        state.ui.runtime.path.buffer = cwd_s.clone();
         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-            state.ui.breadcrumbs_scroll_to_end_next = true;
+            state.ui.runtime.breadcrumb.scroll_to_end_next = true;
         }
-    } else if state.ui.path_edit_last_cwd.is_empty() {
-        state.ui.path_edit_last_cwd = cwd_s.clone();
-        if state.ui.path_edit_buffer.trim().is_empty() {
-            state.ui.path_edit_buffer = cwd_s.clone();
+    } else if state.ui.runtime.path.last_cwd.is_empty() {
+        state.ui.runtime.path.last_cwd = cwd_s.clone();
+        if state.ui.runtime.path.buffer.trim().is_empty() {
+            state.ui.runtime.path.buffer = cwd_s.clone();
         }
         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-            state.ui.breadcrumbs_scroll_to_end_next = true;
+            state.ui.runtime.breadcrumb.scroll_to_end_next = true;
         }
     }
 
     let breadcrumbs_mode = state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs;
     let is_igfd_classic = matches!(header_style, HeaderStyle::IgfdClassic);
-    let show_breadcrumb_composer = breadcrumbs_mode && !state.ui.path_input_mode;
+    let show_breadcrumb_composer = breadcrumbs_mode && !state.ui.runtime.path.input_mode;
 
     // IGFD uses compact labels for classic chrome. Keep them scoped to IgfdClassic to avoid
     // surprising other header styles.
@@ -708,12 +708,12 @@ pub(super) fn draw_chrome(
             let label = p.display().to_string();
             if ui.selectable(&label) {
                 let _ = state.core.handle_event(CoreEvent::NavigateTo(p.clone()));
-                state.ui.path_edit = false;
-                state.ui.path_edit_last_cwd = state.core.cwd.display().to_string();
-                state.ui.path_edit_buffer = state.ui.path_edit_last_cwd.clone();
-                state.ui.path_history_index = None;
-                state.ui.path_history_saved_buffer = None;
-                state.ui.ui_error = None;
+                state.ui.runtime.path.edit = false;
+                state.ui.runtime.path.last_cwd = state.core.cwd.display().to_string();
+                state.ui.runtime.path.buffer = state.ui.runtime.path.last_cwd.clone();
+                state.ui.runtime.path.history_index = None;
+                state.ui.runtime.path.history_saved_buffer = None;
+                state.ui.runtime.error = None;
                 ui.close_current_popup();
             }
         }
@@ -723,13 +723,14 @@ pub(super) fn draw_chrome(
     if breadcrumbs_mode {
         let can_reset = state
             .ui
+            .runtime
             .opened_cwd
             .as_ref()
             .is_some_and(|p| *p != state.core.cwd);
         {
             let _disabled = ui.begin_disabled_with_cond(!can_reset);
             if ui.button(reset_label) {
-                if let Some(p) = state.ui.opened_cwd.clone() {
+                if let Some(p) = state.ui.runtime.opened_cwd.clone() {
                     let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
                 }
             }
@@ -777,13 +778,13 @@ pub(super) fn draw_chrome(
         }
 
         if ui.button(action_label) {
-            state.ui.path_input_mode = !state.ui.path_input_mode;
-            if state.ui.path_input_mode {
-                state.ui.path_edit_buffer = state.core.cwd.display().to_string();
-                state.ui.focus_path_edit_next = true;
+            state.ui.runtime.path.input_mode = !state.ui.runtime.path.input_mode;
+            if state.ui.runtime.path.input_mode {
+                state.ui.runtime.path.buffer = state.core.cwd.display().to_string();
+                state.ui.runtime.path.focus_next = true;
             } else {
-                state.ui.path_edit = false;
-                state.ui.focus_path_edit_next = false;
+                state.ui.runtime.path.edit = false;
+                state.ui.runtime.path.focus_next = false;
             }
         }
         if ui.is_item_hovered() {
@@ -960,9 +961,9 @@ pub(super) fn draw_chrome(
     ui.same_line();
     ui.text("Search:");
     ui.same_line();
-    if state.ui.focus_search_next {
+    if state.ui.runtime.focus_search_next {
         ui.set_keyboard_focus_here();
-        state.ui.focus_search_next = false;
+        state.ui.runtime.focus_search_next = false;
     }
     ui.set_next_item_width(ui.content_region_avail_width().max(80.0));
     let _search_changed = ui.input_text("##search", &mut state.core.search).build();

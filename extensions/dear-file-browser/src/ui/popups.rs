@@ -83,7 +83,7 @@ pub(super) fn try_create_new_folder_in_cwd(
             state.ui.operations.new_folder.name.clear();
             let id = EntryId::from_path(&path);
             state.core.focus_and_select_by_id(id);
-            state.ui.reveal_id_next = Some(id);
+            state.ui.operations.reveal_id_next = Some(id);
             state.core.invalidate_dir_cache();
             true
         }
@@ -267,15 +267,15 @@ pub(super) fn draw_options_popup(
 pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
     const POPUP_ID: &str = "Rename";
 
-    if state.ui.rename_open_next {
-        state.ui.rename_open_next = false;
+    if state.ui.operations.rename.open_next {
+        state.ui.operations.rename.open_next = false;
         if !ui.is_popup_open(POPUP_ID) {
             ui.open_popup(POPUP_ID);
         }
     }
 
     if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
-        let Some(target_id) = state.ui.rename_target_id else {
+        let Some(target_id) = state.ui.operations.rename.target_id else {
             ui.text_disabled("No entry selected for rename.");
             if ui.button("Close") {
                 ui.close_current_popup();
@@ -290,7 +290,7 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn F
         else {
             ui.text_disabled("Selected entry is no longer available.");
             if ui.button("Close") {
-                state.ui.rename_target_id = None;
+                state.ui.operations.rename.target_id = None;
                 ui.close_current_popup();
             }
             return;
@@ -308,24 +308,25 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn F
         ui.separator();
         ui.text(format!("From: {from_name}"));
 
-        if state.ui.rename_focus_next {
+        if state.ui.operations.rename.focus_next {
             ui.set_keyboard_focus_here();
-            state.ui.rename_focus_next = false;
+            state.ui.operations.rename.focus_next = false;
         }
-        ui.input_text("To", &mut state.ui.rename_to).build();
+        ui.input_text("To", &mut state.ui.operations.rename.to)
+            .build();
 
         let rename = ui.button("Rename");
         ui.same_line();
         let cancel = ui.button("Cancel");
         if cancel {
-            state.ui.rename_error = None;
-            state.ui.rename_target_id = None;
+            state.ui.operations.rename.error = None;
+            state.ui.operations.rename.target_id = None;
             ui.close_current_popup();
         }
 
         if rename {
-            state.ui.rename_error = None;
-            let to_name = state.ui.rename_to.trim();
+            state.ui.operations.rename.error = None;
+            let to_name = state.ui.operations.rename.to.trim();
             let invalid = to_name.is_empty()
                 || to_name == "."
                 || to_name == ".."
@@ -333,28 +334,28 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn F
                 || to_name.contains('\\')
                 || to_name.contains('\0');
             if invalid {
-                state.ui.rename_error = Some("Invalid target name".into());
+                state.ui.operations.rename.error = Some("Invalid target name".into());
             } else if to_name == from_name.as_str() {
-                state.ui.rename_error = Some("Target name is unchanged".into());
+                state.ui.operations.rename.error = Some("Target name is unchanged".into());
             } else {
                 let to_name = to_name.to_string();
                 let to_path = from_path.with_file_name(&to_name);
 
                 if fs.metadata(&to_path).is_ok() {
-                    state.ui.rename_error = Some("Target already exists".into());
+                    state.ui.operations.rename.error = Some("Target already exists".into());
                 } else {
                     match fs.rename(&from_path, &to_path) {
                         Ok(()) => {
                             let id = EntryId::from_path(&to_path);
                             state.core.focus_and_select_by_id(id);
-                            state.ui.reveal_id_next = Some(id);
+                            state.ui.operations.reveal_id_next = Some(id);
                             state.core.invalidate_dir_cache();
-                            state.ui.rename_target_id = None;
-                            state.ui.rename_to.clear();
+                            state.ui.operations.rename.target_id = None;
+                            state.ui.operations.rename.to.clear();
                             ui.close_current_popup();
                         }
                         Err(e) => {
-                            state.ui.rename_error =
+                            state.ui.operations.rename.error =
                                 Some(format!("Failed to rename '{from_name}': {e}"));
                         }
                     }
@@ -362,7 +363,7 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn F
             }
         }
 
-        if let Some(err) = &state.ui.rename_error {
+        if let Some(err) = &state.ui.operations.rename.error {
             ui.separator();
             ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
         }
@@ -372,16 +373,16 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn F
 pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
     const POPUP_ID: &str = "Delete";
 
-    if state.ui.delete_open_next {
-        state.ui.delete_open_next = false;
-        state.ui.delete_recursive = false;
+    if state.ui.operations.delete.open_next {
+        state.ui.operations.delete.open_next = false;
+        state.ui.operations.delete.recursive = false;
         if !ui.is_popup_open(POPUP_ID) {
             ui.open_popup(POPUP_ID);
         }
     }
 
     if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
-        if state.ui.delete_target_ids.is_empty() {
+        if state.ui.operations.delete.target_ids.is_empty() {
             ui.text_disabled("No entries selected for deletion.");
             if ui.button("Close") {
                 ui.close_current_popup();
@@ -391,18 +392,20 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs
 
         let delete_targets = state
             .ui
-            .delete_target_ids
+            .operations
+            .delete
+            .target_ids
             .iter()
             .copied()
             .filter_map(|id| state.core.entry_path_by_id(id).map(Path::to_path_buf))
             .collect::<Vec<_>>();
 
-        if delete_targets.len() != state.ui.delete_target_ids.len() {
+        if delete_targets.len() != state.ui.operations.delete.target_ids.len() {
             ui.text_disabled("Some selected entries are no longer available.");
             if ui.button("Close") {
-                state.ui.delete_error = None;
-                state.ui.delete_target_ids.clear();
-                state.ui.delete_recursive = false;
+                state.ui.operations.delete.error = None;
+                state.ui.operations.delete.target_ids.clear();
+                state.ui.operations.delete.recursive = false;
                 ui.close_current_popup();
             }
             return;
@@ -448,11 +451,11 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs
             .iter()
             .any(|path| fs.metadata(path).map(|m| m.is_dir).unwrap_or(false));
         if any_dir {
-            ui.checkbox("Recursive", &mut state.ui.delete_recursive);
+            ui.checkbox("Recursive", &mut state.ui.operations.delete.recursive);
             ui.same_line();
             ui.text_disabled("Delete directories with contents");
         } else {
-            state.ui.delete_recursive = false;
+            state.ui.operations.delete.recursive = false;
         }
 
         ui.separator();
@@ -460,15 +463,15 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs
         ui.same_line();
         let cancel = ui.button("Cancel");
         if cancel {
-            state.ui.delete_error = None;
-            state.ui.delete_target_ids.clear();
-            state.ui.delete_recursive = false;
+            state.ui.operations.delete.error = None;
+            state.ui.operations.delete.target_ids.clear();
+            state.ui.operations.delete.recursive = false;
             ui.close_current_popup();
         }
 
         if del {
-            state.ui.delete_error = None;
-            let recursive = state.ui.delete_recursive;
+            state.ui.operations.delete.error = None;
+            let recursive = state.ui.operations.delete.recursive;
             for (path, name) in delete_targets.iter().zip(delete_target_names.iter()) {
                 let is_dir = fs.metadata(path).map(|m| m.is_dir).unwrap_or(false);
                 let result = if is_dir {
@@ -481,21 +484,22 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs
                     fs.remove_file(path)
                 };
                 if let Err(e) = result {
-                    state.ui.delete_error = Some(format!("Failed to delete '{name}': {e}"));
+                    state.ui.operations.delete.error =
+                        Some(format!("Failed to delete '{name}': {e}"));
                     break;
                 }
             }
 
-            if state.ui.delete_error.is_none() {
+            if state.ui.operations.delete.error.is_none() {
                 state.core.clear_selection();
                 state.core.invalidate_dir_cache();
-                state.ui.delete_target_ids.clear();
-                state.ui.delete_recursive = false;
+                state.ui.operations.delete.target_ids.clear();
+                state.ui.operations.delete.recursive = false;
                 ui.close_current_popup();
             }
         }
 
-        if let Some(err) = &state.ui.delete_error {
+        if let Some(err) = &state.ui.operations.delete.error {
             ui.separator();
             ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
         }
@@ -505,8 +509,8 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs
 pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
     const POPUP_ID: &str = "Paste Conflict";
 
-    if state.ui.paste_conflict_open_next {
-        state.ui.paste_conflict_open_next = false;
+    if state.ui.operations.paste.conflict_open_next {
+        state.ui.operations.paste.conflict_open_next = false;
         if !ui.is_popup_open(POPUP_ID) {
             ui.open_popup(POPUP_ID);
         }
@@ -515,7 +519,9 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState, fs
     if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
         let prompt = state
             .ui
-            .paste_job
+            .operations
+            .paste
+            .job
             .as_ref()
             .and_then(|j| j.conflict.as_ref())
             .cloned();
@@ -552,7 +558,7 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState, fs
         let cancel = ui.button("Cancel Paste");
 
         if cancel {
-            state.ui.paste_job = None;
+            state.ui.operations.paste.job = None;
             ui.close_current_popup();
             return;
         }
@@ -568,7 +574,7 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState, fs
         };
 
         if let Some(action) = selected {
-            if let Some(job) = state.ui.paste_job.as_mut() {
+            if let Some(job) = state.ui.operations.paste.job.as_mut() {
                 if apply_to_all {
                     job.apply_all_conflicts = Some(action);
                 }
@@ -576,12 +582,12 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState, fs
                 job.conflict = None;
             }
             ui.close_current_popup();
-            state.ui.ui_error = None;
+            state.ui.runtime.error = None;
             if let Err(e) = super::ops::run_paste_job_until_wait_or_done(state, fs) {
-                state.ui.ui_error = Some(e);
-                state.ui.paste_job = None;
+                state.ui.runtime.error = Some(e);
+                state.ui.operations.paste.job = None;
             }
-        } else if let Some(job) = state.ui.paste_job.as_mut() {
+        } else if let Some(job) = state.ui.operations.paste.job.as_mut() {
             if let Some(conflict) = job.conflict.as_mut() {
                 conflict.apply_to_all = apply_to_all;
             }

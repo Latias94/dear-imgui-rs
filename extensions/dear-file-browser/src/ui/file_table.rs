@@ -135,13 +135,15 @@ fn draw_entry_context_menu(
     let has_selection = state.core.has_selection();
     let can_paste = state
         .ui
+        .operations
+        .paste
         .clipboard
         .as_ref()
         .map(|c| !c.sources.is_empty())
         .unwrap_or(false);
 
     if ui.menu_item_enabled_selected("Open", Some("Enter"), false, true) {
-        state.ui.ui_error = None;
+        state.ui.runtime.error = None;
         *request_confirm |= matches!(
             state
                 .core
@@ -181,11 +183,11 @@ fn draw_entry_context_menu(
         return;
     }
     if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
-        state.ui.ui_error = None;
+        state.ui.runtime.error = None;
         start_paste_into_cwd(state);
         if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
-            state.ui.ui_error = Some(e);
-            state.ui.paste_job = None;
+            state.ui.runtime.error = Some(e);
+            state.ui.operations.paste.job = None;
         }
         ui.close_current_popup();
     }
@@ -199,6 +201,8 @@ fn draw_file_list_window_context_menu(
 ) {
     let can_paste = state
         .ui
+        .operations
+        .paste
         .clipboard
         .as_ref()
         .map(|c| !c.sources.is_empty())
@@ -292,11 +296,11 @@ fn draw_file_list_window_context_menu(
     ui.separator();
 
     if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
-        state.ui.ui_error = None;
+        state.ui.runtime.error = None;
         start_paste_into_cwd(state);
         if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
-            state.ui.ui_error = Some(e);
-            state.ui.paste_job = None;
+            state.ui.runtime.error = Some(e);
+            state.ui.operations.paste.job = None;
         }
         ui.close_current_popup();
     }
@@ -468,11 +472,11 @@ fn draw_file_table_view(
                 clipboard_set_from_selection(state, ClipboardOp::Cut);
             }
             if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
-                state.ui.ui_error = None;
+                state.ui.runtime.error = None;
                 start_paste_into_cwd(state);
                 if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
-                    state.ui.ui_error = Some(e);
-                    state.ui.paste_job = None;
+                    state.ui.runtime.error = Some(e);
+                    state.ui.operations.paste.job = None;
                 }
             }
             if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
@@ -586,7 +590,7 @@ fn draw_file_table_view(
                         }
 
                         if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
-                            state.ui.ui_error = None;
+                            state.ui.runtime.error = None;
                             *request_confirm |= matches!(
                                 state
                                     .core
@@ -626,9 +630,9 @@ fn draw_file_table_view(
                 }
             }
 
-            if state.ui.reveal_id_next == Some(e.id) {
+            if state.ui.operations.reveal_id_next == Some(e.id) {
                 ui.set_scroll_here_y(0.5);
-                state.ui.reveal_id_next = None;
+                state.ui.operations.reveal_id_next = None;
             }
         }
 
@@ -734,11 +738,11 @@ fn draw_file_grid_view(
                     clipboard_set_from_selection(state, ClipboardOp::Cut);
                 }
                 if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
-                    state.ui.ui_error = None;
+                    state.ui.runtime.error = None;
                     start_paste_into_cwd(state);
                     if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
-                        state.ui.ui_error = Some(e);
-                        state.ui.paste_job = None;
+                        state.ui.runtime.error = Some(e);
+                        state.ui.operations.paste.job = None;
                     }
                 }
                 if ui.is_key_pressed_with_repeat(Key::LeftArrow, true) {
@@ -801,9 +805,9 @@ fn draw_file_grid_view(
                     let img_min = [item_min[0] + pad_x, item_min[1] + pad_y];
                     let img_max = [img_min[0] + thumb[0], img_min[1] + thumb[1]];
 
-                    if state.ui.reveal_id_next == Some(e.id) {
+                    if state.ui.operations.reveal_id_next == Some(e.id) {
                         ui.set_scroll_here_y(0.5);
-                        state.ui.reveal_id_next = None;
+                        state.ui.operations.reveal_id_next = None;
                     }
 
                     if state.ui.config.thumbnails_enabled && !e.is_dir {
@@ -911,7 +915,7 @@ fn draw_file_grid_view(
                     }
 
                     if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
-                        state.ui.ui_error = None;
+                        state.ui.runtime.error = None;
                         *request_confirm |= matches!(
                             state
                                 .core

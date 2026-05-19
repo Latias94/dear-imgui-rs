@@ -206,21 +206,21 @@ pub(super) fn draw_path_input_text(
     path_w: f32,
     show_go_button: bool,
 ) {
-    let prev_path_buffer = state.ui.path_edit_buffer.clone();
+    let prev_path_buffer = state.ui.runtime.path.buffer.clone();
     ui.set_next_item_width(path_w);
-    let select_all = state.ui.focus_path_edit_next;
+    let select_all = state.ui.runtime.path.focus_next;
     if select_all {
         ui.set_keyboard_focus_here();
-        state.ui.focus_path_edit_next = false;
+        state.ui.runtime.path.focus_next = false;
     }
 
     let callback_recent_paths = recent_paths
         .iter()
         .map(|p| p.display().to_string())
         .collect::<Vec<_>>();
-    let history_index_ptr: *mut Option<usize> = &mut state.ui.path_history_index;
-    let history_saved_ptr: *mut Option<String> = &mut state.ui.path_history_saved_buffer;
-    let programmatic_edit_ptr: *mut bool = &mut state.ui.path_bar_programmatic_edit;
+    let history_index_ptr: *mut Option<usize> = &mut state.ui.runtime.path.history_index;
+    let history_saved_ptr: *mut Option<String> = &mut state.ui.runtime.path.history_saved_buffer;
+    let programmatic_edit_ptr: *mut bool = &mut state.ui.runtime.path.programmatic_edit;
     let callback = PathBarCallback {
         cwd: state.core.cwd.clone(),
         fs,
@@ -230,7 +230,7 @@ pub(super) fn draw_path_input_text(
         programmatic_edit: programmatic_edit_ptr,
     };
     let submitted = ui
-        .input_text("##path_bar", &mut state.ui.path_edit_buffer)
+        .input_text("##path_bar", &mut state.ui.runtime.path.buffer)
         .callback(callback)
         .callback_flags(InputTextCallback::COMPLETION | InputTextCallback::HISTORY)
         .auto_select_all(select_all)
@@ -238,15 +238,15 @@ pub(super) fn draw_path_input_text(
         .build();
 
     let path_active = ui.is_item_active() || ui.is_item_focused();
-    state.ui.path_edit = path_active;
+    state.ui.runtime.path.edit = path_active;
     if path_active
-        && !state.ui.path_bar_programmatic_edit
-        && state.ui.path_edit_buffer != prev_path_buffer
+        && !state.ui.runtime.path.programmatic_edit
+        && state.ui.runtime.path.buffer != prev_path_buffer
     {
-        state.ui.path_history_index = None;
-        state.ui.path_history_saved_buffer = None;
+        state.ui.runtime.path.history_index = None;
+        state.ui.runtime.path.history_saved_buffer = None;
     }
-    state.ui.path_bar_programmatic_edit = false;
+    state.ui.runtime.path.programmatic_edit = false;
 
     if show_go_button {
         ui.same_line();
@@ -259,9 +259,9 @@ pub(super) fn draw_path_input_text(
 }
 
 fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
-    let input = state.ui.path_edit_buffer.trim();
+    let input = state.ui.runtime.path.buffer.trim();
     if input.is_empty() {
-        state.ui.ui_error = Some("Path is empty".into());
+        state.ui.runtime.error = Some("Path is empty".into());
         return;
     }
 
@@ -276,12 +276,12 @@ fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
         Ok(md) => {
             if md.is_dir {
                 let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
-                state.ui.path_edit = false;
-                state.ui.path_edit_last_cwd = state.core.cwd.display().to_string();
-                state.ui.path_edit_buffer = state.ui.path_edit_last_cwd.clone();
-                state.ui.ui_error = None;
+                state.ui.runtime.path.edit = false;
+                state.ui.runtime.path.last_cwd = state.core.cwd.display().to_string();
+                state.ui.runtime.path.buffer = state.ui.runtime.path.last_cwd.clone();
+                state.ui.runtime.error = None;
             } else {
-                state.ui.ui_error = Some("Path exists but is not a directory".into());
+                state.ui.runtime.error = Some("Path exists but is not a directory".into());
             }
         }
         Err(e) => {
@@ -291,7 +291,7 @@ fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
                 PermissionDenied => format!("Permission denied: {}", input),
                 _ => format!("Invalid directory '{}': {}", input, e),
             };
-            state.ui.ui_error = Some(msg);
+            state.ui.runtime.error = Some(msg);
         }
     }
 }
@@ -448,19 +448,19 @@ pub(super) fn draw_breadcrumbs(
                 new_cwd = Some(path.clone());
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
-                state.ui.path_edit = true;
-                state.ui.path_edit_buffer = path.display().to_string();
-                state.ui.focus_path_edit_next = true;
+                state.ui.runtime.path.edit = true;
+                state.ui.runtime.path.buffer = path.display().to_string();
+                state.ui.runtime.path.focus_next = true;
                 if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-                    state.ui.path_input_mode = true;
+                    state.ui.runtime.path.input_mode = true;
                 }
             }
             if ui.is_item_hovered() {
                 ui.tooltip_text(path.display().to_string());
             }
-            if auto_scroll_end && i + 1 == n && state.ui.breadcrumbs_scroll_to_end_next {
+            if auto_scroll_end && i + 1 == n && state.ui.runtime.breadcrumb.scroll_to_end_next {
                 ui.set_scroll_here_x(1.0);
-                state.ui.breadcrumbs_scroll_to_end_next = false;
+                state.ui.runtime.breadcrumb.scroll_to_end_next = false;
             }
             ui.same_line();
             if i + 1 < n {
@@ -470,15 +470,15 @@ pub(super) fn draw_breadcrumbs(
                 }
                 if state.ui.config.breadcrumbs_quick_select {
                     if ui.small_button(sep_label) {
-                        state.ui.breadcrumb_quick_parent = Some(path.clone());
+                        state.ui.runtime.breadcrumb.quick_parent = Some(path.clone());
                         ui.open_popup("##igfd_path_popup");
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
-                        state.ui.path_edit = true;
-                        state.ui.path_edit_buffer = path.display().to_string();
-                        state.ui.focus_path_edit_next = true;
+                        state.ui.runtime.path.edit = true;
+                        state.ui.runtime.path.buffer = path.display().to_string();
+                        state.ui.runtime.path.focus_next = true;
                         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-                            state.ui.path_input_mode = true;
+                            state.ui.runtime.path.input_mode = true;
                         }
                     }
                 } else {
@@ -495,11 +495,11 @@ pub(super) fn draw_breadcrumbs(
                 new_cwd = Some(path.clone());
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
-                state.ui.path_edit = true;
-                state.ui.path_edit_buffer = path.display().to_string();
-                state.ui.focus_path_edit_next = true;
+                state.ui.runtime.path.edit = true;
+                state.ui.runtime.path.buffer = path.display().to_string();
+                state.ui.runtime.path.focus_next = true;
                 if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-                    state.ui.path_input_mode = true;
+                    state.ui.runtime.path.input_mode = true;
                 }
             }
             if ui.is_item_hovered() {
@@ -509,15 +509,15 @@ pub(super) fn draw_breadcrumbs(
             if label != sep_label {
                 if state.ui.config.breadcrumbs_quick_select {
                     if ui.small_button(sep_label) {
-                        state.ui.breadcrumb_quick_parent = Some(path.clone());
+                        state.ui.runtime.breadcrumb.quick_parent = Some(path.clone());
                         ui.open_popup("##igfd_path_popup");
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
-                        state.ui.path_edit = true;
-                        state.ui.path_edit_buffer = path.display().to_string();
-                        state.ui.focus_path_edit_next = true;
+                        state.ui.runtime.path.edit = true;
+                        state.ui.runtime.path.buffer = path.display().to_string();
+                        state.ui.runtime.path.focus_next = true;
                         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-                            state.ui.path_input_mode = true;
+                            state.ui.runtime.path.input_mode = true;
                         }
                     }
                 } else {
@@ -559,15 +559,15 @@ pub(super) fn draw_breadcrumbs(
         if let Some((_, parent)) = crumbs.get(start_tail.saturating_sub(1)) {
             if state.ui.config.breadcrumbs_quick_select {
                 if ui.small_button(sep_label) {
-                    state.ui.breadcrumb_quick_parent = Some(parent.clone());
+                    state.ui.runtime.breadcrumb.quick_parent = Some(parent.clone());
                     ui.open_popup("##igfd_path_popup");
                 }
                 if ui.is_item_clicked_with_button(MouseButton::Right) {
-                    state.ui.path_edit = true;
-                    state.ui.path_edit_buffer = parent.display().to_string();
-                    state.ui.focus_path_edit_next = true;
+                    state.ui.runtime.path.edit = true;
+                    state.ui.runtime.path.buffer = parent.display().to_string();
+                    state.ui.runtime.path.focus_next = true;
                     if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-                        state.ui.path_input_mode = true;
+                        state.ui.runtime.path.input_mode = true;
                     }
                 }
             } else {
@@ -587,33 +587,33 @@ pub(super) fn draw_breadcrumbs(
                 new_cwd = Some(path.clone());
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
-                state.ui.path_edit = true;
-                state.ui.path_edit_buffer = path.display().to_string();
-                state.ui.focus_path_edit_next = true;
+                state.ui.runtime.path.edit = true;
+                state.ui.runtime.path.buffer = path.display().to_string();
+                state.ui.runtime.path.focus_next = true;
                 if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-                    state.ui.path_input_mode = true;
+                    state.ui.runtime.path.input_mode = true;
                 }
             }
             if ui.is_item_hovered() {
                 ui.tooltip_text(path.display().to_string());
             }
-            if auto_scroll_end && i + 1 == n && state.ui.breadcrumbs_scroll_to_end_next {
+            if auto_scroll_end && i + 1 == n && state.ui.runtime.breadcrumb.scroll_to_end_next {
                 ui.set_scroll_here_x(1.0);
-                state.ui.breadcrumbs_scroll_to_end_next = false;
+                state.ui.runtime.breadcrumb.scroll_to_end_next = false;
             }
             ui.same_line();
             if i + 1 < n {
                 if state.ui.config.breadcrumbs_quick_select {
                     if ui.small_button(sep_label) {
-                        state.ui.breadcrumb_quick_parent = Some(path.clone());
+                        state.ui.runtime.breadcrumb.quick_parent = Some(path.clone());
                         ui.open_popup("##igfd_path_popup");
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
-                        state.ui.path_edit = true;
-                        state.ui.path_edit_buffer = path.display().to_string();
-                        state.ui.focus_path_edit_next = true;
+                        state.ui.runtime.path.edit = true;
+                        state.ui.runtime.path.buffer = path.display().to_string();
+                        state.ui.runtime.path.focus_next = true;
                         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
-                            state.ui.path_input_mode = true;
+                            state.ui.runtime.path.input_mode = true;
                         }
                     }
                 } else {

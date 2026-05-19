@@ -32,7 +32,7 @@ pub(super) fn draw_igfd_path_popup(
     }
 
     if let Some(_popup) = ui.begin_popup("##igfd_path_popup") {
-        let Some(parent) = state.ui.breadcrumb_quick_parent.clone() else {
+        let Some(parent) = state.ui.runtime.breadcrumb.quick_parent.clone() else {
             ui.text_disabled("No path");
             return None;
         };
