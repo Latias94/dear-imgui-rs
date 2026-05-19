@@ -64,8 +64,8 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
     }
 
     /// Replaces all current settings with the given flags
-    pub fn flags(mut self, flags: impl Into<DragFlags>) -> Self {
-        self.flags = flags.into();
+    pub fn flags(mut self, flags: DragFlags) -> Self {
+        self.flags = flags;
         self
     }
 

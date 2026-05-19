@@ -24,6 +24,10 @@ fn test_api_types_exist() {
     let _popup_context_flags = PopupContextFlags::NO_OPEN_OVER_ITEMS;
     let _popup_query_flags = PopupQueryFlags::ANY_POPUP;
 
+    // Drag/slider flags
+    let _drag_flags = DragFlags::WRAP_AROUND | DragFlags::ALWAYS_CLAMP;
+    let _slider_flags = SliderFlags::ALWAYS_CLAMP | SliderFlags::LOGARITHMIC;
+
     // Hover flags
     let _hover_flags = ItemHoveredFlags::ALLOW_WHEN_DISABLED;
 

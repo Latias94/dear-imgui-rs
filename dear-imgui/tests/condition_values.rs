@@ -122,6 +122,10 @@ fn slider_and_drag_flags_match_supported_imgui_subsets() {
         imgui::SliderFlags::LOGARITHMIC.bits(),
         imgui::DragFlags::LOGARITHMIC.bits()
     );
+    assert_eq!(
+        imgui::SliderFlags::all().bits() & imgui::DragFlags::WRAP_AROUND.bits(),
+        0
+    );
 }
 
 #[test]

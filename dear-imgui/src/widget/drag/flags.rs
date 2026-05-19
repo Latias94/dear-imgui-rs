@@ -1,5 +1,4 @@
 use crate::sys;
-use crate::widget::slider::SliderFlags;
 
 bitflags::bitflags! {
     /// Flags for drag widgets.
@@ -31,11 +30,5 @@ bitflags::bitflags! {
         ///
         /// Dear ImGui only defines four default component colors.
         const COLOR_MARKERS = sys::ImGuiSliderFlags_ColorMarkers as i32;
-    }
-}
-
-impl From<SliderFlags> for DragFlags {
-    fn from(flags: SliderFlags) -> Self {
-        Self::from_bits_retain(flags.bits())
     }
 }
