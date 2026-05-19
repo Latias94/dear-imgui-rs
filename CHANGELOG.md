@@ -60,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Viewport::set_parent_viewport_id()` now use `Option<Id>` instead of raw viewport IDs.
   - `Ui::push_focus_scope` now takes `Id` instead of raw `ImGuiID`.
   - Logging helpers now take `LogAutoOpenDepth` instead of raw `-1` auto-open-depth sentinels.
+  - Drag/drop flags are split by call-site domain: source APIs now use `DragDropSourceFlags`
+    and target accept APIs now use `DragDropTargetFlags`. Migrate `DragDropFlags::SOURCE_*`
+    constants to `DragDropSourceFlags::*` and `DragDropFlags::ACCEPT_*` constants to
+    `DragDropTargetFlags::*`.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - `dear-file-browser` scan request/batch/status generations now use `ScanGeneration`,

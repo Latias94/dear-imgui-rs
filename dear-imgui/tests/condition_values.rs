@@ -41,6 +41,67 @@ fn drag_drop_payload_condition_values_match_supported_imgui_cond() {
 }
 
 #[test]
+fn drag_drop_flags_are_split_by_source_and_target_domain() {
+    assert_eq!(
+        imgui::DragDropSourceFlags::NO_PREVIEW_TOOLTIP.bits(),
+        imgui::sys::ImGuiDragDropFlags_SourceNoPreviewTooltip as u32
+    );
+    assert_eq!(
+        imgui::DragDropSourceFlags::NO_DISABLE_HOVER.bits(),
+        imgui::sys::ImGuiDragDropFlags_SourceNoDisableHover as u32
+    );
+    assert_eq!(
+        imgui::DragDropSourceFlags::NO_HOLD_TO_OPEN_OTHERS.bits(),
+        imgui::sys::ImGuiDragDropFlags_SourceNoHoldToOpenOthers as u32
+    );
+    assert_eq!(
+        imgui::DragDropSourceFlags::ALLOW_NULL_ID.bits(),
+        imgui::sys::ImGuiDragDropFlags_SourceAllowNullID as u32
+    );
+    assert_eq!(
+        imgui::DragDropSourceFlags::EXTERN.bits(),
+        imgui::sys::ImGuiDragDropFlags_SourceExtern as u32
+    );
+    assert_eq!(
+        imgui::DragDropSourceFlags::PAYLOAD_AUTO_EXPIRE.bits(),
+        imgui::sys::ImGuiDragDropFlags_PayloadAutoExpire as u32
+    );
+    assert_eq!(
+        imgui::DragDropSourceFlags::PAYLOAD_NO_CROSS_CONTEXT.bits(),
+        imgui::sys::ImGuiDragDropFlags_PayloadNoCrossContext as u32
+    );
+    assert_eq!(
+        imgui::DragDropSourceFlags::PAYLOAD_NO_CROSS_PROCESS.bits(),
+        imgui::sys::ImGuiDragDropFlags_PayloadNoCrossProcess as u32
+    );
+
+    assert_eq!(
+        imgui::DragDropTargetFlags::BEFORE_DELIVERY.bits(),
+        imgui::sys::ImGuiDragDropFlags_AcceptBeforeDelivery as u32
+    );
+    assert_eq!(
+        imgui::DragDropTargetFlags::NO_DRAW_DEFAULT_RECT.bits(),
+        imgui::sys::ImGuiDragDropFlags_AcceptNoDrawDefaultRect as u32
+    );
+    assert_eq!(
+        imgui::DragDropTargetFlags::NO_PREVIEW_TOOLTIP.bits(),
+        imgui::sys::ImGuiDragDropFlags_AcceptNoPreviewTooltip as u32
+    );
+    assert_eq!(
+        imgui::DragDropTargetFlags::DRAW_AS_HOVERED.bits(),
+        imgui::sys::ImGuiDragDropFlags_AcceptDrawAsHovered as u32
+    );
+    assert_eq!(
+        imgui::DragDropTargetFlags::PEEK_ONLY.bits(),
+        imgui::sys::ImGuiDragDropFlags_AcceptPeekOnly as u32
+    );
+
+    let source_bits = imgui::DragDropSourceFlags::all().bits();
+    let target_bits = imgui::DragDropTargetFlags::all().bits();
+    assert_eq!(source_bits & target_bits, 0);
+}
+
+#[test]
 fn slider_and_drag_flags_match_supported_imgui_subsets() {
     assert!(
         !imgui::SliderFlags::all().contains(imgui::SliderFlags::from_bits_retain(

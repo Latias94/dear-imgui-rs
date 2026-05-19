@@ -27,7 +27,10 @@
 //! // Create a drop target
 //! ui.button("Drop here!");
 //! if let Some(target) = ui.drag_drop_target() {
-//!     if target.accept_payload_empty("MY_DATA", DragDropFlags::empty()).is_some() {
+//!     if target
+//!         .accept_payload_empty("MY_DATA", DragDropTargetFlags::NONE)
+//!         .is_some()
+//!     {
 //!         println!("Data dropped!");
 //!     }
 //!     target.pop();
@@ -76,39 +79,78 @@ fn validate_payload_submission(name: &str, ptr: *const ffi::c_void, size: usize,
 }
 
 bitflags::bitflags! {
-    /// Flags for drag and drop operations
+    /// Flags for drag and drop sources.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct DragDropFlags: u32 {
+    pub struct DragDropSourceFlags: u32 {
         /// No flags
         const NONE = 0;
 
-        // Source flags
         /// Disable preview tooltip during drag
-        const SOURCE_NO_PREVIEW_TOOLTIP = sys::ImGuiDragDropFlags_SourceNoPreviewTooltip as u32;
+        const NO_PREVIEW_TOOLTIP = sys::ImGuiDragDropFlags_SourceNoPreviewTooltip as u32;
         /// Don't disable hover during drag
-        const SOURCE_NO_DISABLE_HOVER = sys::ImGuiDragDropFlags_SourceNoDisableHover as u32;
+        const NO_DISABLE_HOVER = sys::ImGuiDragDropFlags_SourceNoDisableHover as u32;
         /// Don't open tree nodes/headers when hovering during drag
-        const SOURCE_NO_HOLD_TO_OPEN_OTHERS = sys::ImGuiDragDropFlags_SourceNoHoldToOpenOthers as u32;
+        const NO_HOLD_TO_OPEN_OTHERS = sys::ImGuiDragDropFlags_SourceNoHoldToOpenOthers as u32;
         /// Allow items without unique ID to be drag sources
-        const SOURCE_ALLOW_NULL_ID = sys::ImGuiDragDropFlags_SourceAllowNullID as u32;
+        const ALLOW_NULL_ID = sys::ImGuiDragDropFlags_SourceAllowNullID as u32;
         /// External drag source (from outside ImGui)
-        const SOURCE_EXTERN = sys::ImGuiDragDropFlags_SourceExtern as u32;
+        const EXTERN = sys::ImGuiDragDropFlags_SourceExtern as u32;
         /// Automatically expire payload if source stops being submitted
         const PAYLOAD_AUTO_EXPIRE = sys::ImGuiDragDropFlags_PayloadAutoExpire as u32;
-
-        // Target flags
-        /// Accept payload before mouse button is released
-        const ACCEPT_BEFORE_DELIVERY = sys::ImGuiDragDropFlags_AcceptBeforeDelivery as u32;
-        /// Don't draw default highlight rectangle when hovering
-        const ACCEPT_NO_DRAW_DEFAULT_RECT = sys::ImGuiDragDropFlags_AcceptNoDrawDefaultRect as u32;
-        /// Don't show preview tooltip from source
-        const ACCEPT_NO_PREVIEW_TOOLTIP = sys::ImGuiDragDropFlags_AcceptNoPreviewTooltip as u32;
-        /// Render accepting target as hovered (e.g. allow Button() as drop target)
-        const ACCEPT_DRAW_AS_HOVERED = sys::ImGuiDragDropFlags_AcceptDrawAsHovered as u32;
-        /// Convenience flag for peeking (ACCEPT_BEFORE_DELIVERY | ACCEPT_NO_DRAW_DEFAULT_RECT)
-        const ACCEPT_PEEK_ONLY = sys::ImGuiDragDropFlags_AcceptPeekOnly as u32;
+        /// Hint that the payload may not be copied outside the current Dear ImGui context
+        const PAYLOAD_NO_CROSS_CONTEXT = sys::ImGuiDragDropFlags_PayloadNoCrossContext as u32;
+        /// Hint that the payload may not be copied outside the current process
+        const PAYLOAD_NO_CROSS_PROCESS = sys::ImGuiDragDropFlags_PayloadNoCrossProcess as u32;
     }
+}
+
+impl Default for DragDropSourceFlags {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+bitflags::bitflags! {
+    /// Flags for drag and drop targets.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct DragDropTargetFlags: u32 {
+        /// No flags
+        const NONE = 0;
+        /// Accept payload before mouse button is released
+        const BEFORE_DELIVERY = sys::ImGuiDragDropFlags_AcceptBeforeDelivery as u32;
+        /// Don't draw default highlight rectangle when hovering
+        const NO_DRAW_DEFAULT_RECT = sys::ImGuiDragDropFlags_AcceptNoDrawDefaultRect as u32;
+        /// Don't show preview tooltip from source
+        const NO_PREVIEW_TOOLTIP = sys::ImGuiDragDropFlags_AcceptNoPreviewTooltip as u32;
+        /// Render accepting target as hovered (e.g. allow Button() as drop target)
+        const DRAW_AS_HOVERED = sys::ImGuiDragDropFlags_AcceptDrawAsHovered as u32;
+        /// Convenience flag for peeking (BEFORE_DELIVERY | NO_DRAW_DEFAULT_RECT)
+        const PEEK_ONLY = sys::ImGuiDragDropFlags_AcceptPeekOnly as u32;
+    }
+}
+
+impl Default for DragDropTargetFlags {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+fn validate_drag_drop_source_flags(caller: &str, flags: DragDropSourceFlags) {
+    let unsupported = flags.bits() & !DragDropSourceFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiDragDropFlags source bits: 0x{unsupported:X}"
+    );
+}
+
+fn validate_drag_drop_target_flags(caller: &str, flags: DragDropTargetFlags) {
+    let unsupported = flags.bits() & !DragDropTargetFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiDragDropFlags target bits: 0x{unsupported:X}"
+    );
 }
 
 impl Ui {
@@ -124,7 +166,7 @@ impl Ui {
     /// # let ui = ctx.frame();
     /// ui.button("Drag me!");
     /// if let Some(source) = ui.drag_drop_source_config("MY_DATA")
-    ///     .flags(DragDropFlags::SOURCE_NO_PREVIEW_TOOLTIP)
+    ///     .flags(DragDropSourceFlags::NO_PREVIEW_TOOLTIP)
     ///     .begin() {
     ///     ui.text("Custom drag tooltip");
     ///     source.end();
@@ -133,7 +175,7 @@ impl Ui {
     pub fn drag_drop_source_config<T: AsRef<str>>(&self, name: T) -> DragDropSource<'_, T> {
         DragDropSource {
             name,
-            flags: DragDropFlags::NONE,
+            flags: DragDropSourceFlags::NONE,
             cond: DragDropPayloadCond::Always,
             ui: self,
         }
@@ -151,7 +193,7 @@ impl Ui {
     /// # let ui = ctx.frame();
     /// ui.button("Drop target");
     /// if let Some(target) = ui.drag_drop_target() {
-    ///     if target.accept_payload_empty("MY_DATA", DragDropFlags::NONE).is_some() {
+    ///     if target.accept_payload_empty("MY_DATA", DragDropTargetFlags::NONE).is_some() {
     ///         println!("Received drop!");
     ///     }
     ///     target.pop();
@@ -192,7 +234,7 @@ impl Ui {
 #[derive(Debug)]
 pub struct DragDropSource<'ui, T> {
     name: T,
-    flags: DragDropFlags,
+    flags: DragDropSourceFlags,
     cond: DragDropPayloadCond,
     ui: &'ui Ui,
 }
@@ -201,9 +243,10 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
     /// Set flags for this drag source
     ///
     /// # Arguments
-    /// * `flags` - Combination of source-related `DragDropFlags`
+    /// * `flags` - Combination of source-related `DragDropSourceFlags`
     #[inline]
-    pub fn flags(mut self, flags: DragDropFlags) -> Self {
+    pub fn flags(mut self, flags: DragDropSourceFlags) -> Self {
+        validate_drag_drop_source_flags("DragDropSource::flags()", flags);
         self.flags = flags;
         self
     }
@@ -277,6 +320,7 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
             size,
             "DragDropSource::begin_payload_unchecked()",
         );
+        validate_drag_drop_source_flags("DragDropSource::begin_payload_unchecked()", self.flags);
         unsafe {
             let should_begin = sys::igBeginDragDropSource(self.flags.bits() as i32);
 
@@ -348,7 +392,7 @@ impl<'ui> DragDropTarget<'ui> {
     pub fn accept_payload_empty(
         &self,
         name: impl AsRef<str>,
-        flags: DragDropFlags,
+        flags: DragDropTargetFlags,
     ) -> Option<DragDropPayloadEmpty> {
         self.accept_payload(name, flags)?
             .ok()
@@ -371,7 +415,7 @@ impl<'ui> DragDropTarget<'ui> {
     pub fn accept_payload<T: 'static + Copy, Name: AsRef<str>>(
         &self,
         name: Name,
-        flags: DragDropFlags,
+        flags: DragDropTargetFlags,
     ) -> Option<Result<DragDropPayloadPod<T>, PayloadIsWrongType>> {
         let output = unsafe { self.accept_payload_unchecked(name, flags) };
 
@@ -391,9 +435,10 @@ impl<'ui> DragDropTarget<'ui> {
     pub unsafe fn accept_payload_unchecked(
         &self,
         name: impl AsRef<str>,
-        flags: DragDropFlags,
+        flags: DragDropTargetFlags,
     ) -> Option<DragDropPayload> {
         validate_payload_type_name(name.as_ref(), "DragDropTarget::accept_payload_unchecked()");
+        validate_drag_drop_target_flags("DragDropTarget::accept_payload_unchecked()", flags);
         let inner =
             unsafe { sys::igAcceptDragDropPayload(self.0.scratch_txt(name), flags.bits() as i32) };
 
@@ -600,6 +645,55 @@ mod tests {
                     ptr,
                     0,
                     "payload_submission_rejects_imgui_assert_conditions_before_ffi",
+                );
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn drag_drop_flag_domain_validation_rejects_wrong_domain_bits() {
+        validate_drag_drop_source_flags("test", DragDropSourceFlags::all());
+        validate_drag_drop_target_flags("test", DragDropTargetFlags::all());
+
+        let target_bit_in_source =
+            DragDropSourceFlags::from_bits_retain(DragDropTargetFlags::BEFORE_DELIVERY.bits());
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_drag_drop_source_flags("test", target_bit_in_source);
+            })
+            .is_err()
+        );
+
+        let source_bit_in_target =
+            DragDropTargetFlags::from_bits_retain(DragDropSourceFlags::NO_PREVIEW_TOOLTIP.bits());
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_drag_drop_target_flags("test", source_bit_in_target);
+            })
+            .is_err()
+        );
+
+        let known_bits = DragDropSourceFlags::all().bits() | DragDropTargetFlags::all().bits();
+        let unknown_bit = (0..u32::BITS)
+            .map(|bit| 1u32 << bit)
+            .find(|bit| known_bits & bit == 0)
+            .expect("Dear ImGui drag-drop flags should not consume every u32 bit");
+
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_drag_drop_source_flags(
+                    "test",
+                    DragDropSourceFlags::from_bits_retain(unknown_bit),
+                );
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                validate_drag_drop_target_flags(
+                    "test",
+                    DragDropTargetFlags::from_bits_retain(unknown_bit),
                 );
             })
             .is_err()

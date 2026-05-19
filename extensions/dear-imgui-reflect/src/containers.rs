@@ -130,9 +130,10 @@ where
         if arr_settings.reorderable
             && let Some(target) = ui.drag_drop_target()
         {
-            if let Some(Ok(payload)) = target
-                .accept_payload::<i32, _>("IMGUI_REFLECT_ARRAY_ITEM", imgui::DragDropFlags::NONE)
-                && payload.delivery
+            if let Some(Ok(payload)) = target.accept_payload::<i32, _>(
+                "IMGUI_REFLECT_ARRAY_ITEM",
+                imgui::DragDropTargetFlags::NONE,
+            ) && payload.delivery
             {
                 let from = payload.data as usize;
                 let to = index;
@@ -980,9 +981,10 @@ where
         if vec_settings.reorderable
             && let Some(target) = ui.drag_drop_target()
         {
-            if let Some(Ok(payload)) = target
-                .accept_payload::<i32, _>("IMGUI_REFLECT_VEC_ITEM", imgui::DragDropFlags::NONE)
-                && payload.delivery
+            if let Some(Ok(payload)) = target.accept_payload::<i32, _>(
+                "IMGUI_REFLECT_VEC_ITEM",
+                imgui::DragDropTargetFlags::NONE,
+            ) && payload.delivery
             {
                 let from = payload.data as usize;
                 let to = index;
