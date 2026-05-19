@@ -412,14 +412,13 @@ impl OffscreenRtt {
         });
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let id64 =
+        let texture_id =
             renderer
                 .texture_manager_mut()
                 .register_texture(dear_imgui_wgpu::WgpuTexture::new(
                     texture.clone(),
                     view.clone(),
                 ));
-        let texture_id = dear_imgui_rs::TextureId::from(id64);
 
         Self {
             size,

@@ -100,13 +100,13 @@ impl WgpuTexture {
 #[derive(Debug)]
 pub struct WgpuTextureManager {
     /// Map from texture ID to WGPU texture
-    textures: HashMap<u64, WgpuTexture>,
+    textures: HashMap<TextureId, WgpuTexture>,
     /// Next available texture ID
     next_id: u64,
     /// Custom samplers registered for external textures (sampler_id -> sampler)
     custom_samplers: HashMap<u64, Sampler>,
     /// Mapping from texture_id -> sampler_id for per-texture custom sampling
-    custom_sampler_by_texture: HashMap<u64, u64>,
+    custom_sampler_by_texture: HashMap<TextureId, u64>,
     /// Cached common bind groups (uniform buffer + sampler) per sampler_id
     common_bind_groups: HashMap<u64, BindGroup>,
     /// Next available sampler ID
@@ -179,7 +179,7 @@ impl WgpuTextureManager {
         &mut self,
         queue: &Queue,
         texture_data: &TextureData,
-        texture_id: u64,
+        texture_id: TextureId,
     ) -> RendererResult<bool> {
         let wgpu_tex = match self.textures.get(&texture_id) {
             Some(t) => t,
@@ -273,7 +273,7 @@ impl WgpuTextureManager {
                     tracing::debug!(
                         target: "dear-imgui-wgpu",
                         "[dear-imgui-wgpu][debug] Updated texture id={} subrect x={} y={} w={} h={}",
-                        texture_id, rect.x, rect.y, rect.w, rect.h
+                        texture_id.id(), rect.x, rect.y, rect.w, rect.h
                     );
                 }
             } else {
@@ -303,34 +303,34 @@ impl WgpuTextureManager {
     }
 
     /// Register a new texture and return its ID
-    pub fn register_texture(&mut self, texture: WgpuTexture) -> u64 {
-        let id = self.next_id;
+    pub fn register_texture(&mut self, texture: WgpuTexture) -> TextureId {
+        let id = TextureId::new(self.next_id);
         self.next_id += 1;
         self.textures.insert(id, texture);
         id
     }
 
     /// Get a texture by ID
-    pub fn get_texture(&self, id: u64) -> Option<&WgpuTexture> {
+    pub fn get_texture(&self, id: TextureId) -> Option<&WgpuTexture> {
         self.textures.get(&id)
     }
 
     /// Remove a texture by ID
-    pub fn remove_texture(&mut self, id: u64) -> Option<WgpuTexture> {
+    pub fn remove_texture(&mut self, id: TextureId) -> Option<WgpuTexture> {
         self.textures.remove(&id)
     }
 
     /// Check if a texture exists
-    pub fn contains_texture(&self, id: u64) -> bool {
+    pub fn contains_texture(&self, id: TextureId) -> bool {
         self.textures.contains_key(&id)
     }
 
     /// Insert a texture with a specific ID
-    pub fn insert_texture_with_id(&mut self, id: u64, texture: WgpuTexture) {
+    pub fn insert_texture_with_id(&mut self, id: TextureId, texture: WgpuTexture) {
         self.textures.insert(id, texture);
         // Update next_id if necessary
-        if id >= self.next_id {
-            self.next_id = id + 1;
+        if id.id() >= self.next_id {
+            self.next_id = id.id().saturating_add(1);
         }
     }
 
@@ -339,7 +339,7 @@ impl WgpuTextureManager {
     /// Returns the internal sampler_id assigned to this sampler.
     pub(crate) fn set_custom_sampler_for_texture(
         &mut self,
-        texture_id: u64,
+        texture_id: TextureId,
         sampler: Sampler,
     ) -> u64 {
         let sampler_id = self.next_sampler_id;
@@ -361,7 +361,7 @@ impl WgpuTextureManager {
     /// Returns false if the texture_id is not registered.
     pub(crate) fn update_custom_sampler_for_texture(
         &mut self,
-        texture_id: u64,
+        texture_id: TextureId,
         sampler: Sampler,
     ) -> bool {
         if !self.textures.contains_key(&texture_id) {
@@ -377,12 +377,12 @@ impl WgpuTextureManager {
     }
 
     /// Get the custom sampler id for a texture (if any).
-    pub(crate) fn custom_sampler_id_for_texture(&self, texture_id: u64) -> Option<u64> {
+    pub(crate) fn custom_sampler_id_for_texture(&self, texture_id: TextureId) -> Option<u64> {
         self.custom_sampler_by_texture.get(&texture_id).copied()
     }
 
     /// Remove any custom sampler association for a texture.
-    pub(crate) fn clear_custom_sampler_for_texture(&mut self, texture_id: u64) {
+    pub(crate) fn clear_custom_sampler_for_texture(&mut self, texture_id: TextureId) {
         if let Some(sampler_id) = self.custom_sampler_by_texture.remove(&texture_id) {
             // Drop cached bind group so next use rebuilds it.
             self.common_bind_groups.remove(&sampler_id);
@@ -423,7 +423,7 @@ impl WgpuTextureManager {
     }
 
     /// Destroy a texture by ID
-    pub fn destroy_texture_by_id(&mut self, id: u64) {
+    pub fn destroy_texture_by_id(&mut self, id: TextureId) {
         self.remove_texture(id);
     }
 
@@ -433,7 +433,7 @@ impl WgpuTextureManager {
         device: &Device,
         queue: &Queue,
         texture_data: &TextureData,
-        texture_id: u64,
+        texture_id: TextureId,
     ) -> RendererResult<()> {
         // For WGPU, we recreate the texture instead of updating in place.
         // Create the replacement first so a failure does not destroy the existing texture.
@@ -479,7 +479,7 @@ impl WgpuTextureManager {
         device: &Device,
         queue: &Queue,
         texture_data: &TextureData,
-    ) -> RendererResult<u64> {
+    ) -> RendererResult<TextureId> {
         let width = texture_data.width();
         let height = texture_data.height();
         let format = texture_data.format();
@@ -649,7 +649,7 @@ impl WgpuTextureManager {
             tracing::debug!(
                 target: "dear-imgui-wgpu",
                 "[dear-imgui-wgpu][debug] Texture registered: id={}",
-                texture_id
+                texture_id.id()
             );
         }
         Ok(texture_id)
@@ -662,7 +662,7 @@ impl WgpuTextureManager {
         queue: &Queue,
         texture_data: &TextureData,
     ) -> RendererResult<()> {
-        let texture_id = texture_data.tex_id().id();
+        let texture_id = texture_data.tex_id();
 
         // If the texture already exists and the TextureData only requests sub-rectangle
         // updates, honor them in-place to match Dear ImGui 1.92 semantics.
@@ -695,8 +695,7 @@ impl WgpuTextureManager {
 
     /// Destroy a texture
     pub fn destroy_texture(&mut self, texture_id: TextureId) {
-        let texture_id_u64 = texture_id.id();
-        self.remove_texture(texture_id_u64);
+        self.remove_texture(texture_id);
         // WGPU textures are automatically cleaned up when dropped
     }
 
@@ -719,7 +718,7 @@ impl WgpuTextureManager {
         let mut textures = draw_data.textures_mut();
         while let Some(mut texture_data) = textures.next() {
             let status = texture_data.status();
-            let current_tex_id = texture_data.tex_id().id();
+            let current_tex_id = texture_data.tex_id();
 
             match status {
                 TextureStatus::WantCreate => {
@@ -728,7 +727,7 @@ impl WgpuTextureManager {
 
                     // If ImGui already had a TexID associated, drop any stale bind group
                     // so that a new one is created the first time we render with it.
-                    if current_tex_id != 0 {
+                    if !current_tex_id.is_null() {
                         render_resources.remove_image_bind_group(current_tex_id);
                     }
 
@@ -738,16 +737,14 @@ impl WgpuTextureManager {
                             // In the C++ implementation, they use the TextureView pointer as ImTextureID.
                             // In Rust, we can't get the raw pointer, so we use our internal texture ID.
                             // This works because our renderer will map the texture ID to the WGPU texture.
-                            let new_texture_id = dear_imgui_rs::TextureId::from(wgpu_texture_id);
-
-                            texture_data.set_tex_id(new_texture_id);
+                            texture_data.set_tex_id(wgpu_texture_id);
 
                             // Mark texture as ready
                             texture_data.set_status(TextureStatus::OK);
                         }
                         Err(e) => {
                             println!(
-                                "Failed to create texture for ID: {}, error: {}",
+                                "Failed to create texture for ID: {:?}, error: {}",
                                 current_tex_id, e
                             );
                         }
@@ -755,15 +752,15 @@ impl WgpuTextureManager {
                 }
                 TextureStatus::WantUpdates => {
                     let imgui_tex_id = texture_data.tex_id();
-                    let internal_id = imgui_tex_id.id();
+                    let internal_id = imgui_tex_id;
 
                     // If we don't have a valid texture id yet (first update) or the
                     // id isn't registered, create it now and write back the TexID,
                     // so this frame (or the next one) can bind the correct texture.
-                    if internal_id == 0 || !self.contains_texture(internal_id) {
+                    if internal_id.is_null() || !self.contains_texture(internal_id) {
                         match self.create_texture_from_data(device, queue, &*texture_data) {
                             Ok(new_id) => {
-                                texture_data.set_tex_id(dear_imgui_rs::TextureId::from(new_id));
+                                texture_data.set_tex_id(new_id);
                                 texture_data.set_status(TextureStatus::OK);
                             }
                             Err(_e) => {
@@ -816,7 +813,7 @@ impl WgpuTextureManager {
                     }
                     if can_destroy {
                         let imgui_tex_id = texture_data.tex_id();
-                        let internal_id = imgui_tex_id.id();
+                        let internal_id = imgui_tex_id;
                         // Remove from texture cache and any associated bind groups
                         self.remove_texture(internal_id);
                         self.clear_custom_sampler_for_texture(internal_id);
@@ -864,18 +861,14 @@ impl WgpuTextureManager {
         match texture_data.status() {
             TextureStatus::WantCreate => {
                 let texture_id = self.create_texture_from_data(device, queue, texture_data)?;
-                Ok(TextureUpdateResult::Created {
-                    texture_id: TextureId::from(texture_id),
-                })
+                Ok(TextureUpdateResult::Created { texture_id })
             }
             TextureStatus::WantUpdates => {
-                let internal_id = texture_data.tex_id().id();
-                if internal_id == 0 || !self.contains_texture(internal_id) {
+                let internal_id = texture_data.tex_id();
+                if internal_id.is_null() || !self.contains_texture(internal_id) {
                     // No valid ID yet: create now and return Created so caller can set TexID
                     let texture_id = self.create_texture_from_data(device, queue, texture_data)?;
-                    Ok(TextureUpdateResult::Created {
-                        texture_id: TextureId::from(texture_id),
-                    })
+                    Ok(TextureUpdateResult::Created { texture_id })
                 } else {
                     match self.update_texture_from_data_with_id(
                         device,

@@ -160,8 +160,7 @@ impl AppWindow {
         renderer.set_gamma_mode(GammaMode::Auto);
 
         // Register the offscreen texture as an external ImGui texture.
-        let game_tex_raw_id = renderer.register_external_texture(&game_tex, &game_tex_view);
-        let game_tex_id = TextureId::from(game_tex_raw_id);
+        let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
 
         // Build Self first to pin renderer and imgui in their final locations
         let mut app = Self {

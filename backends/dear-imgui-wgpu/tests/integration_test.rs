@@ -2,8 +2,11 @@
 //!
 //! This test verifies that our improvements maintain compatibility with the C++ implementation
 
+use dear_imgui_rs::{TextureData, TextureId};
 use dear_imgui_wgpu::wgpu::*;
-use dear_imgui_wgpu::{Uniforms, WgpuRenderer};
+use dear_imgui_wgpu::{
+    RenderResources, RendererResult, Uniforms, WgpuRenderer, WgpuTexture, WgpuTextureManager,
+};
 
 /// Test that gamma correction values match the C++ implementation
 #[test]
@@ -166,4 +169,54 @@ fn test_uniforms_layout() {
     assert_eq!(uniforms.mvp[1][1], 1.0);
     assert_eq!(uniforms.mvp[2][2], 1.0);
     assert_eq!(uniforms.mvp[3][3], 1.0);
+}
+
+/// Public texture-management APIs should expose semantic TextureId handles, not raw integers.
+#[test]
+fn texture_id_api_boundaries_are_typed() {
+    let _: fn(&mut WgpuTextureManager, WgpuTexture) -> TextureId =
+        WgpuTextureManager::register_texture;
+    let _: for<'a> fn(&'a WgpuTextureManager, TextureId) -> Option<&'a WgpuTexture> =
+        WgpuTextureManager::get_texture;
+    let _: fn(&mut WgpuTextureManager, TextureId) -> Option<WgpuTexture> =
+        WgpuTextureManager::remove_texture;
+    let _: fn(&WgpuTextureManager, TextureId) -> bool = WgpuTextureManager::contains_texture;
+    let _: fn(&mut WgpuTextureManager, TextureId, WgpuTexture) =
+        WgpuTextureManager::insert_texture_with_id;
+    let _: fn(&mut WgpuTextureManager, TextureId) = WgpuTextureManager::destroy_texture_by_id;
+    let _: for<'a, 'b, 'c> fn(
+        &'a mut WgpuTextureManager,
+        &'b Device,
+        &'c Queue,
+        &TextureData,
+    ) -> RendererResult<TextureId> = WgpuTextureManager::create_texture_from_data;
+    let _: for<'a, 'b, 'c> fn(
+        &'a mut WgpuTextureManager,
+        &'b Device,
+        &'c Queue,
+        &TextureData,
+        TextureId,
+    ) -> RendererResult<()> = WgpuTextureManager::update_texture_from_data_with_id;
+
+    let _: for<'a, 'b> fn(
+        &'a mut RenderResources,
+        &'b Device,
+        TextureId,
+        &TextureView,
+    ) -> RendererResult<&'a BindGroup> = RenderResources::get_or_create_image_bind_group;
+    let _: fn(&mut RenderResources, TextureId) = RenderResources::remove_image_bind_group;
+
+    let _: for<'a, 'b, 'c> fn(&'a mut WgpuRenderer, &'b Texture, &'c TextureView) -> TextureId =
+        WgpuRenderer::register_external_texture;
+    let _: for<'a, 'b, 'c, 'd> fn(
+        &'a mut WgpuRenderer,
+        &'b Texture,
+        &'c TextureView,
+        &'d Sampler,
+    ) -> TextureId = WgpuRenderer::register_external_texture_with_sampler;
+    let _: for<'a, 'b> fn(&'a mut WgpuRenderer, TextureId, &'b TextureView) -> bool =
+        WgpuRenderer::update_external_texture_view;
+    let _: for<'a, 'b> fn(&'a mut WgpuRenderer, TextureId, &'b Sampler) -> bool =
+        WgpuRenderer::update_external_texture_sampler;
+    let _: fn(&mut WgpuRenderer, TextureId) = WgpuRenderer::unregister_texture;
 }

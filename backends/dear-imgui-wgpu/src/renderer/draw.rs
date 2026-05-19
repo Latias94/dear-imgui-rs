@@ -1,6 +1,7 @@
 // Renderer draw helpers: frame resources, setup state, draw lists traversal
 
 use super::*;
+use dear_imgui_rs::TextureId;
 use dear_imgui_rs::render::{DrawData, DrawIdx};
 
 // ImGui index type is currently u16 in dear-imgui-rs, but keep this derived so
@@ -155,11 +156,12 @@ impl WgpuRenderer {
                         let tex_id = unsafe {
                             let mut cmd_copy = *raw_cmd;
                             dear_imgui_rs::sys::ImDrawCmd_GetTexID(&mut cmd_copy)
-                        } as u64;
+                        };
+                        let tex_id = TextureId::from(tex_id);
 
                         // Switch common bind group (sampler) if this texture uses a custom sampler
                         // or a standard sampler callback changed the default.
-                        let desired_sampler = if tex_id == 0 {
+                        let desired_sampler = if tex_id.is_null() {
                             standard_sampler
                         } else {
                             texture_manager
@@ -193,13 +195,13 @@ impl WgpuRenderer {
                             current_sampler = desired_sampler;
                         }
 
-                        let texture_bind_group = if tex_id == 0 {
+                        let texture_bind_group = if tex_id.is_null() {
                             if let Some(default_tex) = default_texture {
                                 backend_data
                                     .render_resources
                                     .get_or_create_image_bind_group(
                                         &backend_data.device,
-                                        0,
+                                        TextureId::null(),
                                         default_tex,
                                     )?
                                     .clone()
@@ -222,7 +224,7 @@ impl WgpuRenderer {
                                 .render_resources
                                 .get_or_create_image_bind_group(
                                     &backend_data.device,
-                                    0,
+                                    TextureId::null(),
                                     default_tex,
                                 )?
                                 .clone()

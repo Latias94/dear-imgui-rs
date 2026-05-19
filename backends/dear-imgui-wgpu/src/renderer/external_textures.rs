@@ -1,18 +1,19 @@
 // Renderer external texture helpers (register/update/unregister)
 
 use super::WgpuRenderer;
+use dear_imgui_rs::TextureId;
 
 impl WgpuRenderer {
     /// Register an external WGPU texture + view and obtain a TextureId for ImGui usage.
     ///
     /// Use this when you already have a `wgpu::Texture` (e.g., game view RT, video frame,
     /// atlas upload) and want to display it via legacy `TextureId` path:
-    /// `ui.image(TextureId::from(id), size)`.
+    /// `ui.image(texture_id, size)`.
     pub fn register_external_texture(
         &mut self,
         texture: &wgpu::Texture,
         view: &wgpu::TextureView,
-    ) -> u64 {
+    ) -> TextureId {
         self.texture_manager
             .register_texture(crate::WgpuTexture::new(texture.clone(), view.clone()))
     }
@@ -26,7 +27,7 @@ impl WgpuRenderer {
         texture: &wgpu::Texture,
         view: &wgpu::TextureView,
         sampler: &wgpu::Sampler,
-    ) -> u64 {
+    ) -> TextureId {
         let id = self
             .texture_manager
             .register_texture(crate::WgpuTexture::new(texture.clone(), view.clone()));
@@ -40,7 +41,7 @@ impl WgpuRenderer {
     /// Returns true if the texture existed and the view was replaced.
     pub fn update_external_texture_view(
         &mut self,
-        texture_id: u64,
+        texture_id: TextureId,
         view: &wgpu::TextureView,
     ) -> bool {
         if let Some(mut tex) = self.texture_manager.remove_texture(texture_id) {
@@ -60,7 +61,7 @@ impl WgpuRenderer {
     /// Returns false if the texture_id is not registered.
     pub fn update_external_texture_sampler(
         &mut self,
-        texture_id: u64,
+        texture_id: TextureId,
         sampler: &wgpu::Sampler,
     ) -> bool {
         self.texture_manager
@@ -68,7 +69,7 @@ impl WgpuRenderer {
     }
 
     /// Unregister (remove) a texture by id. Safe for both external and managed textures.
-    pub fn unregister_texture(&mut self, texture_id: u64) {
+    pub fn unregister_texture(&mut self, texture_id: TextureId) {
         self.texture_manager.remove_texture(texture_id);
         self.texture_manager
             .clear_custom_sampler_for_texture(texture_id);

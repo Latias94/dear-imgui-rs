@@ -513,16 +513,15 @@ impl<'a> GpuApi<'a> {
         texture: &wgpu::Texture,
         view: &wgpu::TextureView,
     ) -> TextureId {
-        TextureId::from(self.renderer.register_external_texture(texture, view))
+        self.renderer.register_external_texture(texture, view)
     }
     /// Update the view for an existing registered texture
     pub fn update_texture_view(&mut self, tex_id: TextureId, view: &wgpu::TextureView) -> bool {
-        self.renderer
-            .update_external_texture_view(tex_id.id(), view)
+        self.renderer.update_external_texture_view(tex_id, view)
     }
     /// Unregister a previously registered texture
     pub fn unregister_texture(&mut self, tex_id: TextureId) {
-        self.renderer.unregister_texture(tex_id.id())
+        self.renderer.unregister_texture(tex_id)
     }
     /// Optional: directly drive managed TextureData create/update without waiting for draw pass
     pub fn update_texture_data(

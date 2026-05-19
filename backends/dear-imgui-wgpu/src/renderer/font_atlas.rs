@@ -29,7 +29,7 @@ impl WgpuRenderer {
         imgui_ctx: &mut Context,
         device: &Device,
         queue: &Queue,
-    ) -> RendererResult<Option<u64>> {
+    ) -> RendererResult<Option<dear_imgui_rs::TextureId>> {
         // SAFETY: Access raw TexData/bytes only to copy pixels. Requires fonts.build() called.
         let fonts = imgui_ctx.font_atlas();
         // Try to read raw texture data to determine bytes-per-pixel
@@ -189,13 +189,13 @@ impl WgpuRenderer {
             // Set atlas texture id + status OK (updates TexRef and TexData)
             {
                 let mut fonts_mut = imgui_ctx.font_atlas_mut();
-                fonts_mut.set_texture_id(dear_imgui_rs::TextureId::from(tex_id));
+                fonts_mut.set_texture_id(tex_id);
             }
             if cfg!(debug_assertions) {
                 tracing::debug!(
                     target: "dear-imgui-wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas fallback upload complete: tex_id={}",
-                    tex_id
+                    tex_id.id()
                 );
             }
 

@@ -124,6 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dear-imgui-sdl3::{render,canvas_render}` now take `&mut DrawData` instead of `&DrawData`.
   - `dear-app::GpuApi` texture registration now returns and accepts `TextureId` instead of raw
     `u64` ids.
+  - `dear-imgui-wgpu` texture manager and external texture helpers now return and accept
+    `TextureId` instead of raw `u64` texture IDs.
   - `dear-imgui-glow::TextureMap` texture registration/update dimensions now use `u32`.
 
 ### Changed

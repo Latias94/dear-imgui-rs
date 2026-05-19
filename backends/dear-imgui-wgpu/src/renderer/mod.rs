@@ -18,7 +18,7 @@ use crate::{
     FrameResources, RenderResources, RendererError, RendererResult, ShaderManager, Uniforms,
     WgpuBackendData, WgpuInitInfo, WgpuTextureManager,
 };
-use dear_imgui_rs::{BackendFlags, Context, render::DrawData, sys};
+use dear_imgui_rs::{BackendFlags, Context, TextureId, render::DrawData, sys};
 #[cfg(feature = "mv-log")]
 use std::sync::{Mutex, OnceLock};
 use wgpu::*;
@@ -351,8 +351,9 @@ impl WgpuRenderer {
             // primary mode.
             let mut tex_ref = imgui_ctx.font_atlas().get_tex_ref();
             let existing_tex_id = unsafe { sys::ImTextureRef_GetTexID(&mut tex_ref) };
-            let has_live_font_texture =
-                existing_tex_id != 0 && self.texture_manager.contains_texture(existing_tex_id);
+            let existing_tex_id = TextureId::from(existing_tex_id);
+            let has_live_font_texture = !existing_tex_id.is_null()
+                && self.texture_manager.contains_texture(existing_tex_id);
 
             if !has_live_font_texture
                 && let Some(tex_id) =
@@ -362,7 +363,7 @@ impl WgpuRenderer {
                 tracing::debug!(
                     target: "dear-imgui-wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas uploaded via legacy fallback path. tex_id={}",
-                    tex_id
+                    tex_id.id()
                 );
             }
         }
@@ -483,11 +484,11 @@ impl WgpuRenderer {
                 crate::TextureUpdateResult::Created { texture_id } => {
                     backend_data
                         .render_resources
-                        .remove_image_bind_group(texture_id.id());
+                        .remove_image_bind_group(texture_id);
                 }
                 crate::TextureUpdateResult::Updated | crate::TextureUpdateResult::Destroyed => {
-                    let id = texture_data.tex_id().id();
-                    if id != 0 {
+                    let id = texture_data.tex_id();
+                    if !id.is_null() {
                         backend_data.render_resources.remove_image_bind_group(id);
                     }
                 }
@@ -809,12 +810,13 @@ impl WgpuRenderer {
                             // Texture bind group resolution mirrors render_draw_lists_static
                             // Resolve effective ImTextureID using raw_cmd (modern texture path)
                             let mut cmd_copy = *raw_cmd;
-                            let tex_id =
-                                dear_imgui_rs::sys::ImDrawCmd_GetTexID(&mut cmd_copy) as u64;
+                            let tex_id = TextureId::from(dear_imgui_rs::sys::ImDrawCmd_GetTexID(
+                                &mut cmd_copy,
+                            ));
 
                             // Switch common bind group (sampler) if this texture uses a custom sampler
                             // or a standard sampler callback changed the default.
-                            let desired_sampler = if tex_id == 0 {
+                            let desired_sampler = if tex_id.is_null() {
                                 standard_sampler
                             } else {
                                 self.texture_manager
@@ -849,13 +851,13 @@ impl WgpuRenderer {
                                 current_sampler = desired_sampler;
                             }
 
-                            let texture_bind_group = if tex_id == 0 {
+                            let texture_bind_group = if tex_id.is_null() {
                                 if let Some(default_tex) = &self.default_texture {
                                     backend_data
                                         .render_resources
                                         .get_or_create_image_bind_group(
                                             &backend_data.device,
-                                            0,
+                                            TextureId::null(),
                                             default_tex,
                                         )?
                                         .clone()
@@ -880,7 +882,7 @@ impl WgpuRenderer {
                                     .render_resources
                                     .get_or_create_image_bind_group(
                                         &backend_data.device,
-                                        0,
+                                        TextureId::null(),
                                         default_tex,
                                     )?
                                     .clone()

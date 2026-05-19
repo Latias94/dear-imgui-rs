@@ -776,8 +776,7 @@ impl ViewRtt {
         });
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let id64 = renderer.register_external_texture_with_sampler(&texture, &view, sampler);
-        let texture_id = TextureId::from(id64);
+        let texture_id = renderer.register_external_texture_with_sampler(&texture, &view, sampler);
 
         Self {
             texture,

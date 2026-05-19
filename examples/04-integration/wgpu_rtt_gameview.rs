@@ -58,8 +58,7 @@ impl OffscreenRtt {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let id64 = renderer.register_external_texture_with_sampler(&texture, &view, sampler);
-        let texture_id = dear_imgui_rs::TextureId::from(id64);
+        let texture_id = renderer.register_external_texture_with_sampler(&texture, &view, sampler);
 
         Self {
             size,
@@ -78,7 +77,7 @@ impl OffscreenRtt {
         sampler: &wgpu::Sampler,
     ) {
         // Destroy old registration
-        renderer.unregister_texture(self.texture_id.id());
+        renderer.unregister_texture(self.texture_id);
 
         let new_self = OffscreenRtt::create(device, renderer, size, format, sampler);
         *self = new_self;
@@ -439,7 +438,7 @@ impl AppWindow {
             } else {
                 &self.linear_sampler
             };
-            let _ = renderer.update_external_texture_sampler(self.rtt.texture_id.id(), sampler);
+            let _ = renderer.update_external_texture_sampler(self.rtt.texture_id, sampler);
         }
 
         // Render to swapchain
@@ -561,10 +560,10 @@ impl ApplicationHandler for App {
                             } else {
                                 &window.linear_sampler
                             };
-                            let _ = window.imgui.renderer.update_external_texture_sampler(
-                                window.rtt.texture_id.id(),
-                                sampler,
-                            );
+                            let _ = window
+                                .imgui
+                                .renderer
+                                .update_external_texture_sampler(window.rtt.texture_id, sampler);
                             window.window.request_redraw();
                         }
                         _ => {}

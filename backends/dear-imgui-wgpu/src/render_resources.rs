@@ -4,6 +4,7 @@
 //! corresponding to the RenderResources struct in imgui_impl_wgpu.cpp
 
 use crate::{RendererError, RendererResult, UniformBuffer};
+use dear_imgui_rs::TextureId;
 use std::collections::HashMap;
 use wgpu::*;
 
@@ -22,7 +23,7 @@ pub struct RenderResources {
     /// Common bind group using the nearest/point sampler
     pub nearest_common_bind_group: Option<BindGroup>,
     /// Image bind groups cache (texture_id -> bind_group)
-    pub image_bind_groups: HashMap<u64, BindGroup>,
+    pub image_bind_groups: HashMap<TextureId, BindGroup>,
     /// Image bind group layout (cached for efficiency)
     pub image_bind_group_layout: Option<BindGroupLayout>,
 }
@@ -154,7 +155,7 @@ impl RenderResources {
     pub fn get_or_create_image_bind_group(
         &mut self,
         device: &Device,
-        texture_id: u64,
+        texture_id: TextureId,
         texture_view: &TextureView,
     ) -> RendererResult<&BindGroup> {
         if !self.image_bind_groups.contains_key(&texture_id) {
@@ -168,7 +169,7 @@ impl RenderResources {
     }
 
     /// Remove an image bind group
-    pub fn remove_image_bind_group(&mut self, texture_id: u64) {
+    pub fn remove_image_bind_group(&mut self, texture_id: TextureId) {
         self.image_bind_groups.remove(&texture_id);
     }
 
