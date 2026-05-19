@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and target accept APIs now use `DragDropTargetFlags`. Migrate `DragDropFlags::SOURCE_*`
     constants to `DragDropSourceFlags::*` and `DragDropFlags::ACCEPT_*` constants to
     `DragDropTargetFlags::*`.
+  - Hovered flags are split by call-site domain: window hover queries now use
+    `WindowHoveredFlags`, item hover queries now use `ItemHoveredFlags`, and style tooltip hover
+    defaults now use `TooltipHoveredFlags`.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - `dear-file-browser` scan request/batch/status generations now use `ScanGeneration`,

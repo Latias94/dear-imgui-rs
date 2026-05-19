@@ -58,7 +58,7 @@ pub(crate) mod scroll;
 pub use child_window::{ChildFlags, ChildWindow, ChildWindowToken};
 
 // Window-focused/hovered helpers are available via utils.rs variants.
-// Window hovered/focused flag helpers are provided by crate::utils::HoveredFlags.
+// Window hovered/focused flag helpers are provided by crate::utils.
 
 bitflags! {
     /// Configuration flags for windows

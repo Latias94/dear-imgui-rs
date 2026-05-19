@@ -115,12 +115,12 @@ impl Ui {
     /// This is typically used to show tooltips.
     #[doc(alias = "IsItemHovered")]
     pub fn is_item_hovered(&self) -> bool {
-        unsafe { sys::igIsItemHovered(crate::HoveredFlags::NONE.bits()) }
+        unsafe { sys::igIsItemHovered(crate::ItemHoveredFlags::NONE.bits()) }
     }
 
     /// Returns true if the last item is being hovered by mouse with specific flags.
     #[doc(alias = "IsItemHovered")]
-    pub fn is_item_hovered_with_flags(&self, flags: crate::HoveredFlags) -> bool {
+    pub fn is_item_hovered_with_flags(&self, flags: crate::ItemHoveredFlags) -> bool {
         crate::utils::validate_item_hovered_flags("Ui::is_item_hovered_with_flags()", flags);
         unsafe { sys::igIsItemHovered(flags.bits()) }
     }

@@ -18,20 +18,24 @@ fn prepare_context(ctx: &mut imgui::Context) {
 #[test]
 fn hover_and_focus_flag_types_include_current_public_upstream_aliases() {
     assert_eq!(
-        imgui::HoveredFlags::ALLOW_WHEN_OVERLAPPED_BY_ITEM.bits(),
+        imgui::ItemHoveredFlags::ALLOW_WHEN_OVERLAPPED_BY_ITEM.bits(),
         imgui::sys::ImGuiHoveredFlags_AllowWhenOverlappedByItem
     );
     assert_eq!(
-        imgui::HoveredFlags::ALLOW_WHEN_OVERLAPPED_BY_WINDOW.bits(),
+        imgui::ItemHoveredFlags::ALLOW_WHEN_OVERLAPPED_BY_WINDOW.bits(),
         imgui::sys::ImGuiHoveredFlags_AllowWhenOverlappedByWindow
     );
     assert_eq!(
-        imgui::HoveredFlags::RECT_ONLY.bits(),
+        imgui::ItemHoveredFlags::RECT_ONLY.bits(),
         imgui::sys::ImGuiHoveredFlags_RectOnly
     );
     assert_eq!(
-        imgui::HoveredFlags::ROOT_AND_CHILD_WINDOWS.bits(),
+        imgui::WindowHoveredFlags::ROOT_AND_CHILD_WINDOWS.bits(),
         imgui::sys::ImGuiHoveredFlags_RootAndChildWindows
+    );
+    assert_eq!(
+        imgui::TooltipHoveredFlags::DELAY_SHORT.bits(),
+        imgui::sys::ImGuiHoveredFlags_DelayShort
     );
     assert_eq!(
         imgui::FocusedFlags::ROOT_AND_CHILD_WINDOWS.bits(),
@@ -50,39 +54,46 @@ fn hover_query_methods_reject_flags_invalid_for_their_call_site_before_ffi() {
     let _ = ui.window("hover flag boundaries").build(|| {
         ui.text("hover target");
 
-        let legal_item_flags = imgui::HoveredFlags::ALLOW_WHEN_DISABLED
-            | imgui::HoveredFlags::ALLOW_WHEN_OVERLAPPED_BY_ITEM
-            | imgui::HoveredFlags::DELAY_SHORT;
+        let legal_item_flags = imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED
+            | imgui::ItemHoveredFlags::ALLOW_WHEN_OVERLAPPED_BY_ITEM
+            | imgui::ItemHoveredFlags::DELAY_SHORT;
         let _ = ui.is_item_hovered_with_flags(legal_item_flags);
 
-        let legal_window_flags = imgui::HoveredFlags::ROOT_AND_CHILD_WINDOWS
-            | imgui::HoveredFlags::ALLOW_WHEN_BLOCKED_BY_POPUP
-            | imgui::HoveredFlags::STATIONARY;
+        let legal_window_flags = imgui::WindowHoveredFlags::ROOT_AND_CHILD_WINDOWS
+            | imgui::WindowHoveredFlags::ALLOW_WHEN_BLOCKED_BY_POPUP
+            | imgui::WindowHoveredFlags::STATIONARY;
         let _ = ui.is_window_hovered_with_flags(legal_window_flags);
 
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = ui.is_item_hovered_with_flags(imgui::HoveredFlags::CHILD_WINDOWS);
+                let flags = imgui::ItemHoveredFlags::from_bits_retain(
+                    imgui::WindowHoveredFlags::CHILD_WINDOWS.bits(),
+                );
+                let _ = ui.is_item_hovered_with_flags(flags);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = ui.is_window_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED);
+                let flags = imgui::WindowHoveredFlags::from_bits_retain(
+                    imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED.bits(),
+                );
+                let _ = ui.is_window_hovered_with_flags(flags);
             }))
             .is_err()
         );
 
-        let raw_unused_bit = imgui::HoveredFlags::from_bits_retain(1 << 6);
+        let raw_item_unused_bit = imgui::ItemHoveredFlags::from_bits_retain(1 << 6);
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = ui.is_item_hovered_with_flags(raw_unused_bit);
+                let _ = ui.is_item_hovered_with_flags(raw_item_unused_bit);
             }))
             .is_err()
         );
+        let raw_window_unused_bit = imgui::WindowHoveredFlags::from_bits_retain(1 << 6);
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = ui.is_window_hovered_with_flags(raw_unused_bit);
+                let _ = ui.is_window_hovered_with_flags(raw_window_unused_bit);
             }))
             .is_err()
         );
@@ -119,16 +130,18 @@ fn tooltip_hover_style_flags_reject_raw_window_or_recursive_flags_before_storage
     let mut ctx = imgui::Context::create();
     let style = ctx.style_mut();
 
-    let legal_mouse_flags = imgui::HoveredFlags::ALLOW_WHEN_DISABLED
-        | imgui::HoveredFlags::STATIONARY
-        | imgui::HoveredFlags::DELAY_SHORT;
+    let legal_mouse_flags = imgui::TooltipHoveredFlags::ALLOW_WHEN_DISABLED
+        | imgui::TooltipHoveredFlags::STATIONARY
+        | imgui::TooltipHoveredFlags::DELAY_SHORT;
     style.set_hover_flags_for_tooltip_mouse(legal_mouse_flags);
     assert_eq!(style.hover_flags_for_tooltip_mouse(), legal_mouse_flags);
 
     for invalid in [
-        imgui::HoveredFlags::CHILD_WINDOWS,
-        imgui::HoveredFlags::FOR_TOOLTIP,
-        imgui::HoveredFlags::from_bits_retain(1 << 6),
+        imgui::TooltipHoveredFlags::from_bits_retain(
+            imgui::WindowHoveredFlags::CHILD_WINDOWS.bits(),
+        ),
+        imgui::TooltipHoveredFlags::from_bits_retain(imgui::ItemHoveredFlags::FOR_TOOLTIP.bits()),
+        imgui::TooltipHoveredFlags::from_bits_retain(1 << 6),
     ] {
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -140,7 +153,7 @@ fn tooltip_hover_style_flags_reject_raw_window_or_recursive_flags_before_storage
     }
 
     let legal_nav_flags =
-        imgui::HoveredFlags::ALLOW_WHEN_DISABLED | imgui::HoveredFlags::DELAY_NORMAL;
+        imgui::TooltipHoveredFlags::ALLOW_WHEN_DISABLED | imgui::TooltipHoveredFlags::DELAY_NORMAL;
     style.set_hover_flags_for_tooltip_nav(legal_nav_flags);
     assert_eq!(style.hover_flags_for_tooltip_nav(), legal_nav_flags);
 }

@@ -51,10 +51,10 @@ impl From<u32> for LogAutoOpenDepth {
 }
 
 bitflags! {
-    /// Flags for hovering detection
+    /// Flags accepted by `Ui::is_window_hovered_with_flags()`.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct HoveredFlags: i32 {
+    pub struct WindowHoveredFlags: i32 {
         /// Return true if directly over the item/window, not obstructed by another window, not obstructed by an active popup or modal blocking inputs under them.
         const NONE = sys::ImGuiHoveredFlags_None as i32;
         /// IsWindowHovered() only: Return true if any children of the window is hovered
@@ -71,6 +71,32 @@ bitflags! {
         const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup as i32;
         /// Return true even if an active item is blocking access to this item/window. Useful for Drag and Drop patterns.
         const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
+        /// IsWindowHovered() only: Shortcut for `ROOT_WINDOW | CHILD_WINDOWS`.
+        const ROOT_AND_CHILD_WINDOWS = sys::ImGuiHoveredFlags_RootAndChildWindows as i32;
+        /// Shortcut for standard flags when using IsWindowHovered() + tooltip-style hover behavior.
+        const FOR_TOOLTIP = sys::ImGuiHoveredFlags_ForTooltip as i32;
+        /// Require mouse to be stationary for style.HoverStationaryDelay (~0.15 sec) at least one time.
+        const STATIONARY = sys::ImGuiHoveredFlags_Stationary as i32;
+    }
+}
+
+impl Default for WindowHoveredFlags {
+    fn default() -> Self {
+        WindowHoveredFlags::NONE
+    }
+}
+
+bitflags! {
+    /// Flags accepted by `Ui::is_item_hovered_with_flags()`.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct ItemHoveredFlags: i32 {
+        /// Return true if directly over the item, not obstructed by another window, not obstructed by an active popup or modal blocking inputs under it.
+        const NONE = sys::ImGuiHoveredFlags_None as i32;
+        /// Return true even if a popup window is normally blocking access to this item/window
+        const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup as i32;
+        /// Return true even if an active item is blocking access to this item/window. Useful for Drag and Drop patterns.
+        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
         /// IsItemHovered() only: Return true even if the item uses AllowOverlap mode and is overlapped by another hoverable item.
         const ALLOW_WHEN_OVERLAPPED_BY_ITEM = sys::ImGuiHoveredFlags_AllowWhenOverlappedByItem as i32;
         /// IsItemHovered() only: Return true even if the item position is overlapped by another window.
@@ -83,8 +109,6 @@ bitflags! {
         const NO_NAV_OVERRIDE = sys::ImGuiHoveredFlags_NoNavOverride as i32;
         /// IsItemHovered() only: test rectangle visibility with popup/active-item/overlap bypasses.
         const RECT_ONLY = sys::ImGuiHoveredFlags_RectOnly as i32;
-        /// IsWindowHovered() only: Shortcut for `ROOT_WINDOW | CHILD_WINDOWS`.
-        const ROOT_AND_CHILD_WINDOWS = sys::ImGuiHoveredFlags_RootAndChildWindows as i32;
         /// Shortcut for standard flags when using IsItemHovered() + SetTooltip() sequence.
         const FOR_TOOLTIP = sys::ImGuiHoveredFlags_ForTooltip as i32;
         /// Require mouse to be stationary for style.HoverStationaryDelay (~0.15 sec) _at least one time_. After this, can move on same item/window. Using the stationary test tends to reduces the need for a long delay.
@@ -100,9 +124,55 @@ bitflags! {
     }
 }
 
-impl Default for HoveredFlags {
+impl Default for ItemHoveredFlags {
     fn default() -> Self {
-        HoveredFlags::NONE
+        ItemHoveredFlags::NONE
+    }
+}
+
+bitflags! {
+    /// Flags stored in style tooltip hover defaults.
+    ///
+    /// This is the item-hover subset that can be expanded by
+    /// `ItemHoveredFlags::FOR_TOOLTIP`; it intentionally excludes `FOR_TOOLTIP`
+    /// itself to avoid recursive tooltip-style storage.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct TooltipHoveredFlags: i32 {
+        /// No flags
+        const NONE = sys::ImGuiHoveredFlags_None as i32;
+        /// Return true even if a popup window is normally blocking access to this item/window
+        const ALLOW_WHEN_BLOCKED_BY_POPUP = sys::ImGuiHoveredFlags_AllowWhenBlockedByPopup as i32;
+        /// Return true even if an active item is blocking access to this item/window. Useful for Drag and Drop patterns.
+        const ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM = sys::ImGuiHoveredFlags_AllowWhenBlockedByActiveItem as i32;
+        /// Return true even if the item uses AllowOverlap mode and is overlapped by another hoverable item.
+        const ALLOW_WHEN_OVERLAPPED_BY_ITEM = sys::ImGuiHoveredFlags_AllowWhenOverlappedByItem as i32;
+        /// Return true even if the item position is overlapped by another window.
+        const ALLOW_WHEN_OVERLAPPED_BY_WINDOW = sys::ImGuiHoveredFlags_AllowWhenOverlappedByWindow as i32;
+        /// Return true even if the position is obstructed or overlapped by another window.
+        const ALLOW_WHEN_OVERLAPPED = sys::ImGuiHoveredFlags_AllowWhenOverlapped as i32;
+        /// Return true even if the item is disabled.
+        const ALLOW_WHEN_DISABLED = sys::ImGuiHoveredFlags_AllowWhenDisabled as i32;
+        /// Disable using gamepad/keyboard navigation state when active, always query mouse.
+        const NO_NAV_OVERRIDE = sys::ImGuiHoveredFlags_NoNavOverride as i32;
+        /// Test rectangle visibility with popup/active-item/overlap bypasses.
+        const RECT_ONLY = sys::ImGuiHoveredFlags_RectOnly as i32;
+        /// Require mouse to be stationary for style.HoverStationaryDelay at least one time.
+        const STATIONARY = sys::ImGuiHoveredFlags_Stationary as i32;
+        /// Return true immediately.
+        const DELAY_NONE = sys::ImGuiHoveredFlags_DelayNone as i32;
+        /// Return true after style.HoverDelayShort elapsed.
+        const DELAY_SHORT = sys::ImGuiHoveredFlags_DelayShort as i32;
+        /// Return true after style.HoverDelayNormal elapsed.
+        const DELAY_NORMAL = sys::ImGuiHoveredFlags_DelayNormal as i32;
+        /// Disable shared delay system where moving between items preserves the previous timer.
+        const NO_SHARED_DELAY = sys::ImGuiHoveredFlags_NoSharedDelay as i32;
+    }
+}
+
+impl Default for TooltipHoveredFlags {
+    fn default() -> Self {
+        TooltipHoveredFlags::NONE
     }
 }
 
@@ -134,32 +204,27 @@ impl Default for FocusedFlags {
     }
 }
 
-const HOVERED_FLAGS_ALLOWED_FOR_WINDOW: i32 =
-    sys::ImGuiHoveredFlags_AllowedMaskForIsWindowHovered as i32;
-const HOVERED_FLAGS_ALLOWED_FOR_ITEM: i32 =
-    sys::ImGuiHoveredFlags_AllowedMaskForIsItemHovered as i32;
-
-fn validate_hovered_flags(caller: &str, flags: HoveredFlags, allowed_mask: i32) {
-    let unsupported = flags.bits() & !allowed_mask;
+pub(crate) fn validate_window_hovered_flags(caller: &str, flags: WindowHoveredFlags) {
+    let unsupported = flags.bits() & !WindowHoveredFlags::all().bits();
     assert!(
         unsupported == 0,
-        "{caller} received ImGuiHoveredFlags bits that are invalid for this call: 0x{unsupported:X}"
+        "{caller} received unsupported ImGuiHoveredFlags window bits: 0x{unsupported:X}"
     );
 }
 
-pub(crate) fn validate_window_hovered_flags(caller: &str, flags: HoveredFlags) {
-    validate_hovered_flags(caller, flags, HOVERED_FLAGS_ALLOWED_FOR_WINDOW);
-}
-
-pub(crate) fn validate_item_hovered_flags(caller: &str, flags: HoveredFlags) {
-    validate_hovered_flags(caller, flags, HOVERED_FLAGS_ALLOWED_FOR_ITEM);
-}
-
-pub(crate) fn validate_tooltip_hovered_flags(caller: &str, flags: HoveredFlags) {
-    validate_item_hovered_flags(caller, flags);
+pub(crate) fn validate_item_hovered_flags(caller: &str, flags: ItemHoveredFlags) {
+    let unsupported = flags.bits() & !ItemHoveredFlags::all().bits();
     assert!(
-        !flags.contains(HoveredFlags::FOR_TOOLTIP),
-        "{caller} stores the flags expanded by ImGuiHoveredFlags_ForTooltip, so FOR_TOOLTIP itself is not valid here"
+        unsupported == 0,
+        "{caller} received unsupported ImGuiHoveredFlags item bits: 0x{unsupported:X}"
+    );
+}
+
+pub(crate) fn validate_tooltip_hovered_flags(caller: &str, flags: TooltipHoveredFlags) {
+    let unsupported = flags.bits() & !TooltipHoveredFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ImGuiHoveredFlags tooltip bits: 0x{unsupported:X}"
     );
 }
 
@@ -222,12 +287,12 @@ impl crate::ui::Ui {
     /// Returns `true` if the current window is hovered (and typically: not blocked by a popup/modal)
     #[doc(alias = "IsWindowHovered")]
     pub fn is_window_hovered(&self) -> bool {
-        unsafe { sys::igIsWindowHovered(HoveredFlags::NONE.bits()) }
+        unsafe { sys::igIsWindowHovered(WindowHoveredFlags::NONE.bits()) }
     }
 
     /// Returns `true` if the current window is hovered based on the given flags
     #[doc(alias = "IsWindowHovered")]
-    pub fn is_window_hovered_with_flags(&self, flags: HoveredFlags) -> bool {
+    pub fn is_window_hovered_with_flags(&self, flags: WindowHoveredFlags) -> bool {
         validate_window_hovered_flags("Ui::is_window_hovered_with_flags()", flags);
         unsafe { sys::igIsWindowHovered(flags.bits()) }
     }

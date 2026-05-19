@@ -260,7 +260,7 @@ where
         let _disabled = ui.begin_disabled();
         let _ = ui.small_button(&add_label);
         drop(_disabled);
-        if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+        if ui.is_item_hovered_with_flags(imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED) {
             ui.set_item_tooltip("Insertion disabled in MapSettings");
         }
     }
@@ -397,11 +397,15 @@ where
                     } else {
                         let _disabled = ui.begin_disabled();
                         ui.menu_item("Remove item");
-                        if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+                        if ui.is_item_hovered_with_flags(
+                            imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED,
+                        ) {
                             ui.set_item_tooltip("Removal disabled in MapSettings");
                         }
                         ui.menu_item("Clear all");
-                        if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+                        if ui.is_item_hovered_with_flags(
+                            imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED,
+                        ) {
                             ui.set_item_tooltip("Removal disabled in MapSettings");
                         }
                         drop(_disabled);
@@ -451,11 +455,11 @@ where
                 } else {
                     let _disabled = ui.begin_disabled();
                     ui.menu_item("Remove item");
-                    if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+                    if ui.is_item_hovered_with_flags(imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED) {
                         ui.set_item_tooltip("Removal disabled in MapSettings");
                     }
                     ui.menu_item("Clear all");
-                    if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+                    if ui.is_item_hovered_with_flags(imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED) {
                         ui.set_item_tooltip("Removal disabled in MapSettings");
                     }
                     drop(_disabled);
@@ -548,7 +552,7 @@ where
         let _disabled = ui.begin_disabled();
         let _ = ui.small_button(&add_label);
         drop(_disabled);
-        if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+        if ui.is_item_hovered_with_flags(imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED) {
             ui.set_item_tooltip("Insertion disabled in MapSettings");
         }
     }
@@ -683,11 +687,15 @@ where
                     } else {
                         let _disabled = ui.begin_disabled();
                         ui.menu_item("Remove item");
-                        if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+                        if ui.is_item_hovered_with_flags(
+                            imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED,
+                        ) {
                             ui.set_item_tooltip("Removal disabled in MapSettings");
                         }
                         ui.menu_item("Clear all");
-                        if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+                        if ui.is_item_hovered_with_flags(
+                            imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED,
+                        ) {
                             ui.set_item_tooltip("Removal disabled in MapSettings");
                         }
                         drop(_disabled);
@@ -738,11 +746,11 @@ where
                 } else {
                     let _disabled = ui.begin_disabled();
                     ui.menu_item("Remove item");
-                    if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+                    if ui.is_item_hovered_with_flags(imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED) {
                         ui.set_item_tooltip("Removal disabled in MapSettings");
                     }
                     ui.menu_item("Clear all");
-                    if ui.is_item_hovered_with_flags(imgui::HoveredFlags::ALLOW_WHEN_DISABLED) {
+                    if ui.is_item_hovered_with_flags(imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED) {
                         ui.set_item_tooltip("Removal disabled in MapSettings");
                     }
                     drop(_disabled);

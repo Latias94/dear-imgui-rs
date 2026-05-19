@@ -1,4 +1,4 @@
-use dear_imgui_rs::HoveredFlags;
+use dear_imgui_rs::ItemHoveredFlags;
 use dear_imgui_rs::input::MouseButton;
 use dear_imgui_rs::*;
 
@@ -21,7 +21,7 @@ fn test_api_types_exist() {
     let _popup_flags = PopupFlags::NO_OPEN_OVER_EXISTING_POPUP;
 
     // Hover flags
-    let _hover_flags = HoveredFlags::ALLOW_WHEN_DISABLED;
+    let _hover_flags = ItemHoveredFlags::ALLOW_WHEN_DISABLED;
 
     // Mouse button
     let _button = MouseButton::Left;

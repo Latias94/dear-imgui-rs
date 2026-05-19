@@ -7,7 +7,7 @@
 use super::Style;
 use super::validation::assert_non_negative_f32;
 use crate::sys;
-use crate::utils::{HoveredFlags, validate_tooltip_hovered_flags};
+use crate::utils::{TooltipHoveredFlags, validate_tooltip_hovered_flags};
 
 impl Style {
     pub fn hover_stationary_delay(&self) -> f32 {
@@ -34,21 +34,21 @@ impl Style {
         self.inner_mut().HoverDelayNormal = v;
     }
 
-    pub fn hover_flags_for_tooltip_mouse(&self) -> HoveredFlags {
-        HoveredFlags::from_bits_truncate(self.inner().HoverFlagsForTooltipMouse as i32)
+    pub fn hover_flags_for_tooltip_mouse(&self) -> TooltipHoveredFlags {
+        TooltipHoveredFlags::from_bits_retain(self.inner().HoverFlagsForTooltipMouse as i32)
     }
-    pub fn set_hover_flags_for_tooltip_mouse(&mut self, flags: HoveredFlags) {
+    pub fn set_hover_flags_for_tooltip_mouse(&mut self, flags: TooltipHoveredFlags) {
         validate_tooltip_hovered_flags("Style::set_hover_flags_for_tooltip_mouse()", flags);
         self.inner_mut().HoverFlagsForTooltipMouse = flags.bits() as sys::ImGuiHoveredFlags;
     }
 
-    pub fn hover_flags_for_tooltip_nav(&self) -> HoveredFlags {
-        HoveredFlags::from_bits_truncate(self.inner().HoverFlagsForTooltipNav as i32)
+    pub fn hover_flags_for_tooltip_nav(&self) -> TooltipHoveredFlags {
+        TooltipHoveredFlags::from_bits_retain(self.inner().HoverFlagsForTooltipNav as i32)
     }
-    pub fn set_hover_flags_for_tooltip_nav(&mut self, flags: HoveredFlags) {
+    pub fn set_hover_flags_for_tooltip_nav(&mut self, flags: TooltipHoveredFlags) {
         validate_tooltip_hovered_flags("Style::set_hover_flags_for_tooltip_nav()", flags);
         self.inner_mut().HoverFlagsForTooltipNav = flags.bits() as sys::ImGuiHoveredFlags;
     }
 }
 
-// HoveredFlags are defined in utils.rs and re-exported at crate root.
+// Hovered flag domain types are defined in utils.rs and re-exported at crate root.
