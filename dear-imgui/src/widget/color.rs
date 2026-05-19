@@ -13,7 +13,8 @@ mod validation;
 pub use button::ColorButton;
 pub use edit::{ColorEdit3, ColorEdit4};
 pub use flags::{
-    ColorButtonOptions, ColorDataType, ColorDisplayMode, ColorEditFlags, ColorEditOptions,
-    ColorInputMode, ColorPickerDisplayFlags, ColorPickerMode, ColorPickerOptions,
+    ColorButtonFlags, ColorButtonOptions, ColorDataType, ColorDisplayMode, ColorEditFlags,
+    ColorEditOptions, ColorInputMode, ColorPickerDisplayFlags, ColorPickerFlags, ColorPickerMode,
+    ColorPickerOptions,
 };
 pub use picker::{ColorPicker3, ColorPicker4};

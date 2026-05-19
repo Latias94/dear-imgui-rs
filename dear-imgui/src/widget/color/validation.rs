@@ -1,4 +1,4 @@
-use super::flags::ColorEditFlags;
+use super::flags::{ColorButtonFlags, ColorEditFlags, ColorPickerFlags};
 use crate::sys;
 
 #[inline]
@@ -33,7 +33,7 @@ pub(super) const fn color_edit_supported_mask() -> u32 {
 
 #[inline]
 pub(super) const fn color_picker_supported_mask() -> u32 {
-    ColorEditFlags::all().bits()
+    ColorPickerFlags::all().bits()
         | color_display_mask()
         | color_data_type_mask()
         | color_picker_mask()
@@ -42,14 +42,30 @@ pub(super) const fn color_picker_supported_mask() -> u32 {
 
 #[inline]
 pub(super) const fn color_button_supported_mask() -> u32 {
-    ColorEditFlags::all().bits() | color_input_mask()
+    ColorButtonFlags::all().bits() | color_input_mask()
 }
 
-pub(super) fn validate_color_independent_flags(caller: &str, flags: ColorEditFlags) {
+pub(super) fn validate_color_edit_flags(caller: &str, flags: ColorEditFlags) {
     let unsupported = flags.bits() & !ColorEditFlags::all().bits();
     assert!(
         unsupported == 0,
-        "{caller} received non-independent ImGuiColorEditFlags bits: 0x{unsupported:X}"
+        "{caller} received unsupported ColorEditFlags bits: 0x{unsupported:X}"
+    );
+}
+
+pub(super) fn validate_color_picker_flags(caller: &str, flags: ColorPickerFlags) {
+    let unsupported = flags.bits() & !ColorPickerFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ColorPickerFlags bits: 0x{unsupported:X}"
+    );
+}
+
+pub(super) fn validate_color_button_flags(caller: &str, flags: ColorButtonFlags) {
+    let unsupported = flags.bits() & !ColorButtonFlags::all().bits();
+    assert!(
+        unsupported == 0,
+        "{caller} received unsupported ColorButtonFlags bits: 0x{unsupported:X}"
     );
 }
 

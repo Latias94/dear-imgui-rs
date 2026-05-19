@@ -72,6 +72,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ButtonFlags` for `Ui::invisible_button_flags` now contains only independent behavior flags.
     Use `InvisibleButtonOptions` and `InvisibleButtonMouseButtons` to select right/middle or
     multiple mouse buttons for invisible buttons.
+  - Color widget flags are split by call-site domain: color edit APIs now use `ColorEditFlags`,
+    color picker APIs now use `ColorPickerFlags`, and color button APIs now use
+    `ColorButtonFlags`. Migrate picker-only flags such as `NO_SIDE_PREVIEW` to
+    `ColorPickerFlags`, and button-only flags such as `NO_BORDER` to `ColorButtonFlags`.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - `dear-file-browser` scan request/batch/status generations now use `ScanGeneration`,

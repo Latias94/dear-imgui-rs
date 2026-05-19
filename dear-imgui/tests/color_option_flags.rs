@@ -20,14 +20,21 @@ fn color_options_reject_raw_option_bits_before_ffi() {
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();
-    let non_independent_flags = !imgui::ColorEditFlags::all();
+    let unsupported_edit_flags = imgui::ColorEditFlags::from_bits_retain(
+        imgui::sys::ImGuiColorEditFlags_NoSidePreview as u32,
+    );
+    let unsupported_picker_flags =
+        imgui::ColorPickerFlags::from_bits_retain(imgui::sys::ImGuiColorEditFlags_NoPicker as u32);
+    let unsupported_button_flags = imgui::ColorButtonFlags::from_bits_retain(
+        imgui::sys::ImGuiColorEditFlags_NoSidePreview as u32,
+    );
     let unsupported_display_flags = imgui::ColorPickerDisplayFlags::from_bits_retain(
         imgui::sys::ImGuiColorEditFlags_InputRGB as u32,
     );
 
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            ui.set_color_edit_options(imgui::ColorEditOptions::new().flags(non_independent_flags));
+            ui.set_color_edit_options(imgui::ColorEditOptions::new().flags(unsupported_edit_flags));
         }))
         .is_err()
     );
@@ -38,7 +45,7 @@ fn color_options_reject_raw_option_bits_before_ffi() {
                 let mut color = [0.1, 0.2, 0.3, 0.4];
                 let _ = ui
                     .color_edit4_config("invalid color edit", &mut color)
-                    .flags(non_independent_flags)
+                    .flags(unsupported_edit_flags)
                     .build();
             }))
             .is_err()
@@ -48,7 +55,7 @@ fn color_options_reject_raw_option_bits_before_ffi() {
                 let mut color = [0.1, 0.2, 0.3, 0.4];
                 let _ = ui
                     .color_picker4_config("invalid color picker", &mut color)
-                    .flags(non_independent_flags)
+                    .flags(unsupported_picker_flags)
                     .build();
             }))
             .is_err()
@@ -67,7 +74,7 @@ fn color_options_reject_raw_option_bits_before_ffi() {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _ = ui
                     .color_button_config("invalid color button", [0.1, 0.2, 0.3, 0.4])
-                    .flags(non_independent_flags)
+                    .flags(unsupported_button_flags)
                     .build();
             }))
             .is_err()
@@ -103,8 +110,8 @@ fn color_options_reject_raw_option_bits_before_ffi() {
             .flags(
                 imgui::ColorPickerOptions::new()
                     .flags(
-                        imgui::ColorEditFlags::ALPHA_BAR
-                            | imgui::ColorEditFlags::ALPHA_PREVIEW_HALF,
+                        imgui::ColorPickerFlags::ALPHA_BAR
+                            | imgui::ColorPickerFlags::ALPHA_PREVIEW_HALF,
                     )
                     .display_flags(
                         imgui::ColorPickerDisplayFlags::RGB | imgui::ColorPickerDisplayFlags::HEX,
@@ -119,7 +126,9 @@ fn color_options_reject_raw_option_bits_before_ffi() {
             .color_button_config("typed color button", [0.1, 0.2, 0.3, 0.4])
             .flags(
                 imgui::ColorButtonOptions::new()
-                    .flags(imgui::ColorEditFlags::NO_TOOLTIP | imgui::ColorEditFlags::ALPHA_OPAQUE)
+                    .flags(
+                        imgui::ColorButtonFlags::NO_TOOLTIP | imgui::ColorButtonFlags::ALPHA_OPAQUE,
+                    )
                     .input_mode(imgui::ColorInputMode::Rgb),
             )
             .build();

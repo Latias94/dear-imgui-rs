@@ -202,7 +202,7 @@ fn table_options_keep_single_choice_masks_out_of_flags() {
 }
 
 #[test]
-fn color_options_keep_single_choice_masks_out_of_flags() {
+fn color_options_split_independent_flags_by_widget_domain() {
     let display_bits = (imgui::sys::ImGuiColorEditFlags_DisplayRGB
         | imgui::sys::ImGuiColorEditFlags_DisplayHSV
         | imgui::sys::ImGuiColorEditFlags_DisplayHex) as u32;
@@ -217,6 +217,40 @@ fn color_options_keep_single_choice_masks_out_of_flags() {
         imgui::ColorEditFlags::all().bits()
             & (display_bits | data_type_bits | picker_bits | input_bits),
         0
+    );
+    assert_eq!(
+        imgui::ColorPickerFlags::all().bits()
+            & (display_bits | data_type_bits | picker_bits | input_bits),
+        0
+    );
+    assert_eq!(
+        imgui::ColorButtonFlags::all().bits()
+            & (display_bits | data_type_bits | picker_bits | input_bits),
+        0
+    );
+
+    assert!(imgui::ColorEditFlags::all().contains(imgui::ColorEditFlags::NO_PICKER));
+    assert!(
+        !imgui::ColorEditFlags::all().intersects(imgui::ColorEditFlags::from_bits_retain(
+            imgui::sys::ImGuiColorEditFlags_NoSidePreview as u32
+                | imgui::sys::ImGuiColorEditFlags_NoBorder as u32
+        ))
+    );
+    assert!(imgui::ColorPickerFlags::all().contains(imgui::ColorPickerFlags::NO_SIDE_PREVIEW));
+    assert!(
+        !imgui::ColorPickerFlags::all().intersects(imgui::ColorPickerFlags::from_bits_retain(
+            imgui::sys::ImGuiColorEditFlags_NoPicker as u32
+                | imgui::sys::ImGuiColorEditFlags_NoBorder as u32
+                | imgui::sys::ImGuiColorEditFlags_NoDragDrop as u32
+        ))
+    );
+    assert!(imgui::ColorButtonFlags::all().contains(imgui::ColorButtonFlags::NO_BORDER));
+    assert!(
+        !imgui::ColorButtonFlags::all().intersects(imgui::ColorButtonFlags::from_bits_retain(
+            imgui::sys::ImGuiColorEditFlags_NoPicker as u32
+                | imgui::sys::ImGuiColorEditFlags_NoSidePreview as u32
+                | imgui::sys::ImGuiColorEditFlags_AlphaBar as u32
+        ))
     );
 
     assert_eq!(

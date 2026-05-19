@@ -1,90 +1,112 @@
 use super::validation::{
     assert_color_single_choice_mask, color_button_supported_mask, color_data_type_mask,
     color_display_mask, color_edit_supported_mask, color_input_mask, color_picker_mask,
-    color_picker_supported_mask, validate_color_independent_flags, validate_color_supported_bits,
+    color_picker_supported_mask, validate_color_button_flags, validate_color_edit_flags,
+    validate_color_picker_flags, validate_color_supported_bits,
 };
 use crate::sys;
 
-/// Flags for color edit widgets
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-pub struct ColorEditFlags(u32);
-
-impl ColorEditFlags {
-    /// No flags
-    pub const NONE: Self = Self(0);
-    /// ColorEdit, ColorPicker, ColorButton: ignore Alpha component (will only read 3 components from the input pointer).
-    pub const NO_ALPHA: Self = Self(sys::ImGuiColorEditFlags_NoAlpha as u32);
-    /// ColorEdit: disable picker when clicking on color square.
-    pub const NO_PICKER: Self = Self(sys::ImGuiColorEditFlags_NoPicker as u32);
-    /// ColorEdit: disable toggling options menu when right-clicking on inputs/small preview.
-    pub const NO_OPTIONS: Self = Self(sys::ImGuiColorEditFlags_NoOptions as u32);
-    /// ColorEdit, ColorPicker: disable color square preview next to the inputs. (e.g. to show only the inputs)
-    pub const NO_SMALL_PREVIEW: Self = Self(sys::ImGuiColorEditFlags_NoSmallPreview as u32);
-    /// ColorEdit, ColorPicker: disable inputs sliders/text widgets (e.g. to show only the small preview color square).
-    pub const NO_INPUTS: Self = Self(sys::ImGuiColorEditFlags_NoInputs as u32);
-    /// ColorEdit, ColorPicker, ColorButton: disable tooltip when hovering the preview.
-    pub const NO_TOOLTIP: Self = Self(sys::ImGuiColorEditFlags_NoTooltip as u32);
-    /// ColorEdit, ColorPicker: disable display of inline text label (the label is still forwarded to the tooltip and picker).
-    pub const NO_LABEL: Self = Self(sys::ImGuiColorEditFlags_NoLabel as u32);
-    /// ColorPicker: disable bigger color preview on right side of the picker, use small color square preview instead.
-    pub const NO_SIDE_PREVIEW: Self = Self(sys::ImGuiColorEditFlags_NoSidePreview as u32);
-    /// ColorEdit: disable drag and drop target. ColorButton: disable drag and drop source.
-    pub const NO_DRAG_DROP: Self = Self(sys::ImGuiColorEditFlags_NoDragDrop as u32);
-    /// ColorButton: disable border (which is enforced by default)
-    pub const NO_BORDER: Self = Self(sys::ImGuiColorEditFlags_NoBorder as u32);
-    /// ColorEdit: disable rendering R/G/B/A color markers.
-    pub const NO_COLOR_MARKERS: Self = Self(sys::ImGuiColorEditFlags_NoColorMarkers as u32);
-
-    /// ColorEdit, ColorPicker: show vertical alpha bar/gradient in picker.
-    pub const ALPHA_BAR: Self = Self(sys::ImGuiColorEditFlags_AlphaBar as u32);
-    /// ColorEdit, ColorPicker, ColorButton: disable alpha in the preview.
-    pub const ALPHA_OPAQUE: Self = Self(sys::ImGuiColorEditFlags_AlphaOpaque as u32);
-    /// ColorEdit, ColorPicker, ColorButton: disable the checkerboard background behind transparent colors.
-    pub const ALPHA_NO_BG: Self = Self(sys::ImGuiColorEditFlags_AlphaNoBg as u32);
-    /// Compatibility alias for [`Self::ALPHA_NO_BG`].
-    pub const ALPHA_PREVIEW: Self = Self::ALPHA_NO_BG;
-    /// ColorEdit, ColorPicker, ColorButton: display half opaque / half checkerboard, instead of opaque.
-    pub const ALPHA_PREVIEW_HALF: Self = Self(sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32);
-    /// (WIP) ColorEdit: Currently only disable 0.0f..1.0f limits in RGBA edition (note: you probably want to use ImGuiColorEditFlags_Float flag as well).
-    pub const HDR: Self = Self(sys::ImGuiColorEditFlags_HDR as u32);
-
-    /// Returns the underlying bits
-    pub const fn bits(self) -> u32 {
-        self.0
-    }
-
-    /// Returns true if all flags are set
-    pub const fn contains(self, other: Self) -> bool {
-        (self.0 & other.0) == other.0
-    }
-
-    /// Returns all independently composable public color flags.
-    pub const fn all() -> Self {
-        Self(
-            Self::NO_ALPHA.0
-                | Self::NO_PICKER.0
-                | Self::NO_OPTIONS.0
-                | Self::NO_SMALL_PREVIEW.0
-                | Self::NO_INPUTS.0
-                | Self::NO_TOOLTIP.0
-                | Self::NO_LABEL.0
-                | Self::NO_SIDE_PREVIEW.0
-                | Self::NO_DRAG_DROP.0
-                | Self::NO_BORDER.0
-                | Self::NO_COLOR_MARKERS.0
-                | Self::ALPHA_BAR.0
-                | Self::ALPHA_OPAQUE.0
-                | Self::ALPHA_NO_BG.0
-                | Self::ALPHA_PREVIEW_HALF.0
-                | Self::HDR.0,
-        )
+bitflags::bitflags! {
+    /// Independently composable flags accepted by `ColorEdit3()`,
+    /// `ColorEdit4()`, and `SetColorEditOptions()`.
+    #[repr(transparent)]
+    #[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq)]
+    pub struct ColorEditFlags: u32 {
+        /// No flags.
+        const NONE = 0;
+        /// Ignore Alpha component (will only read 3 components from the input pointer).
+        const NO_ALPHA = sys::ImGuiColorEditFlags_NoAlpha as u32;
+        /// Disable picker when clicking on color square.
+        const NO_PICKER = sys::ImGuiColorEditFlags_NoPicker as u32;
+        /// Disable toggling options menu when right-clicking on inputs/small preview.
+        const NO_OPTIONS = sys::ImGuiColorEditFlags_NoOptions as u32;
+        /// Disable color square preview next to the inputs.
+        const NO_SMALL_PREVIEW = sys::ImGuiColorEditFlags_NoSmallPreview as u32;
+        /// Disable inputs sliders/text widgets.
+        const NO_INPUTS = sys::ImGuiColorEditFlags_NoInputs as u32;
+        /// Disable tooltip when hovering the preview.
+        const NO_TOOLTIP = sys::ImGuiColorEditFlags_NoTooltip as u32;
+        /// Disable display of inline text label.
+        const NO_LABEL = sys::ImGuiColorEditFlags_NoLabel as u32;
+        /// Disable drag and drop target/source.
+        const NO_DRAG_DROP = sys::ImGuiColorEditFlags_NoDragDrop as u32;
+        /// Disable rendering R/G/B/A color markers.
+        const NO_COLOR_MARKERS = sys::ImGuiColorEditFlags_NoColorMarkers as u32;
+        /// Show vertical alpha bar/gradient in the picker.
+        const ALPHA_BAR = sys::ImGuiColorEditFlags_AlphaBar as u32;
+        /// Disable alpha in the preview.
+        const ALPHA_OPAQUE = sys::ImGuiColorEditFlags_AlphaOpaque as u32;
+        /// Disable the checkerboard background behind transparent colors.
+        const ALPHA_NO_BG = sys::ImGuiColorEditFlags_AlphaNoBg as u32;
+        /// Compatibility alias for [`Self::ALPHA_NO_BG`].
+        const ALPHA_PREVIEW = Self::ALPHA_NO_BG.bits();
+        /// Display half opaque / half checkerboard, instead of opaque.
+        const ALPHA_PREVIEW_HALF = sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32;
+        /// Disable 0.0f..1.0f limits in RGBA edition.
+        const HDR = sys::ImGuiColorEditFlags_HDR as u32;
     }
 }
 
-impl Default for ColorEditFlags {
-    fn default() -> Self {
-        Self::NONE
+bitflags::bitflags! {
+    /// Independently composable flags accepted by `ColorPicker3()` and
+    /// `ColorPicker4()`.
+    #[repr(transparent)]
+    #[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq)]
+    pub struct ColorPickerFlags: u32 {
+        /// No flags.
+        const NONE = 0;
+        /// Ignore Alpha component (will only read 3 components from the input pointer).
+        const NO_ALPHA = sys::ImGuiColorEditFlags_NoAlpha as u32;
+        /// Disable toggling options menu when right-clicking.
+        const NO_OPTIONS = sys::ImGuiColorEditFlags_NoOptions as u32;
+        /// Disable color square preview next to the inputs.
+        const NO_SMALL_PREVIEW = sys::ImGuiColorEditFlags_NoSmallPreview as u32;
+        /// Disable inputs sliders/text widgets.
+        const NO_INPUTS = sys::ImGuiColorEditFlags_NoInputs as u32;
+        /// Disable tooltip when hovering the preview.
+        const NO_TOOLTIP = sys::ImGuiColorEditFlags_NoTooltip as u32;
+        /// Disable display of inline text label.
+        const NO_LABEL = sys::ImGuiColorEditFlags_NoLabel as u32;
+        /// Disable bigger color preview on right side of the picker.
+        const NO_SIDE_PREVIEW = sys::ImGuiColorEditFlags_NoSidePreview as u32;
+        /// Show vertical alpha bar/gradient in the picker.
+        const ALPHA_BAR = sys::ImGuiColorEditFlags_AlphaBar as u32;
+        /// Disable alpha in the preview.
+        const ALPHA_OPAQUE = sys::ImGuiColorEditFlags_AlphaOpaque as u32;
+        /// Disable the checkerboard background behind transparent colors.
+        const ALPHA_NO_BG = sys::ImGuiColorEditFlags_AlphaNoBg as u32;
+        /// Compatibility alias for [`Self::ALPHA_NO_BG`].
+        const ALPHA_PREVIEW = Self::ALPHA_NO_BG.bits();
+        /// Display half opaque / half checkerboard, instead of opaque.
+        const ALPHA_PREVIEW_HALF = sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32;
+        /// Disable 0.0f..1.0f limits in RGBA edition.
+        const HDR = sys::ImGuiColorEditFlags_HDR as u32;
+    }
+}
+
+bitflags::bitflags! {
+    /// Independently composable flags accepted by `ColorButton()`.
+    #[repr(transparent)]
+    #[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq)]
+    pub struct ColorButtonFlags: u32 {
+        /// No flags.
+        const NONE = 0;
+        /// Ignore Alpha component. For `ColorButton()` this does the same as [`Self::ALPHA_OPAQUE`].
+        const NO_ALPHA = sys::ImGuiColorEditFlags_NoAlpha as u32;
+        /// Disable tooltip when hovering the preview.
+        const NO_TOOLTIP = sys::ImGuiColorEditFlags_NoTooltip as u32;
+        /// Disable drag and drop source.
+        const NO_DRAG_DROP = sys::ImGuiColorEditFlags_NoDragDrop as u32;
+        /// Disable border (which is enforced by default).
+        const NO_BORDER = sys::ImGuiColorEditFlags_NoBorder as u32;
+        /// Disable alpha in the preview.
+        const ALPHA_OPAQUE = sys::ImGuiColorEditFlags_AlphaOpaque as u32;
+        /// Disable the checkerboard background behind transparent colors.
+        const ALPHA_NO_BG = sys::ImGuiColorEditFlags_AlphaNoBg as u32;
+        /// Compatibility alias for [`Self::ALPHA_NO_BG`].
+        const ALPHA_PREVIEW = Self::ALPHA_NO_BG.bits();
+        /// Display half opaque / half checkerboard, instead of opaque.
+        const ALPHA_PREVIEW_HALF = sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32;
     }
 }
 
@@ -221,7 +243,7 @@ impl ColorEditOptions {
     }
 
     pub(crate) fn validate(self, caller: &str) {
-        validate_color_independent_flags(caller, self.flags);
+        validate_color_edit_flags(caller, self.flags);
         validate_color_supported_bits(caller, self.bits(), color_edit_supported_mask());
         assert_color_single_choice_mask(caller, self.bits(), color_display_mask(), "display mode");
         assert_color_single_choice_mask(caller, self.bits(), color_data_type_mask(), "data type");
@@ -245,7 +267,7 @@ impl From<ColorEditFlags> for ColorEditOptions {
 /// Options accepted by `ColorPicker3()` and `ColorPicker4()`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub struct ColorPickerOptions {
-    pub flags: ColorEditFlags,
+    pub flags: ColorPickerFlags,
     pub display_flags: ColorPickerDisplayFlags,
     pub data_type: Option<ColorDataType>,
     pub picker_mode: Option<ColorPickerMode>,
@@ -255,7 +277,7 @@ pub struct ColorPickerOptions {
 impl ColorPickerOptions {
     pub const fn new() -> Self {
         Self {
-            flags: ColorEditFlags::NONE,
+            flags: ColorPickerFlags::NONE,
             display_flags: ColorPickerDisplayFlags::empty(),
             data_type: None,
             picker_mode: None,
@@ -263,7 +285,7 @@ impl ColorPickerOptions {
         }
     }
 
-    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
+    pub fn flags(mut self, flags: ColorPickerFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -297,7 +319,7 @@ impl ColorPickerOptions {
     }
 
     pub(crate) fn validate(self, caller: &str) {
-        validate_color_independent_flags(caller, self.flags);
+        validate_color_picker_flags(caller, self.flags);
         let unsupported_display =
             self.display_flags.bits() & !ColorPickerDisplayFlags::all().bits();
         assert!(
@@ -317,8 +339,8 @@ impl Default for ColorPickerOptions {
     }
 }
 
-impl From<ColorEditFlags> for ColorPickerOptions {
-    fn from(flags: ColorEditFlags) -> Self {
+impl From<ColorPickerFlags> for ColorPickerOptions {
+    fn from(flags: ColorPickerFlags) -> Self {
         Self::new().flags(flags)
     }
 }
@@ -326,19 +348,19 @@ impl From<ColorEditFlags> for ColorPickerOptions {
 /// Options accepted by `ColorButton()`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub struct ColorButtonOptions {
-    pub flags: ColorEditFlags,
+    pub flags: ColorButtonFlags,
     pub input_mode: Option<ColorInputMode>,
 }
 
 impl ColorButtonOptions {
     pub const fn new() -> Self {
         Self {
-            flags: ColorEditFlags::NONE,
+            flags: ColorButtonFlags::NONE,
             input_mode: None,
         }
     }
 
-    pub fn flags(mut self, flags: ColorEditFlags) -> Self {
+    pub fn flags(mut self, flags: ColorButtonFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -353,7 +375,7 @@ impl ColorButtonOptions {
     }
 
     pub(crate) fn validate(self, caller: &str) {
-        validate_color_independent_flags(caller, self.flags);
+        validate_color_button_flags(caller, self.flags);
         validate_color_supported_bits(caller, self.bits(), color_button_supported_mask());
         assert_color_single_choice_mask(caller, self.bits(), color_input_mask(), "input mode");
     }
@@ -365,54 +387,8 @@ impl Default for ColorButtonOptions {
     }
 }
 
-impl From<ColorEditFlags> for ColorButtonOptions {
-    fn from(flags: ColorEditFlags) -> Self {
+impl From<ColorButtonFlags> for ColorButtonOptions {
+    fn from(flags: ColorButtonFlags) -> Self {
         Self::new().flags(flags)
-    }
-}
-
-impl std::ops::BitOr for ColorEditFlags {
-    type Output = Self;
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Self(self.0 | rhs.0)
-    }
-}
-
-impl std::ops::BitOrAssign for ColorEditFlags {
-    fn bitor_assign(&mut self, rhs: Self) {
-        self.0 |= rhs.0;
-    }
-}
-
-impl std::ops::BitAnd for ColorEditFlags {
-    type Output = Self;
-    fn bitand(self, rhs: Self) -> Self::Output {
-        Self(self.0 & rhs.0)
-    }
-}
-
-impl std::ops::BitAndAssign for ColorEditFlags {
-    fn bitand_assign(&mut self, rhs: Self) {
-        self.0 &= rhs.0;
-    }
-}
-
-impl std::ops::BitXor for ColorEditFlags {
-    type Output = Self;
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        Self(self.0 ^ rhs.0)
-    }
-}
-
-impl std::ops::BitXorAssign for ColorEditFlags {
-    fn bitxor_assign(&mut self, rhs: Self) {
-        self.0 ^= rhs.0;
-    }
-}
-
-impl std::ops::Not for ColorEditFlags {
-    type Output = Self;
-    fn not(self) -> Self::Output {
-        Self(!self.0)
     }
 }
