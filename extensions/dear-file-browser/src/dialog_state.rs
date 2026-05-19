@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use dear_imgui_rs::FontId;
 
@@ -649,8 +650,8 @@ pub struct FileDialogUiState {
     pub thumbnails: ThumbnailCache,
     /// Enable "type-to-select" behavior in the file list (IGFD-style).
     pub type_select_enabled: bool,
-    /// Timeout (milliseconds) after which the type-to-select buffer resets.
-    pub type_select_timeout_ms: u64,
+    /// Timeout after which the type-to-select buffer resets.
+    pub type_select_timeout: Duration,
     /// Whether to render a custom pane region (when a pane is provided by the caller).
     pub custom_pane_enabled: bool,
     /// Dock position for the custom pane.
@@ -775,7 +776,7 @@ impl Default for FileDialogUiState {
             thumbnail_size: [32.0, 32.0],
             thumbnails: ThumbnailCache::new(ThumbnailCacheConfig::default()),
             type_select_enabled: true,
-            type_select_timeout_ms: 750,
+            type_select_timeout: Duration::from_millis(750),
             custom_pane_enabled: true,
             custom_pane_dock: CustomPaneDock::default(),
             custom_pane_height: 120.0,
@@ -1033,6 +1034,13 @@ mod tests {
     fn default_scan_policy_is_tuned_incremental() {
         let state = FileDialogState::new(DialogMode::OpenFile);
         assert_eq!(state.scan_policy(), ScanPolicy::tuned_incremental());
+    }
+
+    #[test]
+    fn default_type_select_timeout_uses_duration() {
+        let state = FileDialogUiState::default();
+
+        assert_eq!(state.type_select_timeout, Duration::from_millis(750));
     }
 
     #[test]

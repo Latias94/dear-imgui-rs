@@ -185,11 +185,47 @@ impl ScanPolicy {
     }
 }
 
+/// Monotonic identity for a directory scan generation.
+///
+/// This is a semantic token used to reject stale scan batches. It is not a file count, byte count,
+/// or user-visible ordering key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ScanGeneration(u64);
+
+impl ScanGeneration {
+    /// Creates a scan generation token from a raw counter value.
+    #[cfg(test)]
+    #[inline]
+    const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    #[inline]
+    const fn zero() -> Self {
+        Self(0)
+    }
+
+    #[inline]
+    fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+
+    #[inline]
+    fn previous(self) -> Option<Self> {
+        self.0.checked_sub(1).map(Self)
+    }
+
+    #[inline]
+    fn raw(self) -> u64 {
+        self.0
+    }
+}
+
 /// Immutable scan request descriptor.
 #[derive(Clone, Debug)]
 pub struct ScanRequest {
     /// Monotonic scan generation.
-    pub generation: u64,
+    pub generation: ScanGeneration,
     /// Directory being scanned.
     pub cwd: PathBuf,
     /// Scan policy at submission time.
@@ -202,7 +238,7 @@ pub struct ScanRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScanBatch {
     /// Batch generation.
-    pub generation: u64,
+    pub generation: ScanGeneration,
     /// Batch payload kind.
     pub kind: ScanBatchKind,
     /// Whether this batch completes the generation.
@@ -210,7 +246,7 @@ pub struct ScanBatch {
 }
 
 impl ScanBatch {
-    fn begin(generation: u64) -> Self {
+    fn begin(generation: ScanGeneration) -> Self {
         Self {
             generation,
             kind: ScanBatchKind::Begin,
@@ -218,7 +254,7 @@ impl ScanBatch {
         }
     }
 
-    fn entries(generation: u64, loaded: usize, is_final: bool) -> Self {
+    fn entries(generation: ScanGeneration, loaded: usize, is_final: bool) -> Self {
         Self {
             generation,
             kind: ScanBatchKind::Entries { loaded },
@@ -226,7 +262,7 @@ impl ScanBatch {
         }
     }
 
-    fn complete(generation: u64, loaded: usize) -> Self {
+    fn complete(generation: ScanGeneration, loaded: usize) -> Self {
         Self {
             generation,
             kind: ScanBatchKind::Complete { loaded },
@@ -234,7 +270,7 @@ impl ScanBatch {
         }
     }
 
-    fn error(generation: u64, message: String) -> Self {
+    fn error(generation: ScanGeneration, message: String) -> Self {
         Self {
             generation,
             kind: ScanBatchKind::Error { message },
@@ -273,26 +309,26 @@ pub enum ScanStatus {
     /// A scan generation is running.
     Scanning {
         /// Active generation id.
-        generation: u64,
+        generation: ScanGeneration,
     },
     /// A scan generation has partial data.
     Partial {
         /// Active generation id.
-        generation: u64,
+        generation: ScanGeneration,
         /// Number of currently loaded entries.
         loaded: usize,
     },
     /// A scan generation finished successfully.
     Complete {
         /// Completed generation id.
-        generation: u64,
+        generation: ScanGeneration,
         /// Final number of loaded entries.
         loaded: usize,
     },
     /// A scan generation failed.
     Failed {
         /// Failed generation id.
-        generation: u64,
+        generation: ScanGeneration,
         /// Error message captured from filesystem backend.
         message: String,
     },
@@ -442,7 +478,7 @@ impl ScanRuntime {
         }
     }
 
-    fn cancel_generation(&mut self, generation: u64) {
+    fn cancel_generation(&mut self, generation: ScanGeneration) {
         match self {
             Self::Sync(runtime) => runtime.cancel_generation(generation),
             Self::Worker(runtime) => runtime.cancel_generation(generation),
@@ -493,7 +529,7 @@ impl SyncScanRuntime {
         self.batches.pop_front()
     }
 
-    fn cancel_generation(&mut self, generation: u64) {
+    fn cancel_generation(&mut self, generation: ScanGeneration) {
         self.batches.retain(|batch| batch.generation != generation);
     }
 }
@@ -579,14 +615,14 @@ impl WorkerScanRuntime {
         self.batches.pop_front()
     }
 
-    fn cancel_generation(&mut self, generation: u64) {
+    fn cancel_generation(&mut self, generation: ScanGeneration) {
         self.batches.retain(|batch| batch.generation != generation);
     }
 }
 
 #[derive(Debug)]
 struct RuntimeBatch {
-    generation: u64,
+    generation: ScanGeneration,
     kind: RuntimeBatchKind,
 }
 
@@ -670,7 +706,7 @@ pub struct FileDialogCore {
     scan_hook: Option<ScanHook>,
     scan_policy: ScanPolicy,
     scan_status: ScanStatus,
-    scan_generation: u64,
+    scan_generation: ScanGeneration,
     scan_started_at: Option<std::time::Instant>,
     scan_runtime: ScanRuntime,
     dir_snapshot: DirSnapshot,
@@ -725,7 +761,7 @@ impl FileDialogCore {
             scan_hook: None,
             scan_policy: ScanPolicy::default(),
             scan_status: ScanStatus::default(),
-            scan_generation: 0,
+            scan_generation: ScanGeneration::zero(),
             scan_started_at: None,
             scan_runtime: ScanRuntime::from_policy(ScanPolicy::default()),
             dir_snapshot: DirSnapshot {
@@ -1005,7 +1041,7 @@ impl FileDialogCore {
     }
 
     /// Returns the latest issued scan generation.
-    pub fn scan_generation(&self) -> u64 {
+    pub fn scan_generation(&self) -> ScanGeneration {
         self.scan_generation
     }
 
@@ -1217,8 +1253,9 @@ impl FileDialogCore {
 
         if should_refresh {
             let request = self.begin_scan_request();
-            self.scan_runtime
-                .cancel_generation(request.generation.saturating_sub(1));
+            if let Some(previous_generation) = request.generation.previous() {
+                self.scan_runtime.cancel_generation(previous_generation);
+            }
             let scan_result =
                 read_entries_snapshot_with_fs(fs, &request.cwd, self.scan_hook.as_mut());
             self.scan_runtime.submit(request, scan_result);
@@ -1240,7 +1277,7 @@ impl FileDialogCore {
     }
 
     fn begin_scan_request(&mut self) -> ScanRequest {
-        let generation = self.scan_generation.saturating_add(1);
+        let generation = self.scan_generation.next();
         self.scan_generation = generation;
         let request = ScanRequest {
             generation,
@@ -2368,7 +2405,7 @@ fn empty_snapshot_for_cwd(cwd: &Path) -> DirSnapshot {
 fn trace_scan_requested(request: &ScanRequest) {
     trace!(
         event = "scan.requested",
-        generation = request.generation,
+        generation = request.generation.raw(),
         cwd = %request.cwd.display(),
         ?request.scan_policy,
         "scan requested"
@@ -2379,39 +2416,52 @@ fn trace_scan_requested(request: &ScanRequest) {
 fn trace_scan_requested(_request: &ScanRequest) {}
 
 #[cfg(feature = "tracing")]
-fn trace_scan_batch_applied(generation: u64, entries: usize, kind: &'static str) {
+fn trace_scan_batch_applied(generation: ScanGeneration, entries: usize, kind: &'static str) {
     trace!(
         event = "scan.batch_applied",
-        generation, entries, kind, "scan batch applied"
+        generation = generation.raw(),
+        entries,
+        kind,
+        "scan batch applied"
     );
 }
 
 #[cfg(not(feature = "tracing"))]
-fn trace_scan_batch_applied(_generation: u64, _entries: usize, _kind: &'static str) {}
+fn trace_scan_batch_applied(_generation: ScanGeneration, _entries: usize, _kind: &'static str) {}
 
 #[cfg(feature = "tracing")]
-fn trace_scan_completed(generation: u64, total_entries: usize, duration_ms: u128) {
+fn trace_scan_completed(generation: ScanGeneration, total_entries: usize, duration_ms: u128) {
     trace!(
         event = "scan.completed",
-        generation, total_entries, duration_ms, "scan completed"
+        generation = generation.raw(),
+        total_entries,
+        duration_ms,
+        "scan completed"
     );
 }
 
 #[cfg(not(feature = "tracing"))]
-fn trace_scan_completed(_generation: u64, _total_entries: usize, _duration_ms: u128) {}
+fn trace_scan_completed(_generation: ScanGeneration, _total_entries: usize, _duration_ms: u128) {}
 
 #[cfg(feature = "tracing")]
-fn trace_scan_dropped_stale_batch(generation: u64, current_generation: u64, source: &'static str) {
+fn trace_scan_dropped_stale_batch(
+    generation: ScanGeneration,
+    current_generation: ScanGeneration,
+    source: &'static str,
+) {
     trace!(
         event = "scan.dropped_stale_batch",
-        generation, current_generation, source, "scan dropped stale batch"
+        generation = generation.raw(),
+        current_generation = current_generation.raw(),
+        source,
+        "scan dropped stale batch"
     );
 }
 
 #[cfg(not(feature = "tracing"))]
 fn trace_scan_dropped_stale_batch(
-    _generation: u64,
-    _current_generation: u64,
+    _generation: ScanGeneration,
+    _current_generation: ScanGeneration,
     _source: &'static str,
 ) {
 }
@@ -3258,7 +3308,7 @@ mod tests {
         core.cwd = PathBuf::from("/tmp");
 
         core.rescan_if_needed(&fs);
-        assert_eq!(core.scan_generation(), 1);
+        assert_eq!(core.scan_generation(), ScanGeneration::new(1));
         assert!(!core.dir_snapshot_dirty);
 
         core.set_scan_policy(ScanPolicy::Incremental {
@@ -3275,7 +3325,24 @@ mod tests {
         assert!(core.dir_snapshot_dirty);
 
         core.rescan_if_needed(&fs);
-        assert_eq!(core.scan_generation(), 2);
+        assert_eq!(core.scan_generation(), ScanGeneration::new(2));
+    }
+
+    #[test]
+    fn scan_generation_token_is_typed_and_monotonic() {
+        let fs = TestFs::default();
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+
+        core.rescan_if_needed(&fs);
+
+        let first_generation = core.scan_generation();
+        assert_eq!(first_generation, ScanGeneration::new(1));
+
+        core.request_rescan();
+        core.rescan_if_needed(&fs);
+
+        assert_eq!(core.scan_generation(), ScanGeneration::new(2));
     }
 
     #[test]
@@ -3340,7 +3407,7 @@ mod tests {
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Partial {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 1,
             }
         );
@@ -3350,7 +3417,7 @@ mod tests {
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Partial {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 3,
             }
         );
@@ -3360,7 +3427,7 @@ mod tests {
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Complete {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 4,
             }
         );
@@ -3395,11 +3462,11 @@ mod tests {
         core.cwd = PathBuf::from("/tmp");
         core.rescan_if_needed(&fs);
 
-        assert_eq!(core.scan_generation(), 1);
+        assert_eq!(core.scan_generation(), ScanGeneration::new(1));
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Complete {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 2,
             }
         );
@@ -3445,15 +3512,20 @@ mod tests {
         });
 
         core.rescan_if_needed(&fs);
-        assert_eq!(core.scan_generation(), 1);
-        assert_eq!(core.scan_status(), &ScanStatus::Scanning { generation: 1 });
+        assert_eq!(core.scan_generation(), ScanGeneration::new(1));
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Scanning {
+                generation: ScanGeneration::new(1)
+            }
+        );
         assert!(core.entries().is_empty());
 
         core.rescan_if_needed(&fs);
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Partial {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 2,
             }
         );
@@ -3463,7 +3535,7 @@ mod tests {
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Partial {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 3,
             }
         );
@@ -3473,7 +3545,7 @@ mod tests {
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Complete {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 3,
             }
         );
@@ -3525,19 +3597,24 @@ mod tests {
 
         core.rescan_if_needed(&fs_old);
         core.rescan_if_needed(&fs_old);
-        assert_eq!(core.scan_generation(), 1);
+        assert_eq!(core.scan_generation(), ScanGeneration::new(1));
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Partial {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 1,
             }
         );
 
         core.request_rescan();
         core.rescan_if_needed(&fs_new);
-        assert_eq!(core.scan_generation(), 2);
-        assert_eq!(core.scan_status(), &ScanStatus::Scanning { generation: 2 });
+        assert_eq!(core.scan_generation(), ScanGeneration::new(2));
+        assert_eq!(
+            core.scan_status(),
+            &ScanStatus::Scanning {
+                generation: ScanGeneration::new(2)
+            }
+        );
 
         core.rescan_if_needed(&fs_new);
         core.rescan_if_needed(&fs_new);
@@ -3545,7 +3622,7 @@ mod tests {
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Complete {
-                generation: 2,
+                generation: ScanGeneration::new(2),
                 loaded: 1,
             }
         );
@@ -3620,7 +3697,7 @@ mod tests {
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Complete {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 3,
             }
         );
@@ -3658,7 +3735,7 @@ mod tests {
         assert_eq!(
             core.scan_status(),
             &ScanStatus::Complete {
-                generation: 1,
+                generation: ScanGeneration::new(1),
                 loaded: 1,
             }
         );
@@ -3684,7 +3761,7 @@ mod tests {
             assert_eq!(
                 core_sync.scan_status(),
                 &ScanStatus::Complete {
-                    generation: 1,
+                    generation: ScanGeneration::new(1),
                     loaded: entry_count,
                 }
             );
@@ -3794,12 +3871,22 @@ mod tests {
     #[test]
     fn stale_scan_batch_is_ignored() {
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
-        core.scan_generation = 3;
-        core.scan_status = ScanStatus::Scanning { generation: 3 };
+        core.scan_generation = ScanGeneration::new(3);
+        core.scan_status = ScanStatus::Scanning {
+            generation: ScanGeneration::new(3),
+        };
 
-        core.apply_scan_batch(ScanBatch::error(2, "stale".to_string()));
+        core.apply_scan_batch(ScanBatch::error(
+            ScanGeneration::new(2),
+            "stale".to_string(),
+        ));
 
-        assert_eq!(core.scan_status, ScanStatus::Scanning { generation: 3 });
+        assert_eq!(
+            core.scan_status,
+            ScanStatus::Scanning {
+                generation: ScanGeneration::new(3)
+            }
+        );
     }
 
     #[test]
@@ -3813,13 +3900,13 @@ mod tests {
         core.cwd = PathBuf::from("/tmp");
         core.rescan_if_needed(&fs);
 
-        assert_eq!(core.scan_generation(), 1);
+        assert_eq!(core.scan_generation(), ScanGeneration::new(1));
         match core.scan_status() {
             ScanStatus::Failed {
                 generation,
                 message,
             } => {
-                assert_eq!(*generation, 1);
+                assert_eq!(*generation, ScanGeneration::new(1));
                 assert!(message.contains("read_dir failure"));
             }
             other => panic!("unexpected scan status: {other:?}"),

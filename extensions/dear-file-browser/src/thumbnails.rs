@@ -84,6 +84,31 @@ struct ThumbnailEntry {
     lru_stamp: u64,
 }
 
+/// Monotonic per-frame token used by [`ThumbnailCache`] bookkeeping.
+///
+/// This is a semantic frame identity, not a duration or filesystem entry count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ThumbnailFrameIndex(u64);
+
+impl ThumbnailFrameIndex {
+    /// Creates a thumbnail frame token from a raw counter value.
+    #[cfg(test)]
+    #[inline]
+    const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    #[inline]
+    const fn zero() -> Self {
+        Self(0)
+    }
+
+    #[inline]
+    fn next_wrapping(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
 /// An in-memory thumbnail request queue + LRU cache.
 ///
 /// This type is renderer-agnostic: the application is expected to:
@@ -98,7 +123,7 @@ pub struct ThumbnailCache {
     /// Cache configuration.
     pub config: ThumbnailCacheConfig,
 
-    frame_index: u64,
+    frame_index: ThumbnailFrameIndex,
     issued_this_frame: usize,
     next_stamp: u64,
 
@@ -140,7 +165,7 @@ impl ThumbnailCache {
     pub fn new(config: ThumbnailCacheConfig) -> Self {
         Self {
             config,
-            frame_index: 0,
+            frame_index: ThumbnailFrameIndex::zero(),
             issued_this_frame: 0,
             next_stamp: 1,
             entries: HashMap::new(),
@@ -154,12 +179,12 @@ impl ThumbnailCache {
     ///
     /// Call this once per UI frame before issuing visibility requests.
     pub fn advance_frame(&mut self) {
-        self.frame_index = self.frame_index.wrapping_add(1);
+        self.frame_index = self.frame_index.next_wrapping();
         self.issued_this_frame = 0;
     }
 
     /// Returns the internal frame counter.
-    pub fn frame_index(&self) -> u64 {
+    pub fn frame_index(&self) -> ThumbnailFrameIndex {
         self.frame_index
     }
 
@@ -410,6 +435,17 @@ mod tests {
         c.request_visible(Path::new("/c.png"), [64, 64]);
         let reqs = c.take_requests();
         assert_eq!(reqs.len(), 2);
+    }
+
+    #[test]
+    fn thumbnail_frame_index_is_typed_and_advances() {
+        let mut c = ThumbnailCache::new(ThumbnailCacheConfig::default());
+
+        assert_eq!(c.frame_index(), ThumbnailFrameIndex::new(0));
+
+        c.advance_frame();
+
+        assert_eq!(c.frame_index(), ThumbnailFrameIndex::new(1));
     }
 
     #[test]

@@ -47,7 +47,8 @@ pub use custom_pane::{CustomPane, CustomPaneCtx};
 #[cfg(feature = "imgui")]
 pub use dialog_core::{
     ConfirmGate, CoreEvent, CoreEventOutcome, DirSnapshot, EntryId, FileDialogCore, FileMeta,
-    Modifiers, ScanBatch, ScanBatchKind, ScanHookAction, ScanPolicy, ScanRequest, ScanStatus,
+    Modifiers, ScanBatch, ScanBatchKind, ScanGeneration, ScanHookAction, ScanPolicy, ScanRequest,
+    ScanStatus,
 };
 #[cfg(feature = "imgui")]
 pub use dialog_manager::{DialogId, DialogManager};
@@ -73,8 +74,8 @@ pub use places::{
 };
 #[cfg(feature = "imgui")]
 pub use thumbnails::{
-    DecodedRgbaImage, ThumbnailBackend, ThumbnailCache, ThumbnailCacheConfig, ThumbnailProvider,
-    ThumbnailRenderer, ThumbnailRequest,
+    DecodedRgbaImage, ThumbnailBackend, ThumbnailCache, ThumbnailCacheConfig, ThumbnailFrameIndex,
+    ThumbnailProvider, ThumbnailRenderer, ThumbnailRequest,
 };
 #[cfg(feature = "thumbnails-image")]
 pub use thumbnails_image::ImageThumbnailProvider;

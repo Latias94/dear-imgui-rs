@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Logging helpers now take `LogAutoOpenDepth` instead of raw `-1` auto-open-depth sentinels.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
+  - `dear-file-browser` scan request/batch/status generations now use `ScanGeneration`,
+    type-to-select timeout config uses `Duration`, and thumbnail frame counters return
+    `ThumbnailFrameIndex` instead of raw integers.
   - ImPlot, ImPlot3D, node-editor, and ImNodes RAII tokens that call extension `End`/`Pop` functions
     on drop are now UI/current-context scoped and intentionally `!Send + !Sync`.
   - `dear-implot` colormap helpers now use typed `ColormapIndex`, `ColormapColorIndex`, and

@@ -847,6 +847,7 @@ mod tests {
         FileListViewMode,
     };
     use crate::fs::{FileSystem, FsEntry, FsMetadata};
+    use dear_imgui_rs::TableColumnIndex;
     use std::path::{Path, PathBuf};
 
     fn columns_config(
@@ -992,10 +993,10 @@ mod tests {
                     FileListDataColumn::Size,
                     FileListDataColumn::Modified,
                 ],
-                name: 0,
-                extension: Some(1),
-                size: Some(2),
-                modified: Some(3),
+                name: TableColumnIndex::new(0),
+                extension: Some(TableColumnIndex::new(1)),
+                size: Some(TableColumnIndex::new(2)),
+                modified: Some(TableColumnIndex::new(3)),
             }
         );
     }
@@ -1022,10 +1023,10 @@ mod tests {
                     FileListDataColumn::Size,
                     FileListDataColumn::Modified,
                 ],
-                name: 0,
+                name: TableColumnIndex::new(0),
                 extension: None,
-                size: Some(1),
-                modified: Some(2),
+                size: Some(TableColumnIndex::new(1)),
+                modified: Some(TableColumnIndex::new(2)),
             }
         );
     }
@@ -1051,10 +1052,10 @@ mod tests {
                     FileListDataColumn::Size,
                     FileListDataColumn::Modified,
                 ],
-                name: 1,
-                extension: Some(2),
-                size: Some(3),
-                modified: Some(4),
+                name: TableColumnIndex::new(1),
+                extension: Some(TableColumnIndex::new(2)),
+                size: Some(TableColumnIndex::new(3)),
+                modified: Some(TableColumnIndex::new(4)),
             }
         );
     }
@@ -1079,10 +1080,10 @@ mod tests {
                     FileListDataColumn::Extension,
                     FileListDataColumn::Modified,
                 ],
-                name: 0,
-                extension: Some(1),
+                name: TableColumnIndex::new(0),
+                extension: Some(TableColumnIndex::new(1)),
                 size: None,
-                modified: Some(2),
+                modified: Some(TableColumnIndex::new(2)),
             }
         );
     }
@@ -1172,9 +1173,9 @@ mod tests {
                     FileListDataColumn::Extension,
                     FileListDataColumn::Size,
                 ],
-                name: 0,
-                extension: Some(1),
-                size: Some(2),
+                name: TableColumnIndex::new(0),
+                extension: Some(TableColumnIndex::new(1)),
+                size: Some(TableColumnIndex::new(2)),
                 modified: None,
             }
         );
@@ -1196,8 +1197,8 @@ mod tests {
             list_column_layout(false, &cfg),
             ListColumnLayout {
                 data_columns: vec![FileListDataColumn::Name, FileListDataColumn::Extension],
-                name: 0,
-                extension: Some(1),
+                name: TableColumnIndex::new(0),
+                extension: Some(TableColumnIndex::new(1)),
                 size: None,
                 modified: None,
             }
@@ -1225,10 +1226,10 @@ mod tests {
                     FileListDataColumn::Modified,
                     FileListDataColumn::Extension,
                 ],
-                name: 0,
-                extension: Some(3),
-                size: Some(1),
-                modified: Some(2),
+                name: TableColumnIndex::new(0),
+                extension: Some(TableColumnIndex::new(3)),
+                size: Some(TableColumnIndex::new(1)),
+                modified: Some(TableColumnIndex::new(2)),
             }
         );
     }

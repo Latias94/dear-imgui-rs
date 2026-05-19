@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::core::{DialogMode, LayoutStyle, SortBy};
 use crate::dialog_core::{CoreEvent, CoreEventOutcome, DirEntry, EntryId, Modifiers};
@@ -964,7 +964,7 @@ fn handle_type_select(ui: &Ui, state: &mut FileDialogState) {
         return;
     }
     let now = Instant::now();
-    let timeout = Duration::from_millis(state.ui.type_select_timeout_ms);
+    let timeout = state.ui.type_select_timeout;
     if let Some(last) = state.ui.type_select_last_input {
         if now.duration_since(last) > timeout {
             state.ui.type_select_buffer.clear();
