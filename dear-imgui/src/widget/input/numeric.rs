@@ -1,4 +1,4 @@
-use super::validate_input_scalar_flags;
+use super::validation::validate_input_scalar_flags;
 use crate::InputTextFlags;
 use crate::internal::{DataTypeKind, component_count_i32};
 use crate::sys;
